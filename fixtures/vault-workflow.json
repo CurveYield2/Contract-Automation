@@ -1,0 +1,18 @@
+{
+  "steps": [
+    { "action": "deploy", "alias": "token", "contract": "TestToken", "args": [] },
+    { "action": "deploy", "alias": "staking", "contract": "TestStaking", "args": ["$token"] },
+    { "action": "deploy", "alias": "strategy", "contract": "TestStrategy", "args": ["$token", "$staking"] },
+    { "action": "deploy", "alias": "vault", "contract": "TestVault", "args": ["$token", "$strategy"] },
+    { "action": "call", "target": "$strategy", "function": "setVault", "args": ["$vault"] },
+    { "action": "call", "target": "$token", "function": "mint", "args": ["$account0", "1000000000000000000000"] },
+    { "action": "call", "target": "$token", "function": "approve", "args": ["$vault", "1000000000000000000000"] },
+    { "action": "call", "target": "$vault", "function": "deposit", "args": ["100000000000000000000"] },
+    { "action": "call", "target": "$staking", "function": "addRewards", "args": ["$strategy", "10000000000000000000"] },
+    { "action": "call", "target": "$strategy", "function": "harvest", "args": [] },
+    { "action": "assertCall", "target": "$staking", "function": "balanceOf", "args": ["$strategy"], "equals": "110000000000000000000" },
+    { "action": "call", "target": "$vault", "function": "withdraw", "args": ["50000000000000000000"] },
+    { "action": "assertCall", "target": "$token", "function": "balanceOf", "args": ["$account0"], "equals": "950000000000000000000" },
+    { "action": "assertCall", "target": "$vault", "function": "balanceOf", "args": ["$account0"], "equals": "50000000000000000000" }
+  ]
+}

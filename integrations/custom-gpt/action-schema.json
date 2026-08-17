@@ -1,0 +1,591 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "PreflightSim Lite API",
+    "version": "0.2.0",
+    "description": "Compile Solidity and run structured, stateful single-chain fork simulations. This API cannot sign or broadcast real transactions."
+  },
+  "servers": [
+    {
+      "url": "https://preflight.curveyield.online"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/api/v1/chains": {
+      "get": {
+        "operationId": "listSupportedChains",
+        "summary": "List supported fork chains",
+        "description": "Call before submitting a simulation when the requested chain is uncertain.",
+        "responses": {
+          "200": {
+            "description": "Supported chains",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chains": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "chainId": {
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "chainId"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "chains"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs": {
+      "post": {
+        "operationId": "createSimulationJob",
+        "summary": "Create a compile or simulation job",
+        "description": "Submit inline Solidity sources or a public GitHub repository. Never submit private keys, RPC URLs, signed transactions, shell commands, or deployment scripts.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Job accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or forbidden request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{jobId}": {
+      "get": {
+        "operationId": "getJobStatus",
+        "summary": "Get job status",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{jobId}/summary": {
+      "get": {
+        "operationId": "getJobSummary",
+        "summary": "Get compact job results",
+        "description": "Prefer this after completion; it returns diagnostics counts, deployments, workflow counts, and errors without full artifacts or traces.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Compact status or result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{jobId}/result": {
+      "get": {
+        "operationId": "getJobResult",
+        "summary": "Get full machine-readable result",
+        "description": "Use only when the compact summary lacks details needed to answer the user. Full compiler artifacts can be large.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/JobId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResult"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Result is not ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "parameters": {
+      "JobId": {
+        "name": "jobId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^job_[A-Za-z0-9]+$"
+        }
+      }
+    },
+    "schemas": {
+      "InlineProject": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "files"
+        ],
+        "properties": {
+          "type": {
+            "const": "inline"
+          },
+          "files": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Map of safe relative .sol paths to Solidity source text."
+          }
+        }
+      },
+      "GithubProject": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "repository"
+        ],
+        "properties": {
+          "type": {
+            "const": "github"
+          },
+          "repository": {
+            "type": "string",
+            "description": "Public owner/repository only."
+          },
+          "ref": {
+            "type": "string",
+            "default": "main"
+          }
+        }
+      },
+      "Project": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/InlineProject"
+          },
+          {
+            "$ref": "#/components/schemas/GithubProject"
+          }
+        ]
+      },
+      "Optimizer": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "enabled",
+          "runs"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "runs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000
+          }
+        }
+      },
+      "WorkflowStep": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "deploy",
+              "call",
+              "staticCall",
+              "expectRevert",
+              "setBalance",
+              "transferNative",
+              "mine",
+              "increaseTime",
+              "snapshot",
+              "revertSnapshot",
+              "assertBalance",
+              "assertCall"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "continueOnFailure": {
+            "type": "boolean"
+          },
+          "alias": {
+            "type": "string"
+          },
+          "contract": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "args": {
+            "type": "array",
+            "items": {}
+          },
+          "from": {
+            "type": "string"
+          },
+          "value": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "function": {
+            "type": "string"
+          },
+          "saveAs": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "amount": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          },
+          "to": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "snapshot": {
+            "type": "string"
+          },
+          "equals": {},
+          "min": {},
+          "max": {}
+        }
+      },
+      "Workflow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "steps"
+        ],
+        "properties": {
+          "steps": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStep"
+            }
+          }
+        }
+      },
+      "JobRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "project",
+          "compilerVersion"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "compile",
+              "simulate"
+            ],
+            "default": "simulate"
+          },
+          "project": {
+            "$ref": "#/components/schemas/Project"
+          },
+          "compilerVersion": {
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+          },
+          "openZeppelinVersion": {
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+          },
+          "chain": {
+            "type": "string",
+            "enum": [
+              "ethereum",
+              "base",
+              "katana",
+              "fraxtal",
+              "arbitrum",
+              "polygon",
+              "optimism"
+            ]
+          },
+          "block": {
+            "oneOf": [
+              {
+                "const": "latest"
+              },
+              {
+                "type": "integer",
+                "minimum": 0
+              }
+            ],
+            "default": "latest"
+          },
+          "timeoutMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 35,
+            "default": 10
+          },
+          "workflow": {
+            "$ref": "#/components/schemas/Workflow"
+          },
+          "optimizer": {
+            "$ref": "#/components/schemas/Optimizer"
+          },
+          "evmVersion": {
+            "type": "string"
+          },
+          "viaIR": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      },
+      "JobStatus": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "jobId",
+          "status"
+        ],
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "completed",
+              "failed"
+            ]
+          },
+          "stage": {
+            "type": "string"
+          },
+          "chain": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "JobSummary": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "jobId",
+          "status"
+        ],
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "deployments": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "compiler": {
+            "type": "object"
+          },
+          "workflow": {
+            "type": "object"
+          },
+          "error": {
+            "type": "object"
+          }
+        }
+      },
+      "JobResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "jobId",
+          "status",
+          "compilerDiagnostics",
+          "steps",
+          "startedAt",
+          "finishedAt"
+        ],
+        "properties": {
+          "jobId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "compilerDiagnostics": {
+            "type": "array",
+            "items": {}
+          },
+          "deployments": {
+            "type": "object"
+          },
+          "steps": {
+            "type": "array",
+            "items": {}
+          },
+          "artifacts": {
+            "type": "array",
+            "items": {}
+          },
+          "error": {
+            "type": "object"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {}
+            }
+          }
+        }
+      }
+    }
+  }
+}

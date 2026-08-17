@@ -1,0 +1,37 @@
+name: PreflightSim GitHub Issue Bridge
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: preflightsim-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  submit-and-report:
+    if: ${{ github.event.label.name == 'preflightsim-job' && !github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PREFLIGHTSIM_API_URL: ${{ vars.PREFLIGHTSIM_API_URL || 'https://preflight.curveyield.online' }}
+      PREFLIGHTSIM_CLIENT_API_KEY: ${{ secrets.PREFLIGHTSIM_GITHUB_BRIDGE_API_KEY }}
+      PREFLIGHTSIM_ALLOWED_GITHUB_USERS: ${{ vars.PREFLIGHTSIM_ALLOWED_GITHUB_USERS || 'James-Nexus' }}
+    steps:
+      - name: Check out trusted bridge code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Submit issue job and publish results
+        run: node packages/github-bridge/src/cli.mjs

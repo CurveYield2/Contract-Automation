@@ -1,0 +1,49 @@
+name: Run PreflightSim Job
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Authenticated PreflightSim job ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preflightsim-lite-runner
+  cancel-in-progress: false
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      PREFLIGHTSIM_JOB_ID: ${{ inputs.job_id }}
+      PREFLIGHTSIM_API_URL: ${{ vars.PREFLIGHTSIM_API_URL || 'https://preflight.curveyield.online' }}
+      PREFLIGHTSIM_RUNNER_API_KEY: ${{ secrets.PREFLIGHTSIM_RUNNER_API_KEY }}
+      PREFLIGHTSIM_TIMEOUT_MINUTES: "35"
+      RPC_ETHEREUM: ${{ secrets.RPC_ETHEREUM }}
+      RPC_BASE: ${{ secrets.RPC_BASE }}
+      RPC_KATANA: ${{ secrets.RPC_KATANA }}
+      RPC_FRAXTAL: ${{ secrets.RPC_FRAXTAL }}
+      RPC_ARBITRUM: ${{ secrets.RPC_ARBITRUM }}
+      RPC_POLYGON: ${{ secrets.RPC_POLYGON }}
+      RPC_OPTIMISM: ${{ secrets.RPC_OPTIMISM }}
+    steps:
+      - name: Check out trusted runner code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install trusted dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Execute authenticated job
+        run: node packages/runner/src/cli.mjs --job-id "$PREFLIGHTSIM_JOB_ID"

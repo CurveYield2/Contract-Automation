@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>PreflightSim Lite API Reference</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <header class="shell hero compact-hero">
+    <div><p class="eyebrow">Normal REST API</p><h1>Agent API reference</h1><p class="lede">Use bearer authentication. This API never accepts RPC URLs, signing keys, shell commands, scripts, or broadcast actions.</p></div>
+    <a class="status-pill" href="./index.html">Submit through browser</a>
+  </header>
+  <main class="shell">
+    <section class="panel">
+      <h2>Authentication</h2>
+      <pre>Authorization: Bearer YOUR_ACCESS_KEY</pre>
+      <p>Do not put the access key in a URL or query string.</p>
+
+      <h2>Endpoints</h2>
+      <pre>GET  /api/v1/health
+GET  /api/v1/chains
+POST /api/v1/uploads
+POST /api/v1/jobs
+GET  /api/v1/jobs/{jobId}
+GET  /api/v1/jobs/{jobId}/summary
+GET  /api/v1/jobs/{jobId}/result
+GET  /api/v1/jobs/{jobId}/report</pre>
+
+      <h2>Create a compile-only job</h2>
+      <pre>curl -X POST https://preflight.curveyield.online/api/v1/jobs \
+  -H "Authorization: Bearer $PREFLIGHTSIM_KEY" \
+  -H "Content-Type: application/json" \
+  --data '{
+    "mode":"compile",
+    "project":{"type":"github","repository":"owner/repository","ref":"main"},
+    "compilerVersion":"0.8.30",
+    "workflow":{"steps":[]}
+  }'</pre>
+
+      <h2>HTML form-compatible submission</h2>
+      <p><code>POST /api/v1/jobs</code> also accepts <code>application/x-www-form-urlencoded</code> or <code>multipart/form-data</code> containing one field named <code>request</code>. Its value must be the same JSON request shown above.</p>
+
+      <h2>Live-fork simulation</h2>
+      <pre>{
+  "mode": "simulate",
+  "project": {"type":"github","repository":"owner/repository","ref":"main"},
+  "compilerVersion": "0.8.30",
+  "chain": "polygon",
+  "block": "latest",
+  "workflow": {
+    "steps": [
+      {"action":"deploy","alias":"vault","contract":"Vault","args":[]},
+      {"action":"call","target":"$vault","function":"deposit","args":["1000000"]}
+    ]
+  }
+}</pre>
+      <p>Allowed actions: deploy, call, staticCall, expectRevert, setBalance, transferNative, mine, increaseTime, snapshot, revertSnapshot, assertBalance, assertCall.</p>
+    </section>
+  </main>
+</body>
+</html>

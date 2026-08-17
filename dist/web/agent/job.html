@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>PreflightSim Lite — Job</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <header class="shell hero compact-hero">
+    <div>
+      <p class="eyebrow">Browser-agent job page</p>
+      <h1>Job status</h1>
+      <p class="lede">This URL contains only the job ID. The API key is entered separately and is never placed in the URL.</p>
+    </div>
+    <a class="status-pill" href="./index.html">Submit another job</a>
+  </header>
+
+  <main class="shell agent-grid">
+    <form id="agent-job-status" class="panel" autocomplete="off">
+      <h2>Access job</h2>
+      <label>API URL
+        <input id="job-api-url" type="url" value="https://preflight.curveyield.online" required>
+      </label>
+      <label>API key
+        <input id="job-api-key" type="password" placeholder="Access key" required>
+      </label>
+      <label>Job ID
+        <input id="job-id-input" type="text" pattern="job_[A-Za-z0-9]+" required>
+      </label>
+      <label class="checkbox"><input id="job-auto-poll" type="checkbox" checked> Poll until complete</label>
+      <div class="actions">
+        <button id="job-refresh" type="submit">Check status</button>
+        <button id="job-stop" type="button" class="secondary">Stop polling</button>
+      </div>
+    </form>
+
+    <section class="panel" aria-labelledby="job-result-title">
+      <h2 id="job-result-title">Result</h2>
+      <dl class="status-list">
+        <div><dt>Status</dt><dd id="job-status">Unknown</dd></div>
+        <div><dt>Stage</dt><dd id="job-stage">Unknown</dd></div>
+        <div><dt>Updated</dt><dd id="job-updated">Unknown</dd></div>
+      </dl>
+      <p id="job-message" class="progress" aria-live="polite">Enter the API key, then check status.</p>
+      <pre id="job-output">No result loaded.</pre>
+      <div class="actions">
+        <button id="job-download" type="button" class="secondary" disabled>Download JSON</button>
+        <button id="job-report" type="button" class="secondary" disabled>Open HTML report</button>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./job.js"></script>
+</body>
+</html>

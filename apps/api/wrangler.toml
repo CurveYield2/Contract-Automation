@@ -1,0 +1,29 @@
+name = "curveyield-preflight"
+main = "src/entry.mjs"
+compatibility_date = "2026-07-30"
+workers_dev = true
+
+[[routes]]
+pattern = "preflight.curveyield.online"
+custom_domain = true
+
+[[routes]]
+pattern = "api.preflight.curveyield.online"
+custom_domain = true
+
+[[r2_buckets]]
+binding = "JOBS"
+bucket_name = "curveyield-preflight"
+
+[assets]
+directory = "../../dist/web"
+binding = "ASSETS"
+
+[vars]
+GITHUB_OWNER = "CurveYield"
+GITHUB_REPO = "contract-automation"
+GITHUB_WORKFLOW = "simulate.yml"
+GITHUB_REF = "main"
+R2_BUCKET_NAME = "curveyield-preflight"
+CORS_ORIGIN = "https://preflight.curveyield.online"
+PUBLIC_APP_URL = "https://preflight.curveyield.online"

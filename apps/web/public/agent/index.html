@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>PreflightSim Lite — Agent Interface</title>
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <header class="shell hero compact-hero">
+    <div>
+      <p class="eyebrow">Browser-agent interface</p>
+      <h1>PreflightSim Lite</h1>
+      <p class="lede">Submit an authenticated compile or live-fork simulation job. Only structured EVM actions are accepted; no transaction can be broadcast.</p>
+    </div>
+    <a class="status-pill" href="../index.html">Full interface</a>
+  </header>
+
+  <main class="shell agent-grid">
+    <form id="agent-job-form" class="panel" autocomplete="off">
+      <h2>Submit job</h2>
+      <label>API URL
+        <input id="agent-api-url" type="url" value="https://preflight.curveyield.online" required>
+      </label>
+      <label>API key
+        <input id="agent-api-key" type="password" placeholder="Access key" required>
+      </label>
+      <label>Optional project ZIP
+        <input id="agent-project-file" type="file" accept=".zip,application/zip">
+      </label>
+      <p class="hint">When a ZIP is selected, its uploaded object replaces the <code>project</code> value in the JSON request.</p>
+      <label>Job request JSON
+        <textarea id="agent-request" rows="28" spellcheck="false">{
+  "mode": "compile",
+  "project": {
+    "type": "inline",
+    "files": {
+      "Counter.sol": "pragma solidity 0.8.30; contract Counter { uint256 public value; function set(uint256 next) external { value = next; } }"
+    }
+  },
+  "compilerVersion": "0.8.30",
+  "workflow": { "steps": [] }
+}</textarea>
+      </label>
+      <div class="actions">
+        <button id="agent-submit" type="submit">Submit job</button>
+        <button id="agent-format" type="button" class="secondary">Format JSON</button>
+      </div>
+    </form>
+
+    <section class="panel" aria-labelledby="agent-output-title">
+      <h2 id="agent-output-title">Machine-readable output</h2>
+      <p id="agent-message" class="progress" aria-live="polite">Ready.</p>
+      <pre id="agent-output">No job submitted.</pre>
+      <p id="agent-next" class="hidden"><a id="agent-job-link" href="job.html">Open permanent job page</a></p>
+    </section>
+  </main>
+
+  <footer class="shell footer">
+    <p>API keys remain in session storage unless the user clears the tab.</p>
+    <span><a href="./api.html">API reference</a> · <a href="../privacy.html">Privacy</a></span>
+  </footer>
+  <script type="module" src="./agent.js"></script>
+</body>
+</html>

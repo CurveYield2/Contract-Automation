@@ -1,0 +1,111 @@
+name: Test and Deploy CurveYield Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: curveyield-preflight-deploy
+  cancel-in-progress: true
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PAGES_PROJECT_NAME: ${{ vars.PAGES_PROJECT_NAME || 'curveyield-preflight' }}
+      PAGES_DOMAIN: preflight.curveyield.online
+      R2_BUCKET_NAME: curveyield-preflight
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install trusted dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Run unit and security tests
+        run: npm test
+
+      - name: Check JavaScript syntax
+        run: npm run lint
+
+      - name: Build Pages assets
+        run: npm run build
+
+      - name: Create R2 bucket when missing
+        run: npx wrangler r2 bucket create "$R2_BUCKET_NAME" || true
+
+      - name: Configure R2 browser uploads and retention
+        run: |
+          npx wrangler r2 bucket cors set "$R2_BUCKET_NAME" --file infra/r2-cors.json
+          npx wrangler r2 bucket lifecycle set "$R2_BUCKET_NAME" --file infra/r2-lifecycle.json --force
+
+      - name: Create Worker before adding secrets
+        run: npx wrangler deploy --config apps/api/wrangler.toml
+
+      - name: Upload Worker secrets
+        env:
+          CLIENT_API_KEY: ${{ secrets.PREFLIGHTSIM_CLIENT_API_KEY }}
+          GPT_API_KEY: ${{ secrets.PREFLIGHTSIM_GPT_API_KEY }}
+          GITHUB_BRIDGE_API_KEY: ${{ secrets.PREFLIGHTSIM_GITHUB_BRIDGE_API_KEY }}
+          RUNNER_API_KEY: ${{ secrets.PREFLIGHTSIM_RUNNER_API_KEY }}
+          PREFLIGHT_GITHUB_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          R2_ACCESS_KEY_ID: ${{ secrets.PREFLIGHTSIM_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.PREFLIGHTSIM_R2_SECRET_ACCESS_KEY }}
+        run: |
+          jq -n \
+            --arg CLIENT_API_KEY "$CLIENT_API_KEY" \
+            --arg GPT_API_KEY "$GPT_API_KEY" \
+            --arg GITHUB_BRIDGE_API_KEY "$GITHUB_BRIDGE_API_KEY" \
+            --arg RUNNER_API_KEY "$RUNNER_API_KEY" \
+            --arg GITHUB_TOKEN "$PREFLIGHT_GITHUB_TOKEN" \
+            --arg R2_ACCOUNT_ID "$CLOUDFLARE_ACCOUNT_ID" \
+            --arg R2_ACCESS_KEY_ID "$R2_ACCESS_KEY_ID" \
+            --arg R2_SECRET_ACCESS_KEY "$R2_SECRET_ACCESS_KEY" \
+            '{CLIENT_API_KEY:$CLIENT_API_KEY,GPT_API_KEY:$GPT_API_KEY,GITHUB_BRIDGE_API_KEY:$GITHUB_BRIDGE_API_KEY,RUNNER_API_KEY:$RUNNER_API_KEY,GITHUB_TOKEN:$GITHUB_TOKEN,R2_ACCOUNT_ID:$R2_ACCOUNT_ID,R2_ACCESS_KEY_ID:$R2_ACCESS_KEY_ID,R2_SECRET_ACCESS_KEY:$R2_SECRET_ACCESS_KEY}' \
+            > /tmp/preflight-secrets.json
+          npx wrangler secret bulk /tmp/preflight-secrets.json --config apps/api/wrangler.toml
+          rm -f /tmp/preflight-secrets.json
+
+      - name: Redeploy Worker with custom domain
+        run: npx wrangler deploy --config apps/api/wrangler.toml
+
+      - name: Create Pages project when missing
+        run: npx wrangler pages project create "$PAGES_PROJECT_NAME" --production-branch=main || true
+
+      - name: Deploy Cloudflare Pages
+        run: npx wrangler pages deploy dist/web --project-name="$PAGES_PROJECT_NAME" --branch=main
+
+      - name: Attach Pages custom domain
+        run: |
+          status=$(curl --silent --output /tmp/domain.json --write-out '%{http_code}' \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT_NAME/domains/$PAGES_DOMAIN")
+          if [ "$status" = "404" ]; then
+            curl --fail-with-body --silent --show-error \
+              --request POST \
+              --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              --header "Content-Type: application/json" \
+              --data "{\"name\":\"$PAGES_DOMAIN\"}" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT_NAME/domains"
+          elif [ "$status" -ge 400 ]; then
+            cat /tmp/domain.json
+            exit 1
+          fi
+
+      - name: Ensure GitHub issue label exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh label create preflightsim-job --description "Run a CurveYield Preflight contract job" --color 1D76DB --force

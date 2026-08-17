@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Compile Solidity and run structured live-RPC fork simulations without broadcasting transactions.">
+  <title>PreflightSim Lite</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="shell hero">
+    <div>
+      <p class="eyebrow">CurveYield developer infrastructure</p>
+      <h1>PreflightSim Lite</h1>
+      <p class="lede">Compile Solidity, fork an allowlisted live chain, deploy contracts, execute structured writes, and inspect results. Nothing is signed or broadcast to a real blockchain.</p>
+    </div>
+    <div class="status-pill" id="service-state" aria-live="polite">Not connected</div>
+  </header>
+
+  <main class="shell grid">
+    <section class="panel" aria-labelledby="connection-title">
+      <h2 id="connection-title">Connection</h2>
+      <label>API URL
+        <input id="api-url" name="apiUrl" type="url" value="https://preflight.curveyield.online" autocomplete="url">
+      </label>
+      <label>API key
+        <input id="api-key" name="apiKey" type="password" autocomplete="off" placeholder="Bearer API key">
+      </label>
+      <label class="checkbox"><input id="remember-key" type="checkbox"> Remember key in this browser</label>
+      <button id="test-connection" type="button" class="secondary">Test connection</button>
+    </section>
+
+    <form id="job-form" class="panel wide">
+      <div class="section-heading">
+        <div><p class="eyebrow">Job request</p><h2>Project and fork</h2></div>
+        <span class="badge">Structured EVM actions only</span>
+      </div>
+
+      <fieldset>
+        <legend>Project source</legend>
+        <div class="segmented" role="radiogroup" aria-label="Project source type">
+          <label><input type="radio" name="projectType" value="github" checked> Public GitHub</label>
+          <label><input type="radio" name="projectType" value="inline"> Inline Solidity</label>
+          <label><input type="radio" name="projectType" value="upload"> ZIP upload</label>
+        </div>
+      </fieldset>
+
+      <div id="github-project" class="project-fields">
+        <label>Repository
+          <input id="github-repository" type="text" placeholder="owner/repository" value="CurveYield/contract-automation">
+        </label>
+        <label>Ref
+          <input id="github-ref" type="text" placeholder="branch, tag, or commit" value="main">
+        </label>
+      </div>
+
+      <div id="inline-project" class="project-fields hidden">
+        <label>Source path
+          <input id="inline-path" type="text" value="Contract.sol">
+        </label>
+        <label>Solidity source
+          <textarea id="inline-source" rows="14" spellcheck="false">// SPDX-License-Identifier: UNLICENSED
+pragma solidity 0.8.30;
+
+contract Counter {
+    uint256 public value;
+    function set(uint256 value_) external { value = value_; }
+}</textarea>
+        </label>
+      </div>
+
+      <div id="upload-project" class="project-fields hidden">
+        <label>Project ZIP (maximum 250 MB)
+          <input id="project-file" type="file" accept=".zip,application/zip">
+        </label>
+      </div>
+
+      <div class="columns">
+        <label>Mode
+          <select id="mode">
+            <option value="simulate" selected>Compile + simulate</option>
+            <option value="compile">Compile only</option>
+          </select>
+        </label>
+        <label>Chain
+          <select id="chain">
+            <option value="ethereum">Ethereum</option>
+            <option value="base">Base</option>
+            <option value="katana">Katana</option>
+            <option value="fraxtal">Fraxtal</option>
+            <option value="arbitrum">Arbitrum</option>
+            <option value="polygon" selected>Polygon</option>
+            <option value="optimism">Optimism</option>
+          </select>
+        </label>
+        <label>Fork block
+          <input id="block" type="text" value="latest" placeholder="latest or block number">
+        </label>
+        <label>Solidity compiler
+          <input id="compiler-version" type="text" value="0.8.30" pattern="\d+\.\d+\.\d+">
+        </label>
+        <label>OpenZeppelin version
+          <input id="openzeppelin-version" type="text" placeholder="optional exact version">
+        </label>
+      </div>
+
+      <details>
+        <summary>Compiler settings</summary>
+        <div class="columns detail-grid">
+          <label class="checkbox"><input id="optimizer-enabled" type="checkbox" checked> Enable optimizer</label>
+          <label>Optimizer runs<input id="optimizer-runs" type="number" min="0" max="1000000" value="200"></label>
+          <label class="checkbox"><input id="via-ir" type="checkbox"> Compile via IR</label>
+          <label>EVM version<input id="evm-version" type="text" placeholder="optional, e.g. cancun"></label>
+        </div>
+      </details>
+
+      <label>Structured workflow JSON
+        <textarea id="workflow" rows="22" spellcheck="false">{
+  "steps": [
+    { "action": "deploy", "alias": "counter", "contract": "Counter", "args": [] },
+    { "action": "call", "target": "$counter", "function": "set", "args": ["42"] },
+    { "action": "assertCall", "target": "$counter", "function": "value", "args": [], "equals": "42" }
+  ]
+}</textarea>
+      </label>
+
+      <div class="actions">
+        <button id="submit-job" type="submit">Compile and simulate</button>
+        <button id="load-vault-example" type="button" class="secondary">Load vault example</button>
+      </div>
+    </form>
+
+    <section class="panel wide" aria-labelledby="result-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Execution</p><h2 id="result-title">Job status</h2></div>
+        <code id="job-id">No job submitted</code>
+      </div>
+      <div id="progress" class="progress" aria-live="polite">Ready.</div>
+      <pre id="result-json" tabindex="0">Results will appear here.</pre>
+      <div class="actions">
+        <button id="download-json" type="button" class="secondary" disabled>Download JSON</button>
+        <button id="open-report" type="button" class="secondary" disabled>Open HTML report</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell footer">
+    <p>No private keys. No wallet connection. No real transaction broadcasting.</p>
+    <nav><a href="./agent/index.html">Agent interface</a> · <a href="./privacy.html">Privacy</a></nav>
+  </footer>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
