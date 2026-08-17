@@ -1,0 +1,34 @@
+{
+  "name": "curveyield-contract-automation",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "lint": "node scripts/check.mjs",
+    "build": "node scripts/build.mjs",
+    "runner": "node packages/runner/src/cli.mjs",
+    "integration:local": "node packages/runner/src/integration-local.mjs",
+    "cfbuild": "npm test && npm run lint && npm run build",
+    "cfdeploy": "wrangler r2 bucket create curveyield-preflight || true && wrangler deploy --config apps/api/wrangler.toml",
+    "deploy": "wrangler r2 bucket create curveyield-preflight || true && wrangler deploy --config apps/api/wrangler.toml"
+  },
+  "dependencies": {
+    "ethers": "6.15.0",
+    "ganache": "7.9.2",
+    "solc": "0.8.30",
+    "tar": "7.4.3",
+    "unzipper": "0.12.3"
+  },
+  "devDependencies": {
+    "wrangler": "4.116.0"
+  }
+}
