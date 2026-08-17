@@ -3,14 +3,13 @@ name: Bootstrap restored source
 on:
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/bootstrap-restore-v1.yml'
 
 permissions:
   contents: write
 
 jobs:
   restore:
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,13 +22,14 @@ jobs:
           unzip -oq Contract-Automation_working_source_v1.zip -d .restore_tmp
           cp -a .restore_tmp/. .
           rm -rf .restore_tmp Contract-Automation_working_source_v1.zip
-          rm -f .github/workflows/bootstrap-restore-v1.yml
+          rm -f .bootstrap-trigger-v1 .github/workflows/bootstrap-restore-v1.yml
       - name: Verify restored source
         run: |
           set -euo pipefail
-          node --test
-          node scripts/check.mjs
-          node scripts/build.mjs
+          npm install --ignore-scripts --no-audit --no-fund
+          npm test
+          npm run lint
+          npm run build
       - name: Commit restored tree
         run: |
           set -euo pipefail
