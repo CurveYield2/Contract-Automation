@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   planStage2aAnalysis,
   assertNativeFuzzMayStart,
+  runStage2aAnalysis,
   validateStage2aToolchainEvidence
 } from '../src/stage2a-toolchain.mjs';
 
@@ -44,4 +45,44 @@ test('requires terminal Medusa evidence before native fuzz starts', () => {
   assert.throws(() => assertNativeFuzzMayStart({ status: 'running', backend: 'medusa' }), /terminal Medusa evidence/);
   assert.doesNotThrow(() => assertNativeFuzzMayStart({ status: 'failed', backend: 'medusa', authoritativeFinding: false }));
   assert.doesNotThrow(() => assertNativeFuzzMayStart({ status: 'disabled', backend: 'medusa', authoritativeFinding: false }));
+  assert.doesNotThrow(() => assertNativeFuzzMayStart({ status: 'completed_with_failures', backend: 'medusa', authoritativeFinding: true }));
+});
+
+test('Stage-2A orchestrator executes Slither, then terminal Medusa, then native fuzz', async () => {
+  const calls = [];
+  const results = await runStage2aAnalysis({ slither: true, medusa: true, nativeFuzz: true }, {
+    runSlither: async () => {
+      calls.push('slither');
+      return { backend: 'slither', status: 'completed', terminal: true };
+    },
+    runMedusa: async () => {
+      calls.push('medusa');
+      return { backend: 'medusa', status: 'completed_with_failures', terminal: true };
+    },
+    runNativeFuzz: async () => {
+      calls.push('native-fuzz');
+      return { backend: 'native-fuzz', status: 'completed', terminal: true };
+    }
+  });
+  assert.deepEqual(calls, ['slither', 'medusa', 'native-fuzz']);
+  assert.equal(results.medusa.status, 'completed_with_failures');
+  assert.equal(results.nativeFuzz.status, 'completed');
+});
+
+test('Stage-2A orchestrator refuses to start native fuzz without terminal Medusa evidence', async () => {
+  const calls = [];
+  await assert.rejects(
+    runStage2aAnalysis({ medusa: true, nativeFuzz: true }, {
+      runMedusa: async () => {
+        calls.push('medusa');
+        return { backend: 'medusa', status: 'running', terminal: false };
+      },
+      runNativeFuzz: async () => {
+        calls.push('native-fuzz');
+        return { backend: 'native-fuzz', status: 'completed', terminal: true };
+      }
+    }),
+    /terminal Medusa evidence/
+  );
+  assert.deepEqual(calls, ['medusa']);
 });
