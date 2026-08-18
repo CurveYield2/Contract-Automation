@@ -1,6 +1,7 @@
 import { V7ExecutionError, runProcess } from './execution.mjs';
 
 const EXACT_SLITHER_VERSION = '0.11.6';
+const EXACT_MEDUSA_VERSION = '1.5.1';
 const COMMIT = /^[0-9a-f]{40}$/;
 
 function raw(result = {}) {
@@ -40,6 +41,42 @@ function slitherResult(input, fields) {
     sourceCommit: input.sourceCommit,
     rawArtifactRef: input.rawArtifactRef,
     ...fields
+  };
+}
+
+function medusaResult(input, fields) {
+  return {
+    backend: 'medusa',
+    version: EXACT_MEDUSA_VERSION,
+    sourceCommit: input.sourceCommit,
+    rawArtifactRef: input.rawArtifactRef,
+    ...fields
+  };
+}
+
+function objectOrEmpty(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? structuredClone(value) : {};
+}
+
+export function parseMedusaOutput(output) {
+  let parsed;
+  try {
+    parsed = JSON.parse(String(output ?? ''));
+  } catch (error) {
+    throw new V7ExecutionError('EVIDENCE_PARSE_FAILURE', 'Medusa terminal output is not valid JSON', { cause: error.message });
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new V7ExecutionError('EVIDENCE_PARSE_FAILURE', 'Medusa terminal output must be a JSON object');
+  }
+  const properties = Array.isArray(parsed.properties) ? structuredClone(parsed.properties) : [];
+  const falsifiedProperties = properties.filter((property) => property && property.status === 'failed').length;
+  return {
+    status: typeof parsed.status === 'string' ? parsed.status : (falsifiedProperties > 0 ? 'falsified' : 'completed'),
+    properties,
+    falsifiedProperties,
+    corpus: objectOrEmpty(parsed.corpus),
+    coverage: objectOrEmpty(parsed.coverage),
+    statistics: objectOrEmpty(parsed.statistics)
   };
 }
 
@@ -93,5 +130,63 @@ export async function runSlitherAnalysis(input, { runCommand = runProcess } = {}
     componentStatus: 'COMPLETED',
     continuationDisposition: 'COMPLETE_EVIDENCE',
     rawOutput: raw(analysisResult)
+  });
+}
+
+export async function runMedusaAnalysis(input, { runCommand = runProcess } = {}) {
+  validateCommon(input, EXACT_MEDUSA_VERSION);
+
+  const versionResult = await runCommand({ command: 'medusa', args: ['--version'], cwd: input.projectRoot });
+  if (!versionResult || versionResult.exitCode !== 0) {
+    return medusaResult(input, {
+      status: 'failed',
+      terminal: true,
+      failureKind: 'TOOL_FAILURE',
+      componentStatus: 'FAILED',
+      continuationDisposition: 'CONTINUE_WITH_LIMITATION',
+      rawOutput: raw(versionResult)
+    });
+  }
+  if (!versionMatches(versionResult, EXACT_MEDUSA_VERSION)) {
+    throw new V7ExecutionError('TOOLCHAIN_INTEGRITY_FAILURE', 'Medusa version does not match the recovered V7 pin', {
+      expectedVersion: EXACT_MEDUSA_VERSION,
+      stdout: String(versionResult.stdout ?? ''),
+      stderr: String(versionResult.stderr ?? '')
+    });
+  }
+
+  const campaignResult = await runCommand({ command: 'medusa', args: ['fuzz'], cwd: input.projectRoot });
+  if (!campaignResult || campaignResult.exitCode < 0) {
+    return medusaResult(input, {
+      status: 'failed',
+      terminal: true,
+      failureKind: 'TOOL_FAILURE',
+      componentStatus: 'FAILED',
+      continuationDisposition: 'CONTINUE_WITH_LIMITATION',
+      rawOutput: raw(campaignResult)
+    });
+  }
+
+  const campaign = parseMedusaOutput(campaignResult.stdout);
+  const falsified = campaign.falsifiedProperties > 0 || campaign.status === 'falsified';
+  if (falsified || campaignResult.exitCode !== 0) {
+    return medusaResult(input, {
+      status: 'completed_with_failures',
+      terminal: true,
+      failureKind: falsified ? 'PROPERTY_FALSIFICATION' : 'ANALYSIS_COMPONENT_FAILURE',
+      componentStatus: 'COMPLETED_WITH_FAILURES',
+      continuationDisposition: 'CONTINUE_WITH_LIMITATION',
+      campaign,
+      rawOutput: raw(campaignResult)
+    });
+  }
+
+  return medusaResult(input, {
+    status: 'completed',
+    terminal: true,
+    componentStatus: 'COMPLETED',
+    continuationDisposition: 'COMPLETE_EVIDENCE',
+    campaign,
+    rawOutput: raw(campaignResult)
   });
 }
