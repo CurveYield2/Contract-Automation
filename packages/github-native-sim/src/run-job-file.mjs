@@ -1,5 +1,8 @@
 import path from 'node:path';
+import { CHAINS } from '../../protocol/src/index.mjs';
 import { buildProject as defaultBuildProject } from '../../runner/src/build-dispatch.mjs';
+import { startGanacheEngine } from '../../runner/src/engine.mjs';
+import { executeWorkflow } from '../../runner/src/workflow.mjs';
 import { runMedusaAnalysis, runSlitherAnalysis } from './analysis.mjs';
 import { normalizeDeploymentGasEvidence } from './deployment-gas-v1.mjs';
 import { checkoutExactSource, safeRepositoryProjectPath } from './execution.mjs';
@@ -40,6 +43,7 @@ function failureResult(request, startedAt, error, partial = {}, now) {
     build: partial.build,
     deploymentGasEvidence: partial.deploymentGasEvidence ?? null,
     analysis: partial.analysis ?? {},
+    simulation: partial.simulation ?? null,
     analysisComponentFailureCount: partial.analysisComponentFailureCount ?? 0,
     failedStepCount: partial.failedStepCount ?? 0,
     failedSteps: partial.failedSteps ?? [],
@@ -76,15 +80,99 @@ function deploymentGasConfigurationIdentity(request, build) {
 
 function buildDeploymentGasEvidence(request, build) {
   if (request.phaseId !== 'fork-simulation-lifecycle') return null;
-  const deployableContracts = request.configuration.deploymentGas?.deployableContracts;
-  if (!Array.isArray(deployableContracts) || deployableContracts.length === 0) {
-    throw new Error('Phase 7 requires configuration.deploymentGas.deployableContracts from the frozen production scope');
-  }
   return normalizeDeploymentGasEvidence({
-    deployableContracts,
+    deployableContracts: request.configuration.deploymentGas.deployableContracts,
     artifacts: build?.artifacts ?? [],
     configurationIdentity: deploymentGasConfigurationIdentity(request, build),
   });
+}
+
+function buildArtifactAccessor(artifacts = []) {
+  const byQualifiedName = new Map();
+  const byName = new Map();
+  for (const artifact of artifacts) {
+    if (!artifact?.sourceName || !artifact?.contractName) continue;
+    byQualifiedName.set(`${artifact.sourceName}:${artifact.contractName}`, artifact);
+    const sameName = byName.get(artifact.contractName) ?? [];
+    sameName.push(artifact);
+    byName.set(artifact.contractName, sameName);
+  }
+  return {
+    all: [...byQualifiedName.values()],
+    get(contractName, sourceName = undefined) {
+      if (sourceName) {
+        const artifact = byQualifiedName.get(`${sourceName}:${contractName}`);
+        if (!artifact) throw new Error(`Contract not found in accepted build: ${sourceName}:${contractName}`);
+        return artifact;
+      }
+      const matches = byName.get(contractName) ?? [];
+      if (matches.length === 0) throw new Error(`Contract not found in accepted build: ${contractName}`);
+      if (matches.length > 1) throw new Error(`Ambiguous contract name ${contractName}; workflow must specify source`);
+      return matches[0];
+    }
+  };
+}
+
+function simulationFailure({ request, kind, error, steps = [], deployments = {} }) {
+  const simulation = request.configuration.simulation;
+  return {
+    status: 'failed',
+    failureKind: kind,
+    chain: simulation.chain,
+    chainId: CHAINS[simulation.chain].chainId,
+    block: simulation.block,
+    pinnedFork: true,
+    steps: structuredClone(steps),
+    deployments: structuredClone(deployments),
+    error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) }
+  };
+}
+
+async function executePhase7Simulation({ request, build, environment, startSimulationEngine, executeSimulationWorkflow }) {
+  if (request.phaseId !== 'fork-simulation-lifecycle') return null;
+  const simulation = request.configuration.simulation;
+  const chain = CHAINS[simulation.chain];
+  const forkUrl = environment[chain.rpcEnv];
+  if (!forkUrl) {
+    const error = new Error(`Runner secret ${chain.rpcEnv} is not configured for the pinned ${simulation.chain} fork`);
+    error.kind = 'RPC_CONFIGURATION_FAILURE';
+    error.simulationEvidence = simulationFailure({ request, kind: error.kind, error });
+    throw error;
+  }
+
+  let engine;
+  try {
+    engine = await startSimulationEngine({
+      artifacts: buildArtifactAccessor(build?.artifacts ?? []),
+      workflow: simulation.workflow,
+      chainId: chain.chainId,
+      forkUrl,
+      block: simulation.block,
+    });
+    const execution = await executeSimulationWorkflow(simulation.workflow, engine.runtime, { aliases: engine.aliases });
+    return {
+      status: 'completed',
+      failureKind: null,
+      chain: simulation.chain,
+      chainId: chain.chainId,
+      block: simulation.block,
+      pinnedFork: true,
+      steps: structuredClone(execution.steps ?? []),
+      deployments: structuredClone(execution.context?.deployments ?? {}),
+    };
+  } catch (error) {
+    if (!error.kind) error.kind = 'LIFECYCLE_WORKFLOW_FAILURE';
+    error.simulationEvidence = simulationFailure({
+      request,
+      kind: error.kind,
+      error,
+      steps: error.workflowSteps ?? [],
+      deployments: error.workflowContext?.deployments ?? {},
+    });
+    throw error;
+  } finally {
+    if (engine?.close) await engine.close().catch(() => {});
+  }
 }
 
 async function executeSlither({ request, checkout, build, runSlither, runCommand }) {
@@ -112,12 +200,13 @@ async function executeMedusa({ request, checkout, build, runMedusa, runCommand }
 async function executeNativeFuzz({ request, checkout, build, runNativeFuzz, runCommand }) {
   if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build });
   const native = request.configuration.analysis?.nativeFuzz ?? {};
+  const fuzzRuns = native.fuzzRuns ?? 256;
   return runNativeFuzzAnalysis({
     projectRoot: checkout.projectRoot,
     sourceCommit: request.source.commit,
     rawArtifactRef: rawArtifactRef('native-fuzz/raw.txt'),
-    command: native.command ?? 'forge',
-    args: native.args ?? ['test'],
+    command: 'forge',
+    args: ['test', '--fuzz-runs', String(fuzzRuns)],
     recoverableExitCodes: native.recoverableExitCodes ?? []
   }, { ...(runCommand ? { runCommand } : {}) });
 }
@@ -130,6 +219,9 @@ export async function runGitHubNativeJob(input, {
   runMedusa,
   runNativeFuzz,
   runCommand,
+  environment = process.env,
+  startSimulationEngine = startGanacheEngine,
+  executeSimulationWorkflow = executeWorkflow,
   now = () => new Date()
 } = {}) {
   const request = validateDeepAssuranceRequestV2(input);
@@ -138,6 +230,7 @@ export async function runGitHubNativeJob(input, {
   let build;
   let checkout;
   let deploymentGasEvidence = null;
+  let simulation = null;
 
   try {
     checkout = await checkoutSource(request.source, { workspaceRoot, runCommand });
@@ -151,7 +244,7 @@ export async function runGitHubNativeJob(input, {
     });
     deploymentGasEvidence = buildDeploymentGasEvidence(request, build);
   } catch (error) {
-    return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis }, now);
+    return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation }, now);
   }
 
   if (request.profileId === 'github-native-compile-v2') {
@@ -196,6 +289,7 @@ export async function runGitHubNativeJob(input, {
         build,
         deploymentGasEvidence,
         analysis,
+        simulation,
         analysisComponentFailureCount: componentFailures,
         continuityDisposition: componentFailures > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE'
       }, now);
@@ -204,20 +298,52 @@ export async function runGitHubNativeJob(input, {
 
   const componentFailures = analysisFailureCount(analysis);
   const hardStop = hasHardStop(analysis);
+  if (hardStop) {
+    return failureResult(request, startedAt, new Error('Analysis component requires execution stop'), {
+      build,
+      deploymentGasEvidence,
+      analysis,
+      simulation,
+      analysisComponentFailureCount: componentFailures,
+      continuityDisposition: 'STOP_EXECUTION'
+    }, now);
+  }
+
+  if (request.phaseId === 'fork-simulation-lifecycle') {
+    try {
+      simulation = await executePhase7Simulation({ request, build, environment, startSimulationEngine, executeSimulationWorkflow });
+    } catch (error) {
+      simulation = error.simulationEvidence ?? simulation;
+      const failedSteps = simulation?.steps?.filter((step) => step.status === 'failed') ?? [];
+      return failureResult(request, startedAt, error, {
+        build,
+        deploymentGasEvidence,
+        analysis,
+        simulation,
+        analysisComponentFailureCount: componentFailures,
+        failedStepCount: failedSteps.length,
+        failedSteps,
+        continuityDisposition: 'CONTINUE_WITH_LIMITATION'
+      }, now);
+    }
+  }
+
+  const failedSteps = simulation?.steps?.filter((step) => step.status === 'failed') ?? [];
   return {
     schemaVersion: 'deep-assurance-github-native-execution-v2',
     requestId: request.requestId,
     requestDigest: request.requestDigest,
     profileId: request.profileId,
     source: structuredClone(request.source),
-    status: hardStop ? 'failed' : 'completed',
+    status: 'completed',
     build,
     deploymentGasEvidence,
     analysis,
+    simulation,
     analysisComponentFailureCount: componentFailures,
-    failedStepCount: 0,
-    failedSteps: [],
-    continuityDisposition: hardStop ? 'STOP_EXECUTION' : componentFailures > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE',
+    failedStepCount: failedSteps.length,
+    failedSteps,
+    continuityDisposition: componentFailures > 0 || failedSteps.length > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE',
     startedAt,
     finishedAt: nowIso(now)
   };
