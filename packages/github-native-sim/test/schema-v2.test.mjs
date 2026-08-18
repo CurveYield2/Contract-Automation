@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  HISTORICAL_V7_RELEASE_PROVENANCE,
   V2_AUTOMATION_RELEASE,
   V2_RUNNER_RELEASE,
   validateDeepAssuranceRequestV2
@@ -8,24 +9,24 @@ import {
 
 const baseRequest = () => ({
   schemaVersion: 'deep-assurance-github-request-v2',
-  processId: 'deep-assurance-v6',
+  processId: 'audit-v7-independent-review',
   contractAutomationRelease: {
-    repository: 'CurveYield/contract-automation',
-    branch: 'orchestrator/round4-ci-base-v1',
-    commit: 'ad11d7d5a623c1411cbabb4bb0cd9acf7975bce8',
-    contractVersion: 'contract-automation-finalized-v1'
+    repository: 'CurveYield2/Contract-Automation',
+    branch: 'recovery/v7-execution-layer-v1',
+    commit: '612fa50264e587e3f24550bf4dae35719b04211c',
+    contractVersion: 'contract-automation-v7-relocated-v1'
   },
   runnerRelease: {
     version: 'deep-assurance-github-bridge-v1',
-    manifestSha256: 'd32cfca35524606a5c85e98fb3dec1bba58bff8a4bc73466ccef496ceab79734'
+    manifestSha256: '2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc'
   },
   campaignId: 'campaign-1',
-  assignmentId: 'assignment-1',
-  phaseId: 'phase-6',
-  gateId: 'build-test-adversarial',
+  assignmentId: 'reviewer-2-phase-6-v1',
+  phaseId: 'build-and-test',
+  gateId: 'exact-build-and-tests-complete',
   profileId: 'github-native-simulate-v2',
   source: {
-    repository: 'CurveYield/Audits',
+    repository: 'CurveYield2/Audits',
     commit: '1'.repeat(40),
     projectPath: 'audit-targets/example'
   },
@@ -38,20 +39,35 @@ const baseRequest = () => ({
   requestDigest: '3'.repeat(64)
 });
 
-test('pins the recovered V7 automation and runner identities', () => {
+test('pins the active CurveYield2 V7 automation and runner identities', () => {
   assert.deepEqual(V2_AUTOMATION_RELEASE, {
-    repository: 'CurveYield/contract-automation',
-    branch: 'orchestrator/round4-ci-base-v1',
-    commit: 'ad11d7d5a623c1411cbabb4bb0cd9acf7975bce8',
-    contractVersion: 'contract-automation-finalized-v1'
+    repository: 'CurveYield2/Contract-Automation',
+    branch: 'recovery/v7-execution-layer-v1',
+    commit: '612fa50264e587e3f24550bf4dae35719b04211c',
+    contractVersion: 'contract-automation-v7-relocated-v1'
   });
   assert.deepEqual(V2_RUNNER_RELEASE, {
     version: 'deep-assurance-github-bridge-v1',
-    manifestSha256: 'd32cfca35524606a5c85e98fb3dec1bba58bff8a4bc73466ccef496ceab79734'
+    manifestSha256: '2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc'
   });
 });
 
-test('accepts the exact recovered v2 simulation request envelope', () => {
+test('retains deleted CurveYield release only as historical provenance', () => {
+  assert.equal(HISTORICAL_V7_RELEASE_PROVENANCE.status, 'HISTORICAL_DELETED_ORGANIZATION_PROVENANCE_ONLY');
+  assert.equal(HISTORICAL_V7_RELEASE_PROVENANCE.repository, 'CurveYield/contract-automation');
+  const request = baseRequest();
+  assert.throws(() => validateDeepAssuranceRequestV2({
+    ...request,
+    contractAutomationRelease: {
+      repository: HISTORICAL_V7_RELEASE_PROVENANCE.repository,
+      branch: 'orchestrator/round4-ci-base-v1',
+      commit: HISTORICAL_V7_RELEASE_PROVENANCE.requestBaseCommit,
+      contractVersion: 'contract-automation-finalized-v1'
+    }
+  }), /contractAutomationRelease/);
+});
+
+test('accepts the exact relocated v2 simulation request envelope', () => {
   const request = baseRequest();
   assert.deepEqual(validateDeepAssuranceRequestV2(request), request);
 });
@@ -63,8 +79,9 @@ test('accepts github-native-compile-v2 and github-native-simulate-v2 only', () =
   assert.throws(() => validateDeepAssuranceRequestV2({ ...baseRequest(), profileId: 'github-native-simulate-v1' }), /profileId/);
 });
 
-test('rejects drift in pinned automation or runner identity', () => {
+test('rejects process and pinned release drift', () => {
   const request = baseRequest();
+  assert.throws(() => validateDeepAssuranceRequestV2({ ...request, processId: 'deep-assurance-v6' }), /processId/);
   assert.throws(() => validateDeepAssuranceRequestV2({
     ...request,
     contractAutomationRelease: { ...request.contractAutomationRelease, commit: '9'.repeat(40) }
