@@ -1,0 +1,47 @@
+name: V7 Recovery CI
+
+on:
+  push:
+    branches:
+      - recovery/v7-execution-layer-v1
+  pull_request:
+    branches:
+      - baseline/restored-working-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout recovery candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies without lockfile
+        run: npm install --no-package-lock
+
+      - name: Focused V7 package tests
+        run: node --test packages/github-native-sim/test/*.test.mjs
+
+      - name: Full node test suite
+        run: node --test
+
+      - name: Static checks
+        run: node scripts/check.mjs
+
+      - name: Build checks
+        run: node scripts/build.mjs
+
+      - name: Record tested commit
+        run: echo "tested_sha=$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
