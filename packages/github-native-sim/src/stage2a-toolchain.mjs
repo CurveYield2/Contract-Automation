@@ -1,5 +1,5 @@
 const SHA256 = /^[0-9a-f]{64}$/;
-const TERMINAL_MEDUSA = new Set(['failed', 'disabled', 'passed', 'completed', 'not_applicable']);
+const TERMINAL_MEDUSA = new Set(['failed', 'disabled', 'passed', 'completed', 'completed_with_failures', 'not_applicable']);
 
 function fail(path, message) { throw new Error(`${path}: ${message}`); }
 function obj(value, path) {
@@ -43,4 +43,32 @@ export function assertNativeFuzzMayStart(medusaResult) {
   if (medusaResult.backend !== 'medusa') fail('medusaResult.backend', 'must equal medusa');
   if (!TERMINAL_MEDUSA.has(medusaResult.status)) fail('medusaResult.status', 'terminal Medusa evidence is required before native fuzz');
   return true;
+}
+
+export async function runStage2aAnalysis(
+  configuration = {},
+  { runSlither, runMedusa, runNativeFuzz } = {}
+) {
+  const plan = planStage2aAnalysis(configuration);
+  const results = { plan };
+
+  for (const component of plan) {
+    if (component === 'slither') {
+      if (typeof runSlither !== 'function') fail('runSlither', 'executor is required when Slither is enabled');
+      results.slither = await runSlither();
+      continue;
+    }
+    if (component === 'medusa') {
+      if (typeof runMedusa !== 'function') fail('runMedusa', 'executor is required when Medusa is enabled');
+      results.medusa = await runMedusa();
+      continue;
+    }
+    if (component === 'native-fuzz') {
+      if (configuration.medusa) assertNativeFuzzMayStart(results.medusa);
+      if (typeof runNativeFuzz !== 'function') fail('runNativeFuzz', 'executor is required when native fuzz is enabled');
+      results.nativeFuzz = await runNativeFuzz();
+    }
+  }
+
+  return results;
 }
