@@ -58,6 +58,21 @@ function objectOrEmpty(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? structuredClone(value) : {};
 }
 
+function parseSlitherOutput(output) {
+  try {
+    const parsed = JSON.parse(String(output ?? ''));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const detectors = Array.isArray(parsed?.results?.detectors) ? structuredClone(parsed.results.detectors) : [];
+    return {
+      success: parsed.success === true,
+      detectors,
+      findingCount: detectors.length
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function parseMedusaOutput(output) {
   let parsed;
   try {
@@ -113,7 +128,22 @@ export async function runSlitherAnalysis(input, { runCommand = runProcess } = {}
       rawOutput: raw(analysisResult)
     });
   }
-  if (analysisResult.exitCode !== 0) {
+
+  const parsed = parseSlitherOutput(analysisResult.stdout);
+  if (parsed?.success === true) {
+    return slitherResult(input, {
+      status: parsed.findingCount > 0 ? 'completed_with_findings' : 'completed',
+      terminal: true,
+      componentStatus: 'COMPLETED',
+      continuationDisposition: 'COMPLETE_EVIDENCE',
+      authoritativeFinding: false,
+      findingCount: parsed.findingCount,
+      detectors: parsed.detectors,
+      rawOutput: raw(analysisResult)
+    });
+  }
+
+  if (analysisResult.exitCode !== 0 || parsed?.success === false) {
     return slitherResult(input, {
       status: 'completed_with_failures',
       terminal: true,
