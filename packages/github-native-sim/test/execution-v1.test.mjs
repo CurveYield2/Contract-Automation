@@ -15,24 +15,24 @@ const sha = (c) => c.repeat(64);
 function request() {
   return {
     schemaVersion: 'deep-assurance-github-request-v2',
-    processId: 'deep-assurance-v6',
+    processId: 'audit-v7-independent-review',
     contractAutomationRelease: {
-      repository: 'CurveYield/contract-automation',
-      branch: 'orchestrator/round4-ci-base-v1',
-      commit: 'ad11d7d5a623c1411cbabb4bb0cd9acf7975bce8',
-      contractVersion: 'contract-automation-finalized-v1'
+      repository: 'CurveYield2/Contract-Automation',
+      branch: 'recovery/v7-execution-layer-v1',
+      commit: '612fa50264e587e3f24550bf4dae35719b04211c',
+      contractVersion: 'contract-automation-v7-relocated-v1'
     },
     runnerRelease: {
       version: 'deep-assurance-github-bridge-v1',
-      manifestSha256: 'd32cfca35524606a5c85e98fb3dec1bba58bff8a4bc73466ccef496ceab79734'
+      manifestSha256: '2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc'
     },
     campaignId: 'campaign-1',
-    assignmentId: 'assignment-1',
-    phaseId: 'phase-6',
-    gateId: 'build-test-adversarial',
+    assignmentId: 'reviewer-1-phase-1-v1',
+    phaseId: 'scope-and-provenance',
+    gateId: 'exact-scope-provenance-complete',
     profileId: 'github-native-compile-v2',
     source: {
-      repository: 'CurveYield/Audits',
+      repository: 'CurveYield2/Audits',
       commit: commit('1'),
       projectPath: 'audit-targets/example'
     },
@@ -105,7 +105,7 @@ test('successful pinned build records exact source, compiler identity, command s
     runCommand: async ({ command, args, cwd }) => ({ exitCode: 0, stdout: `${command} ${args.join(' ')} @ ${cwd}`, stderr: '' })
   });
 
-  assert.equal(result.source.repository, 'CurveYield/Audits');
+  assert.equal(result.source.repository, 'CurveYield2/Audits');
   assert.equal(result.source.commit, commit('1'));
   assert.equal(result.source.projectPath, 'audit-targets/example');
   assert.deepEqual(result.compiler, { name: 'solc', version: '0.8.28' });
