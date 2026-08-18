@@ -33,11 +33,39 @@ const baseRequest = () => ({
   configuration: {
     compilers: [{ language: 'solidity', version: '0.8.28' }],
     timeoutMinutes: 20,
-    analysis: { medusa: { version: '1.5.1' }, nativeFuzz: { enabled: true } }
+    analysis: { medusa: { version: '1.5.1' }, nativeFuzz: { enabled: true, fuzzRuns: 256 } }
   },
   requestId: `dar-${'2'.repeat(32)}`,
   requestDigest: '3'.repeat(64)
 });
+
+function phase7Request() {
+  const request = baseRequest();
+  return {
+    ...request,
+    assignmentId: 'reviewer-2-phase-7-v1',
+    phaseId: 'fork-simulation-lifecycle',
+    gateId: 'fork-simulation-lifecycle-complete',
+    configuration: {
+      ...request.configuration,
+      deploymentGas: {
+        deployableContracts: [{ sourceName: 'contracts/Vault.sol', contractName: 'Vault' }]
+      },
+      simulation: {
+        chain: 'ethereum',
+        block: 25666794,
+        workflow: {
+          steps: [
+            { action: 'deploy', alias: 'vault', contract: 'Vault' },
+            { action: 'snapshot', alias: 'before' },
+            { action: 'mine', blocks: 2 },
+            { action: 'revertSnapshot', snapshot: '$before' }
+          ]
+        }
+      }
+    }
+  };
+}
 
 test('pins the active CurveYield2 V7 automation and runner identities', () => {
   assert.deepEqual(V2_AUTOMATION_RELEASE, {
@@ -72,6 +100,49 @@ test('accepts the exact relocated v2 simulation request envelope', () => {
   assert.deepEqual(validateDeepAssuranceRequestV2(request), request);
 });
 
+test('accepts a structured Phase-7 Ethereum pinned-fork lifecycle request', () => {
+  const request = phase7Request();
+  assert.deepEqual(validateDeepAssuranceRequestV2(request), request);
+});
+
+test('Phase 7 rejects latest/unpinned fork state and unsupported chains', () => {
+  const request = phase7Request();
+  assert.throws(() => validateDeepAssuranceRequestV2({
+    ...request,
+    configuration: { ...request.configuration, simulation: { ...request.configuration.simulation, block: 'latest' } }
+  }), /simulation\.block/);
+  assert.throws(() => validateDeepAssuranceRequestV2({
+    ...request,
+    configuration: { ...request.configuration, simulation: { ...request.configuration.simulation, chain: 'polygon' } }
+  }), /simulation\.chain/);
+});
+
+test('Phase 7 rejects arbitrary workflow actions and forbidden command fields', () => {
+  const request = phase7Request();
+  assert.throws(() => validateDeepAssuranceRequestV2({
+    ...request,
+    configuration: {
+      ...request.configuration,
+      simulation: { chain: 'ethereum', block: 25666794, workflow: { steps: [{ action: 'shell', command: 'curl attacker' }] } }
+    }
+  }), /forbidden|Unsupported action|unsupported_action|command/);
+  assert.throws(() => validateDeepAssuranceRequestV2({
+    ...baseRequest(),
+    configuration: {
+      ...baseRequest().configuration,
+      analysis: { nativeFuzz: { enabled: true, command: 'bash', args: ['-c', 'anything'] } }
+    }
+  }), /command|args|nativeFuzz/);
+});
+
+test('Phase 7 requires frozen deployment-gas inventory and pinned simulation configuration', () => {
+  const request = phase7Request();
+  const { deploymentGas: _gas, ...withoutGas } = request.configuration;
+  assert.throws(() => validateDeepAssuranceRequestV2({ ...request, configuration: withoutGas }), /deploymentGas/);
+  const { simulation: _simulation, ...withoutSimulation } = request.configuration;
+  assert.throws(() => validateDeepAssuranceRequestV2({ ...request, configuration: withoutSimulation }), /simulation/);
+});
+
 test('accepts github-native-compile-v2 and github-native-simulate-v2 only', () => {
   for (const profileId of ['github-native-compile-v2', 'github-native-simulate-v2']) {
     assert.equal(validateDeepAssuranceRequestV2({ ...baseRequest(), profileId }).profileId, profileId);
@@ -100,11 +171,15 @@ test('rejects malformed exact source, request id, digest, and unsafe project pat
   assert.throws(() => validateDeepAssuranceRequestV2({ ...request, requestDigest: 'bad' }), /requestDigest/);
 });
 
-test('rejects unknown top-level fields and invalid timeout bounds', () => {
+test('rejects unknown top-level/configuration fields and invalid timeout bounds', () => {
   const request = baseRequest();
   assert.throws(() => validateDeepAssuranceRequestV2({ ...request, surprise: true }), /surprise/);
   assert.throws(() => validateDeepAssuranceRequestV2({
     ...request,
     configuration: { ...request.configuration, timeoutMinutes: 0 }
   }), /timeoutMinutes/);
+  assert.throws(() => validateDeepAssuranceRequestV2({
+    ...request,
+    configuration: { ...request.configuration, arbitraryExecution: { shell: 'bash' } }
+  }), /arbitraryExecution/);
 });
