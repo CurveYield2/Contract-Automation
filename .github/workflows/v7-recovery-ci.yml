@@ -20,6 +20,7 @@ jobs:
       - name: Checkout recovery candidate
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Set up Node.js
@@ -29,6 +30,9 @@ jobs:
 
       - name: Install dependencies without lockfile
         run: npm install --no-package-lock
+
+      - name: Focused V7 package tests
+        run: node --test packages/github-native-sim/test/*.test.mjs
 
       - name: Full node test suite
         run: node --test
@@ -40,4 +44,4 @@ jobs:
         run: node scripts/build.mjs
 
       - name: Record tested commit
-        run: echo "tested_sha=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+        run: echo "tested_sha=$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
