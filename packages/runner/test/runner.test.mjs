@@ -25,7 +25,7 @@ test('safeProjectPath rejects traversal and absolute paths', () => {
   assert.throws(() => safeProjectPath(root, '/etc/passwd'));
 });
 
-test('buildCompilerInput requests deployment and inspection artifacts', () => {
+test('buildCompilerInput requests deployment, inspection, and gas evidence artifacts', () => {
   const input = buildCompilerInput(sources, {
     optimizer: { enabled: true, runs: 500 },
     viaIR: true,
@@ -41,20 +41,22 @@ test('buildCompilerInput requests deployment and inspection artifacts', () => {
     'storageLayout',
     'evm.bytecode.object',
     'evm.deployedBytecode.object',
-    'evm.methodIdentifiers'
+    'evm.methodIdentifiers',
+    'evm.gasEstimates'
   ]);
 });
 
-test('contractArtifactMap rejects duplicate names unless source is specified', () => {
+test('contractArtifactMap preserves compiler gas estimates and rejects duplicate names unless source is specified', () => {
   const output = {
     contracts: {
-      'A.sol': { Vault: { abi: [], evm: { bytecode: { object: '01' }, deployedBytecode: { object: '02' } } } },
+      'A.sol': { Vault: { abi: [], evm: { bytecode: { object: '01' }, deployedBytecode: { object: '02' }, gasEstimates: { creation: { totalCost: '123' } } } } },
       'B.sol': { Vault: { abi: [], evm: { bytecode: { object: '03' }, deployedBytecode: { object: '04' } } } }
     }
   };
   const map = contractArtifactMap(output);
   assert.throws(() => map.get('Vault'));
   assert.equal(map.get('Vault', 'A.sol').bytecode, '0x01');
+  assert.equal(map.get('Vault', 'A.sol').gasEstimates.creation.totalCost, '123');
 });
 
 test('collectSoliditySources only includes .sol files and preserves relative names', async () => {
