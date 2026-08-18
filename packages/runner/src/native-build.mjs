@@ -101,10 +101,13 @@ export async function collectNativeContractArtifacts(projectRoot, fsApi = fs) {
       for (const [contractName, raw] of Object.entries(contracts ?? {})) {
         const key = `${sourceName}:${contractName}`;
         const bytecodeObject = raw?.evm?.bytecode?.object ?? '';
+        const deployedObject = raw?.evm?.deployedBytecode?.object ?? '';
         const candidate = {
           sourceName,
           contractName,
+          abi: raw?.abi ?? [],
           bytecode: bytecodeObject ? `0x${String(bytecodeObject).replace(/^0x/, '')}` : '0x',
+          deployedBytecode: deployedObject ? `0x${String(deployedObject).replace(/^0x/, '')}` : '0x',
           gasEstimates: raw?.evm?.gasEstimates ?? null,
         };
         const existing = byQualifiedName.get(key);
