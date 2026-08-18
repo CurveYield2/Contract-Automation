@@ -8,7 +8,8 @@ const OUTPUT_SELECTION = [
   'storageLayout',
   'evm.bytecode.object',
   'evm.deployedBytecode.object',
-  'evm.methodIdentifiers'
+  'evm.methodIdentifiers',
+  'evm.gasEstimates'
 ];
 
 export function safeProjectPath(root, relativePath) {
@@ -77,6 +78,7 @@ function normalizeArtifact(sourceName, contractName, artifact) {
     metadata: artifact.metadata ?? null,
     storageLayout: artifact.storageLayout ?? null,
     methodIdentifiers: artifact?.evm?.methodIdentifiers ?? {},
+    gasEstimates: artifact?.evm?.gasEstimates ?? null,
     bytecode: bytecodeObject ? `0x${bytecodeObject.replace(/^0x/, '')}` : '0x',
     deployedBytecode: deployedObject ? `0x${deployedObject.replace(/^0x/, '')}` : '0x'
   };
