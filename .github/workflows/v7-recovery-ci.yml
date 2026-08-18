@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - recovery/v7-execution-layer-v1
+  pull_request:
+    branches:
+      - baseline/restored-working-v1
   workflow_dispatch:
 
 permissions:
@@ -14,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout recovery branch
+      - name: Checkout recovery candidate
         uses: actions/checkout@v4
         with:
           persist-credentials: false
