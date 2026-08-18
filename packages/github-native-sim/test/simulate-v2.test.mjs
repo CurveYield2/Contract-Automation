@@ -5,27 +5,27 @@ import { runGitHubNativeJob } from '../src/run-job-file.mjs';
 const commit = (c) => c.repeat(40);
 const sha = (c) => c.repeat(64);
 
-function request() {
+function request(overrides = {}) {
   return {
     schemaVersion: 'deep-assurance-github-request-v2',
-    processId: 'deep-assurance-v6',
+    processId: 'audit-v7-independent-review',
     contractAutomationRelease: {
-      repository: 'CurveYield/contract-automation',
-      branch: 'orchestrator/round4-ci-base-v1',
-      commit: 'ad11d7d5a623c1411cbabb4bb0cd9acf7975bce8',
-      contractVersion: 'contract-automation-finalized-v1'
+      repository: 'CurveYield2/Contract-Automation',
+      branch: 'recovery/v7-execution-layer-v1',
+      commit: '612fa50264e587e3f24550bf4dae35719b04211c',
+      contractVersion: 'contract-automation-v7-relocated-v1'
     },
     runnerRelease: {
       version: 'deep-assurance-github-bridge-v1',
-      manifestSha256: 'd32cfca35524606a5c85e98fb3dec1bba58bff8a4bc73466ccef496ceab79734'
+      manifestSha256: '2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc'
     },
     campaignId: 'campaign-1',
-    assignmentId: 'assignment-1',
-    phaseId: 'phase-6',
-    gateId: 'stateful-adversarial',
+    assignmentId: 'reviewer-2-phase-6-v1',
+    phaseId: 'build-and-test',
+    gateId: 'exact-build-and-tests-complete',
     profileId: 'github-native-simulate-v2',
     source: {
-      repository: 'CurveYield/Audits',
+      repository: 'CurveYield2/Audits',
       commit: commit('1'),
       projectPath: 'audit-targets/example'
     },
@@ -39,7 +39,8 @@ function request() {
       }
     },
     requestId: `dar-${'2'.repeat(32)}`,
-    requestDigest: sha('3')
+    requestDigest: sha('3'),
+    ...overrides,
   };
 }
 
@@ -54,10 +55,10 @@ function checkout(calls) {
   };
 }
 
-function build(calls) {
+function build(calls, artifacts = []) {
   return async () => {
     calls.push('build');
-    return { status: 'completed', system: 'hardhat-native', compilerVersion: '0.8.28', artifacts: [] };
+    return { status: 'completed', system: 'hardhat-native', compilerVersion: '0.8.28', artifacts };
   };
 }
 
@@ -101,6 +102,7 @@ test('simulate-v2 preserves build -> Slither -> terminal Medusa -> native-fuzz o
   assert.equal(result.analysis.nativeFuzz.status, 'completed');
   assert.equal(result.analysisComponentFailureCount, 1);
   assert.equal(result.continuityDisposition, 'CONTINUE_WITH_LIMITATION');
+  assert.equal(result.deploymentGasEvidence, null);
 });
 
 test('simulate-v2 allows native fuzz after terminal Medusa tool failure and preserves both component outcomes', async () => {
@@ -153,4 +155,45 @@ test('simulate-v2 refuses native fuzz when Medusa has not reached terminal evide
   assert.equal(result.status, 'failed');
   assert.match(result.error.message, /terminal Medusa evidence/);
   assert.equal(result.analysis.nativeFuzz, undefined);
+});
+
+test('Phase 7 attaches deployment gas evidence from the same accepted build artifacts', async () => {
+  const calls = [];
+  const phase7 = request({
+    assignmentId: 'reviewer-2-phase-7-v1',
+    phaseId: 'fork-simulation-lifecycle',
+    gateId: 'fork-simulation-lifecycle-complete',
+    configuration: {
+      compilers: [{ language: 'solidity', version: '0.8.28' }],
+      optimizer: { enabled: true, runs: 200 },
+      evmVersion: 'cancun',
+      viaIR: false,
+      timeoutMinutes: 20,
+      deploymentGas: { deployableContracts: [{ sourceName: 'contracts/Vault.sol', contractName: 'Vault' }] },
+      analysis: { slither: false, medusa: false, nativeFuzz: { enabled: false } }
+    }
+  });
+  const artifacts = [{ sourceName: 'contracts/Vault.sol', contractName: 'Vault', bytecode: '0x6000', gasEstimates: { creation: { totalCost: '222222', codeDepositCost: '200000', executionCost: '22222' } } }];
+  const result = await runGitHubNativeJob(phase7, {
+    workspaceRoot: '/tmp/v7-phase7-gas',
+    checkoutSource: checkout(calls),
+    buildProject: build(calls, artifacts),
+  });
+  assert.deepEqual(calls, ['checkout', 'build']);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.deploymentGasEvidence.rows.length, 1);
+  assert.equal(result.deploymentGasEvidence.rows[0].deploymentGasEstimate, '222222');
+  assert.equal(result.deploymentGasEvidence.sourceCommit, commit('1'));
+});
+
+test('Phase 7 fails truthfully when frozen deployable contract inventory is absent', async () => {
+  const calls = [];
+  const phase7 = request({ assignmentId: 'reviewer-2-phase-7-v1', phaseId: 'fork-simulation-lifecycle', gateId: 'fork-simulation-lifecycle-complete' });
+  const result = await runGitHubNativeJob(phase7, {
+    workspaceRoot: '/tmp/v7-phase7-gas-missing',
+    checkoutSource: checkout(calls),
+    buildProject: build(calls),
+  });
+  assert.equal(result.status, 'failed');
+  assert.match(result.error.message, /deployableContracts/);
 });
