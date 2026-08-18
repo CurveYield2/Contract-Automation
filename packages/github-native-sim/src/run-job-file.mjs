@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { buildProject as defaultBuildProject } from '../../runner/src/build-dispatch.mjs';
 import { runMedusaAnalysis, runSlitherAnalysis } from './analysis.mjs';
+import { normalizeDeploymentGasEvidence } from './deployment-gas-v1.mjs';
 import { checkoutExactSource, safeRepositoryProjectPath } from './execution.mjs';
 import { runNativeFuzzAnalysis } from './native-fuzz.mjs';
 import { validateDeepAssuranceRequestV2 } from './schema.mjs';
@@ -9,7 +10,7 @@ import { runStage2aAnalysis } from './stage2a-toolchain.mjs';
 function nowIso(now = () => new Date()) { return now().toISOString(); }
 
 function rawArtifactRef(component) {
-  const repository = process.env.GITHUB_REPOSITORY ?? 'CurveYield/contract-automation';
+  const repository = process.env.GITHUB_REPOSITORY ?? 'CurveYield2/Contract-Automation';
   const runId = process.env.GITHUB_RUN_ID ?? 'recovery';
   return `github-actions://${repository}/runs/${runId}/artifacts/v7-execution/${component}`;
 }
@@ -37,6 +38,7 @@ function failureResult(request, startedAt, error, partial = {}, now) {
     source: structuredClone(request.source),
     status: 'failed',
     build: partial.build,
+    deploymentGasEvidence: partial.deploymentGasEvidence ?? null,
     analysis: partial.analysis ?? {},
     analysisComponentFailureCount: partial.analysisComponentFailureCount ?? 0,
     failedStepCount: partial.failedStepCount ?? 0,
@@ -59,6 +61,30 @@ function analysisFailureCount(analysis) {
 
 function hasHardStop(analysis) {
   return Object.values(analysis).some((component) => component?.continuationDisposition === 'STOP_EXECUTION');
+}
+
+function deploymentGasConfigurationIdentity(request, build) {
+  const compiler = (request.configuration.compilers ?? []).find((item) => item?.language === 'solidity') ?? { language: 'solidity', version: build?.compilerVersion };
+  return {
+    sourceCommit: request.source.commit,
+    compiler: { language: compiler.language ?? 'solidity', version: compiler.version ?? build?.compilerVersion },
+    optimizer: request.configuration.optimizer ?? null,
+    evmVersion: request.configuration.evmVersion ?? null,
+    viaIR: request.configuration.viaIR ?? false,
+  };
+}
+
+function buildDeploymentGasEvidence(request, build) {
+  if (request.phaseId !== 'fork-simulation-lifecycle') return null;
+  const deployableContracts = request.configuration.deploymentGas?.deployableContracts;
+  if (!Array.isArray(deployableContracts) || deployableContracts.length === 0) {
+    throw new Error('Phase 7 requires configuration.deploymentGas.deployableContracts from the frozen production scope');
+  }
+  return normalizeDeploymentGasEvidence({
+    deployableContracts,
+    artifacts: build?.artifacts ?? [],
+    configurationIdentity: deploymentGasConfigurationIdentity(request, build),
+  });
 }
 
 async function executeSlither({ request, checkout, build, runSlither, runCommand }) {
@@ -111,6 +137,7 @@ export async function runGitHubNativeJob(input, {
   const analysis = {};
   let build;
   let checkout;
+  let deploymentGasEvidence = null;
 
   try {
     checkout = await checkoutSource(request.source, { workspaceRoot, runCommand });
@@ -122,8 +149,9 @@ export async function runGitHubNativeJob(input, {
       request,
       ...(runCommand ? { runCommand } : {})
     });
+    deploymentGasEvidence = buildDeploymentGasEvidence(request, build);
   } catch (error) {
-    return failureResult(request, startedAt, error, { build, analysis }, now);
+    return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis }, now);
   }
 
   if (request.profileId === 'github-native-compile-v2') {
@@ -166,6 +194,7 @@ export async function runGitHubNativeJob(input, {
       const componentFailures = analysisFailureCount(analysis);
       return failureResult(request, startedAt, error, {
         build,
+        deploymentGasEvidence,
         analysis,
         analysisComponentFailureCount: componentFailures,
         continuityDisposition: componentFailures > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE'
@@ -183,6 +212,7 @@ export async function runGitHubNativeJob(input, {
     source: structuredClone(request.source),
     status: hardStop ? 'failed' : 'completed',
     build,
+    deploymentGasEvidence,
     analysis,
     analysisComponentFailureCount: componentFailures,
     failedStepCount: 0,
