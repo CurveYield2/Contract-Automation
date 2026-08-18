@@ -52,6 +52,24 @@ test('successful Slither 0.11.6 run preserves raw evidence and normalized comple
   ]);
 });
 
+test('Slither exit 255 with success:true JSON is completed neutral evidence, not a component failure', async () => {
+  const fake = sequence([
+    { exitCode: 0, stdout: 'slither 0.11.6\n', stderr: '' },
+    {
+      exitCode: 255,
+      stdout: JSON.stringify({ success: true, results: { detectors: [{ check: 'reentrancy-eth' }, { check: 'unused-return' }] } }),
+      stderr: '2 detector observations'
+    }
+  ]);
+  const result = await runSlitherAnalysis(input(), { runCommand: fake.runCommand });
+  assert.equal(result.status, 'completed_with_findings');
+  assert.equal(result.componentStatus, 'COMPLETED');
+  assert.equal(result.continuationDisposition, 'COMPLETE_EVIDENCE');
+  assert.equal(result.authoritativeFinding, false);
+  assert.equal(result.findingCount, 2);
+  assert.equal(result.rawOutput.exitCode, 255);
+});
+
 test('Slither tool start failure is typed separately from integrity failure', async () => {
   const fake = sequence([{ exitCode: -1, stdout: '', stderr: 'ENOENT' }]);
   const result = await runSlitherAnalysis(input(), { runCommand: fake.runCommand });
@@ -62,10 +80,10 @@ test('Slither tool start failure is typed separately from integrity failure', as
   assert.match(result.rawOutput.stderr, /ENOENT/);
 });
 
-test('terminal nonzero Slither analysis is a neutral component failure with allowed continuation', async () => {
+test('terminal nonzero Slither analysis with success:false is a neutral component failure with allowed continuation', async () => {
   const fake = sequence([
     { exitCode: 0, stdout: 'slither 0.11.6\n', stderr: '' },
-    { exitCode: 2, stdout: '{"success":false,"results":{"detectors":[{"check":"reentrancy"}]}}', stderr: 'detectors reported' }
+    { exitCode: 2, stdout: '{"success":false,"results":{"detectors":[{"check":"reentrancy"}]}}', stderr: 'analysis failed' }
   ]);
   const result = await runSlitherAnalysis(input(), { runCommand: fake.runCommand });
   assert.equal(result.status, 'completed_with_failures');
