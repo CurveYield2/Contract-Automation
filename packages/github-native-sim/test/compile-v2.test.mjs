@@ -12,24 +12,24 @@ const sha = (c) => c.repeat(64);
 function request(profileId = 'github-native-compile-v2') {
   return {
     schemaVersion: 'deep-assurance-github-request-v2',
-    processId: 'deep-assurance-v6',
+    processId: 'audit-v7-independent-review',
     contractAutomationRelease: {
-      repository: 'CurveYield/contract-automation',
-      branch: 'orchestrator/round4-ci-base-v1',
-      commit: 'ad11d7d5a623c1411cbabb4bb0cd9acf7975bce8',
-      contractVersion: 'contract-automation-finalized-v1'
+      repository: 'CurveYield2/Contract-Automation',
+      branch: 'recovery/v7-execution-layer-v1',
+      commit: '612fa50264e587e3f24550bf4dae35719b04211c',
+      contractVersion: 'contract-automation-v7-relocated-v1'
     },
     runnerRelease: {
       version: 'deep-assurance-github-bridge-v1',
-      manifestSha256: 'd32cfca35524606a5c85e98fb3dec1bba58bff8a4bc73466ccef496ceab79734'
+      manifestSha256: '2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc'
     },
     campaignId: 'campaign-1',
-    assignmentId: 'assignment-1',
-    phaseId: 'phase-1',
-    gateId: 'exact-build-static-analysis',
+    assignmentId: 'reviewer-1-phase-1-v1',
+    phaseId: 'scope-and-provenance',
+    gateId: 'exact-scope-provenance-complete',
     profileId,
     source: {
-      repository: 'CurveYield/Audits',
+      repository: 'CurveYield2/Audits',
       commit: commit('1'),
       projectPath: 'audit-targets/example'
     },
@@ -85,6 +85,7 @@ test('Hardhat native build runs locked dependency install then repository-native
   assert.equal(result.buildInfo.length, 1);
   assert.equal(result.buildInfo[0].path, 'artifacts-v20/build-info/build-a.json');
   assert.match(result.buildInfo[0].sha256, /^[0-9a-f]{64}$/);
+  assert.deepEqual(result.artifacts, []);
 });
 
 test('compile-v2 executes exact checkout and build before neutral Slither', async () => {
