@@ -44,13 +44,13 @@ async function firstPresent(root, names, fsApi) {
   return null;
 }
 
-async function listBuildInfo(projectRoot, fsApi = fs) {
+async function buildInfoFiles(projectRoot, fsApi = fs) {
   const rootEntries = await fsApi.readdir(projectRoot, { withFileTypes: true });
   const artifactDirs = rootEntries
     .filter((entry) => entry.isDirectory() && entry.name.startsWith('artifacts'))
     .map((entry) => entry.name)
     .sort();
-  const output = [];
+  const files = [];
   for (const artifactDir of artifactDirs) {
     const buildInfoDir = path.join(projectRoot, artifactDir, 'build-info');
     let entries;
@@ -60,25 +60,59 @@ async function listBuildInfo(projectRoot, fsApi = fs) {
       continue;
     }
     for (const entry of entries.filter((item) => item.isFile() && item.name.endsWith('.json')).sort((a, b) => a.name.localeCompare(b.name))) {
-      const absolute = path.join(buildInfoDir, entry.name);
-      let optimizerRuns = null;
-      let solcVersion = null;
-      try {
-        const parsed = JSON.parse(await fsApi.readFile(absolute, 'utf8'));
-        optimizerRuns = parsed?.input?.settings?.optimizer?.runs ?? null;
-        solcVersion = parsed?.solcVersion ?? parsed?.solcLongVersion ?? null;
-      } catch {
-        // Raw build-info bytes remain evidence even if metadata parsing is unavailable.
-      }
-      output.push({
-        path: path.relative(projectRoot, absolute).split(path.sep).join('/'),
-        sha256: await sha256File(absolute, fsApi),
-        optimizerRuns,
-        solcVersion
-      });
+      files.push(path.join(buildInfoDir, entry.name));
     }
   }
+  return files;
+}
+
+async function listBuildInfo(projectRoot, fsApi = fs) {
+  const output = [];
+  for (const absolute of await buildInfoFiles(projectRoot, fsApi)) {
+    let optimizerRuns = null;
+    let solcVersion = null;
+    try {
+      const parsed = JSON.parse(await fsApi.readFile(absolute, 'utf8'));
+      optimizerRuns = parsed?.input?.settings?.optimizer?.runs ?? null;
+      solcVersion = parsed?.solcVersion ?? parsed?.solcLongVersion ?? null;
+    } catch {
+      // Raw build-info bytes remain evidence even if metadata parsing is unavailable.
+    }
+    output.push({
+      path: path.relative(projectRoot, absolute).split(path.sep).join('/'),
+      sha256: await sha256File(absolute, fsApi),
+      optimizerRuns,
+      solcVersion
+    });
+  }
   return output;
+}
+
+export async function collectNativeContractArtifacts(projectRoot, fsApi = fs) {
+  const byQualifiedName = new Map();
+  for (const absolute of await buildInfoFiles(projectRoot, fsApi)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(await fsApi.readFile(absolute, 'utf8'));
+    } catch {
+      continue;
+    }
+    for (const [sourceName, contracts] of Object.entries(parsed?.output?.contracts ?? {})) {
+      for (const [contractName, raw] of Object.entries(contracts ?? {})) {
+        const key = `${sourceName}:${contractName}`;
+        const bytecodeObject = raw?.evm?.bytecode?.object ?? '';
+        const candidate = {
+          sourceName,
+          contractName,
+          bytecode: bytecodeObject ? `0x${String(bytecodeObject).replace(/^0x/, '')}` : '0x',
+          gasEstimates: raw?.evm?.gasEstimates ?? null,
+        };
+        const existing = byQualifiedName.get(key);
+        if (!existing || (existing.gasEstimates === null && candidate.gasEstimates !== null)) byQualifiedName.set(key, candidate);
+      }
+    }
+  }
+  return [...byQualifiedName.values()].sort((a, b) => `${a.sourceName}:${a.contractName}`.localeCompare(`${b.sourceName}:${b.contractName}`));
 }
 
 async function solidityInventory(projectRoot, fsApi = fs) {
@@ -130,6 +164,7 @@ export async function compileRepoNativeHardhat({
   if (!compile || compile.exitCode !== 0) throw commandFailure('Repository-native Hardhat compilation failed', compile);
 
   const buildInfo = await listBuildInfo(projectRoot, fsApi);
+  const artifacts = await collectNativeContractArtifacts(projectRoot, fsApi);
   const sources = await solidityInventory(projectRoot, fsApi);
   return {
     status: 'completed',
@@ -143,6 +178,7 @@ export async function compileRepoNativeHardhat({
     },
     buildInfo,
     buildInfoCount: buildInfo.length,
+    artifacts,
     sourceInventory: sources,
     sourceInventoryFiles: sources.length
   };
