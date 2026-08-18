@@ -1,13 +1,21 @@
 export const V2_AUTOMATION_RELEASE = Object.freeze({
-  repository: 'CurveYield/contract-automation',
-  branch: 'orchestrator/round4-ci-base-v1',
-  commit: 'ad11d7d5a623c1411cbabb4bb0cd9acf7975bce8',
-  contractVersion: 'contract-automation-finalized-v1'
+  repository: 'CurveYield2/Contract-Automation',
+  branch: 'recovery/v7-execution-layer-v1',
+  commit: '612fa50264e587e3f24550bf4dae35719b04211c',
+  contractVersion: 'contract-automation-v7-relocated-v1'
 });
 
 export const V2_RUNNER_RELEASE = Object.freeze({
   version: 'deep-assurance-github-bridge-v1',
-  manifestSha256: 'd32cfca35524606a5c85e98fb3dec1bba58bff8a4bc73466ccef496ceab79734'
+  manifestSha256: '2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc'
+});
+
+export const HISTORICAL_V7_RELEASE_PROVENANCE = Object.freeze({
+  repository: 'CurveYield/contract-automation',
+  requestBaseCommit: 'ad11d7d5a623c1411cbabb4bb0cd9acf7975bce8',
+  trustedRunnerCommit: '999a44d2ecb9deae844cd15669224019e1222171',
+  trustedManifestSha256: 'd32cfca35524606a5c85e98fb3dec1bba58bff8a4bc73466ccef496ceab79734',
+  status: 'HISTORICAL_DELETED_ORGANIZATION_PROVENANCE_ONLY'
 });
 
 const TOP_LEVEL_FIELDS = new Set([
@@ -58,7 +66,7 @@ function validateSource(source) {
   string(source.commit, 'source.commit', { min: 40, max: 40, pattern: /^[0-9a-f]{40}$/ });
   const projectPath = string(source.projectPath, 'source.projectPath', { max: 512 });
   const normalized = projectPath.replaceAll('\\', '/');
-  if (normalized.startsWith('/') || normalized === '..' || normalized.includes('../') || normalized.includes('/./')) fail('source.projectPath', 'must be a safe repository-relative path');
+  if (normalized.startsWith('/') || normalized === '..' || normalized.split('/').some((part) => part === '..' || part === '.' || part === '')) fail('source.projectPath', 'must be a safe repository-relative path');
 }
 
 function validateConfiguration(configuration) {
@@ -77,7 +85,7 @@ export function validateDeepAssuranceRequestV2(input) {
   for (const key of TOP_LEVEL_FIELDS) if (!(key in input)) fail(key, 'is required');
 
   if (input.schemaVersion !== 'deep-assurance-github-request-v2') fail('schemaVersion', 'must equal deep-assurance-github-request-v2');
-  if (input.processId !== 'deep-assurance-v6') fail('processId', 'must equal deep-assurance-v6');
+  if (input.processId !== 'audit-v7-independent-review') fail('processId', 'must equal audit-v7-independent-review');
   exactObject(input.contractAutomationRelease, V2_AUTOMATION_RELEASE, 'contractAutomationRelease');
   exactObject(input.runnerRelease, V2_RUNNER_RELEASE, 'runnerRelease');
 
