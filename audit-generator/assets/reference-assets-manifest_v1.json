@@ -1,0 +1,12 @@
+{
+  "archive_sha256": "952cd2a78b6666801667bd322a0ef2f20b226630e00398de94aa6db59cd5d022",
+  "parts": [
+    "approved-reference-assets_v1.b64.part-01_v1.txt",
+    "approved-reference-assets_v1.b64.part-02_v1.txt",
+    "approved-reference-assets_v1.b64.part-03_v1.txt",
+    "approved-reference-assets_v1.b64.part-04_v1.txt",
+    "approved-reference-assets_v1.b64.part-05_v1.txt"
+  ],
+  "reference_pdf_sha256": "849a0a4a0aa65bf7e91096f43ac3abadc73f4b9fd263bcc07929fcd0e8ede71a",
+  "schema_version": "reference-assets-manifest-v1"
+}
