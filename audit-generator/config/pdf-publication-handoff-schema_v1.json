@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://curveyield.com/schemas/pdf-publication-handoff-v1.json",
+  "title": "CurveYield PDF Publication Handoff v1",
+  "type": "object",
+  "required": ["schema_version", "campaign", "audit_report_data", "created_from_final_state"],
+  "properties": {
+    "schema_version": {"const": "pdf-publication-handoff-v1"},
+    "campaign": {
+      "type": "object",
+      "required": ["repository", "ref", "root", "canonical_state_sha256"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "ref": {"type": "string", "minLength": 1},
+        "root": {"type": "string", "minLength": 1},
+        "canonical_state_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "campaign_generation_id": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    },
+    "audit_report_data": {
+      "type": "object",
+      "required": ["audit_identity", "product_context", "scope", "methodology", "results", "findings", "remediations", "tests", "fuzzing", "fork_runs", "compiler", "release", "limitations", "recommendations", "evidence", "links", "provenance"],
+      "properties": {
+        "audit_identity": {"type": "object"},
+        "product_context": {"type": "object"},
+        "scope": {"type": "array"},
+        "methodology": {"type": "array"},
+        "results": {"type": "object"},
+        "findings": {"type": "array"},
+        "remediations": {"type": "array"},
+        "post_audit_defects": {"type": "array"},
+        "tests": {"type": "array"},
+        "fuzzing": {"type": "array"},
+        "fork_runs": {"type": "array"},
+        "compiler": {"type": "object"},
+        "release": {"type": "object"},
+        "limitations": {"type": "array"},
+        "recommendations": {"type": "array"},
+        "evidence": {"type": "array"},
+        "links": {"type": "object"},
+        "provenance": {"type": "object"}
+      },
+      "additionalProperties": true
+    },
+    "public_evidence_destination": {"type": ["string", "null"]},
+    "created_from_final_state": {"const": true}
+  },
+  "additionalProperties": true
+}
