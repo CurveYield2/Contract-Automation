@@ -1,0 +1,133 @@
+name: Audit PDF Generator v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_repository:
+        description: Private controller repository (owner/repo)
+        required: true
+        default: CurveYield2/Solo-Audit-Controller
+      campaign_ref:
+        description: Branch, tag, or commit
+        required: true
+        default: main
+      campaign_root:
+        description: Campaign directory inside the controller repository
+        required: true
+      product_name:
+        description: Exact client-facing product name
+        required: true
+      template_version:
+        description: Approved frozen template version
+        required: true
+        default: approved-reference-v1
+      output_version:
+        description: Output audit version (v1, v2, ...)
+        required: true
+        default: v1
+      system_overview_path:
+        description: Optional path inside campaign checkout to client/official overview Markdown
+        required: false
+      allow_agent_overview:
+        description: Explicitly permit an already-provenanced agent overview in campaign data
+        type: boolean
+        required: true
+        default: false
+      publish_draft_pr:
+        description: Publish client package to a draft PR in this public repository
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  build-audit-pdf-v1:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout public generator repository
+        uses: actions/checkout@v4
+
+      - name: Checkout private campaign evidence read-only
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.campaign_repository }}
+          ref: ${{ inputs.campaign_ref }}
+          token: ${{ secrets.AUDIT_CONTROLLER_READ_TOKEN }}
+          path: _campaign_controller_v1
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PDF generator dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r audit-generator/requirements_v1.txt
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils
+
+      - name: Restore and hash-verify frozen reference assets
+        run: python audit-generator/scripts/prepare_reference_assets_v1.py
+
+      - name: Build deterministic audit PDF and 50-pass QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          OVERVIEW_ARGS=()
+          if [ -n "${{ inputs.system_overview_path }}" ]; then
+            OVERVIEW_ARGS+=(--system-overview "_campaign_controller_v1/${{ inputs.system_overview_path }}")
+          fi
+          AGENT_ARGS=()
+          if [ "${{ inputs.allow_agent_overview }}" = "true" ]; then
+            AGENT_ARGS+=(--allow-agent-overview)
+          fi
+          python audit-generator/scripts/build_audit_pdf_v1.py \
+            --campaign-path "_campaign_controller_v1/${{ inputs.campaign_root }}" \
+            --campaign-ref "${{ inputs.campaign_ref }}" \
+            --campaign-root "${{ inputs.campaign_root }}" \
+            --product-name "${{ inputs.product_name }}" \
+            --template "${{ inputs.template_version }}" \
+            --output-version "${{ inputs.output_version }}" \
+            --build-dir "build/audit-pdf-v1" \
+            "${OVERVIEW_ARGS[@]}" \
+            "${AGENT_ARGS[@]}"
+
+      - name: Upload audit PDF build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-pdf-${{ inputs.output_version }}
+          path: build/audit-pdf-v1/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish client package to draft PR
+        if: ${{ success() && inputs.publish_draft_pr }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SAFE_PRODUCT="$(printf '%s' '${{ inputs.product_name }}' | tr -cs 'A-Za-z0-9._-' '-')"
+          BRANCH="audit-pdf/${SAFE_PRODUCT}/${{ inputs.output_version }}"
+          git config user.name "curveyield-audit-generator"
+          git config user.email "audit-generator@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          mkdir -p "Audits/${{ inputs.product_name }}"
+          cp -R "build/audit-pdf-v1/client-publication_v1/Audits/${{ inputs.product_name }}/." "Audits/${{ inputs.product_name }}/"
+          cp build/audit-pdf-v1/*.pdf "Audits/${{ inputs.product_name }}/"
+          cp build/audit-pdf-v1/*manifest_v1.json "Audits/${{ inputs.product_name }}/" || true
+          cp build/audit-pdf-v1/pdf-qa-report_v1.json "Audits/${{ inputs.product_name }}/"
+          cp build/audit-pdf-v1/system-overview-provenance_v1.json "Audits/${{ inputs.product_name }}/"
+          git add "Audits/${{ inputs.product_name }}"
+          git commit -m "Publish ${{ inputs.product_name }} audit ${{ inputs.output_version }}"
+          git push -u origin "$BRANCH"
+          gh pr create --draft --title "Publish ${{ inputs.product_name }} audit ${{ inputs.output_version }}" --body "Generated by Audit PDF Generator v1 from the canonical private audit campaign. Includes 50-pass QA report and reproducibility manifests. No automatic merge." --base "${{ github.event.repository.default_branch }}" --head "$BRANCH"
