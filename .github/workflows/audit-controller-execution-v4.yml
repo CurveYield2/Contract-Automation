@@ -142,6 +142,46 @@ jobs:
           if (validated.source.archivePath) console.log(`archive=${validated.source.archivePath}@${validated.source.archiveSha256}`);
           NODE
 
+      - name: Record Phase 7 archive RPC identity
+        env:
+          SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        run: |
+          mkdir -p .audit-evidence/v7-execution-v4
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { CHAINS } from './packages/protocol/src/index.mjs';
+          import { probeArchiveRpcIdentity } from './packages/github-native-sim/src/archive-rpc-identity-v1.mjs';
+          import { validateDeepAssuranceRequestV2 } from './packages/github-native-sim/src/schema.mjs';
+
+          const outputPath = '.audit-evidence/v7-execution-v4/archive-rpc-identity-v1.json';
+          const request = validateDeepAssuranceRequestV2(JSON.parse(fs.readFileSync('.v7-request/request.json', 'utf8')));
+          if (request.phaseId !== 'fork-simulation-lifecycle') {
+            process.exit(0);
+          }
+          const simulation = request.configuration.simulation;
+          const expectedChainId = CHAINS[simulation.chain].chainId;
+          try {
+            const evidence = await probeArchiveRpcIdentity({
+              rpcUrl: process.env.SIM_ARCHIVE_PRIMARY_ETHEREUM_01,
+              block: simulation.block,
+              expectedChainId
+            });
+            fs.writeFileSync(outputPath, `${JSON.stringify(evidence, null, 2)}\n`);
+            console.log(`archive_rpc_remote_chain_id=${evidence.remoteChainId}`);
+            console.log(`archive_rpc_pinned_block_hash=${evidence.block.hash}`);
+          } catch (error) {
+            const evidence = {
+              schemaVersion: 'phase7-archive-rpc-identity-v1',
+              status: 'probe_failed',
+              expectedChainId,
+              block: simulation.block,
+              error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) }
+            };
+            fs.writeFileSync(outputPath, `${JSON.stringify(evidence, null, 2)}\n`);
+            console.error(`archive RPC identity probe failed: ${evidence.error.message}`);
+          }
+          NODE
+
       - name: Execute V7 GitHub-native request
         env:
           AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
