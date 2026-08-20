@@ -2,7 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import unzipper from 'unzipper';
 import { validateDeepAssuranceRequestV2 } from './schema.mjs';
+
+const MAX_EXTRACTED_ARCHIVE_BYTES = 250 * 1024 * 1024;
 
 export class V7ExecutionError extends Error {
   constructor(kind, message, details = {}) {
@@ -21,7 +24,7 @@ export function safeRepositoryProjectPath(root, relativePath) {
     throw new V7ExecutionError('UNSAFE_PROJECT_PATH', 'project path is required');
   }
   const normalized = relativePath.replaceAll('\\', '/');
-  if (normalized.startsWith('/') || normalized === '..' || normalized.split('/').some((part) => part === '..' || part === '')) {
+  if (normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized) || normalized === '..' || normalized.split('/').some((part) => part === '..' || part === '')) {
     throw new V7ExecutionError('UNSAFE_PROJECT_PATH', `unsafe repository-relative path: ${relativePath}`);
   }
   const resolvedRoot = path.resolve(root);
@@ -119,6 +122,107 @@ export async function sha256File(filePath) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
+function archiveEntryRelativePath(entryPath) {
+  if (typeof entryPath !== 'string' || entryPath.length === 0) {
+    throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', 'unsafe archive entry: empty path');
+  }
+  const normalized = entryPath.replaceAll('\\', '/');
+  const directory = normalized.endsWith('/');
+  const trimmed = directory ? normalized.slice(0, -1) : normalized;
+  if (!trimmed || trimmed.startsWith('/') || /^[A-Za-z]:\//.test(trimmed)) {
+    throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `unsafe archive entry: ${entryPath}`);
+  }
+  const parts = trimmed.split('/');
+  if (parts.some((part) => part === '' || part === '.' || part === '..')) {
+    throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `unsafe archive entry: ${entryPath}`);
+  }
+  return { relativePath: parts.join('/'), directory };
+}
+
+function archiveEntryIsSymlink(entry) {
+  const attributes = Number(entry?.vars?.externalFileAttributes ?? 0);
+  const unixMode = (attributes >>> 16) & 0xffff;
+  return (unixMode & 0o170000) === 0o120000;
+}
+
+async function defaultOpenArchive(filePath) {
+  return unzipper.Open.file(filePath);
+}
+
+export async function stageExactArchiveSource({
+  checkoutRoot,
+  workspaceRoot,
+  archivePath,
+  archiveSha256,
+  projectPath
+}, {
+  openArchive = defaultOpenArchive,
+  fsApi = fs,
+  digestFile = sha256File
+} = {}) {
+  const archiveAbsolute = safeRepositoryProjectPath(checkoutRoot, archivePath);
+  const actualDigest = await digestFile(archiveAbsolute);
+  if (actualDigest !== archiveSha256) {
+    throw new V7ExecutionError('SOURCE_INTEGRITY_FAILURE', 'private archive SHA-256 does not match the frozen request', {
+      archivePath,
+      expectedSha256: archiveSha256,
+      actualSha256: actualDigest
+    });
+  }
+
+  const extractionRoot = path.join(workspaceRoot, 'archive-source');
+  await fsApi.rm(extractionRoot, { recursive: true, force: true });
+  await fsApi.mkdir(extractionRoot, { recursive: true });
+  const opened = await openArchive(archiveAbsolute);
+  if (!opened || !Array.isArray(opened.files)) {
+    throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', 'archive reader returned no file inventory');
+  }
+
+  let extractedBytes = 0;
+  for (const entry of opened.files) {
+    if (archiveEntryIsSymlink(entry)) {
+      throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `symlink archive entry is forbidden: ${entry.path}`);
+    }
+    const parsed = archiveEntryRelativePath(entry.path);
+    const entryType = entry.type ?? (parsed.directory ? 'Directory' : 'File');
+    if (!['File', 'Directory'].includes(entryType)) {
+      throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `unsupported archive entry type ${entryType}: ${entry.path}`);
+    }
+    const destination = safeRepositoryProjectPath(extractionRoot, parsed.relativePath);
+    if (entryType === 'Directory' || parsed.directory) {
+      await fsApi.mkdir(destination, { recursive: true });
+      continue;
+    }
+    const bytes = await entry.buffer();
+    extractedBytes += bytes.length;
+    if (extractedBytes > MAX_EXTRACTED_ARCHIVE_BYTES) {
+      throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `extracted archive exceeds ${MAX_EXTRACTED_ARCHIVE_BYTES} bytes`);
+    }
+    await fsApi.mkdir(path.dirname(destination), { recursive: true });
+    await fsApi.writeFile(destination, bytes);
+  }
+
+  const projectRoot = safeRepositoryProjectPath(extractionRoot, projectPath);
+  let projectStats;
+  try {
+    projectStats = await fsApi.stat(projectRoot);
+  } catch (error) {
+    throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `archive project root is missing: ${projectPath}`, { cause: error.message });
+  }
+  if (!projectStats.isDirectory()) {
+    throw new V7ExecutionError('ARCHIVE_SOURCE_FAILURE', `archive project root is not a directory: ${projectPath}`);
+  }
+
+  return {
+    projectRoot,
+    extractionRoot,
+    archivePath,
+    archiveSha256: actualDigest,
+    extractedBytes,
+    entryCount: opened.files.length
+  };
+}
+
 export async function runPinnedBuild(input, {
   workspaceRoot,
   build,
@@ -150,7 +254,16 @@ export async function runPinnedBuild(input, {
     });
   }
 
-  const projectRoot = safeRepositoryProjectPath(checkoutRoot, request.source.projectPath);
+  const staged = request.source.archivePath
+    ? await stageExactArchiveSource({
+        checkoutRoot,
+        workspaceRoot,
+        archivePath: request.source.archivePath,
+        archiveSha256: request.source.archiveSha256,
+        projectPath: request.source.projectPath
+      }, { digestFile })
+    : null;
+  const projectRoot = staged?.projectRoot ?? safeRepositoryProjectPath(checkoutRoot, request.source.projectPath);
   const args = Array.isArray(build.args) ? [...build.args] : [];
   const commandResult = await runCommand({ command: build.command, args, cwd: projectRoot });
   if (!commandResult || commandResult.exitCode !== 0) {
@@ -181,7 +294,8 @@ export async function runPinnedBuild(input, {
     source: structuredClone(request.source),
     checkout: {
       repository: request.source.repository,
-      commit: checkout.commit
+      commit: checkout.commit,
+      ...(staged ? { archivePath: staged.archivePath, archiveSha256: staged.archiveSha256 } : {})
     },
     compiler: structuredClone(build.compiler),
     command: {
