@@ -1,0 +1,236 @@
+name: V7 Audit Controller Execution v3
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/audit-controller-execution-v3.yml'
+  workflow_dispatch:
+    inputs:
+      request_path:
+        description: 'Repository-relative deep-assurance-github-request-v2 JSON path in Solo-Audit-Controller'
+        required: true
+        type: string
+      controller_ref:
+        description: 'Solo-Audit-Controller ref containing the request file'
+        required: true
+        default: 'main'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bridge-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Contract Automation
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verify V7 secret contract
+        env:
+          AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        run: |
+          test -n "$AUDIT_CONTROLLER_GITHUB_TOKEN"
+          if [ -n "$SIM_ARCHIVE_PRIMARY_ETHEREUM_01" ]; then
+            echo "ARCHIVE_RPC_CONFIGURED=true" >> "$GITHUB_ENV"
+            echo "archive_rpc_configured=true" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ARCHIVE_RPC_CONFIGURED=false" >> "$GITHUB_ENV"
+            echo "archive_rpc_configured=false" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Prove authenticated private controller checkout
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Solo-Audit-Controller
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller-smoke
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Record private checkout identity
+        run: |
+          controller_sha="$(git -C .controller-smoke rev-parse HEAD)"
+          echo "CONTROLLER_CHECKOUT_SHA=$controller_sha" >> "$GITHUB_ENV"
+          echo "controller_checkout_sha=$controller_sha" >> "$GITHUB_STEP_SUMMARY"
+          test -f .controller-smoke/packages/contract-automation-adapter/src/v7-independent-review-v1.mjs
+
+      - name: Publish durable bridge smoke receipt
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .bridge-receipt
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const receipt = {
+            schemaVersion: 'v7-bridge-smoke-receipt-v1',
+            workflowVersion: 'audit-controller-execution-v3',
+            workflowRunId: Number(process.env.GITHUB_RUN_ID),
+            workflowSha: process.env.GITHUB_SHA,
+            contractAutomationRepository: process.env.GITHUB_REPOSITORY,
+            controllerRepository: 'CurveYield2/Solo-Audit-Controller',
+            controllerCheckoutSha: process.env.CONTROLLER_CHECKOUT_SHA,
+            auditControllerGithubTokenConfigured: true,
+            archiveRpcConfigured: process.env.ARCHIVE_RPC_CONFIGURED === 'true',
+            verifiedAt: new Date().toISOString()
+          };
+          fs.writeFileSync('.bridge-receipt/V7_BRIDGE_SMOKE_RECEIPT_v1.json', `${JSON.stringify(receipt, null, 2)}\n`);
+          NODE
+          content="$(base64 -w0 .bridge-receipt/V7_BRIDGE_SMOKE_RECEIPT_v1.json)"
+          existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_BRIDGE_SMOKE_RECEIPT_v1.json" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$existing_sha" ]; then
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/process/V7_BRIDGE_SMOKE_RECEIPT_v1.json" \
+              -f message='chore(v7): update bridge smoke receipt v1' \
+              -f content="$content" \
+              -f sha="$existing_sha" \
+              -f branch='main' >/dev/null
+          else
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/process/V7_BRIDGE_SMOKE_RECEIPT_v1.json" \
+              -f message='chore(v7): publish bridge smoke receipt v1' \
+              -f content="$content" \
+              -f branch='main' >/dev/null
+          fi
+
+  execute-v7-request:
+    if: github.event_name == 'workflow_dispatch'
+    needs: bridge-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact Contract Automation runner
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Contract Automation dependencies on GitHub runner
+        run: npm install --no-package-lock
+
+      - name: Checkout private controller request repository
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Solo-Audit-Controller
+          ref: ${{ inputs.controller_ref }}
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller-request
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate request path and V7 request envelope
+        env:
+          V7_REQUEST_PATH: ${{ inputs.request_path }}
+        run: |
+          case "$V7_REQUEST_PATH" in
+            campaigns/*/requests/*.json) ;;
+            *) echo "Invalid V7 request path: $V7_REQUEST_PATH" >&2; exit 1 ;;
+          esac
+          test -f ".controller-request/$V7_REQUEST_PATH"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { validateDeepAssuranceRequestV2 } from './packages/github-native-sim/src/schema.mjs';
+          const requestPath = `.controller-request/${process.env.V7_REQUEST_PATH}`;
+          const request = JSON.parse(fs.readFileSync(requestPath, 'utf8'));
+          const validated = validateDeepAssuranceRequestV2(request);
+          console.log(`validated_request=${validated.requestId}`);
+          console.log(`phase=${validated.phaseId}`);
+          console.log(`source=${validated.source.repository}@${validated.source.commit}:${validated.source.projectPath}`);
+          NODE
+
+      - name: Execute V7 GitHub-native request
+        env:
+          V7_REQUEST_PATH: ${{ inputs.request_path }}
+          AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        run: |
+          mkdir -p .audit-evidence/v7-execution-v3
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { runGitHubNativeJob } from './packages/github-native-sim/src/run-job-file.mjs';
+
+          const requestPath = `.controller-request/${process.env.V7_REQUEST_PATH}`;
+          const request = JSON.parse(fs.readFileSync(requestPath, 'utf8'));
+          const result = await runGitHubNativeJob(request, {
+            workspaceRoot: '.audit-work/v7-execution-v3',
+            environment: process.env
+          });
+
+          const rawPath = '.audit-evidence/v7-execution-v3/raw-result-v3.json';
+          const rawBytes = `${JSON.stringify(result, null, 2)}\n`;
+          fs.writeFileSync(rawPath, rawBytes);
+          const artifactDigest = createHash('sha256').update(rawBytes).digest('hex');
+          const resultStatus = result.status !== 'completed'
+            ? 'FAIL'
+            : ((result.analysisComponentFailureCount ?? 0) > 0 || (result.failedStepCount ?? 0) > 0 ? 'FINDINGS' : 'PASS');
+
+          const evidence = {
+            schemaVersion: 'audit-v7-github-execution-evidence-v1',
+            requestId: request.requestId,
+            requestDigest: request.requestDigest,
+            processId: request.processId,
+            profileId: request.profileId,
+            source: request.source,
+            runnerImplementation: {
+              repository: process.env.GITHUB_REPOSITORY,
+              commit: process.env.GITHUB_SHA
+            },
+            resultStatus,
+            artifactDigest,
+            deploymentGasEvidence: result.deploymentGasEvidence ?? null,
+            simulationEvidence: result.simulation ?? null,
+            analysisComponentFailureCount: result.analysisComponentFailureCount ?? 0,
+            failedStepCount: result.failedStepCount ?? 0,
+            failedSteps: result.failedSteps ?? [],
+            continuityDisposition: result.continuityDisposition ?? null,
+            authoritativeFinding: false
+          };
+          fs.writeFileSync('.audit-evidence/v7-execution-v3/controller-evidence-v3.json', `${JSON.stringify(evidence, null, 2)}\n`);
+          fs.writeFileSync('.audit-evidence/v7-execution-v3/execution-identity-v3.json', `${JSON.stringify({
+            workflowRunId: process.env.GITHUB_RUN_ID,
+            workflowSha: process.env.GITHUB_SHA,
+            runnerRepository: process.env.GITHUB_REPOSITORY,
+            controllerRequestPath: process.env.V7_REQUEST_PATH,
+            requestId: request.requestId,
+            requestDigest: request.requestDigest,
+            source: request.source
+          }, null, 2)}\n`);
+          NODE
+
+      - name: Upload V7 execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v7-execution-v3
+          path: .audit-evidence/v7-execution-v3
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce V7 execution outcome
+        if: always()
+        run: |
+          test -f .audit-evidence/v7-execution-v3/raw-result-v3.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const result = JSON.parse(fs.readFileSync('.audit-evidence/v7-execution-v3/raw-result-v3.json', 'utf8'));
+          if (result.status !== 'completed') {
+            console.error(`V7 execution failed: ${result.error?.message ?? 'unknown failure'}`);
+            process.exit(1);
+          }
+          NODE
