@@ -14,7 +14,7 @@ function phase7Request() {
     processId: 'audit-v7-independent-review',
     contractAutomationRelease: {
       repository: 'CurveYield2/Contract-Automation',
-      branch: 'main',
+      branch: 'recovery/v7-execution-layer-v1',
       commit: '612fa50264e587e3f24550bf4dae35719b04211c',
       contractVersion: 'contract-automation-v7-relocated-v1'
     },
