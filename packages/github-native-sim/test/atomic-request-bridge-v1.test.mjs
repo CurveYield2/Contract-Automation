@@ -20,6 +20,15 @@ test('V7 v4 bridge executes one atomic request file from github-native-sim reque
   assert.match(workflow, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01:\s*\$\{\{\s*secrets\.SIM_ARCHIVE_PRIMARY_ETHEREUM_01\s*\}\}/);
 });
 
+test('V7 v4 bridge permits same-repository PR trace execution without admitting fork PR secrets', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /types:\s*\[opened, synchronize, reopened\]/);
+  assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+  assert.match(workflow, /startsWith\(github\.event\.pull_request\.head\.ref, 'github-native-sim\/'\)/);
+  assert.match(workflow, /github\.event\.pull_request\.head\.sha \|\| github\.sha/);
+});
+
 test('V7 v4 atomic request branches do not modify the generic PreflightSim issue bridge', () => {
   const genericPath = path.join(repoRoot, '.github/workflows/github-bridge.yml');
   const generic = fs.readFileSync(genericPath, 'utf8');
