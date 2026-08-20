@@ -71,6 +71,20 @@ function externalAbi(functionText) {
   return [functionText.trim().startsWith('function ') ? functionText.trim() : `function ${functionText.trim()}`];
 }
 
+export function buildGanacheOptions({ workflow, chainId, forkUrl, block = 'latest', quiet = true }) {
+  const unlockedAccounts = collectLiteralActors(workflow);
+  const options = {
+    logging: { quiet },
+    chain: { chainId, networkId: chainId, allowUnlimitedContractSize: false },
+    wallet: { deterministic: true, totalAccounts: 20, unlockedAccounts }
+  };
+  if (forkUrl) {
+    options.fork = { url: forkUrl };
+    if (block !== 'latest') options.fork.blockNumber = block;
+  }
+  return options;
+}
+
 export async function startGanacheEngine({
   artifacts,
   workflow,
@@ -82,16 +96,7 @@ export async function startGanacheEngine({
   const ganacheModule = await import('ganache');
   const ethers = await import('ethers');
   const ganache = ganacheModule.default ?? ganacheModule;
-  const unlockedAccounts = collectLiteralActors(workflow);
-  const options = {
-    logging: { quiet },
-    chain: { chainId, allowUnlimitedContractSize: false },
-    wallet: { deterministic: true, totalAccounts: 20, unlockedAccounts }
-  };
-  if (forkUrl) {
-    options.fork = { url: forkUrl };
-    if (block !== 'latest') options.fork.blockNumber = block;
-  }
+  const options = buildGanacheOptions({ workflow, chainId, forkUrl, block, quiet });
   const server = ganache.server(options);
   await server.listen(0, '127.0.0.1');
   const address = server.address();
