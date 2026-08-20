@@ -1,0 +1,213 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "boosthub-staking-v2-g1-20260818T215920Z",
+  "assignmentId": "reviewer-2-phase-7-discovery-v1",
+  "phaseId": "fork-simulation-lifecycle",
+  "gateId": "phase7-dependency-discovery-preflight",
+  "profileId": "github-native-simulate-v2",
+  "source": {
+    "repository": "CurveYield2/Solo-Audit-Controller",
+    "commit": "b91d41b3f6cf43f4ad91fba8bfcb0e5386a17429",
+    "projectPath": "CurveYield-BoostHub-sdCRV-sdFXN-sdYB-Deployment-Package-v2",
+    "archivePath": "campaigns/CurveYield-BoostHub-sdCRV-sdFXN-sdYB-Deployment-Package-v2.zip",
+    "archiveSha256": "2a9d8d5d4efd07ef4d91461cbe5823aef905e0b0183aa7070fd468896ecfa9dd"
+  },
+  "configuration": {
+    "compilers": [
+      {
+        "language": "solidity",
+        "version": "0.8.28"
+      },
+      {
+        "language": "vyper",
+        "version": "0.4.3"
+      }
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun",
+    "viaIR": true,
+    "timeoutMinutes": 35,
+    "deploymentGas": {
+      "deployableContracts": [
+        {
+          "sourceName": "contracts/CurveYieldGovernanceToken.sol",
+          "contractName": "CurveYieldGovernanceToken"
+        },
+        {
+          "sourceName": "contracts/CurveYieldVault.sol",
+          "contractName": "CurveYieldVault"
+        },
+        {
+          "sourceName": "contracts/boosthub/CurveYieldStakingStrategyV2.sol",
+          "contractName": "CurveYieldStakingStrategyV2"
+        },
+        {
+          "sourceName": "contracts/boosthub/SdYbRewardConverter.sol",
+          "contractName": "SdYbRewardConverter"
+        },
+        {
+          "sourceName": "contracts/boosthub/vyper/BoostHubStaking-v16.vy",
+          "contractName": "BoostHubStaking-v16"
+        }
+      ]
+    },
+    "simulation": {
+      "chain": "ethereum",
+      "block": 25737717,
+      "workflow": {
+        "steps": [
+          {
+            "action": "staticCall",
+            "label": "boosthub-owner",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "owner() view returns(address)",
+            "saveAs": "boostHubOwner"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-0-info",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolInfo(uint256) view returns(tuple(address asset,address gauge,bool active,uint256 totalStaked,address[] rewardTokens))",
+            "args": [0],
+            "saveAs": "pool0Info"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-0-depositor",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolDepositor(uint256) view returns(address)",
+            "args": [0],
+            "saveAs": "pool0Depositor"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-0-depositor-locked",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolDepositorLocked(uint256) view returns(bool)",
+            "args": [0],
+            "saveAs": "pool0DepositorLocked"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-0-retention-fee",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolRetentionFeeBps(uint256) view returns(uint16)",
+            "args": [0],
+            "saveAs": "pool0RetentionFeeBps"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-0-checkpoint-selector",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolCheckpointSelector(uint256) view returns(bytes4)",
+            "args": [0],
+            "saveAs": "pool0CheckpointSelector"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-1-info",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolInfo(uint256) view returns(tuple(address asset,address gauge,bool active,uint256 totalStaked,address[] rewardTokens))",
+            "args": [1],
+            "saveAs": "pool1Info"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-1-depositor",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolDepositor(uint256) view returns(address)",
+            "args": [1],
+            "saveAs": "pool1Depositor"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-1-depositor-locked",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolDepositorLocked(uint256) view returns(bool)",
+            "args": [1],
+            "saveAs": "pool1DepositorLocked"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-1-retention-fee",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolRetentionFeeBps(uint256) view returns(uint16)",
+            "args": [1],
+            "saveAs": "pool1RetentionFeeBps"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-1-checkpoint-selector",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolCheckpointSelector(uint256) view returns(bytes4)",
+            "args": [1],
+            "saveAs": "pool1CheckpointSelector"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-2-info",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolInfo(uint256) view returns(tuple(address asset,address gauge,bool active,uint256 totalStaked,address[] rewardTokens))",
+            "args": [2],
+            "saveAs": "pool2Info"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-2-depositor",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolDepositor(uint256) view returns(address)",
+            "args": [2],
+            "saveAs": "pool2Depositor"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-2-depositor-locked",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolDepositorLocked(uint256) view returns(bool)",
+            "args": [2],
+            "saveAs": "pool2DepositorLocked"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-2-retention-fee",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolRetentionFeeBps(uint256) view returns(uint16)",
+            "args": [2],
+            "saveAs": "pool2RetentionFeeBps"
+          },
+          {
+            "action": "staticCall",
+            "label": "pool-2-checkpoint-selector",
+            "target": "0xB7724786ee8247078126Fc091058C46A4F3d9b84",
+            "function": "poolCheckpointSelector(uint256) view returns(bytes4)",
+            "args": [2],
+            "saveAs": "pool2CheckpointSelector"
+          }
+        ]
+      }
+    },
+    "analysis": {
+      "slither": false,
+      "medusa": false,
+      "nativeFuzz": {
+        "enabled": false
+      }
+    }
+  },
+  "requestId": "dar-af3c7ead1d814f1f9782a505aaec54df",
+  "requestDigest": "9d68226ebfb87a02603f24739aa8d824da9cbf9c7a5fd2009a84deae02ddacea"
+}
