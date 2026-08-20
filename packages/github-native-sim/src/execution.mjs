@@ -64,7 +64,22 @@ async function requireSuccess(result, kind, command, args) {
   return result;
 }
 
-export async function checkoutExactSource({ repository, commit, destination }, { runCommand = runProcess } = {}) {
+function authenticatedGitEnvironment(environment) {
+  const { AUDIT_CONTROLLER_GITHUB_TOKEN: token, ...baseEnvironment } = environment ?? {};
+  if (typeof token !== 'string' || token.length === 0) return baseEnvironment;
+  const basic = Buffer.from(`x-access-token:${token}`, 'utf8').toString('base64');
+  return {
+    ...baseEnvironment,
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'http.https://github.com/.extraheader',
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}`
+  };
+}
+
+export async function checkoutExactSource({ repository, commit, destination }, {
+  runCommand = runProcess,
+  environment = process.env
+} = {}) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? '')) {
     throw new V7ExecutionError('SOURCE_INTEGRITY_FAILURE', 'repository must be owner/repository');
   }
@@ -77,8 +92,14 @@ export async function checkoutExactSource({ repository, commit, destination }, {
   const remote = `https://github.com/${repository}.git`;
   const addRemote = await runCommand({ command: 'git', args: ['remote', 'add', 'origin', remote], cwd: destination });
   await requireSuccess(addRemote, 'SOURCE_CHECKOUT_FAILURE', 'git', ['remote', 'add', 'origin', remote]);
-  const fetch = await runCommand({ command: 'git', args: ['fetch', '--depth', '1', 'origin', commit], cwd: destination });
-  await requireSuccess(fetch, 'SOURCE_CHECKOUT_FAILURE', 'git', ['fetch', '--depth', '1', 'origin', commit]);
+  const fetchArgs = ['fetch', '--depth', '1', 'origin', commit];
+  const fetch = await runCommand({
+    command: 'git',
+    args: fetchArgs,
+    cwd: destination,
+    env: authenticatedGitEnvironment(environment)
+  });
+  await requireSuccess(fetch, 'SOURCE_CHECKOUT_FAILURE', 'git', fetchArgs);
   const checkout = await runCommand({ command: 'git', args: ['checkout', '--detach', 'FETCH_HEAD'], cwd: destination });
   await requireSuccess(checkout, 'SOURCE_CHECKOUT_FAILURE', 'git', ['checkout', '--detach', 'FETCH_HEAD']);
   const rev = await runCommand({ command: 'git', args: ['rev-parse', 'HEAD'], cwd: destination });
@@ -103,6 +124,7 @@ export async function runPinnedBuild(input, {
   build,
   checkoutExactSourceFn = checkoutExactSource,
   runCommand = runProcess,
+  environment = process.env,
   digestFile = sha256File
 } = {}) {
   const request = validateDeepAssuranceRequestV2(input);
@@ -120,7 +142,7 @@ export async function runPinnedBuild(input, {
     repository: request.source.repository,
     commit: request.source.commit,
     destination: checkoutRoot
-  }, { runCommand });
+  }, { runCommand, environment });
   if (!checkout || checkout.commit !== request.source.commit) {
     throw new V7ExecutionError('SOURCE_INTEGRITY_FAILURE', 'checkout did not return the requested commit', {
       expectedCommit: request.source.commit,
