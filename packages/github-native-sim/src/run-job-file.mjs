@@ -5,7 +5,7 @@ import { startGanacheEngine } from '../../runner/src/engine.mjs';
 import { executeWorkflow } from '../../runner/src/workflow.mjs';
 import { runMedusaAnalysis, runSlitherAnalysis } from './analysis.mjs';
 import { normalizeDeploymentGasEvidence } from './deployment-gas-v1.mjs';
-import { checkoutExactSource, safeRepositoryProjectPath } from './execution.mjs';
+import { checkoutExactSource, safeRepositoryProjectPath, stageExactArchiveSource } from './execution.mjs';
 import { runNativeFuzzAnalysis } from './native-fuzz.mjs';
 import { validateDeepAssuranceRequestV2 } from './schema.mjs';
 import { runStage2aAnalysis } from './stage2a-toolchain.mjs';
@@ -28,10 +28,25 @@ async function defaultCheckoutSource(source, { workspaceRoot, runCommand, enviro
     ...(runCommand ? { runCommand } : {}),
     ...(environment ? { environment } : {})
   });
+  const staged = source.archivePath
+    ? await stageExactArchiveSource({
+        checkoutRoot,
+        workspaceRoot,
+        archivePath: source.archivePath,
+        archiveSha256: source.archiveSha256,
+        projectPath: source.projectPath
+      })
+    : null;
   return {
     checkoutRoot,
-    projectRoot: safeRepositoryProjectPath(checkoutRoot, source.projectPath),
-    commit: checkout.commit
+    projectRoot: staged?.projectRoot ?? safeRepositoryProjectPath(checkoutRoot, source.projectPath),
+    commit: checkout.commit,
+    ...(staged ? {
+      archivePath: staged.archivePath,
+      archiveSha256: staged.archiveSha256,
+      archiveExtractedBytes: staged.extractedBytes,
+      archiveEntryCount: staged.entryCount
+    } : {})
   };
 }
 
