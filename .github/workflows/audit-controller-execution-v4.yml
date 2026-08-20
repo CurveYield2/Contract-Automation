@@ -4,10 +4,8 @@ on:
   push:
     branches:
       - main
-      - 'github-native-sim/**'
     paths:
       - '.github/workflows/audit-controller-execution-v4.yml'
-      - 'github-native-sim/requests/**/request.json'
   pull_request:
     branches:
       - main
@@ -31,14 +29,16 @@ permissions:
 
 jobs:
   bridge-smoke:
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout Contract Automation
+      - name: Checkout trusted Contract Automation runner
         uses: actions/checkout@v4
         with:
+          ref: main
           persist-credentials: false
+          fetch-depth: 1
 
       - name: Verify V7 secret contract
         env:
@@ -64,18 +64,29 @@ jobs:
       - name: Record private checkout identity
         run: |
           echo "controller_checkout_sha=$(git -C .controller-smoke rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo "trusted_runner_sha=$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
           test -f .controller-smoke/packages/contract-automation-adapter/src/v7-independent-review-v1.mjs
 
   execute-v7-request:
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref_name, 'github-native-sim/')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'github-native-sim/')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.event.pull_request.head.ref, 'github-native-sim/')) }}
     needs: bridge-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Checkout exact Contract Automation request branch
+      - name: Checkout trusted Contract Automation runner
         uses: actions/checkout@v4
         with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout atomic request source
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: .request-source
           persist-credentials: false
           fetch-depth: 1
 
@@ -112,7 +123,7 @@ jobs:
             cp ".controller-request/$DISPATCH_REQUEST_PATH" .v7-request/request.json
             echo "request_source=$DISPATCH_REQUEST_PATH" >> "$GITHUB_STEP_SUMMARY"
           else
-            mapfile -t requests < <(find github-native-sim/requests -mindepth 2 -maxdepth 2 -type f -name request.json | sort)
+            mapfile -t requests < <(find .request-source/github-native-sim/requests -mindepth 2 -maxdepth 2 -type f -name request.json | sort)
             test "${#requests[@]}" -eq 1
             cp "${requests[0]}" .v7-request/request.json
             echo "request_source=${requests[0]}" >> "$GITHUB_STEP_SUMMARY"
@@ -140,9 +151,11 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import { createHash } from 'node:crypto';
+          import { execFileSync } from 'node:child_process';
           import { runGitHubNativeJob } from './packages/github-native-sim/src/run-job-file.mjs';
 
           const request = JSON.parse(fs.readFileSync('.v7-request/request.json', 'utf8'));
+          const runnerCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
           const result = await runGitHubNativeJob(request, {
             workspaceRoot: '.audit-work/v7-execution-v4',
             environment: process.env
@@ -165,7 +178,7 @@ jobs:
             source: request.source,
             runnerImplementation: {
               repository: process.env.GITHUB_REPOSITORY,
-              commit: process.env.GITHUB_SHA
+              commit: runnerCommit
             },
             resultStatus,
             artifactDigest,
@@ -183,6 +196,7 @@ jobs:
             workflowSha: process.env.GITHUB_SHA,
             workflowRef: process.env.GITHUB_REF,
             runnerRepository: process.env.GITHUB_REPOSITORY,
+            runnerCommit,
             requestId: request.requestId,
             requestDigest: request.requestDigest,
             source: request.source
