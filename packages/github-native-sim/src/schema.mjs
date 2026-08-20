@@ -78,15 +78,29 @@ function scanForbiddenDynamicKeys(value, path = 'configuration') {
   }
 }
 
+function safeRelativePath(value, pathLabel, { requireZip = false } = {}) {
+  const input = string(value, pathLabel, { max: 512 });
+  const normalized = input.replaceAll('\\', '/');
+  if (normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized) || normalized === '..' || normalized.split('/').some((part) => part === '..' || part === '.' || part === '')) {
+    fail(pathLabel, 'must be a safe repository-relative path');
+  }
+  if (requireZip && !normalized.toLowerCase().endsWith('.zip')) fail(pathLabel, 'must identify a .zip archive');
+  return normalized;
+}
+
 function validateSource(source) {
   object(source, 'source');
-  const allowed = new Set(['repository', 'commit', 'projectPath']);
+  const allowed = new Set(['repository', 'commit', 'projectPath', 'archivePath', 'archiveSha256']);
   for (const key of Object.keys(source)) if (!allowed.has(key)) fail(`source.${key}`, 'is not allowed');
   string(source.repository, 'source.repository', { max: 200, pattern: /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/ });
   string(source.commit, 'source.commit', { min: 40, max: 40, pattern: /^[0-9a-f]{40}$/ });
-  const projectPath = string(source.projectPath, 'source.projectPath', { max: 512 });
-  const normalized = projectPath.replaceAll('\\', '/');
-  if (normalized.startsWith('/') || normalized === '..' || normalized.split('/').some((part) => part === '..' || part === '.' || part === '')) fail('source.projectPath', 'must be a safe repository-relative path');
+  safeRelativePath(source.projectPath, 'source.projectPath');
+
+  const archiveRequested = source.archivePath !== undefined || source.archiveSha256 !== undefined;
+  if (archiveRequested) {
+    safeRelativePath(source.archivePath, 'source.archivePath', { requireZip: true });
+    string(source.archiveSha256, 'source.archiveSha256', { min: 64, max: 64, pattern: /^[0-9a-f]{64}$/ });
+  }
 }
 
 function validateCompilers(compilers) {
