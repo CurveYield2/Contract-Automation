@@ -18,13 +18,16 @@ function rawArtifactRef(component) {
   return `github-actions://${repository}/runs/${runId}/artifacts/v7-execution/${component}`;
 }
 
-async function defaultCheckoutSource(source, { workspaceRoot, runCommand } = {}) {
+async function defaultCheckoutSource(source, { workspaceRoot, runCommand, environment } = {}) {
   const checkoutRoot = path.join(workspaceRoot, 'checkout');
   const checkout = await checkoutExactSource({
     repository: source.repository,
     commit: source.commit,
     destination: checkoutRoot
-  }, { ...(runCommand ? { runCommand } : {}) });
+  }, {
+    ...(runCommand ? { runCommand } : {}),
+    ...(environment ? { environment } : {})
+  });
   return {
     checkoutRoot,
     projectRoot: safeRepositoryProjectPath(checkoutRoot, source.projectPath),
@@ -128,13 +131,19 @@ function simulationFailure({ request, kind, error, steps = [], deployments = {} 
   };
 }
 
+function phase7RpcEnv(simulation) {
+  if (simulation.chain === 'ethereum') return 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01';
+  return CHAINS[simulation.chain].rpcEnv;
+}
+
 async function executePhase7Simulation({ request, build, environment, startSimulationEngine, executeSimulationWorkflow }) {
   if (request.phaseId !== 'fork-simulation-lifecycle') return null;
   const simulation = request.configuration.simulation;
   const chain = CHAINS[simulation.chain];
-  const forkUrl = environment[chain.rpcEnv];
+  const rpcEnv = phase7RpcEnv(simulation);
+  const forkUrl = environment[rpcEnv];
   if (!forkUrl) {
-    const error = new Error(`Runner secret ${chain.rpcEnv} is not configured for the pinned ${simulation.chain} fork`);
+    const error = new Error(`Runner secret ${rpcEnv} is not configured for the pinned ${simulation.chain} fork`);
     error.kind = 'RPC_CONFIGURATION_FAILURE';
     error.simulationEvidence = simulationFailure({ request, kind: error.kind, error });
     throw error;
@@ -233,7 +242,7 @@ export async function runGitHubNativeJob(input, {
   let simulation = null;
 
   try {
-    checkout = await checkoutSource(request.source, { workspaceRoot, runCommand });
+    checkout = await checkoutSource(request.source, { workspaceRoot, runCommand, environment });
     if (!checkout || checkout.commit !== request.source.commit) {
       throw new Error(`Exact source checkout mismatch: expected ${request.source.commit}, got ${checkout?.commit ?? 'missing'}`);
     }
