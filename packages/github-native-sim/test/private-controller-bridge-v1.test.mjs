@@ -83,6 +83,35 @@ test('private source checkout uses AUDIT_CONTROLLER_GITHUB_TOKEN without placing
   assert.equal(fetchCall.env?.GIT_CONFIG_VALUE_0?.includes(token), false, 'raw token must not appear in git config value');
 });
 
+test('private source checkout resolves a relative destination once and uses that exact absolute checkout for every git command', async () => {
+  const calls = [];
+  const requestedCommit = commit('b');
+  const relativeDestination = path.join('.audit-work', 'v7-execution-v4', 'checkout');
+  const expectedDestination = path.resolve(relativeDestination);
+
+  const result = await checkoutExactSource({
+    repository: 'CurveYield2/Solo-Audit-Controller',
+    commit: requestedCommit,
+    destination: relativeDestination
+  }, {
+    environment: { PATH: process.env.PATH, AUDIT_CONTROLLER_GITHUB_TOKEN: 'test-token' },
+    runCommand: async (input) => {
+      calls.push(input);
+      if (input.args?.[0] === 'rev-parse') return { exitCode: 0, stdout: `${requestedCommit}\n`, stderr: '' };
+      return { exitCode: 0, stdout: '', stderr: '' };
+    }
+  });
+
+  const init = calls.find((call) => call.args?.[0] === 'init');
+  assert.ok(init, 'expected git init');
+  assert.deepEqual(init.args, ['init', expectedDestination]);
+  assert.equal(init.cwd, path.dirname(expectedDestination));
+  for (const call of calls.filter((entry) => entry.args?.[0] !== 'init')) {
+    assert.equal(call.cwd, expectedDestination, `git ${call.args?.[0]} must use the exact resolved checkout cwd`);
+  }
+  assert.equal(result.destination, expectedDestination);
+});
+
 test('Phase 7 Ethereum lifecycle uses SIM_ARCHIVE_PRIMARY_ETHEREUM_01 as the authoritative fork RPC', async () => {
   const calls = [];
   const archiveUrl = 'https://archive-rpc.example';
