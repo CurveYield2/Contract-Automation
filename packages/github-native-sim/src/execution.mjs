@@ -89,23 +89,26 @@ export async function checkoutExactSource({ repository, commit, destination }, {
   if (!/^[0-9a-f]{40}$/.test(commit ?? '')) {
     throw new V7ExecutionError('SOURCE_INTEGRITY_FAILURE', 'commit must be exactly 40 lowercase hex characters');
   }
-  await fs.mkdir(path.dirname(destination), { recursive: true });
-  const init = await runCommand({ command: 'git', args: ['init', destination], cwd: path.dirname(destination) });
-  await requireSuccess(init, 'SOURCE_CHECKOUT_FAILURE', 'git', ['init', destination]);
+  const resolvedDestination = path.resolve(destination);
+  const resolvedParent = path.dirname(resolvedDestination);
+  await fs.mkdir(resolvedParent, { recursive: true });
+  const initArgs = ['init', resolvedDestination];
+  const init = await runCommand({ command: 'git', args: initArgs, cwd: resolvedParent });
+  await requireSuccess(init, 'SOURCE_CHECKOUT_FAILURE', 'git', initArgs);
   const remote = `https://github.com/${repository}.git`;
-  const addRemote = await runCommand({ command: 'git', args: ['remote', 'add', 'origin', remote], cwd: destination });
+  const addRemote = await runCommand({ command: 'git', args: ['remote', 'add', 'origin', remote], cwd: resolvedDestination });
   await requireSuccess(addRemote, 'SOURCE_CHECKOUT_FAILURE', 'git', ['remote', 'add', 'origin', remote]);
   const fetchArgs = ['fetch', '--depth', '1', 'origin', commit];
   const fetch = await runCommand({
     command: 'git',
     args: fetchArgs,
-    cwd: destination,
+    cwd: resolvedDestination,
     env: authenticatedGitEnvironment(environment)
   });
   await requireSuccess(fetch, 'SOURCE_CHECKOUT_FAILURE', 'git', fetchArgs);
-  const checkout = await runCommand({ command: 'git', args: ['checkout', '--detach', 'FETCH_HEAD'], cwd: destination });
+  const checkout = await runCommand({ command: 'git', args: ['checkout', '--detach', 'FETCH_HEAD'], cwd: resolvedDestination });
   await requireSuccess(checkout, 'SOURCE_CHECKOUT_FAILURE', 'git', ['checkout', '--detach', 'FETCH_HEAD']);
-  const rev = await runCommand({ command: 'git', args: ['rev-parse', 'HEAD'], cwd: destination });
+  const rev = await runCommand({ command: 'git', args: ['rev-parse', 'HEAD'], cwd: resolvedDestination });
   await requireSuccess(rev, 'SOURCE_CHECKOUT_FAILURE', 'git', ['rev-parse', 'HEAD']);
   const resolvedCommit = String(rev.stdout ?? '').trim();
   if (resolvedCommit !== commit) {
@@ -114,7 +117,7 @@ export async function checkoutExactSource({ repository, commit, destination }, {
       actualCommit: resolvedCommit
     });
   }
-  return { repository, commit: resolvedCommit, destination };
+  return { repository, commit: resolvedCommit, destination: resolvedDestination };
 }
 
 export async function sha256File(filePath) {
