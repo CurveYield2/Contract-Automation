@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const identity = await import('../src/archive-rpc-identity-v1.mjs').catch(() => ({}));
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, '../../..');
 
 test('Phase 7 archive preflight records remote identity and pinned block evidence without exposing the RPC URL', async () => {
   assert.equal(typeof identity.probeArchiveRpcIdentity, 'function', 'probeArchiveRpcIdentity must be exported');
@@ -62,4 +67,16 @@ test('Phase 7 archive preflight records remote identity and pinned block evidenc
   assert.equal(evidence.sampleTransaction.blockNumber, 25737717);
   assert.equal('rpcUrl' in evidence, false);
   assert.equal(JSON.stringify(evidence).includes('secret.example'), false);
+});
+
+test('V7 trusted workflow writes archive identity evidence before lifecycle execution and uploads it with the normal artifact', () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/audit-controller-execution-v4.yml'), 'utf8');
+  const preflight = workflow.indexOf('Record Phase 7 archive RPC identity');
+  const execution = workflow.indexOf('Execute V7 GitHub-native request');
+  assert.ok(preflight >= 0, 'archive identity preflight step must exist');
+  assert.ok(execution > preflight, 'archive identity preflight must run before lifecycle execution');
+  assert.match(workflow, /probeArchiveRpcIdentity/);
+  assert.match(workflow, /archive-rpc-identity-v1\.json/);
+  assert.match(workflow, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01:\s*\$\{\{\s*secrets\.SIM_ARCHIVE_PRIMARY_ETHEREUM_01\s*\}\}/);
+  assert.match(workflow, /path:\s*\.audit-evidence\/v7-execution-v4/);
 });
