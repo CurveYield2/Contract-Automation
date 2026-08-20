@@ -13,11 +13,23 @@ test('V7 v4 bridge executes one atomic request file from github-native-sim reque
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   assert.match(workflow, /github-native-sim\/\*\*/);
   assert.match(workflow, /github-native-sim\/requests\/\*\*\/request\.json/);
-  assert.match(workflow, /find github-native-sim\/requests/);
+  assert.match(workflow, /find .*github-native-sim\/requests/);
   assert.match(workflow, /test "\$\{#requests\[@\]\}" -eq 1/);
   assert.match(workflow, /runGitHubNativeJob/);
   assert.match(workflow, /AUDIT_CONTROLLER_GITHUB_TOKEN:\s*\$\{\{\s*secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN\s*\}\}/);
   assert.match(workflow, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01:\s*\$\{\{\s*secrets\.SIM_ARCHIVE_PRIMARY_ETHEREUM_01\s*\}\}/);
+});
+
+test('V7 v4 executes trusted runner code from main and treats the request branch as data only', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.match(workflow, /name:\s*Checkout trusted Contract Automation runner/);
+  assert.match(workflow, /ref:\s*main/);
+  assert.match(workflow, /name:\s*Checkout atomic request source/);
+  assert.match(workflow, /path:\s*\.request-source/);
+  assert.match(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha \|\| github\.sha\s*\}\}/);
+  assert.match(workflow, /find \.request-source\/github-native-sim\/requests/);
+  assert.match(workflow, /cp "\$\{requests\[0\]\}" \.v7-request\/request\.json/);
+  assert.doesNotMatch(workflow, /name:\s*Checkout exact Contract Automation request branch/);
 });
 
 test('V7 v4 bridge permits same-repository PR trace execution without admitting fork PR secrets', () => {
@@ -26,7 +38,6 @@ test('V7 v4 bridge permits same-repository PR trace execution without admitting 
   assert.match(workflow, /types:\s*\[opened, synchronize, reopened\]/);
   assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
   assert.match(workflow, /startsWith\(github\.event\.pull_request\.head\.ref, 'github-native-sim\/'\)/);
-  assert.match(workflow, /github\.event\.pull_request\.head\.sha \|\| github\.sha/);
 });
 
 test('V7 v4 atomic request branches do not modify the generic PreflightSim issue bridge', () => {
