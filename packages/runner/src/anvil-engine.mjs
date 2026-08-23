@@ -29,6 +29,35 @@ export function buildAnvilArgs({ chainId, forkUrl, block = 'latest', port, hardf
   return args;
 }
 
+export function buildAnvilLaunchSpec({
+  cwd = process.cwd(),
+  execPath = process.execPath,
+  anvilArgs = []
+} = {}) {
+  return {
+    command: execPath,
+    args: [path.resolve(cwd, 'node_modules/@foundry-rs/anvil/bin.mjs'), ...anvilArgs]
+  };
+}
+
+export function waitForChildSpawn(child) {
+  if (!child || typeof child.once !== 'function') {
+    return Promise.reject(new Error('Anvil process handle is invalid'));
+  }
+  return new Promise((resolve, reject) => {
+    const onSpawn = () => {
+      child.removeListener?.('error', onError);
+      resolve();
+    };
+    const onError = (error) => {
+      child.removeListener?.('spawn', onSpawn);
+      reject(new Error(`Anvil process failed to spawn: ${error?.message ?? String(error)}`, { cause: error }));
+    };
+    child.once('spawn', onSpawn);
+    child.once('error', onError);
+  });
+}
+
 export function createAnvilProviderAdapter(provider) {
   if (!provider || typeof provider.send !== 'function') throw new Error('Anvil provider is required');
   return new Proxy(provider, {
@@ -105,9 +134,10 @@ export async function startAnvilEngine({
   block = 'latest',
   evmVersion = 'cancun',
   quiet = true,
-  anvilCommand = path.resolve('node_modules/.bin/anvil'),
   spawnImpl = spawn,
-  fetchImpl = globalThis.fetch
+  fetchImpl = globalThis.fetch,
+  cwd = process.cwd(),
+  execPath = process.execPath
 }) {
   let identityProxy = null;
   let child = null;
@@ -115,22 +145,29 @@ export async function startAnvilEngine({
   try {
     identityProxy = await startRpcIdentityProxy({ upstreamUrl: forkUrl, chainId, fetchImpl });
     const port = await reserveLoopbackPort();
-    const args = buildAnvilArgs({
+    const anvilArgs = buildAnvilArgs({
       chainId,
       forkUrl: identityProxy.url,
       block,
       port,
       hardfork: String(evmVersion).toLowerCase()
     });
-    child = spawnImpl(anvilCommand, args, {
-      cwd: process.cwd(),
+    const launch = buildAnvilLaunchSpec({ cwd, execPath, anvilArgs });
+    child = spawnImpl(launch.command, launch.args, {
+      cwd,
       env: process.env,
       stdio: quiet ? ['ignore', 'ignore', 'pipe'] : 'inherit'
     });
     let stderr = '';
     if (child.stderr) child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk}`.slice(-4096); });
+    await waitForChildSpawn(child);
     const url = `http://127.0.0.1:${port}`;
-    await waitForAnvilRpc({ url, child, fetchImpl });
+    try {
+      await waitForAnvilRpc({ url, child, fetchImpl });
+    } catch (error) {
+      const suffix = stderr.trim() ? `: ${stderr.trim()}` : '';
+      throw new Error(`${error.message}${suffix}`, { cause: error });
+    }
 
     const ethers = await import('ethers');
     const realProvider = new ethers.JsonRpcProvider(url, chainId, { staticNetwork: true });
@@ -164,7 +201,7 @@ export async function startAnvilEngine({
     try { await stopChild(child); } catch {}
     try { if (identityProxy) await identityProxy.close(); } catch {}
     if (String(error?.message ?? '').includes(String(forkUrl))) {
-      throw new Error(String(error.message).replaceAll(String(forkUrl), '<redacted-fork-rpc>'));
+      throw new Error(String(error.message).replaceAll(String(forkUrl), '<redacted-fork-rpc>'), { cause: error });
     }
     throw error;
   }
