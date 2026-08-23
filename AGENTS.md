@@ -1,6 +1,6 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v2
+Policy version: v3
 
 ## Full simulation backend — mandatory
 
@@ -14,6 +14,15 @@ Policy version: v2
 - Ganache code may remain only for bounded lightweight/local regression utilities that are not authoritative full-simulation evidence. It must never be selected by the V7 Phase-7/full-fork execution path.
 
 If Anvil cannot start or cannot execute a required fork, fail with typed execution evidence and repair the Anvil path. Do not substitute Ganache.
+
+## V7 execution preflight and qualification — mandatory
+
+- New V7 work is V2-only: `deep-assurance-github-request-v2`, `github-native-compile-v2`, and `github-native-simulate-v2`. V1 execution profiles are historical/non-executable.
+- Infrastructure qualification is repository-level and occurs outside audit campaigns. Use `.github/workflows/v7-execution-infrastructure-qualification-v1.yml` to qualify an exact candidate release before the Solo Audit Controller admits it to a campaign.
+- Phase 6 must classify target Medusa and Foundry/native-fuzz harness applicability before analyzer invocation. Use `packages/github-native-sim/src/phase6-execution-preflight-v1.mjs`. Missing target harnesses are terminal `NOT_APPLICABLE`; do not invoke an inapplicable analyzer merely to discover that condition.
+- Phase 7 must pass the Anvil/archive fork preflight before lifecycle execution. Use `packages/github-native-sim/src/phase7-fork-preflight-v1.mjs` to prove launcher/hardfork, archive secret, chain identity, pinned state, target code, impersonation/balance control, and workflow-action support.
+- Prefer standardized Phase-7 lifecycle recipes from `packages/github-native-sim/src/lifecycle-recipes-v1.mjs`. Unsupported behavior is `RECIPE_GAP`, not permission for arbitrary commands.
+- If runner infrastructure must change after campaign admission, preserve the failed attempt and return control to the Solo Audit Controller `RUNNER_REPAIR_REBIND` state. Do not change target production source to repair audit infrastructure.
 
 ## Audit execution boundary
 
