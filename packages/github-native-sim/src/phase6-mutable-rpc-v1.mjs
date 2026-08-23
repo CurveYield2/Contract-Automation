@@ -1,6 +1,8 @@
-export const PHASE6_MUTABLE_RPC_ENV = 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01';
-export const PHASE6_MUTABLE_RPC_CHAIN = 'ethereum';
-export const PHASE6_MUTABLE_RPC_CHAIN_ID = 1;
+import { V7_POLICY } from './v7-policy.mjs';
+
+export const PHASE6_MUTABLE_RPC_ENV = V7_POLICY.mutableRpc.ethereumProfile;
+export const PHASE6_MUTABLE_RPC_CHAIN = V7_POLICY.mutableRpc.chain;
+export const PHASE6_MUTABLE_RPC_CHAIN_ID = V7_POLICY.mutableRpc.chainId;
 
 function hexQuantity(value, label) {
   if (typeof value !== 'string' || !/^0x[0-9a-fA-F]+$/.test(value)) throw new Error(`${label} must be a hex quantity`);
@@ -62,8 +64,8 @@ export async function probePhase6MutableRpc({ environment = process.env, fetchIm
       chainIdMatchesExpected,
       blockNumber,
       blockHash,
-      backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY',
-      requesterSuppliedRpcAllowed: false,
+      backendPolicy: V7_POLICY.mutableRpc.backendPolicy,
+      requesterSuppliedRpcAllowed: V7_POLICY.mutableRpc.requesterSuppliedRpcAllowed,
       rpcUrlExposedInEvidence: false,
     };
   } catch (error) {
