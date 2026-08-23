@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { selectForkEngineName, buildAnvilArgs } from '../src/engine.mjs';
+import { selectForkEngineName, buildAnvilArgs, createAnvilProviderAdapter } from '../src/anvil-engine.mjs';
 
 test('Cancun lifecycle selects Anvil instead of Ganache', () => {
   assert.equal(selectForkEngineName('cancun'), 'anvil');
@@ -25,4 +25,25 @@ test('Anvil fork arguments pin chain, block, hardfork and loopback binding', () 
     '--accounts', '20',
     '--silent'
   ]);
+});
+
+test('Anvil provider adapter translates only balance-control RPC and preserves provider methods', async () => {
+  const calls = [];
+  const realProvider = {
+    async send(method, params) {
+      calls.push([method, params]);
+      return method;
+    },
+    getSigner(address) {
+      return `signer:${address}`;
+    }
+  };
+  const adapted = createAnvilProviderAdapter(realProvider);
+  await adapted.send('evm_setAccountBalance', ['0xabc', '0x10']);
+  await adapted.send('evm_mine', []);
+  assert.deepEqual(calls, [
+    ['anvil_setBalance', ['0xabc', '0x10']],
+    ['evm_mine', []]
+  ]);
+  assert.equal(adapted.getSigner('0xabc'), 'signer:0xabc');
 });
