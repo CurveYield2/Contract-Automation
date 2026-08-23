@@ -7,6 +7,7 @@ import {
 import { validateDeepAssuranceRequestV2 } from './schema.mjs';
 import { runGitHubNativeJob as runGitHubNativeJobV1 } from './run-job-file.mjs';
 import { runPhase6ExecutionPreflightV1 } from './phase6-execution-preflight-v1.mjs';
+import { phase6MutableRpcRuntime } from './phase6-mutable-rpc-v1.mjs';
 import { runPhase7ForkPreflightV2 } from './phase7-fork-preflight-v2.mjs';
 
 async function stageForPreflight(source, { workspaceRoot, environment }) {
@@ -45,8 +46,11 @@ function terminalNotApplicable(backend, preflightComponent) {
   };
 }
 
-function phase6DelegateOptions(delegateOptions, preflight) {
+function phase6DelegateOptions(delegateOptions, preflight, environment) {
   const options = { ...delegateOptions };
+  if (preflight?.mutableRpc?.status === 'PASS') {
+    options.phase6MutableRpc = phase6MutableRpcRuntime({ environment, preflight });
+  }
   if (preflight?.medusa?.status === 'NOT_APPLICABLE') options.runMedusa = async () => terminalNotApplicable('medusa', preflight.medusa);
   if (preflight?.nativeFuzz?.status === 'NOT_APPLICABLE') options.runNativeFuzz = async () => terminalNotApplicable('native-fuzz', preflight.nativeFuzz);
   return options;
@@ -77,14 +81,14 @@ export async function runGitHubNativeJobV2(input, {
   if (request.phaseId === 'build-and-test') {
     const staged = await stageForPreflight(request.source, { workspaceRoot, environment });
     if (staged.commit !== request.source.commit) throw new Error(`Phase 6 preflight source mismatch: expected ${request.source.commit}, received ${staged.commit}`);
-    preflight = await runPhase6ExecutionPreflightV1({ request, projectRoot: staged.projectRoot, runnerCommit });
+    preflight = await runPhase6ExecutionPreflightV1({ request, projectRoot: staged.projectRoot, runnerCommit, environment });
   } else if (request.phaseId === 'fork-simulation-lifecycle') {
     preflight = await runPhase7ForkPreflightV2({ request, environment });
   }
 
   if (preflight && preflight.status !== 'PASS') return preflightFailure(request, preflight);
 
-  const delegated = request.phaseId === 'build-and-test' ? phase6DelegateOptions(delegateOptions, preflight) : delegateOptions;
+  const delegated = request.phaseId === 'build-and-test' ? phase6DelegateOptions(delegateOptions, preflight, environment) : delegateOptions;
   let result = await runGitHubNativeJobV1(request, {
     workspaceRoot: path.join(workspaceRoot, 'execution'), environment, ...delegated,
   });
