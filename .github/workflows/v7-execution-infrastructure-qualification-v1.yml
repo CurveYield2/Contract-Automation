@@ -1,0 +1,53 @@
+name: V7 Execution Infrastructure Qualification v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_ref:
+        description: Contract-Automation commit/ref to qualify for campaign admission
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  qualify-v7-execution-infrastructure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout candidate infrastructure release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_ref }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pinned repository dependencies
+        run: npm install --no-package-lock
+
+      - name: V2 request and evidence contract qualification
+        run: node --test packages/github-native-sim/test/*.test.mjs
+
+      - name: Anvil full-simulation qualification
+        run: node --test packages/runner/test/anvil-*.test.mjs packages/runner/test/full-simulation-anvil-only-v1.test.mjs
+
+      - name: Repository static checks
+        run: node scripts/check.mjs
+
+      - name: Repository build checks
+        run: node scripts/build.mjs
+
+      - name: Record immutable qualification identity
+        run: |
+          echo "qualification_schema=v7-execution-infrastructure-qualification-v1" >> "$GITHUB_STEP_SUMMARY"
+          echo "qualified_commit=$(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo "request_schema=deep-assurance-github-request-v2" >> "$GITHUB_STEP_SUMMARY"
+          echo "profiles=github-native-compile-v2,github-native-simulate-v2" >> "$GITHUB_STEP_SUMMARY"
+          echo "full_simulation_backend=anvil" >> "$GITHUB_STEP_SUMMARY"
