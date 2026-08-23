@@ -33,6 +33,10 @@ function checkWorkflowActions(workflow) {
   };
 }
 
+function archiveRpcEnvForChain(simulation, chain) {
+  return simulation.chain === 'ethereum' ? 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01' : chain.rpcEnv;
+}
+
 export async function runPhase7ForkPreflightV1({
   request,
   environment = process.env,
@@ -45,10 +49,11 @@ export async function runPhase7ForkPreflightV1({
   const chain = CHAINS[simulation.chain];
   if (!chain) throw new Error(`Unsupported Phase 7 chain ${simulation.chain}`);
 
-  const forkUrl = environment.SIM_ARCHIVE_PRIMARY_ETHEREUM_01;
+  const rpcEnv = archiveRpcEnvForChain(simulation, chain);
+  const forkUrl = environment[rpcEnv];
   const archiveRpcSecret = {
     status: typeof forkUrl === 'string' && forkUrl.length > 0 ? 'PASS' : 'FAIL',
-    profile: simulation.chain === 'ethereum' ? 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01' : 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01',
+    profile: rpcEnv,
   };
   const workflowActions = checkWorkflowActions(simulation.workflow);
   if (archiveRpcSecret.status !== 'PASS' || workflowActions.status !== 'PASS') {
