@@ -8,11 +8,13 @@ export const V7_POLICY = Object.freeze({
   tools: Object.freeze({
     slither: '0.11.6',
     medusa: '1.5.1',
+    forge: '1.7.1',
     anvilPackage: '1.7.1',
   }),
   workflows: Object.freeze({
     execution: '.github/workflows/audit-controller-execution.yml',
     qualification: '.github/workflows/v7-execution-infrastructure-qualification.yml',
+    toolchainSetup: '.github/actions/setup-v7-toolchain/action.yml',
   }),
   mutableRpc: Object.freeze({
     ethereumProfile: 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01',
@@ -28,6 +30,7 @@ export const V7_POLICY = Object.freeze({
     skeletonReadme: 'packages/github-native-sim/harness-skeletons-v2/README_v2.md',
     medusaBeforeFoundry: true,
     requiredRuntimeFiles: Object.freeze(['medusa.json', 'foundry.toml']),
+    rpcIdentityPolicy: 'ONE_NORMALIZED_RPC_SESSION_FOR_PREFLIGHT_MEDUSA_AND_FOUNDRY',
   }),
   evidence: Object.freeze({
     schemaVersion: 'audit-v7-github-execution-evidence-v2',
