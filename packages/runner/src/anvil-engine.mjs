@@ -2,7 +2,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { GanacheWorkflowRuntime } from './engine.mjs';
+import { SimulationWorkflowRuntime } from './engine.mjs';
 import { startRpcIdentityProxy } from './rpc-identity-proxy-v1.mjs';
 
 const ANVIL_READY_TIMEOUT_MS = 20_000;
@@ -175,7 +175,7 @@ export async function startAnvilEngine({
     for (const actor of collectLiteralActors(workflow)) {
       await provider.send('anvil_impersonateAccount', [actor]);
     }
-    const runtime = new GanacheWorkflowRuntime({ provider, artifacts, ethers });
+    const runtime = new SimulationWorkflowRuntime({ provider, artifacts, ethers });
     const aliases = Object.fromEntries(accounts.map((account, index) => [`account${index}`, account]));
     let closed = false;
     return {
