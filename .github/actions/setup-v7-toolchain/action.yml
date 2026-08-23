@@ -29,13 +29,22 @@ runs:
         restore-keys: |
           v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-
 
-    - name: Install pinned Medusa
+    - name: Install pinned Medusa and normalize Forge CLI
       shell: bash
       run: |
         set -euo pipefail
         install_dir="$RUNNER_TEMP/v7-tools/bin"
         mkdir -p "$install_dir"
         GOBIN="$install_dir" go install github.com/crytic/medusa@v1.5.1
+
+        forge_entry="$GITHUB_WORKSPACE/node_modules/@foundry-rs/forge/bin.mjs"
+        if [ ! -f "$forge_entry" ]; then
+          echo "Pinned @foundry-rs/forge package is missing bin.mjs" >&2
+          exit 1
+        fi
+        chmod +x "$forge_entry"
+        ln -sfn "$forge_entry" "$install_dir/forge"
+
         echo "$install_dir" >> "$GITHUB_PATH"
         echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
 

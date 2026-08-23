@@ -73,13 +73,17 @@ test('Phase 7 archive state-readiness probe records sanitized HTTP and JSON-RPC 
   assert.equal(JSON.stringify(rpcFailure).includes('secret.example'), false);
 });
 
-test('V7 trusted workflow records archive state readiness before starting the Phase 7 lifecycle', () => {
-  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/audit-controller-execution-v4.yml'), 'utf8');
-  const readinessStep = workflow.indexOf('Record Phase 7 archive state readiness');
-  const executionStep = workflow.indexOf('Execute V7 GitHub-native request');
-  assert.ok(readinessStep >= 0, 'archive state-readiness step must exist');
-  assert.ok(executionStep > readinessStep, 'archive state-readiness evidence must be recorded before lifecycle execution');
-  assert.match(workflow, /probeArchiveRpcStateReadiness/);
-  assert.match(workflow, /archive-rpc-state-readiness-v1\.json/);
-  assert.match(workflow, /90f8bf6a479f320ead074411a4b0e7944ea8c9c1/i);
+test('canonical V7 runner proves pinned Phase 7 state readiness before lifecycle execution', () => {
+  const preflight = fs.readFileSync(path.join(repoRoot, 'packages/github-native-sim/src/phase7-fork-preflight-v1.mjs'), 'utf8');
+  const runner = fs.readFileSync(path.join(repoRoot, 'packages/github-native-sim/src/run-job-file-v2.mjs'), 'utf8');
+
+  assert.match(preflight, /const localBlock = await engine\.provider\.getBlock\(simulation\.block\)/);
+  assert.match(preflight, /const pinnedBlockState =/);
+  assert.match(preflight, /localHashMatch/);
+  assert.match(preflight, /proveImpersonationBalanceControl/);
+
+  const preflightStep = runner.indexOf('preflight = await runPhase7ForkPreflightV2');
+  const lifecycleStep = runner.lastIndexOf('runGitHubNativeJobV1(request');
+  assert.ok(preflightStep >= 0, 'canonical runner must invoke Phase 7 preflight');
+  assert.ok(lifecycleStep > preflightStep, 'pinned historical state readiness must be proven before lifecycle execution');
 });
