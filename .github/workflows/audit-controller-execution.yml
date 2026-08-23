@@ -1,0 +1,110 @@
+name: V7 Audit Controller Execution
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'github-native-sim/requests/**/request.json'
+  workflow_dispatch:
+    inputs:
+      request_path:
+        description: Repository-relative deep-assurance-github-request-v2 JSON path in Solo-Audit-Controller
+        required: true
+        type: string
+      controller_ref:
+        description: Solo-Audit-Controller ref containing the request file
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v7-execution-${{ github.event.pull_request.number || inputs.request_path || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  execute-v7-request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout trusted Contract-Automation runner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Cache npm download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: v7-npm-${{ runner.os }}-${{ hashFiles('package-lock.json', 'package.json') }}
+          restore-keys: |
+            v7-npm-${{ runner.os }}-
+
+      - name: Install trusted runner dependencies
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+            echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
+          else
+            npm install --no-package-lock
+            echo "V7_DEPENDENCY_LOCKED=false" >> "$GITHUB_ENV"
+            echo "::warning::package-lock.json is not yet present; dependency resolution is not fully locked"
+          fi
+
+      - name: Verify canonical runner manifest
+        run: npm run v7:manifest -- --check
+
+      - name: Checkout atomic request source for PR
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .request-source
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout private Solo Audit Controller for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Solo-Audit-Controller
+          ref: ${{ inputs.controller_ref }}
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller-request
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve and validate PR request
+        if: github.event_name == 'pull_request'
+        run: npm run v7 -- resolve --mode pr --source .request-source --output .v7-request/request.json
+
+      - name: Resolve and validate dispatched request
+        if: github.event_name == 'workflow_dispatch'
+        run: npm run v7 -- resolve --mode dispatch --source .controller-request --request-path "${{ inputs.request_path }}" --output .v7-request/request.json
+
+      - name: Execute V7 request
+        env:
+          AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        run: npm run v7:execute -- --request .v7-request/request.json
+
+      - name: Upload request-addressable V7 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.V7_ARTIFACT_NAME || 'v7-execution-unresolved' }}
+          path: .audit-evidence/v7-execution
+          if-no-files-found: warn
+          retention-days: 30
