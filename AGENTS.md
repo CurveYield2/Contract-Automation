@@ -1,6 +1,19 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v7
+Policy version: v8
+
+## Archive boundary — mandatory
+
+`CurveYield2/archive` is the only repository-level home for superseded, deprecated, obsolete, historical-only, backup, or replaced Contract-Automation files.
+
+- Active Contract-Automation paths contain only current operational files and current instructions.
+- When an active file is superseded, preserve the old file in `CurveYield2/archive/Contract-Automation/<original-path>` and remove it from this repository.
+- Do not keep version chains such as active `foo-v1`, `foo-v2`, `foo-v3` siblings when only one version is current.
+- Git history remains available, but do not use Git history as an excuse to leave obsolete files beside live files.
+- Agents MUST NOT use Archive files as current execution instructions, current schemas, current workflows, current skeletons, or current policy unless a human explicitly requests historical recovery/comparison.
+- If an Archive copy is needed, preserve the exact original bytes/digest before deleting the active-repo copy.
+
+Static checks enforce this rule for V7 workflows, process artifacts, and Phase-6 skeleton-kit siblings.
 
 ## Canonical V7 control surface
 
@@ -11,7 +24,7 @@ For Audit V7, this repository has exactly one active execution workflow, one act
 - runner manifest: `process/RUNNER_MANIFEST.json`
 - CLI: `packages/github-native-sim/src/v7-cli.mjs`
 
-Agents MUST NOT choose among historical workflow/manifests or recreate version-suffixed active entrypoints. Git history is the archive.
+Agents MUST NOT choose among historical workflow/manifests or recreate version-suffixed active entrypoints.
 
 Normal operations are:
 
