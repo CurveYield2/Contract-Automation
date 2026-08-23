@@ -1,0 +1,162 @@
+name: V7 Audit Controller Execution v5
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'github-native-sim/requests/**/request.json'
+  workflow_dispatch:
+    inputs:
+      request_path:
+        description: Repository-relative deep-assurance-github-request-v2 JSON path in Solo-Audit-Controller
+        required: true
+        type: string
+      controller_ref:
+        description: Solo-Audit-Controller ref containing the request file
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  execute-v7-request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout trusted Contract-Automation runner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install trusted runner dependencies
+        run: npm install --no-package-lock
+
+      - name: Checkout atomic request source for PR
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: .request-source
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout private Solo Audit Controller for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Solo-Audit-Controller
+          ref: ${{ inputs.controller_ref }}
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller-request
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve exactly one V2 request
+        env:
+          DISPATCH_REQUEST_PATH: ${{ inputs.request_path }}
+        run: |
+          mkdir -p .v7-request
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            case "$DISPATCH_REQUEST_PATH" in
+              campaigns/*/requests/*.json) ;;
+              *) echo "Invalid V7 request path: $DISPATCH_REQUEST_PATH" >&2; exit 1 ;;
+            esac
+            test -f ".controller-request/$DISPATCH_REQUEST_PATH"
+            cp ".controller-request/$DISPATCH_REQUEST_PATH" .v7-request/request.json
+          else
+            mapfile -t requests < <(find .request-source/github-native-sim/requests -mindepth 2 -maxdepth 2 -type f -name request.json | sort)
+            test "${#requests[@]}" -eq 1
+            cp "${requests[0]}" .v7-request/request.json
+          fi
+
+      - name: Validate V2 request envelope
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { validateDeepAssuranceRequestV2 } from './packages/github-native-sim/src/schema.mjs';
+          const request = validateDeepAssuranceRequestV2(JSON.parse(fs.readFileSync('.v7-request/request.json', 'utf8')));
+          console.log(`validated_request=${request.requestId}`);
+          console.log(`phase=${request.phaseId}`);
+          console.log(`profile=${request.profileId}`);
+          NODE
+
+      - name: Execute mandatory preflight then V7 request
+        env:
+          AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        run: |
+          mkdir -p .audit-evidence/v7-execution-v5
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { execFileSync } from 'node:child_process';
+          import { runGitHubNativeJobV2 } from './packages/github-native-sim/src/run-job-file-v2.mjs';
+
+          const request = JSON.parse(fs.readFileSync('.v7-request/request.json', 'utf8'));
+          const runnerCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+          const result = await runGitHubNativeJobV2(request, {
+            workspaceRoot: '.audit-work/v7-execution-v5',
+            environment: process.env,
+            runnerCommit,
+          });
+          const raw = `${JSON.stringify(result, null, 2)}\n`;
+          fs.writeFileSync('.audit-evidence/v7-execution-v5/raw-result-v5.json', raw);
+          const artifactDigest = createHash('sha256').update(raw).digest('hex');
+          const evidence = {
+            schemaVersion: 'audit-v7-github-execution-evidence-v1',
+            requestId: request.requestId,
+            requestDigest: request.requestDigest,
+            processId: request.processId,
+            profileId: request.profileId,
+            source: request.source,
+            runnerImplementation: { repository: process.env.GITHUB_REPOSITORY, commit: runnerCommit },
+            preflight: result.preflight ?? null,
+            resultStatus: result.status === 'completed' ? ((result.failedStepCount ?? 0) > 0 || (result.analysisComponentFailureCount ?? 0) > 0 ? 'FINDINGS' : 'PASS') : 'FAIL',
+            artifactDigest,
+            deploymentGasEvidence: result.deploymentGasEvidence ?? null,
+            simulationEvidence: result.simulation ?? null,
+            analysisComponentFailureCount: result.analysisComponentFailureCount ?? 0,
+            failedStepCount: result.failedStepCount ?? 0,
+            failedSteps: result.failedSteps ?? [],
+            continuityDisposition: result.continuityDisposition ?? null,
+            authoritativeFinding: false,
+          };
+          fs.writeFileSync('.audit-evidence/v7-execution-v5/controller-evidence-v5.json', `${JSON.stringify(evidence, null, 2)}\n`);
+          NODE
+
+      - name: Upload V7 execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v7-execution-v5
+          path: .audit-evidence/v7-execution-v5
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce preflight and execution outcome
+        if: always()
+        run: |
+          test -f .audit-evidence/v7-execution-v5/raw-result-v5.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const result = JSON.parse(fs.readFileSync('.audit-evidence/v7-execution-v5/raw-result-v5.json', 'utf8'));
+          if (result.preflight && result.preflight.status !== 'PASS') {
+            console.error(`V7 preflight failed; next state=${result.preflight.nextState ?? 'RUNNER_REPAIR_REBIND'}`);
+            process.exit(1);
+          }
+          if (result.status !== 'completed') {
+            console.error(`V7 execution failed: ${result.error?.message ?? 'unknown failure'}`);
+            process.exit(1);
+          }
+          NODE
