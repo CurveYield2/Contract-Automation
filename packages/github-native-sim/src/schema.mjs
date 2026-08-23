@@ -1,4 +1,5 @@
 import { validateWorkflow } from '../../protocol/src/index.mjs';
+import { V7_POLICY } from './v7-policy.mjs';
 
 export const V2_AUTOMATION_RELEASE = Object.freeze({
   repository: 'CurveYield2/Contract-Automation',
@@ -29,7 +30,7 @@ const CONFIGURATION_FIELDS = new Set([
   'compilers', 'timeoutMinutes', 'analysis', 'optimizer', 'evmVersion', 'viaIR',
   'deploymentGas', 'simulation', 'build', 'sbom', 'coverage', 'properties', 'harness', 'actions'
 ]);
-const PROFILE_IDS = new Set(['github-native-compile-v2', 'github-native-simulate-v2']);
+const PROFILE_IDS = new Set(Object.values(V7_POLICY.profiles));
 const V7_FORK_CHAINS = new Set(['ethereum', 'base']);
 const FORBIDDEN_DYNAMIC_KEYS = new Set(['command', 'shell', 'script', 'npmScript', 'rawTransaction', 'signedTransaction', 'rpc', 'rpcUrl', 'privateKey', 'privateKeys', 'mnemonic', 'seed', 'secret']);
 
@@ -140,6 +141,27 @@ function validateAnalysis(analysis) {
   validateNativeFuzz(analysis.nativeFuzz);
 }
 
+function validateHarness(harness, input) {
+  if (harness === undefined) return;
+  object(harness, 'configuration.harness');
+  const keys = Object.keys(harness);
+  if (harness.kind === V7_POLICY.phase6.overlayKind) {
+    if (input.phaseId !== 'build-and-test') fail('configuration.harness.kind', 'Phase 6 audit overlays are allowed only for build-and-test');
+    const allowed = new Set(['kind', 'bundleId']);
+    for (const key of keys) if (!allowed.has(key)) fail(`configuration.harness.${key}`, 'is not allowed for Phase 6 audit overlay');
+    string(harness.bundleId, 'configuration.harness.bundleId', { max: 128, pattern: /^[a-z0-9][a-z0-9._-]{0,127}$/ });
+    return;
+  }
+  if ('recipeId' in harness) {
+    const allowed = new Set(['recipeId']);
+    for (const key of keys) if (!allowed.has(key)) fail(`configuration.harness.${key}`, 'is not allowed for Phase 7 lifecycle recipe');
+    if (input.phaseId !== 'fork-simulation-lifecycle') fail('configuration.harness.recipeId', 'lifecycle recipe is allowed only for fork-simulation-lifecycle');
+    string(harness.recipeId, 'configuration.harness.recipeId', { max: 160 });
+    return;
+  }
+  fail('configuration.harness', `must be either {kind:${V7_POLICY.phase6.overlayKind},bundleId} or {recipeId}`);
+}
+
 function validateDeploymentGas(deploymentGas, { required = false } = {}) {
   if (deploymentGas === undefined) {
     if (required) fail('configuration.deploymentGas', 'is required for Phase 7');
@@ -184,6 +206,7 @@ function validateConfiguration(configuration, input) {
   scanForbiddenDynamicKeys(configuration);
   validateCompilers(configuration.compilers);
   validateAnalysis(configuration.analysis);
+  validateHarness(configuration.harness, input);
   if ('timeoutMinutes' in configuration) {
     const value = configuration.timeoutMinutes;
     if (!Number.isInteger(value) || value < 1 || value > 35) fail('configuration.timeoutMinutes', 'must be an integer from 1 to 35');
@@ -206,8 +229,8 @@ export function validateDeepAssuranceRequestV2(input) {
   for (const key of Object.keys(input)) if (!TOP_LEVEL_FIELDS.has(key)) fail(key, 'is not allowed');
   for (const key of TOP_LEVEL_FIELDS) if (!(key in input)) fail(key, 'is required');
 
-  if (input.schemaVersion !== 'deep-assurance-github-request-v2') fail('schemaVersion', 'must equal deep-assurance-github-request-v2');
-  if (input.processId !== 'audit-v7-independent-review') fail('processId', 'must equal audit-v7-independent-review');
+  if (input.schemaVersion !== V7_POLICY.requestSchema) fail('schemaVersion', `must equal ${V7_POLICY.requestSchema}`);
+  if (input.processId !== V7_POLICY.processId) fail('processId', `must equal ${V7_POLICY.processId}`);
   exactObject(input.contractAutomationRelease, V2_AUTOMATION_RELEASE, 'contractAutomationRelease');
   exactObject(input.runnerRelease, V2_RUNNER_RELEASE, 'runnerRelease');
 
@@ -215,7 +238,7 @@ export function validateDeepAssuranceRequestV2(input) {
   string(input.assignmentId, 'assignmentId', { max: 200 });
   string(input.phaseId, 'phaseId', { max: 100 });
   string(input.gateId, 'gateId', { max: 160 });
-  if (!PROFILE_IDS.has(input.profileId)) fail('profileId', 'must be github-native-compile-v2 or github-native-simulate-v2');
+  if (!PROFILE_IDS.has(input.profileId)) fail('profileId', `must be ${[...PROFILE_IDS].join(' or ')}`);
   validateSource(input.source);
   validateConfiguration(input.configuration, input);
   string(input.requestId, 'requestId', { min: 36, max: 36, pattern: /^dar-[0-9a-f]{32}$/ });
