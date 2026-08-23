@@ -54,7 +54,7 @@ jobs:
         shell: bash
         run: |
           if [ -f package-lock.json ]; then
-            npm ci --omit=optional
+            npm ci --force --omit=optional
             echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
           else
             npm install --no-package-lock
