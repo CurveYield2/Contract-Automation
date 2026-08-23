@@ -1,6 +1,30 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v4
+Policy version: v5
+
+## Existing mutable Anvil RPC — mandatory shared execution boundary
+
+`SIM_ARCHIVE_PRIMARY_ETHEREUM_01` is the existing approved CurveYield mutable Ethereum Anvil RPC used by the trusted Contract-Automation simulation lane.
+
+**Any audit process that requires fork-state access or mutable JSON-RPC semantics MUST use this existing runner-managed mutable Anvil RPC path.**
+
+- Do not request, accept, invent, or substitute another mutable RPC URL.
+- Do not route Medusa, Foundry, exploit reproduction, deployment/lifecycle simulation, impersonation, balance/state mutation, time/block mutation, snapshot/revert, or comparable mutable-state work through a public/read-only/requester-supplied RPC.
+- Do not create a parallel local or remote Anvil fork system for V7 work when the existing mutable RPC path applies.
+- The mutable RPC secret is runner-owned. It must never be serialized into a V2 request, committed harness/config, campaign ledger, corpus, artifact, raw evidence, or final report.
+- V2 request fields named `rpc`, `rpcUrl`, `privateKey`, `seed`, and other requester-controlled dynamic execution fields remain forbidden.
+- Evidence may record only the secret profile name, chain identity, preflight-frozen block number/hash, and policy disposition.
+- If the existing mutable RPC is missing, unreachable, or wrong-chain, fail with typed infrastructure evidence and return to `RUNNER_REPAIR_REBIND`. Do not fall back to another provider.
+
+### Phase 6 binding
+
+For applicable Phase 6 Solidity/EVM fuzz work:
+
+- preflight probes `SIM_ARCHIVE_PRIMARY_ETHEREUM_01`, verifies Ethereum chain identity, and freezes the observed block number/hash;
+- Medusa MUST run in fork mode through that RPC. The trusted runner enforces `medusa fuzz --rpc-url <runtime-secret> --rpc-block <frozen-block>`;
+- native Foundry MUST use the same fork identity. The trusted runner enforces `forge test ... --fork-url <runtime-secret> --fork-block-number <frozen-block>`;
+- Medusa and Foundry may perform their fuzz-state exploration in their own execution engines, but their fork source is the same existing mutable Anvil RPC and neither may substitute another RPC;
+- checked-in templates must not contain a usable RPC URL. Use `packages/github-native-sim/harness-skeletons-v2/`.
 
 ## Full simulation backend — mandatory
 
@@ -10,18 +34,19 @@ Policy version: v4
 - Do not use Ganache for full simulations, even for older EVM versions or as a compatibility fallback.
 - Do not silently downgrade the configured EVM version to make another backend work.
 - Preserve the request's exact compiler/EVM profile and execute it on Anvil.
-- For Ethereum Phase-7 archive simulations, continue to use `SIM_ARCHIVE_PRIMARY_ETHEREUM_01` through the trusted Contract-Automation execution lane.
+- For Ethereum Phase-7 simulations, continue to use `SIM_ARCHIVE_PRIMARY_ETHEREUM_01` through the trusted Contract-Automation execution lane.
 - Ganache code may remain only for bounded lightweight/local regression utilities that are not authoritative full-simulation evidence. It must never be selected by the V7 Phase-7/full-fork execution path.
 
-If Anvil cannot start or cannot execute a required fork, fail with typed execution evidence and repair the Anvil path. Do not substitute Ganache.
+If Anvil cannot execute a required simulation, fail with typed execution evidence and repair the approved Anvil path. Do not substitute another engine or RPC.
 
 ## V7 execution preflight and qualification — mandatory
 
 - New V7 work is V2-only: `deep-assurance-github-request-v2`, `github-native-compile-v2`, and `github-native-simulate-v2`. V1 execution profiles are historical/non-executable.
 - Infrastructure qualification is repository-level and occurs outside audit campaigns. Use `.github/workflows/v7-execution-infrastructure-qualification-v1.yml` to qualify an exact candidate release before the Solo Audit Controller admits it to a campaign.
-- Phase 6 must classify target Medusa and Foundry/native-fuzz applicability before analyzer invocation. Use `packages/github-native-sim/src/phase6-execution-preflight-v1.mjs`. For an applicable Solidity/EVM target, a missing usable Medusa or Foundry harness is `HARNESS_REQUIRED`, never `NOT_APPLICABLE`; transition to `PHASE6_HARNESS_AUTHORING`. The auditor owns creation of the missing audit-only harness/configuration without modifying frozen production source. Start from `packages/github-native-sim/harness-skeletons-v1/` when useful. `NOT_APPLICABLE` requires actual technical target/tool incompatibility.
+- Phase 6 must classify target Medusa and Foundry/native-fuzz applicability before analyzer invocation. Use `packages/github-native-sim/src/phase6-execution-preflight-v1.mjs`. For an applicable Solidity/EVM target, a missing usable Medusa or Foundry harness is `HARNESS_REQUIRED`, never `NOT_APPLICABLE`; transition to `PHASE6_HARNESS_AUTHORING`. The auditor owns creation of the missing audit-only harness/configuration without modifying frozen production source. Start from `packages/github-native-sim/harness-skeletons-v2/`. `NOT_APPLICABLE` requires actual technical target/tool incompatibility.
+- Phase 6 preflight also requires the existing mutable Anvil RPC to pass identity/readiness checks whenever Medusa or native Foundry is requested.
 - Phase 6 audit-only harnesses, configs, models, dictionaries, and corpus inputs must be separately source-bound and hashed. If the admitted runner cannot stage an authored harness overlay into both preflight and execution without altering `request.source`, keep the campaign blocked in the harness-authoring/runner-repair path; do not smuggle the harness into frozen production source.
-- Phase 7 must pass the Anvil/archive fork preflight before lifecycle execution. Use `packages/github-native-sim/src/phase7-fork-preflight-v1.mjs` to prove launcher/hardfork, archive secret, chain identity, pinned state, target code, impersonation/balance control, and workflow-action support.
+- Phase 7 must pass the Anvil/archive fork preflight before lifecycle execution. Use `packages/github-native-sim/src/phase7-fork-preflight-v1.mjs` to prove launcher/hardfork, approved RPC secret, chain identity, pinned state, target code, impersonation/balance control, and workflow-action support.
 - Prefer standardized Phase-7 lifecycle recipes from `packages/github-native-sim/src/lifecycle-recipes-v1.mjs`. Unsupported behavior is `RECIPE_GAP`, not permission for arbitrary commands.
 - If runner infrastructure must change after campaign admission, preserve the failed attempt and return control to the Solo Audit Controller `RUNNER_REPAIR_REBIND` state. Do not change target production source to repair audit infrastructure.
 
