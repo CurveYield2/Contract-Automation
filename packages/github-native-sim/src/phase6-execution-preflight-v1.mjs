@@ -42,6 +42,7 @@ export async function runPhase6ExecutionPreflightV1({
   environment = process.env,
   fetchImpl = globalThis.fetch,
   runCommand = runProcess,
+  mutableRpcSession = null,
 }) {
   if (!request || request.phaseId !== 'build-and-test') throw new Error('Phase 6 preflight requires a build-and-test request');
   if (request.profileId !== 'github-native-simulate-v2') throw new Error('Phase 6 preflight requires github-native-simulate-v2');
@@ -62,7 +63,9 @@ export async function runPhase6ExecutionPreflightV1({
   const nativeFuzzRequested = request.configuration?.analysis?.nativeFuzz?.enabled === true;
   const mutableRpcRequired = medusaRequested || nativeFuzzRequested;
   const mutableRpc = mutableRpcRequired
-    ? await probePhase6MutableRpc({ environment, fetchImpl })
+    ? (mutableRpcSession?.evidence
+        ? structuredClone(mutableRpcSession.evidence)
+        : await probePhase6MutableRpc({ environment, fetchImpl }))
     : { status: 'NOT_REQUIRED', profile: null, backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY' };
 
   const medusaHarnessPresent = medusaConfigs.length > 0 || propertySources.length > 0;
@@ -126,12 +129,14 @@ export async function runPhase6ExecutionPreflightV1({
       requested: request.configuration.compilers,
     },
     mutableRpcPolicy: {
-      rule: 'ALL_PHASE6_MUTABLE_OR_FORK_RPC_ACCESS_USES_EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC',
+      rule: 'ONE_IDENTITY_NORMALIZED_RPC_SESSION_FOR_PHASE6_PREFLIGHT_MEDUSA_AND_FOUNDRY',
       requesterSuppliedRpcAllowed: false,
       alternateMutableRpcAllowed: false,
       medusaForkModeRequired: medusaRequested,
       foundryForkModeRequired: nativeFuzzRequested,
       runtimeSecretMustNotAppearInEvidence: true,
+      sharedSessionRequired: mutableRpcRequired,
+      sharedSessionObserved: mutableRpcRequired ? Boolean(mutableRpcSession?.runtime?.identityNormalized) : null,
     },
     mutableRpc,
     harnessPolicy: {
