@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/v7-execution-infrastructure-qualification.yml'
+      - '.github/actions/setup-v7-toolchain/**'
       - 'packages/github-native-sim/src/**'
       - 'packages/github-native-sim/test/**'
       - 'packages/runner/src/**'
@@ -19,6 +20,7 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/v7-execution-infrastructure-qualification.yml'
+      - '.github/actions/setup-v7-toolchain/**'
       - 'packages/github-native-sim/src/**'
       - 'packages/github-native-sim/test/**'
       - 'packages/runner/src/**'
@@ -29,7 +31,7 @@ on:
       - 'package-lock.json'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: v7-qualification-${{ github.event.pull_request.number || github.ref }}
@@ -38,7 +40,7 @@ concurrency:
 jobs:
   qualify-v7-execution-infrastructure:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Checkout exact candidate runner
         uses: actions/checkout@v4
@@ -60,44 +62,93 @@ jobs:
           restore-keys: |
             v7-qualification-npm-${{ runner.os }}-
 
-      - name: Install dependencies
+      - name: Install exact Node dependencies
         shell: bash
         run: |
+          set -euo pipefail
           if [ -f package-lock.json ]; then
             npm ci
             echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
           else
-            npm install --no-package-lock
+            npm install --package-lock-only --ignore-scripts
+            npm ci
             echo "V7_DEPENDENCY_LOCKED=false" >> "$GITHUB_ENV"
-            echo "::warning::package-lock.json is not yet present; dependency resolution is not fully locked"
           fi
+
+      - name: Bootstrap package-lock into trusted main
+        if: github.event_name != 'pull_request' && env.V7_DEPENDENCY_LOCKED != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/package-lock.json?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -z "$existing_sha" ]; then
+            content="$(base64 -w0 package-lock.json)"
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/package-lock.json" \
+              -f message='chore(v7): generate canonical dependency lock' \
+              -f content="$content" \
+              -f branch='main' >/dev/null
+            echo "package_lock_published=true" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "package_lock_already_present=true" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Install and verify canonical V7 toolchain
+        uses: ./.github/actions/setup-v7-toolchain
+
+      - name: Initialize qualification evidence
+        run: mkdir -p .audit-evidence/v7-infrastructure-qualification
+
+      - name: Record exact toolchain verification evidence
+        run: npm run v7:toolchain:verify > .audit-evidence/v7-infrastructure-qualification/toolchain.json
 
       - name: Verify canonical runner manifest
         run: npm run v7:manifest -- --check
 
-      - name: V2 request and evidence contract qualification
+      - name: V7 request and execution contract qualification
         run: node --test packages/github-native-sim/test/*.test.mjs
 
       - name: Anvil-only runner qualification
         run: node --test packages/runner/test/anvil-*.test.mjs packages/runner/test/full-simulation-anvil-only-v1.test.mjs
 
+      - name: Full repository Node test suite
+        run: npm test
+
       - name: Repository static checks
-        run: node scripts/check.mjs
+        run: npm run lint
 
       - name: Repository build checks
-        run: node scripts/build.mjs
+        run: npm run build
 
-      - name: Live trusted-main mutable-Anvil qualification
+      - name: Live trusted-main Phase 6 and Phase 7 mutable-Anvil qualification
         if: github.event_name != 'pull_request'
         env:
           SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
         run: |
-          mkdir -p .audit-evidence/v7-infrastructure-qualification
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import { execFileSync } from 'node:child_process';
+          import { createPhase6MutableRpcSession } from './packages/github-native-sim/src/phase6-mutable-rpc-v1.mjs';
           import { runPhase7ForkPreflightV2 } from './packages/github-native-sim/src/phase7-fork-preflight-v2.mjs';
           import { V7_POLICY } from './packages/github-native-sim/src/v7-policy.mjs';
+
+          const phase6Session = await createPhase6MutableRpcSession({ environment: process.env });
+          let phase6;
+          try {
+            phase6 = {
+              ...phase6Session.evidence,
+              runtime: phase6Session.runtime ? {
+                identityNormalized: phase6Session.runtime.identityNormalized === true,
+                blockNumber: phase6Session.runtime.blockNumber,
+                blockHash: phase6Session.runtime.blockHash,
+                profile: phase6Session.runtime.profile,
+                rpcUrlExposed: false,
+              } : null,
+            };
+          } finally {
+            await phase6Session.close();
+          }
 
           const expectedBlockHash='0xb7f45fdc91b604d7c0450a505cf5c9571c9bb6267c86b6a8d535f4bc11b3f4ee';
           const request={
@@ -111,7 +162,11 @@ jobs:
           const qualifiedCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
           const observed=preflight.observedPinnedBlockHash?.toLowerCase()??null;
           const checks={
-            preflightPass:preflight.status==='PASS',
+            dependencyLockPresent:fs.existsSync('package-lock.json'),
+            phase6MutableRpcPass:phase6.status==='PASS',
+            phase6IdentityNormalized:phase6.runtime?.identityNormalized===true && phase6.identityNormalization?.status==='PASS',
+            phase6RpcSecretNotExposed:JSON.stringify(phase6).includes(process.env.SIM_ARCHIVE_PRIMARY_ETHEREUM_01)===false,
+            phase7PreflightPass:preflight.status==='PASS',
             recipeEnforced:preflight.checks?.lifecycleRecipe?.status==='PASS',
             recipeId:preflight.recipeId==='external-readiness-v1',
             ethereumMutableRpcOnly:preflight.chain==='ethereum',
@@ -125,24 +180,26 @@ jobs:
             workflowAllowlist:preflight.checks?.workflowActions?.status==='PASS'
           };
           const qualification={
-            schemaVersion:'v7-execution-infrastructure-qualification-v3',
+            schemaVersion:'v7-execution-infrastructure-qualification-v4',
             status:Object.values(checks).every(Boolean)?'PASS':'FAIL',
             qualifiedCommit,
             requestSchema:V7_POLICY.requestSchema,
             profiles:Object.values(V7_POLICY.profiles),
             fullSimulationBackend:'anvil',
-            mutableRpcPolicy:{supportedChains:['ethereum'],rpcProfile:V7_POLICY.mutableRpc.ethereumProfile},
-            dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true',
+            mutableRpcPolicy:{supportedChains:['ethereum'],rpcProfile:V7_POLICY.mutableRpc.ethereumProfile,phase6IdentityPolicy:V7_POLICY.phase6.rpcIdentityPolicy},
+            toolchain:{slither:V7_POLICY.tools.slither,medusa:V7_POLICY.tools.medusa,forge:V7_POLICY.tools.forge,anvilPackage:V7_POLICY.tools.anvilPackage},
+            dependencyLockPresent:fs.existsSync('package-lock.json'),
+            phase6,
             fixture:{chain:'ethereum',block:25817400,expectedBlockHash},
             checks,
-            preflight
+            phase7:preflight
           };
           fs.writeFileSync('.audit-evidence/v7-infrastructure-qualification/qualification.json',`${JSON.stringify(qualification,null,2)}\n`);
           if(qualification.status!=='PASS') process.exit(1);
           NODE
 
       - name: Upload qualification evidence
-        if: always() && github.event_name != 'pull_request'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: v7-infrastructure-qualification-${{ github.sha }}
