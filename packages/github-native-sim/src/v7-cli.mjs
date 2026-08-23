@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { runGitHubNativeJobV2 } from './run-job-file-v2.mjs';
 import { validateDeepAssuranceRequestV2 } from './schema.mjs';
 import { submitV7Request } from './request-submission-v1.mjs';
+import { resolveV7Request } from './request-resolution-v1.mjs';
 import { initializePhase6HarnessBundle, validatePhase6HarnessBundle } from './phase6-harness-authoring-v1.mjs';
 import { checkRunnerManifestV2, writeRunnerManifestV2 } from './runner-manifest-v2.mjs';
 import { V7_POLICY } from './v7-policy.mjs';
@@ -58,6 +59,21 @@ async function readRequest(requestPath) {
   try { parsed = JSON.parse(bytes.toString('utf8')); }
   catch (error) { throw new Error(`Request JSON parse failed: ${error.message}`); }
   return { request: validateDeepAssuranceRequestV2(parsed), bytes };
+}
+
+async function resolveCommand(args) {
+  const result = await resolveV7Request({
+    mode: args.mode,
+    sourceRoot: args.source,
+    requestPath: typeof args['request-path'] === 'string' ? args['request-path'] : null,
+    outputPath: args.output ?? '.v7-request/request.json',
+  });
+  await appendGithubEnv({
+    V7_REQUEST_ID: result.requestId,
+    V7_PHASE_ID: result.phaseId,
+  });
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  return 0;
 }
 
 async function executeCommand(args) {
@@ -186,7 +202,7 @@ async function manifestCommand(args) {
 }
 
 function help() {
-  return `V7 Contract-Automation CLI\n\nCommands:\n  execute --request <request.json> [--workspace <dir>] [--evidence-dir <dir>]\n  submit --request <request.json> [--repository owner/repo] [--base main] [--branch name] [--no-pr]\n  harness:init --request <request.json> [--campaign discovery|property|targeted] [--type standard] [--bundle id]\n  harness:validate --bundle <bundle-id> [--request <request.json>]\n  manifest [--check] [--write]\n`;
+  return `V7 Contract-Automation CLI\n\nCommands:\n  resolve --mode pr|dispatch --source <checkout> [--request-path campaigns/.../request.json] [--output .v7-request/request.json]\n  execute --request <request.json> [--workspace <dir>] [--evidence-dir <dir>]\n  submit --request <request.json> [--repository owner/repo] [--base main] [--branch name] [--no-pr]\n  harness:init --request <request.json> [--campaign discovery|property|targeted] [--type standard] [--bundle id]\n  harness:validate --bundle <bundle-id> [--request <request.json>]\n  manifest [--check] [--write]\n`;
 }
 
 async function main() {
@@ -196,6 +212,7 @@ async function main() {
     process.stdout.write(help());
     return 0;
   }
+  if (command === 'resolve') return resolveCommand(args);
   if (command === 'execute') return executeCommand(args);
   if (command === 'submit') return submitCommand(args);
   if (command === 'harness:init') return harnessInitCommand(args);
