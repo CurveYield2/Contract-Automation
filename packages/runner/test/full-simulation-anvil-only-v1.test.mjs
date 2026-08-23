@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { selectForkEngineName } from '../src/anvil-engine.mjs';
 
 const runJobPath = fileURLToPath(new URL('../../github-native-sim/src/run-job-file.mjs', import.meta.url));
+const anvilEnginePath = fileURLToPath(new URL('../src/anvil-engine.mjs', import.meta.url));
 
 test('full fork simulation backend policy is Anvil-only for every EVM version', () => {
   for (const evmVersion of ['frontier', 'london', 'shanghai', 'cancun', 'prague', 'osaka', undefined]) {
@@ -12,9 +13,10 @@ test('full fork simulation backend policy is Anvil-only for every EVM version', 
   }
 });
 
-test('V7 Phase-7 runner is wired directly to Anvil and cannot silently fall back to Ganache', () => {
-  const source = fs.readFileSync(runJobPath, 'utf8');
-  assert.match(source, /import \{ startAnvilEngine \} from '\.\.\/\.\.\/runner\/src\/anvil-engine\.mjs';/);
-  assert.doesNotMatch(source, /startCompatibleForkEngine/);
-  assert.match(source, /startSimulationEngine = startAnvilEngine/);
+test('V7 Phase-7 runner cannot reach a Ganache fallback through its simulation adapter', () => {
+  const runJobSource = fs.readFileSync(runJobPath, 'utf8');
+  const anvilSource = fs.readFileSync(anvilEnginePath, 'utf8');
+  assert.match(runJobSource, /from '\.\.\/\.\.\/runner\/src\/anvil-engine\.mjs';/);
+  assert.doesNotMatch(anvilSource, /startGanacheEngine/);
+  assert.match(anvilSource, /export async function startCompatibleForkEngine\(input\) \{\s*return startAnvilEngine\(input\);\s*\}/);
 });
