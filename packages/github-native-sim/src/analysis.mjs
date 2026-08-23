@@ -1,9 +1,8 @@
 import { V7ExecutionError, runProcess } from './execution.mjs';
-import { inspectCyvlSdtV30MedusaHarness } from './cyvlsdt-v30-phase6-source-model-v1.mjs';
 
 const EXACT_SLITHER_VERSION = '0.11.6';
 const EXACT_MEDUSA_VERSION = '1.5.1';
-const CYVLSDT_V30_SOURCE_COMMIT = '6bde63416a4611e127b8bb3a5958e6b6d874c188';
+const MEDUSA_TEST_FAILED_EXIT_CODE = 7;
 const COMMIT = /^[0-9a-f]{40}$/;
 
 function raw(result = {}) {
@@ -75,12 +74,48 @@ function parseSlitherOutput(output) {
   }
 }
 
-export function parseMedusaOutput(output) {
+function stripAnsi(value) {
+  return String(value ?? '').replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
+}
+
+function parseMedusaConsoleOutput(output, exitCode) {
+  const text = stripAnsi(output);
+  const properties = [];
+  const seen = new Set();
+  const linePattern = /^\s*([A-Za-z_][A-Za-z0-9_]*(?:\([^\r\n]*\))?)\s*:\s*(passed|failed)\b/im;
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(linePattern);
+    if (!match) continue;
+    const name = match[1].replace(/\(\)$/, '');
+    const status = match[2].toLowerCase();
+    const key = `${name}:${status}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    properties.push({ name, status });
+  }
+  if (exitCode === MEDUSA_TEST_FAILED_EXIT_CODE && !properties.some((property) => property.status === 'failed')) {
+    properties.push({ name: 'medusa_failed_test_case', status: 'failed', detailsInRawTranscript: true });
+  }
+  const falsifiedProperties = properties.filter((property) => property.status === 'failed').length;
+  return {
+    outputFormat: 'console',
+    status: exitCode === MEDUSA_TEST_FAILED_EXIT_CODE ? 'falsified' : exitCode === 0 ? 'completed' : 'error',
+    properties,
+    falsifiedProperties,
+    corpus: {},
+    coverage: {},
+    statistics: {},
+    rawTranscriptPreserved: true,
+  };
+}
+
+export function parseMedusaOutput(output, { exitCode } = {}) {
   let parsed;
   try {
     parsed = JSON.parse(String(output ?? ''));
   } catch (error) {
-    throw new V7ExecutionError('EVIDENCE_PARSE_FAILURE', 'Medusa terminal output is not valid JSON', { cause: error.message });
+    if (Number.isInteger(exitCode)) return parseMedusaConsoleOutput(output, exitCode);
+    throw new V7ExecutionError('EVIDENCE_PARSE_FAILURE', 'Medusa terminal output is not valid JSON and no native exit code was supplied', { cause: error.message });
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new V7ExecutionError('EVIDENCE_PARSE_FAILURE', 'Medusa terminal output must be a JSON object');
@@ -88,6 +123,7 @@ export function parseMedusaOutput(output) {
   const properties = Array.isArray(parsed.properties) ? structuredClone(parsed.properties) : [];
   const falsifiedProperties = properties.filter((property) => property && property.status === 'failed').length;
   return {
+    outputFormat: 'json',
     status: typeof parsed.status === 'string' ? parsed.status : (falsifiedProperties > 0 ? 'falsified' : 'completed'),
     properties,
     falsifiedProperties,
@@ -168,31 +204,6 @@ export async function runSlitherAnalysis(input, { runCommand = runProcess } = {}
 export async function runMedusaAnalysis(input, { runCommand = runProcess } = {}) {
   validateCommon(input, EXACT_MEDUSA_VERSION);
 
-  // The admitted cyvlSDT v30 package contains no Medusa config and no Solidity property harness.
-  // Classify that applicability fact before tool invocation so missing runner-local binaries cannot be
-  // mistaken for a target defect. The successor still receives terminal Medusa evidence before the
-  // trusted native adversarial source-model lane is allowed to start.
-  if (input.sourceCommit === CYVLSDT_V30_SOURCE_COMMIT) {
-    const harness = await inspectCyvlSdtV30MedusaHarness(input.projectRoot);
-    if (!harness.medusaPropertyHarnessAvailable) {
-      return medusaResult(input, {
-        status: 'not_applicable',
-        terminal: true,
-        failureKind: 'HARNESS_NOT_APPLICABLE',
-        componentStatus: 'NOT_APPLICABLE',
-        continuationDisposition: 'CONTINUE_WITH_LIMITATION',
-        reason: 'Exact admitted cyvlSDT v30 source contains no Medusa configuration or Solidity property-test harness; creating a new target smart-contract harness is outside the frozen source fence.',
-        harnessInventory: harness,
-        authoritativeFinding: false,
-        rawOutput: {
-          exitCode: 0,
-          stdout: 'Medusa applicability preflight: NOT_APPLICABLE (no admitted property harness).',
-          stderr: ''
-        }
-      });
-    }
-  }
-
   const versionResult = await runCommand({ command: 'medusa', args: ['--version'], cwd: input.projectRoot });
   if (!versionResult || versionResult.exitCode !== 0) {
     return medusaResult(input, {
@@ -212,7 +223,7 @@ export async function runMedusaAnalysis(input, { runCommand = runProcess } = {})
     });
   }
 
-  const campaignResult = await runCommand({ command: 'medusa', args: ['fuzz'], cwd: input.projectRoot });
+  const campaignResult = await runCommand({ command: 'medusa', args: ['fuzz', '--no-color'], cwd: input.projectRoot });
   if (!campaignResult || campaignResult.exitCode < 0) {
     return medusaResult(input, {
       status: 'failed',
@@ -224,13 +235,25 @@ export async function runMedusaAnalysis(input, { runCommand = runProcess } = {})
     });
   }
 
-  const campaign = parseMedusaOutput(campaignResult.stdout);
-  const falsified = campaign.falsifiedProperties > 0 || campaign.status === 'falsified';
-  if (falsified || campaignResult.exitCode !== 0) {
+  const campaign = parseMedusaOutput(campaignResult.stdout, { exitCode: campaignResult.exitCode });
+  const falsified = campaign.falsifiedProperties > 0 || campaign.status === 'falsified' || campaignResult.exitCode === MEDUSA_TEST_FAILED_EXIT_CODE;
+  if (falsified) {
     return medusaResult(input, {
       status: 'completed_with_failures',
       terminal: true,
-      failureKind: falsified ? 'PROPERTY_FALSIFICATION' : 'ANALYSIS_COMPONENT_FAILURE',
+      failureKind: 'PROPERTY_FALSIFICATION',
+      componentStatus: 'COMPLETED_WITH_FAILURES',
+      continuationDisposition: 'CONTINUE_WITH_LIMITATION',
+      campaign,
+      rawOutput: raw(campaignResult)
+    });
+  }
+
+  if (campaignResult.exitCode !== 0) {
+    return medusaResult(input, {
+      status: 'completed_with_failures',
+      terminal: true,
+      failureKind: 'ANALYSIS_COMPONENT_FAILURE',
       componentStatus: 'COMPLETED_WITH_FAILURES',
       continuationDisposition: 'CONTINUE_WITH_LIMITATION',
       campaign,
