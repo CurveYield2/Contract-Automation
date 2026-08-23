@@ -32,6 +32,7 @@ async function stageForPreflight(source, { workspaceRoot, environment }) {
 }
 
 function preflightFailure(request, preflight) {
+  const repairRequired = preflight?.nextState === 'RUNNER_REPAIR_REBIND';
   return {
     schemaVersion: 'deep-assurance-github-native-execution-v2',
     requestId: request.requestId,
@@ -47,15 +48,40 @@ function preflightFailure(request, preflight) {
     analysisComponentFailureCount: 0,
     failedStepCount: 0,
     failedSteps: [],
-    continuityDisposition: 'RUNNER_REPAIR_REBIND_REQUIRED',
+    continuityDisposition: repairRequired ? 'RUNNER_REPAIR_REBIND_REQUIRED' : 'PREFLIGHT_BLOCKED',
     error: {
       name: 'V7ExecutionPreflightFailure',
       message: `${request.phaseId} preflight did not pass`,
-      kind: 'EXECUTION_PREFLIGHT_FAILURE',
+      kind: preflight?.failureKind ?? 'EXECUTION_PREFLIGHT_FAILURE',
     },
     startedAt: new Date().toISOString(),
     finishedAt: new Date().toISOString(),
   };
+}
+
+function terminalNotApplicable(backend, preflightComponent) {
+  return {
+    backend,
+    status: 'not_applicable',
+    terminal: true,
+    componentStatus: 'NOT_APPLICABLE',
+    continuationDisposition: 'CONTINUE_WITH_LIMITATION',
+    failureKind: 'TARGET_HARNESS_NOT_PRESENT',
+    reason: preflightComponent?.reason ?? 'TARGET_HARNESS_NOT_PRESENT',
+    preflightDetermined: true,
+    toolInvoked: false,
+  };
+}
+
+function phase6DelegateOptions(delegateOptions, preflight) {
+  const options = { ...delegateOptions };
+  if (preflight?.medusa?.status === 'NOT_APPLICABLE') {
+    options.runMedusa = async () => terminalNotApplicable('medusa', preflight.medusa);
+  }
+  if (preflight?.nativeFuzz?.status === 'NOT_APPLICABLE') {
+    options.runNativeFuzz = async () => terminalNotApplicable('native-fuzz', preflight.nativeFuzz);
+  }
+  return options;
 }
 
 export async function runGitHubNativeJobV2(input, {
@@ -83,10 +109,13 @@ export async function runGitHubNativeJobV2(input, {
 
   if (preflight && preflight.status !== 'PASS') return preflightFailure(request, preflight);
 
+  const delegated = request.phaseId === 'build-and-test'
+    ? phase6DelegateOptions(delegateOptions, preflight)
+    : delegateOptions;
   const result = await runGitHubNativeJobV1(request, {
     workspaceRoot: path.join(workspaceRoot, 'execution'),
     environment,
-    ...delegateOptions,
+    ...delegated,
   });
   return {
     ...result,
