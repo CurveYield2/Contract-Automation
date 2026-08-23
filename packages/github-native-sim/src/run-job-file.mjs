@@ -9,6 +9,7 @@ import { checkoutExactSource, safeRepositoryProjectPath, stageExactArchiveSource
 import { runNativeFuzzAnalysis } from './native-fuzz.mjs';
 import { validateDeepAssuranceRequestV2 } from './schema.mjs';
 import { runStage2aAnalysis } from './stage2a-toolchain.mjs';
+import { V7_POLICY } from './v7-policy.mjs';
 
 function nowIso(now = () => new Date()) { return now().toISOString(); }
 
@@ -104,7 +105,7 @@ function simulationFailure({ request, kind, error, steps = [], deployments = {} 
 }
 
 function phase7RpcEnv(simulation) {
-  if (simulation.chain === 'ethereum') return 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01';
+  if (simulation.chain === V7_POLICY.mutableRpc.chain) return V7_POLICY.mutableRpc.ethereumProfile;
   return CHAINS[simulation.chain].rpcEnv;
 }
 
@@ -141,13 +142,13 @@ async function executePhase7Simulation({ request, build, environment, startSimul
 
 async function executeSlither({ request, checkout, build, runSlither, runCommand }) {
   if (runSlither) return runSlither({ projectRoot: checkout.projectRoot, request, build });
-  const slitherVersion = request.configuration.analysis?.slither?.version ?? '0.11.6';
+  const slitherVersion = request.configuration.analysis?.slither?.version ?? V7_POLICY.tools.slither;
   return runSlitherAnalysis({ projectRoot: checkout.projectRoot, version: slitherVersion, sourceCommit: request.source.commit, rawArtifactRef: rawArtifactRef('slither/raw.json') }, { ...(runCommand ? { runCommand } : {}) });
 }
 
 async function executeMedusa({ request, checkout, build, phase6MutableRpc, runMedusa, runCommand }) {
   if (runMedusa) return runMedusa({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
-  const medusaVersion = request.configuration.analysis?.medusa?.version ?? '1.5.1';
+  const medusaVersion = request.configuration.analysis?.medusa?.version ?? V7_POLICY.tools.medusa;
   return runMedusaAnalysis({
     projectRoot: checkout.projectRoot,
     version: medusaVersion,
@@ -168,7 +169,7 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
   const blockNumber = phase6MutableRpc?.blockNumber;
   const forkEvidence = {
     mode: 'mandatory-fork',
-    backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY',
+    backendPolicy: V7_POLICY.mutableRpc.backendPolicy,
     rpcProfile: phase6MutableRpc?.profile ?? null,
     blockNumber: blockNumber ?? null,
     blockHash: phase6MutableRpc?.blockHash ?? null,
@@ -218,7 +219,7 @@ export async function runGitHubNativeJob(input, {
     return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation }, now);
   }
 
-  if (request.profileId === 'github-native-compile-v2') {
+  if (request.profileId === V7_POLICY.profiles.compile) {
     try {
       analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
     } catch (error) {
