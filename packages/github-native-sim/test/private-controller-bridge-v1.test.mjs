@@ -138,7 +138,7 @@ test('Phase 7 Ethereum lifecycle uses SIM_ARCHIVE_PRIMARY_ETHEREUM_01 as the aut
     },
     startSimulationEngine: async (input) => {
       calls.push(input);
-      return { runtime: {}, aliases: {}, async close() {} };
+      return { engine: 'anvil', runtime: {}, aliases: {}, async close() {} };
     },
     executeSimulationWorkflow: async () => ({ steps: [{ index: 0, action: 'deploy', status: 'completed' }], context: { deployments: {} } })
   });
