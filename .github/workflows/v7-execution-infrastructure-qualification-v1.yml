@@ -18,6 +18,11 @@ on:
       - 'packages/runner/test/**'
       - 'packages/protocol/src/**'
       - 'package.json'
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.deep-assurance/qualification-trigger/**'
 
 permissions:
   contents: read
@@ -30,7 +35,7 @@ jobs:
       - name: Checkout candidate infrastructure release
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_ref || github.sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_ref || github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 1
 
@@ -94,7 +99,7 @@ jobs:
           const preflight = await runPhase7ForkPreflightV1({ request, environment: process.env });
           const qualifiedCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
           const observedHash = preflight.observedPinnedBlockHash?.toLowerCase() ?? null;
-          const campaignIndependentChecks = {
+          const checks = {
             preflightPass: preflight.status === 'PASS',
             ethereumArchiveOnly: preflight.chain === 'ethereum',
             anvilOnly: preflight.checks?.anvilLauncher?.engine === 'anvil',
@@ -108,20 +113,17 @@ jobs:
           };
           const qualification = {
             schemaVersion: 'v7-execution-infrastructure-qualification-v1',
-            status: Object.values(campaignIndependentChecks).every(Boolean) ? 'PASS' : 'FAIL',
+            status: Object.values(checks).every(Boolean) ? 'PASS' : 'FAIL',
             qualifiedCommit,
             requestSchema: 'deep-assurance-github-request-v2',
             profiles: ['github-native-compile-v2', 'github-native-simulate-v2'],
             fullSimulationBackend: 'anvil',
             archivePolicy: { supportedChains: ['ethereum'], rpcProfile: 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01' },
             fixture: { chain: 'ethereum', block: 25817400, expectedBlockHash },
-            checks: campaignIndependentChecks,
+            checks,
             preflight
           };
-          fs.writeFileSync(
-            '.audit-evidence/v7-infrastructure-qualification-v1/qualification-v1.json',
-            `${JSON.stringify(qualification, null, 2)}\n`
-          );
+          fs.writeFileSync('.audit-evidence/v7-infrastructure-qualification-v1/qualification-v1.json', `${JSON.stringify(qualification, null, 2)}\n`);
           console.log(`qualification_status=${qualification.status}`);
           console.log(`qualified_commit=${qualifiedCommit}`);
           console.log(`archive_reconciliation_mode=${preflight.checks?.chainIdentity?.reconciliationMode ?? 'unavailable'}`);
