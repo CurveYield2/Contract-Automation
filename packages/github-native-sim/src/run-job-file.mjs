@@ -20,33 +20,15 @@ function rawArtifactRef(component) {
 
 async function defaultCheckoutSource(source, { workspaceRoot, runCommand, environment } = {}) {
   const checkoutRoot = path.join(workspaceRoot, 'checkout');
-  const checkout = await checkoutExactSource({
-    repository: source.repository,
-    commit: source.commit,
-    destination: checkoutRoot
-  }, {
-    ...(runCommand ? { runCommand } : {}),
-    ...(environment ? { environment } : {})
-  });
+  const checkout = await checkoutExactSource({ repository: source.repository, commit: source.commit, destination: checkoutRoot }, { ...(runCommand ? { runCommand } : {}), ...(environment ? { environment } : {}) });
   const staged = source.archivePath
-    ? await stageExactArchiveSource({
-        checkoutRoot,
-        workspaceRoot,
-        archivePath: source.archivePath,
-        archiveSha256: source.archiveSha256,
-        projectPath: source.projectPath
-      })
+    ? await stageExactArchiveSource({ checkoutRoot, workspaceRoot, archivePath: source.archivePath, archiveSha256: source.archiveSha256, projectPath: source.projectPath })
     : null;
   return {
     checkoutRoot,
     projectRoot: staged?.projectRoot ?? safeRepositoryProjectPath(checkoutRoot, source.projectPath),
     commit: checkout.commit,
-    ...(staged ? {
-      archivePath: staged.archivePath,
-      archiveSha256: staged.archiveSha256,
-      archiveExtractedBytes: staged.extractedBytes,
-      archiveEntryCount: staged.entryCount
-    } : {})
+    ...(staged ? { archivePath: staged.archivePath, archiveSha256: staged.archiveSha256, archiveExtractedBytes: staged.extractedBytes, archiveEntryCount: staged.entryCount } : {})
   };
 }
 
@@ -66,12 +48,7 @@ function failureResult(request, startedAt, error, partial = {}, now) {
     failedStepCount: partial.failedStepCount ?? 0,
     failedSteps: partial.failedSteps ?? [],
     continuityDisposition: partial.continuityDisposition ?? 'COMPLETE_EVIDENCE',
-    error: {
-      name: error?.name ?? 'Error',
-      message: error?.message ?? String(error),
-      ...(error?.code ? { code: error.code } : {}),
-      ...(error?.kind ? { kind: error.kind } : {})
-    },
+    error: { name: error?.name ?? 'Error', message: error?.message ?? String(error), ...(error?.code ? { code: error.code } : {}), ...(error?.kind ? { kind: error.kind } : {}) },
     startedAt,
     finishedAt: nowIso(now)
   };
@@ -87,22 +64,12 @@ function hasHardStop(analysis) {
 
 function deploymentGasConfigurationIdentity(request, build) {
   const compiler = (request.configuration.compilers ?? []).find((item) => item?.language === 'solidity') ?? { language: 'solidity', version: build?.compilerVersion };
-  return {
-    sourceCommit: request.source.commit,
-    compiler: { language: compiler.language ?? 'solidity', version: compiler.version ?? build?.compilerVersion },
-    optimizer: request.configuration.optimizer ?? null,
-    evmVersion: request.configuration.evmVersion ?? null,
-    viaIR: request.configuration.viaIR ?? false,
-  };
+  return { sourceCommit: request.source.commit, compiler: { language: compiler.language ?? 'solidity', version: compiler.version ?? build?.compilerVersion }, optimizer: request.configuration.optimizer ?? null, evmVersion: request.configuration.evmVersion ?? null, viaIR: request.configuration.viaIR ?? false };
 }
 
 function buildDeploymentGasEvidence(request, build) {
   if (request.phaseId !== 'fork-simulation-lifecycle') return null;
-  return normalizeDeploymentGasEvidence({
-    deployableContracts: request.configuration.deploymentGas.deployableContracts,
-    artifacts: build?.artifacts ?? [],
-    configurationIdentity: deploymentGasConfigurationIdentity(request, build),
-  });
+  return normalizeDeploymentGasEvidence({ deployableContracts: request.configuration.deploymentGas.deployableContracts, artifacts: build?.artifacts ?? [], configurationIdentity: deploymentGasConfigurationIdentity(request, build) });
 }
 
 function buildArtifactAccessor(artifacts = []) {
@@ -133,17 +100,7 @@ function buildArtifactAccessor(artifacts = []) {
 
 function simulationFailure({ request, kind, error, steps = [], deployments = {} }) {
   const simulation = request.configuration.simulation;
-  return {
-    status: 'failed',
-    failureKind: kind,
-    chain: simulation.chain,
-    chainId: CHAINS[simulation.chain].chainId,
-    block: simulation.block,
-    pinnedFork: true,
-    steps: structuredClone(steps),
-    deployments: structuredClone(deployments),
-    error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) }
-  };
+  return { status: 'failed', failureKind: kind, chain: simulation.chain, chainId: CHAINS[simulation.chain].chainId, block: simulation.block, pinnedFork: true, steps: structuredClone(steps), deployments: structuredClone(deployments), error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) } };
 }
 
 function phase7RpcEnv(simulation) {
@@ -163,43 +120,19 @@ async function executePhase7Simulation({ request, build, environment, startSimul
     error.simulationEvidence = simulationFailure({ request, kind: error.kind, error });
     throw error;
   }
-
   let engine;
   try {
-    engine = await startSimulationEngine({
-      artifacts: buildArtifactAccessor(build?.artifacts ?? []),
-      workflow: simulation.workflow,
-      chainId: chain.chainId,
-      forkUrl,
-      block: simulation.block,
-      evmVersion: request.configuration.evmVersion,
-    });
+    engine = await startSimulationEngine({ artifacts: buildArtifactAccessor(build?.artifacts ?? []), workflow: simulation.workflow, chainId: chain.chainId, forkUrl, block: simulation.block, evmVersion: request.configuration.evmVersion });
     if (engine?.engine !== 'anvil') {
       const error = new Error(`Phase 7 authoritative fork engine must be Anvil; received ${engine?.engine ?? 'unknown'}`);
       error.kind = 'FORK_ENGINE_POLICY_FAILURE';
       throw error;
     }
     const execution = await executeSimulationWorkflow(simulation.workflow, engine.runtime, { aliases: engine.aliases });
-    return {
-      status: 'completed',
-      failureKind: null,
-      engine: engine.engine,
-      chain: simulation.chain,
-      chainId: chain.chainId,
-      block: simulation.block,
-      pinnedFork: true,
-      steps: structuredClone(execution.steps ?? []),
-      deployments: structuredClone(execution.context?.deployments ?? {}),
-    };
+    return { status: 'completed', failureKind: null, engine: engine.engine, chain: simulation.chain, chainId: chain.chainId, block: simulation.block, pinnedFork: true, steps: structuredClone(execution.steps ?? []), deployments: structuredClone(execution.context?.deployments ?? {}) };
   } catch (error) {
     if (!error.kind) error.kind = 'LIFECYCLE_WORKFLOW_FAILURE';
-    error.simulationEvidence = simulationFailure({
-      request,
-      kind: error.kind,
-      error,
-      steps: error.workflowSteps ?? [],
-      deployments: error.workflowContext?.deployments ?? {},
-    });
+    error.simulationEvidence = simulationFailure({ request, kind: error.kind, error, steps: error.workflowSteps ?? [], deployments: error.workflowContext?.deployments ?? {} });
     throw error;
   } finally {
     if (engine?.close) await engine.close().catch(() => {});
@@ -209,35 +142,47 @@ async function executePhase7Simulation({ request, build, environment, startSimul
 async function executeSlither({ request, checkout, build, runSlither, runCommand }) {
   if (runSlither) return runSlither({ projectRoot: checkout.projectRoot, request, build });
   const slitherVersion = request.configuration.analysis?.slither?.version ?? '0.11.6';
-  return runSlitherAnalysis({
-    projectRoot: checkout.projectRoot,
-    version: slitherVersion,
-    sourceCommit: request.source.commit,
-    rawArtifactRef: rawArtifactRef('slither/raw.json')
-  }, { ...(runCommand ? { runCommand } : {}) });
+  return runSlitherAnalysis({ projectRoot: checkout.projectRoot, version: slitherVersion, sourceCommit: request.source.commit, rawArtifactRef: rawArtifactRef('slither/raw.json') }, { ...(runCommand ? { runCommand } : {}) });
 }
 
-async function executeMedusa({ request, checkout, build, runMedusa, runCommand }) {
-  if (runMedusa) return runMedusa({ projectRoot: checkout.projectRoot, request, build });
+async function executeMedusa({ request, checkout, build, phase6MutableRpc, runMedusa, runCommand }) {
+  if (runMedusa) return runMedusa({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const medusaVersion = request.configuration.analysis?.medusa?.version ?? '1.5.1';
   return runMedusaAnalysis({
     projectRoot: checkout.projectRoot,
     version: medusaVersion,
     sourceCommit: request.source.commit,
-    rawArtifactRef: rawArtifactRef('medusa/raw.json')
+    rawArtifactRef: rawArtifactRef('medusa/raw.json'),
+    rpcUrl: phase6MutableRpc?.url,
+    rpcBlock: phase6MutableRpc?.blockNumber,
+    rpcBlockHash: phase6MutableRpc?.blockHash ?? null,
+    rpcProfile: phase6MutableRpc?.profile ?? null,
   }, { ...(runCommand ? { runCommand } : {}) });
 }
 
-async function executeNativeFuzz({ request, checkout, build, runNativeFuzz, runCommand }) {
-  if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build });
+async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, environment, runNativeFuzz, runCommand }) {
+  if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const native = request.configuration.analysis?.nativeFuzz ?? {};
   const fuzzRuns = native.fuzzRuns ?? 256;
+  const rpcUrl = phase6MutableRpc?.url;
+  const blockNumber = phase6MutableRpc?.blockNumber;
+  const forkEvidence = {
+    mode: 'mandatory-fork',
+    backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY',
+    rpcProfile: phase6MutableRpc?.profile ?? null,
+    blockNumber: blockNumber ?? null,
+    blockHash: phase6MutableRpc?.blockHash ?? null,
+    rpcUrlExposed: false,
+  };
   return runNativeFuzzAnalysis({
     projectRoot: checkout.projectRoot,
     sourceCommit: request.source.commit,
     rawArtifactRef: rawArtifactRef('native-fuzz/raw.txt'),
     command: 'forge',
-    args: ['test', '--fuzz-runs', String(fuzzRuns)],
+    args: ['test', '--fuzz-runs', String(fuzzRuns), '--fork-url', rpcUrl, '--fork-block-number', String(blockNumber)],
+    env: { ...environment, ETH_RPC_URL: rpcUrl },
+    redactValues: [rpcUrl],
+    forkEvidence,
     recoverableExitCodes: native.recoverableExitCodes ?? []
   }, { ...(runCommand ? { runCommand } : {}) });
 }
@@ -251,6 +196,7 @@ export async function runGitHubNativeJob(input, {
   runNativeFuzz,
   runCommand,
   environment = process.env,
+  phase6MutableRpc = null,
   startSimulationEngine = startCompatibleForkEngine,
   executeSimulationWorkflow = executeWorkflow,
   now = () => new Date()
@@ -265,14 +211,8 @@ export async function runGitHubNativeJob(input, {
 
   try {
     checkout = await checkoutSource(request.source, { workspaceRoot, runCommand, environment });
-    if (!checkout || checkout.commit !== request.source.commit) {
-      throw new Error(`Exact source checkout mismatch: expected ${request.source.commit}, got ${checkout?.commit ?? 'missing'}`);
-    }
-    build = await buildProject({
-      projectRoot: checkout.projectRoot,
-      request,
-      ...(runCommand ? { runCommand } : {})
-    });
+    if (!checkout || checkout.commit !== request.source.commit) throw new Error(`Exact source checkout mismatch: expected ${request.source.commit}, got ${checkout?.commit ?? 'missing'}`);
+    build = await buildProject({ projectRoot: checkout.projectRoot, request, ...(runCommand ? { runCommand } : {}) });
     deploymentGasEvidence = buildDeploymentGasEvidence(request, build);
   } catch (error) {
     return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation }, now);
@@ -282,23 +222,11 @@ export async function runGitHubNativeJob(input, {
     try {
       analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
     } catch (error) {
-      analysis.slither = {
-        backend: 'slither',
-        status: 'failed',
-        terminal: true,
-        componentStatus: 'FAILED',
-        continuationDisposition: 'CONTINUE_WITH_LIMITATION',
-        failureKind: error?.kind ?? 'ANALYSIS_COMPONENT_FAILURE',
-        error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) }
-      };
+      analysis.slither = { backend: 'slither', status: 'failed', terminal: true, componentStatus: 'FAILED', continuationDisposition: 'CONTINUE_WITH_LIMITATION', failureKind: error?.kind ?? 'ANALYSIS_COMPONENT_FAILURE', error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) } };
     }
   } else {
     const requestedAnalysis = request.configuration.analysis ?? {};
-    const stage2aConfig = {
-      slither: requestedAnalysis.slither !== false,
-      medusa: requestedAnalysis.medusa !== false,
-      nativeFuzz: requestedAnalysis.nativeFuzz?.enabled === true
-    };
+    const stage2aConfig = { slither: requestedAnalysis.slither !== false, medusa: requestedAnalysis.medusa !== false, nativeFuzz: requestedAnalysis.nativeFuzz?.enabled === true };
     try {
       await runStage2aAnalysis(stage2aConfig, {
         runSlither: async () => {
@@ -306,38 +234,24 @@ export async function runGitHubNativeJob(input, {
           return analysis.slither;
         },
         runMedusa: async () => {
-          analysis.medusa = await executeMedusa({ request, checkout, build, runMedusa, runCommand });
+          analysis.medusa = await executeMedusa({ request, checkout, build, phase6MutableRpc, runMedusa, runCommand });
           return analysis.medusa;
         },
         runNativeFuzz: async () => {
-          analysis.nativeFuzz = await executeNativeFuzz({ request, checkout, build, runNativeFuzz, runCommand });
+          analysis.nativeFuzz = await executeNativeFuzz({ request, checkout, build, phase6MutableRpc, environment, runNativeFuzz, runCommand });
           return analysis.nativeFuzz;
         }
       });
     } catch (error) {
       const componentFailures = analysisFailureCount(analysis);
-      return failureResult(request, startedAt, error, {
-        build,
-        deploymentGasEvidence,
-        analysis,
-        simulation,
-        analysisComponentFailureCount: componentFailures,
-        continuityDisposition: componentFailures > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE'
-      }, now);
+      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, continuityDisposition: componentFailures > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE' }, now);
     }
   }
 
   const componentFailures = analysisFailureCount(analysis);
   const hardStop = hasHardStop(analysis);
   if (hardStop) {
-    return failureResult(request, startedAt, new Error('Analysis component requires execution stop'), {
-      build,
-      deploymentGasEvidence,
-      analysis,
-      simulation,
-      analysisComponentFailureCount: componentFailures,
-      continuityDisposition: 'STOP_EXECUTION'
-    }, now);
+    return failureResult(request, startedAt, new Error('Analysis component requires execution stop'), { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, continuityDisposition: 'STOP_EXECUTION' }, now);
   }
 
   if (request.phaseId === 'fork-simulation-lifecycle') {
@@ -346,16 +260,7 @@ export async function runGitHubNativeJob(input, {
     } catch (error) {
       simulation = error.simulationEvidence ?? simulation;
       const failedSteps = simulation?.steps?.filter((step) => step.status === 'failed') ?? [];
-      return failureResult(request, startedAt, error, {
-        build,
-        deploymentGasEvidence,
-        analysis,
-        simulation,
-        analysisComponentFailureCount: componentFailures,
-        failedStepCount: failedSteps.length,
-        failedSteps,
-        continuityDisposition: 'CONTINUE_WITH_LIMITATION'
-      }, now);
+      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, failedStepCount: failedSteps.length, failedSteps, continuityDisposition: 'CONTINUE_WITH_LIMITATION' }, now);
     }
   }
 
