@@ -39,6 +39,29 @@ runs:
         echo "$install_dir" >> "$GITHUB_PATH"
         echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
 
+    - name: Diagnose Foundry npm package
+      shell: bash
+      run: |
+        set -euo pipefail
+        node --input-type=module <<'NODE'
+        import fs from 'node:fs';
+        import path from 'node:path';
+        const pkgPath='node_modules/@foundry-rs/forge/package.json';
+        const exists=fs.existsSync(pkgPath);
+        console.log(`foundry_package_exists=${exists}`);
+        if (exists) {
+          const pkg=JSON.parse(fs.readFileSync(pkgPath,'utf8'));
+          console.log(`foundry_package=${JSON.stringify({name:pkg.name,version:pkg.version,bin:pkg.bin,scripts:pkg.scripts,optionalDependencies:pkg.optionalDependencies,os:pkg.os,cpu:pkg.cpu})}`);
+          const dir=path.dirname(pkgPath);
+          console.log(`foundry_files=${JSON.stringify(fs.readdirSync(dir).sort())}`);
+        }
+        const binDir='node_modules/.bin';
+        console.log(`node_bin_exists=${fs.existsSync(binDir)}`);
+        if (fs.existsSync(binDir)) console.log(`node_bins=${JSON.stringify(fs.readdirSync(binDir).filter((name)=>name.includes('forge')||name.includes('foundry')).sort())}`);
+        const scope='node_modules/@foundry-rs';
+        if (fs.existsSync(scope)) console.log(`foundry_scope=${JSON.stringify(fs.readdirSync(scope).sort())}`);
+        NODE
+
     - name: Verify exact V7 toolchain
       shell: bash
       run: |
