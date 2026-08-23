@@ -67,11 +67,11 @@ jobs:
         run: |
           set -euo pipefail
           if [ -f package-lock.json ]; then
-            npm ci
+            npm ci --omit=optional
             echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
           else
             npm install --package-lock-only --ignore-scripts
-            npm ci
+            npm ci --omit=optional
             echo "V7_DEPENDENCY_LOCKED=false" >> "$GITHUB_ENV"
           fi
 
