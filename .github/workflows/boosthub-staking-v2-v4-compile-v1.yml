@@ -28,23 +28,17 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@v4
+      - name: Install pinned Forge 1.7.1
+        uses: foundry-rs/foundry-toolchain@v1
         with:
-          node-version: '22'
+          version: v1.7.1
 
-      - name: Install pinned runner dependencies
+      - name: Verify Forge version
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install --no-package-lock
-          fi
-
-      - name: Install and verify canonical V7 toolchain
-        uses: ./.github/actions/setup-v7-toolchain
+          forge --version | tee boosthub-staking-v2-v4-forge-version-v1.txt
+          forge --version | grep -F '1.7.1'
 
       - name: Checkout exact Solo Audit Controller source commit
         uses: actions/checkout@v4
@@ -91,7 +85,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH"
           ROOT='${{ steps.locate.outputs.package_root }}'
           : > boosthub-staking-v2-v4-compile-log-v1.txt
           : > boosthub-staking-v2-v4-compile-summary-v1.txt
@@ -148,12 +141,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p boosthub-staking-v2-v4-compile-evidence-v1
+          cp boosthub-staking-v2-v4-forge-version-v1.txt boosthub-staking-v2-v4-compile-evidence-v1/ || true
           cp boosthub-staking-v2-v4-archive-sha256-v1.txt boosthub-staking-v2-v4-compile-evidence-v1/ || true
           cp all-solidity-files-v1.txt boosthub-staking-v2-v4-compile-evidence-v1/ || true
           cp staking-candidates-v1.txt boosthub-staking-v2-v4-compile-evidence-v1/ || true
           cp boosthub-staking-v2-v4-compile-log-v1.txt boosthub-staking-v2-v4-compile-evidence-v1/ || true
           cp boosthub-staking-v2-v4-compile-summary-v1.txt boosthub-staking-v2-v4-compile-evidence-v1/ || true
-          find .boosthub-v4 -type f \( -path '*/out/*/*.json' -o -path '*/cache/*' \) -print0 2>/dev/null | xargs -0 -r cp --parents -t boosthub-staking-v2-v4-compile-evidence-v1/ || true
+          find .boosthub-v4 -type f -path '*/out/*/*.json' -print0 2>/dev/null | xargs -0 -r cp --parents -t boosthub-staking-v2-v4-compile-evidence-v1/ || true
 
       - name: Upload compile evidence
         if: always()
