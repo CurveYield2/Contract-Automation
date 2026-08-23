@@ -51,9 +51,8 @@ test('auditor harness overlay rejects production overwrite and dangerous Foundry
 
   const second = await roots();
   await fs.writeFile(path.join(second.auditHarnessRoot, 'foundry.toml'), '[profile.default]\nffi=true\n');
-  const ffiDigest = await computeAuditorHarnessTreeSha256V1(second.auditHarnessRoot);
   await assert.rejects(
-    prepareAuditorHarnessOverlayV1({ ...second, expectedTreeSha256: ffiDigest }),
+    computeAuditorHarnessTreeSha256V1(second.auditHarnessRoot),
     /ffi/i,
   );
 });
