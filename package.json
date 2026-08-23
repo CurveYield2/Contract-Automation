@@ -32,7 +32,6 @@
     "@foundry-rs/anvil": "1.7.1",
     "@foundry-rs/forge": "1.7.1",
     "ethers": "6.15.0",
-    "ganache": "7.9.2",
     "solc": "0.8.30",
     "tar": "7.4.3",
     "unzipper": "0.12.3"
