@@ -69,14 +69,22 @@ test('Phase 7 archive preflight records remote identity and pinned block evidenc
   assert.equal(JSON.stringify(evidence).includes('secret.example'), false);
 });
 
-test('V7 trusted workflow writes archive identity evidence before lifecycle execution and uploads it with the normal artifact', () => {
-  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/audit-controller-execution-v4.yml'), 'utf8');
-  const preflight = workflow.indexOf('Record Phase 7 archive RPC identity');
-  const execution = workflow.indexOf('Execute V7 GitHub-native request');
-  assert.ok(preflight >= 0, 'archive identity preflight step must exist');
-  assert.ok(execution > preflight, 'archive identity preflight must run before lifecycle execution');
-  assert.match(workflow, /probeArchiveRpcIdentity/);
-  assert.match(workflow, /archive-rpc-identity-v1\.json/);
+test('canonical V7 runner records archive identity before Phase 7 lifecycle execution and keeps the RPC secret out of evidence paths', () => {
+  const preflight = fs.readFileSync(path.join(repoRoot, 'packages/github-native-sim/src/phase7-fork-preflight-v1.mjs'), 'utf8');
+  const runner = fs.readFileSync(path.join(repoRoot, 'packages/github-native-sim/src/run-job-file-v2.mjs'), 'utf8');
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/audit-controller-execution.yml'), 'utf8');
+
+  assert.match(preflight, /import \{ probeArchiveRpcIdentity \}/);
+  assert.match(preflight, /upstreamIdentity = await probeUpstreamIdentity/);
+  assert.match(preflight, /rpcUrl: forkUrl/);
+  assert.match(preflight, /reconcileUpstreamIdentity/);
+
+  const preflightStep = runner.indexOf('preflight = await runPhase7ForkPreflightV2');
+  const lifecycleStep = runner.indexOf('runGitHubNativeJobV1(request');
+  assert.ok(preflightStep >= 0, 'canonical runner must invoke Phase 7 preflight');
+  assert.ok(lifecycleStep > preflightStep, 'archive identity must be reconciled before lifecycle execution');
+
   assert.match(workflow, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01:\s*\$\{\{\s*secrets\.SIM_ARCHIVE_PRIMARY_ETHEREUM_01\s*\}\}/);
-  assert.match(workflow, /path:\s*\.audit-evidence\/v7-execution-v4/);
+  assert.match(workflow, /npm run v7:execute -- --request \.v7-request\/request\.json/);
+  assert.match(workflow, /path:\s*\.audit-evidence\/v7-execution/);
 });
