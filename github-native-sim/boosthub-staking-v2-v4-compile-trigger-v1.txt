@@ -1,1 +1,2 @@
 Compile the exact remediated v4 Boosthub Staking v2 source archive from Solo-Audit-Controller commit 93062463611e798ab26544a88c4e119f9620be9a.
+retry=2; compiler=forge-v1.7.1-direct
