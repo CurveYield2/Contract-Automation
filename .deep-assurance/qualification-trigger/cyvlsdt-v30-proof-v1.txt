@@ -1,0 +1,2 @@
+V7 infrastructure qualification trace trigger for cyvlSDT v30 proof run.
+This branch must not be merged; qualification checks out the exact main base commit.
