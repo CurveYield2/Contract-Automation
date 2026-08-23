@@ -1,0 +1,151 @@
+name: V7 Execution Infrastructure Qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/v7-execution-infrastructure-qualification.yml'
+      - 'packages/github-native-sim/src/**'
+      - 'packages/github-native-sim/test/**'
+      - 'packages/runner/src/**'
+      - 'packages/runner/test/**'
+      - 'packages/protocol/src/**'
+      - 'process/RUNNER_MANIFEST.json'
+      - 'package.json'
+      - 'package-lock.json'
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/v7-execution-infrastructure-qualification.yml'
+      - 'packages/github-native-sim/src/**'
+      - 'packages/github-native-sim/test/**'
+      - 'packages/runner/src/**'
+      - 'packages/runner/test/**'
+      - 'packages/protocol/src/**'
+      - 'process/RUNNER_MANIFEST.json'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v7-qualification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify-v7-execution-infrastructure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact candidate runner
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Cache npm download cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: v7-qualification-npm-${{ runner.os }}-${{ hashFiles('package-lock.json', 'package.json') }}
+          restore-keys: |
+            v7-qualification-npm-${{ runner.os }}-
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+            echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
+          else
+            npm install --no-package-lock
+            echo "V7_DEPENDENCY_LOCKED=false" >> "$GITHUB_ENV"
+            echo "::warning::package-lock.json is not yet present; dependency resolution is not fully locked"
+          fi
+
+      - name: Verify canonical runner manifest
+        run: npm run v7:manifest -- --check
+
+      - name: V2 request and evidence contract qualification
+        run: node --test packages/github-native-sim/test/*.test.mjs
+
+      - name: Anvil-only runner qualification
+        run: node --test packages/runner/test/anvil-*.test.mjs packages/runner/test/full-simulation-anvil-only-v1.test.mjs
+
+      - name: Repository static checks
+        run: node scripts/check.mjs
+
+      - name: Repository build checks
+        run: node scripts/build.mjs
+
+      - name: Live trusted-main mutable-Anvil qualification
+        if: github.event_name != 'pull_request'
+        env:
+          SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        run: |
+          mkdir -p .audit-evidence/v7-infrastructure-qualification
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          import { runPhase7ForkPreflightV2 } from './packages/github-native-sim/src/phase7-fork-preflight-v2.mjs';
+          import { V7_POLICY } from './packages/github-native-sim/src/v7-policy.mjs';
+
+          const expectedBlockHash='0xb7f45fdc91b604d7c0450a505cf5c9571c9bb6267c86b6a8d535f4bc11b3f4ee';
+          const request={
+            requestId:'dar-00000000000000000000000000000000', phaseId:'fork-simulation-lifecycle', profileId:V7_POLICY.profiles.simulate,
+            source:{commit:'0000000000000000000000000000000000000000'},
+            configuration:{evmVersion:'cancun',harness:{recipeId:'external-readiness-v1'},simulation:{chain:'ethereum',block:25817400,workflow:{steps:[
+              {action:'staticCall',target:'0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F',function:'decimals() view returns (uint8)',args:[],label:'qualified SDT external readiness'}
+            ]}}}
+          };
+          const preflight=await runPhase7ForkPreflightV2({request,environment:process.env});
+          const qualifiedCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          const observed=preflight.observedPinnedBlockHash?.toLowerCase()??null;
+          const checks={
+            preflightPass:preflight.status==='PASS',
+            recipeEnforced:preflight.checks?.lifecycleRecipe?.status==='PASS',
+            recipeId:preflight.recipeId==='external-readiness-v1',
+            ethereumMutableRpcOnly:preflight.chain==='ethereum',
+            anvilOnly:preflight.checks?.anvilLauncher?.engine==='anvil',
+            cancunAccepted:preflight.checks?.exactHardfork?.requested==='cancun',
+            chainIdentityReconciled:preflight.checks?.chainIdentity?.status==='PASS',
+            historicalStateAvailable:preflight.checks?.pinnedBlockState?.status==='PASS',
+            targetCodePresent:preflight.checks?.targetCode?.status==='PASS',
+            impersonationBalanceControl:preflight.checks?.impersonationBalanceControl?.status==='PASS',
+            fixtureBlockHashMatches:observed===expectedBlockHash,
+            workflowAllowlist:preflight.checks?.workflowActions?.status==='PASS'
+          };
+          const qualification={
+            schemaVersion:'v7-execution-infrastructure-qualification-v3',
+            status:Object.values(checks).every(Boolean)?'PASS':'FAIL',
+            qualifiedCommit,
+            requestSchema:V7_POLICY.requestSchema,
+            profiles:Object.values(V7_POLICY.profiles),
+            fullSimulationBackend:'anvil',
+            mutableRpcPolicy:{supportedChains:['ethereum'],rpcProfile:V7_POLICY.mutableRpc.ethereumProfile},
+            dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true',
+            fixture:{chain:'ethereum',block:25817400,expectedBlockHash},
+            checks,
+            preflight
+          };
+          fs.writeFileSync('.audit-evidence/v7-infrastructure-qualification/qualification.json',`${JSON.stringify(qualification,null,2)}\n`);
+          if(qualification.status!=='PASS') process.exit(1);
+          NODE
+
+      - name: Upload qualification evidence
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v7-infrastructure-qualification-${{ github.sha }}
+          path: .audit-evidence/v7-infrastructure-qualification
+          if-no-files-found: warn
+          retention-days: 30
