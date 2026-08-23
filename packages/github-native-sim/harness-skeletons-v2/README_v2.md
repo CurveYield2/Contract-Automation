@@ -2,6 +2,14 @@
 
 Purpose: repo-native Audit V7 Phase 6 harness templates for `CurveYield2/Contract-Automation`, with mandatory use of the existing CurveYield mutable Anvil RPC system.
 
+## Canonical discovery contract
+
+This file is the canonical Phase-6 skeleton entrypoint:
+
+`CurveYield2/Contract-Automation/packages/github-native-sim/harness-skeletons-v2/README_v2.md`
+
+Agents working on Phase 6 MUST start here before authoring or repairing Medusa/Foundry harness code. If a caller reaches this repository through a stale/guessed path, search the repository for `harness-skeletons-v2` or one of the exact filenames in the Skeleton map below and return to this README. Do not ask the human where the skeleton code is and do not recreate it from memory while this repository is accessible.
+
 ## Non-negotiable mutable-RPC rule
 
 Any Phase 6 operation that consumes fork state or requires mutable-RPC semantics MUST use the existing trusted runner secret `SIM_ARCHIVE_PRIMARY_ETHEREUM_01`. Auditors and request authors MUST NOT provide another RPC URL, create a parallel Anvil service, use a public/read-only RPC directly, or serialize the secret into a request, harness manifest, corpus, artifact, log, or report.
