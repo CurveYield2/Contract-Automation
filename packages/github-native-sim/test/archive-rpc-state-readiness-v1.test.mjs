@@ -83,7 +83,7 @@ test('canonical V7 runner proves pinned Phase 7 state readiness before lifecycle
   assert.match(preflight, /proveImpersonationBalanceControl/);
 
   const preflightStep = runner.indexOf('preflight = await runPhase7ForkPreflightV2');
-  const lifecycleStep = runner.indexOf('runGitHubNativeJobV1(request');
+  const lifecycleStep = runner.lastIndexOf('runGitHubNativeJobV1(request');
   assert.ok(preflightStep >= 0, 'canonical runner must invoke Phase 7 preflight');
   assert.ok(lifecycleStep > preflightStep, 'pinned historical state readiness must be proven before lifecycle execution');
 });
