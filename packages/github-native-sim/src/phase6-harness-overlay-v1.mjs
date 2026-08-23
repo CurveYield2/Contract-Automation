@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { V7_POLICY } from './v7-policy.mjs';
 
 const BUNDLE_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
-const OVERLAY_ROOT = ['packages', 'github-native-sim', 'audit-harnesses'];
 const ALLOWED_ROOT_FILES = new Set(['medusa.json', 'foundry.toml']);
 const ALLOWED_PREFIXES = ['test/phase6/', 'audit/phase6/', 'script/phase6/'];
 
@@ -51,12 +51,19 @@ function validateSourceBinding(manifest, source) {
   }
 }
 
+function assertNoUsableRpcLiteral(bytes, sourcePath) {
+  const text = bytes.toString('utf8');
+  const urls = text.match(/https?:\/\/[^\s"'<>]+/g) ?? [];
+  const forbidden = urls.filter((url) => !url.includes('127.0.0.1') && !url.includes('localhost'));
+  if (forbidden.length > 0) throw new Error(`Phase 6 audit overlay contains a forbidden literal RPC URL in ${sourcePath}`);
+}
+
 export async function materializePhase6HarnessOverlayV1({ projectRoot, runnerRoot, bundleId, source }) {
   if (typeof projectRoot !== 'string' || projectRoot.length === 0) throw new Error('Phase 6 harness overlay requires projectRoot');
   if (typeof runnerRoot !== 'string' || runnerRoot.length === 0) throw new Error('Phase 6 harness overlay requires runnerRoot');
   if (!BUNDLE_ID.test(bundleId ?? '')) throw new Error(`Invalid Phase 6 harness bundle id: ${bundleId ?? ''}`);
 
-  const bundlesRoot = path.join(path.resolve(runnerRoot), ...OVERLAY_ROOT);
+  const bundlesRoot = path.join(path.resolve(runnerRoot), V7_POLICY.phase6.overlayRoot);
   const bundleRoot = inside(bundlesRoot, bundleId, 'bundleId');
   const manifestPath = path.join(bundleRoot, 'manifest.json');
   let manifest;
@@ -72,19 +79,31 @@ export async function materializePhase6HarnessOverlayV1({ projectRoot, runnerRoo
   if (!Array.isArray(manifest.files) || manifest.files.length === 0) throw new Error(`Phase 6 harness manifest ${bundleId} has no files`);
 
   const materialized = [];
+  const destinations = new Set();
   for (const [index, entry] of manifest.files.entries()) {
     if (!entry || typeof entry !== 'object') throw new Error(`Phase 6 harness manifest file[${index}] must be an object`);
     const sourcePath = safeRelative(entry.source, `manifest.files[${index}].source`);
     const destinationPath = safeRelative(entry.destination, `manifest.files[${index}].destination`);
     if (!destinationAllowed(destinationPath)) throw new Error(`Phase 6 harness destination is outside the audit-only allowlist: ${destinationPath}`);
+    if (destinations.has(destinationPath)) throw new Error(`Phase 6 harness manifest has duplicate destination: ${destinationPath}`);
+    destinations.add(destinationPath);
 
     const from = inside(bundleRoot, sourcePath, `manifest.files[${index}].source`);
     const to = inside(projectRoot, destinationPath, `manifest.files[${index}].destination`);
     await destinationMustNotExist(to);
     const bytes = await fs.readFile(from);
+    const observedDigest = sha256(bytes);
+    if (entry.sha256 && entry.sha256 !== observedDigest) {
+      throw new Error(`Phase 6 harness file digest mismatch for ${sourcePath}: expected ${entry.sha256}, observed ${observedDigest}`);
+    }
+    assertNoUsableRpcLiteral(bytes, sourcePath);
     await fs.mkdir(path.dirname(to), { recursive: true });
     await fs.writeFile(to, bytes);
-    materialized.push({ source: sourcePath, destination: destinationPath, sha256: sha256(bytes), bytes: bytes.length });
+    materialized.push({ source: sourcePath, destination: destinationPath, sha256: observedDigest, bytes: bytes.length });
+  }
+
+  for (const required of V7_POLICY.phase6.requiredRuntimeFiles) {
+    if (!destinations.has(required)) throw new Error(`Phase 6 harness manifest is missing required runtime destination: ${required}`);
   }
 
   materialized.sort((a, b) => a.destination.localeCompare(b.destination));
