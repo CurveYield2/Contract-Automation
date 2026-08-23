@@ -1,6 +1,6 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v3
+Policy version: v4
 
 ## Full simulation backend — mandatory
 
@@ -19,7 +19,8 @@ If Anvil cannot start or cannot execute a required fork, fail with typed executi
 
 - New V7 work is V2-only: `deep-assurance-github-request-v2`, `github-native-compile-v2`, and `github-native-simulate-v2`. V1 execution profiles are historical/non-executable.
 - Infrastructure qualification is repository-level and occurs outside audit campaigns. Use `.github/workflows/v7-execution-infrastructure-qualification-v1.yml` to qualify an exact candidate release before the Solo Audit Controller admits it to a campaign.
-- Phase 6 must classify target Medusa and Foundry/native-fuzz harness applicability before analyzer invocation. Use `packages/github-native-sim/src/phase6-execution-preflight-v1.mjs`. Missing target harnesses are terminal `NOT_APPLICABLE`; do not invoke an inapplicable analyzer merely to discover that condition.
+- Phase 6 must classify target Medusa and Foundry/native-fuzz applicability before analyzer invocation. Use `packages/github-native-sim/src/phase6-execution-preflight-v1.mjs`. For an applicable Solidity/EVM target, a missing usable Medusa or Foundry harness is `HARNESS_REQUIRED`, never `NOT_APPLICABLE`; transition to `PHASE6_HARNESS_AUTHORING`. The auditor owns creation of the missing audit-only harness/configuration without modifying frozen production source. Start from `packages/github-native-sim/harness-skeletons-v1/` when useful. `NOT_APPLICABLE` requires actual technical target/tool incompatibility.
+- Phase 6 audit-only harnesses, configs, models, dictionaries, and corpus inputs must be separately source-bound and hashed. If the admitted runner cannot stage an authored harness overlay into both preflight and execution without altering `request.source`, keep the campaign blocked in the harness-authoring/runner-repair path; do not smuggle the harness into frozen production source.
 - Phase 7 must pass the Anvil/archive fork preflight before lifecycle execution. Use `packages/github-native-sim/src/phase7-fork-preflight-v1.mjs` to prove launcher/hardfork, archive secret, chain identity, pinned state, target code, impersonation/balance control, and workflow-action support.
 - Prefer standardized Phase-7 lifecycle recipes from `packages/github-native-sim/src/lifecycle-recipes-v1.mjs`. Unsupported behavior is `RECIPE_GAP`, not permission for arbitrary commands.
 - If runner infrastructure must change after campaign admission, preserve the failed attempt and return control to the Solo Audit Controller `RUNNER_REPAIR_REBIND` state. Do not change target production source to repair audit infrastructure.
