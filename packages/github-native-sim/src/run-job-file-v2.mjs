@@ -7,7 +7,7 @@ import {
 import { validateDeepAssuranceRequestV2 } from './schema.mjs';
 import { runGitHubNativeJob as runGitHubNativeJobV1 } from './run-job-file.mjs';
 import { runPhase6ExecutionPreflightV1 } from './phase6-execution-preflight-v1.mjs';
-import { runPhase7ForkPreflightV1 } from './phase7-fork-preflight-v1.mjs';
+import { runPhase7ForkPreflightV2 } from './phase7-fork-preflight-v2.mjs';
 
 async function stageForPreflight(source, { workspaceRoot, environment }) {
   const checkoutRoot = path.join(workspaceRoot, 'preflight-checkout');
@@ -79,7 +79,7 @@ export async function runGitHubNativeJobV2(input, {
     if (staged.commit !== request.source.commit) throw new Error(`Phase 6 preflight source mismatch: expected ${request.source.commit}, received ${staged.commit}`);
     preflight = await runPhase6ExecutionPreflightV1({ request, projectRoot: staged.projectRoot, runnerCommit });
   } else if (request.phaseId === 'fork-simulation-lifecycle') {
-    preflight = await runPhase7ForkPreflightV1({ request, environment });
+    preflight = await runPhase7ForkPreflightV2({ request, environment });
   }
 
   if (preflight && preflight.status !== 'PASS') return preflightFailure(request, preflight);
