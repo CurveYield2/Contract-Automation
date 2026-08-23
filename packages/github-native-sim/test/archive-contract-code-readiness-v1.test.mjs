@@ -88,7 +88,7 @@ test('canonical V7 runner derives literal Phase 7 targets and proves code before
   assert.match(preflight, /const targetCode =/);
 
   const preflightStep = runner.indexOf('preflight = await runPhase7ForkPreflightV2');
-  const lifecycleStep = runner.indexOf('runGitHubNativeJobV1(request');
+  const lifecycleStep = runner.lastIndexOf('runGitHubNativeJobV1(request');
   assert.ok(preflightStep >= 0, 'Phase 7 preflight must be invoked by the canonical runner');
   assert.ok(lifecycleStep > preflightStep, 'target code readiness must be proven before lifecycle execution');
 
