@@ -1,0 +1,53 @@
+export const V7_POLICY = Object.freeze({
+  processId: 'audit-v7-independent-review',
+  requestSchema: 'deep-assurance-github-request-v2',
+  profiles: Object.freeze({
+    compile: 'github-native-compile-v2',
+    simulate: 'github-native-simulate-v2',
+  }),
+  tools: Object.freeze({
+    slither: '0.11.6',
+    medusa: '1.5.1',
+    anvilPackage: '1.7.1',
+  }),
+  workflows: Object.freeze({
+    execution: '.github/workflows/audit-controller-execution.yml',
+    qualification: '.github/workflows/v7-execution-infrastructure-qualification.yml',
+  }),
+  mutableRpc: Object.freeze({
+    ethereumProfile: 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01',
+    chain: 'ethereum',
+    chainId: 1,
+    backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY',
+    requesterSuppliedRpcAllowed: false,
+  }),
+  phase6: Object.freeze({
+    overlayKind: 'runner-owned-audit-overlay-v1',
+    overlayRoot: 'packages/github-native-sim/audit-harnesses',
+    skeletonRoot: 'packages/github-native-sim/harness-skeletons-v2',
+    skeletonReadme: 'packages/github-native-sim/harness-skeletons-v2/README_v2.md',
+    medusaBeforeFoundry: true,
+    requiredRuntimeFiles: Object.freeze(['medusa.json', 'foundry.toml']),
+  }),
+  evidence: Object.freeze({
+    schemaVersion: 'audit-v7-github-execution-evidence-v2',
+    root: '.audit-evidence/v7-execution',
+  }),
+  dispositions: Object.freeze({
+    pass: 'PASS',
+    findings: 'FINDINGS',
+    harnessRequired: 'HARNESS_AUTHORING_REQUIRED',
+    runnerRepair: 'RUNNER_REPAIR_REBIND',
+    recipeGap: 'RECIPE_GAP',
+    infrastructureBlocked: 'INFRASTRUCTURE_BLOCKED',
+    executionFailed: 'EXECUTION_FAILED',
+  }),
+});
+
+export function phase6HarnessRecoveryCommand(requestPath = '<request.json>') {
+  return `npm run v7:harness:init -- --request ${requestPath}`;
+}
+
+export function executionRecoveryCommand(requestPath = '<request.json>') {
+  return `npm run v7:execute -- --request ${requestPath}`;
+}
