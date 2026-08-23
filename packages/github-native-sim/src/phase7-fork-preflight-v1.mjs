@@ -5,6 +5,8 @@ const ALLOWLISTED_ACTIONS = new Set([
   'deploy', 'call', 'staticCall', 'expectRevert', 'setBalance', 'transferNative',
   'mine', 'increaseTime', 'snapshot', 'revertSnapshot', 'assertBalance', 'assertCall',
 ]);
+const ETHEREUM_ARCHIVE_RPC_ENV = 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01';
+const CURRENT_ARCHIVE_CHAINS = new Set(['ethereum']);
 
 function literalTargets(workflow) {
   const targets = new Set();
@@ -33,10 +35,6 @@ function checkWorkflowActions(workflow) {
   };
 }
 
-function archiveRpcEnvForChain(simulation, chain) {
-  return simulation.chain === 'ethereum' ? 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01' : chain.rpcEnv;
-}
-
 export async function runPhase7ForkPreflightV1({
   request,
   environment = process.env,
@@ -49,13 +47,35 @@ export async function runPhase7ForkPreflightV1({
   const chain = CHAINS[simulation.chain];
   if (!chain) throw new Error(`Unsupported Phase 7 chain ${simulation.chain}`);
 
-  const rpcEnv = archiveRpcEnvForChain(simulation, chain);
-  const forkUrl = environment[rpcEnv];
+  const workflowActions = checkWorkflowActions(simulation.workflow);
+
+  if (!CURRENT_ARCHIVE_CHAINS.has(simulation.chain)) {
+    return {
+      schemaVersion: 'audit-v7-phase7-fork-preflight-v1',
+      status: 'FAIL',
+      requestId: request.requestId,
+      sourceCommit: request.source.commit,
+      chain: simulation.chain,
+      pinnedBlock: simulation.block,
+      evmVersion: request.configuration.evmVersion,
+      checks: {
+        archiveRpcSecret: {
+          status: 'UNAVAILABLE',
+          reason: 'ARCHIVE_RPC_UNAVAILABLE',
+          supportedArchiveChains: [...CURRENT_ARCHIVE_CHAINS],
+        },
+        workflowActions,
+      },
+      blockingReason: 'ARCHIVE_RPC_UNAVAILABLE',
+      nextState: 'PHASE7_FORK_PREFLIGHT',
+    };
+  }
+
+  const forkUrl = environment[ETHEREUM_ARCHIVE_RPC_ENV];
   const archiveRpcSecret = {
     status: typeof forkUrl === 'string' && forkUrl.length > 0 ? 'PASS' : 'FAIL',
-    profile: rpcEnv,
+    profile: ETHEREUM_ARCHIVE_RPC_ENV,
   };
-  const workflowActions = checkWorkflowActions(simulation.workflow);
   if (archiveRpcSecret.status !== 'PASS' || workflowActions.status !== 'PASS') {
     return {
       schemaVersion: 'audit-v7-phase7-fork-preflight-v1',
@@ -66,7 +86,8 @@ export async function runPhase7ForkPreflightV1({
       pinnedBlock: simulation.block,
       evmVersion: request.configuration.evmVersion,
       checks: { archiveRpcSecret, workflowActions },
-      nextState: 'RUNNER_REPAIR_REBIND',
+      blockingReason: archiveRpcSecret.status !== 'PASS' ? 'ARCHIVE_RPC_SECRET_MISSING' : 'UNSUPPORTED_WORKFLOW_ACTION',
+      nextState: archiveRpcSecret.status !== 'PASS' ? 'PHASE7_FORK_PREFLIGHT' : 'RUNNER_REPAIR_REBIND',
     };
   }
 
