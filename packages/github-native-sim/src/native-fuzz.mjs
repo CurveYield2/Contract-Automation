@@ -39,29 +39,32 @@ function baseResult(input, fields) {
 export async function runNativeFuzzAnalysis(input, { runCommand = runProcess } = {}) {
   validateInput(input);
 
-  // Exact-source Phase-6 recovery lane for cyvlSDT v30. The admitted package has no Foundry
-  // project/test harness, so invoking forge would only produce runner-tool failure rather than
-  // adversarial evidence. Use the trusted, deterministic source-model fuzz lane instead. It reads
-  // only the frozen admitted files, performs exact structural predicates, and executes randomized
-  // arithmetic/state-transition models for the carried Phase-5 candidates.
+  // Exact-source Phase-6 applicability handling for cyvlSDT v30. The admitted package has no
+  // Foundry project/fuzz harness. The mandatory native-fuzz component therefore receives a typed,
+  // terminal NOT_APPLICABLE record. A separate trusted deterministic source-model campaign is
+  // executed and attached as replacement adversarial evidence; it must not be mislabeled as Forge.
   if (input.sourceCommit === CYVLSDT_V30_SOURCE_COMMIT) {
     try {
-      const campaign = await runCyvlSdtV30SourceModelFuzz({
+      const replacementAdversarialCampaign = await runCyvlSdtV30SourceModelFuzz({
         projectRoot: input.projectRoot,
         sourceCommit: input.sourceCommit,
         iterations: 20_000
       });
       return baseResult(input, {
-        status: 'completed',
+        status: 'not_applicable',
         terminal: true,
-        componentStatus: 'COMPLETED',
-        continuationDisposition: 'COMPLETE_EVIDENCE',
-        engine: campaign.engine,
+        failureKind: 'HARNESS_NOT_APPLICABLE',
+        componentStatus: 'NOT_APPLICABLE',
+        continuationDisposition: 'CONTINUE_WITH_LIMITATION',
+        reason: 'Exact admitted cyvlSDT v30 source contains no foundry.toml or .t.sol native fuzz harness; creating a new target smart-contract harness is outside the frozen source fence.',
         authoritativeFinding: false,
-        campaign,
+        replacementAdversarialCampaign,
         rawOutput: {
           exitCode: 0,
-          stdout: JSON.stringify(campaign),
+          stdout: JSON.stringify({
+            nativeFuzz: 'NOT_APPLICABLE',
+            replacementAdversarialCampaign
+          }),
           stderr: ''
         }
       });
