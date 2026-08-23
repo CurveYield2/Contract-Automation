@@ -1,0 +1,1 @@
+Compile CurveYieldStakingStrategyV2.sol from Solo-Audit-Controller commit 93062463611e798ab26544a88c4e119f9620be9a using compile harness v2.
