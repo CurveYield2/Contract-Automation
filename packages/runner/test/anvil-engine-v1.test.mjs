@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { selectForkEngineName, buildAnvilArgs, createAnvilProviderAdapter } from '../src/anvil-engine.mjs';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const runnerSrc = path.resolve(here, '../src');
 
 test('full lifecycle simulation selects Anvil for both modern and legacy EVM versions', () => {
   assert.equal(selectForkEngineName('cancun'), 'anvil');
@@ -47,4 +53,16 @@ test('Anvil provider adapter translates only balance-control RPC and preserves p
     ['evm_mine', []]
   ]);
   assert.equal(adapted.getSigner('0xabc'), 'signer:0xabc');
+});
+
+test('Anvil runtime is isolated from the Ganache-bearing engine module', () => {
+  const anvilSource = fs.readFileSync(path.join(runnerSrc, 'anvil-engine.mjs'), 'utf8');
+  const sharedRuntimePath = path.join(runnerSrc, 'workflow-runtime.mjs');
+  assert.equal(fs.existsSync(sharedRuntimePath), true, 'shared Ganache-free workflow runtime module must exist');
+  const sharedRuntime = fs.readFileSync(sharedRuntimePath, 'utf8');
+
+  assert.match(anvilSource, /from ['"]\.\/workflow-runtime\.mjs['"]/);
+  assert.doesNotMatch(anvilSource, /from ['"]\.\/engine\.mjs['"]/);
+  assert.doesNotMatch(sharedRuntime, /\bganache\b/i);
+  assert.match(sharedRuntime, /export class WorkflowRuntime/);
 });
