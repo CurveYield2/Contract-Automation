@@ -4,11 +4,19 @@ const EXACT_SLITHER_VERSION = '0.11.6';
 const EXACT_MEDUSA_VERSION = '1.5.1';
 const COMMIT = /^[0-9a-f]{40}$/;
 
-function raw(result = {}) {
+function redact(value, secrets = []) {
+  let text = String(value ?? '');
+  for (const secret of secrets) {
+    if (typeof secret === 'string' && secret.length > 0) text = text.replaceAll(secret, '<redacted-mutable-anvil-rpc>');
+  }
+  return text;
+}
+
+function raw(result = {}, secrets = []) {
   return {
     exitCode: Number.isInteger(result.exitCode) ? result.exitCode : -1,
-    stdout: String(result.stdout ?? ''),
-    stderr: String(result.stderr ?? ''),
+    stdout: redact(result.stdout, secrets),
+    stderr: redact(result.stderr, secrets),
     ...(result.signal ? { signal: result.signal } : {})
   };
 }
@@ -26,6 +34,11 @@ function validateCommon(input, expectedVersion) {
   if (typeof input.rawArtifactRef !== 'string' || !input.rawArtifactRef.startsWith('github-actions://')) {
     throw new V7ExecutionError('ANALYSIS_CONFIGURATION_FAILURE', 'rawArtifactRef must be a github-actions:// reference');
   }
+}
+
+function validateMedusaFork(input) {
+  if (typeof input.rpcUrl !== 'string' || input.rpcUrl.length === 0) throw new V7ExecutionError('MUTABLE_RPC_CONFIGURATION_FAILURE', 'Medusa Phase 6 requires the existing mutable Anvil RPC URL');
+  if (!Number.isSafeInteger(input.rpcBlock) || input.rpcBlock < 0) throw new V7ExecutionError('MUTABLE_RPC_CONFIGURATION_FAILURE', 'Medusa Phase 6 requires the preflight-frozen mutable RPC block');
 }
 
 function versionMatches(output, expected) {
@@ -82,14 +95,28 @@ export async function runSlitherAnalysis(input, { runCommand = runProcess } = {}
 
 export async function runMedusaAnalysis(input, { runCommand = runProcess } = {}) {
   validateCommon(input, EXACT_MEDUSA_VERSION);
+  validateMedusaFork(input);
+  const secrets = [input.rpcUrl];
+  const forkEvidence = {
+    mode: 'mandatory-fork',
+    backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY',
+    rpcProfile: input.rpcProfile ?? null,
+    blockNumber: input.rpcBlock,
+    blockHash: input.rpcBlockHash ?? null,
+    rpcUrlExposed: false,
+  };
   const versionResult = await runCommand({ command: 'medusa', args: ['--version'], cwd: input.projectRoot });
-  if (!versionResult || versionResult.exitCode !== 0) return medusaResult(input, { status:'failed', terminal:true, failureKind:'TOOL_FAILURE', componentStatus:'FAILED', continuationDisposition:'CONTINUE_WITH_LIMITATION', rawOutput:raw(versionResult) });
-  if (!versionMatches(versionResult, EXACT_MEDUSA_VERSION)) throw new V7ExecutionError('TOOLCHAIN_INTEGRITY_FAILURE', 'Medusa version does not match the recovered V7 pin', { expectedVersion:EXACT_MEDUSA_VERSION, stdout:String(versionResult.stdout ?? ''), stderr:String(versionResult.stderr ?? '') });
+  if (!versionResult || versionResult.exitCode !== 0) return medusaResult(input, { status:'failed', terminal:true, failureKind:'TOOL_FAILURE', componentStatus:'FAILED', continuationDisposition:'CONTINUE_WITH_LIMITATION', fork:forkEvidence, rawOutput:raw(versionResult, secrets) });
+  if (!versionMatches(versionResult, EXACT_MEDUSA_VERSION)) throw new V7ExecutionError('TOOLCHAIN_INTEGRITY_FAILURE', 'Medusa version does not match the recovered V7 pin', { expectedVersion:EXACT_MEDUSA_VERSION, stdout:redact(versionResult.stdout, secrets), stderr:redact(versionResult.stderr, secrets) });
 
-  const campaignResult = await runCommand({ command: 'medusa', args: ['fuzz'], cwd: input.projectRoot });
-  if (!campaignResult || campaignResult.exitCode < 0) return medusaResult(input, { status:'failed', terminal:true, failureKind:'TOOL_FAILURE', componentStatus:'FAILED', continuationDisposition:'CONTINUE_WITH_LIMITATION', rawOutput:raw(campaignResult) });
+  const campaignResult = await runCommand({
+    command: 'medusa',
+    args: ['fuzz', '--rpc-url', input.rpcUrl, '--rpc-block', String(input.rpcBlock)],
+    cwd: input.projectRoot,
+  });
+  if (!campaignResult || campaignResult.exitCode < 0) return medusaResult(input, { status:'failed', terminal:true, failureKind:'TOOL_FAILURE', componentStatus:'FAILED', continuationDisposition:'CONTINUE_WITH_LIMITATION', fork:forkEvidence, rawOutput:raw(campaignResult, secrets) });
   const campaign = parseMedusaOutput(campaignResult.stdout);
   const falsified = campaign.falsifiedProperties > 0 || campaign.status === 'falsified';
-  if (falsified || campaignResult.exitCode !== 0) return medusaResult(input, { status:'completed_with_failures', terminal:true, failureKind:falsified ? 'PROPERTY_FALSIFICATION' : 'ANALYSIS_COMPONENT_FAILURE', componentStatus:'COMPLETED_WITH_FAILURES', continuationDisposition:'CONTINUE_WITH_LIMITATION', campaign, rawOutput:raw(campaignResult) });
-  return medusaResult(input, { status:'completed', terminal:true, componentStatus:'COMPLETED', continuationDisposition:'COMPLETE_EVIDENCE', campaign, rawOutput:raw(campaignResult) });
+  if (falsified || campaignResult.exitCode !== 0) return medusaResult(input, { status:'completed_with_failures', terminal:true, failureKind:falsified ? 'PROPERTY_FALSIFICATION' : 'ANALYSIS_COMPONENT_FAILURE', componentStatus:'COMPLETED_WITH_FAILURES', continuationDisposition:'CONTINUE_WITH_LIMITATION', fork:forkEvidence, campaign, rawOutput:raw(campaignResult, secrets) });
+  return medusaResult(input, { status:'completed', terminal:true, componentStatus:'COMPLETED', continuationDisposition:'COMPLETE_EVIDENCE', fork:forkEvidence, campaign, rawOutput:raw(campaignResult, secrets) });
 }
