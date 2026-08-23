@@ -62,6 +62,16 @@ function failedSessionEvidence(failureKind, reason) {
   };
 }
 
+function observedUpstreamChainId(proxy) {
+  const observation = proxy?.getUpstreamIdentityObservation?.();
+  if (!observation?.chainId) return null;
+  try {
+    return hexQuantity(observation.chainId, 'upstream eth_chainId');
+  } catch {
+    return null;
+  }
+}
+
 export async function createPhase6MutableRpcSession({
   environment = process.env,
   fetchImpl = globalThis.fetch,
@@ -78,16 +88,6 @@ export async function createPhase6MutableRpcSession({
     };
   }
 
-  let observedUpstreamChainId = null;
-  try {
-    observedUpstreamChainId = hexQuantity(
-      await rpcCall(upstreamUrl, 'eth_chainId', [], fetchImpl),
-      'upstream eth_chainId',
-    );
-  } catch {
-    observedUpstreamChainId = null;
-  }
-
   let proxy;
   try {
     proxy = await startIdentityProxy({
@@ -96,6 +96,7 @@ export async function createPhase6MutableRpcSession({
       fetchImpl,
     });
     const normalized = await probeNormalizedRpc(proxy.url, fetchImpl);
+    const upstreamChainId = observedUpstreamChainId(proxy);
     if (normalized.status !== 'PASS') {
       await proxy.close().catch(() => {});
       return {
@@ -107,9 +108,9 @@ export async function createPhase6MutableRpcSession({
           blockHash: normalized.blockHash,
           identityNormalization: {
             status: 'FAIL',
-            observedUpstreamChainId,
+            observedUpstreamChainId: upstreamChainId,
             observedNormalizedChainId: normalized.chainId,
-            upstreamIdentityVirtualized: observedUpstreamChainId === null ? null : observedUpstreamChainId !== PHASE6_MUTABLE_RPC_CHAIN_ID,
+            upstreamIdentityVirtualized: upstreamChainId === null ? null : upstreamChainId !== PHASE6_MUTABLE_RPC_CHAIN_ID,
           },
         },
         runtime: null,
@@ -133,10 +134,11 @@ export async function createPhase6MutableRpcSession({
       rpcUrlExposedInEvidence: false,
       identityNormalization: {
         status: 'PASS',
-        observedUpstreamChainId,
+        observedUpstreamChainId: upstreamChainId,
         observedNormalizedChainId: normalized.chainId,
-        upstreamIdentityVirtualized: observedUpstreamChainId === null ? null : observedUpstreamChainId !== PHASE6_MUTABLE_RPC_CHAIN_ID,
+        upstreamIdentityVirtualized: upstreamChainId === null ? null : upstreamChainId !== PHASE6_MUTABLE_RPC_CHAIN_ID,
         mode: 'EXISTING_RPC_IDENTITY_PROXY',
+        rawIdentityProbeBypassUsed: false,
       },
     };
     const runtime = {
