@@ -17,6 +17,12 @@
     "build": "node scripts/build.mjs",
     "runner": "node packages/runner/src/cli.mjs",
     "integration:local": "node packages/runner/src/integration-local.mjs",
+    "v7": "node packages/github-native-sim/src/v7-cli.mjs",
+    "v7:execute": "node packages/github-native-sim/src/v7-cli.mjs execute",
+    "v7:submit": "node packages/github-native-sim/src/v7-cli.mjs submit",
+    "v7:harness:init": "node packages/github-native-sim/src/v7-cli.mjs harness:init",
+    "v7:harness:validate": "node packages/github-native-sim/src/v7-cli.mjs harness:validate",
+    "v7:manifest": "node packages/github-native-sim/src/v7-cli.mjs manifest",
     "cfbuild": "npm test && npm run lint && npm run build",
     "cfdeploy": "wrangler r2 bucket create curveyield-preflight || true && wrangler deploy --config apps/api/wrangler.toml",
     "deploy": "wrangler r2 bucket create curveyield-preflight || true && wrangler deploy --config apps/api/wrangler.toml"
