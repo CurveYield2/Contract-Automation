@@ -1,0 +1,218 @@
+name: V7 Audit Controller Execution v6
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'github-native-sim/requests/**/request.json'
+      - 'github-native-sim/requests/**/audit-harness/**'
+  workflow_dispatch:
+    inputs:
+      request_path:
+        description: Repository-relative deep-assurance-github-request-v2 JSON path in Solo-Audit-Controller
+        required: true
+        type: string
+      controller_ref:
+        description: Solo-Audit-Controller ref containing the request and any bound audit harness
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  execute-v7-request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout trusted Contract-Automation runner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install trusted runner dependencies
+        run: |
+          npm install --no-package-lock
+          echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Checkout atomic request source for PR
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: .request-source
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout private Solo Audit Controller for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Solo-Audit-Controller
+          ref: ${{ inputs.controller_ref }}
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller-request
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve exactly one V2 request
+        env:
+          DISPATCH_REQUEST_PATH: ${{ inputs.request_path }}
+        run: |
+          mkdir -p .v7-request
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            case "$DISPATCH_REQUEST_PATH" in
+              campaigns/*/requests/*.json) ;;
+              *) echo "Invalid V7 request path: $DISPATCH_REQUEST_PATH" >&2; exit 1 ;;
+            esac
+            test -f ".controller-request/$DISPATCH_REQUEST_PATH"
+            cp ".controller-request/$DISPATCH_REQUEST_PATH" .v7-request/request.json
+            echo "REQUEST_SOURCE_ROOT=$GITHUB_WORKSPACE/.controller-request" >> "$GITHUB_ENV"
+          else
+            mapfile -t requests < <(find .request-source/github-native-sim/requests -mindepth 2 -maxdepth 2 -type f -name request.json | sort)
+            test "${#requests[@]}" -eq 1
+            cp "${requests[0]}" .v7-request/request.json
+            echo "REQUEST_SOURCE_ROOT=$GITHUB_WORKSPACE/.request-source" >> "$GITHUB_ENV"
+          fi
+
+      - name: Validate request and bind auditor harness
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { validateDeepAssuranceRequestV2 } from './packages/github-native-sim/src/schema-v3.mjs';
+          import { safeRepositoryProjectPath } from './packages/github-native-sim/src/execution.mjs';
+          import { computeAuditorHarnessTreeSha256V1 } from './packages/github-native-sim/src/auditor-harness-overlay-v1.mjs';
+
+          const request = validateDeepAssuranceRequestV2(JSON.parse(fs.readFileSync('.v7-request/request.json', 'utf8')));
+          const envLines = [`V7_PHASE_ID=${request.phaseId}`];
+          const medusaRequested = request.phaseId === 'build-and-test' && request.configuration?.analysis?.medusa !== false && request.configuration?.analysis?.medusa !== undefined;
+          const nativeRequested = request.phaseId === 'build-and-test' && request.configuration?.analysis?.nativeFuzz?.enabled === true;
+          envLines.push(`PHASE6_MEDUSA=${medusaRequested ? 'true' : 'false'}`);
+          envLines.push(`PHASE6_NATIVE_FUZZ=${nativeRequested ? 'true' : 'false'}`);
+
+          const harness = request.configuration?.harness;
+          if (request.phaseId === 'build-and-test' && harness?.mode === 'auditor-generated') {
+            const root = safeRepositoryProjectPath(process.env.REQUEST_SOURCE_ROOT, harness.path);
+            const stat = fs.statSync(root);
+            if (!stat.isDirectory()) throw new Error(`Bound auditor harness is not a directory: ${root}`);
+            const actual = await computeAuditorHarnessTreeSha256V1(root);
+            if (actual !== harness.treeSha256) throw new Error(`Auditor harness digest mismatch: expected ${harness.treeSha256}, received ${actual}`);
+            envLines.push(`AUDIT_HARNESS_ROOT=${root}`);
+            console.log(`auditor_harness=${harness.path}`);
+            console.log(`auditor_harness_sha256=${actual}`);
+          }
+
+          fs.appendFileSync(process.env.GITHUB_ENV, `${envLines.join('\n')}\n`);
+          console.log(`validated_request=${request.requestId}`);
+          console.log(`phase=${request.phaseId}`);
+          console.log(`profile=${request.profileId}`);
+          NODE
+
+      - name: Set up Go for Medusa
+        if: env.PHASE6_MEDUSA == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+
+      - name: Set up Python for crytic-compile
+        if: env.PHASE6_MEDUSA == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install pinned Medusa toolchain
+        if: env.PHASE6_MEDUSA == 'true'
+        run: |
+          python -m pip install --disable-pip-version-check --no-input 'crytic-compile==0.4.1'
+          go install github.com/crytic/medusa@v1.5.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/medusa" --version | grep '1.5.1'
+          crytic-compile --version
+
+      - name: Verify pinned Forge toolchain
+        if: env.PHASE6_NATIVE_FUZZ == 'true'
+        run: forge --version | grep '1.7.1'
+
+      - name: Execute mandatory preflight then V7 request
+        env:
+          AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ env.V7_PHASE_ID == 'fork-simulation-lifecycle' && secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 || '' }}
+        run: |
+          mkdir -p .audit-evidence/v7-execution-v6
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { execFileSync } from 'node:child_process';
+          import { runGitHubNativeJobV2 } from './packages/github-native-sim/src/run-job-file-v2.mjs';
+
+          const request = JSON.parse(fs.readFileSync('.v7-request/request.json', 'utf8'));
+          const runnerCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+          const result = await runGitHubNativeJobV2(request, {
+            workspaceRoot: '.audit-work/v7-execution-v6',
+            environment: process.env,
+            runnerCommit,
+            auditHarnessRoot: process.env.AUDIT_HARNESS_ROOT || null,
+          });
+          const raw = `${JSON.stringify(result, null, 2)}\n`;
+          fs.writeFileSync('.audit-evidence/v7-execution-v6/raw-result-v6.json', raw);
+          const artifactDigest = createHash('sha256').update(raw).digest('hex');
+          const evidence = {
+            schemaVersion: 'audit-v7-github-execution-evidence-v2',
+            requestId: request.requestId,
+            requestDigest: request.requestDigest,
+            processId: request.processId,
+            phaseId: request.phaseId,
+            profileId: request.profileId,
+            source: request.source,
+            runnerImplementation: { repository: process.env.GITHUB_REPOSITORY, commit: runnerCommit },
+            preflight: result.preflight ?? null,
+            auditHarness: result.auditHarness ?? null,
+            resultStatus: result.status === 'completed' ? ((result.failedStepCount ?? 0) > 0 || (result.analysisComponentFailureCount ?? 0) > 0 ? 'FINDINGS' : 'PASS') : 'FAIL',
+            artifactDigest,
+            deploymentGasEvidence: result.deploymentGasEvidence ?? null,
+            simulationEvidence: result.simulation ?? null,
+            analysis: result.analysis ?? {},
+            analysisComponentFailureCount: result.analysisComponentFailureCount ?? 0,
+            failedStepCount: result.failedStepCount ?? 0,
+            failedSteps: result.failedSteps ?? [],
+            continuityDisposition: result.continuityDisposition ?? null,
+            authoritativeFinding: false,
+          };
+          fs.writeFileSync('.audit-evidence/v7-execution-v6/controller-evidence-v6.json', `${JSON.stringify(evidence, null, 2)}\n`);
+          NODE
+
+      - name: Upload V7 execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v7-execution-v6
+          path: .audit-evidence/v7-execution-v6
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Enforce preflight and execution outcome
+        if: always()
+        run: |
+          test -f .audit-evidence/v7-execution-v6/raw-result-v6.json
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const result = JSON.parse(fs.readFileSync('.audit-evidence/v7-execution-v6/raw-result-v6.json', 'utf8'));
+          if (result.preflight && result.preflight.status !== 'PASS') {
+            console.error(`V7 preflight did not pass; next state=${result.preflight.nextState ?? 'UNKNOWN'}`);
+            process.exit(1);
+          }
+          if (result.status !== 'completed') {
+            console.error(`V7 execution failed: ${result.error?.message ?? 'unknown failure'}`);
+            process.exit(1);
+          }
+          NODE
