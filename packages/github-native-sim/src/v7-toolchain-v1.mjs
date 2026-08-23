@@ -7,7 +7,7 @@ export const V7_TOOLCHAIN = Object.freeze({
   forge: Object.freeze({ command: 'forge', version: V7_POLICY.tools.forge }),
 });
 
-function versionMatches(text, expected) {
+export function toolOutputMatchesVersion(text, expected) {
   const escaped = expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(?:^|[^0-9])${escaped}(?:[^0-9]|$)`).test(String(text ?? ''));
 }
@@ -43,7 +43,7 @@ async function verifyOne(name, spec, runCommand) {
       observedVersionOutput: output,
     };
   }
-  if (!versionMatches(output, spec.version)) {
+  if (!toolOutputMatchesVersion(output, spec.version)) {
     return {
       name,
       command: spec.command,
