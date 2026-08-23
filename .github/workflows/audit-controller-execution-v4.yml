@@ -204,6 +204,32 @@ jobs:
           console.log(`archive_rpc_state_readiness=${evidence.status}`);
           NODE
 
+      - name: Record Phase 7 target code readiness
+        env:
+          SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        run: |
+          mkdir -p .audit-evidence/v7-execution-v4
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { probeArchiveContractCode } from './packages/github-native-sim/src/archive-contract-code-readiness-v1.mjs';
+          import { validateDeepAssuranceRequestV2 } from './packages/github-native-sim/src/schema.mjs';
+
+          const outputPath = '.audit-evidence/v7-execution-v4/archive-contract-code-readiness-v1.json';
+          const request = validateDeepAssuranceRequestV2(JSON.parse(fs.readFileSync('.v7-request/request.json', 'utf8')));
+          if (request.phaseId !== 'fork-simulation-lifecycle') process.exit(0);
+          const workflow = request.configuration.simulation.workflow;
+          const targetStep = workflow.steps.find((step) => typeof step.target === 'string' && /^0x[0-9a-fA-F]{40}$/.test(step.target));
+          if (!targetStep) process.exit(0);
+          const evidence = await probeArchiveContractCode({
+            rpcUrl: process.env.SIM_ARCHIVE_PRIMARY_ETHEREUM_01,
+            block: request.configuration.simulation.block,
+            address: targetStep.target
+          });
+          fs.writeFileSync(outputPath, `${JSON.stringify(evidence, null, 2)}\n`);
+          console.log(`archive_target_code_readiness=${evidence.status}`);
+          console.log(`archive_target_code_bytes=${evidence.byteLength ?? 'unavailable'}`);
+          NODE
+
       - name: Execute V7 GitHub-native request
         env:
           AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
