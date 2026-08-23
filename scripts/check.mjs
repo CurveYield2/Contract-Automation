@@ -25,15 +25,56 @@ for (const file of files) {
   }
 }
 
-const authoritativeRoots = [
-  path.join(root, 'packages', 'github-native-sim', 'src'),
-  path.join(root, 'packages', 'runner', 'src'),
-];
-for (const file of files) {
-  if (!authoritativeRoots.some((prefix) => file.startsWith(`${prefix}${path.sep}`) || file === prefix)) continue;
+function moduleSpecifiers(source) {
+  const specifiers = new Set();
+  const patterns = [
+    /\bfrom\s*['"]([^'"]+)['"]/g,
+    /\bimport\s*['"]([^'"]+)['"]/g,
+    /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) specifiers.add(match[1]);
+  }
+  return [...specifiers];
+}
+
+const fileSet = new Set(files);
+function resolveRelativeModule(importer, specifier) {
+  if (!specifier.startsWith('.')) return null;
+  const base = path.resolve(path.dirname(importer), specifier);
+  for (const candidate of [base, `${base}.mjs`, `${base}.js`, path.join(base, 'index.mjs'), path.join(base, 'index.js')]) {
+    if (fileSet.has(candidate)) return candidate;
+  }
+  return null;
+}
+
+const v7SourceRoot = path.join(root, 'packages', 'github-native-sim', 'src');
+const v7Roots = files.filter((file) => file.startsWith(`${v7SourceRoot}${path.sep}`));
+const authoritativeV7Graph = new Set();
+const pendingV7Modules = [...v7Roots];
+while (pendingV7Modules.length > 0) {
+  const file = pendingV7Modules.pop();
+  if (authoritativeV7Graph.has(file)) continue;
+  authoritativeV7Graph.add(file);
   const source = await fs.readFile(file, 'utf8');
-  if (/\b(?:from\s+['"]ganache['"]|require\(\s*['"]ganache['"]\s*\)|import\(\s*['"]ganache['"]\s*\))/.test(source)) {
-    throw new Error(`Authoritative V7 execution code may not import Ganache: ${path.relative(root, file)}`);
+  const specifiers = moduleSpecifiers(source);
+  if (specifiers.includes('ganache') || /\brequire\(\s*['"]ganache['"]\s*\)/.test(source)) {
+    throw new Error(`Authoritative V7 dependency graph may not import Ganache: ${path.relative(root, file)}`);
+  }
+  for (const specifier of specifiers) {
+    const dependency = resolveRelativeModule(file, specifier);
+    if (dependency && !authoritativeV7Graph.has(dependency)) pendingV7Modules.push(dependency);
+  }
+}
+
+const requiredV7RunnerModules = [
+  path.join(root, 'packages', 'runner', 'src', 'anvil-engine.mjs'),
+  path.join(root, 'packages', 'runner', 'src', 'workflow-runtime.mjs'),
+  path.join(root, 'packages', 'runner', 'src', 'rpc-identity-proxy-v1.mjs'),
+];
+for (const required of requiredV7RunnerModules) {
+  if (!authoritativeV7Graph.has(required)) {
+    throw new Error(`Canonical V7 dependency graph does not reach required runner module: ${path.relative(root, required)}`);
   }
 }
 
