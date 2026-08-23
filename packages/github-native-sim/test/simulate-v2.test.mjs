@@ -194,6 +194,7 @@ test('Phase 7 uses the same accepted build for gas evidence and a full pinned-fo
     gasEstimates: { creation: { totalCost: '222222', codeDepositCost: '200000', executionCost: '22222' } }
   }];
   const engine = {
+    engine: 'anvil',
     runtime: { id: 'runtime' },
     aliases: { account0: '0x0000000000000000000000000000000000000001' },
     async close() { calls.push('close-fork'); }
@@ -229,6 +230,7 @@ test('Phase 7 uses the same accepted build for gas evidence and a full pinned-fo
   assert.equal(result.deploymentGasEvidence.rows[0].deploymentGasEstimate, '222222');
   assert.equal(result.deploymentGasEvidence.sourceCommit, commit('1'));
   assert.equal(result.simulation.status, 'completed');
+  assert.equal(result.simulation.engine, 'anvil');
   assert.equal(result.simulation.chain, 'ethereum');
   assert.equal(result.simulation.chainId, 1);
   assert.equal(result.simulation.block, 25666794);
@@ -266,7 +268,7 @@ test('Phase 7 captures workflow failures as typed lifecycle evidence and closes 
     checkoutSource: checkout(calls),
     buildProject: build(calls, artifacts),
     environment: { SIM_ARCHIVE_PRIMARY_ETHEREUM_01: 'https://ethereum-archive-rpc.example' },
-    startSimulationEngine: async () => ({ runtime: {}, aliases: {}, async close() { calls.push('close-fork'); } }),
+    startSimulationEngine: async () => ({ engine: 'anvil', runtime: {}, aliases: {}, async close() { calls.push('close-fork'); } }),
     executeSimulationWorkflow: async () => { calls.push('lifecycle'); throw error; }
   });
   assert.deepEqual(calls, ['checkout', 'build', 'lifecycle', 'close-fork']);
