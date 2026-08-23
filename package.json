@@ -22,6 +22,7 @@
     "deploy": "wrangler r2 bucket create curveyield-preflight || true && wrangler deploy --config apps/api/wrangler.toml"
   },
   "dependencies": {
+    "@foundry-rs/anvil": "1.7.1",
     "ethers": "6.15.0",
     "ganache": "7.9.2",
     "solc": "0.8.30",
