@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { runProcess } from './execution.mjs';
 import { probePhase6MutableRpc } from './phase6-mutable-rpc-v1.mjs';
+import { V7_TOOLCHAIN, toolOutputMatchesVersion } from './v7-toolchain-v1.mjs';
 
 const SUPPORTED_COMPILER_LANGUAGES = new Set(['solidity', 'vyper']);
 
@@ -21,13 +22,35 @@ async function containsPropertyFunction(projectRoot, file) {
   return /\b(property_|echidna_|invariant_)[A-Za-z0-9_]*\s*\(/.test(source);
 }
 
-async function toolVersion(command, { cwd, runCommand }) {
-  const result = await runCommand({ command, args: ['--version'], cwd });
+async function toolVersion(name, { cwd, runCommand }) {
+  const spec = V7_TOOLCHAIN[name];
+  if (!spec) throw new Error(`Unknown V7 toolchain component ${name}`);
+  let result;
+  try {
+    result = await runCommand({ command: spec.command, args: ['--version'], cwd });
+  } catch (error) {
+    return {
+      available: false,
+      exactVersion: false,
+      expectedVersion: spec.version,
+      exitCode: -1,
+      stdout: '',
+      stderr: error?.message ?? String(error),
+      failureKind: 'TOOL_UNAVAILABLE',
+    };
+  }
+  const stdout = String(result?.stdout ?? '');
+  const stderr = String(result?.stderr ?? '');
+  const available = Boolean(result && result.exitCode === 0);
+  const exactVersion = available && toolOutputMatchesVersion(`${stdout}\n${stderr}`, spec.version);
   return {
-    available: Boolean(result && result.exitCode === 0),
+    available,
+    exactVersion,
+    expectedVersion: spec.version,
     exitCode: Number.isInteger(result?.exitCode) ? result.exitCode : -1,
-    stdout: String(result?.stdout ?? ''),
-    stderr: String(result?.stderr ?? ''),
+    stdout,
+    stderr,
+    failureKind: !available ? 'TOOL_UNAVAILABLE' : exactVersion ? null : 'TOOL_VERSION_MISMATCH',
   };
 }
 
@@ -42,6 +65,7 @@ export async function runPhase6ExecutionPreflightV1({
   environment = process.env,
   fetchImpl = globalThis.fetch,
   runCommand = runProcess,
+  mutableRpcEvidence = null,
 }) {
   if (!request || request.phaseId !== 'build-and-test') throw new Error('Phase 6 preflight requires a build-and-test request');
   if (request.profileId !== 'github-native-simulate-v2') throw new Error('Phase 6 preflight requires github-native-simulate-v2');
@@ -62,7 +86,7 @@ export async function runPhase6ExecutionPreflightV1({
   const nativeFuzzRequested = request.configuration?.analysis?.nativeFuzz?.enabled === true;
   const mutableRpcRequired = medusaRequested || nativeFuzzRequested;
   const mutableRpc = mutableRpcRequired
-    ? await probePhase6MutableRpc({ environment, fetchImpl })
+    ? (mutableRpcEvidence ?? await probePhase6MutableRpc({ environment, fetchImpl }))
     : { status: 'NOT_REQUIRED', profile: null, backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY' };
 
   const medusaHarnessPresent = medusaConfigs.length > 0 || propertySources.length > 0;
@@ -82,7 +106,7 @@ export async function runPhase6ExecutionPreflightV1({
     medusa = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: false, toolInvoked: false, reason: 'AUDITOR_MUST_AUTHOR_MEDUSA_HARNESS' };
   } else {
     medusa = { status: 'PENDING_TOOL_CHECK', technicallyApplicable: true, harnessPresent: true, toolInvoked: true, tool: await toolVersion('medusa', { cwd: projectRoot, runCommand }) };
-    medusa.status = medusa.tool.available ? 'READY' : 'BLOCKED_INFRASTRUCTURE';
+    medusa.status = medusa.tool.available && medusa.tool.exactVersion ? 'READY' : 'BLOCKED_INFRASTRUCTURE';
   }
 
   let nativeFuzz;
@@ -94,7 +118,7 @@ export async function runPhase6ExecutionPreflightV1({
     nativeFuzz = { status: 'HARNESS_REQUIRED', technicallyApplicable: true, harnessPresent: false, toolInvoked: false, reason: 'AUDITOR_MUST_AUTHOR_FOUNDRY_HARNESS' };
   } else {
     nativeFuzz = { status: 'PENDING_TOOL_CHECK', technicallyApplicable: true, harnessPresent: true, toolInvoked: true, tool: await toolVersion('forge', { cwd: projectRoot, runCommand }) };
-    nativeFuzz.status = nativeFuzz.tool.available ? 'READY' : 'BLOCKED_INFRASTRUCTURE';
+    nativeFuzz.status = nativeFuzz.tool.available && nativeFuzz.tool.exactVersion ? 'READY' : 'BLOCKED_INFRASTRUCTURE';
   }
 
   const harnessRequired = [medusa, nativeFuzz].some((component) => component.status === 'HARNESS_REQUIRED');
@@ -111,9 +135,13 @@ export async function runPhase6ExecutionPreflightV1({
         : 'PHASE6_EXECUTION_PREFLIGHT';
 
   return {
-    schemaVersion: 'audit-v7-phase6-execution-preflight-v4',
+    schemaVersion: 'audit-v7-phase6-execution-preflight-v5',
     status,
-    failureKind: mutableRpcBlocked ? (mutableRpc.failureKind ?? 'MUTABLE_RPC_UNAVAILABLE') : null,
+    failureKind: mutableRpcBlocked
+      ? (mutableRpc.failureKind ?? 'MUTABLE_RPC_UNAVAILABLE')
+      : toolInfrastructureBlocked
+        ? 'PHASE6_TOOLCHAIN_UNAVAILABLE_OR_MISMATCHED'
+        : null,
     phaseId: request.phaseId,
     profileId: request.profileId,
     requestId: request.requestId,
@@ -126,11 +154,12 @@ export async function runPhase6ExecutionPreflightV1({
       requested: request.configuration.compilers,
     },
     mutableRpcPolicy: {
-      rule: 'ALL_PHASE6_MUTABLE_OR_FORK_RPC_ACCESS_USES_EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC',
+      rule: 'ALL_PHASE6_MUTABLE_OR_FORK_RPC_ACCESS_USES_ONE_IDENTITY_NORMALIZED_EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_SESSION',
       requesterSuppliedRpcAllowed: false,
       alternateMutableRpcAllowed: false,
       medusaForkModeRequired: medusaRequested,
       foundryForkModeRequired: nativeFuzzRequested,
+      sameNormalizedSessionRequiredForPreflightMedusaAndFoundry: mutableRpcRequired,
       runtimeSecretMustNotAppearInEvidence: true,
     },
     mutableRpc,
