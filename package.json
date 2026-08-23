@@ -22,6 +22,7 @@
     "v7:submit": "node packages/github-native-sim/src/v7-cli.mjs submit",
     "v7:harness:init": "node packages/github-native-sim/src/v7-cli.mjs harness:init",
     "v7:harness:validate": "node packages/github-native-sim/src/v7-cli.mjs harness:validate",
+    "v7:toolchain:verify": "node packages/github-native-sim/src/v7-cli.mjs toolchain:verify",
     "v7:manifest": "node packages/github-native-sim/src/v7-cli.mjs manifest",
     "cfbuild": "npm test && npm run lint && npm run build",
     "cfdeploy": "wrangler r2 bucket create curveyield-preflight || true && wrangler deploy --config apps/api/wrangler.toml",
@@ -29,6 +30,7 @@
   },
   "dependencies": {
     "@foundry-rs/anvil": "1.7.1",
+    "@foundry-rs/forge": "1.7.1",
     "ethers": "6.15.0",
     "ganache": "7.9.2",
     "solc": "0.8.30",
