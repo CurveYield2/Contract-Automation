@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { runProcess } from './execution.mjs';
+import { probePhase6MutableRpc } from './phase6-mutable-rpc-v1.mjs';
 
 const SUPPORTED_COMPILER_LANGUAGES = new Set(['solidity', 'vyper']);
 
@@ -38,6 +39,8 @@ export async function runPhase6ExecutionPreflightV1({
   request,
   projectRoot,
   runnerCommit,
+  environment = process.env,
+  fetchImpl = globalThis.fetch,
   runCommand = runProcess,
 }) {
   if (!request || request.phaseId !== 'build-and-test') throw new Error('Phase 6 preflight requires a build-and-test request');
@@ -57,6 +60,11 @@ export async function runPhase6ExecutionPreflightV1({
 
   const medusaRequested = requested(request.configuration?.analysis?.medusa);
   const nativeFuzzRequested = request.configuration?.analysis?.nativeFuzz?.enabled === true;
+  const mutableRpcRequired = medusaRequested || nativeFuzzRequested;
+  const mutableRpc = mutableRpcRequired
+    ? await probePhase6MutableRpc({ environment, fetchImpl })
+    : { status: 'NOT_REQUIRED', profile: null, backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY' };
+
   const medusaHarnessPresent = medusaConfigs.length > 0 || propertySources.length > 0;
   const nativeFuzzHarnessPresent = foundryConfigs.length > 0 && solidityTests.length > 0;
   const medusaTechnicallyApplicable = medusaRequested && soliditySources.length > 0;
@@ -90,7 +98,9 @@ export async function runPhase6ExecutionPreflightV1({
   }
 
   const harnessRequired = [medusa, nativeFuzz].some((component) => component.status === 'HARNESS_REQUIRED');
-  const infrastructureBlocked = [medusa, nativeFuzz].some((component) => component.status === 'BLOCKED_INFRASTRUCTURE');
+  const toolInfrastructureBlocked = [medusa, nativeFuzz].some((component) => component.status === 'BLOCKED_INFRASTRUCTURE');
+  const mutableRpcBlocked = mutableRpcRequired && mutableRpc.status !== 'PASS';
+  const infrastructureBlocked = toolInfrastructureBlocked || mutableRpcBlocked;
   const status = compilerAcceptance && !harnessRequired && !infrastructureBlocked ? 'PASS' : 'BLOCKED';
   const nextState = harnessRequired
     ? 'PHASE6_HARNESS_AUTHORING'
@@ -101,8 +111,9 @@ export async function runPhase6ExecutionPreflightV1({
         : 'PHASE6_EXECUTION_PREFLIGHT';
 
   return {
-    schemaVersion: 'audit-v7-phase6-execution-preflight-v3',
+    schemaVersion: 'audit-v7-phase6-execution-preflight-v4',
     status,
+    failureKind: mutableRpcBlocked ? (mutableRpc.failureKind ?? 'MUTABLE_RPC_UNAVAILABLE') : null,
     phaseId: request.phaseId,
     profileId: request.profileId,
     requestId: request.requestId,
@@ -114,6 +125,15 @@ export async function runPhase6ExecutionPreflightV1({
       status: compilerAcceptance ? 'PASS' : 'FAIL',
       requested: request.configuration.compilers,
     },
+    mutableRpcPolicy: {
+      rule: 'ALL_PHASE6_MUTABLE_OR_FORK_RPC_ACCESS_USES_EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC',
+      requesterSuppliedRpcAllowed: false,
+      alternateMutableRpcAllowed: false,
+      medusaForkModeRequired: medusaRequested,
+      foundryForkModeRequired: nativeFuzzRequested,
+      runtimeSecretMustNotAppearInEvidence: true,
+    },
+    mutableRpc,
     harnessPolicy: {
       rule: 'AUDITOR_AUTHORS_REQUIRED_HARNESSES_WITHOUT_MODIFYING_FROZEN_PRODUCTION_SOURCE',
       missingHarnessIsNotNotApplicable: true,
