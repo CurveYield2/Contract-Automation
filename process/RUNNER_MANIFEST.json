@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "curveyield2-v7-runner-manifest-v2",
+  "repository": "CurveYield2/Contract-Automation",
+  "processId": "audit-v7-independent-review",
+  "requestSchema": "deep-assurance-github-request-v2",
+  "profiles": [
+    "github-native-compile-v2",
+    "github-native-simulate-v2"
+  ],
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "activeWorkflows": {
+    "execution": ".github/workflows/audit-controller-execution.yml",
+    "qualification": ".github/workflows/v7-execution-infrastructure-qualification.yml"
+  },
+  "toolchain": {
+    "slither": "0.11.6",
+    "medusa": "1.5.1",
+    "anvilPackage": "1.7.1"
+  },
+  "mutableRpc": {
+    "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
+    "chain": "ethereum",
+    "chainId": 1,
+    "backendPolicy": "EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY",
+    "requesterSuppliedRpcAllowed": false
+  },
+  "phase6": {
+    "skeletonRoot": "packages/github-native-sim/harness-skeletons-v2",
+    "skeletonReadme": "packages/github-native-sim/harness-skeletons-v2/README_v2.md",
+    "overlayKind": "runner-owned-audit-overlay-v1",
+    "overlayRoot": "packages/github-native-sim/audit-harnesses",
+    "requiredRuntimeFiles": [
+      "medusa.json",
+      "foundry.toml"
+    ],
+    "medusaBeforeFoundry": true,
+    "stagingPolicy": "SINGLE_VERIFIED_SNAPSHOT_THEN_LOCAL_EXECUTION_COPY"
+  },
+  "commands": {
+    "execute": "npm run v7:execute -- --request <request.json>",
+    "submit": "npm run v7:submit -- --request <request.json>",
+    "harnessInit": "npm run v7:harness:init -- --request <request.json>",
+    "harnessValidate": "npm run v7:harness:validate -- --bundle <bundle-id> --request <request.json>",
+    "manifestCheck": "npm run v7:manifest -- --check"
+  },
+  "evidence": {
+    "schemaVersion": "audit-v7-github-execution-evidence-v2",
+    "root": ".audit-evidence/v7-execution",
+    "terminalDispositionRequired": true
+  }
+}
