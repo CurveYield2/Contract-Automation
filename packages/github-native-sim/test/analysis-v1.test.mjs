@@ -30,7 +30,7 @@ const medusaInput = () => ({
   projectRoot: '/tmp/project',
   version: '1.5.1',
   sourceCommit: commit('1'),
-  rawArtifactRef: 'github-actions://CurveYield/contract-automation/runs/1/artifacts/medusa/raw.json'
+  rawArtifactRef: 'github-actions://CurveYield/contract-automation/runs/1/artifacts/medusa/raw.txt'
 });
 
 test('successful Slither 0.11.6 run preserves raw evidence and normalized completion', async () => {
@@ -159,6 +159,26 @@ test('Medusa falsification preserves counterexample and shrinking evidence as a 
   assert.equal(result.campaign.falsifiedProperties, 1);
   assert.equal(result.campaign.properties[0].counterexample.length, 2);
   assert.equal(result.campaign.properties[0].shrinking.minimizedLength, 2);
+});
+
+test('native Medusa console output uses exit code 7 as durable property falsification evidence', async () => {
+  const fake = sequence([
+    { exitCode: 0, stdout: 'medusa version 1.5.1\n', stderr: '' },
+    {
+      exitCode: 7,
+      stdout: 'Reading the configuration file at: medusa.json\nproperty_no_pre_stake_reward_capture(): failed\nCall sequence:\n1) stakeAfterZeroSupply(1)\n',
+      stderr: ''
+    }
+  ]);
+  const result = await runMedusaAnalysis(medusaInput(), { runCommand: fake.runCommand });
+  assert.equal(result.status, 'completed_with_failures');
+  assert.equal(result.failureKind, 'PROPERTY_FALSIFICATION');
+  assert.equal(result.componentStatus, 'COMPLETED_WITH_FAILURES');
+  assert.equal(result.campaign.outputFormat, 'console');
+  assert.equal(result.campaign.falsifiedProperties, 1);
+  assert.equal(result.campaign.properties[0].name, 'property_no_pre_stake_reward_capture');
+  assert.equal(result.campaign.properties[0].status, 'failed');
+  assert.match(result.rawOutput.stdout, /stakeAfterZeroSupply/);
 });
 
 test('Medusa execution failure is typed and terminal without becoming an integrity failure', async () => {
