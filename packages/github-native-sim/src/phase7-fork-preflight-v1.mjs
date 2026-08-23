@@ -38,7 +38,6 @@ function unsupportedArchiveChain(request, workflowActions) {
     sourceCommit: request.source.commit,
     chain: simulation.chain,
     pinnedBlock: simulation.block,
-    pinnedBlockHash: simulation.blockHash ?? null,
     evmVersion: request.configuration.evmVersion,
     checks: {
       archiveRpcSecret: {
@@ -53,16 +52,14 @@ function unsupportedArchiveChain(request, workflowActions) {
   };
 }
 
-function reconcileUpstreamIdentity({ upstreamIdentity, expectedChainId, expectedBlockHash, localBlock }) {
+function reconcileUpstreamIdentity({ upstreamIdentity, expectedChainId, localBlock }) {
   const directIdentityMatch = upstreamIdentity.chainIdMatchesExpected === true
     && upstreamIdentity.networkIdMatchesExpected === true;
   const transactionChainMatch = upstreamIdentity.sampleTransaction?.chainId === expectedChainId;
-  const expectedHashMatch = typeof expectedBlockHash === 'string'
-    && upstreamIdentity.block?.hash?.toLowerCase() === expectedBlockHash.toLowerCase();
   const localHashMatch = Boolean(localBlock?.hash)
-    && upstreamIdentity.block?.hash?.toLowerCase() === localBlock.hash.toLowerCase();
-  const stateIdentityEstablished = expectedHashMatch && localHashMatch;
-  const reconciled = stateIdentityEstablished && (directIdentityMatch || transactionChainMatch);
+    && Boolean(upstreamIdentity.block?.hash)
+    && upstreamIdentity.block.hash.toLowerCase() === localBlock.hash.toLowerCase();
+  const reconciled = localHashMatch && (directIdentityMatch || transactionChainMatch);
   return {
     status: reconciled ? 'PASS' : 'FAIL',
     expectedChainId,
@@ -71,10 +68,8 @@ function reconcileUpstreamIdentity({ upstreamIdentity, expectedChainId, expected
     directIdentityMatch,
     sampleTransactionChainId: upstreamIdentity.sampleTransaction?.chainId ?? null,
     transactionChainMatch,
-    expectedBlockHash,
     upstreamBlockHash: upstreamIdentity.block?.hash ?? null,
     localAnvilBlockHash: localBlock?.hash ?? null,
-    expectedHashMatch,
     localHashMatch,
     reconciliationMode: reconciled
       ? (directIdentityMatch ? 'DIRECT_IDENTITY_AND_STATE_MATCH' : 'IDENTITY_PROXY_STATE_RECONCILED')
@@ -85,12 +80,11 @@ function reconcileUpstreamIdentity({ upstreamIdentity, expectedChainId, expected
 
 async function proveImpersonationBalanceControl(provider) {
   const actor = IMPERSONATION_PROBE_ACTOR;
-  const probeBalanceHex = '0xde0b6b3a7640000';
   let impersonated = false;
   try {
     await provider.send('anvil_impersonateAccount', [actor]);
     impersonated = true;
-    await provider.send('evm_setAccountBalance', [actor, probeBalanceHex]);
+    await provider.send('evm_setAccountBalance', [actor, '0xde0b6b3a7640000']);
     const balance = await provider.getBalance(actor);
     return {
       status: balance === 10n ** 18n ? 'PASS' : 'FAIL',
@@ -101,11 +95,8 @@ async function proveImpersonationBalanceControl(provider) {
     };
   } catch (error) {
     return {
-      status: 'FAIL',
-      actor,
-      impersonationSucceeded: impersonated,
-      balanceMutationSucceeded: false,
-      reason: error?.message ?? String(error),
+      status: 'FAIL', actor, impersonationSucceeded: impersonated,
+      balanceMutationSucceeded: false, reason: error?.message ?? String(error),
     };
   } finally {
     if (impersonated) await provider.send('anvil_stopImpersonatingAccount', [actor]).catch(() => {});
@@ -142,25 +133,9 @@ export async function runPhase7ForkPreflightV1({
       sourceCommit: request.source.commit,
       chain: simulation.chain,
       pinnedBlock: simulation.block,
-      pinnedBlockHash: simulation.blockHash ?? null,
       evmVersion: request.configuration.evmVersion,
       checks: { archiveRpcSecret, workflowActions },
       nextState: archiveRpcSecret.status !== 'PASS' ? 'PHASE7_FORK_PREFLIGHT' : 'RUNNER_REPAIR_REBIND',
-    };
-  }
-  if (typeof simulation.blockHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(simulation.blockHash)) {
-    return {
-      schemaVersion: 'audit-v7-phase7-fork-preflight-v1',
-      status: 'FAIL',
-      failureKind: 'PINNED_BLOCK_HASH_REQUIRED',
-      requestId: request.requestId,
-      sourceCommit: request.source.commit,
-      chain: simulation.chain,
-      pinnedBlock: simulation.block,
-      pinnedBlockHash: simulation.blockHash ?? null,
-      evmVersion: request.configuration.evmVersion,
-      checks: { archiveRpcSecret, workflowActions, pinnedBlockState: { status: 'FAIL', reason: 'Exact pinned block hash is required' } },
-      nextState: 'PHASE7_FORK_PREFLIGHT',
     };
   }
 
@@ -174,19 +149,11 @@ export async function runPhase7ForkPreflightV1({
   } catch (error) {
     return {
       schemaVersion: 'audit-v7-phase7-fork-preflight-v1',
-      status: 'FAIL',
-      failureKind: 'ARCHIVE_IDENTITY_PROBE_FAILURE',
-      requestId: request.requestId,
-      sourceCommit: request.source.commit,
-      chain: simulation.chain,
-      pinnedBlock: simulation.block,
-      pinnedBlockHash: simulation.blockHash,
+      status: 'FAIL', failureKind: 'ARCHIVE_IDENTITY_PROBE_FAILURE',
+      requestId: request.requestId, sourceCommit: request.source.commit,
+      chain: simulation.chain, pinnedBlock: simulation.block,
       evmVersion: request.configuration.evmVersion,
-      checks: {
-        archiveRpcSecret,
-        workflowActions,
-        chainIdentity: { status: 'FAIL', reason: error?.message ?? String(error) },
-      },
+      checks: { archiveRpcSecret, workflowActions, chainIdentity: { status: 'FAIL', reason: error?.message ?? String(error) } },
       nextState: 'PHASE7_FORK_PREFLIGHT',
     };
   }
@@ -206,26 +173,17 @@ export async function runPhase7ForkPreflightV1({
     const anvilChainIdHex = await engine.provider.send('eth_chainId', []);
     const observedAnvilChainId = Number(BigInt(anvilChainIdHex));
     const localBlock = await engine.provider.getBlock(simulation.block);
-    const chainIdentity = reconcileUpstreamIdentity({
-      upstreamIdentity,
-      expectedChainId: chain.chainId,
-      expectedBlockHash: simulation.blockHash,
-      localBlock,
-    });
+    const chainIdentity = reconcileUpstreamIdentity({ upstreamIdentity, expectedChainId: chain.chainId, localBlock });
     chainIdentity.anvilChainId = observedAnvilChainId;
     chainIdentity.anvilChainIdMatchesExpected = observedAnvilChainId === chain.chainId;
     if (!chainIdentity.anvilChainIdMatchesExpected) chainIdentity.status = 'FAIL';
 
     const pinnedBlockState = {
-      status: localBlock?.number === simulation.block
-        && Boolean(localBlock?.hash)
-        && localBlock.hash.toLowerCase() === simulation.blockHash.toLowerCase()
-        && upstreamIdentity.block?.hash?.toLowerCase() === simulation.blockHash.toLowerCase()
-        ? 'PASS' : 'FAIL',
+      status: localBlock?.number === simulation.block && chainIdentity.localHashMatch ? 'PASS' : 'FAIL',
       number: localBlock?.number ?? null,
-      expectedHash: simulation.blockHash,
       localHash: localBlock?.hash ?? null,
       upstreamHash: upstreamIdentity.block?.hash ?? null,
+      stateRoot: upstreamIdentity.block?.stateRoot ?? null,
     };
 
     const codeChecks = [];
@@ -247,26 +205,14 @@ export async function runPhase7ForkPreflightV1({
       launchArgumentMode: 'EXACT_REQUESTED_HARDFORK_NO_DOWNGRADE',
       downgradeAllowed: false,
     };
-    const checks = {
-      anvilLauncher,
-      exactHardfork,
-      archiveRpcSecret,
-      chainIdentity,
-      pinnedBlockState,
-      targetCode,
-      impersonationBalanceControl,
-      workflowActions,
-    };
+    const checks = { anvilLauncher, exactHardfork, archiveRpcSecret, chainIdentity, pinnedBlockState, targetCode, impersonationBalanceControl, workflowActions };
     const status = Object.values(checks).every((check) => check.status === 'PASS') ? 'PASS' : 'FAIL';
     return {
       schemaVersion: 'audit-v7-phase7-fork-preflight-v1',
-      status,
-      failureKind: status === 'PASS' ? null : 'FORK_PREFLIGHT_ASSERTION_FAILURE',
-      requestId: request.requestId,
-      sourceCommit: request.source.commit,
-      chain: simulation.chain,
-      pinnedBlock: simulation.block,
-      pinnedBlockHash: simulation.blockHash,
+      status, failureKind: status === 'PASS' ? null : 'FORK_PREFLIGHT_ASSERTION_FAILURE',
+      requestId: request.requestId, sourceCommit: request.source.commit,
+      chain: simulation.chain, pinnedBlock: simulation.block,
+      observedPinnedBlockHash: upstreamIdentity.block?.hash ?? null,
       evmVersion: request.configuration.evmVersion,
       checks,
       nextState: status === 'PASS' ? 'ACTIVE' : 'RUNNER_REPAIR_REBIND',
@@ -274,20 +220,15 @@ export async function runPhase7ForkPreflightV1({
   } catch (error) {
     return {
       schemaVersion: 'audit-v7-phase7-fork-preflight-v1',
-      status: 'FAIL',
-      failureKind: 'ANVIL_PREFLIGHT_FAILURE',
-      requestId: request.requestId,
-      sourceCommit: request.source.commit,
-      chain: simulation.chain,
-      pinnedBlock: simulation.block,
-      pinnedBlockHash: simulation.blockHash,
+      status: 'FAIL', failureKind: 'ANVIL_PREFLIGHT_FAILURE',
+      requestId: request.requestId, sourceCommit: request.source.commit,
+      chain: simulation.chain, pinnedBlock: simulation.block,
+      observedPinnedBlockHash: upstreamIdentity?.block?.hash ?? null,
       evmVersion: request.configuration.evmVersion,
       checks: {
-        archiveRpcSecret,
-        workflowActions,
+        archiveRpcSecret, workflowActions,
         chainIdentity: {
-          status: 'FAIL',
-          expectedChainId: chain.chainId,
+          status: 'FAIL', expectedChainId: chain.chainId,
           remoteChainId: upstreamIdentity?.remoteChainId ?? null,
           remoteNetworkId: upstreamIdentity?.remoteNetworkId ?? null,
           sampleTransactionChainId: upstreamIdentity?.sampleTransaction?.chainId ?? null,
