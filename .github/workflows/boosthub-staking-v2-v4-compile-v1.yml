@@ -1,0 +1,159 @@
+name: Boosthub Staking v2 v4 Compile v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/boosthub-staking-v2-v4-compile-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-staking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout trusted Contract-Automation runner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pinned runner dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-package-lock
+          fi
+
+      - name: Install and verify canonical V7 toolchain
+        uses: ./.github/actions/setup-v7-toolchain
+
+      - name: Checkout exact Solo Audit Controller source commit
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Solo-Audit-Controller
+          ref: 93062463611e798ab26544a88c4e119f9620be9a
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Extract exact remediated v4 archive and identify staking source
+        id: locate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP='.controller/campaigns/Boosthub Staking v2/source/CurveYield-BoostHub-sdCRV-sdFXN-sdYB-Deployment-Package-Remediated-v4.zip'
+          test -f "$ZIP"
+          sha256sum "$ZIP" | tee boosthub-staking-v2-v4-archive-sha256-v1.txt
+          rm -rf .boosthub-v4
+          mkdir -p .boosthub-v4
+          unzip -q "$ZIP" -d .boosthub-v4
+
+          ROOT="$(find .boosthub-v4 -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+          test -n "$ROOT"
+          echo "package_root=$ROOT" >> "$GITHUB_OUTPUT"
+
+          find "$ROOT" -type f -name '*.sol' | sort > all-solidity-files-v1.txt
+          grep -Ei '/[^/]*staking[^/]*\.sol$|/[^/]*boosthub[^/]*\.sol$' all-solidity-files-v1.txt | sort -u > staking-candidates-v1.txt || true
+
+          if [ ! -s staking-candidates-v1.txt ]; then
+            grep -RIl --include='*.sol' -E 'contract[[:space:]]+[A-Za-z0-9_]*(Staking|BoostHub)|BoostHub.*Staking|Staking.*BoostHub' "$ROOT" | sort -u > staking-candidates-v1.txt || true
+          fi
+
+          if [ ! -s staking-candidates-v1.txt ]; then
+            echo 'No staking Solidity source candidate found in remediated v4 archive.' >&2
+            exit 1
+          fi
+
+          echo 'Staking candidates:'
+          cat staking-candidates-v1.txt
+
+      - name: Compile staking source with pinned Forge
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$GITHUB_WORKSPACE/node_modules/.bin:$PATH"
+          ROOT='${{ steps.locate.outputs.package_root }}'
+          : > boosthub-staking-v2-v4-compile-log-v1.txt
+          : > boosthub-staking-v2-v4-compile-summary-v1.txt
+
+          foundry_roots_file="$RUNNER_TEMP/foundry-roots.txt"
+          find "$ROOT" -type f -name foundry.toml -printf '%h\n' | sort -u > "$foundry_roots_file" || true
+
+          compiled=0
+          while IFS= read -r candidate; do
+            [ -n "$candidate" ] || continue
+            candidate_abs="$(realpath "$candidate")"
+            project_root=''
+
+            while IFS= read -r fr; do
+              [ -n "$fr" ] || continue
+              fr_abs="$(realpath "$fr")"
+              case "$candidate_abs" in
+                "$fr_abs"/*)
+                  if [ ${#fr_abs} -gt ${#project_root} ]; then project_root="$fr_abs"; fi
+                  ;;
+              esac
+            done < "$foundry_roots_file"
+
+            if [ -z "$project_root" ]; then
+              project_root="$(realpath "$ROOT")"
+            fi
+
+            rel_candidate="${candidate_abs#${project_root}/}"
+            {
+              echo '============================================================'
+              echo "candidate=$candidate_abs"
+              echo "project_root=$project_root"
+              echo "forge_version=$(forge --version | head -n 1)"
+              echo '============================================================'
+            } | tee -a boosthub-staking-v2-v4-compile-log-v1.txt
+
+            if (cd "$project_root" && forge build "$rel_candidate" --force -vvv) 2>&1 | tee -a boosthub-staking-v2-v4-compile-log-v1.txt; then
+              echo "PASS $candidate_abs" | tee -a boosthub-staking-v2-v4-compile-summary-v1.txt
+              compiled=$((compiled + 1))
+            else
+              echo "FAIL $candidate_abs" | tee -a boosthub-staking-v2-v4-compile-summary-v1.txt
+            fi
+          done < staking-candidates-v1.txt
+
+          echo "compiled_candidates=$compiled" | tee -a boosthub-staking-v2-v4-compile-summary-v1.txt
+          if [ "$compiled" -lt 1 ]; then
+            echo 'No staking candidate compiled successfully.' >&2
+            exit 1
+          fi
+
+      - name: Collect compiled staking artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p boosthub-staking-v2-v4-compile-evidence-v1
+          cp boosthub-staking-v2-v4-archive-sha256-v1.txt boosthub-staking-v2-v4-compile-evidence-v1/ || true
+          cp all-solidity-files-v1.txt boosthub-staking-v2-v4-compile-evidence-v1/ || true
+          cp staking-candidates-v1.txt boosthub-staking-v2-v4-compile-evidence-v1/ || true
+          cp boosthub-staking-v2-v4-compile-log-v1.txt boosthub-staking-v2-v4-compile-evidence-v1/ || true
+          cp boosthub-staking-v2-v4-compile-summary-v1.txt boosthub-staking-v2-v4-compile-evidence-v1/ || true
+          find .boosthub-v4 -type f \( -path '*/out/*/*.json' -o -path '*/cache/*' \) -print0 2>/dev/null | xargs -0 -r cp --parents -t boosthub-staking-v2-v4-compile-evidence-v1/ || true
+
+      - name: Upload compile evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boosthub-staking-v2-v4-compile-evidence-v1
+          path: boosthub-staking-v2-v4-compile-evidence-v1
+          if-no-files-found: error
+          retention-days: 30
