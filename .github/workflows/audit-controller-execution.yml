@@ -62,6 +62,9 @@ jobs:
             echo "::warning::package-lock.json is not yet present; dependency resolution is not fully locked"
           fi
 
+      - name: Set up exact shared V7 toolchain
+        uses: ./.github/actions/setup-v7-toolchain
+
       - name: Verify canonical runner manifest
         run: npm run v7:manifest -- --check
 
