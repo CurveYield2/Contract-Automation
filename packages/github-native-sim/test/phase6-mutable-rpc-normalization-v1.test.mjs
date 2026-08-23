@@ -34,11 +34,15 @@ async function upstreamFetch(url, options) {
   });
 }
 
-test('Phase 6 normalizes a virtual-ID mutable Ethereum backend and keeps one normalized RPC alive for execution', async () => {
-  const session = await createPhase6MutableRpcSession({
+async function openSession() {
+  return createPhase6MutableRpcSession({
     environment: { [PHASE6_MUTABLE_RPC_ENV]: 'https://virtual-mutable-anvil.example/rpc' },
     fetchImpl: upstreamFetch,
   });
+}
+
+test('Phase 6 normalizes a virtual-ID mutable Ethereum backend and keeps one normalized RPC alive for execution', async () => {
+  const session = await openSession();
 
   try {
     assert.equal(session.evidence.status, 'PASS');
@@ -64,4 +68,20 @@ test('Phase 6 normalizes a virtual-ID mutable Ethereum backend and keeps one nor
   } finally {
     await session.close();
   }
+});
+
+test('Phase 6 normalized RPC session closes idempotently and cannot be reused after cleanup', async () => {
+  const session = await openSession();
+  assert.equal(session.evidence.status, 'PASS');
+  const runtimeUrl = session.runtime.url;
+  await session.close();
+  await session.close();
+
+  await assert.rejects(
+    fetch(runtimeUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 8, method: 'eth_chainId', params: [] }),
+    }),
+  );
 });

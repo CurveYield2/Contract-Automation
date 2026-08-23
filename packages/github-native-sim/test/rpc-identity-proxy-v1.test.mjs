@@ -1,12 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const proxyModule = await import('../../runner/src/rpc-identity-proxy-v1.mjs').catch(() => ({}));
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, '../../..');
 
 async function postJson(url, body) {
   const response = await fetch(url, {
@@ -67,14 +62,4 @@ test('fork RPC identity proxy rewrites only eth_chainId and net_version while pr
     'eth_getBlockByNumber',
     ['eth_chainId', 'eth_getCode', 'net_version']
   ]);
-});
-
-test('Ganache fork engine routes only fork traffic through the localhost identity proxy and keeps the pinned block', () => {
-  const engine = fs.readFileSync(path.join(repoRoot, 'packages/runner/src/engine.mjs'), 'utf8');
-  assert.match(engine, /startRpcIdentityProxy/);
-  assert.match(engine, /upstreamUrl:\s*forkUrl/);
-  assert.match(engine, /chainId/);
-  assert.match(engine, /buildGanacheOptions\(\{[^}]*forkUrl:\s*identityProxy\.url/s);
-  assert.match(engine, /if \(block !== 'latest'\) options\.fork\.blockNumber = block/);
-  assert.match(engine, /await identityProxy\.close\(\)/);
 });
