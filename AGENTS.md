@@ -1,153 +1,133 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v6
+Policy version: v7
+
+## Canonical V7 control surface
+
+For Audit V7, this repository has exactly one active execution workflow, one active qualification workflow, one active runner manifest, and one operational CLI:
+
+- execution workflow: `.github/workflows/audit-controller-execution.yml`
+- qualification workflow: `.github/workflows/v7-execution-infrastructure-qualification.yml`
+- runner manifest: `process/RUNNER_MANIFEST.json`
+- CLI: `packages/github-native-sim/src/v7-cli.mjs`
+
+Agents MUST NOT choose among historical workflow/manifests or recreate version-suffixed active entrypoints. Git history is the archive.
+
+Normal operations are:
+
+- execute: `npm run v7:execute -- --request <request.json>`
+- submit an atomic request: `npm run v7:submit -- --request <request.json>`
+- create a Phase-6 harness bundle: `npm run v7:harness:init -- --request <request.json>`
+- validate a Phase-6 harness bundle: `npm run v7:harness:validate -- --bundle <bundle-id> --request <request.json>`
+- verify the generated runner manifest: `npm run v7:manifest -- --check`
+
+If a deterministic operation exists in this CLI, agents MUST use it instead of manually reconstructing the underlying Git/RPC/file workflow.
+
+## Terminal disposition is authoritative
+
+Every V7 execution returns a top-level machine disposition plus `blocking`, `owner`, `nextAction`, `retryFrom`, and `recoveryCommand` where applicable.
+
+Agents MUST consume these fields directly and MUST NOT re-derive a different next state from nested logs when the runner already supplied one. Current terminal dispositions include:
+
+- `PASS`
+- `FINDINGS`
+- `HARNESS_AUTHORING_REQUIRED`
+- `RUNNER_REPAIR_REBIND`
+- `RECIPE_GAP`
+- `INFRASTRUCTURE_BLOCKED`
+- `EXECUTION_FAILED`
+
+If the disposition contains a recovery command, use that command before inventing a manual repair path.
+
+## Request submission — automated and byte-safe
+
+Do not manually perform the historical blob/tree/commit/ref playbook during normal audit work.
+
+Use:
+
+`npm run v7:submit -- --request <request.json>`
+
+The trusted submission implementation performs schema validation, exact-byte SHA-256 capture, Git blob/tree/commit/ref creation, exact remote-byte verification, atomic-diff verification, and trace-PR creation. A request branch must differ from trusted `main` by exactly one request payload.
+
+Requester-controlled execution fields remain forbidden, including `rpc`, `rpcUrl`, shell commands, private keys, signed transactions, mnemonics, and secrets.
 
 ## Phase 6 skeleton code — canonical location and mandatory discovery
 
-The canonical Audit V7 Phase-6 skeleton code is in this repository at:
+The canonical entrypoint is:
 
 `packages/github-native-sim/harness-skeletons-v2/README_v2.md`
 
-The canonical skeleton directory is:
+The canonical directory is:
 
 `packages/github-native-sim/harness-skeletons-v2/`
 
-For Phase-6 Medusa/Foundry harness work, agents MUST open that README before authoring or repairing harness code. Current skeleton files include:
+Before authoring or repairing a Phase-6 Medusa/Foundry harness, agents MUST open that README. If the path does not resolve on the first lookup, search this repository for `harness-skeletons-v2` or the exact skeleton filenames. While the repository is accessible, do not ask the human where the skeleton code is and do not recreate supplied skeletons from memory.
 
-- `medusa/medusa-discovery-template_v2.json`
-- `medusa/medusa-property-template_v2.json`
-- `medusa/medusa-targeted-template_v2.json`
-- `medusa/Phase6MedusaHarness_v2.sol.template`
-- `foundry/foundry-template_v2.toml`
-- `foundry/Phase6InvariantTargeting_v2.sol.template`
-- `foundry/Phase6StatefulHandler_v2.sol.template`
-- `foundry/Phase6InvariantSuite_v2.t.sol.template`
-- `foundry/Phase6BoundaryFuzz_v2.t.sol.template`
-- `foundry/Phase6DifferentialFuzz_v2.t.sol.template`
-- `models/Phase6GhostModel_v2.sol.template`
-- `phase6-harness-manifest-template_v2.json`
+## Phase 6 harness authoring — deterministic bundle lifecycle
 
-**Discovery fallback is mandatory.** If the canonical path does not resolve on the first lookup, search this same repository for `harness-skeletons-v2` and for the exact filenames above, then inspect the resolved parent directory and its README. A single failed guessed/path lookup is never evidence that skeleton code is absent.
+Missing usable harnesses are `HARNESS_AUTHORING_REQUIRED`, never `NOT_APPLICABLE` when the target is technically compatible.
 
-While this repository is accessible, agents MUST NOT ask the human where the skeleton code is, MUST NOT report `SKELETON_CODE_NOT_FOUND` without exhausting the canonical-path plus exact-filename search procedure, and MUST NOT author replacement skeletons from memory before inspecting the supplied kit. If repository access itself fails, classify that as repository/infrastructure access failure, not missing skeleton code.
+Start with:
+
+`npm run v7:harness:init -- --request <request.json> [--campaign discovery|property|targeted]`
+
+Then adapt the generated audit-only files to the exact frozen target and run:
+
+`npm run v7:harness:validate -- --bundle <bundle-id> --request <request.json>`
+
+The validator checks source binding, duplicate destinations, file digests, required `medusa.json`/`foundry.toml`, mandatory Medusa fork mode, forbidden literal RPC URLs, Foundry RPC selection, and unresolved target-specific placeholders.
+
+Harness/config/model files remain audit-only. Never modify frozen production source merely to make the harness compile or execute.
+
+## Phase 6 source staging — single immutable snapshot
+
+Phase 6 stages exact source, verifies any archive, and materializes the approved audit overlay **once**. That staged project is hashed and used for preflight. Execution receives a local copy of that same hashed snapshot.
+
+Do not add a second network checkout, second archive extraction, or second harness-overlay materialization to the normal Phase-6 path. Snapshot digest mismatch is an integrity failure.
 
 ## Existing mutable Anvil RPC — mandatory shared execution boundary
 
-`SIM_ARCHIVE_PRIMARY_ETHEREUM_01` is the existing approved CurveYield mutable Ethereum Anvil RPC used by the trusted Contract-Automation simulation lane.
+`SIM_ARCHIVE_PRIMARY_ETHEREUM_01` is the existing approved CurveYield mutable Ethereum Anvil RPC used by the trusted Contract-Automation execution lane.
 
-**Any audit process that requires fork-state access or mutable JSON-RPC semantics MUST use this existing runner-managed mutable Anvil RPC path.**
+Any audit operation requiring fork-state access or mutable JSON-RPC semantics MUST use this existing runner-managed path.
 
 - Do not request, accept, invent, or substitute another mutable RPC URL.
-- Do not route Medusa, Foundry, exploit reproduction, deployment/lifecycle simulation, impersonation, balance/state mutation, time/block mutation, snapshot/revert, or comparable mutable-state work through a public/read-only/requester-supplied RPC.
-- Do not create a parallel local or remote Anvil fork system for V7 work when the existing mutable RPC path applies.
-- The mutable RPC secret is runner-owned. It must never be serialized into a V2 request, committed harness/config, campaign ledger, corpus, artifact, raw evidence, or final report.
-- V2 request fields named `rpc`, `rpcUrl`, `privateKey`, `seed`, and other requester-controlled dynamic execution fields remain forbidden.
-- Evidence may record only the secret profile name, chain identity, preflight-frozen block number/hash, and policy disposition.
-- If the existing mutable RPC is missing, unreachable, or wrong-chain, fail with typed infrastructure evidence and return to `RUNNER_REPAIR_REBIND`. Do not fall back to another provider.
+- Do not create a parallel local or remote Anvil fork system when the existing path applies.
+- The secret is runner-owned and must never be serialized into requests, committed configs, corpora, artifacts, logs, or reports.
+- Evidence may record the profile name, chain identity, frozen block number/hash, and policy disposition, never the URL.
+- Missing/unreachable/wrong-chain mutable RPC is infrastructure failure; do not fall back to another provider.
 
-### Phase 6 binding
+For applicable Phase 6:
 
-For applicable Phase 6 Solidity/EVM fuzz work:
+- preflight verifies Ethereum identity and freezes the observed block number/hash;
+- Medusa runs in fork mode through that RPC;
+- Foundry uses the same frozen fork identity;
+- Medusa must reach terminal evidence before native Foundry begins.
 
-- preflight probes `SIM_ARCHIVE_PRIMARY_ETHEREUM_01`, verifies Ethereum chain identity, and freezes the observed block number/hash;
-- Medusa MUST run in fork mode through that RPC. The trusted runner enforces `medusa fuzz --rpc-url <runtime-secret> --rpc-block <frozen-block>`;
-- native Foundry MUST use the same fork identity. The trusted runner enforces `forge test ... --fork-url <runtime-secret> --fork-block-number <frozen-block>`;
-- Medusa and Foundry may perform their fuzz-state exploration in their own execution engines, but their fork source is the same existing mutable Anvil RPC and neither may substitute another RPC;
-- checked-in templates must not contain a usable RPC URL. Use `packages/github-native-sim/harness-skeletons-v2/`.
+## Full simulation backend — Anvil only
 
-## Full simulation backend — mandatory
+All authoritative full/live/archive/mainnet-fork/deployment/lifecycle/Phase-7 simulation uses Anvil.
 
-**All full, live-RPC, archive-RPC, mainnet-fork, lifecycle, deployment, or Phase-7 audit simulations MUST use Anvil.**
+Do not use Ganache as a full-simulation compatibility fallback and do not downgrade the requested EVM profile to make another backend work. Static repository checks reject Ganache imports from authoritative V7 execution modules.
 
-- Anvil is the only approved backend for full simulations in this repository.
-- Do not use Ganache for full simulations, even for older EVM versions or as a compatibility fallback.
-- Do not silently downgrade the configured EVM version to make another backend work.
-- Preserve the request's exact compiler/EVM profile and execute it on Anvil.
-- For Ethereum Phase-7 simulations, continue to use `SIM_ARCHIVE_PRIMARY_ETHEREUM_01` through the trusted Contract-Automation execution lane.
-- Ganache code may remain only for bounded lightweight/local regression utilities that are not authoritative full-simulation evidence. It must never be selected by the V7 Phase-7/full-fork execution path.
+## V7 qualification
 
-If Anvil cannot execute a required simulation, fail with typed execution evidence and repair the approved Anvil path. Do not substitute another engine or RPC.
+Infrastructure qualification is repository-level and outside individual audit campaigns. The only active workflow is:
 
-## V7 execution preflight and qualification — mandatory
+`.github/workflows/v7-execution-infrastructure-qualification.yml`
 
-- New V7 work is V2-only: `deep-assurance-github-request-v2`, `github-native-compile-v2`, and `github-native-simulate-v2`. V1 execution profiles are historical/non-executable.
-- Infrastructure qualification is repository-level and occurs outside audit campaigns. Use `.github/workflows/v7-execution-infrastructure-qualification-v1.yml` to qualify an exact candidate release before the Solo Audit Controller admits it to a campaign.
-- Phase 6 must classify target Medusa and Foundry/native-fuzz applicability before analyzer invocation. Use `packages/github-native-sim/src/phase6-execution-preflight-v1.mjs`. For an applicable Solidity/EVM target, a missing usable Medusa or Foundry harness is `HARNESS_REQUIRED`, never `NOT_APPLICABLE`; transition to `PHASE6_HARNESS_AUTHORING`. The auditor owns creation of the missing audit-only harness/configuration without modifying frozen production source. Start from `packages/github-native-sim/harness-skeletons-v2/`. `NOT_APPLICABLE` requires actual technical target/tool incompatibility.
-- Phase 6 preflight also requires the existing mutable Anvil RPC to pass identity/readiness checks whenever Medusa or native Foundry is requested.
-- Phase 6 audit-only harnesses, configs, models, dictionaries, and corpus inputs must be separately source-bound and hashed. If the admitted runner cannot stage an authored harness overlay into both preflight and execution without altering `request.source`, keep the campaign blocked in the harness-authoring/runner-repair path; do not smuggle the harness into frozen production source.
-- Phase 7 must pass the Anvil/archive fork preflight before lifecycle execution. Use `packages/github-native-sim/src/phase7-fork-preflight-v1.mjs` to prove launcher/hardfork, approved RPC secret, chain identity, pinned state, target code, impersonation/balance control, and workflow-action support.
-- Prefer standardized Phase-7 lifecycle recipes from `packages/github-native-sim/src/lifecycle-recipes-v1.mjs`. Unsupported behavior is `RECIPE_GAP`, not permission for arbitrary commands.
-- If runner infrastructure must change after campaign admission, preserve the failed attempt and return control to the Solo Audit Controller `RUNNER_REPAIR_REBIND` state. Do not change target production source to repair audit infrastructure.
+Static/schema/unit/build qualification runs on relevant PRs. Live mutable-Anvil qualification runs only on trusted `main`/manual execution, where the approved secret is available.
+
+Phase 7 uses `packages/github-native-sim/src/phase7-fork-preflight-v2.mjs` plus standardized lifecycle recipes. Unsupported required behavior is `RECIPE_GAP`, not permission for arbitrary commands.
+
+If infrastructure must change after campaign admission, preserve the failed attempt and return through `RUNNER_REPAIR_REBIND`; do not change target source to repair runner infrastructure.
+
+## Dependency locking status
+
+The repository currently has no recoverable `package-lock.json`. The canonical workflows therefore prefer `npm ci` when a lockfile exists but temporarily fall back to `npm install --no-package-lock` and record `V7_DEPENDENCY_LOCKED=false` when it does not.
+
+Do not claim dependency resolution is locked until a valid lockfile is generated from the repository dependency graph and committed. Do not fabricate a lockfile.
 
 ## Audit execution boundary
 
-Private audit/controller repositories are control planes. Technical/rate-limited execution belongs in this public Contract-Automation repository through the existing bridge. Do not add workload-running audit workflows to private controller repositories.
-
-## Exact large-request / binary-safe Git transfer — mandatory playbook
-
-For large V7 request JSON, exact serialized payloads, or any data where byte integrity matters, **do not use GitHub's Contents API (`create_file` / `update_file`) as the primary transfer path**. During V7 recovery it repeatedly produced malformed large JSON even when the local source bytes parsed correctly.
-
-Use Git's low-level object path instead:
-
-1. **Prepare and validate the exact bytes before GitHub write.**
-   - Materialize or generate the complete request locally/in the working container.
-   - Parse JSON locally (`JSON.parse` or equivalent) before upload.
-   - Compute/record request ID, request digest, byte length, and SHA-256 where applicable.
-   - Do not reserialize or hand-edit the payload after this validation point.
-
-2. **Read the destination branch/base commit and base tree.**
-   - Resolve the exact parent commit SHA for the branch you are updating.
-   - Fetch that commit and record its tree SHA.
-   - For an atomic request branch, normally start from current trusted `main` unless preserving an already-frozen request commit intentionally.
-
-3. **Create the blob from the exact validated bytes.**
-   - Call GitHub `create_blob`.
-   - Prefer `encoding: "base64"` for exact request/binary-safe transfer; base64-encode the already-validated bytes once.
-   - Record the returned blob SHA.
-   - Do not pass the payload through `create_file` or `update_file` first.
-
-4. **Create a tree containing the destination path.**
-   - Call `create_tree` with `base_tree_sha` equal to the parent commit's tree SHA.
-   - Add exactly one tree entry for an atomic request branch, for example:
-     - `path`: `github-native-sim/requests/<request-id>/request.json`
-     - `mode`: `100644`
-     - `type`: `blob`
-     - `sha`: the SHA returned by `create_blob`
-   - Record the returned tree SHA.
-
-5. **Create the commit explicitly.**
-   - Call `create_commit` with:
-     - `tree_sha`: the new tree SHA
-     - `parent_sha`: the exact current branch/head commit SHA
-     - a descriptive message
-   - Record the returned commit SHA.
-
-6. **Move only the intended branch ref.**
-   - Call `update_ref` for the request/working branch and point it to the new commit SHA.
-   - Do not update `main` directly for audit request submission.
-   - Do not force-update unless repairing a branch whose lineage is deliberately being reset and the reason is documented.
-
-7. **Verify the remote bytes before execution.**
-   - Fetch the request file/blob from the new branch/commit.
-   - Parse it as JSON again.
-   - Confirm request ID, request digest, source commit/archive digest, fork block, and any other frozen identities match the locally validated payload.
-   - If exact bytes matter, compare byte length/SHA-256 as well.
-   - Only after this verification may the request be treated as successfully transferred.
-
-8. **Open a trace-only PR to trusted `main` when PR visibility is needed for V7 Actions.**
-   - The PR branch should contain only the atomic request data, not runner changes.
-   - Do **not** merge audit request branches into `main`.
-   - Trusted runner code must come from `main`; request data comes from the request branch.
-
-### Failure recovery
-
-If a request created through `create_file` / `update_file` fails JSON parsing but the local source parses correctly:
-
-- Treat transport corruption as the default hypothesis.
-- Do not rewrite the request semantics.
-- Replace the bad path with the exact validated bytes using `create_blob → create_tree → create_commit → update_ref`.
-- Rerun validation on the remote blob before retriggering execution.
-
-### Atomic branch rule
-
-A V7 request branch must contain **exactly one new request payload** relative to trusted `main`. If inherited request files appear in the PR diff, reset/recreate the branch from the intended base and install only the desired request via the blob/tree/commit path.
+Private audit/controller repositories are control planes. Technical/rate-limited execution belongs in this public Contract-Automation repository through the canonical bridge/workflow. Do not add competing workload-running audit workflows to private controller repositories.
