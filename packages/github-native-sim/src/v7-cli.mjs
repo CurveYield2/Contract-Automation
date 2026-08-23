@@ -9,6 +9,7 @@ import { submitV7Request } from './request-submission-v1.mjs';
 import { resolveV7Request } from './request-resolution-v1.mjs';
 import { initializePhase6HarnessBundle, validatePhase6HarnessBundle } from './phase6-harness-authoring-v1.mjs';
 import { checkRunnerManifestV2, writeRunnerManifestV2 } from './runner-manifest-v2.mjs';
+import { verifyV7Toolchain } from './v7-toolchain-v1.mjs';
 import { V7_POLICY } from './v7-policy.mjs';
 
 const RUNNER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -201,8 +202,14 @@ async function manifestCommand(args) {
   return result.status === 'PASS' ? 0 : 1;
 }
 
+async function toolchainVerifyCommand() {
+  const result = await verifyV7Toolchain();
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  return result.status === 'PASS' ? 0 : 1;
+}
+
 function help() {
-  return `V7 Contract-Automation CLI\n\nCommands:\n  resolve --mode pr|dispatch --source <checkout> [--request-path campaigns/.../request.json] [--output .v7-request/request.json]\n  execute --request <request.json> [--workspace <dir>] [--evidence-dir <dir>]\n  submit --request <request.json> [--repository owner/repo] [--base main] [--branch name] [--no-pr]\n  harness:init --request <request.json> [--campaign discovery|property|targeted] [--type standard] [--bundle id]\n  harness:validate --bundle <bundle-id> [--request <request.json>]\n  manifest [--check] [--write]\n`;
+  return `V7 Contract-Automation CLI\n\nCommands:\n  resolve --mode pr|dispatch --source <checkout> [--request-path campaigns/.../request.json] [--output .v7-request/request.json]\n  execute --request <request.json> [--workspace <dir>] [--evidence-dir <dir>]\n  submit --request <request.json> [--repository owner/repo] [--base main] [--branch name] [--no-pr]\n  harness:init --request <request.json> [--campaign discovery|property|targeted] [--type standard] [--bundle id]\n  harness:validate --bundle <bundle-id> [--request <request.json>]\n  toolchain:verify\n  manifest [--check] [--write]\n`;
 }
 
 async function main() {
@@ -217,6 +224,7 @@ async function main() {
   if (command === 'submit') return submitCommand(args);
   if (command === 'harness:init') return harnessInitCommand(args);
   if (command === 'harness:validate') return harnessValidateCommand(args);
+  if (command === 'toolchain:verify') return toolchainVerifyCommand(args);
   if (command === 'manifest') return manifestCommand(args);
   throw new Error(`Unknown v7 command: ${command}`);
 }
