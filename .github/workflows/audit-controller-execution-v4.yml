@@ -291,6 +291,26 @@ jobs:
           }, null, 2)}\n`);
           NODE
 
+      - name: Record sanitized V7 execution summary
+        if: always()
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const evidencePath = '.audit-evidence/v7-execution-v4/controller-evidence-v4.json';
+          if (!fs.existsSync(evidencePath)) process.exit(0);
+          const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+          const summary = {
+            resultStatus: evidence.resultStatus,
+            artifactDigest: evidence.artifactDigest,
+            analysisComponentFailureCount: evidence.analysisComponentFailureCount,
+            failedStepCount: evidence.failedStepCount,
+            continuityDisposition: evidence.continuityDisposition,
+            deploymentGasEvidence: evidence.deploymentGasEvidence,
+            simulationEvidence: evidence.simulationEvidence
+          };
+          console.log(`V7_SANITIZED_EXECUTION_SUMMARY=${JSON.stringify(summary)}`);
+          NODE
+
       - name: Upload V7 execution evidence
         if: always()
         uses: actions/upload-artifact@v4
