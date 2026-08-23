@@ -6,20 +6,19 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
-const workflowPath = path.join(repoRoot, '.github/workflows/audit-controller-execution-v3.yml');
+const workflowPath = path.join(repoRoot, '.github/workflows/audit-controller-execution.yml');
 
-test('V7 execution workflow v3 exposes private auth, archive RPC, durable smoke receipt, and execution evidence', () => {
-  assert.equal(fs.existsSync(workflowPath), true, 'V7 execution workflow v3 must exist');
+test('canonical V7 execution workflow uses shared toolchain setup, canonical request resolution, and durable evidence upload', () => {
+  assert.equal(fs.existsSync(workflowPath), true, 'canonical V7 execution workflow must exist');
   const workflow = fs.readFileSync(workflowPath, 'utf8');
-  assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /AUDIT_CONTROLLER_GITHUB_TOKEN:\s*\$\{\{\s*secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN\s*\}\}/);
-  assert.match(workflow, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01:\s*\$\{\{\s*secrets\.SIM_ARCHIVE_PRIMARY_ETHEREUM_01\s*\}\}/);
-  assert.match(workflow, /V7_BRIDGE_SMOKE_RECEIPT_v1\.json/);
-  assert.match(workflow, /auditControllerGithubTokenConfigured:\s*true/);
-  assert.match(workflow, /archiveRpcConfigured:/);
-  assert.match(workflow, /packages\/github-native-sim\/src\/run-job-file\.mjs/);
-  assert.match(workflow, /actions\/upload-artifact@v4/);
-  assert.doesNotMatch(workflow, /RPC_ETHEREUM:\s*\$\{\{/);
+  assert.match(workflow, /uses:\s*\.\/\.github\/actions\/setup-v7-toolchain/);
+  assert.match(workflow, /npm run v7:manifest -- --check/);
+  assert.match(workflow, /npm run v7 -- resolve --mode pr --source \.request-source --output \.v7-request\/request\.json/);
+  assert.match(workflow, /npm run v7 -- resolve --mode dispatch --source \.controller-request --request-path/);
+  assert.match(workflow, /npm run v7:execute -- --request \.v7-request\/request\.json/);
+  assert.match(workflow, /name:\s*\$\{\{ env\.V7_ARTIFACT_NAME \|\| 'v7-execution-unresolved' \}\}/);
+  assert.match(workflow, /path:\s*\.audit-evidence\/v7-execution/);
+  assert.match(workflow, /if-no-files-found:\s*warn/);
 });
 
 test('generic PreflightSim bridge remains separate from V7 private credentials', () => {
