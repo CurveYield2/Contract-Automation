@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { validateDeepAssuranceRequestV2 } from './schema.mjs';
 import { runGitHubNativeJob as runGitHubNativeJobV1 } from './run-job-file.mjs';
 import { runPhase6ExecutionPreflightV1 } from './phase6-execution-preflight-v1.mjs';
-import { phase6MutableRpcRuntime } from './phase6-mutable-rpc-v1.mjs';
+import { createPhase6MutableRpcSession, phase6MutableRpcRuntime } from './phase6-mutable-rpc-v1.mjs';
 import { runPhase7ForkPreflightV2 } from './phase7-fork-preflight-v2.mjs';
 import { stagePhase6Snapshot, copyPhase6SnapshotForExecution } from './phase6-staged-snapshot-v1.mjs';
 import { attachExecutionDisposition } from './execution-disposition-v1.mjs';
@@ -31,10 +31,17 @@ function terminalNotApplicable(backend, preflightComponent) {
   };
 }
 
-function phase6DelegateOptions(delegateOptions, preflight, environment) {
+function phase6RequiresMutableRpc(request) {
+  const medusaRequested = request.configuration?.analysis?.medusa !== false
+    && request.configuration?.analysis?.medusa !== undefined;
+  const nativeFuzzRequested = request.configuration?.analysis?.nativeFuzz?.enabled === true;
+  return medusaRequested || nativeFuzzRequested;
+}
+
+function phase6DelegateOptions(delegateOptions, preflight, mutableRpcSession) {
   const options = { ...delegateOptions };
   if (preflight?.mutableRpc?.status === 'PASS') {
-    options.phase6MutableRpc = phase6MutableRpcRuntime({ environment, preflight });
+    options.phase6MutableRpc = phase6MutableRpcRuntime({ session: mutableRpcSession });
   }
   if (preflight?.medusa?.status === 'NOT_APPLICABLE') options.runMedusa = async () => terminalNotApplicable('medusa', preflight.medusa);
   if (preflight?.nativeFuzz?.status === 'NOT_APPLICABLE') options.runNativeFuzz = async () => terminalNotApplicable('native-fuzz', preflight.nativeFuzz);
@@ -54,29 +61,36 @@ function normalizePhase6TerminalSemantics(result) {
   };
 }
 
-export async function runGitHubNativeJobV2(input, {
-  workspaceRoot = path.resolve('.deep-assurance-work-v2'),
-  environment = process.env,
-  runnerCommit = process.env.GITHUB_SHA ?? null,
-  runnerRoot = DEFAULT_RUNNER_ROOT,
-  requestPath = '<request.json>',
-  ...delegateOptions
-} = {}) {
-  const request = validateDeepAssuranceRequestV2(input);
-  let preflight = null;
+async function executePhase6V2({
+  request,
+  workspaceRoot,
+  environment,
+  runnerCommit,
+  runnerRoot,
+  requestPath,
+  delegateOptions,
+  createMutableRpcSession,
+}) {
   let phase6Snapshot = null;
-
-  if (request.phaseId === 'build-and-test') {
+  let mutableRpcSession = null;
+  let executionSnapshot = null;
+  try {
     phase6Snapshot = await stagePhase6Snapshot(request, {
       workspaceRoot: path.join(workspaceRoot, 'staging'),
       environment,
       runnerRoot,
     });
-    preflight = await runPhase6ExecutionPreflightV1({
+
+    if (phase6RequiresMutableRpc(request)) {
+      mutableRpcSession = await createMutableRpcSession({ environment });
+    }
+
+    let preflight = await runPhase6ExecutionPreflightV1({
       request,
       projectRoot: phase6Snapshot.projectRoot,
       runnerCommit,
       environment,
+      ...(mutableRpcSession ? { mutableRpcEvidence: mutableRpcSession.evidence } : {}),
     });
     preflight = {
       ...preflight,
@@ -89,36 +103,32 @@ export async function runGitHubNativeJobV2(input, {
         sourceCommit: phase6Snapshot.commit,
         materializedOnce: true,
       },
+      mutableRpcSession: phase6RequiresMutableRpc(request) ? {
+        status: mutableRpcSession?.evidence?.status ?? 'FAIL',
+        identityNormalized: mutableRpcSession?.runtime?.identityNormalized === true,
+        sharedAcrossPreflightMedusaAndFoundry: mutableRpcSession?.evidence?.status === 'PASS',
+        runtimeUrlExposed: false,
+      } : { status: 'NOT_REQUIRED' },
     };
-  } else if (request.phaseId === 'fork-simulation-lifecycle') {
-    preflight = await runPhase7ForkPreflightV2({ request, environment });
-  }
 
-  if (preflight && preflight.status !== 'PASS') {
-    return attachExecutionDisposition({ request, result: preflightFailure(request, preflight), requestPath });
-  }
+    if (preflight.status !== 'PASS') {
+      return attachExecutionDisposition({ request, result: preflightFailure(request, preflight), requestPath });
+    }
 
-  const delegated = request.phaseId === 'build-and-test'
-    ? phase6DelegateOptions(delegateOptions, preflight, environment)
-    : { ...delegateOptions };
-
-  let executionSnapshot = null;
-  if (request.phaseId === 'build-and-test') {
+    const delegated = phase6DelegateOptions(delegateOptions, preflight, mutableRpcSession);
     delegated.checkoutSource = async () => {
       executionSnapshot = await copyPhase6SnapshotForExecution(phase6Snapshot, {
         workspaceRoot: path.join(workspaceRoot, 'execution'),
       });
       return executionSnapshot;
     };
-  }
 
-  let result = await runGitHubNativeJobV1(request, {
-    workspaceRoot: path.join(workspaceRoot, 'execution'),
-    environment,
-    ...delegated,
-  });
+    let result = await runGitHubNativeJobV1(request, {
+      workspaceRoot: path.join(workspaceRoot, 'execution'),
+      environment,
+      ...delegated,
+    });
 
-  if (request.phaseId === 'build-and-test') {
     result = normalizePhase6TerminalSemantics(result);
     const verified = executionSnapshot?.snapshotDigestSha256 === phase6Snapshot?.snapshotDigestSha256;
     result = {
@@ -131,11 +141,52 @@ export async function runGitHubNativeJobV2(input, {
         secondOverlayMaterializationPerformed: false,
       },
     };
-  } else {
-    result = { ...result, preflight };
+    return attachExecutionDisposition({ request, result, requestPath });
+  } finally {
+    if (mutableRpcSession?.close) await mutableRpcSession.close().catch(() => {});
+  }
+}
+
+export async function runGitHubNativeJobV2(input, {
+  workspaceRoot = path.resolve('.deep-assurance-work-v2'),
+  environment = process.env,
+  runnerCommit = process.env.GITHUB_SHA ?? null,
+  runnerRoot = DEFAULT_RUNNER_ROOT,
+  requestPath = '<request.json>',
+  createMutableRpcSession = createPhase6MutableRpcSession,
+  ...delegateOptions
+} = {}) {
+  const request = validateDeepAssuranceRequestV2(input);
+
+  if (request.phaseId === 'build-and-test') {
+    return executePhase6V2({
+      request,
+      workspaceRoot,
+      environment,
+      runnerCommit,
+      runnerRoot,
+      requestPath,
+      delegateOptions,
+      createMutableRpcSession,
+    });
   }
 
-  return attachExecutionDisposition({ request, result, requestPath });
+  let preflight = null;
+  if (request.phaseId === 'fork-simulation-lifecycle') {
+    preflight = await runPhase7ForkPreflightV2({ request, environment });
+  }
+
+  if (preflight && preflight.status !== 'PASS') {
+    return attachExecutionDisposition({ request, result: preflightFailure(request, preflight), requestPath });
+  }
+
+  const result = await runGitHubNativeJobV1(request, {
+    workspaceRoot: path.join(workspaceRoot, 'execution'),
+    environment,
+    ...delegateOptions,
+  });
+
+  return attachExecutionDisposition({ request, result: { ...result, preflight }, requestPath });
 }
 
 export const runGitHubNativeJob = runGitHubNativeJobV2;
