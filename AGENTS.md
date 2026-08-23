@@ -1,6 +1,35 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v5
+Policy version: v6
+
+## Phase 6 skeleton code — canonical location and mandatory discovery
+
+The canonical Audit V7 Phase-6 skeleton code is in this repository at:
+
+`packages/github-native-sim/harness-skeletons-v2/README_v2.md`
+
+The canonical skeleton directory is:
+
+`packages/github-native-sim/harness-skeletons-v2/`
+
+For Phase-6 Medusa/Foundry harness work, agents MUST open that README before authoring or repairing harness code. Current skeleton files include:
+
+- `medusa/medusa-discovery-template_v2.json`
+- `medusa/medusa-property-template_v2.json`
+- `medusa/medusa-targeted-template_v2.json`
+- `medusa/Phase6MedusaHarness_v2.sol.template`
+- `foundry/foundry-template_v2.toml`
+- `foundry/Phase6InvariantTargeting_v2.sol.template`
+- `foundry/Phase6StatefulHandler_v2.sol.template`
+- `foundry/Phase6InvariantSuite_v2.t.sol.template`
+- `foundry/Phase6BoundaryFuzz_v2.t.sol.template`
+- `foundry/Phase6DifferentialFuzz_v2.t.sol.template`
+- `models/Phase6GhostModel_v2.sol.template`
+- `phase6-harness-manifest-template_v2.json`
+
+**Discovery fallback is mandatory.** If the canonical path does not resolve on the first lookup, search this same repository for `harness-skeletons-v2` and for the exact filenames above, then inspect the resolved parent directory and its README. A single failed guessed/path lookup is never evidence that skeleton code is absent.
+
+While this repository is accessible, agents MUST NOT ask the human where the skeleton code is, MUST NOT report `SKELETON_CODE_NOT_FOUND` without exhausting the canonical-path plus exact-filename search procedure, and MUST NOT author replacement skeletons from memory before inspecting the supplied kit. If repository access itself fails, classify that as repository/infrastructure access failure, not missing skeleton code.
 
 ## Existing mutable Anvil RPC — mandatory shared execution boundary
 
