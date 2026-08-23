@@ -47,9 +47,28 @@ const forbiddenVersionedWorkflows = workflowNames.filter((name) =>
 if (forbiddenVersionedWorkflows.length > 0) {
   throw new Error(`Superseded/versioned V7 workflow entrypoints belong in CurveYield2/archive, not this repository: ${forbiddenVersionedWorkflows.join(', ')}`);
 }
-for (const required of ['audit-controller-execution.yml', 'v7-execution-infrastructure-qualification.yml']) {
+const canonicalWorkflows = ['audit-controller-execution.yml', 'v7-execution-infrastructure-qualification.yml'];
+for (const required of canonicalWorkflows) {
   if (!workflowNames.includes(required)) throw new Error(`Missing canonical V7 workflow: ${required}`);
+  const source = await fs.readFile(path.join(workflowRoot, required), 'utf8');
+  if (!source.includes('uses: ./.github/actions/setup-v7-toolchain')) {
+    throw new Error(`Canonical V7 workflow must use shared toolchain setup action: ${required}`);
+  }
 }
+
+const setupAction = path.join(root, V7_POLICY.workflows.toolchainSetup);
+try { await fs.access(setupAction); }
+catch { throw new Error(`Missing canonical V7 toolchain setup action: ${V7_POLICY.workflows.toolchainSetup}`); }
+
+const packageJson = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+if (packageJson.dependencies?.['@foundry-rs/anvil'] !== V7_POLICY.tools.anvilPackage) {
+  throw new Error(`@foundry-rs/anvil must equal V7 policy pin ${V7_POLICY.tools.anvilPackage}`);
+}
+if (packageJson.dependencies?.['@foundry-rs/forge'] !== V7_POLICY.tools.forge) {
+  throw new Error(`@foundry-rs/forge must equal V7 policy pin ${V7_POLICY.tools.forge}`);
+}
+try { await fs.access(path.join(root, 'package-lock.json')); }
+catch { throw new Error('package-lock.json is mandatory for reproducible V7 GitHub execution'); }
 
 const processNames = await fs.readdir(path.join(root, 'process'));
 const staleManifests = processNames.filter((name) => /^RUNNER_MANIFEST_v\d+\.json$/.test(name) || /^V7_BRIDGE_SMOKE_RECEIPT_v\d+\.json$/.test(name));
@@ -68,4 +87,4 @@ if (staleSkeletonKits.length > 0) {
 const manifestCheck = await checkRunnerManifestV2({ runnerRoot: root });
 if (manifestCheck.status !== 'PASS') throw new Error(`Canonical runner manifest drift: ${manifestCheck.reason ?? 'unknown'}`);
 
-console.log(`Syntax valid: ${files.length} JavaScript modules; V7 canonical/Archive/Anvil policy guards valid`);
+console.log(`Syntax valid: ${files.length} JavaScript modules; V7 canonical/Archive/Anvil/toolchain/lock policy guards valid`);
