@@ -101,7 +101,7 @@ export async function runPhase6ExecutionPreflightV1({
         : 'PHASE6_EXECUTION_PREFLIGHT';
 
   return {
-    schemaVersion: 'audit-v7-phase6-execution-preflight-v2',
+    schemaVersion: 'audit-v7-phase6-execution-preflight-v3',
     status,
     phaseId: request.phaseId,
     profileId: request.profileId,
@@ -118,6 +118,8 @@ export async function runPhase6ExecutionPreflightV1({
       rule: 'AUDITOR_AUTHORS_REQUIRED_HARNESSES_WITHOUT_MODIFYING_FROZEN_PRODUCTION_SOURCE',
       missingHarnessIsNotNotApplicable: true,
       notApplicableRequiresTechnicalInapplicability: true,
+      modelBasedTestingMaySupplementButNeverReplaceRequiredExecutableHarnesses: true,
+      phaseCannotPassWhileHarnessRequired: true,
     },
     harnessInventory: {
       fileCount: files.length,
