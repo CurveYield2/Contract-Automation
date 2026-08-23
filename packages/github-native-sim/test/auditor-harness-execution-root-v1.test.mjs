@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runGitHubNativeJob } from '../src/run-job-file.mjs';
+import { runGitHubNativeJob } from '../src/run-job-file-v3.mjs';
 
 const targetRoot = '/tmp/frozen-target';
 const auditOverlayRoot = '/tmp/auditor-harness-overlay';
