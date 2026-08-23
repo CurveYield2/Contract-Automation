@@ -1,0 +1,2 @@
+Qualify Contract-Automation main base commit 0787aa42f1eec54cd3c9548f89a1bcce4fb0c8e4 for cyvlSDT v30 corrected Phase 6 audit-harness execution.
+This trace-only trigger carries no runner or campaign semantics.
