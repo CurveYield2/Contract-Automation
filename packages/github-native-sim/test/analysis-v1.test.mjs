@@ -30,7 +30,11 @@ const medusaInput = () => ({
   projectRoot: '/tmp/project',
   version: '1.5.1',
   sourceCommit: commit('1'),
-  rawArtifactRef: 'github-actions://CurveYield/contract-automation/runs/1/artifacts/medusa/raw.json'
+  rawArtifactRef: 'github-actions://CurveYield/contract-automation/runs/1/artifacts/medusa/raw.json',
+  rpcUrl: 'http://127.0.0.1:18545',
+  rpcBlock: 25817400,
+  rpcBlockHash: `0x${'2'.repeat(64)}`,
+  rpcProfile: 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01'
 });
 
 test('successful Slither 0.11.6 run preserves raw evidence and normalized completion', async () => {
@@ -128,6 +132,9 @@ test('successful Medusa 1.5.1 run emits terminal machine-readable campaign evide
   assert.equal(result.campaign.coverage.percent, 91.2);
   assert.equal(result.campaign.statistics.testCases, 18000);
   assert.equal(result.rawArtifactRef, medusaInput().rawArtifactRef);
+  assert.deepEqual(fake.calls[1].args.slice(0, 5), ['fuzz', '--rpc-url', medusaInput().rpcUrl, '--rpc-block', String(medusaInput().rpcBlock)]);
+  assert.equal(result.fork.rpcProfile, 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01');
+  assert.equal(result.fork.rpcUrlExposed, false);
 });
 
 test('Medusa falsification preserves counterexample and shrinking evidence as a terminal component failure', async () => {
