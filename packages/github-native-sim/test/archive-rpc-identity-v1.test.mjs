@@ -80,7 +80,7 @@ test('canonical V7 runner records archive identity before Phase 7 lifecycle exec
   assert.match(preflight, /reconcileUpstreamIdentity/);
 
   const preflightStep = runner.indexOf('preflight = await runPhase7ForkPreflightV2');
-  const lifecycleStep = runner.indexOf('runGitHubNativeJobV1(request');
+  const lifecycleStep = runner.lastIndexOf('runGitHubNativeJobV1(request');
   assert.ok(preflightStep >= 0, 'canonical runner must invoke Phase 7 preflight');
   assert.ok(lifecycleStep > preflightStep, 'archive identity must be reconciled before lifecycle execution');
 
