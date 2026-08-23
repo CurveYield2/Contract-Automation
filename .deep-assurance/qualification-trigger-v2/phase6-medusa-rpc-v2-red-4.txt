@@ -1,0 +1,1 @@
+Regression-first phase complete; implementation follows only after observed CI failure.
