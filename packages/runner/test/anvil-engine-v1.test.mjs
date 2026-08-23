@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { selectForkEngineName, buildAnvilArgs, createAnvilProviderAdapter } from '../src/anvil-engine.mjs';
 
-test('Cancun lifecycle selects Anvil instead of Ganache', () => {
+test('full lifecycle simulation selects Anvil for both modern and legacy EVM versions', () => {
   assert.equal(selectForkEngineName('cancun'), 'anvil');
-  assert.equal(selectForkEngineName('shanghai'), 'ganache');
+  assert.equal(selectForkEngineName('shanghai'), 'anvil');
+  assert.equal(selectForkEngineName('london'), 'anvil');
 });
 
 test('Anvil fork arguments pin chain, block, hardfork and loopback binding', () => {

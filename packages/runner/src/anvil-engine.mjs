@@ -2,14 +2,13 @@ import net from 'node:net';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { GanacheWorkflowRuntime, startGanacheEngine } from './engine.mjs';
+import { GanacheWorkflowRuntime } from './engine.mjs';
 import { startRpcIdentityProxy } from './rpc-identity-proxy-v1.mjs';
 
 const ANVIL_READY_TIMEOUT_MS = 20_000;
-const POST_SHANGHAI_EVM_VERSIONS = new Set(['cancun', 'prague', 'osaka']);
 
-export function selectForkEngineName(evmVersion) {
-  return POST_SHANGHAI_EVM_VERSIONS.has(String(evmVersion ?? '').toLowerCase()) ? 'anvil' : 'ganache';
+export function selectForkEngineName(_evmVersion) {
+  return 'anvil';
 }
 
 export function buildAnvilArgs({ chainId, forkUrl, block = 'latest', port, hardfork }) {
@@ -208,6 +207,5 @@ export async function startAnvilEngine({
 }
 
 export async function startCompatibleForkEngine(input) {
-  if (selectForkEngineName(input?.evmVersion) === 'anvil') return startAnvilEngine(input);
-  return startGanacheEngine(input);
+  return startAnvilEngine(input);
 }
