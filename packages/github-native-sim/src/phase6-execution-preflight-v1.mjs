@@ -30,6 +30,33 @@ async function toolVersion(command, { cwd, runCommand }) {
   };
 }
 
+function analysisRequested(request, component) {
+  const analysis = request.configuration?.analysis ?? {};
+  if (component === 'medusa') return analysis.medusa !== false && analysis.medusa !== undefined;
+  if (component === 'nativeFuzz') return analysis.nativeFuzz?.enabled === true;
+  return false;
+}
+
+function harnessRequired(component) {
+  return {
+    status: 'HARNESS_REQUIRED',
+    harnessApplicable: true,
+    harnessOrigin: 'AUDITOR_GENERATED_REQUIRED',
+    toolInvoked: false,
+    reason: `AUDITOR_GENERATED_${component.toUpperCase()}_HARNESS_REQUIRED`,
+  };
+}
+
+function disabled(component) {
+  return {
+    status: 'NOT_REQUESTED',
+    harnessApplicable: false,
+    harnessOrigin: 'NOT_REQUESTED',
+    toolInvoked: false,
+    reason: `${component.toUpperCase()}_NOT_REQUESTED`,
+  };
+}
+
 export async function runPhase6ExecutionPreflightV1({
   request,
   projectRoot,
@@ -49,27 +76,59 @@ export async function runPhase6ExecutionPreflightV1({
     if (await containsPropertyFunction(projectRoot, file)) propertySources.push(file);
   }
 
-  const medusaApplicable = medusaConfigs.length > 0 || propertySources.length > 0;
-  const nativeFuzzApplicable = foundryConfigs.length > 0 && solidityTests.length > 0;
+  const medusaHarnessPresent = medusaConfigs.length > 0 || propertySources.length > 0;
+  const nativeFuzzHarnessPresent = foundryConfigs.length > 0 && solidityTests.length > 0;
+  const medusaRequested = analysisRequested(request, 'medusa');
+  const nativeFuzzRequested = analysisRequested(request, 'nativeFuzz');
 
   const compilerAcceptance = request.configuration?.compilers?.length > 0
     && request.configuration.compilers.every((compiler) => SUPPORTED_COMPILER_LANGUAGES.has(compiler.language) && typeof compiler.version === 'string' && compiler.version.length > 0);
 
-  const medusa = medusaApplicable
-    ? { status: 'PENDING_TOOL_CHECK', harnessApplicable: true, toolInvoked: true, tool: await toolVersion('medusa', { cwd: projectRoot, runCommand }) }
-    : { status: 'NOT_APPLICABLE', harnessApplicable: false, toolInvoked: false, reason: 'TARGET_HARNESS_NOT_PRESENT' };
-  if (medusaApplicable) medusa.status = medusa.tool.available ? 'COMPLETED' : 'FAILED';
+  let medusa;
+  if (!medusaRequested) {
+    medusa = disabled('medusa');
+  } else if (!medusaHarnessPresent) {
+    medusa = harnessRequired('medusa');
+  } else {
+    medusa = {
+      status: 'PENDING_TOOL_CHECK',
+      harnessApplicable: true,
+      harnessOrigin: 'TARGET_PACKAGE',
+      toolInvoked: true,
+      tool: await toolVersion('medusa', { cwd: projectRoot, runCommand }),
+    };
+    medusa.status = medusa.tool.available ? 'COMPLETED' : 'FAILED';
+  }
 
-  const nativeFuzz = nativeFuzzApplicable
-    ? { status: 'PENDING_TOOL_CHECK', harnessApplicable: true, toolInvoked: true, tool: await toolVersion('forge', { cwd: projectRoot, runCommand }) }
-    : { status: 'NOT_APPLICABLE', harnessApplicable: false, toolInvoked: false, reason: 'TARGET_HARNESS_NOT_PRESENT' };
-  if (nativeFuzzApplicable) nativeFuzz.status = nativeFuzz.tool.available ? 'COMPLETED' : 'FAILED';
+  let nativeFuzz;
+  if (!nativeFuzzRequested) {
+    nativeFuzz = disabled('nativeFuzz');
+  } else if (!nativeFuzzHarnessPresent) {
+    nativeFuzz = harnessRequired('nativeFuzz');
+  } else {
+    nativeFuzz = {
+      status: 'PENDING_TOOL_CHECK',
+      harnessApplicable: true,
+      harnessOrigin: 'TARGET_PACKAGE',
+      toolInvoked: true,
+      tool: await toolVersion('forge', { cwd: projectRoot, runCommand }),
+    };
+    nativeFuzz.status = nativeFuzz.tool.available ? 'COMPLETED' : 'FAILED';
+  }
 
-  const status = compilerAcceptance
-    && medusa.status !== 'FAILED'
-    && nativeFuzz.status !== 'FAILED'
-    ? 'PASS'
-    : 'FAIL';
+  const harnessConstructionRequired = medusa.status === 'HARNESS_REQUIRED' || nativeFuzz.status === 'HARNESS_REQUIRED';
+  const infrastructureFailure = medusa.status === 'FAILED' || nativeFuzz.status === 'FAILED';
+  const status = !compilerAcceptance || infrastructureFailure
+    ? 'FAIL'
+    : harnessConstructionRequired
+      ? 'BLOCKED'
+      : 'PASS';
+
+  const nextState = status === 'PASS'
+    ? 'ACTIVE'
+    : status === 'BLOCKED'
+      ? 'PHASE6_HARNESS_CONSTRUCTION'
+      : 'RUNNER_REPAIR_REBIND';
 
   return {
     schemaVersion: 'audit-v7-phase6-execution-preflight-v1',
@@ -94,6 +153,6 @@ export async function runPhase6ExecutionPreflightV1({
     },
     medusa,
     nativeFuzz,
-    nextState: status === 'PASS' ? 'ACTIVE' : 'RUNNER_REPAIR_REBIND',
+    nextState,
   };
 }
