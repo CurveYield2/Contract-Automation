@@ -207,3 +207,61 @@ test('wrong Medusa version is rejected as toolchain integrity failure', async ()
     (error) => error instanceof V7ExecutionError && error.kind === 'TOOLCHAIN_INTEGRITY_FAILURE'
   );
 });
+
+test('real Medusa terminal text with exit 0 is accepted as completed evidence without requiring JSON stdout', async () => {
+  const fake = sequence([
+    { exitCode: 0, stdout: 'medusa version 1.5.1\n', stderr: '' },
+    {
+      exitCode: 0,
+      stdout: 'INFO Fuzzing campaign completed\nProperty tests: all passed\n',
+      stderr: ''
+    }
+  ]);
+  const result = await runMedusaAnalysis(medusaInput(), { runCommand: fake.runCommand });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.componentStatus, 'COMPLETED');
+  assert.equal(result.continuationDisposition, 'COMPLETE_EVIDENCE');
+  assert.equal(result.campaign.outputFormat, 'terminal-text');
+  assert.equal(result.campaign.falsificationDetected, false);
+  assert.match(result.rawOutput.stdout, /campaign completed/);
+  assert.deepEqual(fake.calls[1].args, ['fuzz', '--no-color']);
+});
+
+test('real Medusa exit code 7 is normalized as a property falsification with raw counterexample text preserved', async () => {
+  const fake = sequence([
+    { exitCode: 0, stdout: 'medusa 1.5.1\n', stderr: '' },
+    {
+      exitCode: 7,
+      stdout: 'FAILED property_no_loss\nCall sequence:\ndeposit(100)\nwithdraw(100)\n',
+      stderr: ''
+    }
+  ]);
+  const result = await runMedusaAnalysis(medusaInput(), { runCommand: fake.runCommand });
+  assert.equal(result.status, 'completed_with_failures');
+  assert.equal(result.failureKind, 'PROPERTY_FALSIFICATION');
+  assert.equal(result.componentStatus, 'COMPLETED_WITH_FAILURES');
+  assert.equal(result.continuationDisposition, 'CONTINUE_WITH_LIMITATION');
+  assert.equal(result.campaign.outputFormat, 'terminal-text');
+  assert.equal(result.campaign.falsificationDetected, true);
+  assert.equal(result.campaign.falsifiedPropertiesLowerBound, 1);
+  assert.match(result.rawOutput.stdout, /Call sequence/);
+});
+
+test('real Medusa handled-error exit code 6 is a component limitation rather than a property falsification', async () => {
+  const fake = sequence([
+    { exitCode: 0, stdout: 'medusa 1.5.1\n', stderr: '' },
+    {
+      exitCode: 6,
+      stdout: 'Unable to find tests\n',
+      stderr: 'fuzzing campaign stopped'
+    }
+  ]);
+  const result = await runMedusaAnalysis(medusaInput(), { runCommand: fake.runCommand });
+  assert.equal(result.status, 'completed_with_failures');
+  assert.equal(result.failureKind, 'ANALYSIS_COMPONENT_FAILURE');
+  assert.equal(result.componentStatus, 'COMPLETED_WITH_FAILURES');
+  assert.equal(result.continuationDisposition, 'CONTINUE_WITH_LIMITATION');
+  assert.equal(result.campaign.outputFormat, 'terminal-text');
+  assert.equal(result.campaign.falsificationDetected, false);
+  assert.equal(result.rawOutput.exitCode, 6);
+});
