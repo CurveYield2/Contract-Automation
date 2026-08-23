@@ -1,7 +1,8 @@
 import { V7ExecutionError, runProcess } from './execution.mjs';
+import { V7_POLICY } from './v7-policy.mjs';
 
-const EXACT_SLITHER_VERSION = '0.11.6';
-const EXACT_MEDUSA_VERSION = '1.5.1';
+const EXACT_SLITHER_VERSION = V7_POLICY.tools.slither;
+const EXACT_MEDUSA_VERSION = V7_POLICY.tools.medusa;
 const COMMIT = /^[0-9a-f]{40}$/;
 
 function redact(value, secrets = []) {
@@ -84,7 +85,7 @@ export async function runSlitherAnalysis(input, { runCommand = runProcess } = {}
   validateCommon(input, EXACT_SLITHER_VERSION);
   const versionResult = await runCommand({ command: 'slither', args: ['--version'], cwd: input.projectRoot });
   if (!versionResult || versionResult.exitCode !== 0) return slitherResult(input, { status:'failed', terminal:true, failureKind:'TOOL_FAILURE', componentStatus:'FAILED', continuationDisposition:'CONTINUE_WITH_LIMITATION', rawOutput:raw(versionResult) });
-  if (!versionMatches(versionResult, EXACT_SLITHER_VERSION)) throw new V7ExecutionError('TOOLCHAIN_INTEGRITY_FAILURE', 'Slither version does not match the recovered V7 pin', { expectedVersion:EXACT_SLITHER_VERSION, stdout:String(versionResult.stdout ?? ''), stderr:String(versionResult.stderr ?? '') });
+  if (!versionMatches(versionResult, EXACT_SLITHER_VERSION)) throw new V7ExecutionError('TOOLCHAIN_INTEGRITY_FAILURE', 'Slither version does not match the V7 policy pin', { expectedVersion:EXACT_SLITHER_VERSION, stdout:String(versionResult.stdout ?? ''), stderr:String(versionResult.stderr ?? '') });
   const analysisResult = await runCommand({ command: 'slither', args: ['.', '--json', '-'], cwd: input.projectRoot });
   if (!analysisResult || analysisResult.exitCode < 0) return slitherResult(input, { status:'failed', terminal:true, failureKind:'TOOL_FAILURE', componentStatus:'FAILED', continuationDisposition:'CONTINUE_WITH_LIMITATION', rawOutput:raw(analysisResult) });
   const parsed = parseSlitherOutput(analysisResult.stdout);
@@ -99,7 +100,7 @@ export async function runMedusaAnalysis(input, { runCommand = runProcess } = {})
   const secrets = [input.rpcUrl];
   const forkEvidence = {
     mode: 'mandatory-fork',
-    backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY',
+    backendPolicy: V7_POLICY.mutableRpc.backendPolicy,
     rpcProfile: input.rpcProfile ?? null,
     blockNumber: input.rpcBlock,
     blockHash: input.rpcBlockHash ?? null,
@@ -107,7 +108,7 @@ export async function runMedusaAnalysis(input, { runCommand = runProcess } = {})
   };
   const versionResult = await runCommand({ command: 'medusa', args: ['--version'], cwd: input.projectRoot });
   if (!versionResult || versionResult.exitCode !== 0) return medusaResult(input, { status:'failed', terminal:true, failureKind:'TOOL_FAILURE', componentStatus:'FAILED', continuationDisposition:'CONTINUE_WITH_LIMITATION', fork:forkEvidence, rawOutput:raw(versionResult, secrets) });
-  if (!versionMatches(versionResult, EXACT_MEDUSA_VERSION)) throw new V7ExecutionError('TOOLCHAIN_INTEGRITY_FAILURE', 'Medusa version does not match the recovered V7 pin', { expectedVersion:EXACT_MEDUSA_VERSION, stdout:redact(versionResult.stdout, secrets), stderr:redact(versionResult.stderr, secrets) });
+  if (!versionMatches(versionResult, EXACT_MEDUSA_VERSION)) throw new V7ExecutionError('TOOLCHAIN_INTEGRITY_FAILURE', 'Medusa version does not match the V7 policy pin', { expectedVersion:EXACT_MEDUSA_VERSION, stdout:redact(versionResult.stdout, secrets), stderr:redact(versionResult.stderr, secrets) });
 
   const campaignResult = await runCommand({
     command: 'medusa',
