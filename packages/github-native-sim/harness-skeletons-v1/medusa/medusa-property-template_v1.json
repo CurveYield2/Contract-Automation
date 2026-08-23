@@ -1,0 +1,40 @@
+{
+  "fuzzing": {
+    "workers": 10,
+    "testLimit": 250000,
+    "shrinkLimit": 10000,
+    "callSequenceLength": 150,
+    "coverageEnabled": true,
+    "corpusDirectory": "phase6-corpus/property",
+    "coverageFormats": ["lcov", "html"],
+    "revertReporterEnabled": true,
+    "targetContracts": ["PHASE6_PROPERTY_HARNESS"],
+    "senderAddresses": ["0x10000", "0x20000", "0x30000", "0x40000"],
+    "blockNumberDelayMax": 64,
+    "blockTimestampDelayMax": 86400,
+    "testing": {
+      "stopOnFailedTest": false,
+      "stopOnNoTests": true,
+      "testAllContracts": false,
+      "testViewMethods": true,
+      "assertionTesting": { "enabled": true },
+      "propertyTesting": {
+        "enabled": true,
+        "testPrefixes": ["property_", "invariant_", "echidna_"]
+      },
+      "optimizationTesting": { "enabled": false, "testPrefixes": ["optimize_"] },
+      "targetFunctionSignatures": [],
+      "excludeFunctionSignatures": []
+    }
+  },
+  "compilation": {
+    "platform": "crytic-compile",
+    "platformConfig": {
+      "target": ".",
+      "args": ["--foundry-compile-all"]
+    }
+  },
+  "slither": {
+    "useSlither": true
+  }
+}
