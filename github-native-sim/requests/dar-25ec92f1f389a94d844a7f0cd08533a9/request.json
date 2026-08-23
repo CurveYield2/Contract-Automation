@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "cyvlSDT v30",
+  "assignmentId": "reviewer-2-phase6-build-and-test-r1",
+  "phaseId": "build-and-test",
+  "gateId": "phase-6-revision-1",
+  "profileId": "github-native-simulate-v2",
+  "source": {
+    "repository": "CurveYield2/Solo-Audit-Controller",
+    "commit": "6bde63416a4611e127b8bb3a5958e6b6d874c188",
+    "projectPath": "CurveYield-cyvlSDT-Deployment-Package-v30",
+    "archivePath": "campaigns/CurveYield-cyvlSDT-Deployment-Package-v30.zip",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "configuration": {
+    "compilers": [
+      {"language": "solidity", "version": "0.8.28"},
+      {"language": "vyper", "version": "0.3.10"}
+    ],
+    "timeoutMinutes": 35,
+    "analysis": {
+      "slither": false,
+      "medusa": {"version": "1.5.1"},
+      "nativeFuzz": {"enabled": true, "fuzzRuns": 1000, "recoverableExitCodes": []}
+    },
+    "optimizer": {"enabled": true, "runs": 200},
+    "evmVersion": "cancun",
+    "viaIR": true,
+    "build": {"purpose": "phase6 exact-source build validation"},
+    "sbom": {"reconcile": true},
+    "coverage": {"required": true},
+    "properties": [
+      "P2-CAND-001 atomic deposit share dilution invariant",
+      "P2-CAND-002 zero-supply reward epoch allocation/recovery invariant",
+      "P2-CAND-003 exact-hash ERC1271 local authorization invariant",
+      "P3-CAND-001 exact v30 configuration ABI completion invariant",
+      "P4-CAND-001 zero-supply vault restart value attribution invariant",
+      "P4-CAND-002 delegated boost refresh/working-weight invariant"
+    ],
+    "harness": {
+      "status": "source-package-native-harness-only",
+      "note": "No production source mutation; Phase 6 records tool applicability and terminal evidence against frozen v30 archive."
+    },
+    "actions": {"ordering": "MEDUSA_THEN_NATIVE_FUZZ_MANDATORY"}
+  },
+  "requestId": "dar-25ec92f1f389a94d844a7f0cd08533a9",
+  "requestDigest": "25ec92f1f389a94d844a7f0cd08533a956cdad4c2307ef1186b740934bdb7795"
+}
