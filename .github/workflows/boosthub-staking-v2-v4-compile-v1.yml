@@ -5,6 +5,12 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/boosthub-staking-v2-v4-compile-v1.yml'
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'github-native-sim/boosthub-staking-v2-v4-compile-trigger-v1.txt'
+      - '.github/workflows/boosthub-staking-v2-v4-compile-v1.yml'
   workflow_dispatch:
 
 permissions:
