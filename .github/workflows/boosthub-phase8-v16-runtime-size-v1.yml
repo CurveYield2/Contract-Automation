@@ -1,0 +1,92 @@
+name: Phase 8 V16 exact runtime size v1
+
+on:
+  push:
+    branches:
+      - github-native-sim/boosthub-phase8-v16-size-v1
+
+permissions:
+  contents: read
+
+jobs:
+  compile-v16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout compile fixture
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout frozen audit source
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Solo-Audit-Controller
+          ref: b91d41b3f6cf43f4ad91fba8bfcb0e5386a17429
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: controller
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify and extract frozen v2 archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP='controller/campaigns/CurveYield-BoostHub-sdCRV-sdFXN-sdYB-Deployment-Package-v2.zip'
+          echo '2a9d8d5d4efd07ef4d91461cbe5823aef905e0b0183aa7070fd468896ecfa9dd  '"$ZIP" | sha256sum -c -
+          mkdir src
+          unzip -q "$ZIP" -d src
+
+      - name: Install exact Vyper compiler
+        run: python3 -m pip install --disable-pip-version-check --no-input vyper==0.4.3
+
+      - name: Compile frozen v2 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src/CurveYield-BoostHub-sdCRV-sdFXN-sdYB-Deployment-Package-v2
+          vyper --version
+          vyper --evm-version cancun -f bytecode_runtime contracts/boosthub/vyper/BoostHubStaking-v16.vy > /tmp/v16-v2-runtime.hex
+
+      - name: Apply exact approved v4 V16 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src/CurveYield-BoostHub-sdCRV-sdFXN-sdYB-Deployment-Package-v2
+          patch -p1 < "$GITHUB_WORKSPACE/v16_v2_to_v4.patch"
+          echo '1c2aa94dda58e117e876f58b8fcb3b08ebfa0bb68d78168b8ccfcf31b6f95c37  contracts/boosthub/vyper/BoostHubStaking-v16.vy' | sha256sum -c -
+
+      - name: Compile remediated v4 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src/CurveYield-BoostHub-sdCRV-sdFXN-sdYB-Deployment-Package-v2
+          vyper --evm-version cancun -f bytecode_runtime contracts/boosthub/vyper/BoostHubStaking-v16.vy > /tmp/v16-v4-runtime.hex
+
+      - name: Report exact runtime sizes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          def size(path):
+              value = Path(path).read_text().strip()
+              assert value.startswith('0x')
+              body = value[2:]
+              assert len(body) % 2 == 0
+              return len(body) // 2
+          v2 = size('/tmp/v16-v2-runtime.hex')
+          v4 = size('/tmp/v16-v4-runtime.hex')
+          delta = v4 - v2
+          report = f'V16_V2_RUNTIME_BYTES={v2}\nV16_V4_RUNTIME_BYTES={v4}\nV16_RUNTIME_DELTA_BYTES={delta}\nEIP170_MARGIN_BYTES={24576-v4}\n'
+          print(report, end='')
+          Path('v16-runtime-size-v1.txt').write_text(report)
+          assert v4 <= v2, f'v4 runtime grew by {delta} bytes'
+          assert v4 <= 24576, f'v4 runtime exceeds EIP-170 by {v4-24576} bytes'
+          PY
+
+      - name: Upload runtime-size evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: boosthub-v16-runtime-size-v1
+          path: v16-runtime-size-v1.txt
+          retention-days: 30

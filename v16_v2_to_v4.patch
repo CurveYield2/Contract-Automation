@@ -1,0 +1,83 @@
+--- a/contracts/boosthub/vyper/BoostHubStaking-v16.vy
++++ b/contracts/boosthub/vyper/BoostHubStaking-v16.vy
+@@ -12,8 +12,8 @@
+ 
+ from ethereum.ercs import IERC20
+ 
+-interface BoostHub:
+-    def isRewardToken(pid: uint256, rewardToken: address) -> bool: view
++interface IBoostHubRewards:
++    def isRewardToken(pid: uint256, token: address) -> bool: view
+ 
+ struct WithdrawalRequest:
+     owner: address
+@@ -265,8 +265,13 @@
+     self.last_activation_boundary = block.timestamp // ACTIVATION_STEP_SECONDS * ACTIVATION_STEP_SECONDS
+     self.next_withdrawal_request_id = 1
+ 
++    # Want is always an internal reward-accounting token, but it is not necessarily a BoostHub reward.
++    self.reward_tokens[0] = _lp_token
++    self.reward_from_boosthub[_lp_token] = False
++    log AddReward(_lp_token)
++
+     encountered_empty: bool = False
+-    count: uint256 = 0
++    count: uint256 = 1
+     for i: uint256 in range(MAX_REWARDS):
+         token: address = _reward_tokens[i]
+         if token == empty(address):
+@@ -274,25 +279,20 @@
+             assert _reward_converters[i] == empty(address), "converter for empty slot"
+         else:
+             assert not encountered_empty, "reward slots must be packed"
+-            assert token != self
+-            assert staticcall BoostHub(_boost_hub).isRewardToken(_pid, token)
+-            if i == 0:
+-                assert token == _lp_token, "reward slot 0 must be want"
++            assert token != self and token != _lp_token
++            assert count < MAX_REWARDS, "too many rewards"
++            assert staticcall IBoostHubRewards(_boost_hub).isRewardToken(_pid, token), "not BoostHub reward"
+             for j: uint256 in range(MAX_REWARDS):
+                 if j < i:
+                     assert token != _reward_tokens[j], "duplicate reward"
+-            self.reward_tokens[i] = token
++            self.reward_tokens[count] = token
+             self.reward_from_boosthub[token] = True
+             converter: address = _reward_converters[i]
+-            if token == _lp_token:
+-                assert converter == empty(address), "converter not allowed"
+-            else:
+-                assert converter != empty(address), "converter required"
+-                self.reward_converter[token] = converter
+-                log SetRewardConverter(token, converter)
++            assert converter != empty(address), "converter required"
++            self.reward_converter[token] = converter
++            log SetRewardConverter(token, converter)
+             count += 1
+             log AddReward(token)
+-    assert count != 0
+     self.reward_count = count
+ 
+     # BoostHub.deposit() and donateYieldBoostingTokens() both pull want from this contract.
+@@ -1164,16 +1164,15 @@
+ 
+ @external
+ def add_reward(_reward_token: address):
+-    """Register a reward sourced from BoostHub."""
++    """Register an admin-approved reward that BoostHub already supports for this PID."""
+     assert msg.sender == self.admin, "admin only"
+-    assert _reward_token != empty(address) and _reward_token != self
++    assert _reward_token != empty(address) and _reward_token != self and _reward_token != self.lp_token
+     assert not self._is_reward_token(_reward_token), "duplicate reward"
+     assert self.reward_count < MAX_REWARDS
+-    assert staticcall BoostHub(self.boost_hub).isRewardToken(self.pid, _reward_token), "not BoostHub reward"
+-    idx: uint256 = self.reward_count
+-    self.reward_tokens[idx] = _reward_token
++    assert staticcall IBoostHubRewards(self.boost_hub).isRewardToken(self.pid, _reward_token), "not BoostHub reward"
++    self.reward_tokens[self.reward_count] = _reward_token
+     self.reward_from_boosthub[_reward_token] = True
+-    self.reward_count = idx + 1
++    self.reward_count += 1
+     log AddReward(_reward_token)
+ 
+ @external
