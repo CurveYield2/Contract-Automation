@@ -208,6 +208,7 @@ test('Phase 7 uses the same accepted build for gas evidence and a full pinned-fo
       assert.equal(input.chainId, 1);
       assert.equal(input.forkUrl, 'https://ethereum-archive-rpc.example');
       assert.equal(input.block, 25666794);
+      assert.equal(input.evmVersion, 'cancun');
       assert.deepEqual(input.workflow, phase7Request().configuration.simulation.workflow);
       assert.equal(input.artifacts.get('Vault', 'contracts/Vault.sol').bytecode, '0x6000');
       return engine;
