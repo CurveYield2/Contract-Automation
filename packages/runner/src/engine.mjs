@@ -63,6 +63,12 @@ function resolveReference(value, context) {
   throw new Error(`Unknown workflow reference: ${value}`);
 }
 
+function normalizeLiteralAddress(value) {
+  return typeof value === 'string' && /^0x[0-9a-fA-F]{40}$/.test(value)
+    ? value.toLowerCase()
+    : value;
+}
+
 function functionKey(functionText, Interface) {
   if (!functionText.trim().startsWith('function ')) return functionText.trim();
   const temporary = new Interface([functionText.trim()]);
@@ -173,7 +179,10 @@ export class GanacheWorkflowRuntime {
   }
 
   contractFor(step, context, signerOrProvider) {
-    const target = resolveReference(step.target, context);
+    const resolvedTarget = resolveReference(step.target, context);
+    const target = typeof step.target === 'string' && !step.target.startsWith('$')
+      ? normalizeLiteralAddress(resolvedTarget)
+      : resolvedTarget;
     const deployment = this.deploymentFor(step.target, context);
     const abi = deployment
       ? this.artifacts.get(deployment.contractName, deployment.sourceName).abi
