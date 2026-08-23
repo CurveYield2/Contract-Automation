@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { CHAINS } from '../../protocol/src/index.mjs';
 import { buildProject as defaultBuildProject } from '../../runner/src/build-dispatch.mjs';
-import { startGanacheEngine } from '../../runner/src/engine.mjs';
+import { startCompatibleForkEngine } from '../../runner/src/anvil-engine.mjs';
 import { executeWorkflow } from '../../runner/src/workflow.mjs';
 import { runMedusaAnalysis, runSlitherAnalysis } from './analysis.mjs';
 import { normalizeDeploymentGasEvidence } from './deployment-gas-v1.mjs';
@@ -172,6 +172,7 @@ async function executePhase7Simulation({ request, build, environment, startSimul
       chainId: chain.chainId,
       forkUrl,
       block: simulation.block,
+      evmVersion: request.configuration.evmVersion,
     });
     const execution = await executeSimulationWorkflow(simulation.workflow, engine.runtime, { aliases: engine.aliases });
     return {
@@ -244,7 +245,7 @@ export async function runGitHubNativeJob(input, {
   runNativeFuzz,
   runCommand,
   environment = process.env,
-  startSimulationEngine = startGanacheEngine,
+  startSimulationEngine = startCompatibleForkEngine,
   executeSimulationWorkflow = executeWorkflow,
   now = () => new Date()
 } = {}) {
