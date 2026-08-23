@@ -106,7 +106,7 @@ export async function prepareAuditorHarnessOverlayV1({
 
   const overlayRoot = path.resolve(workspaceRoot, 'auditor-harness-overlay');
   await fs.rm(overlayRoot, { recursive: true, force: true });
-  await fs.mkdir(overlayRoot, { recursive: true });
+  await fs.mkdir(path.dirname(overlayRoot), { recursive: true });
   await fs.cp(projectRoot, overlayRoot, { recursive: true, force: false, errorOnExist: true });
   for (const file of files) {
     const destination = path.join(overlayRoot, ...file.relative.split('/'));
