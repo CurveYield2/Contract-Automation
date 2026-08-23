@@ -2,11 +2,19 @@ import { V7ExecutionError, runProcess } from './execution.mjs';
 
 const COMMIT = /^[0-9a-f]{40}$/;
 
-function normalizedRaw(result = {}) {
+function redact(value, secrets = []) {
+  let text = String(value ?? '');
+  for (const secret of secrets) {
+    if (typeof secret === 'string' && secret.length > 0) text = text.replaceAll(secret, '<redacted-mutable-anvil-rpc>');
+  }
+  return text;
+}
+
+function normalizedRaw(result = {}, secrets = []) {
   return {
     exitCode: Number.isInteger(result.exitCode) ? result.exitCode : -1,
-    stdout: String(result.stdout ?? ''),
-    stderr: String(result.stderr ?? ''),
+    stdout: redact(result.stdout, secrets),
+    stderr: redact(result.stderr, secrets),
     ...(result.signal ? { signal: result.signal } : {})
   };
 }
@@ -18,20 +26,29 @@ function validateInput(input) {
   if (typeof input.rawArtifactRef !== 'string' || !input.rawArtifactRef.startsWith('github-actions://')) throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'rawArtifactRef must be a github-actions:// reference');
   if (typeof input.command !== 'string' || input.command.length === 0) throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'command is required');
   if (input.args !== undefined && !Array.isArray(input.args)) throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'args must be an array');
+  if (input.env !== undefined && (!input.env || typeof input.env !== 'object' || Array.isArray(input.env))) throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'env must be an object');
+  if (input.redactValues !== undefined && !Array.isArray(input.redactValues)) throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'redactValues must be an array');
   if (input.recoverableExitCodes !== undefined && (!Array.isArray(input.recoverableExitCodes) || input.recoverableExitCodes.some((code) => !Number.isInteger(code)))) {
     throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'recoverableExitCodes must contain integers');
   }
 }
 
 function baseResult(input, fields) {
-  return { backend: 'native-fuzz', sourceCommit: input.sourceCommit, rawArtifactRef: input.rawArtifactRef, ...fields };
+  return {
+    backend: 'native-fuzz',
+    sourceCommit: input.sourceCommit,
+    rawArtifactRef: input.rawArtifactRef,
+    ...(input.forkEvidence ? { fork: structuredClone(input.forkEvidence) } : {}),
+    ...fields,
+  };
 }
 
 export async function runNativeFuzzAnalysis(input, { runCommand = runProcess } = {}) {
   validateInput(input);
   const args = input.args ? [...input.args] : [];
-  const result = await runCommand({ command: input.command, args, cwd: input.projectRoot });
-  const rawOutput = normalizedRaw(result);
+  const secrets = input.redactValues ?? [];
+  const result = await runCommand({ command: input.command, args, cwd: input.projectRoot, ...(input.env ? { env: input.env } : {}) });
+  const rawOutput = normalizedRaw(result, secrets);
 
   if (rawOutput.exitCode === 0) return baseResult(input, { status:'completed', terminal:true, componentStatus:'COMPLETED', continuationDisposition:'COMPLETE_EVIDENCE', rawOutput });
 
