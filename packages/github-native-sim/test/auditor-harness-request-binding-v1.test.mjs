@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateDeepAssuranceRequestV2 } from '../src/schema.mjs';
+import { validateDeepAssuranceRequestV2 } from '../src/schema-v3.mjs';
 
 function request(harness) {
   return {
