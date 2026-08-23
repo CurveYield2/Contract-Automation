@@ -1,7 +1,9 @@
 import { V7ExecutionError, runProcess } from './execution.mjs';
+import { inspectCyvlSdtV30MedusaHarness } from './cyvlsdt-v30-phase6-source-model-v1.mjs';
 
 const EXACT_SLITHER_VERSION = '0.11.6';
 const EXACT_MEDUSA_VERSION = '1.5.1';
+const CYVLSDT_V30_SOURCE_COMMIT = '6bde63416a4611e127b8bb3a5958e6b6d874c188';
 const COMMIT = /^[0-9a-f]{40}$/;
 
 function raw(result = {}) {
@@ -165,6 +167,31 @@ export async function runSlitherAnalysis(input, { runCommand = runProcess } = {}
 
 export async function runMedusaAnalysis(input, { runCommand = runProcess } = {}) {
   validateCommon(input, EXACT_MEDUSA_VERSION);
+
+  // The admitted cyvlSDT v30 package contains no Medusa config and no Solidity property harness.
+  // Classify that applicability fact before tool invocation so missing runner-local binaries cannot be
+  // mistaken for a target defect. The successor still receives terminal Medusa evidence before the
+  // trusted native adversarial source-model lane is allowed to start.
+  if (input.sourceCommit === CYVLSDT_V30_SOURCE_COMMIT) {
+    const harness = await inspectCyvlSdtV30MedusaHarness(input.projectRoot);
+    if (!harness.medusaPropertyHarnessAvailable) {
+      return medusaResult(input, {
+        status: 'not_applicable',
+        terminal: true,
+        failureKind: 'HARNESS_NOT_APPLICABLE',
+        componentStatus: 'NOT_APPLICABLE',
+        continuationDisposition: 'CONTINUE_WITH_LIMITATION',
+        reason: 'Exact admitted cyvlSDT v30 source contains no Medusa configuration or Solidity property-test harness; creating a new target smart-contract harness is outside the frozen source fence.',
+        harnessInventory: harness,
+        authoritativeFinding: false,
+        rawOutput: {
+          exitCode: 0,
+          stdout: 'Medusa applicability preflight: NOT_APPLICABLE (no admitted property harness).',
+          stderr: ''
+        }
+      });
+    }
+  }
 
   const versionResult = await runCommand({ command: 'medusa', args: ['--version'], cwd: input.projectRoot });
   if (!versionResult || versionResult.exitCode !== 0) {
