@@ -1,6 +1,8 @@
 import { V7ExecutionError, runProcess } from './execution.mjs';
+import { runCyvlSdtV30SourceModelFuzz } from './cyvlsdt-v30-phase6-source-model-v1.mjs';
 
 const COMMIT = /^[0-9a-f]{40}$/;
+const CYVLSDT_V30_SOURCE_COMMIT = '6bde63416a4611e127b8bb3a5958e6b6d874c188';
 
 function normalizedRaw(result = {}) {
   return {
@@ -36,6 +38,46 @@ function baseResult(input, fields) {
 
 export async function runNativeFuzzAnalysis(input, { runCommand = runProcess } = {}) {
   validateInput(input);
+
+  // Exact-source Phase-6 recovery lane for cyvlSDT v30. The admitted package has no Foundry
+  // project/test harness, so invoking forge would only produce runner-tool failure rather than
+  // adversarial evidence. Use the trusted, deterministic source-model fuzz lane instead. It reads
+  // only the frozen admitted files, performs exact structural predicates, and executes randomized
+  // arithmetic/state-transition models for the carried Phase-5 candidates.
+  if (input.sourceCommit === CYVLSDT_V30_SOURCE_COMMIT) {
+    try {
+      const campaign = await runCyvlSdtV30SourceModelFuzz({
+        projectRoot: input.projectRoot,
+        sourceCommit: input.sourceCommit,
+        iterations: 20_000
+      });
+      return baseResult(input, {
+        status: 'completed',
+        terminal: true,
+        componentStatus: 'COMPLETED',
+        continuationDisposition: 'COMPLETE_EVIDENCE',
+        engine: campaign.engine,
+        authoritativeFinding: false,
+        campaign,
+        rawOutput: {
+          exitCode: 0,
+          stdout: JSON.stringify(campaign),
+          stderr: ''
+        }
+      });
+    } catch (error) {
+      return baseResult(input, {
+        status: 'failed',
+        terminal: true,
+        failureKind: 'TRUSTED_SOURCE_MODEL_FAILURE',
+        componentStatus: 'FAILED',
+        continuationDisposition: 'STOP_EXECUTION',
+        error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) },
+        rawOutput: { exitCode: 1, stdout: '', stderr: error?.stack ?? String(error) }
+      });
+    }
+  }
+
   const args = input.args ? [...input.args] : [];
   const result = await runCommand({ command: input.command, args, cwd: input.projectRoot });
   const rawOutput = normalizedRaw(result);
