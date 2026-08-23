@@ -6,43 +6,57 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
-const workflowPath = path.join(repoRoot, '.github/workflows/audit-controller-execution-v4.yml');
+const workflowPath = path.join(repoRoot, '.github/workflows/audit-controller-execution.yml');
+const resolverPath = path.join(repoRoot, 'packages/github-native-sim/src/request-resolution-v1.mjs');
 
-test('V7 v4 bridge executes one atomic request file from same-repository request PRs', () => {
-  assert.equal(fs.existsSync(workflowPath), true, 'V7 execution workflow v4 must exist');
+test('canonical V7 bridge resolves exactly one atomic request file from request PRs', () => {
+  assert.equal(fs.existsSync(workflowPath), true, 'canonical V7 execution workflow must exist');
   const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const resolver = fs.readFileSync(resolverPath, 'utf8');
+
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /github-native-sim\/requests\/\*\*\/request\.json/);
-  assert.match(workflow, /startsWith\(github\.event\.pull_request\.head\.ref, 'github-native-sim\/'\)/);
-  assert.match(workflow, /find .*github-native-sim\/requests/);
-  assert.match(workflow, /test "\$\{#requests\[@\]\}" -eq 1/);
-  assert.match(workflow, /runGitHubNativeJob/);
-  assert.match(workflow, /AUDIT_CONTROLLER_GITHUB_TOKEN:\s*\$\{\{\s*secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN\s*\}\}/);
-  assert.match(workflow, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01:\s*\$\{\{\s*secrets\.SIM_ARCHIVE_PRIMARY_ETHEREUM_01\s*\}\}/);
-  assert.doesNotMatch(workflow, /push:\s*[\s\S]*branches:\s*[\s\S]*github-native-sim\/\*\*/);
-});
-
-test('V7 v4 executes trusted runner code from main and treats the request branch as data only', () => {
-  const workflow = fs.readFileSync(workflowPath, 'utf8');
-  assert.match(workflow, /name:\s*Checkout trusted Contract Automation runner/);
-  assert.match(workflow, /ref:\s*main/);
-  assert.match(workflow, /name:\s*Checkout atomic request source/);
+  assert.match(workflow, /name:\s*Checkout atomic request source for PR/);
   assert.match(workflow, /path:\s*\.request-source/);
-  assert.match(workflow, /ref:\s*\$\{\{\s*github\.event\.pull_request\.head\.sha \|\| github\.sha\s*\}\}/);
-  assert.match(workflow, /find \.request-source\/github-native-sim\/requests/);
-  assert.match(workflow, /cp "\$\{requests\[0\]\}" \.v7-request\/request\.json/);
-  assert.doesNotMatch(workflow, /name:\s*Checkout exact Contract Automation request branch/);
+  assert.match(workflow, /npm run v7 -- resolve --mode pr --source \.request-source --output \.v7-request\/request\.json/);
+  assert.match(resolver, /const candidates = await findPrRequests/);
+  assert.match(resolver, /candidates\.length !== 1/);
+  assert.match(resolver, /PR request source must contain exactly one atomic request/);
+  assert.match(workflow, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01:\s*\$\{\{\s*secrets\.SIM_ARCHIVE_PRIMARY_ETHEREUM_01\s*\}\}/);
+  assert.doesNotMatch(workflow, /push:\s*[\s\S]*github-native-sim\/requests/);
 });
 
-test('V7 v4 bridge permits same-repository PR trace execution without admitting fork PR secrets', () => {
+test('canonical V7 bridge executes trusted main runner code and treats the PR checkout as request data only', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
-  assert.match(workflow, /pull_request:/);
-  assert.match(workflow, /types:\s*\[opened, synchronize, reopened\]/);
-  assert.match(workflow, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
-  assert.match(workflow, /startsWith\(github\.event\.pull_request\.head\.ref, 'github-native-sim\/'\)/);
+  assert.match(workflow, /name:\s*Checkout trusted Contract-Automation runner/);
+  assert.match(workflow, /ref:\s*main/);
+  assert.match(workflow, /name:\s*Checkout atomic request source for PR/);
+  assert.match(workflow, /repository:\s*\$\{\{ github\.repository \}\}/);
+  assert.match(workflow, /ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
+  assert.match(workflow, /path:\s*\.request-source/);
+  assert.match(workflow, /npm run v7 -- resolve --mode pr/);
+  assert.match(workflow, /npm run v7:execute -- --request \.v7-request\/request\.json/);
+  assert.doesNotMatch(workflow, /Checkout exact Contract Automation request branch/);
 });
 
-test('V7 v4 atomic request branches do not modify the generic PreflightSim issue bridge', () => {
+test('canonical V7 bridge scopes private credentials to private checkout and execution rather than PR source checkout', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const prCheckoutStart = workflow.indexOf('- name: Checkout atomic request source for PR');
+  const dispatchCheckoutStart = workflow.indexOf('- name: Checkout private Solo Audit Controller for manual dispatch');
+  const executionStart = workflow.indexOf('- name: Execute V7 request');
+  assert.ok(prCheckoutStart >= 0 && dispatchCheckoutStart > prCheckoutStart && executionStart > dispatchCheckoutStart);
+
+  const prCheckout = workflow.slice(prCheckoutStart, dispatchCheckoutStart);
+  assert.doesNotMatch(prCheckout, /AUDIT_CONTROLLER_GITHUB_TOKEN/);
+  assert.doesNotMatch(prCheckout, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01/);
+
+  const dispatchAndExecution = workflow.slice(dispatchCheckoutStart);
+  assert.match(dispatchAndExecution, /token:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
+  assert.match(dispatchAndExecution, /AUDIT_CONTROLLER_GITHUB_TOKEN:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
+  assert.match(dispatchAndExecution, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01:\s*\$\{\{ secrets\.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 \}\}/);
+});
+
+test('canonical V7 atomic request bridge does not modify the generic PreflightSim issue bridge', () => {
   const genericPath = path.join(repoRoot, '.github/workflows/github-bridge.yml');
   const generic = fs.readFileSync(genericPath, 'utf8');
   assert.match(generic, /PreflightSim GitHub Issue Bridge/);
