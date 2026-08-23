@@ -15,10 +15,12 @@ export function buildRunnerManifestV2() {
     activeWorkflows: {
       execution: V7_POLICY.workflows.execution,
       qualification: V7_POLICY.workflows.qualification,
+      toolchainSetup: V7_POLICY.workflows.toolchainSetup,
     },
     toolchain: {
       slither: V7_POLICY.tools.slither,
       medusa: V7_POLICY.tools.medusa,
+      forge: V7_POLICY.tools.forge,
       anvilPackage: V7_POLICY.tools.anvilPackage,
     },
     mutableRpc: {
@@ -36,12 +38,14 @@ export function buildRunnerManifestV2() {
       requiredRuntimeFiles: [...V7_POLICY.phase6.requiredRuntimeFiles],
       medusaBeforeFoundry: V7_POLICY.phase6.medusaBeforeFoundry,
       stagingPolicy: 'SINGLE_VERIFIED_SNAPSHOT_THEN_LOCAL_EXECUTION_COPY',
+      rpcIdentityPolicy: V7_POLICY.phase6.rpcIdentityPolicy,
     },
     commands: {
       execute: 'npm run v7:execute -- --request <request.json>',
       submit: 'npm run v7:submit -- --request <request.json>',
       harnessInit: 'npm run v7:harness:init -- --request <request.json>',
       harnessValidate: 'npm run v7:harness:validate -- --bundle <bundle-id> --request <request.json>',
+      toolchainVerify: 'npm run v7:toolchain:verify',
       manifestCheck: 'npm run v7:manifest -- --check',
     },
     evidence: {
