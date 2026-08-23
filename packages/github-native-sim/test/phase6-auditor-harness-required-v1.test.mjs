@@ -23,10 +23,15 @@ function request() {
   };
 }
 
-test('missing target-package harness requires auditor harness construction instead of NOT_APPLICABLE', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'phase6-auditor-harness-'));
+async function makeTargetWithoutHarness() {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'phase6-target-'));
   await fs.mkdir(path.join(root, 'contracts'));
   await fs.writeFile(path.join(root, 'contracts', 'Target.sol'), 'pragma solidity ^0.8.28; contract Target { uint256 public x; }\n');
+  return root;
+}
+
+test('missing target-package harness requires auditor harness construction instead of NOT_APPLICABLE', async () => {
+  const root = await makeTargetWithoutHarness();
   let toolChecks = 0;
 
   const result = await runPhase6ExecutionPreflightV1({
@@ -48,4 +53,39 @@ test('missing target-package harness requires auditor harness construction inste
   assert.equal(result.nativeFuzz.harnessOrigin, 'AUDITOR_GENERATED_REQUIRED');
   assert.equal(result.nextState, 'PHASE6_HARNESS_CONSTRUCTION');
   assert.equal(toolChecks, 0, 'tool availability is checked only after the auditor-generated harness exists');
+});
+
+test('auditor-generated external harness satisfies Medusa and Foundry applicability without modifying target tree', async () => {
+  const projectRoot = await makeTargetWithoutHarness();
+  const auditHarnessRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'phase6-generated-harness-'));
+  await fs.mkdir(path.join(auditHarnessRoot, 'test'), { recursive: true });
+  await fs.writeFile(path.join(auditHarnessRoot, 'foundry.toml'), '[profile.default]\nsrc = "contracts"\ntest = "test"\n');
+  await fs.writeFile(path.join(auditHarnessRoot, 'medusa.json'), '{"testLimit":1000}\n');
+  await fs.writeFile(
+    path.join(auditHarnessRoot, 'test', 'AuditHarness.t.sol'),
+    'pragma solidity ^0.8.28; contract AuditHarness { function invariant_generated_by_auditor() public pure returns (bool) { return true; } }\n',
+  );
+  const targetBefore = (await fs.readdir(projectRoot)).sort();
+  const toolCommands = [];
+
+  const result = await runPhase6ExecutionPreflightV1({
+    request: request(),
+    projectRoot,
+    auditHarnessRoot,
+    runnerCommit: '2222222222222222222222222222222222222222',
+    runCommand: async ({ command }) => {
+      toolCommands.push(command);
+      return { exitCode: 0, stdout: `${command} available`, stderr: '' };
+    },
+  });
+
+  assert.equal(result.status, 'PASS');
+  assert.equal(result.medusa.status, 'COMPLETED');
+  assert.equal(result.medusa.harnessOrigin, 'AUDITOR_GENERATED');
+  assert.equal(result.nativeFuzz.status, 'COMPLETED');
+  assert.equal(result.nativeFuzz.harnessOrigin, 'AUDITOR_GENERATED');
+  assert.deepEqual(toolCommands.sort(), ['forge', 'medusa']);
+  assert.deepEqual((await fs.readdir(projectRoot)).sort(), targetBefore, 'preflight must not mutate the frozen target tree');
+  assert.equal(result.harnessInventory.auditHarnessRootPresent, true);
+  assert.equal(result.nextState, 'ACTIVE');
 });
