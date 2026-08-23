@@ -1,0 +1,47 @@
+name: Setup V7 toolchain
+description: Install and verify the exact Slither, Medusa, and Forge toolchain used by Audit V7
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install pinned Slither
+      shell: bash
+      run: python -m pip install --disable-pip-version-check --no-input 'slither-analyzer==0.11.6'
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.6'
+        cache: false
+
+    - name: Cache Medusa Go build inputs
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-1.5.1
+        restore-keys: |
+          v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Install pinned Medusa
+      shell: bash
+      run: |
+        set -euo pipefail
+        install_dir="$RUNNER_TEMP/v7-tools/bin"
+        mkdir -p "$install_dir"
+        GOBIN="$install_dir" go install github.com/crytic/medusa@v1.5.1
+        echo "$install_dir" >> "$GITHUB_PATH"
+        echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+
+    - name: Verify exact V7 toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        export PATH="$RUNNER_TEMP/v7-tools/bin:$GITHUB_WORKSPACE/node_modules/.bin:$PATH"
+        npm run v7:toolchain:verify
