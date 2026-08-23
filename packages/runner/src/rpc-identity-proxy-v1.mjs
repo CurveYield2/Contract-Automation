@@ -40,6 +40,17 @@ function rewriteResponsePayload(requestPayload, responsePayload, chainId) {
   return rewriteIdentityResponse(responsePayload, request?.method, chainId);
 }
 
+function recordUpstreamIdentity(requestPayload, responsePayload, observation) {
+  const methods = requestMethodMap(requestPayload);
+  const responses = Array.isArray(responsePayload) ? responsePayload : [responsePayload];
+  for (const response of responses) {
+    if (!response || typeof response !== 'object' || response.error || !Object.hasOwn(response, 'id') || !Object.hasOwn(response, 'result')) continue;
+    const method = methods.get(jsonRpcIdKey(response.id));
+    if (method === 'eth_chainId' && typeof response.result === 'string') observation.chainId = response.result;
+    if (method === 'net_version' && typeof response.result === 'string') observation.networkId = response.result;
+  }
+}
+
 function includesIdentityMethod(requestPayload) {
   const requests = Array.isArray(requestPayload) ? requestPayload : [requestPayload];
   return requests.some((request) => request?.method === 'eth_chainId' || request?.method === 'net_version');
@@ -74,6 +85,7 @@ export async function startRpcIdentityProxy({
   if (!Number.isSafeInteger(chainId) || chainId < 1) throw new Error('Fork RPC chainId must be a positive safe integer');
   if (typeof fetchImpl !== 'function') throw new Error('fetch implementation is required');
 
+  const upstreamIdentityObservation = { chainId: null, networkId: null };
   const server = http.createServer(async (request, response) => {
     if (request.method !== 'POST') {
       writeJson(response, 405, { error: 'JSON-RPC POST required' });
@@ -104,6 +116,7 @@ export async function startRpcIdentityProxy({
       }
 
       const responsePayload = JSON.parse(rawResponse);
+      recordUpstreamIdentity(requestPayload, responsePayload, upstreamIdentityObservation);
       writeJson(response, 200, rewriteResponsePayload(requestPayload, responsePayload, chainId));
     } catch (error) {
       const statusCode = error?.message === 'REQUEST_TOO_LARGE' ? 413 : 502;
@@ -131,6 +144,9 @@ export async function startRpcIdentityProxy({
 
   return {
     url,
+    getUpstreamIdentityObservation() {
+      return structuredClone(upstreamIdentityObservation);
+    },
     async close() {
       if (closed) return;
       closed = true;
