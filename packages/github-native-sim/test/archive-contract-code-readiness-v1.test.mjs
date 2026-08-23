@@ -77,14 +77,21 @@ test('Phase 7 target-code probe distinguishes no-code from sanitized RPC failure
   assert.equal(JSON.stringify(failure).includes('secret.example'), false);
 });
 
-test('V7 trusted workflow derives and records the first literal Phase 7 target code before lifecycle execution', () => {
-  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/audit-controller-execution-v4.yml'), 'utf8');
-  const codeStep = workflow.indexOf('Record Phase 7 target code readiness');
-  const executionStep = workflow.indexOf('Execute V7 GitHub-native request');
-  assert.ok(codeStep >= 0, 'target code-readiness step must exist');
-  assert.ok(executionStep > codeStep, 'target code evidence must be recorded before lifecycle execution');
-  assert.match(workflow, /probeArchiveContractCode/);
-  assert.match(workflow, /archive-contract-code-readiness-v1\.json/);
-  assert.match(workflow, /workflow\.steps\.find/);
-  assert.match(workflow, /\^0x\[0-9a-fA-F\]\{40\}\$/);
+test('canonical V7 runner derives literal Phase 7 targets and proves code before lifecycle execution', () => {
+  const preflight = fs.readFileSync(path.join(repoRoot, 'packages/github-native-sim/src/phase7-fork-preflight-v1.mjs'), 'utf8');
+  const runner = fs.readFileSync(path.join(repoRoot, 'packages/github-native-sim/src/run-job-file-v2.mjs'), 'utf8');
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/audit-controller-execution.yml'), 'utf8');
+
+  assert.match(preflight, /function literalTargets\(workflow\)/);
+  assert.match(preflight, /\^0x\[0-9a-fA-F\]\{40\}\$/);
+  assert.match(preflight, /engine\.provider\.getCode\(address\)/);
+  assert.match(preflight, /const targetCode =/);
+
+  const preflightStep = runner.indexOf('preflight = await runPhase7ForkPreflightV2');
+  const lifecycleStep = runner.indexOf('runGitHubNativeJobV1(request');
+  assert.ok(preflightStep >= 0, 'Phase 7 preflight must be invoked by the canonical runner');
+  assert.ok(lifecycleStep > preflightStep, 'target code readiness must be proven before lifecycle execution');
+
+  assert.match(workflow, /name:\s*Execute V7 request/);
+  assert.match(workflow, /npm run v7:execute -- --request \.v7-request\/request\.json/);
 });
