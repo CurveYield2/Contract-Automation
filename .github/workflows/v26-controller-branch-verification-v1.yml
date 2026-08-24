@@ -1,6 +1,9 @@
 name: V26 Controller Branch Verification v1
 
 on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
   push:
     branches:
       - feat/v26-machine-execution-v1
