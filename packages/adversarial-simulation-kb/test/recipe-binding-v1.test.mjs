@@ -83,6 +83,8 @@ test('K09 recipe and SCHEMA_VALID recipe proof regenerate the checked-in current
   const pattern=json(`${ROOT}/patterns/PATTERN-0001/pattern.json`);
   const recipe=json(`${ROOT}/recipes/RECIPE-0001/recipe.json`);
   const recipeProof=json(`${ROOT}/recipes/RECIPE-0001/proof.json`);
-  const generated=buildRegistriesV1({incidents:[incident],patterns:[pattern],recipes:[recipe],executables:[],proofs:[incidentProof,recipeProof],relationships:[]}).registries;
+  const executable=json(`${ROOT}/executables/EXEC-0001/executable.json`);
+  const executableProof=json(`${ROOT}/executables/EXEC-0001/proof.json`);
+  const generated=buildRegistriesV1({incidents:[incident],patterns:[pattern],recipes:[recipe],executables:[executable],proofs:[incidentProof,recipeProof,executableProof],relationships:[]}).registries;
   for(const name of Object.keys(generated)) assert.deepEqual(json(`${ROOT}/registry/${name}.json`),generated[name],name);
 });
