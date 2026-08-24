@@ -32,6 +32,14 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Diagnose stale active preflight fixtures
+        working-directory: controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Active test files containing historical v1 execution-profile fixtures:'
+          grep -RIl -E 'github-native-(compile|simulate)-v1' packages/*/test test || true
+
       - name: Run private controller tests
         working-directory: controller
         run: npm test
