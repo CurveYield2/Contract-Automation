@@ -6,7 +6,7 @@ Generated from `DEVELOPMENT_RECOVERY_STATE_v1.json`. Do not edit this projection
 - Branch: `feat/adversarial-simulation-kb-v1`
 - Pull request: 131
 - Baseline main SHA: `468b749076fb5b9c166c14a187fdd29a6f967acd`
-- Last known good commit: `3f08213fc9b4ff8f9258024cbbf1c55c2921e5b7`
+- Last known good commit: `efabde00344c86f4cd8d151f71b50baa2fac61b1`
 - Overall status: **IN_PROGRESS**
 - Current module: **K13 — Historical Reproduction Path**
 - Current step: **K13-S01 / READY**
