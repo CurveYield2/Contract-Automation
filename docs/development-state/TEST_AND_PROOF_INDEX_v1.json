@@ -23,7 +23,17 @@
       "observed": "6 tests passed, 0 failed",
       "environment": "local-static-node-v22.16.0",
       "sourceCommit": "468b749076fb5b9c166c14a187fdd29a6f967acd"
+    },
+    {
+      "proofId": "K00-GATE-0001",
+      "moduleId": "K00",
+      "stepId": "K00-S05",
+      "type": "REPOSITORY_GATE",
+      "status": "PASS",
+      "observed": "Branch is exactly one atomic commit ahead of baseline; draft PR #131 opened; 8 expected K00 files present; no PR-triggered workflow run applicable to this path set.",
+      "sourceCommit": "61f64488ef2c2c859feb4e302089022e27e8b33b",
+      "pullRequest": 131
     }
   ],
-  "lastUpdatedAt": "2026-08-24T05:49:00Z"
+  "lastUpdatedAt": "2026-08-24T05:58:00Z"
 }

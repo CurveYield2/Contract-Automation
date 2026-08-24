@@ -4,17 +4,17 @@ Generated from `DEVELOPMENT_RECOVERY_STATE_v1.json`. Do not edit this projection
 
 - Repository: `CurveYield2/Contract-Automation`
 - Branch: `feat/adversarial-simulation-kb-v1`
-- Pull request: not opened yet
+- Pull request: 131
 - Baseline main SHA: `468b749076fb5b9c166c14a187fdd29a6f967acd`
-- Last known good commit: `468b749076fb5b9c166c14a187fdd29a6f967acd`
+- Last known good commit: `61f64488ef2c2c859feb4e302089022e27e8b33b`
 - Overall status: **IN_PROGRESS**
-- Current module: **K00 — Development Recovery System**
-- Current step: **K00-S05 / READY**
-- Last completed step: K00-S04
+- Current module: **K01 — Existing Harness/Simulation/Failure Corpus Inventory**
+- Current step: **K01-S01 / READY**
+- Last completed step: K00-S05
 
 ## Next exact action
 
-Open a draft pull request from feat/adversarial-simulation-kb-v1 to main, then record the PR number and complete the K00 recovery-state hard gate.
+Inventory the canonical Medusa/Foundry harness skeletons and record each reusable asset with an explicit REUSE, ADAPT, ARCHIVE, or MISSING disposition in the K01 inventory artifacts.
 
 ## Open blockers
 
