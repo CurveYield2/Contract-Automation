@@ -5,6 +5,7 @@
     {
       "schemaVersion": "adversarial-kb-pattern-v1",
       "patternId": "PATTERN-0001",
+      "revision": 1,
       "name": "Collateral reduction without post-action solvency enforcement",
       "description": "A debt-bearing account can use a user-callable accounting or reserve-transfer path to reduce collateral backing without an equivalent post-action solvency check. An attacker who controls both the unhealthy account and a liquidator can then capture liquidation value that exceeds the economic cost of creating the unhealthy state.",
       "rootCauseClass": ["ACCOUNTING_DESYNC","COLLATERAL_MANIPULATION","DONATION","SOLVENCY_BYPASS"],

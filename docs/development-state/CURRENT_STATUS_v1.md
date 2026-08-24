@@ -6,19 +6,19 @@ Generated from `DEVELOPMENT_RECOVERY_STATE_v1.json`. Do not edit this projection
 - Branch: `feat/adversarial-simulation-kb-v1`
 - Pull request: 131
 - Baseline main SHA: `468b749076fb5b9c166c14a187fdd29a6f967acd`
-- Last known good commit: `91e4005e2038e546d0cddf71feb136359783b85a`
+- Last known good commit: `3abcb3be66cfeb2ade3d303384fb3b2bd7776acc`
 - Overall status: **IN_PROGRESS**
-- Current module: **K11 — Backend-Neutral Executable Contract**
-- Current step: **K11-S01 / READY**
-- Last completed step: K10-S05
+- Current module: **K12 — Foundry Vertical-Slice Reproduction**
+- Current step: **K12-S01 / READY**
+- Last completed step: K11-S05
 
 ## Last hard gate
 
-K10 PASS on canonical GitHub run `32700908341` at source commit `91e4005e2038e546d0cddf71feb136359783b85a`: 52 tests passed, 0 failed; secret/RPC-literal gate PASS. Proof tiers are ordered and sequential, every advancement requires fresh tier-specific evidence, executable-content changes force `REQUALIFICATION_REQUIRED`, and only `ACTIVE + QUALIFIED` proof state may auto-schedule.
+K11 PASS on canonical GitHub run `32703124345` at source commit `3abcb3be66cfeb2ade3d303384fb3b2bd7776acc`: 58 tests passed, 0 failed; secret/RPC-literal gate PASS. The backend-neutral executable contract now binds incident/pattern/recipe by stable ID + explicit revision + canonical SHA-256 digest, distinguishes controlled and historical execution obligations, rejects literal RPC/credential/shell escape fields, and represents never-qualified executables with `lastQualification: null`.
 
 ## Next exact action
 
-Write failing K11 backend-neutral executable-contract tests, then implement one executable identity encoding tool/version/files/digests/requirements, expected setup/effect/evidence, controlled vs historical mode, strict rejection of secret RPC/private key/arbitrary shell fields, and exact incident/pattern/recipe revision bindings.
+Reuse the canonical `packages/github-native-sim` Foundry infrastructure to implement a reduced controlled reproduction for `PATTERN-0001`, run preflight and GitHub execution, capture normalized initial/final state and effect, record proof run IDs/digests, and prove a deliberately broken negative fixture fails as expected.
 
 ## Open blockers
 

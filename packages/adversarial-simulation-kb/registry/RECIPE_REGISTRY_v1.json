@@ -5,6 +5,7 @@
     {
       "schemaVersion": "adversarial-kb-recipe-v1",
       "recipeId": "RECIPE-0001",
+      "revision": 1,
       "patternRefs": ["PATTERN-0001"],
       "targetTopologies": ["COLLATERALIZED_LENDING_LIQUIDATION"],
       "requiredTargetBindings": ["target","collateralAsset","debtAsset","positionSetupAction","collateralReductionAction","healthMetric","liquidationAction","attackerValueObservation"],

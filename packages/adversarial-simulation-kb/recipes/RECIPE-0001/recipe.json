@@ -1,6 +1,7 @@
 {
   "schemaVersion": "adversarial-kb-recipe-v1",
   "recipeId": "RECIPE-0001",
+  "revision": 1,
   "patternRefs": [
     "PATTERN-0001"
   ],

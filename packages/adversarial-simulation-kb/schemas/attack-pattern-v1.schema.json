@@ -3,10 +3,11 @@
   "$id": "https://curveyield.dev/schemas/adversarial-kb/attack-pattern-v1.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion","patternId","name","description","rootCauseClass","structuralPreconditions","runtimePreconditions","attackerCapabilities","attackSequenceAbstract","expectedSecurityPropertyViolation","sourceIntelligenceSignals","runtimeOverlaySignals","nonApplicabilitySignals","falsePositiveGuards","adaptationRules","recommendedBackends","historicalIncidentRefs","recipeRefs","limitations"],
+  "required": ["schemaVersion","patternId","revision","name","description","rootCauseClass","structuralPreconditions","runtimePreconditions","attackerCapabilities","attackSequenceAbstract","expectedSecurityPropertyViolation","sourceIntelligenceSignals","runtimeOverlaySignals","nonApplicabilitySignals","falsePositiveGuards","adaptationRules","recommendedBackends","historicalIncidentRefs","recipeRefs","limitations"],
   "properties": {
     "schemaVersion": {"const": "adversarial-kb-pattern-v1"},
     "patternId": {"type": "string", "pattern": "^PATTERN-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
     "name": {"type": "string", "minLength": 1},
     "description": {"type": "string", "minLength": 1},
     "rootCauseClass": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},

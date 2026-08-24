@@ -3,10 +3,11 @@
   "$id": "https://curveyield.dev/schemas/adversarial-kb/recipe-v1.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion","recipeId","patternRefs","targetTopologies","requiredTargetBindings","setupSteps","attackSteps","observations","assertions","adaptationInputs","backendSupport","executableRefs","proofStatusRef"],
+  "required": ["schemaVersion","recipeId","revision","patternRefs","targetTopologies","requiredTargetBindings","setupSteps","attackSteps","observations","assertions","adaptationInputs","backendSupport","executableRefs","proofStatusRef"],
   "properties": {
     "schemaVersion": {"const": "adversarial-kb-recipe-v1"},
     "recipeId": {"type": "string", "pattern": "^RECIPE-[0-9]{4}$"},
+    "revision": {"type": "integer", "minimum": 1},
     "patternRefs": {"type": "array", "items": {"type": "string", "pattern": "^PATTERN-[0-9]{4}$"}, "minItems": 1},
     "targetTopologies": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},
     "requiredTargetBindings": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1},

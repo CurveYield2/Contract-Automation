@@ -13,7 +13,8 @@
 | First abstract pattern (K08) | PASS | PASS | PASS | N/A | NOT YET PROVEN | PASS |
 | First recipe (K09) | PASS | PASS | PASS | N/A | SCHEMA_VALID ONLY | PASS |
 | Proof state machine (K10) | PASS | PASS | PASS | N/A | N/A | PASS |
-| Backend-neutral executable contract (K11) | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
-| Remaining K12-K36 modules | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| Backend-neutral executable contract (K11) | PASS | PASS | PASS | NOT EXECUTED | NOT EXECUTED | PASS |
+| Foundry vertical-slice reproduction (K12) | PENDING | PENDING | PENDING | N/A | PENDING | PENDING |
+| Remaining K13-K36 modules | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
 
-This table is intentionally conservative. `EXP-2023-0001`, `PATTERN-0001`, and `RECIPE-0001` are validated knowledge records, but incident and recipe proof records remain `SCHEMA_VALID`; no executable exists yet, no controlled/historical/generalized reproduction has been claimed, and nothing is `QUALIFIED`. K10 only enforces how proof may advance: transitions are sequential, each tier requires fresh evidence, executable changes force requalification, and only `ACTIVE + QUALIFIED` records may auto-schedule.
+This table is intentionally conservative. `EXP-2023-0001`, `PATTERN-0001`, and `RECIPE-0001` are validated knowledge records, but incident and recipe proof records remain `SCHEMA_VALID`; no controlled/historical/generalized reproduction has yet been claimed, and nothing is `QUALIFIED`. K11 defines the shared executable identity and proof metadata contract only; K12 is the first module allowed to claim an actual controlled executable reproduction after GitHub proof.

@@ -53,3 +53,10 @@ Append-only. Do not rewrite earlier decisions; append a superseding decision if 
 - Decision: Proof advancement is strictly sequential, and evidence already accumulated at a lower proof tier cannot by itself satisfy the evidence obligation of the next tier. Each transition supplies a fresh tier-specific evidence bundle; prior evidence remains accumulated only for traceability.
 - Basis: K10 requires evidence/run identities per proof tier and must prevent manual or stale-evidence promotion to `QUALIFIED`.
 - Consequence: executable content changes set lifecycle status to `REQUALIFICATION_REQUIRED`, and automatic scheduling is permitted only when the proof is both `ACTIVE` and `QUALIFIED` after the required fresh evidence transitions.
+
+## D-0009 — Executables bind immutable knowledge identity, not mutable IDs alone
+
+- Status: ACTIVE
+- Decision: Persistent incident, pattern, and recipe records expose explicit positive integer revisions. Every backend-neutral executable binds each referenced knowledge record by kind, stable ID, revision, and canonical SHA-256 digest; stale revision or content digest fails closed. Before an executable has actually qualified, `lastQualification` is `null` rather than a synthetic run claim.
+- Basis: K11 requires exact incident/pattern/recipe revision binding and the global KB is consumed through immutable IDs/digests.
+- Consequence: `CONTROLLED` and `HISTORICAL` executable modes share one metadata contract; historical mode additionally requires archive RPC-by-environment and exact block identity. Literal RPC URLs, private keys, mnemonics, and arbitrary shell/command escape fields are forbidden recursively.
