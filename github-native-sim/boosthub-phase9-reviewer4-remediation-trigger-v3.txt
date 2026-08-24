@@ -1,0 +1,4 @@
+Boosthub Staking v2 Phase 9 reviewer-4 remediation regression trigger v3
+Campaign generation: boosthub-staking-v2-g1-20260818T215920Z
+Corrects audit-only sdYB stable-pool interfaces in the live oracle/execution probe.
+Phase9 obligations: OBL-P9-001, OBL-P9-002, OBL-P9-003, OBL-P9-004
