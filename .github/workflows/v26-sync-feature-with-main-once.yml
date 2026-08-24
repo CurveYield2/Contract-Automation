@@ -29,7 +29,7 @@ jobs:
           git config user.name 'CurveYield V26 Qualification'
           git config user.email 'actions@users.noreply.github.com'
           git fetch origin main
-          git merge --no-edit origin/main
+          git merge -X ours --no-edit origin/main
           git rm .github/workflows/v26-sync-feature-with-main-once.yml
           git commit -m 'chore(v26): remove one-shot branch synchronization workflow'
           git push origin HEAD:feat/v26-machine-execution-v1
