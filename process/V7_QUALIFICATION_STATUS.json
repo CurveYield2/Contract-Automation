@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-v7-current-qualification-status-v1",
   "status": "PASS",
-  "qualifiedCommit": "87b2d603d2c3d75436f522ff1954d1ac1bfbd913",
-  "workflowRunId": "32679421997",
-  "qualifiedAt": "2026-08-24T01:20:35.160Z",
+  "qualifiedCommit": "456aab14c6d067b11db57135a239e0ff46a61fda",
+  "workflowRunId": "32681325514",
+  "qualifiedAt": "2026-08-24T01:56:39.701Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
@@ -63,10 +63,41 @@
     },
     "runtime": {
       "identityNormalized": true,
-      "blockNumber": 25821704,
-      "blockHash": "0x629983b19de5e09fd67d0c23d9a775c8d04012ad9a9583bfd7a1445e1723c63d",
+      "blockNumber": 25821826,
+      "blockHash": "0x3c7f0e344f4ab18f3c50f0ca9fd54155f5ba0782df8f454e37668912d2feef22",
       "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
       "rpcUrlExposed": false
+    },
+    "medusaSmoke": {
+      "schemaVersion": "curveyield-v7-medusa-e2e-smoke-v1",
+      "status": "PASS",
+      "rpc": {
+        "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
+        "blockNumber": 25821826,
+        "blockHash": "0x3c7f0e344f4ab18f3c50f0ca9fd54155f5ba0782df8f454e37668912d2feef22",
+        "urlExposed": false
+      },
+      "checks": {
+        "medusaSmokePass": true,
+        "medusaSmokeFalsification": true,
+        "medusaSmokeNoTests": true,
+        "rawEvidencePreserved": true,
+        "rpcSecretNotExposed": true
+      },
+      "outcomes": {
+        "pass": {
+          "status": "completed",
+          "failureKind": null
+        },
+        "falsification": {
+          "status": "completed_with_failures",
+          "failureKind": "PROPERTY_FALSIFICATION"
+        },
+        "noTests": {
+          "status": "completed_with_failures",
+          "failureKind": "NO_TESTS_DISCOVERED"
+        }
+      }
     }
   },
   "phase7": {
