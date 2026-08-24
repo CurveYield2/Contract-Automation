@@ -46,3 +46,10 @@ Append-only. Do not rewrite earlier decisions; append a superseding decision if 
 - Decision: Generalized recipes contain only declared `${binding:...}` placeholders. A recipe instance is `BLOCKED` until every required target binding is explicitly supplied; instantiation performs data substitution only and rejects undeclared placeholders and literal onchain identities in the generalized template.
 - Basis: K09 requires reusable target-bound actions without silently assuming the historical target, and v3 forbids automatic target-specific security judgment.
 - Consequence: missing functions/addresses/metrics are never guessed by the global KB. Applicability, target-specific binding provenance, and auditor-approved security judgment remain later matcher/adaptation/controller responsibilities.
+
+## D-0008 — Every proof-tier advancement requires fresh tier-specific evidence
+
+- Status: ACTIVE
+- Decision: Proof advancement is strictly sequential, and evidence already accumulated at a lower proof tier cannot by itself satisfy the evidence obligation of the next tier. Each transition supplies a fresh tier-specific evidence bundle; prior evidence remains accumulated only for traceability.
+- Basis: K10 requires evidence/run identities per proof tier and must prevent manual or stale-evidence promotion to `QUALIFIED`.
+- Consequence: executable content changes set lifecycle status to `REQUALIFICATION_REQUIRED`, and automatic scheduling is permitted only when the proof is both `ACTIVE` and `QUALIFIED` after the required fresh evidence transitions.

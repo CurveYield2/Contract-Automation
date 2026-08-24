@@ -12,7 +12,8 @@
 | First verified incident (K07) | PASS | PASS | PASS | SCHEMA_VALID ONLY | N/A | PASS |
 | First abstract pattern (K08) | PASS | PASS | PASS | N/A | NOT YET PROVEN | PASS |
 | First recipe (K09) | PASS | PASS | PASS | N/A | SCHEMA_VALID ONLY | PASS |
-| Proof state machine (K10) | IN PROGRESS | PENDING | PENDING | PENDING | PENDING | PENDING |
-| Remaining K11-K36 modules | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| Proof state machine (K10) | PASS | PASS | PASS | N/A | N/A | PASS |
+| Backend-neutral executable contract (K11) | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| Remaining K12-K36 modules | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
 
-This table is intentionally conservative. `EXP-2023-0001`, `PATTERN-0001`, and `RECIPE-0001` are validated knowledge records, but incident and recipe proof records remain `SCHEMA_VALID`; no executable exists yet, no controlled/historical/generalized reproduction has been claimed, and nothing is `QUALIFIED`.
+This table is intentionally conservative. `EXP-2023-0001`, `PATTERN-0001`, and `RECIPE-0001` are validated knowledge records, but incident and recipe proof records remain `SCHEMA_VALID`; no executable exists yet, no controlled/historical/generalized reproduction has been claimed, and nothing is `QUALIFIED`. K10 only enforces how proof may advance: transitions are sequential, each tier requires fresh evidence, executable changes force requalification, and only `ACTIVE + QUALIFIED` records may auto-schedule.
