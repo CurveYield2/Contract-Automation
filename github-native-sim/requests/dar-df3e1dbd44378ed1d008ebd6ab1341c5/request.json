@@ -1,0 +1,373 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "cyvlSDT v30",
+  "assignmentId": "cyvlsdt-v30-phase7-vault-zero-supply-v1",
+  "phaseId": "fork-simulation-lifecycle",
+  "gateId": "phase7-p4-cand-001-vault-zero-supply",
+  "profileId": "github-native-simulate-v2",
+  "source": {
+    "repository": "CurveYield2/Solo-Audit-Controller",
+    "commit": "6bde63416a4611e127b8bb3a5958e6b6d874c188",
+    "projectPath": "CurveYield-cyvlSDT-Deployment-Package-v30",
+    "archivePath": "campaigns/CurveYield-cyvlSDT-Deployment-Package-v30.zip",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "configuration": {
+    "compilers": [
+      {
+        "language": "solidity",
+        "version": "0.8.28"
+      },
+      {
+        "language": "vyper",
+        "version": "0.3.10"
+      }
+    ],
+    "timeoutMinutes": 35,
+    "analysis": {
+      "slither": false,
+      "medusa": false,
+      "nativeFuzz": false
+    },
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun",
+    "viaIR": true,
+    "deploymentGas": {
+      "deployableContracts": [
+        {
+          "sourceName": "contracts/CurveYieldVlSDTLocker.sol",
+          "contractName": "CurveYieldVlSDTLocker"
+        },
+        {
+          "sourceName": "contracts/CurveYieldVlSDTToken.sol",
+          "contractName": "CurveYieldVlSDTToken"
+        },
+        {
+          "sourceName": "contracts/CurveYieldVlSDTRevenueStaking.sol",
+          "contractName": "CurveYieldVlSDTRevenueStaking"
+        },
+        {
+          "sourceName": "contracts/CurveYieldVault.sol",
+          "contractName": "CurveYieldVault"
+        },
+        {
+          "sourceName": "contracts/CurveYieldRevenueStrategyV20.sol",
+          "contractName": "CurveYieldRevenueStrategyV7"
+        },
+        {
+          "sourceName": "contracts/CurveYieldRevenueConverter.sol",
+          "contractName": "CurveYieldRevenueConverter"
+        },
+        {
+          "sourceName": "contracts/CurveYieldUsdcToSdtConverter.sol",
+          "contractName": "CurveYieldUsdcToSdtConverter"
+        },
+        {
+          "sourceName": "contracts/CurveYieldVlSDTBoostStaking.sol",
+          "contractName": "CurveYieldVlSDTBoostStaking"
+        },
+        {
+          "sourceName": "contracts/CurveYieldVlSDTBoostMerchant.sol",
+          "contractName": "CurveYieldVlSDTBoostMerchant"
+        },
+        {
+          "sourceName": "contracts/CurveYieldGovernanceToken.sol",
+          "contractName": "CurveYieldGovernanceToken"
+        },
+        {
+          "sourceName": "contracts/CurveYieldGovernanceMintController.sol",
+          "contractName": "CurveYieldGovernanceMintController"
+        },
+        {
+          "sourceName": "contracts/CurveYieldGovernanceStaking.vy",
+          "contractName": "CurveYieldGovernanceStaking"
+        },
+        {
+          "sourceName": "contracts/CurveYieldCyGovYieldStaking.sol",
+          "contractName": "CurveYieldCyGovYieldStaking"
+        },
+        {
+          "sourceName": "contracts/CurveYieldCyGovFraxswapConverter.sol",
+          "contractName": "CurveYieldCyGovFraxswapConverter"
+        },
+        {
+          "sourceName": "contracts/CurveYieldCyGovDiscountedSaleConverterV9.sol",
+          "contractName": "CurveYieldCyGovDiscountedSaleConverter"
+        }
+      ]
+    },
+    "harness": {
+      "recipeId": "zero-supply-restart-v1"
+    },
+    "simulation": {
+      "chain": "ethereum",
+      "block": 25817400,
+      "workflow": {
+        "steps": [
+          {
+            "action": "setBalance",
+            "account": "$account1",
+            "amount": "10000000000000000000",
+            "label": "fund first depositor gas"
+          },
+          {
+            "action": "setBalance",
+            "account": "$account2",
+            "amount": "10000000000000000000",
+            "label": "fund restart depositor gas"
+          },
+          {
+            "action": "setBalance",
+            "account": "$account0",
+            "amount": "10000000000000000000",
+            "label": "fund residual donor gas"
+          },
+          {
+            "action": "deploy",
+            "alias": "cyvl",
+            "contract": "CurveYieldVlSDTToken",
+            "source": "contracts/CurveYieldVlSDTToken.sol",
+            "args": [
+              "$account0"
+            ],
+            "from": "$account0",
+            "label": "deploy cyvlSDT"
+          },
+          {
+            "action": "deploy",
+            "alias": "gov",
+            "contract": "CurveYieldGovernanceToken",
+            "source": "contracts/CurveYieldGovernanceToken.sol",
+            "args": [
+              "$account0",
+              "CurveYield Governance",
+              "cyGOV"
+            ],
+            "from": "$account0",
+            "label": "deploy governance token"
+          },
+          {
+            "action": "deploy",
+            "alias": "revenueStaking",
+            "contract": "CurveYieldVlSDTRevenueStaking",
+            "source": "contracts/CurveYieldVlSDTRevenueStaking.sol",
+            "args": [
+              "$account0",
+              "$account0",
+              "$account0",
+              "$cyvl",
+              "$gov"
+            ],
+            "from": "$account0",
+            "label": "deploy revenue staking"
+          },
+          {
+            "action": "deploy",
+            "alias": "converter",
+            "contract": "CurveYieldRevenueConverter",
+            "source": "contracts/CurveYieldRevenueConverter.sol",
+            "args": [
+              "$account0",
+              "0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F",
+              "$cyvl",
+              "$account0"
+            ],
+            "from": "$account0",
+            "label": "deploy revenue converter"
+          },
+          {
+            "action": "deploy",
+            "alias": "vault",
+            "contract": "CurveYieldVault",
+            "source": "contracts/CurveYieldVault.sol",
+            "args": [
+              "CurveYield Vault",
+              "cyvSDT",
+              "$account0",
+              "$account0",
+              18
+            ],
+            "from": "$account0",
+            "label": "deploy vault"
+          },
+          {
+            "action": "deploy",
+            "alias": "strategy",
+            "contract": "CurveYieldRevenueStrategyV7",
+            "source": "contracts/CurveYieldRevenueStrategyV20.sol",
+            "args": [
+              "$account0",
+              "$vault",
+              "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+              "0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F",
+              "$gov",
+              "$revenueStaking",
+              "$converter",
+              0,
+              0,
+              0
+            ],
+            "from": "$account0",
+            "label": "deploy revenue strategy"
+          },
+          {
+            "action": "call",
+            "target": "$vault",
+            "function": "setStrategy(address)",
+            "args": [
+              "$strategy"
+            ],
+            "from": "$account0",
+            "label": "configure vault strategy"
+          },
+          {
+            "action": "call",
+            "target": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            "function": "deposit() payable",
+            "args": [],
+            "from": "$account1",
+            "value": "1000000000000000000",
+            "label": "wrap first depositor WETH"
+          },
+          {
+            "action": "call",
+            "target": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            "function": "approve(address,uint256) returns (bool)",
+            "args": [
+              "$vault",
+              "1000000000000000000"
+            ],
+            "from": "$account1",
+            "label": "approve first deposit"
+          },
+          {
+            "action": "call",
+            "target": "$vault",
+            "function": "deposit(uint256)",
+            "args": [
+              "1000000000000000000"
+            ],
+            "from": "$account1",
+            "label": "deposit first principal"
+          },
+          {
+            "action": "staticCall",
+            "target": "$vault",
+            "function": "totalSupply() view returns (uint256)",
+            "args": [],
+            "saveAs": "sharesBeforeExit",
+            "label": "observe initial shares"
+          },
+          {
+            "action": "call",
+            "target": "$vault",
+            "function": "withdrawAll() returns (uint256)",
+            "args": [],
+            "from": "$account1",
+            "label": "withdraw all to zero supply"
+          },
+          {
+            "action": "assertCall",
+            "target": "$vault",
+            "function": "totalSupply() view returns (uint256)",
+            "args": [],
+            "equals": "0",
+            "label": "assert vault zero supply"
+          },
+          {
+            "action": "call",
+            "target": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            "function": "deposit() payable",
+            "args": [],
+            "from": "$account0",
+            "value": "100000000000000000",
+            "label": "wrap ordinary residual WETH"
+          },
+          {
+            "action": "call",
+            "target": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            "function": "transfer(address,uint256) returns (bool)",
+            "args": [
+              "$strategy",
+              "100000000000000000"
+            ],
+            "from": "$account0",
+            "label": "introduce residual strategy value at zero supply"
+          },
+          {
+            "action": "staticCall",
+            "target": "$strategy",
+            "function": "balanceOf() view returns (uint256)",
+            "args": [],
+            "saveAs": "residualStrategyValue",
+            "label": "observe residual strategy value"
+          },
+          {
+            "action": "call",
+            "target": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            "function": "deposit() payable",
+            "args": [],
+            "from": "$account2",
+            "value": "1000000000000000000",
+            "label": "wrap restart depositor WETH"
+          },
+          {
+            "action": "call",
+            "target": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+            "function": "approve(address,uint256) returns (bool)",
+            "args": [
+              "$vault",
+              "1000000000000000000"
+            ],
+            "from": "$account2",
+            "label": "approve restart deposit"
+          },
+          {
+            "action": "call",
+            "target": "$vault",
+            "function": "deposit(uint256)",
+            "args": [
+              "1000000000000000000"
+            ],
+            "from": "$account2",
+            "label": "restart deposit after residual value"
+          },
+          {
+            "action": "staticCall",
+            "target": "$vault",
+            "function": "balanceOf(address) view returns (uint256)",
+            "args": [
+              "$account2"
+            ],
+            "saveAs": "restartDepositorShares",
+            "label": "measure restart depositor shares"
+          },
+          {
+            "action": "staticCall",
+            "target": "$vault",
+            "function": "balance() view returns (uint256)",
+            "args": [],
+            "saveAs": "postRestartAssets",
+            "label": "measure assets after restart"
+          }
+        ]
+      }
+    }
+  },
+  "requestId": "dar-df3e1dbd44378ed1d008ebd6ab1341c5",
+  "requestDigest": "df3e1dbd44378ed1d008ebd6ab1341c56657680de61de542e9d4a1ff8986466a"
+}
