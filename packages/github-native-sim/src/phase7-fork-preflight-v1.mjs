@@ -197,7 +197,7 @@ export async function runPhase7ForkPreflightV1({
         : (codeChecks.every((item) => item.status === 'PASS') ? 'PASS' : 'FAIL'),
       targets: codeChecks,
       reason: codeChecks.length === 0
-        ? 'No pre-existing literal external target is present; deployment-first audited targets do not exist until lifecycle execution'
+        ? 'No literal external call target exists before deployment; deployment-first audited targets do not exist until lifecycle execution'
         : undefined,
     };
 
