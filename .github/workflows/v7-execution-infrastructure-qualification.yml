@@ -130,11 +130,14 @@ jobs:
           import fs from 'node:fs';
           import { execFileSync } from 'node:child_process';
           import { createPhase6MutableRpcSession } from './packages/github-native-sim/src/phase6-mutable-rpc-v1.mjs';
+          import { runMedusaEndToEndSmokeV1 } from './packages/github-native-sim/src/medusa-e2e-smoke-v1.mjs';
           import { runPhase7ForkPreflightV2 } from './packages/github-native-sim/src/phase7-fork-preflight-v2.mjs';
           import { V7_POLICY } from './packages/github-native-sim/src/v7-policy.mjs';
 
+          const qualifiedCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
           const phase6Session = await createPhase6MutableRpcSession({ environment: process.env });
           let phase6;
+          let phase6MedusaSmoke;
           try {
             phase6 = {
               ...phase6Session.evidence,
@@ -146,6 +149,15 @@ jobs:
                 rpcUrlExposed: false,
               } : null,
             };
+            if (!phase6Session.runtime?.url) throw new Error('Phase 6 live qualification requires an active normalized RPC session');
+            phase6MedusaSmoke = await runMedusaEndToEndSmokeV1({
+              rpcUrl: phase6Session.runtime.url,
+              rpcBlock: phase6Session.runtime.blockNumber,
+              rpcBlockHash: phase6Session.runtime.blockHash,
+              rpcProfile: phase6Session.runtime.profile,
+              sourceCommit: qualifiedCommit,
+              evidenceDir: '.audit-evidence/v7-infrastructure-qualification/medusa-e2e-smoke'
+            });
           } finally {
             await phase6Session.close();
           }
@@ -159,13 +171,17 @@ jobs:
             ]}}}
           };
           const preflight=await runPhase7ForkPreflightV2({request,environment:process.env});
-          const qualifiedCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
           const observed=preflight.observedPinnedBlockHash?.toLowerCase()??null;
           const checks={
             dependencyLockPresent:fs.existsSync('package-lock.json'),
             phase6MutableRpcPass:phase6.status==='PASS',
             phase6IdentityNormalized:phase6.runtime?.identityNormalized===true && phase6.identityNormalization?.status==='PASS',
             phase6RpcSecretNotExposed:JSON.stringify(phase6).includes(process.env.SIM_ARCHIVE_PRIMARY_ETHEREUM_01)===false,
+            medusaSmokePass:phase6MedusaSmoke?.checks?.medusaSmokePass===true,
+            medusaSmokeFalsification:phase6MedusaSmoke?.checks?.medusaSmokeFalsification===true,
+            medusaSmokeNoTests:phase6MedusaSmoke?.checks?.medusaSmokeNoTests===true,
+            rawEvidencePreserved:phase6MedusaSmoke?.checks?.rawEvidencePreserved===true,
+            medusaSmokeSecretNotExposed:JSON.stringify(phase6MedusaSmoke).includes(process.env.SIM_ARCHIVE_PRIMARY_ETHEREUM_01)===false,
             phase7PreflightPass:preflight.status==='PASS',
             recipeEnforced:preflight.checks?.lifecycleRecipe?.status==='PASS',
             recipeId:preflight.recipeId==='external-readiness-v1',
@@ -180,7 +196,7 @@ jobs:
             workflowAllowlist:preflight.checks?.workflowActions?.status==='PASS'
           };
           const qualification={
-            schemaVersion:'v7-execution-infrastructure-qualification-v4',
+            schemaVersion:'v7-execution-infrastructure-qualification-v5',
             status:Object.values(checks).every(Boolean)?'PASS':'FAIL',
             qualifiedCommit,
             requestSchema:V7_POLICY.requestSchema,
@@ -191,6 +207,7 @@ jobs:
             dependencyLockPresent:fs.existsSync('package-lock.json'),
             testMatrix:{githubNative:'PASS',anvilRunner:'PASS',fullNodeSuite:'PASS',staticChecks:'PASS',buildChecks:'PASS',toolchainVerification:'PASS'},
             phase6,
+            phase6MedusaSmoke,
             fixture:{chain:'ethereum',block:25817400,expectedBlockHash},
             checks,
             phase7:preflight
@@ -221,7 +238,7 @@ jobs:
             dependencyLockPresent:qualification.dependencyLockPresent,
             toolchain,
             testMatrix:qualification.testMatrix,
-            phase6:{status:qualification.phase6.status,identityNormalization:qualification.phase6.identityNormalization,runtime:qualification.phase6.runtime},
+            phase6:{status:qualification.phase6.status,identityNormalization:qualification.phase6.identityNormalization,runtime:qualification.phase6.runtime,medusaSmoke:qualification.phase6MedusaSmoke},
             phase7:{status:qualification.phase7.status,checks:qualification.phase7.checks},
           };
           fs.writeFileSync('.audit-evidence/v7-infrastructure-qualification/current-status.json',`${JSON.stringify(status,null,2)}\n`);
