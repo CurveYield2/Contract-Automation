@@ -64,13 +64,17 @@ function parseSlitherOutput(output) {
   } catch { return null; }
 }
 
+function normalizeMedusaCliLine(line) {
+  return String(line ?? '').trim().replace(/^⇾\s*/, '');
+}
+
 function parseMedusaCliOutput(output) {
   const lines = String(output ?? '').replace(/\u001b\[[0-9;]*m/g, '').split(/\r?\n/);
   const resultHeader = /^\[(PASSED|FAILED)\]\s+Property Test:\s+(.+?)\s*$/;
   const properties = [];
 
   for (let index = 0; index < lines.length; index++) {
-    const match = lines[index].trim().match(resultHeader);
+    const match = normalizeMedusaCliLine(lines[index]).match(resultHeader);
     if (!match) continue;
 
     const failed = match[1] === 'FAILED';
@@ -79,7 +83,7 @@ function parseMedusaCliOutput(output) {
       const counterexample = [];
       let inCallSequence = false;
       for (let cursor = index + 1; cursor < lines.length; cursor++) {
-        const candidate = lines[cursor].trim();
+        const candidate = normalizeMedusaCliLine(lines[cursor]);
         if (resultHeader.test(candidate)) break;
         if (candidate === '[Call Sequence]') {
           inCallSequence = true;
