@@ -6,7 +6,7 @@ const BASE_RECIPES = {
   },
   'deploy-configure-smoke-v1': {
     purpose: 'Deploy exact accepted artifacts and exercise intended configuration ordering.',
-    allowedActions: ['deploy', 'call', 'staticCall', 'assertCall', 'expectRevert'],
+    allowedActions: ['snapshot', 'deploy', 'call', 'staticCall', 'assertCall', 'expectRevert', 'revertSnapshot'],
     requiresFreshDeployment: true,
   },
   'deposit-withdraw-cycle-v1': {
@@ -95,7 +95,7 @@ function validateFreshDeploymentPrerequisite(recipe, steps) {
     }
     if (!FUNCTION_TEST_ACTIONS.has(step?.action) || typeof step?.target !== 'string') continue;
     const match = step.target.match(LOCAL_ALIAS_TARGET);
-    if (!match) continue; // literal addresses are pinned external dependencies, not freshly deployed audited contracts.
+    if (!match) continue;
     const alias = match[1];
     if (/^account\d+$/.test(alias)) continue;
     if (!deployedAliases.has(alias)) aliasesUsedBeforeDeployment.add(alias);
