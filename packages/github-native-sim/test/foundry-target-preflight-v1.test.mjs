@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { runTargetFoundryPreflightV1 } from '../src/foundry-target-preflight-v1.mjs';
-import { hashProjectSnapshotV1 } from '../src/medusa-target-preflight-v1.mjs';
+import { digestDirectory } from '../src/phase6-staged-snapshot-v1.mjs';
 
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'foundry-target-preflight-'));
@@ -24,9 +24,7 @@ function commandHarness({ smokeStdout = 'Ran 1 test for test/Counter.t.sol:Count
       calls.push({ command, args: [...args], cwd });
       assert.equal(command, 'forge');
       if (args[0] === '--version') return { exitCode: 0, stdout: 'forge Version: 1.7.1', stderr: '' };
-      if (args[0] === 'test' && args.includes('--list')) {
-        return { exitCode: 0, stdout: 'test/Counter.t.sol\n  CounterTest\n    testFuzzSet(uint256)\n', stderr: '' };
-      }
+      if (args[0] === 'test' && args.includes('--list')) return { exitCode: 0, stdout: 'test/Counter.t.sol\n  CounterTest\n    testFuzzSet(uint256)\n', stderr: '' };
       if (args[0] === 'test') return { exitCode: smokeExitCode, stdout: smokeStdout, stderr: '' };
       throw new Error(`unexpected forge args ${args.join(' ')}`);
     },
@@ -34,7 +32,7 @@ function commandHarness({ smokeStdout = 'Ran 1 test for test/Counter.t.sol:Count
 }
 
 async function baseInput(root) {
-  const snapshot = await hashProjectSnapshotV1(root);
+  const snapshot = await digestDirectory(root);
   return {
     projectRoot: root,
     sourceCommit: '1'.repeat(40),
@@ -73,8 +71,7 @@ test('Foundry actual-target smoke blocks the historical zero-exit FAILED suite f
 
 test('Foundry actual-target smoke blocks zero discovered tests before the expensive campaign', async () => {
   const root = await fixture();
-  const snapshot = await hashProjectSnapshotV1(root);
-  const receipt = await runTargetFoundryPreflightV1({ ...(await baseInput(root)), snapshotDigestSha256: snapshot.digestSha256 }, {
+  const receipt = await runTargetFoundryPreflightV1(await baseInput(root), {
     runCommand: async ({ args }) => {
       if (args[0] === '--version') return { exitCode: 0, stdout: 'forge Version: 1.7.1', stderr: '' };
       if (args.includes('--list')) return { exitCode: 0, stdout: '', stderr: '' };
