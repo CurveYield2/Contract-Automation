@@ -19,6 +19,6 @@
   "limitations": [
     "SCHEMA_VALID does not establish historical reproduction; no historical fork replay has yet been executed for this incident.",
     "The representative DAI transaction is one transaction within a broader multi-transaction, multi-asset exploit incident.",
-    "Executable and generalized pattern proof tiers remain pending later K08-K14 modules."
+    "K12 establishes a separate controlled generalized-mechanism reproduction in EXEC-0001 / PROOF-0003; incident-specific historical reproduction and later generalized-target proof tiers remain pending."
   ]
 }
