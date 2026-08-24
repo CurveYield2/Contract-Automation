@@ -22,7 +22,7 @@ During K12, canonical V7 evidence exposed a Forge-wrapper false-positive where f
 
 ## Next exact action
 
-Observe the K13 RED archive-preflight request-builder qualification. It must fail only because `src/historical/archive-preflight-request-v1.mjs` is absent; then implement the minimal canonical Phase-7 request builder.
+Observe the K13 GREEN archive-preflight request-builder qualification. The minimal request builder must pass the full KB suite and secret/RPC-literal gate before an atomic Phase-7 request is submitted.
 
 ## Open blockers
 

@@ -7,25 +7,25 @@
   "pullRequest": 131,
   "baselineMainSha": "468b749076fb5b9c166c14a187fdd29a6f967acd",
   "lastKnownGoodCommit": "9cd692ceaed791dc6a6aede27a3b29c5bdb82f3d",
-  "currentCommit": "9cd692ceaed791dc6a6aede27a3b29c5bdb82f3d",
+  "currentCommit": "2ac67a8c33091024371860f48dab5b17d44ca1a8",
   "overallStatus": "IN_PROGRESS",
   "currentModuleId": "K13",
   "currentStepId": "K13-S03",
   "currentStepStatus": "IN_PROGRESS",
   "lastCompletedModuleId": "K12",
   "lastCompletedStepId": "K12-S07",
-  "nextExactAction": "Observe the K13 RED archive-preflight request-builder qualification. It must fail only because src/historical/archive-preflight-request-v1.mjs is absent; then implement the minimal canonical Phase 7 request builder.",
+  "nextExactAction": "Observe the K13 GREEN archive-preflight request-builder qualification. It must pass the complete KB test suite and secret/RPC-literal gate; then replace the prior K12 atomic controller request with the pinned historical Phase 7 preflight request using source commit 2ac67a8c33091024371860f48dab5b17d44ca1a8.",
   "activeExternalRun": {
     "status": "REQUESTED",
-    "operation": "K13 RED historical archive-preflight request-builder validation",
+    "operation": "K13 GREEN historical archive-preflight request-builder validation",
     "expectedWorkflow": "Adversarial Simulation KB Qualification v1",
     "branch": "feat/adversarial-simulation-kb-v1",
     "expectedArtifacts": [
       "GitHub Actions unit-test log"
     ],
-    "successCondition": "The new K13 test fails only because src/historical/archive-preflight-request-v1.mjs is absent; all prior tests remain green.",
-    "failureCondition": "Any prior test fails, or the new test fails for a reason other than the missing request builder.",
-    "nextActionIfPass": "Implement the minimal canonical Phase 7 archive-preflight request builder and run the green qualification.",
+    "successCondition": "All KB tests pass and the secret/RPC-literal gate passes.",
+    "failureCondition": "Any KB test or secret/RPC-literal check fails.",
+    "nextActionIfPass": "Replace the single atomic controller request with the source-pinned K13 Phase 7 archive preflight request.",
     "nextActionIfFail": "Record failure diagnosis before repair."
   },
   "openBlockers": [],
@@ -50,7 +50,8 @@
     "docs/ADVERSARIAL_SIMULATION_KB_IMPLEMENTATION_STATUS_v1.md",
     "packages/adversarial-simulation-kb/test/historical-reproduction-v1.test.mjs",
     "packages/adversarial-simulation-kb/src/historical/reproduction-v1.mjs",
-    "packages/adversarial-simulation-kb/test/historical-archive-preflight-request-v1.test.mjs"
+    "packages/adversarial-simulation-kb/test/historical-archive-preflight-request-v1.test.mjs",
+    "packages/adversarial-simulation-kb/src/historical/archive-preflight-request-v1.mjs"
   ],
   "moduleStates": {
     "K00": {
@@ -297,5 +298,5 @@
     "D-0010",
     "D-0011"
   ],
-  "lastUpdatedAt": "2026-08-24T20:45:00Z"
+  "lastUpdatedAt": "2026-08-24T21:00:00Z"
 }
