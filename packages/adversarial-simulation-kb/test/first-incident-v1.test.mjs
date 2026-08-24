@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import { validateCoreRecordV1 } from '../src/core-schemas-v1.mjs';
 import { validateIncidentReferenceBasisV1, validateSourceRegistryV1 } from '../src/references/validate-v1.mjs';
 import { validatePrimitiveTagsV1 } from '../src/taxonomy/validate-v1.mjs';
-import { buildRegistriesV1 } from '../src/registry/build-v1.mjs';
 
 const ROOT='packages/adversarial-simulation-kb';
 const INCIDENT_DIR=`${ROOT}/incidents/EXP-2023-0001`;
@@ -45,17 +44,19 @@ test('K07 record states the multi-transaction scope limitation instead of treati
   assert.ok(incident.limitations.some(item=>typeof item==='string'&&item.includes('multiple exploit transactions')));
 });
 
-test('K07 proof is truthful SCHEMA_VALID evidence and generated registries match the checked-in incident corpus',()=>{
+test('K07 proof remains truthful SCHEMA_VALID evidence as later pattern modules extend the incident graph',()=>{
   const incident=json(`${INCIDENT_DIR}/incident.json`);
   const proof=json(`${INCIDENT_DIR}/proof.json`);
+  const incidentRegistry=json(`${ROOT}/registry/INCIDENT_REGISTRY_v1.json`);
+  const proofIndex=json(`${ROOT}/registry/BY_PROOF_STATUS_v1.json`);
+
   assert.equal(validateCoreRecordV1('proof',proof).status,'PASS');
   assert.equal(proof.knowledgeRef,incident.incidentId);
   assert.equal(proof.proofTier,'SCHEMA_VALID');
   assert.notEqual(proof.proofTier,'HISTORICAL_REPRODUCTION');
   assert.ok(proof.limitations.some(item=>typeof item==='string'&&item.includes('historical reproduction')));
 
-  const generated=buildRegistriesV1({incidents:[incident],patterns:[],recipes:[],executables:[],proofs:[proof],relationships:[]}).registries;
-  for(const name of Object.keys(generated)){
-    assert.deepEqual(json(`${ROOT}/registry/${name}.json`),generated[name],name);
-  }
+  const projected=incidentRegistry.records.find(record=>record.incidentId===incident.incidentId);
+  assert.deepEqual(projected,incident);
+  assert.ok(proofIndex.index.SCHEMA_VALID.includes(incident.incidentId));
 });

@@ -6,19 +6,19 @@ Generated from `DEVELOPMENT_RECOVERY_STATE_v1.json`. Do not edit this projection
 - Branch: `feat/adversarial-simulation-kb-v1`
 - Pull request: 131
 - Baseline main SHA: `468b749076fb5b9c166c14a187fdd29a6f967acd`
-- Last known good commit: `bb3f21dcfd9226fc9e8fc7c27f26e7968c950f61`
+- Last known good commit: `1af454215b95a36ea55314c3d8be791cc16a01c5`
 - Overall status: **IN_PROGRESS**
-- Current module: **K08 — Root-Cause Fingerprint + First Abstract Pattern**
-- Current step: **K08-S01 / READY**
-- Last completed step: K07-S07
+- Current module: **K09 — First Recipe**
+- Current step: **K09-S01 / READY**
+- Last completed step: K08-S07
 
 ## Last hard gate
 
-K07 PASS on canonical GitHub qualification run `32699196697` at source commit `bb3f21dcfd9226fc9e8fc7c27f26e7968c950f61`: 36 tests passed, 0 failed; production-secret/RPC-literal check PASS. `EXP-2023-0001` is factually VERIFIED while `PROOF-0001` remains `SCHEMA_VALID`; historical reproduction has not yet been claimed.
+K08 PASS on canonical GitHub qualification run `32699871861` at source commit `1af454215b95a36ea55314c3d8be791cc16a01c5`: 41 tests passed, 0 failed; secret/RPC-literal gate PASS. `PATTERN-0001` is mechanism-general, carries all v3 fingerprint dimensions, explicit non-applicability and false-positive guards, and is linked bidirectionally to `EXP-2023-0001` without historical identifiers in the generalized pattern.
 
 ## Next exact action
 
-Write failing K08 root-cause fingerprint and abstract-pattern tests from `EXP-2023-0001`, then implement the normalized fingerprint, `PATTERN-0001` with structural/runtime applicability and non-applicability signals, mandatory false-positive guards, and bidirectional incident-pattern linkage without Euler-specific names or addresses in the generalized mechanism.
+Write failing K09 recipe binding/instantiation tests for `PATTERN-0001`, then create `RECIPE-0001` with explicit target bindings, setup/attack/observation/assertion steps, backend support, no historical addresses, and fail-closed unresolved-binding validation.
 
 ## Open blockers
 

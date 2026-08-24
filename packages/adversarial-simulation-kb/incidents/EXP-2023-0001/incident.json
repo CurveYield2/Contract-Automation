@@ -1,7 +1,7 @@
 {
   "schemaVersion": "adversarial-kb-incident-v1",
   "incidentId": "EXP-2023-0001",
-  "revision": 1,
+  "revision": 2,
   "title": "Euler V1 donateToReserves solvency-check exploit",
   "incidentDate": "2023-03-13",
   "affectedProtocol": "Euler V1",
@@ -38,7 +38,9 @@
     "A user must not be able to manufacture a profitable liquidation of an attacker-controlled account solely by using protocol accounting operations.",
     "Liquidation incentives and reserve accounting must not allow attacker-created accounting state to redeem against unrelated depositor liquidity without equivalent economic backing."
   ],
-  "affectedPatterns": [],
+  "affectedPatterns": [
+    "PATTERN-0001"
+  ],
   "attackPrimitives": [
     "FLASH_LIQUIDITY",
     "DONATION",
@@ -87,7 +89,9 @@
     "SOURCE-0004"
   ],
   "reproductionRefs": [],
-  "generalizedPatternRefs": [],
+  "generalizedPatternRefs": [
+    "PATTERN-0001"
+  ],
   "proofStatusRef": "PROOF-0001",
   "limitations": [
     "This record uses the first representative DAI exploit transaction as its exact transaction/block anchor; that transaction is not the entire approximately $197M incident.",
