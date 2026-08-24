@@ -5,31 +5,38 @@ import {
   buildReadOnlyPreflightExemptionV1,
 } from '../src/operation-preflight-v1.mjs';
 
-test('same-repository move requires blob reuse and no ad hoc chunking', () => {
+const COMMIT = 'a'.repeat(40);
+const DIGEST = 'b'.repeat(64);
+
+test('wrapper routes file-move to the targeted zero-byte blob-reuse preflight', () => {
   const result = buildOperationPreflightV1({
     operationClass: 'file-move',
-    source: { repository: 'CurveYield2/Audit-Controller', ref: 'main', path: 'old/file.bin', blobSha: 'a'.repeat(40), bytes: 1000 },
-    destination: { repository: 'CurveYield2/Audit-Controller', ref: 'main', path: 'new/file.bin', exists: false },
+    source: { repository: 'CurveYield2/Audit-Controller', ref: COMMIT, path: 'old/file.bin', blobSha: 'c'.repeat(40) },
+    destination: { repository: 'CurveYield2/Audit-Controller', ref: COMMIT, path: 'new/file.bin', exists: false },
     transferMethod: 'GIT_TREE_REUSE_BLOB',
-    plannedChunkCount: 1,
-    verifyRemoteIdentity: true,
+    expectedTransferredBytes: 0,
+    verifyDestinationBlob: true,
     rollbackPlan: 'restore prior tree',
   });
   assert.equal(result.status, 'PREFLIGHT_PASS');
+  assert.equal(result.checks.find((entry) => entry.id === 'move.blob-reuse').status, 'PASS');
 });
 
-test('normal file transfer rejects thousand-piece chunk plan', () => {
+test('wrapper routes file-transfer to targeted anti-chunking preflight', () => {
   const result = buildOperationPreflightV1({
     operationClass: 'file-transfer',
-    source: { repository: 'CurveYield2/Audit-Controller', ref: 'main', path: 'source.zip', blobSha: 'a'.repeat(40), bytes: 10_000_000 },
+    source: { repository: 'CurveYield2/Audit-Controller', ref: COMMIT, path: 'source.zip', blobSha: 'c'.repeat(40), sha256: DIGEST, bytes: 10_000_000 },
     destination: { repository: 'CurveYield2/Contract-Automation', ref: 'work', path: 'source.zip', exists: false },
     transferMethod: 'GIT_EXACT_BLOB_TREE',
     plannedChunkCount: 1000,
-    verifyRemoteIdentity: true,
+    destinationWritable: true,
+    verifyRemoteBytes: true,
     rollbackPlan: 'delete destination commit',
   });
   assert.equal(result.status, 'PREFLIGHT_FAIL');
-  assert.equal(result.checks.find((entry) => entry.id === 'transfer.noAdHocChunking').status, 'FAIL');
+  const failure = result.checks.find((entry) => entry.id === 'transfer.chunking');
+  assert.equal(failure.status, 'FAIL');
+  assert.equal(failure.failureCode, 'TRANSFER_AD_HOC_CHUNKING_FORBIDDEN');
 });
 
 test('unallowlisted read-only exemption fails closed', () => {
@@ -38,43 +45,52 @@ test('unallowlisted read-only exemption fails closed', () => {
 });
 
 test('allowlisted trivial read inspection is exempt', () => {
-  const result = buildReadOnlyPreflightExemptionV1({ exemptionId: 'read-workflow-log', repository: 'CurveYield2/Contract-Automation', ref: 'main' });
+  const result = buildReadOnlyPreflightExemptionV1({ exemptionId: 'read-workflow-log', repository: 'CurveYield2/Contract-Automation', ref: COMMIT });
   assert.equal(result.status, 'PREFLIGHT_EXEMPT');
 });
 
-test('workflow preflight requires canonical identity and validated inputs', () => {
+test('wrapper workflow preflight rejects noncanonical workflow and passes exact canonical configuration', () => {
   const bad = buildOperationPreflightV1({
     operationClass: 'workflow',
     repository: 'CurveYield2/Contract-Automation',
-    ref: 'main',
+    ref: COMMIT,
     workflowPath: '.github/workflows/some-old-v9.yml',
+    classification: 'SUPERSEDED',
     event: 'pull_request',
-    canonical: false,
-    triggerValid: true,
-    secretsReady: true,
-    inputsValidated: false,
+    triggerAllowed: true,
+    requiredSecrets: [],
+    availableSecretNames: [],
+    requiredPermissions: { contents: 'read' },
+    observedPermissions: { contents: 'read' },
+    inputSchemaValid: true,
     expectedOutputs: ['evidence'],
-    retryIdentity: 'run-1',
+    substantiveJobsBlockedByPreflight: true,
+    retry: { isRetry: false },
   });
   assert.equal(bad.status, 'PREFLIGHT_FAIL');
+  assert.equal(bad.firstFailure, 'WORKFLOW_NONCANONICAL_ENTRYPOINT');
 
   const good = buildOperationPreflightV1({
     operationClass: 'workflow',
     repository: 'CurveYield2/Contract-Automation',
-    ref: 'main',
+    ref: COMMIT,
     workflowPath: '.github/workflows/audit-controller-execution.yml',
+    classification: 'ACTIVE_PREFLIGHT_REQUIRED',
     event: 'pull_request',
-    canonical: true,
-    triggerValid: true,
-    secretsReady: true,
-    inputsValidated: true,
+    triggerAllowed: true,
+    requiredSecrets: [],
+    availableSecretNames: [],
+    requiredPermissions: { contents: 'read' },
+    observedPermissions: { contents: 'read' },
+    inputSchemaValid: true,
     expectedOutputs: ['controller-evidence.json'],
-    retryIdentity: 'request-digest-abc',
+    substantiveJobsBlockedByPreflight: true,
+    retry: { isRetry: false },
   });
   assert.equal(good.status, 'PREFLIGHT_PASS');
 });
 
-test('preflight digest is stable across object key order', () => {
+test('preflight digest is stable across object key order even for rejected configs', () => {
   const a = buildOperationPreflightV1({
     operationClass: 'compile', repository: 'CurveYield2/Contract-Automation', ref: 'main', inputsValidated: true,
     prerequisitesReady: true, expectedOutputs: ['build.json'], rollbackPlan: 'discard workspace',
@@ -84,4 +100,5 @@ test('preflight digest is stable across object key order', () => {
     inputsValidated: true, ref: 'main', repository: 'CurveYield2/Contract-Automation', operationClass: 'compile',
   });
   assert.equal(a.inputDigest, b.inputDigest);
+  assert.equal(a.status, 'PREFLIGHT_FAIL');
 });
