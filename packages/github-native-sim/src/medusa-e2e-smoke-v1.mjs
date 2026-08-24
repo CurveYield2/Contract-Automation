@@ -5,14 +5,14 @@ import { runMedusaAnalysis } from './analysis.mjs';
 
 const SOURCE_COMMIT = '0'.repeat(40);
 
-function medusaConfig({ contractName, targetFunctions, stopOnNoTests = true }) {
+export function buildMedusaSmokeConfigV1({ contractName, targetFunctions, stopOnNoTests = true }) {
   return {
     fuzzing: {
       workers: 1,
       testLimit: 32,
       shrinkLimit: 128,
       callSequenceLength: 4,
-      coverageEnabled: false,
+      coverageEnabled: true,
       revertReporterEnabled: true,
       targetContracts: [contractName],
       senderAddresses: ['0x10000'],
@@ -69,7 +69,7 @@ async function writeFixture(root, name, fixture) {
   await fs.mkdir(path.join(projectRoot, 'src'), { recursive: true });
   await fs.writeFile(path.join(projectRoot, 'src', `${fixture.contractName}.sol`), fixture.source);
   await fs.writeFile(path.join(projectRoot, 'foundry.toml'), `[profile.default]\nsrc = "src"\nout = "out"\nlibs = []\nsolc_version = "0.8.28"\nevm_version = "cancun"\noptimizer = true\noptimizer_runs = 200\n`);
-  await fs.writeFile(path.join(projectRoot, 'medusa.json'), `${JSON.stringify(medusaConfig({ contractName: fixture.contractName, targetFunctions: fixture.targetFunctions }), null, 2)}\n`);
+  await fs.writeFile(path.join(projectRoot, 'medusa.json'), `${JSON.stringify(buildMedusaSmokeConfigV1({ contractName: fixture.contractName, targetFunctions: fixture.targetFunctions }), null, 2)}\n`);
   return projectRoot;
 }
 
@@ -124,7 +124,8 @@ export async function runMedusaEndToEndSmokeV1({
       medusaSmokeFalsification: results.falsification?.failureKind === 'PROPERTY_FALSIFICATION'
         && Array.isArray(failedProperty?.counterexample)
         && failedProperty.counterexample.length > 0,
-      medusaSmokeNoTests: results.noTests?.terminal === true && results.noTests?.status !== 'completed',
+      medusaSmokeNoTests: results.noTests?.failureKind === 'NO_TESTS_DISCOVERED'
+        && results.noTests?.campaign?.status === 'no_tests',
       rawEvidencePreserved: Object.values(results).every(rawPresent),
       rpcSecretNotExposed: Object.values(results).every((result) => secretAbsent(result, [rpcUrl]))
     };
