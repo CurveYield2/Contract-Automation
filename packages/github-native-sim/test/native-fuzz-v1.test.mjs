@@ -33,6 +33,27 @@ test('successful native fuzz is a distinct completed component with raw evidence
   assert.deepEqual(calls[0], { command: 'forge', args: ['test', '--fuzz-runs', '256'], cwd: '/tmp/project' });
 });
 
+test('Forge failed-test output is a hard failure even when the wrapper exits zero', async () => {
+  const result = await runNativeFuzzAnalysis(baseInput(), {
+    runCommand: async () => ({
+      exitCode: 0,
+      stdout: [
+        'Ran 1 test for test/Pattern0001ControlledReproduction.t.sol:Pattern0001ControlledReproductionTest',
+        '[FAIL: SOLVENCY] test_K12_controlled_reproduction_health20000_to14000_net100_to110_protocol1000_to890() (gas: 747648)',
+        'Suite result: FAILED. 0 passed; 1 failed; 0 skipped; finished in 1.23s',
+        'Ran 1 test suite in 1.51s: 0 tests passed, 1 failed, 0 skipped (1 total tests)',
+        'Encountered a total of 1 failing tests, 0 tests succeeded'
+      ].join('\n'),
+      stderr: ''
+    })
+  });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.failureKind, 'HARD_FAILURE');
+  assert.equal(result.componentStatus, 'FAILED');
+  assert.equal(result.continuationDisposition, 'STOP_EXECUTION');
+  assert.match(result.rawOutput.stdout, /\[FAIL: SOLVENCY\]/);
+});
+
 test('configured native-fuzz limitation is typed as recoverable and preserves continuation', async () => {
   const result = await runNativeFuzzAnalysis(baseInput(), {
     runCommand: async () => ({ exitCode: 2, stdout: 'coverage unavailable', stderr: 'backend limitation' })
