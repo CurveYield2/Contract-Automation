@@ -2,6 +2,12 @@ name: V7 Execution Infrastructure Qualification
 
 on:
   workflow_dispatch:
+    inputs:
+      controller_ref:
+        description: Optional exact Audit-Controller branch/tag/SHA to verify with npm test and npm run check
+        required: false
+        default: ''
+        type: string
   push:
     branches: [main]
     paths:
@@ -121,6 +127,64 @@ jobs:
       - name: Repository build checks
         run: npm run build
 
+      - name: Checkout exact private Audit-Controller candidate
+        if: inputs.controller_ref != ''
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Audit-Controller
+          ref: ${{ inputs.controller_ref }}
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller-under-test
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify private Audit-Controller v26 suite
+        if: inputs.controller_ref != ''
+        working-directory: .controller-under-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          npm run check
+
+      - name: Record private Audit-Controller qualification evidence
+        if: inputs.controller_ref != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          controller_commit="$(git -C .controller-under-test rev-parse HEAD)"
+          cat > .audit-evidence/v7-infrastructure-qualification/controller.json <<JSON
+          {
+            "schemaVersion": "v26-controller-qualification-v1",
+            "controllerCommit": "$controller_commit",
+            "controllerRef": "${{ inputs.controller_ref }}",
+            "status": "PASS",
+            "testedSchemas": [
+              "audit-v7-sequential-review-state-v3",
+              "v26-phase-contract-v1",
+              "v26-successor-handoff-v1",
+              "v26-security-traceability-graph-v1",
+              "v26-obligation-ledger-v1",
+              "v26-domain-applicability-v1",
+              "v26-evidence-invalidation-v1",
+              "v26-phase6-subgate-state-v1",
+              "v26-audit-closure-manifest-v1"
+            ],
+            "testedGates": [
+              "reviewer-lineage",
+              "successor-handoffs",
+              "phase-contracts",
+              "traceability",
+              "obligations",
+              "domains",
+              "evidence-invalidation",
+              "P6.0-P6.8",
+              "Phase-10-closure",
+              "v26-machine-conformance"
+            ]
+          }
+          JSON
+
       - name: Live trusted-main Phase 6 and Phase 7 mutable-Anvil qualification
         if: github.event_name != 'pull_request'
         env:
@@ -135,6 +199,12 @@ jobs:
           import { V7_POLICY } from './packages/github-native-sim/src/v7-policy.mjs';
 
           const qualifiedCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          const manifest=JSON.parse(fs.readFileSync('process/RUNNER_MANIFEST.json','utf8'));
+          const capabilities=Object.keys(manifest.qualifiedCapabilities?.components??{}).sort();
+          const recipes=[...(manifest.qualifiedCapabilities?.recipes??[])].sort();
+          const controllerQualification=fs.existsSync('.audit-evidence/v7-infrastructure-qualification/controller.json')
+            ? JSON.parse(fs.readFileSync('.audit-evidence/v7-infrastructure-qualification/controller.json','utf8'))
+            : null;
           const phase6Session = await createPhase6MutableRpcSession({ environment: process.env });
           let phase6;
           let phase6MedusaSmoke;
@@ -193,7 +263,10 @@ jobs:
             targetCodePresent:preflight.checks?.targetCode?.status==='PASS',
             impersonationBalanceControl:preflight.checks?.impersonationBalanceControl?.status==='PASS',
             fixtureBlockHashMatches:observed===expectedBlockHash,
-            workflowAllowlist:preflight.checks?.workflowActions?.status==='PASS'
+            workflowAllowlist:preflight.checks?.workflowActions?.status==='PASS',
+            advertisedV26CapabilitiesPresent:capabilities.length>0,
+            advertisedRepeatedLifecycleRecipe:recipes.includes('repeated-lifecycle-v1'),
+            controllerQualificationPass:controllerQualification===null||controllerQualification.status==='PASS'
           };
           const qualification={
             schemaVersion:'v7-execution-infrastructure-qualification-v5',
@@ -204,6 +277,10 @@ jobs:
             fullSimulationBackend:'anvil',
             mutableRpcPolicy:{supportedChains:['ethereum'],rpcProfile:V7_POLICY.mutableRpc.ethereumProfile,phase6IdentityPolicy:V7_POLICY.phase6.rpcIdentityPolicy},
             toolchain:{slither:V7_POLICY.tools.slither,medusa:V7_POLICY.tools.medusa,forge:V7_POLICY.tools.forge,anvilPackage:V7_POLICY.tools.anvilPackage},
+            runnerManifest:{schemaVersion:manifest.schemaVersion,qualifiedCapabilities:manifest.qualifiedCapabilities},
+            capabilities,
+            recipes,
+            controllerQualification,
             dependencyLockPresent:fs.existsSync('package-lock.json'),
             testMatrix:{githubNative:'PASS',anvilRunner:'PASS',fullNodeSuite:'PASS',staticChecks:'PASS',buildChecks:'PASS',toolchainVerification:'PASS'},
             phase6,
@@ -217,7 +294,7 @@ jobs:
           NODE
 
       - name: Publish canonical current qualification status
-        if: success() && github.event_name != 'pull_request'
+        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -235,6 +312,10 @@ jobs:
             qualifiedAt:new Date().toISOString(),
             requestSchema:qualification.requestSchema,
             profiles:qualification.profiles,
+            capabilities:qualification.capabilities,
+            recipes:qualification.recipes,
+            runnerManifest:qualification.runnerManifest,
+            controllerQualification:qualification.controllerQualification,
             dependencyLockPresent:qualification.dependencyLockPresent,
             toolchain,
             testMatrix:qualification.testMatrix,
