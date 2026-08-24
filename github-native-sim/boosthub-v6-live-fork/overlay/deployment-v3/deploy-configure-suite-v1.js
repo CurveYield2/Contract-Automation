@@ -13,6 +13,7 @@ const BOOSTHUB_ABI=[
   "function poolDepositor(uint256) view returns(address)",
   "function poolDepositorLocked(uint256) view returns(bool)",
   "function poolRetentionFeeBps(uint256) view returns(uint16)",
+  "function pendingPoolRetentionFeeConfig(uint256) view returns(uint16 retentionFeeBps,uint256 readyAt,bool exists)",
   "function poolCheckpointSelector(uint256) view returns(bytes4)",
   "function setPoolRuntimeConfigs(uint256[] pids,uint16[] retentionFeeBps,address[] depositors,bytes4[] checkpointSelectors)"
 ];
@@ -40,7 +41,9 @@ async function preflight(ctx){
     if(!info.active)throw new Error(`${label} BoostHub pool inactive`);
     for(const token of p.rewardTokens)if(!(await hub.isRewardToken(p.pid,token)))throw new Error(`${label} reward token not registered in BoostHub: ${token}`);
     const locked=await hub.poolDepositorLocked(p.pid);if(locked)throw new Error(`ABORT BEFORE DEPLOYMENT: ${label} PID ${p.pid} depositor is permanently locked`);
-    pre.pools[label]={pid:p.pid,depositor:ethers.getAddress(await hub.poolDepositor(p.pid)),locked:false,retentionFeeBps:Number(await hub.poolRetentionFeeBps(p.pid)),checkpointSelector:await hub.poolCheckpointSelector(p.pid)};
+    const pendingRetention=await hub.pendingPoolRetentionFeeConfig(p.pid);
+    if(pendingRetention.exists)throw new Error(`ABORT BEFORE DEPLOYMENT: ${label} PID ${p.pid} already has a pending retention-fee change; depositor replacement would overwrite it`);
+    pre.pools[label]={pid:p.pid,depositor:ethers.getAddress(await hub.poolDepositor(p.pid)),locked:false,retentionFeeBps:Number(await hub.poolRetentionFeeBps(p.pid)),checkpointSelector:await hub.poolCheckpointSelector(p.pid),pendingRetentionFeeExisted:false};
   }
   for(const [name,address] of Object.entries(ctx.config.converterTemplates))if(!await codeExists(ctx.provider,address))throw new Error(`converter template ${name} has no code: ${address}`);
   const sc=ctx.config.sdYbConverter;for(const a of [sc.crvUsdYbPool,sc.ybSdYbPool])if(!await codeExists(ctx.provider,a))throw new Error(`sdYB Curve pool has no code: ${a}`);
@@ -110,8 +113,9 @@ async function cutoverBoostHub(ctx,hub,stakings){
   const pre=ctx.state.checks.preflight.pools,pids=[],fees=[],depositors=[],selectors=[];
   for(const label of LABELS){const p=ctx.config.pools[label];if(await hub.poolDepositorLocked(p.pid))throw new Error(`${label}: depositor became locked before cutover`);pids.push(p.pid);fees.push(pre[label].retentionFeeBps);depositors.push(await stakings[label].getAddress());selectors.push(ZERO_SELECTOR);}
   await send(ctx,"boostHub:setPoolRuntimeConfigs:threePools",hub,"setPoolRuntimeConfigs",[pids,fees,depositors,selectors]);
-  for(const label of LABELS){const p=ctx.config.pools[label],expected=await stakings[label].getAddress();if(!same(await hub.poolDepositor(p.pid),expected))throw new Error(`${label}: BoostHub depositor replacement failed`);if(await hub.poolDepositorLocked(p.pid))throw new Error(`${label}: NEW STAKING CONTRACT WAS PERMANENTLY LOCKED`);if(Number(await hub.poolRetentionFeeBps(p.pid))!==pre[label].retentionFeeBps)throw new Error(`${label}: active retention fee changed during depositor cutover`);if((await hub.poolCheckpointSelector(p.pid)).toLowerCase()!==pre[label].checkpointSelector.toLowerCase())throw new Error(`${label}: checkpoint selector changed during depositor cutover`);}
-  ctx.state.checks.boostHubCutover={method:"setPoolRuntimeConfigs",checkpointSelectorsArgument:[ZERO_SELECTOR,ZERO_SELECTOR,ZERO_SELECTOR],lockFunctionCalled:false,postCutoverUnlocked:true};ctx.state.phase="boosthub-depositors-switched-unlocked";saveJson(ctx.statePath,ctx.state);
+  const noOpRetentionQueues={};
+  for(const label of LABELS){const p=ctx.config.pools[label],expected=await stakings[label].getAddress();if(!same(await hub.poolDepositor(p.pid),expected))throw new Error(`${label}: BoostHub depositor replacement failed`);if(await hub.poolDepositorLocked(p.pid))throw new Error(`${label}: NEW STAKING CONTRACT WAS PERMANENTLY LOCKED`);if(Number(await hub.poolRetentionFeeBps(p.pid))!==pre[label].retentionFeeBps)throw new Error(`${label}: active retention fee changed during depositor cutover`);if((await hub.poolCheckpointSelector(p.pid)).toLowerCase()!==pre[label].checkpointSelector.toLowerCase())throw new Error(`${label}: checkpoint selector changed during depositor cutover`);const pending=await hub.pendingPoolRetentionFeeConfig(p.pid);if(!pending.exists||Number(pending.retentionFeeBps)!==pre[label].retentionFeeBps)throw new Error(`${label}: expected same-value no-op pending retention config was not created by setPoolRuntimeConfigs`);noOpRetentionQueues[label]={retentionFeeBps:Number(pending.retentionFeeBps),readyAt:String(pending.readyAt),exists:true};}
+  ctx.state.checks.boostHubCutover={method:"setPoolRuntimeConfigs",checkpointSelectorsArgument:[ZERO_SELECTOR,ZERO_SELECTOR,ZERO_SELECTOR],lockFunctionCalled:false,postCutoverUnlocked:true,activeRetentionFeesUnchanged:true,noOpPendingRetentionFees:noOpRetentionQueues};ctx.state.phase="boosthub-depositors-switched-unlocked";saveJson(ctx.statePath,ctx.state);
 }
 
 async function proposeHandoffs(ctx,governanceToken,stakings,stacks){
