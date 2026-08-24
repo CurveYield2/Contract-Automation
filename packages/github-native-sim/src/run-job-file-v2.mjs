@@ -1,12 +1,13 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateDeepAssuranceRequestV2 } from './schema.mjs';
+import { validateDeepAssuranceRequestWithV26V1 } from './schema-v26.mjs';
 import { runGitHubNativeJob as runGitHubNativeJobV1 } from './run-job-file.mjs';
 import { runPhase6ExecutionPreflightV1 } from './phase6-execution-preflight-v1.mjs';
 import { createPhase6MutableRpcSession, phase6MutableRpcRuntime } from './phase6-mutable-rpc-v1.mjs';
 import { runPhase7ForkPreflightV2 } from './phase7-fork-preflight-v2.mjs';
 import { stagePhase6Snapshot, copyPhase6SnapshotForExecution } from './phase6-staged-snapshot-v1.mjs';
 import { attachExecutionDisposition } from './execution-disposition-v1.mjs';
+import { stripV26RequestExtensionV1, enrichPhase6V26EvidenceV1, enrichPhase7V26EvidenceV1, attachReproductionEvidenceV1 } from './v26-execution-evidence-v1.mjs';
 
 const DEFAULT_RUNNER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -35,7 +36,9 @@ function phase6RequiresMutableRpc(request) {
   const medusaRequested = request.configuration?.analysis?.medusa !== false
     && request.configuration?.analysis?.medusa !== undefined;
   const nativeFuzzRequested = request.configuration?.analysis?.nativeFuzz?.enabled === true;
-  return medusaRequested || nativeFuzzRequested;
+  const v26 = request.configuration?.v26;
+  const coverageRequested = (v26?.foundryCoverageObligations?.length ?? 0) > 0 || v26?.foundryRefinementRequired === true;
+  return medusaRequested || nativeFuzzRequested || coverageRequested;
 }
 
 function phase6DelegateOptions(delegateOptions, preflight, mutableRpcSession) {
@@ -71,11 +74,12 @@ async function executePhase6V2({
   delegateOptions,
   createMutableRpcSession,
 }) {
+  const legacyRequest = stripV26RequestExtensionV1(request);
   let phase6Snapshot = null;
   let mutableRpcSession = null;
   let executionSnapshot = null;
   try {
-    phase6Snapshot = await stagePhase6Snapshot(request, {
+    phase6Snapshot = await stagePhase6Snapshot(legacyRequest, {
       workspaceRoot: path.join(workspaceRoot, 'staging'),
       environment,
       runnerRoot,
@@ -86,7 +90,7 @@ async function executePhase6V2({
     }
 
     let preflight = await runPhase6ExecutionPreflightV1({
-      request,
+      request: legacyRequest,
       projectRoot: phase6Snapshot.projectRoot,
       runnerCommit,
       environment,
@@ -123,7 +127,7 @@ async function executePhase6V2({
       return executionSnapshot;
     };
 
-    let result = await runGitHubNativeJobV1(request, {
+    let result = await runGitHubNativeJobV1(legacyRequest, {
       workspaceRoot: path.join(workspaceRoot, 'execution'),
       environment,
       ...delegated,
@@ -141,6 +145,14 @@ async function executePhase6V2({
         secondOverlayMaterializationPerformed: false,
       },
     };
+    result = await enrichPhase6V26EvidenceV1({
+      request,
+      result,
+      projectRoot: executionSnapshot?.projectRoot ?? phase6Snapshot.projectRoot,
+      mutableRpcRuntime: mutableRpcSession?.evidence?.status === 'PASS' ? phase6MutableRpcRuntime({ session: mutableRpcSession }) : null,
+      environment,
+      runCommand: delegateOptions.runCommand,
+    });
     return attachExecutionDisposition({ request, result, requestPath });
   } finally {
     if (mutableRpcSession?.close) await mutableRpcSession.close().catch(() => {});
@@ -156,7 +168,7 @@ export async function runGitHubNativeJobV2(input, {
   createMutableRpcSession = createPhase6MutableRpcSession,
   ...delegateOptions
 } = {}) {
-  const request = validateDeepAssuranceRequestV2(input);
+  const request = validateDeepAssuranceRequestWithV26V1(input);
 
   if (request.phaseId === 'build-and-test') {
     return executePhase6V2({
@@ -171,22 +183,30 @@ export async function runGitHubNativeJobV2(input, {
     });
   }
 
+  const legacyRequest = stripV26RequestExtensionV1(request);
   let preflight = null;
   if (request.phaseId === 'fork-simulation-lifecycle') {
-    preflight = await runPhase7ForkPreflightV2({ request, environment });
+    preflight = await runPhase7ForkPreflightV2({ request: legacyRequest, environment });
   }
 
   if (preflight && preflight.status !== 'PASS') {
     return attachExecutionDisposition({ request, result: preflightFailure(request, preflight), requestPath });
   }
 
-  const result = await runGitHubNativeJobV1(request, {
+  let result = await runGitHubNativeJobV1(legacyRequest, {
     workspaceRoot: path.join(workspaceRoot, 'execution'),
     environment,
     ...delegateOptions,
   });
+  result = { ...result, preflight };
 
-  return attachExecutionDisposition({ request, result: { ...result, preflight }, requestPath });
+  if (request.phaseId === 'fork-simulation-lifecycle') {
+    result = await enrichPhase7V26EvidenceV1({ request, result, environment, fetchImpl: delegateOptions.fetchImpl ?? globalThis.fetch });
+  } else {
+    result = attachReproductionEvidenceV1(request, result);
+  }
+
+  return attachExecutionDisposition({ request, result, requestPath });
 }
 
 export const runGitHubNativeJob = runGitHubNativeJobV2;
