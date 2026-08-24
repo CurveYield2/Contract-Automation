@@ -6,16 +6,28 @@
   "branch": "feat/adversarial-simulation-kb-v1",
   "pullRequest": 131,
   "baselineMainSha": "468b749076fb5b9c166c14a187fdd29a6f967acd",
-  "lastKnownGoodCommit": "efabde00344c86f4cd8d151f71b50baa2fac61b1",
-  "currentCommit": "efabde00344c86f4cd8d151f71b50baa2fac61b1",
+  "lastKnownGoodCommit": "874e49e78f0840ebb6e6fe1d8e3a76de6c21101b",
+  "currentCommit": "874e49e78f0840ebb6e6fe1d8e3a76de6c21101b",
   "overallStatus": "IN_PROGRESS",
   "currentModuleId": "K13",
   "currentStepId": "K13-S01",
-  "currentStepStatus": "READY",
+  "currentStepStatus": "IN_PROGRESS",
   "lastCompletedModuleId": "K12",
   "lastCompletedStepId": "K12-S07",
-  "nextExactAction": "Begin K13 Historical Reproduction Path with RED tests that require a historical executable to bind EXP-2023-0001, exact historical chain/block identity, archive-RPC-by-environment, historical source/code assumptions, and incident-specific observed effects before HISTORICAL_REPRODUCTION may be claimed; reuse the canonical V7 Phase-7/Anvil infrastructure and do not convert K12's controlled runner fork identity into historical proof.",
-  "activeExternalRun": null,
+  "nextExactAction": "Inspect the expected K13 RED GitHub qualification result for the missing historical-reproduction module, record its run identity, then implement the minimum archive-identity plan validator.",
+  "activeExternalRun": {
+    "status": "REQUESTED",
+    "operation": "K13 RED historical-reproduction plan test",
+    "expectedWorkflow": "Adversarial Simulation KB Qualification v1",
+    "branch": "feat/adversarial-simulation-kb-v1",
+    "expectedArtifacts": [
+      "GitHub Actions unit-test log"
+    ],
+    "successCondition": "The new K13 test fails only because src/historical/reproduction-v1.mjs does not yet exist.",
+    "failureCondition": "Any prior test or secret/RPC-literal check fails.",
+    "nextActionIfPass": "Implement minimum historical reproduction-plan validator.",
+    "nextActionIfFail": "Diagnose the unrelated failing check before continuing."
+  },
   "openBlockers": [],
   "knownFailures": [],
   "modifiedPaths": [
@@ -35,7 +47,8 @@
     "docs/development-state/CURRENT_STATUS_v1.md",
     "docs/development-state/DECISION_LOG_v1.md",
     "docs/development-state/TEST_AND_PROOF_INDEX_v1.json",
-    "docs/ADVERSARIAL_SIMULATION_KB_IMPLEMENTATION_STATUS_v1.md"
+    "docs/ADVERSARIAL_SIMULATION_KB_IMPLEMENTATION_STATUS_v1.md",
+    "packages/adversarial-simulation-kb/test/historical-reproduction-v1.test.mjs"
   ],
   "moduleStates": {
     "K00": {
@@ -282,5 +295,5 @@
     "D-0010",
     "D-0011"
   ],
-  "lastUpdatedAt": "2026-08-24T13:50:00Z"
+  "lastUpdatedAt": "2026-08-24T14:05:00Z"
 }

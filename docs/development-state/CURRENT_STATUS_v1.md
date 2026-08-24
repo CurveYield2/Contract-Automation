@@ -6,10 +6,10 @@ Generated from `DEVELOPMENT_RECOVERY_STATE_v1.json`. Do not edit this projection
 - Branch: `feat/adversarial-simulation-kb-v1`
 - Pull request: 131
 - Baseline main SHA: `468b749076fb5b9c166c14a187fdd29a6f967acd`
-- Last known good commit: `efabde00344c86f4cd8d151f71b50baa2fac61b1`
+- Last known good commit: `874e49e78f0840ebb6e6fe1d8e3a76de6c21101b`
 - Overall status: **IN_PROGRESS**
 - Current module: **K13 — Historical Reproduction Path**
-- Current step: **K13-S01 / READY**
+- Current step: **K13-S01 / IN_PROGRESS**
 - Last completed step: K12-S07
 
 ## Last hard gate
@@ -22,7 +22,7 @@ During K12, canonical V7 evidence exposed a Forge-wrapper false-positive where f
 
 ## Next exact action
 
-Begin K13 Historical Reproduction Path with RED tests that require a historical executable to bind `EXP-2023-0001`, exact historical chain/block identity, archive-RPC-by-environment, historical source/code assumptions, and incident-specific observed effects before `HISTORICAL_REPRODUCTION` may be claimed. Reuse canonical V7 Phase-7/Anvil infrastructure and do not treat K12's controlled runner fork identity as historical proof.
+Inspect the expected K13 RED qualification run for the missing historical-reproduction module, record its run identity, then implement the minimum archive-identity plan validator.
 
 ## Open blockers
 
