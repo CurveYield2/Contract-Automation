@@ -14,11 +14,11 @@
     "blockTimestampDelayMax": 86400,
     "testing": {
       "stopOnFailedTest": false,
-      "stopOnNoTests": false,
+      "stopOnNoTests": true,
       "testAllContracts": false,
       "testViewMethods": true,
       "assertionTesting": { "enabled": false },
-      "propertyTesting": { "enabled": false, "testPrefixes": ["property_", "invariant_"] },
+      "propertyTesting": { "enabled": true, "testPrefixes": ["property_", "invariant_"] },
       "optimizationTesting": { "enabled": false, "testPrefixes": ["optimize_"] },
       "targetFunctionSignatures": [
         "CyvlSdtVaultPhase6HarnessV1.actionDeposit(uint96)",
