@@ -2,7 +2,8 @@
 const fs=require("fs"),path=require("path"),{ethers}=require("ethers");
 const ROOT=path.resolve(__dirname,"..");
 function loadJson(p){return JSON.parse(fs.readFileSync(p,"utf8"));}
-function saveJson(p,v){fs.writeFileSync(p,JSON.stringify(v,null,2)+"\n");}
+function jsonReplacer(_key,value){return typeof value==="bigint"?value.toString():value;}
+function saveJson(p,v){fs.writeFileSync(p,JSON.stringify(v,jsonReplacer,2)+"\n");}
 async function getContext(configPath,statePath){
   const config=loadJson(configPath);const rpc=process.env.RPC_URL;if(!rpc)throw new Error("RPC_URL is required");
   const provider=new ethers.JsonRpcProvider(rpc);let wallet;
