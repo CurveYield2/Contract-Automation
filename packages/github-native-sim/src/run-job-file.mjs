@@ -161,7 +161,17 @@ async function executeMedusa({ request, checkout, build, phase6MutableRpc, runMe
   }, { ...(runCommand ? { runCommand } : {}) });
 }
 
-async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, environment, runNativeFuzz, runCommand }) {
+async function executeNativeFuzz({ request, checkout, build, medusa, phase6MutableRpc, environment, preflightNativeFuzz, runNativeFuzz, runCommand }) {
+  if (preflightNativeFuzz) {
+    const receipt = await preflightNativeFuzz({ projectRoot: checkout.projectRoot, request, build, medusa, phase6MutableRpc });
+    if (!receipt || receipt.status !== 'PREFLIGHT_PASS') {
+      const diagnostic = receipt?.diagnostics?.[0];
+      const error = new Error(diagnostic?.summary ?? 'Foundry/native-fuzz targeted preflight did not pass');
+      error.kind = receipt?.firstFailure ?? 'FOUNDRY_TARGET_PREFLIGHT_FAILURE';
+      error.preflightReceipt = receipt ?? null;
+      throw error;
+    }
+  }
   if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const native = request.configuration.analysis?.nativeFuzz ?? {};
   const fuzzRuns = native.fuzzRuns ?? 256;
@@ -194,6 +204,7 @@ export async function runGitHubNativeJob(input, {
   buildProject = defaultBuildProject,
   runSlither,
   runMedusa,
+  preflightNativeFuzz,
   runNativeFuzz,
   runCommand,
   environment = process.env,
@@ -239,7 +250,7 @@ export async function runGitHubNativeJob(input, {
           return analysis.medusa;
         },
         runNativeFuzz: async () => {
-          analysis.nativeFuzz = await executeNativeFuzz({ request, checkout, build, phase6MutableRpc, environment, runNativeFuzz, runCommand });
+          analysis.nativeFuzz = await executeNativeFuzz({ request, checkout, build, medusa: analysis.medusa, phase6MutableRpc, environment, preflightNativeFuzz, runNativeFuzz, runCommand });
           return analysis.nativeFuzz;
         }
       });
