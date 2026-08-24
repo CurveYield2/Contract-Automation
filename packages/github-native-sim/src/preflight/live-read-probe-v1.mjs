@@ -1,0 +1,13 @@
+import {check,finalize} from './common-v1.mjs';
+export function preflightLiveReadProbeV1(c={}){
+ const x=[];
+ x.push(check({id:'live.chain',pass:c.chainId===1,failureCode:'LIVE_PROBE_CHAIN_MISMATCH',summary:'Live read probe is not bound to Ethereum chain ID 1',expected:1,observed:c.chainId??null,remediation:'Use the approved Ethereum RPC profile.'}));
+ x.push(check({id:'live.block',pass:Number.isInteger(c.blockNumber)&&typeof c.blockHash==='string',failureCode:'LIVE_PROBE_BLOCK_IDENTITY_MISSING',summary:'Live probe block identity is incomplete',expected:'blockNumber + blockHash',observed:{blockNumber:c.blockNumber??null,blockHash:c.blockHash??null},remediation:'Freeze/read exact block identity before the probe.'}));
+ x.push(check({id:'live.code',pass:c.codePresent===true,failureCode:'LIVE_PROBE_TARGET_CODE_MISSING',summary:'Probe target has no runtime code at the selected block',expected:true,observed:c.codePresent??null,remediation:'Correct the address/block before eth_call.'}));
+ x.push(check({id:'live.address',pass:c.addressNormalized===true,failureCode:'LIVE_PROBE_ADDRESS_INVALID',summary:'Probe target address is not normalized/valid',expected:true,observed:c.addressNormalized??null,remediation:'Normalize/validate target address first.'}));
+ x.push(check({id:'live.abi',pass:c.abiCheck?.status==='PASS',failureCode:'LIVE_PROBE_ABI_SIGNATURE_MISMATCH',summary:'Read function ABI/signature/arguments do not match the target',expected:'PASS',observed:c.abiCheck??null,remediation:'Fix the exact function signature/arguments and decode shape before eth_call.'}));
+ x.push(check({id:'live.read-only',pass:c.stateMutability==='view'||c.stateMutability==='pure',failureCode:'LIVE_PROBE_NOT_READ_ONLY',summary:'Requested probe is not a read-only function',expected:['view','pure'],observed:c.stateMutability??null,remediation:'Use simulation operation for state-changing calls; live-read-probe cannot mutate state.'}));
+ x.push(check({id:'live.call-rehearsal',pass:c.callProbe?.status==='PASS',failureCode:'LIVE_PROBE_CALL_REVERT_OR_DECODE_FAILURE',summary:'Read call already reverts or fails decoding',expected:'PASS',observed:c.callProbe??null,remediation:'Inspect revert/decode error, correct ABI/address/block, then rerun preflight.'}));
+ x.push(check({id:'live.secret-redaction',pass:c.normalizedEvidenceContainsRpcSecret===false,failureCode:'LIVE_PROBE_SECRET_LEAK',summary:'Normalized probe evidence contains RPC secret material',expected:false,observed:c.normalizedEvidenceContainsRpcSecret??null,remediation:'Record profile/chain/block only; redact runtime URL/secrets.'}));
+ return finalize('live-read-probe',c,x,{repository:c.repository,ref:c.ref,expectedOutputs:c.expectedOutputs,rollback:'none'});
+}

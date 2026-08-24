@@ -45,6 +45,7 @@ function failureResult(request, startedAt, error, partial = {}, now) {
     deploymentGasEvidence: partial.deploymentGasEvidence ?? null,
     analysis: partial.analysis ?? {},
     simulation: partial.simulation ?? null,
+    ...(partial.preflight && Object.keys(partial.preflight).length > 0 ? { preflight: structuredClone(partial.preflight) } : {}),
     analysisComponentFailureCount: partial.analysisComponentFailureCount ?? 0,
     failedStepCount: partial.failedStepCount ?? 0,
     failedSteps: partial.failedSteps ?? [],
@@ -140,7 +141,25 @@ async function executePhase7Simulation({ request, build, environment, startSimul
   }
 }
 
-async function executeSlither({ request, checkout, build, runSlither, runCommand }) {
+async function executeSlither({ request, checkout, build, preflightSlither, runSlither, runCommand }) {
+  if (preflightSlither) {
+    const receipt = await preflightSlither({ projectRoot: checkout.projectRoot, request, build, checkout });
+    if (!receipt || receipt.status !== 'PREFLIGHT_PASS') {
+      return {
+        backend: 'slither',
+        version: request.configuration.analysis?.slither?.version ?? V7_POLICY.tools.slither,
+        sourceCommit: request.source.commit,
+        rawArtifactRef: rawArtifactRef('slither/preflight.json'),
+        status: 'preflight_blocked',
+        terminal: true,
+        failureKind: receipt?.firstFailure ?? 'SLITHER_TARGET_PREFLIGHT_FAILURE',
+        componentStatus: 'COMPLETED_WITH_FAILURES',
+        continuationDisposition: 'CONTINUE_WITH_LIMITATION',
+        authoritativeFinding: false,
+        preflight: receipt ?? null,
+      };
+    }
+  }
   if (runSlither) return runSlither({ projectRoot: checkout.projectRoot, request, build });
   const slitherVersion = request.configuration.analysis?.slither?.version ?? V7_POLICY.tools.slither;
   return runSlitherAnalysis({ projectRoot: checkout.projectRoot, version: slitherVersion, sourceCommit: request.source.commit, rawArtifactRef: rawArtifactRef('slither/raw.json') }, { ...(runCommand ? { runCommand } : {}) });
@@ -161,7 +180,17 @@ async function executeMedusa({ request, checkout, build, phase6MutableRpc, runMe
   }, { ...(runCommand ? { runCommand } : {}) });
 }
 
-async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, environment, runNativeFuzz, runCommand }) {
+async function executeNativeFuzz({ request, checkout, build, medusa, phase6MutableRpc, environment, preflightNativeFuzz, runNativeFuzz, runCommand }) {
+  if (preflightNativeFuzz) {
+    const receipt = await preflightNativeFuzz({ projectRoot: checkout.projectRoot, request, build, medusa, phase6MutableRpc });
+    if (!receipt || receipt.status !== 'PREFLIGHT_PASS') {
+      const diagnostic = receipt?.diagnostics?.[0];
+      const error = new Error(diagnostic?.summary ?? 'Foundry/native-fuzz targeted preflight did not pass');
+      error.kind = receipt?.firstFailure ?? 'FOUNDRY_TARGET_PREFLIGHT_FAILURE';
+      error.preflightReceipt = receipt ?? null;
+      throw error;
+    }
+  }
   if (runNativeFuzz) return runNativeFuzz({ projectRoot: checkout.projectRoot, request, build, phase6MutableRpc });
   const native = request.configuration.analysis?.nativeFuzz ?? {};
   const fuzzRuns = native.fuzzRuns ?? 256;
@@ -191,9 +220,12 @@ async function executeNativeFuzz({ request, checkout, build, phase6MutableRpc, e
 export async function runGitHubNativeJob(input, {
   workspaceRoot = path.resolve('.deep-assurance-work'),
   checkoutSource = defaultCheckoutSource,
+  preflightBuild,
   buildProject = defaultBuildProject,
+  preflightSlither,
   runSlither,
   runMedusa,
+  preflightNativeFuzz,
   runNativeFuzz,
   runCommand,
   environment = process.env,
@@ -205,6 +237,7 @@ export async function runGitHubNativeJob(input, {
   const request = validateDeepAssuranceRequestV2(input);
   const startedAt = nowIso(now);
   const analysis = {};
+  const preflight = {};
   let build;
   let checkout;
   let deploymentGasEvidence = null;
@@ -213,15 +246,26 @@ export async function runGitHubNativeJob(input, {
   try {
     checkout = await checkoutSource(request.source, { workspaceRoot, runCommand, environment });
     if (!checkout || checkout.commit !== request.source.commit) throw new Error(`Exact source checkout mismatch: expected ${request.source.commit}, got ${checkout?.commit ?? 'missing'}`);
+    if (preflightBuild) {
+      const receipt = await preflightBuild({ projectRoot: checkout.projectRoot, request, checkout });
+      preflight.compile = receipt ?? null;
+      if (!receipt || receipt.status !== 'PREFLIGHT_PASS') {
+        const diagnostic = receipt?.diagnostics?.[0];
+        const error = new Error(diagnostic?.summary ?? 'Compile targeted preflight did not pass');
+        error.kind = receipt?.firstFailure ?? 'COMPILE_TARGET_PREFLIGHT_FAILURE';
+        error.preflightReceipt = receipt ?? null;
+        throw error;
+      }
+    }
     build = await buildProject({ projectRoot: checkout.projectRoot, request, ...(runCommand ? { runCommand } : {}) });
     deploymentGasEvidence = buildDeploymentGasEvidence(request, build);
   } catch (error) {
-    return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation }, now);
+    return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, preflight }, now);
   }
 
   if (request.profileId === V7_POLICY.profiles.compile) {
     try {
-      analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
+      analysis.slither = await executeSlither({ request, checkout, build, preflightSlither, runSlither, runCommand });
     } catch (error) {
       analysis.slither = { backend: 'slither', status: 'failed', terminal: true, componentStatus: 'FAILED', continuationDisposition: 'CONTINUE_WITH_LIMITATION', failureKind: error?.kind ?? 'ANALYSIS_COMPONENT_FAILURE', error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) } };
     }
@@ -231,7 +275,7 @@ export async function runGitHubNativeJob(input, {
     try {
       await runStage2aAnalysis(stage2aConfig, {
         runSlither: async () => {
-          analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
+          analysis.slither = await executeSlither({ request, checkout, build, preflightSlither, runSlither, runCommand });
           return analysis.slither;
         },
         runMedusa: async () => {
@@ -239,20 +283,20 @@ export async function runGitHubNativeJob(input, {
           return analysis.medusa;
         },
         runNativeFuzz: async () => {
-          analysis.nativeFuzz = await executeNativeFuzz({ request, checkout, build, phase6MutableRpc, environment, runNativeFuzz, runCommand });
+          analysis.nativeFuzz = await executeNativeFuzz({ request, checkout, build, medusa: analysis.medusa, phase6MutableRpc, environment, preflightNativeFuzz, runNativeFuzz, runCommand });
           return analysis.nativeFuzz;
         }
       });
     } catch (error) {
       const componentFailures = analysisFailureCount(analysis);
-      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, continuityDisposition: componentFailures > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE' }, now);
+      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, preflight, analysisComponentFailureCount: componentFailures, continuityDisposition: componentFailures > 0 ? 'CONTINUE_WITH_LIMITATION' : 'COMPLETE_EVIDENCE' }, now);
     }
   }
 
   const componentFailures = analysisFailureCount(analysis);
   const hardStop = hasHardStop(analysis);
   if (hardStop) {
-    return failureResult(request, startedAt, new Error('Analysis component requires execution stop'), { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, continuityDisposition: 'STOP_EXECUTION' }, now);
+    return failureResult(request, startedAt, new Error('Analysis component requires execution stop'), { build, deploymentGasEvidence, analysis, simulation, preflight, analysisComponentFailureCount: componentFailures, continuityDisposition: 'STOP_EXECUTION' }, now);
   }
 
   if (request.phaseId === 'fork-simulation-lifecycle') {
@@ -261,7 +305,7 @@ export async function runGitHubNativeJob(input, {
     } catch (error) {
       simulation = error.simulationEvidence ?? simulation;
       const failedSteps = simulation?.steps?.filter((step) => step.status === 'failed') ?? [];
-      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, analysisComponentFailureCount: componentFailures, failedStepCount: failedSteps.length, failedSteps, continuityDisposition: 'CONTINUE_WITH_LIMITATION' }, now);
+      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, preflight, analysisComponentFailureCount: componentFailures, failedStepCount: failedSteps.length, failedSteps, continuityDisposition: 'CONTINUE_WITH_LIMITATION' }, now);
     }
   }
 
@@ -277,6 +321,7 @@ export async function runGitHubNativeJob(input, {
     deploymentGasEvidence,
     analysis,
     simulation,
+    ...(Object.keys(preflight).length > 0 ? { preflight } : {}),
     analysisComponentFailureCount: componentFailures,
     failedStepCount: failedSteps.length,
     failedSteps,

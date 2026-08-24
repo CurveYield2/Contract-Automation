@@ -1,0 +1,3 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {diagnoseFailureV1} from '../src/failure-doctor-v1.mjs';
+test('doctor classifies real Medusa JSON parse failure',()=>{const d=diagnoseFailureV1({error:{message:'EVIDENCE_PARSE_FAILURE: Medusa terminal output is not valid JSON'}});assert.equal(d.knownSignatureId,'MEDUSA-001');assert.equal(d.doNotRerunFullOperation,true);});
+test('unknown failure still forbids blind rerun',()=>{const d=diagnoseFailureV1({error:'brand new failure'});assert.equal(d.failureClass,'UNKNOWN_FAILURE');assert.equal(d.doNotRerunFullOperation,true);});

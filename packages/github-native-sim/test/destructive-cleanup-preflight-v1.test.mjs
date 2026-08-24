@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {preflightDestructiveCleanupV1} from '../src/preflight/destructive-cleanup-v1.mjs';
+const ok={currentMainSha:'a'.repeat(40),compareCompleted:true,uniqueFiles:['old'],uniqueCommits:['c'],uniqueValuableItems:['old'],preservedItems:['old'],openDependencies:[],archiveRequired:true,archiveVerified:true,activeReferencesAfterCleanup:[],rollbackReference:'commit:a'};
+test('safe cleanup readiness PASS',()=>assert.equal(preflightDestructiveCleanupV1(ok).status,'PREFLIGHT_PASS'));
+test('unique unarchived content blocks deletion',()=>{const r=preflightDestructiveCleanupV1({...ok,preservedItems:[]});assert.equal(r.firstFailure,'CLEANUP_UNARCHIVED_UNIQUE_CONTENT');assert.equal(r.doNotExecute,true);});

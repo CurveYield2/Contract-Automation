@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {preflightFoundryV1} from '../src/preflight/foundry-v1.mjs';
+const h='a'.repeat(64),ok={observedVersion:'1.7.1',medusaPredecessorRequired:true,medusaTerminalStatus:'PROPERTY_FALSIFICATION',sourceSnapshotDigest:h,expectedSourceSnapshotDigest:h,compileProbe:{status:'PASS'},discoveredTestCount:2,discoveredTests:['testFuzzA','invariant_B'],invariantRequired:true,discoveredHandlerCount:1,forkRequired:true,expectedBlockHash:'0xabc',rpcProbe:{chainId:1,blockHash:'0xabc'},coverageObligationsValid:true,outputPathsWritable:true};
+test('foundry fuzz/invariant preflight PASS',()=>assert.equal(preflightFoundryV1(ok).status,'PREFLIGHT_PASS'));
+test('no tests fails before forge campaign',()=>assert.equal(preflightFoundryV1({...ok,discoveredTestCount:0,discoveredTests:[]}).firstFailure,'FOUNDRY_NO_TESTS_DISCOVERED')); 

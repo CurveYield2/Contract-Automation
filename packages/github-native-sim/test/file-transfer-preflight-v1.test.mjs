@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {preflightFileTransferV1} from '../src/preflight/file-transfer-v1.mjs';
+const ok={source:{repository:'CurveYield2/Audit-Controller',ref:'a'.repeat(40),path:'x.zip',blobSha:'b'.repeat(40),sha256:'c'.repeat(64),bytes:20000000},destination:{repository:'CurveYield2/Contract-Automation',ref:'work',path:'x.zip',exists:false},plannedChunkCount:1,transferMethod:'GIT_EXACT_BLOB_TREE',destinationWritable:true,verifyRemoteBytes:true,rollbackPlan:'remove destination commit'};
+test('large exact transfer does not require chunking',()=>assert.equal(preflightFileTransferV1(ok).status,'PREFLIGHT_PASS'));
+test('1000 piece plan blocks before write',()=>{const r=preflightFileTransferV1({...ok,plannedChunkCount:1000});assert.equal(r.firstFailure,'TRANSFER_AD_HOC_CHUNKING_FORBIDDEN');assert.equal(r.doNotExecute,true);});
