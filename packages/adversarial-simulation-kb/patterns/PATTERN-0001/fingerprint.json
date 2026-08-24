@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "adversarial-kb-root-cause-fingerprint-v1",
+  "protocolTopology": "COLLATERALIZED_LENDING_LIQUIDATION",
+  "stateVariableClass": [
+    "COLLATERAL_ACCOUNTING",
+    "DEBT_ACCOUNTING",
+    "RESERVE_ACCOUNTING"
+  ],
+  "assetAccountingModel": "INTERNAL_COLLATERAL_DEBT_LEDGER",
+  "attackerCapabilities": [
+    "ATTACKER_CONTROLLED_LIQUIDATOR",
+    "ATTACKER_CONTROLLED_VIOLATOR",
+    "TEMPORARY_LIQUIDITY",
+    "USER_CALLABLE_COLLATERAL_REDUCTION"
+  ],
+  "triggerAction": "COLLATERAL_REDUCTION_WITHOUT_HEALTH_CHECK",
+  "incorrectAssumption": "ALL_COLLATERAL_REDUCING_PATHS_PRESERVE_SOLVENCY",
+  "violatedInvariantClass": "POST_ACTION_SOLVENCY",
+  "valueExtractionMechanism": "PROFITABLE_SELF_LIQUIDATION",
+  "externalDependencyRole": "TEMPORARY_LIQUIDITY_AMPLIFICATION",
+  "primitiveRefs": [
+    "ACCOUNTING_DESYNC",
+    "COLLATERAL_MANIPULATION",
+    "DONATION",
+    "FLASH_LIQUIDITY",
+    "SOLVENCY_BYPASS"
+  ]
+}

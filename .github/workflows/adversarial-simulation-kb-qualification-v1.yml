@@ -1,0 +1,49 @@
+name: Adversarial Simulation KB Qualification v1
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/workflows/adversarial-simulation-kb-qualification-v1.yml'
+      - 'packages/adversarial-simulation-kb/**'
+      - 'docs/development-state/**'
+      - 'docs/ADVERSARIAL_SIMULATION_KB_IMPLEMENTATION_STATUS_v1.md'
+      - 'process/ADVERSARIAL_KB_*.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: adversarial-kb-qualification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify-adversarial-kb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run adversarial KB static/unit qualification
+        run: node --test packages/adversarial-simulation-kb/test/*.test.mjs
+
+      - name: Verify no production-secret literals entered KB
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RInE '(PRIVATE_KEY|MNEMONIC|SIM_ARCHIVE_PRIMARY_ETHEREUM_01=https?://|rpcUrl[[:space:]]*:[[:space:]]*"https?://)' packages/adversarial-simulation-kb; then
+            echo 'Forbidden secret/RPC literal detected in adversarial KB' >&2
+            exit 1
+          fi
