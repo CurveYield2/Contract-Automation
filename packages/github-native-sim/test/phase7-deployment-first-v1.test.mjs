@@ -55,3 +55,17 @@ test('external readiness remains read-only and does not require deploying third-
   assert.equal(result.status, 'SUPPORTED');
   assert.equal(result.deploymentPrerequisite?.status, 'NOT_REQUIRED');
 });
+
+test('deploy-configure smoke supports snapshot rollback around a deployment-first live suite', () => {
+  const result = validateWorkflowAgainstV7RecipeV1('deploy-configure-smoke-v1', {
+    steps: [
+      { action: 'snapshot', alias: 'baseline', label: 'pin suite baseline' },
+      { action: 'deploy', alias: 'vault', contract: 'CurveYieldVault', source: 'contracts/CurveYieldVault.sol', args: [], from: '$account0', label: 'deploy audited vault' },
+      { action: 'staticCall', target: '$vault', function: 'totalSupply() view returns (uint256)', args: [], saveAs: 'supply', label: 'test freshly deployed vault' },
+      { action: 'revertSnapshot', snapshot: '$baseline', label: 'restore suite baseline' },
+    ],
+  });
+  assert.equal(result.status, 'SUPPORTED');
+  assert.equal(result.deploymentPrerequisite?.status, 'SATISFIED');
+  assert.deepEqual(result.unsupported, []);
+});
