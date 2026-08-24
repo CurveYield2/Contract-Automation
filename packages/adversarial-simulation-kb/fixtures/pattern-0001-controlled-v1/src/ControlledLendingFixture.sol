@@ -27,8 +27,7 @@ contract ControlledLendingFixture {
         require(position.collateral >= amount, "COLLATERAL");
         uint256 remaining = position.collateral - amount;
 
-        // Deliberately protected RED fixture. K12's exploit assertion must fail here.
-        require(position.debt == 0 || remaining * 10_000 / position.debt >= minimumHealthBps, "SOLVENCY");
+        // Deliberately vulnerable CONTROLLED fixture: collateral reduction commits without a post-action solvency check.
         position.collateral = remaining;
     }
 
