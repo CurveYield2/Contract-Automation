@@ -164,8 +164,23 @@ export async function runMedusaAnalysis(input, { runCommand = runProcess } = {})
     cwd: input.projectRoot,
   });
   if (!campaignResult || campaignResult.exitCode < 0) return medusaResult(input, { status:'failed', terminal:true, failureKind:'TOOL_FAILURE', componentStatus:'FAILED', continuationDisposition:'CONTINUE_WITH_LIMITATION', fork:forkEvidence, rawOutput:raw(campaignResult, secrets) });
-  const campaign = parseMedusaOutput(campaignResult.stdout);
+
+  const rawOutput = raw(campaignResult, secrets);
+  let campaign;
+  try {
+    campaign = parseMedusaOutput(campaignResult.stdout);
+  } catch (error) {
+    if (error instanceof V7ExecutionError && error.kind === 'EVIDENCE_PARSE_FAILURE') {
+      return medusaResult(input, {
+        status:'failed', terminal:true, failureKind:'EVIDENCE_PARSE_FAILURE', componentStatus:'FAILED',
+        continuationDisposition:'CONTINUE_WITH_LIMITATION', fork:forkEvidence, rawOutput,
+        error:{ name:error.name, message:error.message }
+      });
+    }
+    throw error;
+  }
+
   const falsified = campaign.falsifiedProperties > 0 || campaign.status === 'falsified';
-  if (falsified || campaignResult.exitCode !== 0) return medusaResult(input, { status:'completed_with_failures', terminal:true, failureKind:falsified ? 'PROPERTY_FALSIFICATION' : 'ANALYSIS_COMPONENT_FAILURE', componentStatus:'COMPLETED_WITH_FAILURES', continuationDisposition:'CONTINUE_WITH_LIMITATION', fork:forkEvidence, campaign, rawOutput:raw(campaignResult, secrets) });
-  return medusaResult(input, { status:'completed', terminal:true, componentStatus:'COMPLETED', continuationDisposition:'COMPLETE_EVIDENCE', fork:forkEvidence, campaign, rawOutput:raw(campaignResult, secrets) });
+  if (falsified || campaignResult.exitCode !== 0) return medusaResult(input, { status:'completed_with_failures', terminal:true, failureKind:falsified ? 'PROPERTY_FALSIFICATION' : 'ANALYSIS_COMPONENT_FAILURE', componentStatus:'COMPLETED_WITH_FAILURES', continuationDisposition:'CONTINUE_WITH_LIMITATION', fork:forkEvidence, campaign, rawOutput });
+  return medusaResult(input, { status:'completed', terminal:true, componentStatus:'COMPLETED', continuationDisposition:'COMPLETE_EVIDENCE', fork:forkEvidence, campaign, rawOutput });
 }
