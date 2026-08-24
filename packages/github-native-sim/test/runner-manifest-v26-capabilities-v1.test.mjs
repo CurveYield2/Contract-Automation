@@ -15,6 +15,7 @@ const expected = Object.freeze({
 
 test('runner manifest advertises only v26 components exercised by repository qualification tests', () => {
   const manifest = buildRunnerManifestV2();
+  assert.equal(manifest.schemaVersion, 'curveyield2-v7-runner-manifest-v2');
   assert.deepEqual(manifest.qualifiedCapabilities?.components, expected);
   assert.deepEqual(manifest.qualifiedCapabilities?.recipes, ['repeated-lifecycle-v1']);
   assert.equal(manifest.qualifiedCapabilities?.requestExtension, 'configuration.v26-v1');
