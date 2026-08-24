@@ -1,0 +1,4 @@
+Boosthub Staking v2 Phase 9 reviewer-4 remediation regression trigger v2
+Campaign generation: boosthub-staking-v2-g1-20260818T215920Z
+Supersedes failed Hardhat/EDR fork harness attempt from run 32684241876.
+Phase9 obligations: OBL-P9-001, OBL-P9-002, OBL-P9-003, OBL-P9-004
