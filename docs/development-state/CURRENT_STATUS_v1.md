@@ -22,7 +22,7 @@ During K12, canonical V7 evidence exposed a Forge-wrapper false-positive where f
 
 ## Next exact action
 
-Inspect the expected K13 RED qualification run for the missing historical-reproduction module, record its run identity, then implement the minimum archive-identity plan validator.
+Inspect the K13 GREEN plan qualification. If it passes, add the exact historical executable/proof artifacts and bind them to canonical archive/Anvil preflight before requesting historical execution.
 
 ## Open blockers
 
