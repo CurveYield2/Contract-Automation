@@ -3,6 +3,21 @@ import path from 'node:path';
 import { V2_AUTOMATION_RELEASE, V2_RUNNER_RELEASE } from './schema.mjs';
 import { V7_POLICY } from './v7-policy.mjs';
 
+export const V26_QUALIFIED_CAPABILITIES_V1 = Object.freeze({
+  requestExtension: 'configuration.v26-v1',
+  qualificationWorkflow: V7_POLICY.workflows.qualification,
+  components: Object.freeze({
+    'v26-result-components-v1': 'audit-v7-github-execution-evidence-v2',
+    'v26-build-sbom-v1': 'audit-v7-build-sbom-v1',
+    'v26-phase6-campaign-evidence-v1': 'audit-v7-phase6-campaign-evidence-v1',
+    'v26-foundry-coverage-v1': 'audit-v7-foundry-coverage-v1',
+    'v26-simulation-ledger-v1': 'audit-v7-simulation-lifecycle-ledger-v1',
+    'v26-live-attestation-v1': 'audit-v7-live-deployment-attestation-v1',
+    'v26-reproduction-v1': 'audit-v7-candidate-reproduction-v1',
+  }),
+  recipes: Object.freeze(['repeated-lifecycle-v1']),
+});
+
 export function buildRunnerManifestV2() {
   return {
     schemaVersion: 'curveyield2-v7-runner-manifest-v2',
@@ -39,6 +54,12 @@ export function buildRunnerManifestV2() {
       medusaBeforeFoundry: V7_POLICY.phase6.medusaBeforeFoundry,
       stagingPolicy: 'SINGLE_VERIFIED_SNAPSHOT_THEN_LOCAL_EXECUTION_COPY',
       rpcIdentityPolicy: V7_POLICY.phase6.rpcIdentityPolicy,
+    },
+    qualifiedCapabilities: {
+      requestExtension: V26_QUALIFIED_CAPABILITIES_V1.requestExtension,
+      qualificationWorkflow: V26_QUALIFIED_CAPABILITIES_V1.qualificationWorkflow,
+      components: { ...V26_QUALIFIED_CAPABILITIES_V1.components },
+      recipes: [...V26_QUALIFIED_CAPABILITIES_V1.recipes],
     },
     commands: {
       execute: 'npm run v7:execute -- --request <request.json>',
