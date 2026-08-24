@@ -10,13 +10,13 @@
       "kind": "pattern",
       "id": "PATTERN-0001",
       "revision": 1,
-      "digest": "0000000000000000000000000000000000000000000000000000000000000000"
+      "digest": "d9f10dc22ab27ad2dad3cc25260fd713b8d12d63df12978801dafcd8518cbe37"
     },
     {
       "kind": "recipe",
       "id": "RECIPE-0001",
       "revision": 1,
-      "digest": "1111111111111111111111111111111111111111111111111111111111111111"
+      "digest": "c068b116dcf0dea8a73b102f11dd1372494be6bc4730e0df8154c667cf1d3e88"
     }
   ],
   "backend": "foundry",
