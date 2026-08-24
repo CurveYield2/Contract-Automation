@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildRunnerManifestV2 } from '../src/runner-manifest-v2.mjs';
 
+// This assertion set is also the final feature-branch qualification trigger after temporary verification tooling is removed.
 const expected = Object.freeze({
   'v26-result-components-v1': 'audit-v7-github-execution-evidence-v2',
   'v26-build-sbom-v1': 'audit-v7-build-sbom-v1',
