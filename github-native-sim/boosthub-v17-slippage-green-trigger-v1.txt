@@ -1,0 +1,1 @@
+Compile and size-check the exact BoostHubStaking V17 configurable fee-conversion slippage candidate.
