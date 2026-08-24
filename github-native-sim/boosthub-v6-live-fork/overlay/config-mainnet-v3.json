@@ -1,0 +1,75 @@
+{
+  "network": {"chainId": 1, "name": "ethereum"},
+  "governanceToken": {"name": "CurveYield Governance", "symbol": "cyGOV"},
+  "boostHub": "0xFbEF8941Da53EA724385B44E91ae9672061D0263",
+  "finalAdmin": "REQUIRED_ADDRESS",
+  "vaultFeeReceiver": "REQUIRED_ADDRESS",
+  "converterTemplates": {
+    "crvToSdCrv": "0x3C618Deb7659695C378170A032A1B8e61e17644E",
+    "wstEthToSdFxn": "0xd66D8F419d9e809eC3A6443A5Da72AEae56649eB"
+  },
+  "sdYbConverter": {
+    "crvUSD": "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E",
+    "yb": "0x01791F726B4103694969820be083196cC7c045fF",
+    "sdYB": "0x0c057598dcE1891688829581f890DD2a3685a43f",
+    "crvUsdYbPool": "0xec977F46467a3021785Cff88894886E617abd65b",
+    "ybSdYbPool": "0x98b540fa89690969D111D045afCa575C91519B1A"
+  },
+  "pools": {
+    "sdCRV": {
+      "pid": 0,
+      "asset": "0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5",
+      "vaultName": "CurveYield StakeDAO CRV Vault",
+      "vaultSymbol": "cysdCRV",
+      "vaultDecimals": 18,
+      "rewardTokens": ["0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E", "0xD533a949740bb3306d119CC777fa900bA034cd52"],
+      "rewardConverterKeys": ["DEPLOYED_CRVUSD_TO_SDCRV", "DEPLOYED_CRV_TO_SDCRV"],
+      "strategyRouteTokens": ["0xD533a949740bb3306d119CC777fa900bA034cd52", "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"],
+      "strategyRouteConverterKeys": ["DEPLOYED_CRV_TO_SDCRV", "DEPLOYED_CRVUSD_TO_SDCRV"],
+      "strategyRouteMinAmounts": ["1", "1"],
+      "withdrawFeeBps": "REQUIRED",
+      "performanceFeeBps": "REQUIRED",
+      "performanceFeeReceiver": "REQUIRED_ADDRESS",
+      "performanceFeeStaked": false,
+      "yieldBoostFeeBps": "REQUIRED",
+      "rewardSmoothingUnits": "REQUIRED",
+      "activationDurationUnits": 600,
+      "keeper": "REQUIRED_ADDRESS"
+    },
+    "sdFXN": {
+      "pid": 1,
+      "asset": "0xe19d1c837B8A1C83A56cD9165b2c0256D39653aD",
+      "vaultName": "CurveYield StakeDAO FXN Vault",
+      "vaultSymbol": "cysdFXN",
+      "vaultDecimals": 18,
+      "rewardTokens": ["0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0"],
+      "rewardConverterKeys": ["DEPLOYED_WSTETH_TO_SDFXN"],
+      "strategyRouteTokens": ["0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0"],
+      "strategyRouteConverterKeys": ["DEPLOYED_WSTETH_TO_SDFXN"],
+      "strategyRouteMinAmounts": ["1"],
+      "withdrawFeeBps": "REQUIRED",
+      "performanceFeeBps": "REQUIRED",
+      "performanceFeeReceiver": "REQUIRED_ADDRESS",
+      "performanceFeeStaked": false,
+      "yieldBoostFeeBps": "REQUIRED",
+      "rewardSmoothingUnits": "REQUIRED",
+      "activationDurationUnits": 600,
+      "keeper": "REQUIRED_ADDRESS"
+    },
+    "sdYB": {
+      "pid": 2,
+      "asset": "0x0c057598dcE1891688829581f890DD2a3685a43f",
+      "rewardTokens": ["0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"],
+      "rewardConverterKeys": ["DEPLOYED_CRVUSD_TO_SDYB"],
+      "withdrawFeeBps": "REQUIRED",
+      "performanceFeeBps": "REQUIRED",
+      "performanceFeeReceiver": "REQUIRED_ADDRESS",
+      "performanceFeeStaked": false,
+      "yieldBoostFeeBps": "REQUIRED",
+      "rewardSmoothingUnits": "REQUIRED",
+      "activationDurationUnits": 600,
+      "keeper": "REQUIRED_ADDRESS"
+    }
+  },
+  "cyGovRewardFunding": {"sdCRV": "0", "sdFXN": "0", "sdYB": "0"}
+}
