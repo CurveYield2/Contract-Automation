@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "adversarial-kb-proof-v1",
+  "proofId": "PROOF-0002",
+  "knowledgeRef": "RECIPE-0001",
+  "proofTier": "SCHEMA_VALID",
+  "status": "ACTIVE",
+  "claim": "The frozen RECIPE-0001 candidate at commit 26c2401d73702f653b89dccf8f14e7d6e55c94ab is a schema-valid generalized recipe with explicit target bindings and fail-closed unresolved-binding behavior. This proof does not claim compilation, controlled reproduction, historical reproduction, generalized exploit proof, or qualification.",
+  "evidenceRefs": [
+    "PATTERN-0001",
+    "K09-RED-0001"
+  ],
+  "artifactDigests": [],
+  "runIds": [],
+  "qualifiedAtCommit": "26c2401d73702f653b89dccf8f14e7d6e55c94ab",
+  "limitations": [
+    "SCHEMA_VALID establishes only recipe structure and deterministic binding behavior.",
+    "No backend executable has been compiled or executed for RECIPE-0001.",
+    "Target applicability and exploitability remain campaign-specific decisions requiring later matcher/adaptation and proof modules."
+  ]
+}

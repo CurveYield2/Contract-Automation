@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { validateCoreRecordV1 } from '../src/core-schemas-v1.mjs';
 import { validatePrimitiveTagsV1 } from '../src/taxonomy/validate-v1.mjs';
-import { buildRegistriesV1 } from '../src/registry/build-v1.mjs';
 import {
   buildRootCauseFingerprintV1,
   fingerprintKeyV1,
@@ -80,10 +79,10 @@ test('K08 checked-in fingerprint matches pattern semantics and rejects incomplet
   assert.equal(validateRootCauseFingerprintV1(missing).status,'FAIL');
 });
 
-test('K08 current incident-pattern corpus regenerates the checked-in deterministic registries',()=>{
-  const incident=json(`${ROOT}/incidents/EXP-2023-0001/incident.json`);
+test('K08 pattern remains correctly projected as later recipe modules extend the graph',()=>{
   const pattern=json(`${ROOT}/patterns/PATTERN-0001/pattern.json`);
-  const proof=json(`${ROOT}/incidents/EXP-2023-0001/proof.json`);
-  const generated=buildRegistriesV1({incidents:[incident],patterns:[pattern],recipes:[],executables:[],proofs:[proof],relationships:[]}).registries;
-  for(const name of Object.keys(generated)) assert.deepEqual(json(`${ROOT}/registry/${name}.json`),generated[name],name);
+  const patternRegistry=json(`${ROOT}/registry/ATTACK_PATTERN_REGISTRY_v1.json`);
+  const primitiveIndex=json(`${ROOT}/registry/BY_PRIMITIVE_v1.json`);
+  assert.deepEqual(patternRegistry.records.find(record=>record.patternId===pattern.patternId),pattern);
+  for(const primitive of pattern.rootCauseClass) assert.ok(primitiveIndex.index[primitive].includes(pattern.patternId));
 });

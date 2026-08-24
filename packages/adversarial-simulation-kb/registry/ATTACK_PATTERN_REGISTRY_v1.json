@@ -20,7 +20,7 @@
       "adaptationRules": ["Bind the generalized collateral-reducing action to the target-specific function or state transition identified by source intelligence rather than a historical function name.","Bind account-health observation to the target's canonical solvency, liquidity, collateral-ratio, or equivalent safety metric.","Bind liquidation/settlement and redemption to target-specific interfaces and measure attacker net value before and after the complete sequence.","Treat temporary liquidity as an amplifier, not a required root cause; run a smaller-capital variant when the target permits it."],
       "recommendedBackends": ["foundry","anvil"],
       "historicalIncidentRefs": ["EXP-2023-0001"],
-      "recipeRefs": [],
+      "recipeRefs": ["RECIPE-0001"],
       "limitations": ["Pattern similarity is not an exploitability judgment; target-specific source intelligence, runtime state, guards, and economics must be evaluated before scheduling an attack reproduction.","The pattern does not assume a particular lending protocol, contract address, function name, oracle, token, or historical block."]
     }
   ]

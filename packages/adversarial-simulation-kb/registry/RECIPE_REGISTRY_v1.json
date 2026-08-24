@@ -1,5 +1,21 @@
 {
   "schemaVersion": "adversarial-kb-recipe-registry-v1",
   "revision": 1,
-  "records": []
+  "records": [
+    {
+      "schemaVersion": "adversarial-kb-recipe-v1",
+      "recipeId": "RECIPE-0001",
+      "patternRefs": ["PATTERN-0001"],
+      "targetTopologies": ["COLLATERALIZED_LENDING_LIQUIDATION"],
+      "requiredTargetBindings": ["target","collateralAsset","debtAsset","positionSetupAction","collateralReductionAction","healthMetric","liquidationAction","attackerValueObservation"],
+      "setupSteps": [{"stepId":"SETUP-01","action":"${binding:positionSetupAction}","target":"${binding:target}","inputs":{"collateralAsset":"${binding:collateralAsset}","debtAsset":"${binding:debtAsset}"},"purpose":"Create a debt-bearing position suitable for testing the candidate collateral-reducing path."},{"stepId":"SETUP-02","action":"OBSERVE_BASELINE","target":"${binding:target}","healthObservation":"${binding:healthMetric}","attackerValueObservation":"${binding:attackerValueObservation}","purpose":"Record pre-attack account safety and attacker net-value baselines."}],
+      "attackSteps": [{"stepId":"ATTACK-01","action":"${binding:collateralReductionAction}","target":"${binding:target}","purpose":"Exercise the target-specific exceptional path that may reduce collateral backing outstanding debt."},{"stepId":"ATTACK-02","action":"OBSERVE_POST_REDUCTION_HEALTH","observation":"${binding:healthMetric}","purpose":"Determine whether the collateral-reducing action committed a materially less healthy state instead of reverting."},{"stepId":"ATTACK-03","action":"${binding:liquidationAction}","target":"${binding:target}","purpose":"Attempt attacker-controlled liquidation or equivalent unhealthy-position settlement."}],
+      "observations": [{"observationId":"OBS-HEALTH-BEFORE-AFTER","source":"${binding:healthMetric}","compare":"BEFORE_VS_AFTER_COLLATERAL_REDUCTION"},{"observationId":"OBS-ATTACKER-VALUE","source":"${binding:attackerValueObservation}","compare":"BEFORE_SETUP_VS_AFTER_SETTLEMENT"},{"observationId":"OBS-ASSET-FLOW","collateralAsset":"${binding:collateralAsset}","debtAsset":"${binding:debtAsset}","compare":"TARGET_AND_ATTACKER_BALANCE_DELTAS"}],
+      "assertions": [{"assertionId":"POST_ACTION_SOLVENCY_OR_REVERT","property":"A collateral-reducing action against a debt-bearing account must preserve the target's required health threshold or revert before committing the unsafe state.","healthObservation":"${binding:healthMetric}"},{"assertionId":"NO_NET_PROFITABLE_ATTACKER_CONTROLLED_LIQUIDATION","property":"The complete sequence must not create positive attacker net value solely from inconsistent collateral-accounting enforcement.","valueObservation":"${binding:attackerValueObservation}"}],
+      "adaptationInputs": [{"binding":"target","value":"${binding:target}","requirement":"Canonical target contract or system entry point for the compatible lending topology."},{"binding":"collateralReductionAction","value":"${binding:collateralReductionAction}","requirement":"Source-intelligence-backed action that can materially reduce collateral backing outstanding debt."},{"binding":"healthMetric","value":"${binding:healthMetric}","requirement":"Canonical target-specific solvency, liquidity, health-factor, or equivalent safety observation."},{"binding":"liquidationAction","value":"${binding:liquidationAction}","requirement":"Target-specific liquidation or equivalent unhealthy-position settlement action."}],
+      "backendSupport": {"medusa":"ADAPTATION_REQUIRED","foundry":"SUPPORTED","anvil":"SUPPORTED"},
+      "executableRefs": [],
+      "proofStatusRef": "PROOF-0002"
+    }
+  ]
 }

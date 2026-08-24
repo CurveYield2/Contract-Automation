@@ -39,3 +39,10 @@ Append-only. Do not rewrite earlier decisions; append a superseding decision if 
 - Decision: `EXP-2023-0001` may be `incidentStatus: VERIFIED` because its incident facts are supported by primary protocol/onchain/security evidence, while `PROOF-0001` remains only `SCHEMA_VALID` until the historical reproduction obligations in later modules are executed and qualified.
 - Basis: v3 separates reference confidence from executable proof tiers; K07 must not imply that a verified incident record has already been replayed.
 - Consequence: registry and matching logic may consume the verified incident facts, but no HISTORICAL_REPRODUCTION, GENERALIZED_VARIANT_PROVEN, or QUALIFIED claim may be inferred from K07 alone.
+
+## D-0007 — Recipe instantiation is mechanical and fail-closed
+
+- Status: ACTIVE
+- Decision: Generalized recipes contain only declared `${binding:...}` placeholders. A recipe instance is `BLOCKED` until every required target binding is explicitly supplied; instantiation performs data substitution only and rejects undeclared placeholders and literal onchain identities in the generalized template.
+- Basis: K09 requires reusable target-bound actions without silently assuming the historical target, and v3 forbids automatic target-specific security judgment.
+- Consequence: missing functions/addresses/metrics are never guessed by the global KB. Applicability, target-specific binding provenance, and auditor-approved security judgment remain later matcher/adaptation/controller responsibilities.

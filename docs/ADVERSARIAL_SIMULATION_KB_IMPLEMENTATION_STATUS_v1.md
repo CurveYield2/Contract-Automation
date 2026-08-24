@@ -11,7 +11,8 @@
 | Deterministic registries/indexes (K06) | PASS | PASS | PASS | N/A | N/A | PASS |
 | First verified incident (K07) | PASS | PASS | PASS | SCHEMA_VALID ONLY | N/A | PASS |
 | First abstract pattern (K08) | PASS | PASS | PASS | N/A | NOT YET PROVEN | PASS |
-| First recipe (K09) | IN PROGRESS | PENDING | PENDING | N/A | PENDING | PENDING |
-| Remaining K10-K36 modules | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| First recipe (K09) | PASS | PASS | PASS | N/A | SCHEMA_VALID ONLY | PASS |
+| Proof state machine (K10) | IN PROGRESS | PENDING | PENDING | PENDING | PENDING | PENDING |
+| Remaining K11-K36 modules | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
 
-This table is intentionally conservative. `EXP-2023-0001` is a VERIFIED incident record and `PATTERN-0001` is a validated generalized mechanism record, but `PROOF-0001` remains `SCHEMA_VALID`; no exploit/pattern/recipe/executable is `QUALIFIED`, and no historical or generalized reproduction has yet been claimed.
+This table is intentionally conservative. `EXP-2023-0001`, `PATTERN-0001`, and `RECIPE-0001` are validated knowledge records, but incident and recipe proof records remain `SCHEMA_VALID`; no executable exists yet, no controlled/historical/generalized reproduction has been claimed, and nothing is `QUALIFIED`.

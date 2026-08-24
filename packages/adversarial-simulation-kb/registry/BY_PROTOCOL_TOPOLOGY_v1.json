@@ -2,5 +2,7 @@
   "schemaVersion": "adversarial-kb-index-v1",
   "revision": 1,
   "indexType": "PROTOCOL_TOPOLOGY",
-  "index": {}
+  "index": {
+    "collateralized_lending_liquidation": ["RECIPE-0001"]
+  }
 }

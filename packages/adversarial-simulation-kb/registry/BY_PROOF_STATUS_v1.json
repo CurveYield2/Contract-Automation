@@ -3,6 +3,6 @@
   "revision": 1,
   "indexType": "PROOF_TIER",
   "index": {
-    "SCHEMA_VALID": ["EXP-2023-0001"]
+    "SCHEMA_VALID": ["EXP-2023-0001","RECIPE-0001"]
   }
 }
