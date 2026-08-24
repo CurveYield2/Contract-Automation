@@ -6,57 +6,47 @@
   "branch": "feat/adversarial-simulation-kb-v1",
   "pullRequest": 131,
   "baselineMainSha": "468b749076fb5b9c166c14a187fdd29a6f967acd",
-  "lastKnownGoodCommit": "93a56c6e9e6150f7790d30f19fae1c39d8175d86",
-  "currentCommit": "93a56c6e9e6150f7790d30f19fae1c39d8175d86",
+  "lastKnownGoodCommit": "bb9fb8fb7cab4de2b3ada61c377f293ba5fad978",
+  "currentCommit": "bb9fb8fb7cab4de2b3ada61c377f293ba5fad978",
   "overallStatus": "IN_PROGRESS",
-  "currentModuleId": "K02",
-  "currentStepId": "K02-S01",
+  "currentModuleId": "K03",
+  "currentStepId": "K03-S01",
   "currentStepStatus": "READY",
-  "lastCompletedModuleId": "K01",
-  "lastCompletedStepId": "K01-S06",
-  "nextExactAction": "Write failing stable-ID validation tests for EXP/PATTERN/RECIPE/EXEC/SOURCE/PROOF identifiers, including malformed IDs, duplicate publication IDs, and revision-regression negatives before implementing K02 ID/schema code.",
+  "lastCompletedModuleId": "K02",
+  "lastCompletedStepId": "K02-S08",
+  "nextExactAction": "Write the failing K03 taxonomy tests, then encode the initial attack primitive taxonomy from the v3 specification with deterministic validation, extension/version rules, and unknown-tag rejection.",
   "activeExternalRun": null,
   "openBlockers": [],
   "knownFailures": [],
   "modifiedPaths": [
-    "docs/ADVERSARIAL_KB_EXISTING_ASSET_INVENTORY_v1.md",
-    "process/ADVERSARIAL_KB_EXISTING_ASSET_INVENTORY_v1.json",
-    "packages/adversarial-simulation-kb/src/existing-asset-inventory-v1.mjs",
-    "packages/adversarial-simulation-kb/test/existing-asset-inventory-v1.test.mjs",
+    "packages/adversarial-simulation-kb/src/core-schemas-v1.mjs",
+    "packages/adversarial-simulation-kb/test/core-schemas-v1.test.mjs",
+    "packages/adversarial-simulation-kb/schemas/incident-v1.schema.json",
+    "packages/adversarial-simulation-kb/schemas/attack-pattern-v1.schema.json",
+    "packages/adversarial-simulation-kb/schemas/recipe-v1.schema.json",
+    "packages/adversarial-simulation-kb/schemas/executable-v1.schema.json",
+    "packages/adversarial-simulation-kb/schemas/proof-v1.schema.json",
     "docs/development-state/DEVELOPMENT_RECOVERY_STATE_v1.json",
     "docs/development-state/CURRENT_STATUS_v1.md",
-    "docs/development-state/DECISION_LOG_v1.md",
     "docs/development-state/TEST_AND_PROOF_INDEX_v1.json",
     "docs/ADVERSARIAL_SIMULATION_KB_IMPLEMENTATION_STATUS_v1.md"
   ],
   "moduleStates": {
-    "K00": {
-      "name": "Development Recovery System",
-      "status": "COMPLETE",
-      "steps": {"K00-S01":"PASS","K00-S02":"PASS","K00-S03":"PASS","K00-S04":"PASS","K00-S05":"PASS"},
-      "hardGate": "PASS"
-    },
-    "K01": {
-      "name": "Existing Harness/Simulation/Failure Corpus Inventory",
-      "status": "COMPLETE",
-      "steps": {"K01-S01":"PASS","K01-S02":"PASS","K01-S03":"PASS","K01-S04":"PASS","K01-S05":"PASS","K01-S06":"PASS"},
-      "hardGate": "PASS"
-    },
-    "K02": {
-      "name": "Stable IDs and Core Schemas",
-      "status": "IN_PROGRESS",
-      "steps": {"K02-S01":"READY","K02-S02":"READY","K02-S03":"READY","K02-S04":"READY","K02-S05":"READY","K02-S06":"READY","K02-S07":"READY","K02-S08":"READY"},
-      "hardGate": "PENDING"
-    }
+    "K00": {"name":"Development Recovery System","status":"COMPLETE","steps":{"K00-S01":"PASS","K00-S02":"PASS","K00-S03":"PASS","K00-S04":"PASS","K00-S05":"PASS"},"hardGate":"PASS"},
+    "K01": {"name":"Existing Harness/Simulation/Failure Corpus Inventory","status":"COMPLETE","steps":{"K01-S01":"PASS","K01-S02":"PASS","K01-S03":"PASS","K01-S04":"PASS","K01-S05":"PASS","K01-S06":"PASS"},"hardGate":"PASS"},
+    "K02": {"name":"Stable IDs and Core Schemas","status":"COMPLETE","steps":{"K02-S01":"PASS","K02-S02":"PASS","K02-S03":"PASS","K02-S04":"PASS","K02-S05":"PASS","K02-S06":"PASS","K02-S07":"PASS","K02-S08":"PASS"},"hardGate":"PASS"},
+    "K03": {"name":"Attack Primitive Taxonomy","status":"IN_PROGRESS","steps":{"K03-S01":"READY","K03-S02":"READY","K03-S03":"READY","K03-S04":"READY","K03-S05":"READY"},"hardGate":"PENDING"}
   },
   "testSummary": {
     "developmentRecoveryV1": {"status":"PASS","command":"node --test packages/adversarial-simulation-kb/test/development-recovery-v1.test.mjs","passed":6,"failed":0,"redPhaseVerified":true},
-    "existingAssetInventoryV1": {"status":"PASS","command":"node --test packages/adversarial-simulation-kb/test/existing-asset-inventory-v1.test.mjs","passed":3,"failed":0,"redPhaseVerified":true}
+    "existingAssetInventoryV1": {"status":"PASS","command":"node --test packages/adversarial-simulation-kb/test/existing-asset-inventory-v1.test.mjs","passed":3,"failed":0,"redPhaseVerified":true},
+    "coreSchemasV1": {"status":"PASS","command":"node --test packages/adversarial-simulation-kb/test/core-schemas-v1.test.mjs","passed":5,"failed":0,"redPhaseVerified":true}
   },
   "proofSummary": {
     "K00": {"status":"PASS","hardGate":"PASS","atomicCommit":"61f64488ef2c2c859feb4e302089022e27e8b33b","pullRequest":131,"pullRequestWorkflowRuns":0},
-    "K01": {"status":"PASS","hardGate":"PASS","assetRecords":18,"activeOverlapRecords":2,"baselineMainSha":"468b749076fb5b9c166c14a187fdd29a6f967acd","unclassifiedKnownReusableAssets":0}
+    "K01": {"status":"PASS","hardGate":"PASS","assetRecords":18,"activeOverlapRecords":2,"baselineMainSha":"468b749076fb5b9c166c14a187fdd29a6f967acd","unclassifiedKnownReusableAssets":0},
+    "K02": {"status":"PASS","hardGate":"PASS","schemaFiles":5,"stableIdFamilies":6,"requiredFieldOmissionCoverage":"ALL_CORE_REQUIRED_FIELDS","revisionRegressionNegative":"PASS"}
   },
   "decisions": ["D-0001","D-0002","D-0003","D-0004"],
-  "lastUpdatedAt": "2026-08-24T06:05:00Z"
+  "lastUpdatedAt": "2026-08-24T06:12:00Z"
 }
