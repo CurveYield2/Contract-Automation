@@ -1,11 +1,11 @@
 name: BoostHub V17 Slippage RED v1
 
 on:
-  push:
+  pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened]
     paths:
-      - 'github-native-sim/boosthub-v17-slippage-red-run-v1.txt'
-      - '.github/workflows/boosthub-v17-slippage-red-v1.yml'
+      - 'github-native-sim/boosthub-v17-slippage-red-pr-v1.txt'
 
 permissions:
   contents: read
