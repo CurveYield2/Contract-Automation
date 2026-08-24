@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-v7-current-qualification-status-v1",
   "status": "PASS",
-  "qualifiedCommit": "4dae6fa960cdd56c1239e8e2d44d2c055b8f3645",
-  "workflowRunId": "32678556486",
-  "qualifiedAt": "2026-08-24T01:04:22.299Z",
+  "qualifiedCommit": "87b2d603d2c3d75436f522ff1954d1ac1bfbd913",
+  "workflowRunId": "32679421997",
+  "qualifiedAt": "2026-08-24T01:20:35.160Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
@@ -63,8 +63,8 @@
     },
     "runtime": {
       "identityNormalized": true,
-      "blockNumber": 25821622,
-      "blockHash": "0x2a637da6ebbd43be13991cef4dfd8d4369c12a1d36d10305f1e7c326d89aa834",
+      "blockNumber": 25821704,
+      "blockHash": "0x629983b19de5e09fd67d0c23d9a775c8d04012ad9a9583bfd7a1445e1723c63d",
       "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
       "rpcUrlExposed": false
     }
