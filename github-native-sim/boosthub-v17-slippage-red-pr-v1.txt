@@ -1,1 +1,2 @@
-This file is intentionally created on a PR branch to trigger the expected-failing V17 slippage RED test.
+Trigger expected-failing V17 slippage test against canonical V16/v4 source.
+RED feature expectations: 1% default, owner configurable, 4% hard max.
