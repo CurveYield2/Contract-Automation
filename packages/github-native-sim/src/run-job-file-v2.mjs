@@ -5,6 +5,7 @@ import { runGitHubNativeJob as runGitHubNativeJobV1 } from './run-job-file.mjs';
 import { runPhase6ExecutionPreflightV1 } from './phase6-execution-preflight-v1.mjs';
 import { createPhase6MutableRpcSession, phase6MutableRpcRuntime } from './phase6-mutable-rpc-v1.mjs';
 import { runTargetCompilePreflightV1 } from './compile-target-preflight-v1.mjs';
+import { runTargetSlitherPreflightV1 } from './slither-target-preflight-v1.mjs';
 import { runTargetMedusaPreflightV1 } from './medusa-target-preflight-v1.mjs';
 import { runTargetFoundryPreflightV1 } from './foundry-target-preflight-v1.mjs';
 import { runProcess } from './execution.mjs';
@@ -45,6 +46,10 @@ function phase6RequiresMutableRpc(request) {
   return medusaRequested || nativeFuzzRequested || coverageRequested;
 }
 
+function phase6RequiresSlither(request) {
+  return request.configuration?.analysis?.slither !== false && request.configuration?.analysis?.slither !== undefined;
+}
+
 function expectedCompileArtifacts(request) {
   return (request?.configuration?.deploymentGas?.deployableContracts ?? [])
     .filter((item) => item?.sourceName && item?.contractName)
@@ -66,6 +71,7 @@ function compilePreflightInput(request, projectRoot, expectedSourceSnapshotDiges
 function phase6DelegateOptions(delegateOptions, preflight, mutableRpcSession) {
   const options = { ...delegateOptions };
   delete options.runTargetCompilePreflight;
+  delete options.runTargetSlitherPreflight;
   delete options.runTargetMedusaPreflight;
   delete options.runTargetFoundryPreflight;
   if (preflight?.mutableRpc?.status === 'PASS') {
@@ -79,7 +85,7 @@ function phase6DelegateOptions(delegateOptions, preflight, mutableRpcSession) {
 function normalizePhase6TerminalSemantics(result) {
   if (!result || result.status !== 'completed') return result;
   const components = Object.values(result.analysis ?? {}).filter(Boolean);
-  const failureCount = components.filter((component) => ['FAILED', 'UNAVAILABLE'].includes(component.componentStatus)).length;
+  const failureCount = components.filter((component) => ['FAILED', 'UNAVAILABLE', 'COMPLETED_WITH_FAILURES'].includes(component.componentStatus)).length;
   const limitationCount = components.filter((component) => component.componentStatus === 'NOT_APPLICABLE').length;
   return {
     ...result,
@@ -114,6 +120,7 @@ async function executePhase6V2({
   let mutableRpcSession = null;
   let executionSnapshot = null;
   let targetCompilePreflight = null;
+  let targetSlitherPreflight = null;
   let targetFoundryPreflight = null;
   try {
     phase6Snapshot = await stagePhase6Snapshot(legacyRequest, {
@@ -213,6 +220,18 @@ async function executePhase6V2({
       return targetCompilePreflight;
     };
 
+    if (phase6RequiresSlither(legacyRequest)) {
+      delegated.preflightSlither = async ({ projectRoot, build }) => {
+        const runner = delegateOptions.runTargetSlitherPreflight ?? runTargetSlitherPreflightV1;
+        targetSlitherPreflight = await runner({
+          projectRoot,
+          sourceCommit: phase6Snapshot.commit,
+          build,
+        }, { runCommand: delegateOptions.runCommand ?? runProcess });
+        return targetSlitherPreflight;
+      };
+    }
+
     if (preflight.nativeFuzz?.status === 'PASS') {
       delegated.preflightNativeFuzz = async ({ projectRoot, medusa, phase6MutableRpc }) => {
         const runner = delegateOptions.runTargetFoundryPreflight ?? runTargetFoundryPreflightV1;
@@ -268,6 +287,11 @@ async function executePhase6V2({
         targetCompile: targetCompilePreflight ?? result.preflight?.compile ?? { status: 'NOT_RUN', reason: 'BUILD_BOUNDARY_NOT_REACHED' },
         targetCompileRequired: true,
         targetCompilePassed: targetCompilePreflight ? targetCompilePreflight.status === 'PREFLIGHT_PASS' : null,
+        targetSlither: phase6RequiresSlither(legacyRequest)
+          ? (targetSlitherPreflight ?? { status: 'NOT_RUN', reason: 'SLITHER_ACTION_BOUNDARY_NOT_REACHED' })
+          : { status: 'NOT_APPLICABLE', reason: 'SLITHER_NOT_REQUESTED' },
+        targetSlitherSmokeRequired: phase6RequiresSlither(legacyRequest),
+        targetSlitherSmokePassed: targetSlitherPreflight ? targetSlitherPreflight.status === 'PREFLIGHT_PASS' : null,
         targetFoundry: preflight.nativeFuzz?.status === 'PASS'
           ? (targetFoundryPreflight ?? { status: 'NOT_RUN', reason: 'NATIVE_FUZZ_ACTION_BOUNDARY_NOT_REACHED' })
           : { status: 'NOT_APPLICABLE', reason: preflight.nativeFuzz?.reason ?? 'NATIVE_FUZZ_NOT_REQUESTED' },
@@ -329,12 +353,21 @@ export async function runGitHubNativeJobV2(input, {
 
   const executionOptions = { ...delegateOptions };
   const targetCompileRunner = executionOptions.runTargetCompilePreflight ?? runTargetCompilePreflightV1;
+  const targetSlitherRunner = executionOptions.runTargetSlitherPreflight ?? runTargetSlitherPreflightV1;
   delete executionOptions.runTargetCompilePreflight;
+  delete executionOptions.runTargetSlitherPreflight;
   if (!executionOptions.preflightBuild) {
     executionOptions.preflightBuild = async ({ projectRoot }) => targetCompileRunner(
       compilePreflightInput(request, projectRoot),
       { runCommand: delegateOptions.runCommand ?? runProcess },
     );
+  }
+  if (!executionOptions.preflightSlither && request.configuration?.analysis?.slither !== false && request.configuration?.analysis?.slither !== undefined) {
+    executionOptions.preflightSlither = async ({ projectRoot, build }) => targetSlitherRunner({
+      projectRoot,
+      sourceCommit: request.source.commit,
+      build,
+    }, { runCommand: delegateOptions.runCommand ?? runProcess });
   }
 
   let result = await runGitHubNativeJobV1(request, {
@@ -350,6 +383,7 @@ export async function runGitHubNativeJobV2(input, {
         targetCompile: result.preflight?.compile ?? { status: 'NOT_RUN', reason: 'BUILD_BOUNDARY_NOT_REACHED' },
         targetCompileRequired: true,
         targetCompilePassed: result.preflight?.compile ? result.preflight.compile.status === 'PREFLIGHT_PASS' : null,
+        targetSlither: result.analysis?.slither?.preflight ?? { status: 'NOT_RUN', reason: 'SLITHER_ACTION_BOUNDARY_NOT_REACHED_OR_PASSED_WITHOUT_INLINE_RECEIPT' },
       },
     };
   }
