@@ -1,3 +1,5 @@
+const RUNTIME_ACTIONS = Object.freeze(['deploy','call','staticCall','expectRevert','setBalance','transferNative','mine','increaseTime','snapshot','revertSnapshot','assertBalance','assertCall']);
+
 const BASE_RECIPES = {
   'external-readiness-v1': {
     purpose: 'Pinned external dependency identity and state assertions.',
@@ -27,6 +29,11 @@ const BASE_RECIPES = {
     purpose: 'Final-exit and first-redeposit value attribution across zero supply.',
     allowedActions: ['call', 'increaseTime', 'mine', 'staticCall', 'assertCall', 'snapshot'],
   },
+  'repeated-lifecycle-v1': {
+    purpose: 'Catch state that becomes unsafe only after multiple cycles.',
+    allowedActions: ['deploy','call','staticCall','expectRevert','setBalance','transferNative','mine','increaseTime','snapshot','revertSnapshot','assertBalance','assertCall'],
+    repeatedLifecycle: true,
+  },
 };
 
 const GOVERNANCE_STAKING_ZERO_SUPPLY_RESTART = {
@@ -49,23 +56,28 @@ const GOVERNANCE_STAKING_ZERO_SUPPLY_RESTART = {
   ],
 };
 
+function freezeRecipe(recipe){ return Object.freeze({...recipe,allowedActions:Object.freeze([...recipe.allowedActions]),...(recipe.requiredLabels?{requiredLabels:Object.freeze([...recipe.requiredLabels])}:{})}); }
 export const V7_LIFECYCLE_RECIPES_V1 = Object.freeze(Object.fromEntries(
-  Object.entries({
-    ...BASE_RECIPES,
-    'governance-staking-zero-supply-restart-v1': GOVERNANCE_STAKING_ZERO_SUPPLY_RESTART,
-  }).map(([id, recipe]) => [id, Object.freeze({
-    ...recipe,
-    allowedActions: Object.freeze([...recipe.allowedActions]),
-    ...(recipe.requiredLabels ? { requiredLabels: Object.freeze([...recipe.requiredLabels]) } : {}),
-  })])
+  Object.entries({...BASE_RECIPES,'governance-staking-zero-supply-restart-v1':GOVERNANCE_STAKING_ZERO_SUPPLY_RESTART}).map(([id,recipe])=>[id,freezeRecipe(recipe)])
 ));
 
 export function getV7LifecycleRecipeV1(recipeId) {
   const recipe = V7_LIFECYCLE_RECIPES_V1[recipeId];
-  if (!recipe) {
-    return { status: 'RECIPE_GAP', recipeId, supportedRecipeIds: Object.keys(V7_LIFECYCLE_RECIPES_V1).sort() };
-  }
+  if (!recipe) return { status: 'RECIPE_GAP', recipeId, supportedRecipeIds: Object.keys(V7_LIFECYCLE_RECIPES_V1).sort() };
   return { status: 'SUPPORTED', recipeId, recipe: structuredClone(recipe) };
+}
+
+function repeatedLifecycleGaps(steps){
+  const calls=steps.filter(s=>s?.action==='call').length;
+  const time=steps.filter(s=>s?.action==='increaseTime').length;
+  const mine=steps.filter(s=>s?.action==='mine').length;
+  const snapshots=steps.filter(s=>s?.action==='snapshot').length;
+  const reverts=steps.filter(s=>s?.action==='revertSnapshot').length;
+  const gaps=[];
+  if(calls<2) gaps.push('at least two lifecycle action cycles are required');
+  if((time>0||mine>0)&&(time<2||mine<2)) gaps.push('time/state lifecycle repetition must occur across at least two cycles');
+  if(snapshots>0&&reverts===0) gaps.push('snapshot use requires revertSnapshot validation');
+  return gaps;
 }
 
 export function validateWorkflowAgainstV7RecipeV1(recipeId, workflow) {
@@ -73,13 +85,23 @@ export function validateWorkflowAgainstV7RecipeV1(recipeId, workflow) {
   if (resolved.status !== 'SUPPORTED') return resolved;
   const allowed = new Set(resolved.recipe.allowedActions);
   const steps = workflow?.steps ?? [];
-  const unsupported = steps
-    .map((step, index) => ({ index, action: step?.action }))
-    .filter(({ action }) => !allowed.has(action));
-  const labels = new Set(steps.map((step) => step?.label).filter((label) => typeof label === 'string'));
-  const missingRequiredLabels = (resolved.recipe.requiredLabels ?? []).filter((label) => !labels.has(label));
-  const status = unsupported.length === 0 && missingRequiredLabels.length === 0 ? 'SUPPORTED' : 'RECIPE_GAP';
-  return { status, recipeId, unsupported, missingRequiredLabels, recipe: resolved.recipe };
+  const unsupported = steps.map((step,index)=>({index,action:step?.action})).filter(({action})=>!allowed.has(action));
+  const labels = new Set(steps.map((step)=>step?.label).filter((label)=>typeof label==='string'));
+  const missingRequiredLabels = (resolved.recipe.requiredLabels ?? []).filter((label)=>!labels.has(label));
+  const repeatedLifecycleFailures = recipeId==='repeated-lifecycle-v1' ? repeatedLifecycleGaps(steps) : [];
+  const status = unsupported.length===0&&missingRequiredLabels.length===0&&repeatedLifecycleFailures.length===0 ? 'SUPPORTED' : 'RECIPE_GAP';
+  return { status, recipeId, unsupported, missingRequiredLabels, repeatedLifecycleFailures, recipe: resolved.recipe };
+}
+
+export function registerV7LifecycleRecipeExtensionV1(baseRegistry, extension){
+  if(!baseRegistry||typeof baseRegistry!=='object'||Array.isArray(baseRegistry)) throw new Error('baseRegistry must be an object');
+  const id=extension?.id; if(typeof id!=='string'||!id.trim()) throw new Error('extension id is required');
+  if(Object.prototype.hasOwnProperty.call(baseRegistry,id)) throw new Error(`duplicate canonical recipe ID: ${id}`);
+  if(!Array.isArray(extension.allowedActions)||extension.allowedActions.length===0) throw new Error('extension allowedActions must be non-empty');
+  for(const action of extension.allowedActions) if(!RUNTIME_ACTIONS.includes(action)) throw new Error(`unsupported action in recipe extension: ${action}`);
+  if(extension.requiredLabels!==undefined&&(!Array.isArray(extension.requiredLabels)||extension.requiredLabels.some(x=>typeof x!=='string'||!x.trim()))) throw new Error('malformed required labels');
+  const recipe=freezeRecipe({purpose:typeof extension.purpose==='string'?extension.purpose:'Code-reviewed V7 lifecycle recipe extension.',allowedActions:[...new Set(extension.allowedActions)],requiredLabels:extension.requiredLabels?[...new Set(extension.requiredLabels)]:undefined});
+  return Object.freeze({...baseRegistry,[id]:recipe});
 }
 
 export function buildGovernanceStakingZeroSupplyRestartRecipeV1({
