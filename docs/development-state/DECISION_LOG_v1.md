@@ -25,3 +25,10 @@ Append-only. Do not rewrite earlier decisions; append a superseding decision if 
 - Status: ACTIVE
 - Decision: Existing BoostHub/lifecycle campaign workflows and requests are classified `ADAPT`; they may seed reusable recipes only after normalization and target-binding removal. They do not satisfy HISTORICAL_REPRODUCTION proof merely because they ran on a fork.
 - Consequence: The first historical exploit proof remains a K07-K14 obligation with exact historical chain/block/code/effect binding.
+
+## D-0005 — Deduplication is conservative; probable matches do not auto-merge
+
+- Status: ACTIVE
+- Decision: An exact shared exploit transaction hash is sufficient to classify two candidate records as the same incident and merge their references. A contextual/root-cause fingerprint match without exact transaction identity is only `PROBABLE_SAME_INCIDENT` and remains separate for review. Distinct transaction hashes, or asymmetric transaction evidence with the same fingerprint, are `VARIANT_OR_RELATED`, never silently collapsed.
+- Basis: K05 must avoid both duplicate EXP IDs and loss of distinct exploit variants.
+- Consequence: automated ingestion can merge exact duplicates deterministically while preserving variant/family relationships for explicit modeling.

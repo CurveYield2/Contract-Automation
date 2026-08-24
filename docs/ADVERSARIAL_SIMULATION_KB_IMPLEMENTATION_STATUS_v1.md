@@ -7,7 +7,8 @@
 | Core KB schemas/IDs (K02) | PASS | PASS | PASS | N/A | N/A | PASS |
 | Attack primitive taxonomy (K03) | PASS | PASS | PASS | N/A | N/A | PASS |
 | Source/reference confidence (K04) | PASS | PASS | PASS | N/A | N/A | PASS |
-| Incident deduplication/relationships (K05) | IN PROGRESS | PENDING | PENDING | N/A | N/A | PENDING |
-| Remaining K06-K36 modules | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
+| Incident deduplication/relationships (K05) | PASS | PASS | PASS | N/A | N/A | PASS |
+| Deterministic registries/indexes (K06) | IN PROGRESS | PENDING | PENDING | N/A | N/A | PENDING |
+| Remaining K07-K36 modules | PENDING | PENDING | PENDING | PENDING | PENDING | PENDING |
 
 This table is intentionally conservative. No exploit/pattern/recipe/executable is QUALIFIED yet.
