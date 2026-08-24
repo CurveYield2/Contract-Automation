@@ -1,0 +1,34 @@
+{
+  "finalAdmin": "REQUIRED_ADDRESS",
+  "vaultFeeReceiver": "REQUIRED_ADDRESS",
+  "pools": {
+    "sdCRV": {
+      "withdrawFeeBps": "REQUIRED_0_TO_250",
+      "performanceFeeBps": "REQUIRED_0_TO_1000",
+      "performanceFeeReceiver": "REQUIRED_ADDRESS",
+      "performanceFeeStaked": false,
+      "yieldBoostFeeBps": "REQUIRED_0_TO_500",
+      "rewardSmoothingUnits": "REQUIRED_0_TO_300",
+      "keeper": "REQUIRED_ADDRESS"
+    },
+    "sdFXN": {
+      "withdrawFeeBps": "REQUIRED_0_TO_250",
+      "performanceFeeBps": "REQUIRED_0_TO_1000",
+      "performanceFeeReceiver": "REQUIRED_ADDRESS",
+      "performanceFeeStaked": false,
+      "yieldBoostFeeBps": "REQUIRED_0_TO_500",
+      "rewardSmoothingUnits": "REQUIRED_0_TO_300",
+      "keeper": "REQUIRED_ADDRESS"
+    },
+    "sdYB": {
+      "withdrawFeeBps": "REQUIRED_0_TO_250",
+      "performanceFeeBps": "REQUIRED_0_TO_1000",
+      "performanceFeeReceiver": "REQUIRED_ADDRESS",
+      "performanceFeeStaked": false,
+      "yieldBoostFeeBps": "REQUIRED_0_TO_500",
+      "rewardSmoothingUnits": "REQUIRED_0_TO_300",
+      "keeper": "REQUIRED_ADDRESS"
+    }
+  },
+  "cyGovRewardFunding": {"sdCRV": "0", "sdFXN": "0", "sdYB": "0"}
+}
