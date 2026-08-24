@@ -44,7 +44,8 @@ export async function runTargetSlitherPreflightV1({projectRoot,sourceCommit,buil
     const success=parsed?.success===true;
     const rawText=`${raw.stdout}\n${raw.stderr}`;
     buildViewCompatible=!BUILD_VIEW_FAILURE.test(rawText);
-    smoke={status:success?'PASS':'FAIL',exitCode:raw.exitCode,outputParseable,success,stdout:raw.stdout.slice(0,4000),stderr:raw.stderr.slice(0,4000),command:['slither','.','--print','contract-summary','--json','-']};
+    const smokeStatus=success?'PASS':(raw.exitCode===0&&!outputParseable?'OUTPUT_INCOMPATIBLE':'FAIL');
+    smoke={status:smokeStatus,exitCode:raw.exitCode,outputParseable,success,stdout:raw.stdout.slice(0,4000),stderr:raw.stderr.slice(0,4000),command:['slither','.','--print','contract-summary','--json','-']};
   }
 
   const receipt=preflightSlitherV1({
