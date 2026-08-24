@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {preflightFileMoveV1} from '../src/preflight/file-move-v1.mjs';
+const ok={source:{repository:'CurveYield2/Audit-Controller',ref:'a'.repeat(40),path:'old.bin',blobSha:'b'.repeat(40)},destination:{repository:'CurveYield2/Audit-Controller',ref:'a'.repeat(40),path:'new.bin',exists:false},transferMethod:'GIT_TREE_REUSE_BLOB',expectedTransferredBytes:0,verifyDestinationBlob:true,rollbackPlan:'restore prior tree'};
+test('same repo move requires zero-byte blob reuse',()=>assert.equal(preflightFileMoveV1(ok).status,'PREFLIGHT_PASS'));
+test('reupload move blocked',()=>assert.equal(preflightFileMoveV1({...ok,transferMethod:'UPLOAD',expectedTransferredBytes:100}).firstFailure,'MOVE_BLOB_REUSE_REQUIRED')); 

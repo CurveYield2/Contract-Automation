@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {preflightBranchPrV1} from '../src/preflight/branch-pr-v1.mjs';
+const s='a'.repeat(40),ok={repository:'CurveYield2/Contract-Automation',currentMainSha:s,baseSha:s,taskIdentity:'task-x',existingWorkSearched:true,existingMatches:[],action:'CREATE_NEW',intendedPaths:['x'],lifecycleDisposition:'ACTIVE_WITH_OPEN_PR'};
+test('new distinct branch allowed',()=>assert.equal(preflightBranchPrV1(ok).status,'PREFLIGHT_PASS'));
+test('unchanged request retry must reuse PR',()=>{const r=preflightBranchPrV1({...ok,requestRetry:true,requestSemanticsChanged:false});assert.equal(r.firstFailure,'BRANCH_REDUNDANT_REQUEST_RETRY');});

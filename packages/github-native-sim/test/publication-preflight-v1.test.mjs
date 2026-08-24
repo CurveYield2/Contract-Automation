@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {preflightPublicationV1} from '../src/preflight/publication-v1.mjs';
+const ok={ownerRepository:'CurveYield2/Audit-Controller',publicationKind:'AUDIT_PDF',inputArtifactsComplete:true,inputBundleDigest:'a'.repeat(64),privateDataExposure:false,secretLeakDetected:false,previewValidation:{status:'PASS'},destinationWritable:true,destination:'reports/audit.pdf',destinationExists:false};
+test('private audit PDF publication readiness PASS',()=>assert.equal(preflightPublicationV1(ok).status,'PREFLIGHT_PASS'));
+test('private data exposure blocks publication',()=>assert.equal(preflightPublicationV1({...ok,privateDataExposure:true}).firstFailure,'PUBLICATION_PRIVATE_DATA_EXPOSURE')); 

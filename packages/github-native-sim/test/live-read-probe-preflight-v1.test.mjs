@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {preflightLiveReadProbeV1} from '../src/preflight/live-read-probe-v1.mjs';
+const ok={chainId:1,blockNumber:100,blockHash:'0xabc',codePresent:true,addressNormalized:true,abiCheck:{status:'PASS'},stateMutability:'view',callProbe:{status:'PASS',observed:'1'},normalizedEvidenceContainsRpcSecret:false};
+test('trusted read probe readiness PASS',()=>assert.equal(preflightLiveReadProbeV1(ok).status,'PREFLIGHT_PASS'));
+test('wrong ABI blocks eth_call',()=>assert.equal(preflightLiveReadProbeV1({...ok,abiCheck:{status:'FAIL',error:'decode'}}).firstFailure,'LIVE_PROBE_ABI_SIGNATURE_MISMATCH')); 

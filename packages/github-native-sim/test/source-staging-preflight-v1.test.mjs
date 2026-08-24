@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {preflightSourceStagingV1} from '../src/preflight/source-staging-v1.mjs';
+const c='a'.repeat(40),h='b'.repeat(64),ok={repository:'CurveYield2/Audit-Controller',expectedCommit:c,observedCommit:c,expectedArchiveSha256:h,observedArchiveSha256:h,unsafeEntries:[],extractedBytes:1000,maxExtractedBytes:100000,projectRoot:'target',projectRootExists:true,materializationCount:1,snapshotDigest:'c'.repeat(64)};
+test('exact safe source stage PASS',()=>assert.equal(preflightSourceStagingV1(ok).status,'PREFLIGHT_PASS'));
+test('path traversal blocks extraction',()=>{const r=preflightSourceStagingV1({...ok,unsafeEntries:['../../evil.sol']});assert.equal(r.firstFailure,'STAGE_UNSAFE_ARCHIVE_ENTRY');});

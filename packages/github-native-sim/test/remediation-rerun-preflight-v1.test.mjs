@@ -1,0 +1,4 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {preflightRemediationRerunV1} from '../src/preflight/remediation-rerun-v1.mjs';
+const ok={priorSourceIdentityDigest:'a'.repeat(64),newSourceIdentityDigest:'b'.repeat(64),changedFiles:['A.sol'],invalidationMapComplete:true,impactedEvidenceIds:['EV-1'],requiredRetests:['TEST'],harnessCompatible:true,replacementEvidenceDestination:'campaign/evidence/new.json'};
+test('source-delta-bound rerun PASS',()=>assert.equal(preflightRemediationRerunV1(ok).status,'PREFLIGHT_PASS'));
+test('missing delta mapping blocks rerun',()=>assert.equal(preflightRemediationRerunV1({...ok,invalidationMapComplete:false}).firstFailure,'REMEDIATION_INVALIDATION_MAPPING_MISSING')); 
