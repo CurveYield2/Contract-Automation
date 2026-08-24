@@ -1,0 +1,254 @@
+name: BoostHub v4 Second-Round Remediation Audit v1
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'github-native-sim/boosthub-v4-second-round-audit-trigger-v1.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-v4-second-round:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout trusted runner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Checkout exact v4 source organization commit
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Solo-Audit-Controller
+          ref: 93062463611e798ab26544a88c4e119f9620be9a
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Extract exact v4 archive
+        id: src
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP='.controller/campaigns/Boosthub Staking v2/source/CurveYield-BoostHub-sdCRV-sdFXN-sdYB-Deployment-Package-Remediated-v4.zip'
+          sha256sum "$ZIP" | tee boosthub-v4-archive-sha256-v1.txt
+          test "$(sha256sum "$ZIP" | awk '{print $1}')" = '4b502a2040712da8e6f4e80165ed74c8e3f492226e60141bc23ac8585a3855d4'
+          rm -rf .v4 && mkdir .v4 && unzip -q "$ZIP" -d .v4
+          ROOT="$(find .v4 -mindepth 1 -maxdepth 1 -type d | head -n1)"
+          test -n "$ROOT"
+          echo "root=$(realpath "$ROOT")" >> "$GITHUB_OUTPUT"
+
+      - name: Install package dependencies in GitHub only
+        working-directory: ${{ steps.src.outputs.root }}
+        run: npm ci --ignore-scripts
+
+      - name: Compile v4 Solidity changed surface
+        working-directory: ${{ steps.src.outputs.root }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Core contracts include Strategy + SdYbRewardConverter.
+          npx hardhat compile 2>&1 | tee "$GITHUB_WORKSPACE/boosthub-v4-hardhat-compile-v1.txt"
+          # Compile the three reference converter sources under the exact same package toolchain
+          # without modifying the source archive.
+          mkdir -p contracts/audit-reference
+          cp reference/converters/CurveRouterRewardConverter.sol contracts/audit-reference/
+          cp reference/converters/WstEthCurveRouterRewardConverter.sol contracts/audit-reference/
+          cp reference/converters/CysdCrvCrvUsdRewardConverterV1-flattened-v3.sol contracts/audit-reference/
+          npx hardhat compile --force 2>&1 | tee "$GITHUB_WORKSPACE/boosthub-v4-reference-converters-compile-v1.txt"
+
+      - name: Compile V16 with exact Vyper and measure runtime
+        shell: bash
+        env:
+          ROOT: ${{ steps.src.outputs.root }}
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-input 'vyper==0.4.3'
+          python - <<'PY' | tee boosthub-v4-v16-runtime-v1.txt
+          import os
+          from pathlib import Path
+          import vyper
+          from vyper.compiler import compile_code
+          p=Path(os.environ['ROOT'])/'contracts/boosthub/vyper/BoostHubStaking-v16.vy'
+          out=compile_code(p.read_text(),contract_path=str(p),output_formats=['bytecode_runtime'])
+          x=out['bytecode_runtime']; n=(len(x)-2)//2 if x.startswith('0x') else len(x)//2
+          print('vyper='+vyper.__version__)
+          print('runtime_bytes='+str(n))
+          print('eip170_headroom='+str(24576-n))
+          assert n == 24440, n
+          PY
+
+      - name: Run package non-compile verification
+        working-directory: ${{ steps.src.outputs.root }}
+        run: npm run check:v2 2>&1 | tee "$GITHUB_WORKSPACE/boosthub-v4-package-check-v1.txt"
+
+      - name: Probe pinned live reward classification and oracle-fee floors
+        env:
+          RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          ROOT: ${{ steps.src.outputs.root }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$ROOT/second-round-live-probe-v1.js" <<'NODE'
+          const {ethers}=require('ethers');
+          const fs=require('fs');
+          const path=require('path');
+          const BLOCK=25737717;
+          const provider=new ethers.JsonRpcProvider(process.env.RPC_URL, 1, {staticNetwork:true});
+          const config=JSON.parse(fs.readFileSync(path.join(process.env.ROOT,'config-mainnet-v2.json')));
+          const HUB=config.boostHub;
+          const FEE_DEN=10000000000n;
+          const BPS=10000n;
+          const SLIP=100n;
+          const NATIVE='0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+          const hub=new ethers.Contract(HUB,[
+            'function isRewardToken(uint256,address) view returns(bool)'
+          ],provider);
+          const erc20Abi=['function decimals() view returns(uint8)'];
+          async function callAt(c,fn,args=[]){return await c[fn](...args,{blockTag:BLOCK});}
+          async function lowCall(to, sig, args, types){
+            const iface=new ethers.Interface([`function ${sig}`]);
+            const name=sig.slice(0,sig.indexOf('('));
+            const data=iface.encodeFunctionData(name,args);
+            const ret=await provider.call({to,data},BLOCK);
+            return iface.decodeFunctionResult(name,ret)[0];
+          }
+          async function decimals(t){ if(t.toLowerCase()===NATIVE.toLowerCase()) return 18; return Number(await callAt(new ethers.Contract(t,erc20Abi,provider),'decimals')); }
+          function to18(x,d){ return d===18?x:(d<18?x*10n**BigInt(18-d):x/10n**BigInt(d-18)); }
+          function from18(x,d){ return d===18?x:(d<18?x/10n**BigInt(18-d):x*10n**BigInt(d-18)); }
+          async function fee(pool){return await lowCall(pool,'fee() view returns(uint256)',[],[]);}
+          async function oracle(pool,idx){
+            if(idx===0n) return 10n**18n;
+            if(idx===1n){
+              try { const v=await lowCall(pool,'price_oracle() view returns(uint256)',[],[]); if(v>0n)return v; } catch(e){}
+            }
+            return await lowCall(pool,'price_oracle(uint256) view returns(uint256)',[idx-1n],['uint256']);
+          }
+          async function oracleHop(pool,cur,next,i,j,amount){
+            const ni=to18(amount,await decimals(cur));
+            const pi=await oracle(pool,BigInt(i));
+            const po=await oracle(pool,BigInt(j));
+            let out=ni*pi/po;
+            const f=await fee(pool);
+            out=out*(FEE_DEN-f)/FEE_DEN;
+            return {out:from18(out,await decimals(next)), fee:f, pi, po};
+          }
+          async function getDy(pool,i,j,amount){
+            for(const sig of ['get_dy(uint256,uint256,uint256) view returns(uint256)','get_dy(int128,int128,uint256) view returns(uint256)']){
+              try{return await lowCall(pool,sig,[i,j,amount],[]);}catch(e){}
+            }
+            throw new Error('get_dy unavailable '+pool);
+          }
+          const convAbi=[
+            'function route() view returns(address[9])',
+            'function swapParams() view returns(uint256[3][4])',
+            'function tokenIn() view returns(address)',
+            'function tokenOut() view returns(address)',
+            'function router() view returns(address)',
+            'function wstEth() view returns(address)',
+            'function stEth() view returns(address)',
+            'function previewConvert(address,address,uint256) view returns(uint256)'
+          ];
+          async function genericProbe(label,addr,amounts,isWst=false){
+            const c=new ethers.Contract(addr,convAbi,provider);
+            const route=await callAt(c,'route'); const sp=await callAt(c,'swapParams');
+            const outToken=await callAt(c,'tokenOut');
+            let inToken; if(isWst) inToken=await callAt(c,'wstEth'); else inToken=await callAt(c,'tokenIn');
+            const rows=[];
+            for(const amt of amounts){
+              const spot=await callAt(c,'previewConvert',[inToken,outToken,amt]);
+              let q=amt; const hops=[];
+              let startHop=0;
+              if(isWst){
+                const st=await callAt(c,'stEth');
+                const w=new ethers.Contract(inToken,['function getStETHByWstETH(uint256) view returns(uint256)'],provider);
+                q=await callAt(w,'getStETHByWstETH',[amt]);
+                q=await getDy(route[1],Number(sp[0][0]),Number(sp[0][1]),q);
+                hops.push({pool:route[1],legacy:true,out:q.toString()}); startHop=1;
+              }
+              for(let hop=startHop;hop<4;hop++){
+                const ri=hop*2, pool=route[ri+1], next=route[ri+2], cur=route[ri];
+                if(pool===ethers.ZeroAddress||next===ethers.ZeroAddress)break;
+                const z=await oracleHop(pool,cur,next,sp[hop][0],sp[hop][1],q); q=z.out;
+                hops.push({pool,fee:z.fee.toString(),pi:z.pi.toString(),po:z.po.toString(),out:q.toString()});
+              }
+              const floor=q*(BPS-SLIP)/BPS;
+              rows.push({amount:amt.toString(),spot:spot.toString(),oracleFee:q.toString(),floor1pct:floor.toString(),spotMinusFloorBps: Number((spot-floor)*1000000n/(floor===0n?1n:floor))/100, executable:spot>=floor,hops});
+            }
+            return {label,address:addr,inToken,outToken,route,swapParams:sp.map(x=>x.map(y=>y.toString())),rows};
+          }
+          async function fixedSdCrv(amount){
+            const tri='0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14';
+            const crvpool='0xCA0253A98D16e9C1e3614caFDA19318EE69772D0';
+            const crvusd='0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E';
+            const crv='0xD533a949740bb3306d119CC777fa900bA034cd52';
+            const sdcrv=config.pools.sdCRV.asset;
+            let h1=await oracleHop(tri,crvusd,crv,0n,2n,amount);
+            let h2=await oracleHop(crvpool,crv,sdcrv,0n,1n,h1.out);
+            const q=h2.out, floor=q*(BPS-SLIP)/BPS;
+            const oldAddr=config.pools.sdCRV.strategyRouteConverters[1];
+            const c=new ethers.Contract(oldAddr,convAbi,provider);
+            const spot=await callAt(c,'previewConvert',[crvusd,sdcrv,amount]);
+            return {amount:amount.toString(),spot:spot.toString(),oracleFee:q.toString(),floor1pct:floor.toString(),executable:spot>=floor,fees:[h1.fee.toString(),h2.fee.toString()]};
+          }
+          async function sdYb(amount){
+            const p1=config.sdYbConverter.crvUsdYbPool,p2=config.sdYbConverter.ybSdYbPool;
+            const crvusd=config.sdYbConverter.crvUSD,yb=config.sdYbConverter.yb,sdyb=config.sdYbConverter.sdYB;
+            let h1=await oracleHop(p1,crvusd,yb,0n,1n,amount); let h2=await oracleHop(p2,yb,sdyb,0n,1n,h1.out);
+            const q=h2.out, floor=q*(BPS-SLIP)/BPS;
+            const spot1=await getDy(p1,0,1,amount); const spot=await getDy(p2,0,1,spot1);
+            return {amount:amount.toString(),spot:spot.toString(),oracleFee:q.toString(),floor1pct:floor.toString(),executable:spot>=floor,fees:[h1.fee.toString(),h2.fee.toString()],firstHop:{spot:spot1.toString(),oracleFee:h1.out.toString(),floor1pct:(h1.out*(BPS-SLIP)/BPS).toString(),executable:spot1>=h1.out*(BPS-SLIP)/BPS}};
+          }
+          (async()=>{
+            const cls={};
+            for(const [label,p] of Object.entries(config.pools)){
+              cls[label]={pid:p.pid,want:p.asset,wantIsBoostHubReward:await callAt(hub,'isRewardToken',[p.pid,p.asset]),additional:[]};
+              for(const t of p.rewardTokens) cls[label].additional.push({token:t,isBoostHubReward:await callAt(hub,'isRewardToken',[p.pid,t])});
+            }
+            const out={block:BLOCK,classifications:cls};
+            out.crvGeneric=await genericProbe('CRV->sdCRV',config.pools.sdCRV.strategyRouteConverters[0],[10n**18n,10n**16n],false);
+            out.wstEth=await genericProbe('wstETH->sdFXN',config.pools.sdFXN.strategyRouteConverters[0],[10n**18n,10n**15n,10n**13n],true);
+            out.crvUsdSdCrv=[await fixedSdCrv(10n**18n),await fixedSdCrv(10n**16n)];
+            out.crvUsdSdYb=[await sdYb(10n**18n),await sdYb(10n**16n)];
+            fs.writeFileSync(process.env.GITHUB_WORKSPACE+'/boosthub-v4-second-round-live-probe-v1.json',JSON.stringify(out,(k,v)=>typeof v==='bigint'?v.toString():v,2));
+            console.log(JSON.stringify(out,(k,v)=>typeof v==='bigint'?v.toString():v,2));
+            // Release-blocking assertions: constructor extra rewards must be BoostHub native; PID2 want must remain allowed as non-native.
+            if(out.classifications.sdYB.wantIsBoostHubReward!==false) throw new Error('expected PID2 want to be non-native reward');
+            for(const x of Object.values(out.classifications)) for(const r of x.additional) if(!r.isBoostHubReward) throw new Error('configured additional reward not BoostHub-native');
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+          node "$ROOT/second-round-live-probe-v1.js" | tee boosthub-v4-second-round-live-probe-v1.txt
+
+      - name: Upload second-round audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boosthub-v4-second-round-audit-v1
+          path: |
+            boosthub-v4-archive-sha256-v1.txt
+            boosthub-v4-hardhat-compile-v1.txt
+            boosthub-v4-reference-converters-compile-v1.txt
+            boosthub-v4-v16-runtime-v1.txt
+            boosthub-v4-package-check-v1.txt
+            boosthub-v4-second-round-live-probe-v1.txt
+            boosthub-v4-second-round-live-probe-v1.json
+          if-no-files-found: warn
+          retention-days: 30
