@@ -6,28 +6,16 @@
   "branch": "feat/adversarial-simulation-kb-v1",
   "pullRequest": 131,
   "baselineMainSha": "468b749076fb5b9c166c14a187fdd29a6f967acd",
-  "lastKnownGoodCommit": "874e49e78f0840ebb6e6fe1d8e3a76de6c21101b",
-  "currentCommit": "da69e8df9a34885d63fda9f7f9f5d087379c840e",
+  "lastKnownGoodCommit": "9cd692ceaed791dc6a6aede27a3b29c5bdb82f3d",
+  "currentCommit": "9cd692ceaed791dc6a6aede27a3b29c5bdb82f3d",
   "overallStatus": "IN_PROGRESS",
   "currentModuleId": "K13",
-  "currentStepId": "K13-S02",
-  "currentStepStatus": "IN_PROGRESS",
+  "currentStepId": "K13-S03",
+  "currentStepStatus": "READY",
   "lastCompletedModuleId": "K12",
   "lastCompletedStepId": "K12-S07",
-  "nextExactAction": "Inspect the K13 GREEN plan qualification. If it passes, add the exact historical executable/proof artifacts and bind them to canonical archive/Anvil preflight before requesting historical execution.",
-  "activeExternalRun": {
-    "status": "REQUESTED",
-    "operation": "K13 GREEN historical reproduction-plan validation",
-    "expectedWorkflow": "Adversarial Simulation KB Qualification v1",
-    "branch": "feat/adversarial-simulation-kb-v1",
-    "expectedArtifacts": [
-      "GitHub Actions unit-test log"
-    ],
-    "successCondition": "All static KB tests pass and the secret/RPC-literal gate passes.",
-    "failureCondition": "Any test or secret/RPC-literal check fails.",
-    "nextActionIfPass": "Create historical executable/proof artifacts with no proof-tier advancement.",
-    "nextActionIfFail": "Record failure diagnosis before repair."
-  },
+  "nextExactAction": "Create the historical EXEC/PROOF artifacts and a canonical V7 Anvil preflight request that pins Euler EXP-2023-0001 at block 16817995, verifies the observed block hash and Euler V1 code identity through the runner-owned archive-RPC environment, then records either exact replay evidence or an explicit unsupported limitation.",
+  "activeExternalRun": null,
   "openBlockers": [],
   "knownFailures": [],
   "modifiedPaths": [
@@ -296,5 +284,5 @@
     "D-0010",
     "D-0011"
   ],
-  "lastUpdatedAt": "2026-08-24T14:20:00Z"
+  "lastUpdatedAt": "2026-08-24T14:30:00Z"
 }

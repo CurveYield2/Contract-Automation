@@ -6,10 +6,10 @@ Generated from `DEVELOPMENT_RECOVERY_STATE_v1.json`. Do not edit this projection
 - Branch: `feat/adversarial-simulation-kb-v1`
 - Pull request: 131
 - Baseline main SHA: `468b749076fb5b9c166c14a187fdd29a6f967acd`
-- Last known good commit: `874e49e78f0840ebb6e6fe1d8e3a76de6c21101b`
+- Last known good commit: `9cd692ceaed791dc6a6aede27a3b29c5bdb82f3d`
 - Overall status: **IN_PROGRESS**
 - Current module: **K13 — Historical Reproduction Path**
-- Current step: **K13-S01 / IN_PROGRESS**
+- Current step: **K13-S03 / READY**
 - Last completed step: K12-S07
 
 ## Last hard gate
@@ -22,7 +22,7 @@ During K12, canonical V7 evidence exposed a Forge-wrapper false-positive where f
 
 ## Next exact action
 
-Inspect the K13 GREEN plan qualification. If it passes, add the exact historical executable/proof artifacts and bind them to canonical archive/Anvil preflight before requesting historical execution.
+Create the historical EXEC/PROOF artifacts and a canonical V7 Anvil preflight request that pins Euler EXP-2023-0001 at block 16817995, verifies the observed block hash and Euler V1 code identity through the runner-owned archive-RPC environment, then records either exact replay evidence or an explicit unsupported limitation.
 
 ## Open blockers
 
