@@ -22,7 +22,7 @@ During K12, canonical V7 evidence exposed a Forge-wrapper false-positive where f
 
 ## Next exact action
 
-Observe the K13 GREEN archive-preflight request-builder qualification. The minimal request builder must pass the full KB suite and secret/RPC-literal gate before an atomic Phase-7 request is submitted.
+Observe the K13 RED checked-in Phase-7 request binding qualification. It must fail only because the existing atomic controller request remains the K12 request, then replace it with the source-pinned K13 request.
 
 ## Open blockers
 
