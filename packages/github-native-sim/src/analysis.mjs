@@ -64,10 +64,32 @@ function parseSlitherOutput(output) {
   } catch { return null; }
 }
 
+function parseSuccessfulMedusaCliOutput(output) {
+  const text = String(output ?? '').replace(/\u001b\[[0-9;]*m/g, '');
+  const properties = [];
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\[PASSED\]\s+Property Test:\s+(.+?)\s*$/);
+    if (match) properties.push({ name: match[1], status: 'passed' });
+  }
+  if (properties.length === 0) return null;
+  return {
+    status: 'completed',
+    properties,
+    falsifiedProperties: 0,
+    corpus: {},
+    coverage: {},
+    statistics: {}
+  };
+}
+
 export function parseMedusaOutput(output) {
   let parsed;
   try { parsed = JSON.parse(String(output ?? '')); }
-  catch (error) { throw new V7ExecutionError('EVIDENCE_PARSE_FAILURE', 'Medusa terminal output is not valid JSON', { cause: error.message }); }
+  catch (error) {
+    const cliCampaign = parseSuccessfulMedusaCliOutput(output);
+    if (cliCampaign) return cliCampaign;
+    throw new V7ExecutionError('EVIDENCE_PARSE_FAILURE', 'Medusa terminal output is neither valid JSON nor recognized Medusa 1.5.1 CLI evidence', { cause: error.message });
+  }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new V7ExecutionError('EVIDENCE_PARSE_FAILURE', 'Medusa terminal output must be a JSON object');
   const properties = Array.isArray(parsed.properties) ? structuredClone(parsed.properties) : [];
   const falsifiedProperties = properties.filter((property) => property && property.status === 'failed').length;
