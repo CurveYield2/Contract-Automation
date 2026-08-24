@@ -1,0 +1,80 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "cyvlSDT v30",
+  "assignmentId": "reviewer-3-phase7-process-repair-full-system-medusa-v1",
+  "phaseId": "build-and-test",
+  "gateId": "phase-7-process-integrity-repair-full-system-randomized-v1",
+  "profileId": "github-native-simulate-v2",
+  "source": {
+    "repository": "CurveYield2/Solo-Audit-Controller",
+    "commit": "6bde63416a4611e127b8bb3a5958e6b6d874c188",
+    "projectPath": "CurveYield-cyvlSDT-Deployment-Package-v30",
+    "archivePath": "campaigns/CurveYield-cyvlSDT-Deployment-Package-v30.zip",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "configuration": {
+    "compilers": [
+      {
+        "language": "solidity",
+        "version": "0.8.28"
+      },
+      {
+        "language": "vyper",
+        "version": "0.3.10"
+      }
+    ],
+    "timeoutMinutes": 35,
+    "analysis": {
+      "slither": false,
+      "medusa": {
+        "version": "1.5.1"
+      },
+      "nativeFuzz": false
+    },
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun",
+    "viaIR": true,
+    "build": {
+      "purpose": "Phase 7 process-integrity repair: exact-source full-system randomized accounting Medusa validation"
+    },
+    "sbom": {
+      "reconcile": true
+    },
+    "coverage": {
+      "required": true
+    },
+    "properties": [
+      "Cross-module cyvlSDT conservation across shared actors and accounting modules",
+      "Governance token cap not exceeded under randomized reservation/mint-control interaction",
+      "Vault actor share supply reconciles to totalSupply",
+      "Revenue staking active plus queued stake remains token-backed",
+      "Boost staking total deposited remains token-backed",
+      "cyGOV yield staking total staked remains token-backed",
+      "Randomized transition accounting remains internally consistent",
+      "Interconnected randomized state transitions cover revenue staking, boost staking, Vault/Strategy, yield staking, reward notification, governance reservation, converter routing, Locker, BoostMerchant, Fraxswap converter and discounted sale converter"
+    ],
+    "harness": {
+      "kind": "runner-owned-audit-overlay-v1",
+      "bundleId": "cyvlsdt-v30-phase6-system-v1"
+    },
+    "actions": {
+      "ordering": "MEDUSA_ONLY_SUPPLEMENTAL_FULL_SYSTEM_PROCESS_REPAIR_V1"
+    }
+  },
+  "requestId": "dar-ec8b34557a8e7cac186f53c83e02d9b2",
+  "requestDigest": "ec8b34557a8e7cac186f53c83e02d9b2bd7e77cca3d4e43a090f35e2d306d7f6"
+}
