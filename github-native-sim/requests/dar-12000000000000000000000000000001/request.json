@@ -12,13 +12,13 @@
     "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
   },
   "campaignId": "adversarial-kb-k12-pattern-0001",
-  "assignmentId": "k12-controlled-reproduction-red",
+  "assignmentId": "k12-controlled-reproduction-green",
   "phaseId": "build-and-test",
-  "gateId": "K12-RED-CONTROLLED-REPRODUCTION",
+  "gateId": "K12-GREEN-CONTROLLED-REPRODUCTION",
   "profileId": "github-native-simulate-v2",
   "source": {
     "repository": "CurveYield2/Contract-Automation",
-    "commit": "78a9a272a08bbe6b7bb9398aae67ab71741e2eee",
+    "commit": "295975e5d5b984c787bf1b42c6d113f494d3b719",
     "projectPath": "packages/adversarial-simulation-kb/fixtures/pattern-0001-controlled-v1"
   },
   "configuration": {
@@ -35,7 +35,6 @@
     "evmVersion": null,
     "viaIR": false
   },
-  "requestId": "dar-12000000000000000000000000000001",
-  "requestDigest": "081df2b0c7fab15cf2b3631df410788a8045f68fc70848a12a3bddd2932112ec"
+  "requestId": "dar-12000000000000000000000000000002",
+  "requestDigest": "d876308b6eafe727366da11ac59d9fc0eba0af6f6c5bc1298e9d4f5062d041ec"
 }
-
