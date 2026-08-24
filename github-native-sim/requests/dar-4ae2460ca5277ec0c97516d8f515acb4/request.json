@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "cyvlsdt-v30-audit-v29-r1",
+  "assignmentId": "reviewer-1-phase1-exact-build-neutral-slither-v1",
+  "phaseId": "scope-and-provenance",
+  "gateId": "phase-1-v29-build-static-source-intelligence-v1",
+  "profileId": "github-native-compile-v2",
+  "source": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "projectPath": "CurveYield-cyvlSDT-Deployment-Package-v30",
+    "archivePath": "campaigns/cyvlSDT v30 Audit v29/source/CurveYield-cyvlSDT-Deployment-Package-v30.zip",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "configuration": {
+    "compilers": [
+      {
+        "language": "solidity",
+        "version": "0.8.28"
+      },
+      {
+        "language": "vyper",
+        "version": "0.3.10"
+      }
+    ],
+    "timeoutMinutes": 35,
+    "analysis": {
+      "slither": {
+        "version": "0.11.6"
+      },
+      "medusa": false,
+      "nativeFuzz": false
+    },
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun",
+    "viaIR": true,
+    "build": {
+      "purpose": "Audit V7 v29 Phase 1 exact-source build admission and neutral static reconnaissance"
+    },
+    "sbom": {
+      "reconcile": true
+    },
+    "coverage": {
+      "required": false
+    },
+    "properties": [
+      "Phase 1 neutral reconnaissance only; analyzer output is candidate input, not a finding"
+    ],
+    "actions": {
+      "ordering": "EXACT_BUILD_THEN_NEUTRAL_SLITHER"
+    }
+  },
+  "requestId": "dar-4ae2460ca5277ec0c97516d8f515acb4",
+  "requestDigest": "4ae2460ca5277ec0c97516d8f515acb46e14570615beb4220fc4493d70d3c8c0"
+}
