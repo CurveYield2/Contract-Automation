@@ -1,0 +1,1 @@
+TDD RED trigger for BoostHubStaking V17 configurable fee-conversion slippage feature against canonical remediated v4 source. Expected to fail because V16 has no staking-side slippage config yet.
