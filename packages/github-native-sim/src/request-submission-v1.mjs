@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { validateDeepAssuranceRequestV2 } from './schema.mjs';
+import { validateDeepAssuranceRequestWithV26V1 } from './schema-v26.mjs';
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -102,7 +102,7 @@ export async function submitV7Request({
   let parsed;
   try { parsed = JSON.parse(bytes.toString('utf8')); }
   catch (error) { throw new Error(`Request JSON parse failed before submission: ${error.message}`); }
-  const request = validateDeepAssuranceRequestV2(parsed);
+  const request = validateDeepAssuranceRequestWithV26V1(parsed);
   const transportSha256 = sha256(bytes);
   const targetPath = `github-native-sim/requests/${request.requestId}/request.json`;
   const requestBranch = branch ?? `audit-request/${request.requestId}-${transportSha256.slice(0, 8)}`;
