@@ -56,12 +56,16 @@ async function deployConverters(ctx){
   const wstA=solArtifact("boosthub/converters/WstEthCurveRouterRewardConverter-v1.sol","WstEthCurveRouterRewardConverter");
   const sdYbA=solArtifact("boosthub/converters/SdYbRewardConverter-v1.sol","SdYbRewardConverter");
   const crvTemplate=new ethers.Contract(ctx.config.converterTemplates.crvToSdCrv,TEMPLATE_GENERIC,ctx.wallet);
-  const crvArgs=[await crvTemplate.tokenIn(),await crvTemplate.tokenOut(),await crvTemplate.router(),await crvTemplate.route(),await crvTemplate.swapParams()];
+  const crvRoute=Array.from(await crvTemplate.route());
+  const crvSwapParams=Array.from(await crvTemplate.swapParams(),row=>Array.from(row));
+  const crvArgs=[await crvTemplate.tokenIn(),await crvTemplate.tokenOut(),await crvTemplate.router(),crvRoute,crvSwapParams];
   if(!same(crvArgs[0],ctx.config.pools.sdCRV.strategyRouteTokens[0])||!same(crvArgs[1],ctx.config.pools.sdCRV.asset))throw new Error("CRV->sdCRV converter template token mismatch");
   const crv=await deploy(ctx,"crvToSdCrvConverter",genericA,crvArgs);
   const crvUsd=await deploy(ctx,"crvUsdToSdCrvConverter",crvUsdA,[]);
   const wstTemplate=new ethers.Contract(ctx.config.converterTemplates.wstEthToSdFxn,TEMPLATE_WST,ctx.wallet);
-  const wstArgs=[await wstTemplate.wstEth(),await wstTemplate.stEth(),await wstTemplate.tokenOut(),await wstTemplate.router(),await wstTemplate.route(),await wstTemplate.swapParams()];
+  const wstRoute=Array.from(await wstTemplate.route());
+  const wstSwapParams=Array.from(await wstTemplate.swapParams(),row=>Array.from(row));
+  const wstArgs=[await wstTemplate.wstEth(),await wstTemplate.stEth(),await wstTemplate.tokenOut(),await wstTemplate.router(),wstRoute,wstSwapParams];
   if(!same(wstArgs[0],ctx.config.pools.sdFXN.strategyRouteTokens[0])||!same(wstArgs[2],ctx.config.pools.sdFXN.asset))throw new Error("wstETH->sdFXN converter template token mismatch");
   const wst=await deploy(ctx,"wstEthToSdFxnConverter",wstA,wstArgs);
   const sc=ctx.config.sdYbConverter;
