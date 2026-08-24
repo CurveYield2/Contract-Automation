@@ -9,7 +9,7 @@ Generated from `DEVELOPMENT_RECOVERY_STATE_v1.json`. Do not edit this projection
 - Last known good commit: `9cd692ceaed791dc6a6aede27a3b29c5bdb82f3d`
 - Overall status: **IN_PROGRESS**
 - Current module: **K13 — Historical Reproduction Path**
-- Current step: **K13-S03 / READY**
+- Current step: **K13-S03 / IN_PROGRESS**
 - Last completed step: K12-S07
 
 ## Last hard gate
@@ -22,7 +22,7 @@ During K12, canonical V7 evidence exposed a Forge-wrapper false-positive where f
 
 ## Next exact action
 
-Create the historical EXEC/PROOF artifacts and a canonical V7 Anvil preflight request that pins Euler EXP-2023-0001 at block 16817995, verifies the observed block hash and Euler V1 code identity through the runner-owned archive-RPC environment, then records either exact replay evidence or an explicit unsupported limitation.
+Observe the K13 RED archive-preflight request-builder qualification. It must fail only because `src/historical/archive-preflight-request-v1.mjs` is absent; then implement the minimal canonical Phase-7 request builder.
 
 ## Open blockers
 
