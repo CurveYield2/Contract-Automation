@@ -1,0 +1,272 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "cyvlSDT v30",
+  "assignmentId": "cyvlsdt-v30-phase7-constructor-surface-v1",
+  "phaseId": "fork-simulation-lifecycle",
+  "gateId": "phase7-deploy-configure-smoke-v1",
+  "profileId": "github-native-simulate-v2",
+  "source": {
+    "repository": "CurveYield2/Solo-Audit-Controller",
+    "commit": "6bde63416a4611e127b8bb3a5958e6b6d874c188",
+    "projectPath": "CurveYield-cyvlSDT-Deployment-Package-v30",
+    "archivePath": "campaigns/CurveYield-cyvlSDT-Deployment-Package-v30.zip",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "configuration": {
+    "compilers": [
+      {
+        "language": "solidity",
+        "version": "0.8.28"
+      },
+      {
+        "language": "vyper",
+        "version": "0.3.10"
+      }
+    ],
+    "timeoutMinutes": 35,
+    "analysis": {
+      "slither": false,
+      "medusa": false,
+      "nativeFuzz": false
+    },
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun",
+    "viaIR": true,
+    "deploymentGas": {
+      "deployableContracts": [
+        {
+          "sourceName": "contracts/CurveYieldVlSDTLocker.sol",
+          "contractName": "CurveYieldVlSDTLocker"
+        },
+        {
+          "sourceName": "contracts/CurveYieldVlSDTToken.sol",
+          "contractName": "CurveYieldVlSDTToken"
+        },
+        {
+          "sourceName": "contracts/CurveYieldVlSDTRevenueStaking.sol",
+          "contractName": "CurveYieldVlSDTRevenueStaking"
+        },
+        {
+          "sourceName": "contracts/CurveYieldVault.sol",
+          "contractName": "CurveYieldVault"
+        },
+        {
+          "sourceName": "contracts/CurveYieldRevenueStrategyV20.sol",
+          "contractName": "CurveYieldRevenueStrategyV20"
+        },
+        {
+          "sourceName": "contracts/CurveYieldRevenueConverter.sol",
+          "contractName": "CurveYieldRevenueConverter"
+        },
+        {
+          "sourceName": "contracts/CurveYieldUsdcToSdtConverter.sol",
+          "contractName": "CurveYieldUsdcToSdtConverter"
+        },
+        {
+          "sourceName": "contracts/CurveYieldVlSDTBoostStaking.sol",
+          "contractName": "CurveYieldVlSDTBoostStaking"
+        },
+        {
+          "sourceName": "contracts/CurveYieldVlSDTBoostMerchant.sol",
+          "contractName": "CurveYieldVlSDTBoostMerchant"
+        },
+        {
+          "sourceName": "contracts/CurveYieldGovernanceToken.sol",
+          "contractName": "CurveYieldGovernanceToken"
+        },
+        {
+          "sourceName": "contracts/CurveYieldGovernanceMintController.sol",
+          "contractName": "CurveYieldGovernanceMintController"
+        },
+        {
+          "sourceName": "contracts/CurveYieldGovernanceStaking.vy",
+          "contractName": "CurveYieldGovernanceStaking"
+        },
+        {
+          "sourceName": "contracts/CurveYieldCyGovYieldStaking.sol",
+          "contractName": "CurveYieldCyGovYieldStaking"
+        },
+        {
+          "sourceName": "contracts/CurveYieldCyGovFraxswapConverter.sol",
+          "contractName": "CurveYieldCyGovFraxswapConverter"
+        },
+        {
+          "sourceName": "contracts/CurveYieldCyGovDiscountedSaleConverterV9.sol",
+          "contractName": "CurveYieldCyGovDiscountedSaleConverterV9"
+        }
+      ]
+    },
+    "harness": {
+      "recipeId": "deploy-configure-smoke-v1"
+    },
+    "simulation": {
+      "chain": "ethereum",
+      "block": 25817400,
+      "workflow": {
+        "steps": [
+          {
+            "action": "snapshot",
+            "alias": "baseline",
+            "label": "preserve pinned baseline"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate1",
+            "contract": "CurveYieldVlSDTLocker",
+            "source": "contracts/CurveYieldVlSDTLocker.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldVlSDTLocker"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate2",
+            "contract": "CurveYieldVlSDTToken",
+            "source": "contracts/CurveYieldVlSDTToken.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldVlSDTToken"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate3",
+            "contract": "CurveYieldVlSDTRevenueStaking",
+            "source": "contracts/CurveYieldVlSDTRevenueStaking.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldVlSDTRevenueStaking"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate4",
+            "contract": "CurveYieldVault",
+            "source": "contracts/CurveYieldVault.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldVault"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate5",
+            "contract": "CurveYieldRevenueStrategyV20",
+            "source": "contracts/CurveYieldRevenueStrategyV20.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldRevenueStrategyV20"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate6",
+            "contract": "CurveYieldRevenueConverter",
+            "source": "contracts/CurveYieldRevenueConverter.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldRevenueConverter"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate7",
+            "contract": "CurveYieldUsdcToSdtConverter",
+            "source": "contracts/CurveYieldUsdcToSdtConverter.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldUsdcToSdtConverter"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate8",
+            "contract": "CurveYieldVlSDTBoostStaking",
+            "source": "contracts/CurveYieldVlSDTBoostStaking.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldVlSDTBoostStaking"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate9",
+            "contract": "CurveYieldVlSDTBoostMerchant",
+            "source": "contracts/CurveYieldVlSDTBoostMerchant.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldVlSDTBoostMerchant"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate10",
+            "contract": "CurveYieldGovernanceToken",
+            "source": "contracts/CurveYieldGovernanceToken.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldGovernanceToken"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate11",
+            "contract": "CurveYieldGovernanceMintController",
+            "source": "contracts/CurveYieldGovernanceMintController.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldGovernanceMintController"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate12",
+            "contract": "CurveYieldGovernanceStaking",
+            "source": "contracts/CurveYieldGovernanceStaking.vy",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldGovernanceStaking"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate13",
+            "contract": "CurveYieldCyGovYieldStaking",
+            "source": "contracts/CurveYieldCyGovYieldStaking.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldCyGovYieldStaking"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate14",
+            "contract": "CurveYieldCyGovFraxswapConverter",
+            "source": "contracts/CurveYieldCyGovFraxswapConverter.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldCyGovFraxswapConverter"
+          },
+          {
+            "action": "deploy",
+            "alias": "candidate15",
+            "contract": "CurveYieldCyGovDiscountedSaleConverterV9",
+            "source": "contracts/CurveYieldCyGovDiscountedSaleConverterV9.sol",
+            "args": [],
+            "continueOnFailure": true,
+            "label": "constructor surface: CurveYieldCyGovDiscountedSaleConverterV9"
+          },
+          {
+            "action": "revertSnapshot",
+            "snapshot": "$baseline",
+            "label": "restore pinned baseline"
+          }
+        ]
+      }
+    }
+  },
+  "requestId": "dar-62261ebff98f2a756c694c6408275e00",
+  "requestDigest": "62261ebff98f2a756c694c6408275e000f72622c3e00ac828a87b9825ab73ff5"
+}
