@@ -168,11 +168,11 @@ export async function runGitHubNativeJobV2(input, {
   createMutableRpcSession = createPhase6MutableRpcSession,
   ...delegateOptions
 } = {}) {
-  const request = validateDeepAssuranceRequestWithV26V1(input);
+  const v26Request = validateDeepAssuranceRequestWithV26V1(input);
 
-  if (request.phaseId === 'build-and-test') {
+  if (v26Request.phaseId === 'build-and-test') {
     return executePhase6V2({
-      request,
+      request: v26Request,
       workspaceRoot,
       environment,
       runnerCommit,
@@ -183,30 +183,30 @@ export async function runGitHubNativeJobV2(input, {
     });
   }
 
-  const legacyRequest = stripV26RequestExtensionV1(request);
+  const request = stripV26RequestExtensionV1(v26Request);
   let preflight = null;
-  if (request.phaseId === 'fork-simulation-lifecycle') {
-    preflight = await runPhase7ForkPreflightV2({ request: legacyRequest, environment });
+  if (v26Request.phaseId === 'fork-simulation-lifecycle') {
+    preflight = await runPhase7ForkPreflightV2({ request, environment });
   }
 
   if (preflight && preflight.status !== 'PASS') {
-    return attachExecutionDisposition({ request, result: preflightFailure(request, preflight), requestPath });
+    return attachExecutionDisposition({ request: v26Request, result: preflightFailure(v26Request, preflight), requestPath });
   }
 
-  let result = await runGitHubNativeJobV1(legacyRequest, {
+  let result = await runGitHubNativeJobV1(request, {
     workspaceRoot: path.join(workspaceRoot, 'execution'),
     environment,
     ...delegateOptions,
   });
   result = { ...result, preflight };
 
-  if (request.phaseId === 'fork-simulation-lifecycle') {
-    result = await enrichPhase7V26EvidenceV1({ request, result, environment, fetchImpl: delegateOptions.fetchImpl ?? globalThis.fetch });
+  if (v26Request.phaseId === 'fork-simulation-lifecycle') {
+    result = await enrichPhase7V26EvidenceV1({ request: v26Request, result, environment, fetchImpl: delegateOptions.fetchImpl ?? globalThis.fetch });
   } else {
-    result = attachReproductionEvidenceV1(request, result);
+    result = attachReproductionEvidenceV1(v26Request, result);
   }
 
-  return attachExecutionDisposition({ request, result, requestPath });
+  return attachExecutionDisposition({ request: v26Request, result, requestPath });
 }
 
 export const runGitHubNativeJob = runGitHubNativeJobV2;
