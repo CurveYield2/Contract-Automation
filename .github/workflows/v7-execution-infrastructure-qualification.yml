@@ -101,7 +101,7 @@ jobs:
         run: mkdir -p .audit-evidence/v7-infrastructure-qualification
 
       - name: Record exact toolchain verification evidence
-        run: npm run v7:toolchain:verify > .audit-evidence/v7-infrastructure-qualification/toolchain.json
+        run: node packages/github-native-sim/src/v7-cli.mjs toolchain:verify > .audit-evidence/v7-infrastructure-qualification/toolchain.json
 
       - name: Verify canonical runner manifest
         run: npm run v7:manifest -- --check
