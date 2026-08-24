@@ -1,0 +1,17 @@
+import {check,finalize,requireText,requireSha64,equalityCheck,nonEmptyArrayCheck} from './common-v1.mjs';
+export function preflightCompileV1(c={}){
+ const x=[];
+ x.push(requireSha64('compile.snapshot',c.sourceSnapshotDigest,{code:'COMPILE_SOURCE_SNAPSHOT_MISSING',summary:'Compile source snapshot digest is missing',remediation:'Stage/hash the exact source before compile.'}));
+ x.push(requireText('compile.project-root',c.projectRoot,{code:'COMPILE_PROJECT_ROOT_MISSING',summary:'Compile project root is missing',remediation:'Use the exact detected project root.'}));
+ x.push(check({id:'compile.project-root-exists',pass:c.projectRootExists===true,failureCode:'COMPILE_PROJECT_ROOT_NOT_FOUND',summary:'Compile project root does not exist',expected:true,observed:c.projectRootExists??null,remediation:'Fix source-staging/projectRoot before invoking compilers.'}));
+ x.push(check({id:'compile.build-system',pass:['hardhat-native','foundry-native','mixed-native','vyper-native'].includes(c.buildSystem),failureCode:'COMPILE_BUILD_SYSTEM_UNSUPPORTED',summary:'Build system is unsupported/unresolved',expected:['hardhat-native','foundry-native','mixed-native','vyper-native'],observed:c.buildSystem??null,remediation:'Detect and select the admitted build path for this project.'}));
+ x.push(nonEmptyArrayCheck('compile.language-matrix',c.languages,{code:'COMPILE_LANGUAGE_MATRIX_EMPTY',summary:'Compiler/language matrix is empty',remediation:'Inventory Solidity/Vyper source languages before build.'}));
+ const allowed=new Set(['solidity','vyper']); const unknown=(c.languages??[]).filter(l=>!allowed.has(l.language));
+ x.push(check({id:'compile.languages-supported',pass:unknown.length===0,failureCode:'COMPILE_LANGUAGE_UNSUPPORTED',summary:'Source contains unsupported language entries',expected:['solidity','vyper'],observed:unknown,remediation:'Add an admitted compiler path or block the build explicitly.'}));
+ const mism=(c.languages??[]).filter(l=>l.requestedVersion!==l.installedVersion);
+ x.push(check({id:'compile.versions',pass:mism.length===0,failureCode:'COMPILE_COMPILER_VERSION_MISMATCH',summary:'Installed compiler version differs from requested project compiler',expected:(c.languages??[]).map(l=>({language:l.language,version:l.requestedVersion})),observed:(c.languages??[]).map(l=>({language:l.language,version:l.installedVersion})),remediation:'Install/use the exact compiler version before build.'}));
+ x.push(equalityCheck('compile.settings',c.expectedCompilerSettingsDigest,c.observedCompilerSettingsDigest,{code:'COMPILE_SETTINGS_MISMATCH',summary:'Compiler settings/optimizer/EVM configuration differs from expected',remediation:'Load the exact project/audit build settings; do not silently substitute optimizer or EVM settings.'}));
+ x.push(check({id:'compile.dependencies',pass:c.dependenciesReady===true,failureCode:'COMPILE_DEPENDENCIES_NOT_READY',summary:'Build dependencies/lock state is not ready',expected:true,observed:{dependenciesReady:c.dependenciesReady??null,lockfile:c.lockfile??null},remediation:'Resolve dependency state from the admitted lock/project before compilation.'}));
+ x.push(nonEmptyArrayCheck('compile.outputs',c.expectedArtifacts,{code:'COMPILE_EXPECTED_ARTIFACTS_UNDECLARED',summary:'Expected contract/artifact inventory is not declared',remediation:'Declare source:contract artifacts expected from this build.'}));
+ return finalize('compile',c,x,{repository:c.repository,ref:c.ref,expectedOutputs:c.expectedArtifacts,rollback:'discard build workspace'});
+}

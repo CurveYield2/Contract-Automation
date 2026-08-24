@@ -1,0 +1,16 @@
+import {check,finalize,requireText,requireSha40} from './common-v1.mjs';
+export function preflightBranchPrV1(c={}){
+ const x=[];
+ x.push(requireText('branch.repository',c.repository,{code:'BRANCH_REPOSITORY_MISSING',summary:'Repository is missing',remediation:'Resolve exact repository.'}));
+ x.push(requireSha40('branch.current-main',c.currentMainSha,{code:'BRANCH_MAIN_SHA_INVALID',summary:'Current main SHA is unresolved',remediation:'Read current main immediately before branch/PR mutation.'}));
+ x.push(requireText('branch.task-identity',c.taskIdentity,{code:'BRANCH_TASK_IDENTITY_MISSING',summary:'Task/request identity is missing',remediation:'Bind branch creation to a stable task/request identity.'}));
+ x.push(check({id:'branch.search-existing',pass:c.existingWorkSearched===true,failureCode:'BRANCH_EXISTING_WORK_NOT_SEARCHED',summary:'Existing branches/PRs were not searched before creating another',expected:true,observed:c.existingWorkSearched??null,remediation:'Search branches and open/closed PRs for the same task/request identity first.'}));
+ const dup=(c.existingMatches??[]).filter(m=>['OPEN','ACTIVE','REUSABLE'].includes(m.status));
+ x.push(check({id:'branch.duplicate',pass:dup.length===0||c.action==='REUSE_EXISTING',failureCode:'BRANCH_DUPLICATE_ACTIVE_WORK',summary:'An active/reusable branch or PR already covers this task',expected:'REUSE_EXISTING',observed:{action:c.action??null,matches:dup},remediation:'Reuse the existing active PR/branch rather than creating another retry branch.',historicalSignatureId:'GIT-REQUEST-RETRY-001'}));
+ x.push(check({id:'branch.base-current',pass:c.baseSha===c.currentMainSha||c.action==='REUSE_EXISTING',failureCode:'BRANCH_STALE_BASE',summary:'New branch base is stale relative to current main',expected:c.currentMainSha,observed:c.baseSha??null,remediation:'Create branch from current main or explicitly reuse the existing branch.'}));
+ x.push(check({id:'branch.diff',pass:Array.isArray(c.intendedPaths)&&c.intendedPaths.length>0,failureCode:'BRANCH_INTENDED_DIFF_UNDECLARED',summary:'Intended changed paths are not declared',expected:'non-empty intendedPaths',observed:c.intendedPaths??null,remediation:'Declare the exact expected diff before branch creation.'}));
+ x.push(check({id:'branch.lifecycle',pass:['MERGED_AND_DELETED','ACTIVE_WITH_OPEN_PR','CLOSED_WITH_RECORDED_DISPOSITION'].includes(c.lifecycleDisposition),failureCode:'BRANCH_LIFECYCLE_UNDECLARED',summary:'Branch lifecycle disposition is not valid',expected:['MERGED_AND_DELETED','ACTIVE_WITH_OPEN_PR','CLOSED_WITH_RECORDED_DISPOSITION'],observed:c.lifecycleDisposition??null,remediation:'Set the intended lifecycle and owner before creation.'}));
+ const unchangedRetry=c.requestRetry===true&&c.requestSemanticsChanged!==true;
+ x.push(check({id:'branch.retry-semantics',pass:!unchangedRetry||c.action==='REUSE_EXISTING',failureCode:'BRANCH_REDUNDANT_REQUEST_RETRY',summary:'New branch requested only to rerun unchanged request semantics',expected:'REUSE_EXISTING',observed:{requestRetry:c.requestRetry??false,requestSemanticsChanged:c.requestSemanticsChanged??null,action:c.action??null},remediation:'Reuse/reopen the immutable request PR after runner repair.'}));
+ return finalize('branch-pr',c,x,{repository:c.repository,ref:c.currentMainSha,expectedOutputs:c.expectedOutputs,rollback:c.rollbackPlan});
+}
