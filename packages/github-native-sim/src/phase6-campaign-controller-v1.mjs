@@ -33,7 +33,7 @@ export function recordPhase6CampaignV1(state,input){
     if(input.configurationDigest===prior.configurationDigest && input.harnessBundleDigest===prior.harnessBundleDigest) throw new Error('refinement must use changed configuration or harness digest');
   }
   const normalized={...clone(input),corpus:normalizeMetricGroup(input.corpus),coverage:normalizeMetricGroup(input.coverage),statistics:normalizeMetricGroup(input.statistics),authoritativeFinding:false};
-  normalized.campaignDigest=digestCanonicalV1({...normalized,campaignDigest:undefined});
+  normalized.campaignDigest=digestCanonicalV1(normalized);
   next.campaigns.push(normalized); return next;
 }
 
