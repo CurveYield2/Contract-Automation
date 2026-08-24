@@ -19,6 +19,13 @@ function normalizedRaw(result = {}, secrets = []) {
   };
 }
 
+function forgeReportsFailedTests(command, rawOutput) {
+  if (command !== 'forge') return false;
+  const output = `${rawOutput.stdout}\n${rawOutput.stderr}`;
+  return /Suite result:\s*FAILED\b/.test(output)
+    || /Encountered a total of [1-9][0-9]* failing tests\b/.test(output);
+}
+
 function validateInput(input) {
   if (!input || typeof input !== 'object') throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'native fuzz input is required');
   if (!COMMIT.test(input.sourceCommit ?? '')) throw new V7ExecutionError('SOURCE_INTEGRITY_FAILURE', 'sourceCommit must be a 40-hex commit');
@@ -50,6 +57,7 @@ export async function runNativeFuzzAnalysis(input, { runCommand = runProcess } =
   const result = await runCommand({ command: input.command, args, cwd: input.projectRoot, ...(input.env ? { env: input.env } : {}) });
   const rawOutput = normalizedRaw(result, secrets);
 
+  if (forgeReportsFailedTests(input.command, rawOutput)) return baseResult(input, { status:'failed', terminal:true, failureKind:'HARD_FAILURE', componentStatus:'FAILED', continuationDisposition:'STOP_EXECUTION', rawOutput });
   if (rawOutput.exitCode === 0) return baseResult(input, { status:'completed', terminal:true, componentStatus:'COMPLETED', continuationDisposition:'COMPLETE_EVIDENCE', rawOutput });
 
   const recoverable = new Set(input.recoverableExitCodes ?? []);
