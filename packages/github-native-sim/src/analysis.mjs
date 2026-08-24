@@ -64,18 +64,40 @@ function parseSlitherOutput(output) {
   } catch { return null; }
 }
 
-function parseSuccessfulMedusaCliOutput(output) {
-  const text = String(output ?? '').replace(/\u001b\[[0-9;]*m/g, '');
+function parseMedusaCliOutput(output) {
+  const lines = String(output ?? '').replace(/\u001b\[[0-9;]*m/g, '').split(/\r?\n/);
+  const resultHeader = /^\[(PASSED|FAILED)\]\s+Property Test:\s+(.+?)\s*$/;
   const properties = [];
-  for (const line of text.split(/\r?\n/)) {
-    const match = line.match(/^\[PASSED\]\s+Property Test:\s+(.+?)\s*$/);
-    if (match) properties.push({ name: match[1], status: 'passed' });
+
+  for (let index = 0; index < lines.length; index++) {
+    const match = lines[index].trim().match(resultHeader);
+    if (!match) continue;
+
+    const failed = match[1] === 'FAILED';
+    const property = { name: match[2], status: failed ? 'failed' : 'passed' };
+    if (failed) {
+      const counterexample = [];
+      let inCallSequence = false;
+      for (let cursor = index + 1; cursor < lines.length; cursor++) {
+        const candidate = lines[cursor].trim();
+        if (resultHeader.test(candidate)) break;
+        if (candidate === '[Call Sequence]') {
+          inCallSequence = true;
+          continue;
+        }
+        if (inCallSequence && /^\d+\)\s+/.test(candidate)) counterexample.push(candidate);
+      }
+      if (counterexample.length > 0) property.counterexample = counterexample;
+    }
+    properties.push(property);
   }
+
   if (properties.length === 0) return null;
+  const falsifiedProperties = properties.filter((property) => property.status === 'failed').length;
   return {
-    status: 'completed',
+    status: falsifiedProperties > 0 ? 'falsified' : 'completed',
     properties,
-    falsifiedProperties: 0,
+    falsifiedProperties,
     corpus: {},
     coverage: {},
     statistics: {}
@@ -86,7 +108,7 @@ export function parseMedusaOutput(output) {
   let parsed;
   try { parsed = JSON.parse(String(output ?? '')); }
   catch (error) {
-    const cliCampaign = parseSuccessfulMedusaCliOutput(output);
+    const cliCampaign = parseMedusaCliOutput(output);
     if (cliCampaign) return cliCampaign;
     throw new V7ExecutionError('EVIDENCE_PARSE_FAILURE', 'Medusa terminal output is neither valid JSON nor recognized Medusa 1.5.1 CLI evidence', { cause: error.message });
   }
