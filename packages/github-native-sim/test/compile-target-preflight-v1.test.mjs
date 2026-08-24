@@ -6,10 +6,10 @@ import path from 'node:path';
 import { runTargetCompilePreflightV1 } from '../src/compile-target-preflight-v1.mjs';
 import { digestDirectory } from '../src/phase6-staged-snapshot-v1.mjs';
 
-async function project({ withOpenZeppelin = true } = {}) {
+async function project({ withOpenZeppelin = true, solcVersion = '0.8.28' } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'compile-target-preflight-'));
   await fs.mkdir(path.join(root, 'contracts', 'interfaces'), { recursive: true });
-  await fs.writeFile(path.join(root, 'foundry.toml'), '[profile.default]\nsrc="contracts"\nlibs=["lib"]\nsolc_version="0.8.28"\nremappings=["@openzeppelin/=lib/openzeppelin-contracts/"]\n');
+  await fs.writeFile(path.join(root, 'foundry.toml'), `[profile.default]\nsrc="contracts"\nlibs=["lib"]\nsolc_version="${solcVersion}"\nremappings=["@openzeppelin/=lib/openzeppelin-contracts/"]\n`);
   await fs.writeFile(path.join(root, 'contracts', 'interfaces', 'IVault.sol'), 'pragma solidity ^0.8.28; interface IVault { function totalAssets() external view returns (uint256); }\n');
   await fs.writeFile(path.join(root, 'contracts', 'Strategy.sol'), 'pragma solidity ^0.8.28; import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol"; import {IVault} from "./interfaces/IVault.sol"; contract Strategy is Ownable { IVault public vault; constructor(address owner_, IVault v) Ownable(owner_) { vault=v; } }\n');
   if (withOpenZeppelin) {
@@ -74,10 +74,20 @@ test('compile target preflight rejects a package root that is not the actual bui
   assert.match(JSON.stringify(receipt.diagnostics), /package\/foundry\.toml/);
 });
 
-test('compile target preflight reports exact installed/requested compiler mismatch', async () => {
-  const root = await project();
-  const receipt = await runTargetCompilePreflightV1(await input(root), { runCommand: commands({ forgeVersion: '1.8.0' }) });
+test('compile target preflight reports exact requested/observed Solc compiler mismatch', async () => {
+  const root = await project({ solcVersion: '0.8.27' });
+  const receipt = await runTargetCompilePreflightV1(await input(root), { runCommand: commands() });
   assert.equal(receipt.firstFailure, 'COMPILE_COMPILER_VERSION_MISMATCH');
   const failure = receipt.diagnostics.find((x) => x.failureCode === 'COMPILE_COMPILER_VERSION_MISMATCH');
-  assert.match(JSON.stringify(failure), /0\.8\.28|1\.8\.0/);
+  assert.match(JSON.stringify(failure), /0\.8\.28/);
+  assert.match(JSON.stringify(failure), /0\.8\.27/);
+});
+
+test('compile target preflight keeps Forge toolchain drift distinct from Solc compiler drift', async () => {
+  const root = await project();
+  const receipt = await runTargetCompilePreflightV1(await input(root), { runCommand: commands({ forgeVersion: '1.8.0' }) });
+  assert.equal(receipt.firstFailure, 'COMPILE_BUILD_TOOL_PROBE_FAILURE');
+  const failure = receipt.diagnostics.find((x) => x.failureCode === 'COMPILE_BUILD_TOOL_PROBE_FAILURE');
+  assert.match(JSON.stringify(failure.observed), /1\.8\.0/);
+  assert.match(JSON.stringify(failure.expected), /PASS/);
 });
