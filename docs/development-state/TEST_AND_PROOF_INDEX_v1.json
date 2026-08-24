@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "adversarial-kb-test-and-proof-index-v1",
+  "projectId": "HISTORICAL_EXPLOIT_ADVERSARIAL_SIMULATION_KB",
+  "records": [
+    {
+      "proofId": "K00-RED-0001",
+      "moduleId": "K00",
+      "stepId": "K00-S02",
+      "type": "UNIT_RED",
+      "status": "PASS",
+      "command": "node --test packages/adversarial-simulation-kb/test/development-recovery-v1.test.mjs",
+      "observed": "ERR_MODULE_NOT_FOUND for ../src/development-recovery-v1.mjs",
+      "environment": "local-static-node-v22.16.0",
+      "sourceCommit": "468b749076fb5b9c166c14a187fdd29a6f967acd"
+    },
+    {
+      "proofId": "K00-GREEN-0001",
+      "moduleId": "K00",
+      "stepId": "K00-S03",
+      "type": "UNIT_GREEN",
+      "status": "PASS",
+      "command": "node --test packages/adversarial-simulation-kb/test/development-recovery-v1.test.mjs",
+      "observed": "6 tests passed, 0 failed",
+      "environment": "local-static-node-v22.16.0",
+      "sourceCommit": "468b749076fb5b9c166c14a187fdd29a6f967acd"
+    }
+  ],
+  "lastUpdatedAt": "2026-08-24T05:49:00Z"
+}
