@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "adversarial-kb-incident-references-v1",
+  "incidentId": "EXP-2023-0001",
+  "sourceIds": [
+    "SOURCE-0001",
+    "SOURCE-0002",
+    "SOURCE-0003",
+    "SOURCE-0004"
+  ],
+  "representativeExploitTransaction": {
+    "chain": "ethereum",
+    "blockNumber": 16817996,
+    "transactionHash": "0xc310a0affe2169d1f6feec1c63dbc7f7c62a887fa48795d327d4d2da2d6b111d",
+    "timestamp": "2023-03-13T08:50:59Z",
+    "selectionBasis": "Euler's official historical account links this transaction as the first exploit transaction; Etherscan independently records the successful transaction at block 16817996."
+  },
+  "affectedContractAnchors": [
+    {
+      "chain": "ethereum",
+      "address": "0x27182842E098f60e3D576794A5bFFb0777E025d3",
+      "role": "Euler V1 main storage/dispatch contract",
+      "sourceId": "SOURCE-0004"
+    }
+  ],
+  "verificationBasis": [
+    "SOURCE-0001 is a primary-protocol account that identifies the missing donateToReserves health check and the profitable self-liquidation mechanism.",
+    "SOURCE-0002 anchors the representative exploit transaction, chain, timestamp, and block to primary onchain evidence.",
+    "SOURCE-0003 independently provides the security/auditor technical root-cause analysis.",
+    "SOURCE-0004 anchors the affected Euler V1 main contract identity to verified deployed source."
+  ],
+  "limitations": [
+    "The incident involved multiple exploit transactions and assets; the representative transaction is an exact anchor, not a claim that the complete incident occurred in one transaction."
+  ]
+}

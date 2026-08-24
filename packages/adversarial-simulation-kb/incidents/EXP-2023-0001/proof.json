@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "adversarial-kb-proof-v1",
+  "proofId": "PROOF-0001",
+  "knowledgeRef": "EXP-2023-0001",
+  "proofTier": "SCHEMA_VALID",
+  "status": "ACTIVE",
+  "claim": "The frozen EXP-2023-0001 candidate at commit e61c2ef1bdc32e161dfd80ac8abb6227090fe988 has a source-bound incident representation suitable for strict schema, reference-confidence, primitive-taxonomy, deduplication, and deterministic-registry validation. This proof does not claim historical exploit reproduction.",
+  "evidenceRefs": [
+    "SOURCE-0001",
+    "SOURCE-0002",
+    "SOURCE-0003",
+    "SOURCE-0004",
+    "K07-RED-0001",
+    "K07-GREEN-0001"
+  ],
+  "artifactDigests": [],
+  "runIds": [],
+  "qualifiedAtCommit": "e61c2ef1bdc32e161dfd80ac8abb6227090fe988",
+  "limitations": [
+    "SCHEMA_VALID does not establish historical reproduction; no historical fork replay has yet been executed for this incident.",
+    "The representative DAI transaction is one transaction within a broader multi-transaction, multi-asset exploit incident.",
+    "Executable and generalized pattern proof tiers remain pending later K08-K14 modules."
+  ]
+}

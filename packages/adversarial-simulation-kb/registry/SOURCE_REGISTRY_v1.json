@@ -1,5 +1,101 @@
 {
   "schemaVersion": "adversarial-kb-source-registry-v1",
   "revision": 1,
-  "sources": []
+  "sources": [
+    {
+      "schemaVersion": "adversarial-kb-reference-v1",
+      "sourceId": "SOURCE-0001",
+      "revision": 1,
+      "title": "Euler V1 exploit and recovery historical account",
+      "referenceType": "OFFICIAL_POSTMORTEM",
+      "confidence": "PRIMARY_PROTOCOL",
+      "url": "https://www.euler.finance/blog/war-peace-behind-the-scenes-of-eulers-240m-exploit-recovery",
+      "chain": "ethereum",
+      "transactionHash": null,
+      "contractAddress": null,
+      "publisher": "Euler Finance",
+      "publishedAt": null,
+      "claims": [
+        "Euler V1 was exploited on 2023-03-13 for approximately $197 million in assets.",
+        "The exploit cause was a missing account health check in donateToReserves.",
+        "The attacker donated collateral to become liquidatable and self-liquidated to capture a liquidation bonus greater than the donation loss.",
+        "The first exploit transaction occurred at approximately 08:50:59 UTC and extracted roughly $8.8 million before later exploit transactions drained additional assets."
+      ],
+      "contradicts": [],
+      "limitations": [
+        "Published after the incident and recovery; use the linked onchain transaction for exact transaction identity and block facts."
+      ],
+      "status": "ACTIVE"
+    },
+    {
+      "schemaVersion": "adversarial-kb-reference-v1",
+      "sourceId": "SOURCE-0002",
+      "revision": 1,
+      "title": "Euler first DAI exploit transaction",
+      "referenceType": "ONCHAIN_TRANSACTION",
+      "confidence": "PRIMARY_ONCHAIN",
+      "url": "https://etherscan.io/tx/0xc310a0affe2169d1f6feec1c63dbc7f7c62a887fa48795d327d4d2da2d6b111d",
+      "chain": "ethereum",
+      "transactionHash": "0xc310a0affe2169d1f6feec1c63dbc7f7c62a887fa48795d327d4d2da2d6b111d",
+      "contractAddress": null,
+      "publisher": "Ethereum / Etherscan",
+      "publishedAt": "2023-03-13T08:50:59Z",
+      "claims": [
+        "The transaction succeeded on Ethereum at block 16817996.",
+        "The transaction flash-borrowed 30,000,000 DAI from Aave V2 and interacted with Euler Exploit Contract 1.",
+        "The transaction is the first exploit transaction linked by Euler's official historical account."
+      ],
+      "contradicts": [],
+      "limitations": [
+        "This is one representative exploit transaction from a multi-transaction, multi-asset incident."
+      ],
+      "status": "ACTIVE"
+    },
+    {
+      "schemaVersion": "adversarial-kb-reference-v1",
+      "sourceId": "SOURCE-0003",
+      "revision": 1,
+      "title": "Euler Finance Incident Post-Mortem",
+      "referenceType": "SECURITY_REPORT",
+      "confidence": "PRIMARY_SECURITY_REPORT",
+      "url": "https://medium.com/@omniscia.io/euler-finance-incident-post-mortem-1ce077c28454",
+      "chain": "ethereum",
+      "transactionHash": null,
+      "contractAddress": null,
+      "publisher": "Omniscia",
+      "publishedAt": "2023-03-13T00:00:00Z",
+      "claims": [
+        "The exploited vulnerability stemmed from donations being possible without a proper account health check.",
+        "The vulnerable behavior was introduced with the donateToReserves feature in eIP-14 and interacted with Euler liquidation logic."
+      ],
+      "contradicts": [],
+      "limitations": [
+        "Security-firm technical analysis; exact transaction state remains anchored to the onchain source."
+      ],
+      "status": "ACTIVE"
+    },
+    {
+      "schemaVersion": "adversarial-kb-reference-v1",
+      "sourceId": "SOURCE-0004",
+      "revision": 1,
+      "title": "Verified Euler V1 main contract source",
+      "referenceType": "VERIFIED_CONTRACT_SOURCE",
+      "confidence": "PRIMARY_ONCHAIN",
+      "url": "https://etherscan.io/address/0x27182842e098f60e3d576794a5bffb0777e025d3#code",
+      "chain": "ethereum",
+      "transactionHash": null,
+      "contractAddress": "0x27182842E098f60e3D576794A5bFFb0777E025d3",
+      "publisher": "Ethereum / Etherscan",
+      "publishedAt": null,
+      "claims": [
+        "0x27182842E098f60e3D576794A5bFFb0777E025d3 is the verified Euler V1 main storage/dispatch contract on Ethereum.",
+        "Verified source identifies the contract name as Euler Protocol and exposes the protocol module dispatch architecture."
+      ],
+      "contradicts": [],
+      "limitations": [
+        "The vulnerable donateToReserves behavior executes through Euler's modular/proxy architecture; the main contract address is recorded as the stable affected protocol anchor rather than claiming it alone contains every vulnerable implementation line."
+      ],
+      "status": "ACTIVE"
+    }
+  ]
 }

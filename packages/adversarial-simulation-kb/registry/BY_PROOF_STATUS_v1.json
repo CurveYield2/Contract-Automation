@@ -2,5 +2,7 @@
   "schemaVersion": "adversarial-kb-index-v1",
   "revision": 1,
   "indexType": "PROOF_TIER",
-  "index": {}
+  "index": {
+    "SCHEMA_VALID": ["EXP-2023-0001"]
+  }
 }

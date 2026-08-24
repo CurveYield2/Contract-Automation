@@ -32,3 +32,10 @@ Append-only. Do not rewrite earlier decisions; append a superseding decision if 
 - Decision: An exact shared exploit transaction hash is sufficient to classify two candidate records as the same incident and merge their references. A contextual/root-cause fingerprint match without exact transaction identity is only `PROBABLE_SAME_INCIDENT` and remains separate for review. Distinct transaction hashes, or asymmetric transaction evidence with the same fingerprint, are `VARIANT_OR_RELATED`, never silently collapsed.
 - Basis: K05 must avoid both duplicate EXP IDs and loss of distinct exploit variants.
 - Consequence: automated ingestion can merge exact duplicates deterministically while preserving variant/family relationships for explicit modeling.
+
+## D-0006 — Incident fact verification is distinct from executable historical proof
+
+- Status: ACTIVE
+- Decision: `EXP-2023-0001` may be `incidentStatus: VERIFIED` because its incident facts are supported by primary protocol/onchain/security evidence, while `PROOF-0001` remains only `SCHEMA_VALID` until the historical reproduction obligations in later modules are executed and qualified.
+- Basis: v3 separates reference confidence from executable proof tiers; K07 must not imply that a verified incident record has already been replayed.
+- Consequence: registry and matching logic may consume the verified incident facts, but no HISTORICAL_REPRODUCTION, GENERALIZED_VARIANT_PROVEN, or QUALIFIED claim may be inferred from K07 alone.

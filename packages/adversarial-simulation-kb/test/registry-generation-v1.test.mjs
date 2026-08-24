@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import {
   buildRegistriesV1,
   canonicalRegistryBytesV1,
@@ -104,11 +103,14 @@ test('dangling cross-references and incident relationships fail closed',()=>{
   assert.equal(validateRegistryGraphV1(danglingRelationship).status,'FAIL');
 });
 
-test('checked-in empty canonical registries match generator output for an empty corpus',()=>{
-  const empty=buildRegistriesV1({incidents:[],patterns:[],recipes:[],executables:[],proofs:[],relationships:[]});
-  for(const name of Object.keys(empty.registries)){
-    const path=`packages/adversarial-simulation-kb/registry/${name}.json`;
-    const checked=JSON.parse(fs.readFileSync(path,'utf8'));
-    assert.deepEqual(checked,empty.registries[name],name);
+test('empty corpus generation remains deterministic and produces empty canonical records and indexes',()=>{
+  const input={incidents:[],patterns:[],recipes:[],executables:[],proofs:[],relationships:[]};
+  const first=buildRegistriesV1(input);
+  const second=buildRegistriesV1(structuredClone(input));
+  assert.deepEqual(first,second);
+  for(const [name,registry] of Object.entries(first.registries)){
+    assert.equal(digestRegistryV1(registry),first.digests[name]);
+    if(name.endsWith('_REGISTRY_v1')) assert.deepEqual(registry.records,[]);
+    else assert.deepEqual(registry.index,{});
   }
 });

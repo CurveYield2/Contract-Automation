@@ -1,0 +1,98 @@
+{
+  "schemaVersion": "adversarial-kb-incident-v1",
+  "incidentId": "EXP-2023-0001",
+  "revision": 1,
+  "title": "Euler V1 donateToReserves solvency-check exploit",
+  "incidentDate": "2023-03-13",
+  "affectedProtocol": "Euler V1",
+  "affectedChain": ["ethereum"],
+  "affectedContracts": [
+    "0x27182842E098f60e3D576794A5bFFb0777E025d3"
+  ],
+  "lossEstimate": {
+    "amountUsdApprox": 197000000,
+    "currency": "USD",
+    "scope": "overall multi-transaction incident",
+    "basisSource": "SOURCE-0001"
+  },
+  "sourceType": "HISTORICAL_EXPLOIT",
+  "incidentStatus": "VERIFIED",
+  "rootCauseSummary": "Euler V1's donateToReserves path could reduce an account's collateral position without the account-health check required to prevent the user from intentionally entering an unhealthy state. The attacker combined that solvency-check omission with Euler's liquidation mechanics to create an attacker-controlled liquidatable position and capture a liquidation bonus greater than the economic loss caused by the donation.",
+  "attackSummary": "The attacker used flash liquidity and Euler's leverage/accounting paths, donated collateral through donateToReserves to become liquidatable without a post-donation solvency rejection, then used a second attacker-controlled account to self-liquidate the unhealthy position and extract value from Euler liquidity. The incident was executed across multiple transactions and assets; the first DAI exploit transaction is preserved as the representative onchain anchor for this record.",
+  "preconditions": [
+    "A funded Euler V1 market with withdrawable underlying liquidity.",
+    "The deployed donateToReserves behavior lacks the required post-action account health check.",
+    "An attacker can establish a leveraged collateral/debt position and control both the violator and liquidator roles.",
+    "Liquidation incentives can compensate the attacker-controlled liquidator for liquidating the deliberately unhealthy position.",
+    "Sufficient temporary liquidity is available to establish the attack position."
+  ],
+  "attackSteps": [
+    "Acquire temporary liquidity and establish a leveraged Euler V1 position.",
+    "Use donateToReserves to reduce the violator account's collateral without a post-donation health check rejecting the resulting unhealthy state.",
+    "Use a second attacker-controlled account to liquidate the deliberately unhealthy violator position.",
+    "Capture liquidation value greater than the attacker's donation loss and withdraw real underlying liquidity.",
+    "Repeat the exploit shape across additional Euler markets/assets during the broader incident."
+  ],
+  "violatedProperties": [
+    "Any user action that materially reduces collateral backing debt must preserve account solvency or revert before committing the unhealthy state.",
+    "A user must not be able to manufacture a profitable liquidation of an attacker-controlled account solely by using protocol accounting operations.",
+    "Liquidation incentives and reserve accounting must not allow attacker-created accounting state to redeem against unrelated depositor liquidity without equivalent economic backing."
+  ],
+  "affectedPatterns": [],
+  "attackPrimitives": [
+    "FLASH_LIQUIDITY",
+    "DONATION",
+    "ACCOUNTING_DESYNC",
+    "SOLVENCY_BYPASS",
+    "COLLATERAL_MANIPULATION"
+  ],
+  "applicabilitySignals": [
+    "A user-callable donation or reserve-transfer path can reduce collateral bookkeeping while debt remains outstanding.",
+    "The donation/reserve path does not perform the same solvency or liquidity check enforced after ordinary collateral-reducing operations.",
+    "Liquidation can be initiated by an independently controlled account against the deliberately unhealthy position.",
+    "Liquidation reward/yield is redeemable for real underlying protocol liquidity.",
+    "Leverage or temporary liquidity can amplify the size of the deliberately unhealthy position."
+  ],
+  "nonApplicabilitySignals": [
+    "Every collateral-reducing donation/reserve path enforces an account health check before state is committed.",
+    "Donated balances cannot reduce collateral that backs outstanding debt.",
+    "The protocol has no liquidation path or liquidation cannot transfer economically valuable collateral/yield to an attacker-controlled counterparty.",
+    "The tested deployment does not contain the vulnerable Euler V1 donateToReserves semantics."
+  ],
+  "falsePositiveGuards": [
+    "Confirm the exact target path can make a debt-bearing account less healthy; a cosmetic reserve donation is not sufficient.",
+    "Confirm the target lacks an equivalent post-action solvency check on the relevant deployed path rather than inferring vulnerability from function naming.",
+    "Confirm an attacker-controlled liquidation can produce net extractable value after the donation loss and transaction/flash-liquidity costs.",
+    "Do not transfer Euler V1-specific conclusions to Euler V2 or unrelated modular lending deployments without independent source/runtime matching."
+  ],
+  "requiredCapabilities": [
+    "TEMPORARY_LIQUIDITY",
+    "ATTACKER_CONTROLLED_VIOLATOR",
+    "ATTACKER_CONTROLLED_LIQUIDATOR",
+    "USER_CALLABLE_DONATION_PATH",
+    "LIQUIDATION_EXECUTION"
+  ],
+  "runtimeRequirements": [
+    {
+      "chain": "ethereum",
+      "representativeExploitBlock": 16817996,
+      "representativeExploitTransaction": "0xc310a0affe2169d1f6feec1c63dbc7f7c62a887fa48795d327d4d2da2d6b111d"
+    },
+    "Historical reproduction must bind the Euler V1 deployed code/state at the selected pre-exploit block rather than current Euler V2 state."
+  ],
+  "references": [
+    "SOURCE-0001",
+    "SOURCE-0002",
+    "SOURCE-0003",
+    "SOURCE-0004"
+  ],
+  "reproductionRefs": [],
+  "generalizedPatternRefs": [],
+  "proofStatusRef": "PROOF-0001",
+  "limitations": [
+    "This record uses the first representative DAI exploit transaction as its exact transaction/block anchor; that transaction is not the entire approximately $197M incident.",
+    "Euler's official account documents multiple exploit transactions across additional assets after the representative DAI exploit transaction.",
+    "The overall USD loss estimate is approximate and applies to the multi-transaction incident, not solely to the representative DAI transaction.",
+    "No HISTORICAL_REPRODUCTION or GENERALIZED_VARIANT_PROVEN claim is made at K07; those proof obligations remain for later modules."
+  ]
+}
