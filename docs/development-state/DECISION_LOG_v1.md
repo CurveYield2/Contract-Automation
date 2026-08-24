@@ -60,3 +60,17 @@ Append-only. Do not rewrite earlier decisions; append a superseding decision if 
 - Decision: Persistent incident, pattern, and recipe records expose explicit positive integer revisions. Every backend-neutral executable binds each referenced knowledge record by kind, stable ID, revision, and canonical SHA-256 digest; stale revision or content digest fails closed. Before an executable has actually qualified, `lastQualification` is `null` rather than a synthetic run claim.
 - Basis: K11 requires exact incident/pattern/recipe revision binding and the global KB is consumed through immutable IDs/digests.
 - Consequence: `CONTROLLED` and `HISTORICAL` executable modes share one metadata contract; historical mode additionally requires archive RPC-by-environment and exact block identity. Literal RPC URLs, private keys, mnemonics, and arbitrary shell/command escape fields are forbidden recursively.
+
+## D-0010 — Forge failed-suite output overrides a misleading zero wrapper exit code
+
+- Status: ACTIVE
+- Decision: Canonical native-Fuzz/Foundry evidence fails closed when Forge stdout/stderr explicitly reports `Suite result: FAILED` or a positive count of failing tests, even if the pinned npm Forge wrapper process exits with code 0. Process exit code alone is not sufficient to classify Forge as completed.
+- Basis: K12 initial V7 run `32703872884` produced `[FAIL: SOLVENCY]` and `0 tests passed, 1 failed` while the wrapper returned exit code 0, causing a false PASS. PR #144 reproduced this with a dedicated RED test (`32707884631`), repaired the shared runner, passed canonical qualification (`32708011530`), and merged as `bb8637f31b891b5b995019dbc09db5a4f5107b33`.
+- Consequence: the initial K12 run is regression-discovery evidence only. K12 accepts the repaired protected RED run `32708299604` and vulnerable GREEN run `32708603994` as authoritative execution evidence.
+
+## D-0011 — K12 controlled reproduction is intentionally distinct from historical reproduction
+
+- Status: ACTIVE
+- Decision: `EXEC-0001 / PROOF-0003` may advance to `CONTROLLED_REPRODUCTION` because the same exact Foundry assertion fails against a protected fixture and passes against a deliberately vulnerable controlled fixture with explicit state/economic deltas. The identity-normalized mutable fork used by the canonical Phase-6 runner is execution infrastructure only and does not create a historical block requirement for the controlled executable.
+- Basis: authoritative protected RED run `32708299604`, authoritative vulnerable GREEN run `32708603994`, and final 63/63 KB qualification run `32709590393`.
+- Consequence: `EXP-2023-0001 / PROOF-0001` and `RECIPE-0001 / PROOF-0002` remain `SCHEMA_VALID`; no historical replay or production-target exploitability is inferred from K12. K13 must independently bind and prove the exact historical incident path before any `HISTORICAL_REPRODUCTION` claim.
