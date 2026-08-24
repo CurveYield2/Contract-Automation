@@ -31,7 +31,10 @@ test('cyvlSDT Phase-6 supplemental harness covers the interconnected accounting 
     'actionGovernanceReservation(uint96)',
     'actionConverterRoute(uint16)',
     'actionLockerAccounting(uint16)',
-  ]) assert.ok(targets.includes(required), `missing randomized target ${required}`);
+    'actionMerchantConfig(uint16)',
+    'actionFraxFeeConfig(uint16)',
+    'actionDiscountRate(uint16)',
+  ]) assert.ok(targets.includes(`CyvlSdtSystemPhase6HarnessV1.${required}`), `missing randomized target ${required}`);
 
   for (const productionImport of [
     'CurveYieldVlSDTToken.sol',
