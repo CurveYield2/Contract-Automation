@@ -1,5 +1,91 @@
 {
   "schemaVersion": "adversarial-kb-executable-registry-v1",
   "revision": 1,
-  "records": []
+  "records": [
+    {
+      "schemaVersion": "adversarial-kb-executable-v1",
+      "executableId": "EXEC-0001",
+      "revision": 1,
+      "incidentRefs": [],
+      "patternRefs": ["PATTERN-0001"],
+      "recipeRefs": ["RECIPE-0001"],
+      "knowledgeBindings": [
+        {
+          "kind": "pattern",
+          "id": "PATTERN-0001",
+          "revision": 1,
+          "digest": "d9f10dc22ab27ad2dad3cc25260fd713b8d12d63df12978801dafcd8518cbe37"
+        },
+        {
+          "kind": "recipe",
+          "id": "RECIPE-0001",
+          "revision": 1,
+          "digest": "c068b116dcf0dea8a73b102f11dd1372494be6bc4730e0df8154c667cf1d3e88"
+        }
+      ],
+      "backend": "foundry",
+      "toolVersion": "forge-1.7.1",
+      "language": "solidity",
+      "sourceFiles": [
+        {
+          "path": "foundry.toml",
+          "digest": "e2eef6f10216d74275cb2a42a687d156a93534e2c992f06600725faa61c91090"
+        },
+        {
+          "path": "src/ControlledLendingFixture.sol",
+          "digest": "bd28f6501edaf1663e5e82663d8fca413b155a7f12d25fbaf31a7f26c68346a6"
+        },
+        {
+          "path": "test/Pattern0001ControlledReproduction.t.sol",
+          "digest": "997883920ffacb38122e2adeecd2b3553e3d516c6a9ed3148a204368a84f58a0"
+        }
+      ],
+      "executionMode": "CONTROLLED",
+      "expectedSetup": [
+        {
+          "kind": "POSITION_SETUP",
+          "collateral": 200,
+          "debt": 100,
+          "protocolLiquidity": 1000
+        },
+        {
+          "kind": "BASELINE_OBSERVATION",
+          "healthBps": 20000,
+          "attackerNetValue": 100
+        }
+      ],
+      "requiredRpcForkState": {
+        "required": false,
+        "chain": null,
+        "archiveRequired": false,
+        "rpcEnvVar": null
+      },
+      "requiredBlockIdentity": null,
+      "requiredImpersonation": [],
+      "requiredTokenBalances": [],
+      "expectedResult": {
+        "kind": "CONTROLLED_REPRODUCTION",
+        "effect": "POST_ACTION_SOLVENCY_VIOLATION_WITH_PROFITABLE_ATTACKER_CONTROLLED_LIQUIDATION",
+        "initialHealthBps": 20000,
+        "postReductionHealthBps": 14000,
+        "minimumHealthBps": 15000,
+        "initialAttackerNetValue": 100,
+        "finalAttackerNetValue": 110,
+        "initialProtocolLiquidity": 1000,
+        "finalProtocolLiquidity": 890
+      },
+      "expectedEvidence": [
+        {"kind": "FOUNDRY_ASSERTION", "required": true},
+        {"kind": "STATE_DELTA", "required": true},
+        {"kind": "ATTACKER_NET_VALUE", "required": true},
+        {"kind": "PROTOCOL_LIQUIDITY_DELTA", "required": true},
+        {"kind": "GITHUB_V7_EVIDENCE", "required": true}
+      ],
+      "proofStatusRef": "PROOF-0003",
+      "lastQualification": {
+        "commit": "295975e5d5b984c787bf1b42c6d113f494d3b719",
+        "runId": "32708603994"
+      }
+    }
+  ]
 }
