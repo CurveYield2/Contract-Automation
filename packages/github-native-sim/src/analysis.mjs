@@ -4,6 +4,7 @@ import { V7_POLICY } from './v7-policy.mjs';
 const EXACT_SLITHER_VERSION = V7_POLICY.tools.slither;
 const EXACT_MEDUSA_VERSION = V7_POLICY.tools.medusa;
 const COMMIT = /^[0-9a-f]{40}$/;
+const MEDUSA_NO_TESTS_MESSAGE = 'no assertion, property, optimization, or custom tests were found to fuzz';
 
 function redact(value, secrets = []) {
   let text = String(value ?? '');
@@ -69,7 +70,19 @@ function normalizeMedusaCliLine(line) {
 }
 
 function parseMedusaCliOutput(output) {
-  const lines = String(output ?? '').replace(/\u001b\[[0-9;]*m/g, '').split(/\r?\n/);
+  const plainText = String(output ?? '').replace(/\u001b\[[0-9;]*m/g, '');
+  if (plainText.includes(MEDUSA_NO_TESTS_MESSAGE)) {
+    return {
+      status: 'no_tests',
+      properties: [],
+      falsifiedProperties: 0,
+      corpus: {},
+      coverage: {},
+      statistics: {}
+    };
+  }
+
+  const lines = plainText.split(/\r?\n/);
   const resultHeader = /^\[(PASSED|FAILED)\]\s+Property Test:\s+(.+?)\s*$/;
   const properties = [];
 
@@ -178,6 +191,13 @@ export async function runMedusaAnalysis(input, { runCommand = runProcess } = {})
       });
     }
     throw error;
+  }
+
+  if (campaign.status === 'no_tests') {
+    return medusaResult(input, {
+      status:'completed_with_failures', terminal:true, failureKind:'NO_TESTS_DISCOVERED', componentStatus:'COMPLETED_WITH_FAILURES',
+      continuationDisposition:'CONTINUE_WITH_LIMITATION', fork:forkEvidence, campaign, rawOutput
+    });
   }
 
   const falsified = campaign.falsifiedProperties > 0 || campaign.status === 'falsified';
