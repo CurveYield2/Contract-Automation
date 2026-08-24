@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "cyvlsdt-v30-audit-v29-r1",
+  "assignmentId": "reviewer-2A-phase6a-p6-0-admission-v1",
+  "phaseId": "build-and-test",
+  "gateId": "phase-6a-v29-p6-0-source-rpc-snapshot-harness-admission-v1",
+  "profileId": "github-native-simulate-v2",
+  "source": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "projectPath": "CurveYield-cyvlSDT-Deployment-Package-v30",
+    "archivePath": "campaigns/cyvlSDT v30 Audit v29/source/CurveYield-cyvlSDT-Deployment-Package-v30.zip",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "configuration": {
+    "compilers": [
+      {
+        "language": "solidity",
+        "version": "0.8.28"
+      },
+      {
+        "language": "vyper",
+        "version": "0.3.10"
+      }
+    ],
+    "timeoutMinutes": 35,
+    "analysis": {
+      "slither": false,
+      "medusa": {
+        "version": "1.5.1"
+      },
+      "nativeFuzz": {
+        "enabled": true,
+        "fuzzRuns": 1,
+        "recoverableExitCodes": []
+      }
+    },
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun",
+    "viaIR": true,
+    "build": {
+      "purpose": "P6.0 exact-source mixed-language build, normalized mutable-RPC, immutable-snapshot and audit-overlay admission smoke only"
+    },
+    "coverage": {
+      "required": false
+    },
+    "properties": [
+      "P6.0 admission only: discovery and one source-fence smoke for Medusa and Foundry; no Phase 6B or Phase 6C security conclusion"
+    ],
+    "harness": {
+      "kind": "runner-owned-audit-overlay-v1",
+      "bundleId": "cyvlsdt-v30-v29-phase6-admission-v1"
+    },
+    "actions": {
+      "ordering": "P6_0_PREFLIGHT_THEN_MEDUSA_ADMISSION_SMOKE_THEN_FOUNDRY_ADMISSION_SMOKE"
+    }
+  },
+  "requestId": "dar-ebd243873e170736692b9aaf659db462",
+  "requestDigest": "ebd243873e170736692b9aaf659db4624f8818385a02f1c67ffba9b52181830d"
+}
