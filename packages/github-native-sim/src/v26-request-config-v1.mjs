@@ -5,6 +5,16 @@ function bool(v,path){ if(typeof v!=='boolean') throw new Error(`${path} must be
 function digest(v,path){ if(typeof v!=='string'||!DIGEST.test(v)) throw new Error(`${path} must be a 64-hex digest`); }
 function string(v,path){ if(typeof v!=='string'||!v.trim()) throw new Error(`${path} must be a non-empty string`); }
 function only(v,allowed,path){ for(const k of Object.keys(v)) if(!allowed.has(k)) throw new Error(`${path}.${k} is not allowed`); }
+function validateObservation(type,o){
+  obj(o,'configuration.v26.reproduction.expectedObservation');
+  if(type==='MEDUSA_PROPERTY'){
+    only(o,new Set(['propertyName','propertyStatus']),'configuration.v26.reproduction.expectedObservation'); string(o.propertyName,'configuration.v26.reproduction.expectedObservation.propertyName'); if(!['passed','failed'].includes(o.propertyStatus)) throw new Error('Medusa reproduction propertyStatus must be passed or failed');
+  } else if(type==='FOUNDRY_TEST'){
+    only(o,new Set(['componentStatus']),'configuration.v26.reproduction.expectedObservation'); if(!['COMPLETED','COMPLETED_WITH_FAILURES','FAILED'].includes(o.componentStatus)) throw new Error('Foundry reproduction componentStatus invalid');
+  } else {
+    only(o,new Set(['stepLabel','stepStatus']),'configuration.v26.reproduction.expectedObservation'); string(o.stepLabel,'configuration.v26.reproduction.expectedObservation.stepLabel'); if(!['completed','failed','PASS','FAIL'].includes(o.stepStatus)) throw new Error('Anvil reproduction stepStatus invalid');
+  }
+}
 
 export function validateV26RequestConfigurationV1(v26,{phaseId}={}){
   if(v26===undefined) return undefined; obj(v26,'configuration.v26');
@@ -32,6 +42,9 @@ export function validateV26RequestConfigurationV1(v26,{phaseId}={}){
   }
   if(v26.foundryCoverageObligations!==undefined){ if(!Array.isArray(v26.foundryCoverageObligations)) throw new Error('configuration.v26.foundryCoverageObligations must be an array'); for(const [i,o] of v26.foundryCoverageObligations.entries()){ obj(o,`configuration.v26.foundryCoverageObligations[${i}]`); if(!['FILE_PRESENT','FUNCTION_COVERED','MINIMUM_METRIC'].includes(o.type)) throw new Error('unsupported Foundry coverage obligation'); } }
   if(v26.liveDeploymentAttestation!==undefined){ if(phaseId!=='fork-simulation-lifecycle') throw new Error('live deployment attestation is Phase 7 only'); obj(v26.liveDeploymentAttestation,'configuration.v26.liveDeploymentAttestation'); if(v26.liveDeploymentAttestation.chain!=='ethereum') throw new Error('v26 live attestation currently supports ethereum only'); if(!Array.isArray(v26.liveDeploymentAttestation.deployments)||v26.liveDeploymentAttestation.deployments.length===0) throw new Error('live deployment attestation deployments required'); }
-  if(v26.reproduction!==undefined){ obj(v26.reproduction,'configuration.v26.reproduction'); if(!['FOUNDRY_TEST','MEDUSA_PROPERTY','ANVIL_WORKFLOW'].includes(v26.reproduction.reproductionType)) throw new Error('unsupported reproductionType'); if(typeof v26.reproduction.candidateId!=='string'||!v26.reproduction.candidateId) throw new Error('candidateId is required'); obj(v26.reproduction.expectedObservation,'configuration.v26.reproduction.expectedObservation'); }
+  if(v26.reproduction!==undefined){
+    obj(v26.reproduction,'configuration.v26.reproduction'); only(v26.reproduction,new Set(['candidateId','reproductionType','expectedObservation']),'configuration.v26.reproduction');
+    if(!['FOUNDRY_TEST','MEDUSA_PROPERTY','ANVIL_WORKFLOW'].includes(v26.reproduction.reproductionType)) throw new Error('unsupported reproductionType'); string(v26.reproduction.candidateId,'configuration.v26.reproduction.candidateId'); validateObservation(v26.reproduction.reproductionType,v26.reproduction.expectedObservation);
+  }
   return structuredClone(v26);
 }
