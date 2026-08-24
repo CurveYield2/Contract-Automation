@@ -24,51 +24,13 @@ jobs:
           ref: feat/v26-machine-foundation-v1
           token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: controller
-          persist-credentials: true
+          persist-credentials: false
           fetch-depth: 1
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Repair only stale active preflight fixture profiles
-        working-directory: controller
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          targets = [
-              'packages/controller-core/test/card-activation-v2.test.mjs',
-              'packages/controller-core/test/card-quiz-reducer-v2.test.mjs',
-              'packages/controller-core/test/deep-assurance-assignments.test.mjs',
-              'packages/controller-core/test/deep-assurance-v16-lifecycle.test.mjs',
-              'packages/controller-core/test/deep-assurance-v6.test.mjs',
-              'packages/controller-core/test/instruction-read-proof-v2.test.mjs',
-              'packages/controller-core/test/orchestrator-bootstrap-quiz-v2.test.mjs',
-              'packages/controller-core/test/phase0-registration-quiz-v2.test.mjs',
-              'packages/controller-core/test/team-bootstrap-v2.test.mjs',
-          ]
-          for raw in targets:
-              path = Path(raw)
-              text = path.read_text()
-              before = text
-              for old, new in [
-                  ('github-native-compile-v1', 'github-native-compile-v2'),
-                  ('github-native-simulate-v1', 'github-native-simulate-v2'),
-              ]:
-                  count = text.count(old)
-                  if count < 1:
-                      raise SystemExit(f'{raw}: expected at least one {old} fixture occurrence')
-                  text = text.replace(old, new, 1)
-                  print(f'{raw}: replaced first {old} occurrence (observed {count})')
-              if text == before:
-                  raise SystemExit(f'{raw}: no fixture repair applied')
-              path.write_text(text)
-          PY
-          git diff --check
-          git diff -- packages/controller-core/test
 
       - name: Run private controller tests
         working-directory: controller
@@ -78,21 +40,13 @@ jobs:
         working-directory: controller
         run: npm run check
 
-      - name: Commit verified fixture repair to private controller branch
-        if: success()
+      - name: Assert verification workspace is clean
         working-directory: controller
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet; then
-            echo 'No fixture repair commit required.'
-          else
-            git config user.name 'CurveYield V26 Qualification'
-            git config user.email 'actions@users.noreply.github.com'
-            git add packages/controller-core/test
-            git commit -m 'test(v26): update active execution profile fixtures'
-            git push origin HEAD:feat/v26-machine-foundation-v1
-          fi
+          git diff --exit-code
+          git diff --cached --exit-code
 
       - name: Record exact controller commit
         if: success()
@@ -107,7 +61,8 @@ jobs:
             "controllerCommit": "$commit",
             "status": "PASS",
             "tests": "npm test",
-            "checks": "npm run check"
+            "checks": "npm run check",
+            "workspaceClean": true
           }
           JSON
 
