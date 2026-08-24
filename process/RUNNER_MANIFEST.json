@@ -48,6 +48,22 @@
     "stagingPolicy": "SINGLE_VERIFIED_SNAPSHOT_THEN_LOCAL_EXECUTION_COPY",
     "rpcIdentityPolicy": "ONE_NORMALIZED_RPC_SESSION_FOR_PREFLIGHT_MEDUSA_AND_FOUNDRY"
   },
+  "qualifiedCapabilities": {
+    "requestExtension": "configuration.v26-v1",
+    "qualificationWorkflow": ".github/workflows/v7-execution-infrastructure-qualification.yml",
+    "components": {
+      "v26-result-components-v1": "audit-v7-github-execution-evidence-v2",
+      "v26-build-sbom-v1": "audit-v7-build-sbom-v1",
+      "v26-phase6-campaign-evidence-v1": "audit-v7-phase6-campaign-evidence-v1",
+      "v26-foundry-coverage-v1": "audit-v7-foundry-coverage-v1",
+      "v26-simulation-ledger-v1": "audit-v7-simulation-lifecycle-ledger-v1",
+      "v26-live-attestation-v1": "audit-v7-live-deployment-attestation-v1",
+      "v26-reproduction-v1": "audit-v7-candidate-reproduction-v1"
+    },
+    "recipes": [
+      "repeated-lifecycle-v1"
+    ]
+  },
   "commands": {
     "execute": "npm run v7:execute -- --request <request.json>",
     "submit": "npm run v7:submit -- --request <request.json>",
