@@ -1,0 +1,252 @@
+name: BoostHub Phase9 Reviewer4 Remediation v1
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'github-native-sim/boosthub-phase9-reviewer4-remediation-trigger-v1.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  phase9-remediation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout trusted runner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout controller source/evidence fence
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Audit-Controller
+          ref: 6e186513a8cdcb155600b1afb7b8cdc20c6b40cf
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node and Python
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Bind exact v4 and reconstruct exact V17
+        id: src
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP='.controller/campaigns/Boosthub Staking v2/source/CurveYield-BoostHub-sdCRV-sdFXN-sdYB-Deployment-Package-Remediated-v4.zip'
+          test "$(sha256sum "$ZIP" | awk '{print $1}')" = '4b502a2040712da8e6f4e80165ed74c8e3f492226e60141bc23ac8585a3855d4'
+          rm -rf .phase9 && mkdir .phase9 && unzip -q "$ZIP" -d .phase9
+          ROOT="$(find .phase9 -mindepth 1 -maxdepth 1 -type d | head -n1)"
+          test -n "$ROOT"
+          V16="$ROOT/contracts/boosthub/vyper/BoostHubStaking-v16.vy"
+          V17="$ROOT/contracts/boosthub/vyper/BoostHubStaking-v17.vy"
+          cp "$V16" "$V17"
+          python - "$V17" <<'PY'
+          from pathlib import Path
+          import sys
+          p=Path(sys.argv[1]); s=p.read_text()
+          repls=[
+            ('MAX_YIELD_BOOST_FEE_BPS: constant(uint256) = 500\n','MAX_YIELD_BOOST_FEE_BPS: constant(uint256) = 500\nMAX_FEE_CONVERSION_SLIPPAGE_BPS: constant(uint256) = 400\n'),
+            ('yield_boost_fee_bps: public(uint256)\n\n# Converter','yield_boost_fee_bps: public(uint256)\nfee_conversion_slippage_bps: uint256\n\n# Converter'),
+            ('    self.yield_boost_fee_bps = _yield_boost_fee_bps\n    self.reward_smoothing_units','    self.yield_boost_fee_bps = _yield_boost_fee_bps\n    self.fee_conversion_slippage_bps = 100\n    self.reward_smoothing_units'),
+            ('    assert quote != 0, "zero quote"\n    response: Bytes[32] = raw_call(','    assert quote != 0, "zero quote"\n    quote = quote * (FEE_DENOMINATOR - self.fee_conversion_slippage_bps) // FEE_DENOMINATOR\n    response: Bytes[32] = raw_call('),
+            ('def set_yield_boost_fee_bps(_fee_bps: uint256):\n    assert msg.sender == self.admin and _fee_bps <= MAX_YIELD_BOOST_FEE_BPS\n    self.yield_boost_fee_bps = _fee_bps\n    log SetYieldBoostFee(_fee_bps)\n\n@external\ndef set_reward_converter','def set_yield_boost_fee_bps(_fee_bps: uint256):\n    assert msg.sender == self.admin and _fee_bps <= MAX_YIELD_BOOST_FEE_BPS\n    self.yield_boost_fee_bps = _fee_bps\n    log SetYieldBoostFee(_fee_bps)\n\n@external\ndef set_fee_conversion_slippage_bps(_slippage_bps: uint256):\n    assert msg.sender == self.admin and _slippage_bps <= MAX_FEE_CONVERSION_SLIPPAGE_BPS\n    self.fee_conversion_slippage_bps = _slippage_bps\n\n@external\ndef set_reward_converter')
+          ]
+          for old,new in repls:
+              assert old in s, old[:80]
+              s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          test "$(sha256sum "$V17" | awk '{print $1}')" = 'd579f10a191bcf72feb8c220d7de4de447d9667e4ae923540df42781ee8f4216'
+          echo "root=$(realpath "$ROOT")" >> "$GITHUB_OUTPUT"
+          echo "v17=$(realpath "$V17")" >> "$GITHUB_OUTPUT"
+          printf 'v4_sha256=%s\nv17_sha256=%s\n' "$(sha256sum "$ZIP"|awk '{print $1}')" "$(sha256sum "$V17"|awk '{print $1}')" | tee phase9-source-binding-v1.txt
+
+      - name: Install exact package dependencies and Vyper
+        working-directory: ${{ steps.src.outputs.root }}
+        run: |
+          npm ci --ignore-scripts
+          python -m pip install --disable-pip-version-check --no-input 'vyper==0.4.3'
+
+      - name: Compile revised surfaces and verify static remediation semantics
+        env:
+          ROOT: ${{ steps.src.outputs.root }}
+          V17: ${{ steps.src.outputs.v17 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          npx hardhat compile 2>&1 | tee "$GITHUB_WORKSPACE/phase9-solidity-compile-v1.txt"
+          python - <<'PY' | tee "$GITHUB_WORKSPACE/phase9-static-remediation-v1.txt"
+          import os
+          from pathlib import Path
+          r=Path(os.environ['ROOT'])
+          s=(r/'contracts/boosthub/CurveYieldStakingStrategyV2.sol').read_text()
+          assert 'maxSlippageBps = 100;' in s
+          assert 'MAX_SLIPPAGE_BPS = 400' in s
+          assert 'quoted * (FEE_DENOMINATOR - maxSlippageBps) / FEE_DENOMINATOR' in s
+          assert 'delete tokenRescueReadyAt[token];' in s
+          v=Path(os.environ['V17']).read_text()
+          assert 'self.reward_from_boosthub[_lp_token] = staticcall BoostHub(_boost_hub).isRewardToken(_pid, _lp_token)' in v
+          assert 'assert staticcall BoostHub(_boost_hub).isRewardToken(_pid, token)' in v
+          assert 'if not self.reward_from_boosthub[token]:' in v
+          assert 'self.fee_conversion_slippage_bps = 100' in v
+          assert 'MAX_FEE_CONVERSION_SLIPPAGE_BPS: constant(uint256) = 400' in v
+          assert 'quote = quote * (FEE_DENOMINATOR - self.fee_conversion_slippage_bps) // FEE_DENOMINATOR' in v
+          print('STATIC_REMEDIATION_CHECK=PASS')
+          PY
+          python - <<'PY' | tee "$GITHUB_WORKSPACE/phase9-v17-compile-size-v1.txt"
+          import os,json,vyper
+          from pathlib import Path
+          from vyper.compiler import compile_code
+          p=Path(os.environ['V17'])
+          out=compile_code(p.read_text(),contract_path=str(p),output_formats=['abi','bytecode','bytecode_runtime'])
+          runtime=(len(out['bytecode_runtime'])-2)//2
+          assert vyper.__version__=='0.4.3'
+          assert runtime==24552, runtime
+          assert runtime<=24576
+          names={x.get('name') for x in out['abi'] if x.get('type')=='function'}
+          assert 'set_fee_conversion_slippage_bps' in names
+          assert 'fee_conversion_slippage_bps' not in names
+          Path(os.environ['GITHUB_WORKSPACE'],'phase9-v17-artifact-v1.json').write_text(json.dumps({'abi':out['abi'],'bytecode':out['bytecode']}))
+          print('vyper=0.4.3')
+          print('runtime_bytes='+str(runtime))
+          print('eip170_headroom='+str(24576-runtime))
+          print('V17_COMPILE_SIZE=PASS')
+          PY
+
+      - name: Dynamic stale rescue timer regression
+        env:
+          ROOT: ${{ steps.src.outputs.root }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          mkdir -p contracts/audit test
+          cat > contracts/audit/Phase9MockERC20.sol <<'SOL'
+          // SPDX-License-Identifier: UNLICENSED
+          pragma solidity 0.8.28;
+          import {ERC20} from '@openzeppelin/contracts/token/ERC20/ERC20.sol';
+          contract Phase9MockERC20 is ERC20 {
+              constructor(string memory n,string memory s) ERC20(n,s) {}
+              function mint(address to,uint256 amount) external { _mint(to,amount); }
+          }
+          SOL
+          cat > test/phase9-rescue-timer-reviewer4-v1.js <<'NODE'
+          const {expect}=require('chai'); const {ethers,network}=require('hardhat');
+          describe('Phase9 stale rescue timer regression',function(){
+            it('re-enable clears pre-aged timer and requires a new full delay',async function(){
+              const [owner]=await ethers.getSigners();
+              const T=await ethers.getContractFactory('Phase9MockERC20');
+              const want=await T.deploy('Want','WANT'); await want.waitForDeployment();
+              const reward=await T.deploy('Reward','RWD'); await reward.waitForDeployment();
+              const S=await ethers.getContractFactory('CurveYieldStakingStrategyV2');
+              const s=await S.deploy(await want.getAddress(),owner.address,owner.address,owner.address,[],[],[]); await s.waitForDeployment();
+              const r=await reward.getAddress();
+              await s.addRewardRoute(r,owner.address,1); await s.removeRewardRoute(r);
+              await s.inCaseTokensGetStuck(r); expect(await s.tokenRescueReadyAt(r)).to.not.equal(0n);
+              await network.provider.send('evm_increaseTime',[60*24*60*60+1]); await network.provider.send('evm_mine');
+              await s.addRewardRoute(r,owner.address,1); expect(await s.tokenRescueReadyAt(r)).to.equal(0n);
+              await s.removeRewardRoute(r);
+              await expect(s.executeTokenRescue(r)).to.be.revertedWithCustomError(s,'NoPendingChange');
+              await s.inCaseTokensGetStuck(r);
+              await expect(s.executeTokenRescue(r)).to.be.revertedWithCustomError(s,'TimelockNotReady');
+            });
+          });
+          NODE
+          npx hardhat test test/phase9-rescue-timer-reviewer4-v1.js 2>&1 | tee "$GITHUB_WORKSPACE/phase9-rescue-timer-regression-v1.txt"
+
+      - name: Pinned-fork sdYB V17 constructor and classification regression
+        env:
+          ROOT: ${{ steps.src.outputs.root }}
+          CURVEYIELD_HARDHAT_FORK_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          CURVEYIELD_HARDHAT_FORK_BLOCK: '25737717'
+          V17_ARTIFACT: ${{ github.workspace }}/phase9-v17-artifact-v1.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$ROOT"
+          cat > test/phase9-sdyb-v17-reviewer4-v1.js <<'NODE'
+          const {expect}=require('chai'); const {ethers}=require('hardhat'); const fs=require('fs');
+          const HUB='0xFbEF8941Da53EA724385B44E91ae9672061D0263';
+          const SDYB='0x0c057598dcE1891688829581f890DD2a3685a43f';
+          const CRVUSD='0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E';
+          const CRV='0xD533a949740bb3306d119CC777fa900bA034cd52';
+          describe('Phase9 sdYB V17 fork regression',function(){
+            it('deploys PID2 with non-native WANT and preserves native extra validation/classification',async function(){
+              const [owner]=await ethers.getSigners();
+              const hub=new ethers.Contract(HUB,['function isRewardToken(uint256,address) view returns(bool)'],owner);
+              expect(await hub.isRewardToken(2,SDYB)).to.equal(false); expect(await hub.isRewardToken(2,CRVUSD)).to.equal(true);
+              const a=JSON.parse(fs.readFileSync(process.env.V17_ARTIFACT)); const F=new ethers.ContractFactory(a.abi,a.bytecode,owner);
+              const z=ethers.ZeroAddress; const rt=[CRVUSD,z,z,z,z,z,z,z]; const rc=[owner.address,z,z,z,z,z,z,z];
+              const c=await F.deploy(SDYB,CRV,HUB,2,owner.address,rt,rc,0,0,owner.address,0,0,0,owner.address); await c.waitForDeployment();
+              expect(await c.reward_from_boosthub(SDYB)).to.equal(false); expect(await c.reward_from_boosthub(CRVUSD)).to.equal(true);
+              expect(await c.reward_count()).to.equal(2n);
+            });
+          });
+          NODE
+          npx hardhat test --no-compile test/phase9-sdyb-v17-reviewer4-v1.js 2>&1 | tee "$GITHUB_WORKSPACE/phase9-sdyb-v17-fork-regression-v1.txt"
+
+      - name: Pinned live oracle/execution regression for v4/V17 minima
+        env:
+          RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE' | tee phase9-oracle-execution-regression-v1.txt
+          const {ethers}=require('./.phase9/' + require('fs').readdirSync('.phase9')[0] + '/node_modules/ethers');
+          const p=new ethers.JsonRpcProvider(process.env.RPC_URL,1,{staticNetwork:true}); const B=25737717; const FEE=10000000000n, BPS=10000n;
+          const P1='0xec977F46467a3021785Cff88894886E617abd65b', P2='0x98b540fa89690969D111D045afCa575C91519B1A';
+          const abi=['function fee() view returns(uint256)','function price_oracle() view returns(uint256)','function get_dy(uint256,uint256,uint256) view returns(uint256)'];
+          async function call(c,f,args=[]){return await c[f](...args,{blockTag:B});}
+          (async()=>{const a=new ethers.Contract(P1,abi,p), b=new ethers.Contract(P2,abi,p); const amount=10n**18n;
+            const f1=await call(a,'fee'), f2=await call(b,'fee'), o1=await call(a,'price_oracle'), o2=await call(b,'price_oracle');
+            let q=amount*10n**18n/o1; q=q*(FEE-f1)/FEE; q=q*10n**18n/o2; q=q*(FEE-f2)/FEE;
+            const x1=await call(a,'get_dy',[0,1,amount]); const x2=await call(b,'get_dy',[0,1,x1]); const min=q*(BPS-100n)/BPS;
+            console.log('oracle_fee_preview='+q); console.log('executable='+x2); console.log('strategy_or_v17_1pct_min='+min); console.log('margin_bps_x100='+((x2-min)*1000000n/min));
+            if(x2<min) throw new Error('1pct floor fails');
+            console.log('ORACLE_EXECUTION_REGRESSION=PASS');
+          })().catch(e=>{console.error(e);process.exit(1)});
+          NODE
+
+      - name: Package verification
+        working-directory: ${{ steps.src.outputs.root }}
+        run: npm run check:v2 2>&1 | tee "$GITHUB_WORKSPACE/phase9-package-check-v1.txt"
+
+      - name: Write Phase9 summary
+        shell: bash
+        run: |
+          cat > phase9-reviewer4-summary-v1.json <<'JSON'
+          {"phase":9,"reviewer":"reviewer-4","source":{"v4_sha256":"4b502a2040712da8e6f4e80165ed74c8e3f492226e60141bc23ac8585a3855d4","v17_sha256":"d579f10a191bcf72feb8c220d7de4de447d9667e4ae923540df42781ee8f4216"},"obligations":{"OBL-P9-001":"PASS","OBL-P9-002":"PASS","OBL-P9-003":"PASS","OBL-P9-004":"PASS"},"runtime_bytes":24552,"eip170_headroom_bytes":24}
+          JSON
+
+      - name: Upload reviewer4 Phase9 evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: boosthub-phase9-reviewer4-remediation-v1
+          path: |
+            phase9-source-binding-v1.txt
+            phase9-solidity-compile-v1.txt
+            phase9-static-remediation-v1.txt
+            phase9-v17-compile-size-v1.txt
+            phase9-v17-artifact-v1.json
+            phase9-rescue-timer-regression-v1.txt
+            phase9-sdyb-v17-fork-regression-v1.txt
+            phase9-oracle-execution-regression-v1.txt
+            phase9-package-check-v1.txt
+            phase9-reviewer4-summary-v1.json
+          if-no-files-found: error
+          retention-days: 30
