@@ -1,0 +1,3 @@
+Boosthub Staking v2 Phase 9 V17 setter boundary trigger v1
+Campaign generation: boosthub-staking-v2-g1-20260818T215920Z
+Target: OBL-P9-004 setter authority / 400-bps hard cap boundary.
