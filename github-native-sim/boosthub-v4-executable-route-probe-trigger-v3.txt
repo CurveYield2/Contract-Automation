@@ -1,0 +1,1 @@
+Trigger BoostHub v4 executable route probe v3 for Phase-8 successor remediation validation.
