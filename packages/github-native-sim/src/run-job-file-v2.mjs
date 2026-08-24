@@ -4,6 +4,7 @@ import { validateDeepAssuranceRequestWithV26V1 } from './schema-v26.mjs';
 import { runGitHubNativeJob as runGitHubNativeJobV1 } from './run-job-file.mjs';
 import { runPhase6ExecutionPreflightV1 } from './phase6-execution-preflight-v1.mjs';
 import { createPhase6MutableRpcSession, phase6MutableRpcRuntime } from './phase6-mutable-rpc-v1.mjs';
+import { runTargetMedusaPreflightV1 } from './medusa-target-preflight-v1.mjs';
 import { runPhase7ForkPreflightV2 } from './phase7-fork-preflight-v2.mjs';
 import { stagePhase6Snapshot, copyPhase6SnapshotForExecution } from './phase6-staged-snapshot-v1.mjs';
 import { attachExecutionDisposition } from './execution-disposition-v1.mjs';
@@ -43,6 +44,7 @@ function phase6RequiresMutableRpc(request) {
 
 function phase6DelegateOptions(delegateOptions, preflight, mutableRpcSession) {
   const options = { ...delegateOptions };
+  delete options.runTargetMedusaPreflight;
   if (preflight?.mutableRpc?.status === 'PASS') {
     options.phase6MutableRpc = phase6MutableRpcRuntime({ session: mutableRpcSession });
   }
@@ -117,6 +119,46 @@ async function executePhase6V2({
 
     if (preflight.status !== 'PASS') {
       return attachExecutionDisposition({ request, result: preflightFailure(request, preflight), requestPath });
+    }
+
+    if (preflight.medusa?.status === 'PASS') {
+      const mutableRpcRuntime = phase6MutableRpcRuntime({ session: mutableRpcSession });
+      const targetMedusaPreflightRunner = delegateOptions.runTargetMedusaPreflight ?? runTargetMedusaPreflightV1;
+      const targetMedusaPreflight = await targetMedusaPreflightRunner({
+        sourceCommit: phase6Snapshot.commit,
+        projectRoot: phase6Snapshot.projectRoot,
+        snapshotDigestSha256: phase6Snapshot.snapshotDigestSha256,
+        harnessOverlayDigestSha256: phase6Snapshot.harnessOverlay?.overlayDigestSha256,
+        rpcUrl: mutableRpcRuntime.url,
+        rpcProfile: mutableRpcRuntime.profile,
+        rpcBlock: mutableRpcRuntime.blockNumber,
+        rpcBlockHash: mutableRpcRuntime.blockHash,
+        workspaceRoot: path.join(workspaceRoot, 'preflight'),
+      }, {
+        ...(delegateOptions.runMedusa ? { runMedusa: delegateOptions.runMedusa } : {}),
+      });
+      preflight = {
+        ...preflight,
+        targetMedusa: targetMedusaPreflight,
+        targetMedusaSmokeRequired: true,
+        targetMedusaSmokePassed: targetMedusaPreflight.status === 'PREFLIGHT_PASS',
+      };
+      if (targetMedusaPreflight.status !== 'PREFLIGHT_PASS') {
+        preflight = {
+          ...preflight,
+          status: 'FAIL',
+          failureKind: targetMedusaPreflight.firstFailure ?? 'MEDUSA_TARGET_PREFLIGHT_FAILURE',
+          reason: targetMedusaPreflight.diagnostics?.[0]?.summary ?? 'Actual-target Medusa smoke did not pass',
+        };
+        return attachExecutionDisposition({ request, result: preflightFailure(request, preflight), requestPath });
+      }
+    } else {
+      preflight = {
+        ...preflight,
+        targetMedusa: { status: 'NOT_APPLICABLE', reason: preflight.medusa?.reason ?? 'TARGET_HARNESS_NOT_PRESENT' },
+        targetMedusaSmokeRequired: false,
+        targetMedusaSmokePassed: null,
+      };
     }
 
     const delegated = phase6DelegateOptions(delegateOptions, preflight, mutableRpcSession);
