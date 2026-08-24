@@ -1,0 +1,110 @@
+name: V7 Agent Qualification Bridge
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+
+concurrency:
+  group: v7-agent-qualification-bridge
+  cancel-in-progress: false
+
+jobs:
+  dispatch-and-observe:
+    if: >-
+      github.event.issue.title == '[agent] run-v7-qualification' &&
+      (github.event.issue.user.login == 'CurveYield-Developer-DK' || github.event.issue.user.login == 'JamesNexus')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Dispatch canonical V7 qualification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow='v7-execution-infrastructure-qualification.yml'
+          before="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+          gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref main
+
+          run_id=''
+          for _ in $(seq 1 30); do
+            sleep 2
+            candidate="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" --event workflow_dispatch --branch main --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
+            if [ "$candidate" != '0' ] && [ "$candidate" != "$before" ]; then
+              run_id="$candidate"
+              break
+            fi
+          done
+          if [ -z "$run_id" ]; then
+            echo 'Canonical qualification dispatch did not produce a discoverable workflow run' >&2
+            exit 1
+          fi
+          echo "CANONICAL_RUN_ID=$run_id" >> "$GITHUB_ENV"
+          echo "canonical_run_id=$run_id" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Observe canonical V7 qualification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run watch "$CANONICAL_RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
+
+      - name: Publish last qualification attempt marker
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v7-agent-qualification
+          if [ -n "${CANONICAL_RUN_ID:-}" ]; then
+            gh run view "$CANONICAL_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --json databaseId,status,conclusion,headSha,url,event,createdAt,updatedAt \
+              > /tmp/v7-agent-qualification/canonical-run.json
+          else
+            printf '%s\n' '{"databaseId":null,"status":"unknown","conclusion":"dispatch_not_observed","headSha":null,"url":null,"event":null,"createdAt":null,"updatedAt":null}' \
+              > /tmp/v7-agent-qualification/canonical-run.json
+          fi
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const canonicalRun = JSON.parse(fs.readFileSync('/tmp/v7-agent-qualification/canonical-run.json', 'utf8'));
+          const marker = {
+            schemaVersion: 'curveyield-v7-agent-qualification-last-run-v1',
+            bridgeWorkflowRunId: process.env.GITHUB_RUN_ID,
+            triggerIssue: Number(process.env.ISSUE_NUMBER),
+            recordedAt: new Date().toISOString(),
+            canonicalRun,
+          };
+          fs.writeFileSync('/tmp/v7-agent-qualification/last-run.json', `${JSON.stringify(marker, null, 2)}\n`);
+          NODE
+
+          content="$(base64 -w0 /tmp/v7-agent-qualification/last-run.json)"
+          existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_LAST_RUN.json?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$existing_sha" ]; then
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_LAST_RUN.json" \
+              -f message='chore(v7): record latest qualification attempt' \
+              -f content="$content" -f sha="$existing_sha" -f branch='main' >/dev/null
+          else
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_LAST_RUN.json" \
+              -f message='chore(v7): record latest qualification attempt' \
+              -f content="$content" -f branch='main' >/dev/null
+          fi
+
+      - name: Close trigger issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          run_id="${CANONICAL_RUN_ID:-unavailable}"
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed \
+            --comment "Canonical V7 qualification dispatch handled. Run ID: $run_id. See process/V7_QUALIFICATION_LAST_RUN.json for the recorded outcome."
