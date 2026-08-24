@@ -5,6 +5,8 @@ import { runGitHubNativeJob as runGitHubNativeJobV1 } from './run-job-file.mjs';
 import { runPhase6ExecutionPreflightV1 } from './phase6-execution-preflight-v1.mjs';
 import { createPhase6MutableRpcSession, phase6MutableRpcRuntime } from './phase6-mutable-rpc-v1.mjs';
 import { runTargetMedusaPreflightV1 } from './medusa-target-preflight-v1.mjs';
+import { runTargetFoundryPreflightV1 } from './foundry-target-preflight-v1.mjs';
+import { runProcess } from './execution.mjs';
 import { runPhase7ForkPreflightV2 } from './phase7-fork-preflight-v2.mjs';
 import { stagePhase6Snapshot, copyPhase6SnapshotForExecution } from './phase6-staged-snapshot-v1.mjs';
 import { attachExecutionDisposition } from './execution-disposition-v1.mjs';
@@ -45,6 +47,7 @@ function phase6RequiresMutableRpc(request) {
 function phase6DelegateOptions(delegateOptions, preflight, mutableRpcSession) {
   const options = { ...delegateOptions };
   delete options.runTargetMedusaPreflight;
+  delete options.runTargetFoundryPreflight;
   if (preflight?.mutableRpc?.status === 'PASS') {
     options.phase6MutableRpc = phase6MutableRpcRuntime({ session: mutableRpcSession });
   }
@@ -66,6 +69,16 @@ function normalizePhase6TerminalSemantics(result) {
   };
 }
 
+function foundryMedusaTerminalStatus(medusa) {
+  if (!medusa || medusa.terminal !== true) return 'RUNNING';
+  if (medusa.failureKind === 'PROPERTY_FALSIFICATION') return 'PROPERTY_FALSIFICATION';
+  if (medusa.failureKind === 'NO_TESTS_DISCOVERED') return 'NO_TESTS_DISCOVERED';
+  if (medusa.status === 'completed') return 'COMPLETED';
+  if (medusa.status === 'completed_with_failures') return 'COMPLETED_WITH_FAILURES';
+  if (medusa.status === 'failed') return 'FAILED';
+  return 'FAILED';
+}
+
 async function executePhase6V2({
   request,
   workspaceRoot,
@@ -80,6 +93,7 @@ async function executePhase6V2({
   let phase6Snapshot = null;
   let mutableRpcSession = null;
   let executionSnapshot = null;
+  let targetFoundryPreflight = null;
   try {
     phase6Snapshot = await stagePhase6Snapshot(legacyRequest, {
       workspaceRoot: path.join(workspaceRoot, 'staging'),
@@ -169,6 +183,29 @@ async function executePhase6V2({
       return executionSnapshot;
     };
 
+    if (preflight.nativeFuzz?.status === 'PASS') {
+      delegated.preflightNativeFuzz = async ({ projectRoot, medusa, phase6MutableRpc }) => {
+        const runner = delegateOptions.runTargetFoundryPreflight ?? runTargetFoundryPreflightV1;
+        targetFoundryPreflight = await runner({
+          projectRoot,
+          sourceCommit: phase6Snapshot.commit,
+          snapshotDigestSha256: phase6Snapshot.snapshotDigestSha256,
+          expectedSnapshotDigestSha256: phase6Snapshot.snapshotDigestSha256,
+          medusaTerminalStatus: foundryMedusaTerminalStatus(medusa),
+          rpcUrl: phase6MutableRpc?.url,
+          rpcProfile: phase6MutableRpc?.profile,
+          rpcChainId: phase6MutableRpc?.chainId,
+          rpcBlock: phase6MutableRpc?.blockNumber,
+          rpcBlockHash: phase6MutableRpc?.blockHash,
+          workspaceRoot: path.join(workspaceRoot, 'preflight'),
+          fuzzRuns: Math.min(16, legacyRequest.configuration.analysis?.nativeFuzz?.fuzzRuns ?? 16),
+          coverageObligationsValid: true,
+          outputPathsWritable: true,
+        }, { runCommand: delegateOptions.runCommand ?? runProcess });
+        return targetFoundryPreflight;
+      };
+    }
+
     let result = await runGitHubNativeJobV1(legacyRequest, {
       workspaceRoot: path.join(workspaceRoot, 'execution'),
       environment,
@@ -181,6 +218,11 @@ async function executePhase6V2({
       ...result,
       preflight: {
         ...preflight,
+        targetFoundry: preflight.nativeFuzz?.status === 'PASS'
+          ? (targetFoundryPreflight ?? { status: 'NOT_RUN', reason: 'NATIVE_FUZZ_ACTION_BOUNDARY_NOT_REACHED' })
+          : { status: 'NOT_APPLICABLE', reason: preflight.nativeFuzz?.reason ?? 'NATIVE_FUZZ_NOT_REQUESTED' },
+        targetFoundrySmokeRequired: preflight.nativeFuzz?.status === 'PASS',
+        targetFoundrySmokePassed: targetFoundryPreflight ? targetFoundryPreflight.status === 'PREFLIGHT_PASS' : null,
         executionSnapshotDigestSha256: executionSnapshot?.snapshotDigestSha256 ?? null,
         executionSnapshotVerified: verified,
         secondNetworkCheckoutPerformed: false,
