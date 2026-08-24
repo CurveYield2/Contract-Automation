@@ -141,7 +141,25 @@ async function executePhase7Simulation({ request, build, environment, startSimul
   }
 }
 
-async function executeSlither({ request, checkout, build, runSlither, runCommand }) {
+async function executeSlither({ request, checkout, build, preflightSlither, runSlither, runCommand }) {
+  if (preflightSlither) {
+    const receipt = await preflightSlither({ projectRoot: checkout.projectRoot, request, build, checkout });
+    if (!receipt || receipt.status !== 'PREFLIGHT_PASS') {
+      return {
+        backend: 'slither',
+        version: request.configuration.analysis?.slither?.version ?? V7_POLICY.tools.slither,
+        sourceCommit: request.source.commit,
+        rawArtifactRef: rawArtifactRef('slither/preflight.json'),
+        status: 'preflight_blocked',
+        terminal: true,
+        failureKind: receipt?.firstFailure ?? 'SLITHER_TARGET_PREFLIGHT_FAILURE',
+        componentStatus: 'COMPLETED_WITH_FAILURES',
+        continuationDisposition: 'CONTINUE_WITH_LIMITATION',
+        authoritativeFinding: false,
+        preflight: receipt ?? null,
+      };
+    }
+  }
   if (runSlither) return runSlither({ projectRoot: checkout.projectRoot, request, build });
   const slitherVersion = request.configuration.analysis?.slither?.version ?? V7_POLICY.tools.slither;
   return runSlitherAnalysis({ projectRoot: checkout.projectRoot, version: slitherVersion, sourceCommit: request.source.commit, rawArtifactRef: rawArtifactRef('slither/raw.json') }, { ...(runCommand ? { runCommand } : {}) });
@@ -204,6 +222,7 @@ export async function runGitHubNativeJob(input, {
   checkoutSource = defaultCheckoutSource,
   preflightBuild,
   buildProject = defaultBuildProject,
+  preflightSlither,
   runSlither,
   runMedusa,
   preflightNativeFuzz,
@@ -246,7 +265,7 @@ export async function runGitHubNativeJob(input, {
 
   if (request.profileId === V7_POLICY.profiles.compile) {
     try {
-      analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
+      analysis.slither = await executeSlither({ request, checkout, build, preflightSlither, runSlither, runCommand });
     } catch (error) {
       analysis.slither = { backend: 'slither', status: 'failed', terminal: true, componentStatus: 'FAILED', continuationDisposition: 'CONTINUE_WITH_LIMITATION', failureKind: error?.kind ?? 'ANALYSIS_COMPONENT_FAILURE', error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) } };
     }
@@ -256,7 +275,7 @@ export async function runGitHubNativeJob(input, {
     try {
       await runStage2aAnalysis(stage2aConfig, {
         runSlither: async () => {
-          analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
+          analysis.slither = await executeSlither({ request, checkout, build, preflightSlither, runSlither, runCommand });
           return analysis.slither;
         },
         runMedusa: async () => {
