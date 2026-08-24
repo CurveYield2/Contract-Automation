@@ -83,6 +83,13 @@ jobs:
           OVER='.request/github-native-sim/boosthub-v6-live-fork/overlay'
           test -d "$OVER"
           cp -a "$OVER"/. "$ROOT"/
+          mkdir -p "$ROOT/contracts/boosthub/converters" "$ROOT/contracts/gauges"
+          cp "$ROOT/reference/converters/CurveRouterRewardConverter.sol" "$ROOT/contracts/boosthub/converters/CurveRouterRewardConverter-v1.sol"
+          cp "$ROOT/reference/converters/CysdCrvCrvUsdRewardConverterV1-flattened-v3.sol" "$ROOT/contracts/boosthub/converters/CysdCrvCrvUsdRewardConverterV1-flattened-v3.sol"
+          cp "$ROOT/reference/converters/WstEthCurveRouterRewardConverter.sol" "$ROOT/contracts/boosthub/converters/WstEthCurveRouterRewardConverter-v1.sol"
+          cp "$ROOT/contracts/boosthub/SdYbRewardConverter.sol" "$ROOT/contracts/boosthub/converters/SdYbRewardConverter-v1.sol"
+          cp "$ROOT/reference/curve/ChildGauge.vy" "$ROOT/contracts/gauges/CurveYieldGauge-v1.vy"
+          (cd "$ROOT" && patch -p0 < scripts-v3/CurveYieldGauge-v1.patch)
           echo "ROOT=$(realpath "$ROOT")" >> "$GITHUB_ENV"
           printf 'v4_sha256=%s\nv17_sha256=%s\noverlay_commit=%s\n' \
             "$(sha256sum "$ZIP"|awk '{print $1}')" \
@@ -124,11 +131,11 @@ jobs:
           import json, os
           from pathlib import Path
           p=Path(os.environ['ROOT'])/'artifacts-vyper-v3/BoostHubStaking-v17.json'
-          x=json.loads(p.read_text()); runtime=x.get('bytecode_runtime')
-          if runtime:
-              n=(len(runtime)-2)//2
-              print('runtime_bytes='+str(n))
-              assert n <= 24576
+          x=json.loads(p.read_text()); runtime=x['bytecode_runtime']
+          n=(len(runtime)-2)//2
+          print('runtime_bytes='+str(n))
+          assert n == 24552
+          assert n <= 24576
           PY
 
       - name: Compile standalone gauge with Vyper 0.3.10
