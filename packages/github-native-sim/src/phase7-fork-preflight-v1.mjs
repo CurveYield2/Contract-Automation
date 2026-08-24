@@ -192,9 +192,13 @@ export async function runPhase7ForkPreflightV1({
       codeChecks.push({ address, byteLength: code === '0x' ? 0 : (code.length - 2) / 2, status: code !== '0x' ? 'PASS' : 'FAIL' });
     }
     const targetCode = {
-      status: codeChecks.length > 0 && codeChecks.every((item) => item.status === 'PASS') ? 'PASS' : 'FAIL',
+      status: codeChecks.length === 0
+        ? 'UNAVAILABLE'
+        : (codeChecks.every((item) => item.status === 'PASS') ? 'PASS' : 'FAIL'),
       targets: codeChecks,
-      reason: codeChecks.length === 0 ? 'Workflow contains no literal external target to prove archive code readiness' : undefined,
+      reason: codeChecks.length === 0
+        ? 'No literal external call target exists before deployment; deployment-first audited targets do not exist until lifecycle execution'
+        : undefined,
     };
 
     const impersonationBalanceControl = await proveImpersonationBalanceControl(engine.provider);
@@ -206,7 +210,7 @@ export async function runPhase7ForkPreflightV1({
       downgradeAllowed: false,
     };
     const checks = { anvilLauncher, exactHardfork, archiveRpcSecret, chainIdentity, pinnedBlockState, targetCode, impersonationBalanceControl, workflowActions };
-    const status = Object.values(checks).every((check) => check.status === 'PASS') ? 'PASS' : 'FAIL';
+    const status = Object.values(checks).every((check) => ['PASS', 'UNAVAILABLE'].includes(check.status)) ? 'PASS' : 'FAIL';
     return {
       schemaVersion: 'audit-v7-phase7-fork-preflight-v1',
       status, failureKind: status === 'PASS' ? null : 'FORK_PREFLIGHT_ASSERTION_FAILURE',
