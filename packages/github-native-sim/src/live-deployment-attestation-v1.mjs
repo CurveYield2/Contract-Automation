@@ -4,11 +4,9 @@ import { digestCanonicalV1 } from './canonical-json-v1.mjs';
 
 const EIP1967={
   implementation:'0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc',
-  admin:'0xb53127684a568b3173ae13b9f8a6016e019a3f2e79f3c6c8f7a3f7b6f8f8f103',
+  admin:'0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103',
   beacon:'0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50'
 };
-// Correct EIP-1967 admin slot; kept separate to avoid accidental typo in generated configs.
-EIP1967.admin='0xb53127684a568b3173ae13b9f8a6016e019a3f2e79f3c6c8f7a3f7b6f8f8f103';
 function shaCode(code){ return createHash('sha256').update(Buffer.from(String(code).replace(/^0x/,''),'hex')).digest('hex'); }
 function addrFromWord(word){ const hex=String(word??'').replace(/^0x/,'').padStart(64,'0'); return '0x'+hex.slice(-40).toLowerCase(); }
 function normAddr(a){ return typeof a==='string'?a.toLowerCase():a; }
