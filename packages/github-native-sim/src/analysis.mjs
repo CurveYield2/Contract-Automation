@@ -56,6 +56,10 @@ function medusaResult(input, fields) {
   return { backend: 'medusa', version: EXACT_MEDUSA_VERSION, sourceCommit: input.sourceCommit, rawArtifactRef: input.rawArtifactRef, ...fields };
 }
 function objectOrEmpty(value) { return value && typeof value === 'object' && !Array.isArray(value) ? structuredClone(value) : {}; }
+function metricState(value) { return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0 ? 'PRESENT' : 'UNAVAILABLE_FROM_OUTPUT_MODE'; }
+function metricAvailability(corpus, coverage, statistics) {
+  return { corpus: metricState(corpus), coverage: metricState(coverage), statistics: metricState(statistics) };
+}
 function parseSlitherOutput(output) {
   try {
     const parsed = JSON.parse(String(output ?? ''));
@@ -71,6 +75,7 @@ function normalizeMedusaCliLine(line) {
 
 function parseMedusaCliOutput(output) {
   const plainText = String(output ?? '').replace(/\u001b\[[0-9;]*m/g, '');
+  const unavailable = { corpus: 'UNAVAILABLE_FROM_OUTPUT_MODE', coverage: 'UNAVAILABLE_FROM_OUTPUT_MODE', statistics: 'UNAVAILABLE_FROM_OUTPUT_MODE' };
   if (plainText.includes(MEDUSA_NO_TESTS_MESSAGE)) {
     return {
       status: 'no_tests',
@@ -78,7 +83,8 @@ function parseMedusaCliOutput(output) {
       falsifiedProperties: 0,
       corpus: {},
       coverage: {},
-      statistics: {}
+      statistics: {},
+      metricAvailability: unavailable
     };
   }
 
@@ -117,7 +123,8 @@ function parseMedusaCliOutput(output) {
     falsifiedProperties,
     corpus: {},
     coverage: {},
-    statistics: {}
+    statistics: {},
+    metricAvailability: unavailable
   };
 }
 
@@ -132,13 +139,17 @@ export function parseMedusaOutput(output) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new V7ExecutionError('EVIDENCE_PARSE_FAILURE', 'Medusa terminal output must be a JSON object');
   const properties = Array.isArray(parsed.properties) ? structuredClone(parsed.properties) : [];
   const falsifiedProperties = properties.filter((property) => property && property.status === 'failed').length;
+  const corpus = objectOrEmpty(parsed.corpus);
+  const coverage = objectOrEmpty(parsed.coverage);
+  const statistics = objectOrEmpty(parsed.statistics);
   return {
     status: typeof parsed.status === 'string' ? parsed.status : (falsifiedProperties > 0 ? 'falsified' : 'completed'),
     properties,
     falsifiedProperties,
-    corpus: objectOrEmpty(parsed.corpus),
-    coverage: objectOrEmpty(parsed.coverage),
-    statistics: objectOrEmpty(parsed.statistics)
+    corpus,
+    coverage,
+    statistics,
+    metricAvailability: metricAvailability(corpus, coverage, statistics)
   };
 }
 
