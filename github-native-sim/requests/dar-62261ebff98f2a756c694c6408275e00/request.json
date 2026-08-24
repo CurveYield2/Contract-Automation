@@ -259,6 +259,15 @@
             "label": "constructor surface: CurveYieldCyGovDiscountedSaleConverterV9"
           },
           {
+            "action": "staticCall",
+            "target": "$candidate1",
+            "function": "owner() view returns (address)",
+            "args": [],
+            "saveAs": "candidate1Owner",
+            "continueOnFailure": true,
+            "label": "observe first successful deployment ownership surface"
+          },
+          {
             "action": "revertSnapshot",
             "snapshot": "$baseline",
             "label": "restore pinned baseline"
@@ -268,5 +277,5 @@
     }
   },
   "requestId": "dar-62261ebff98f2a756c694c6408275e00",
-  "requestDigest": "62261ebff98f2a756c694c6408275e000f72622c3e00ac828a87b9825ab73ff5"
+  "requestDigest": "71247b364b3a70c2bf43f3a5fe3186e7b5511fd7b6845f5a59c2c832e237ef44"
 }
