@@ -1,6 +1,6 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v8
+Policy version: v9
 
 ## Archive boundary — mandatory
 
@@ -14,6 +14,27 @@ Policy version: v8
 - If an Archive copy is needed, preserve the exact original bytes/digest before deleting the active-repo copy.
 
 Static checks enforce this rule for V7 workflows, process artifacts, and Phase-6 skeleton-kit siblings.
+
+## Branch lifecycle and cleanup — mandatory
+
+Agents MUST NOT leave completed, abandoned, superseded, experimental, request, repair, or qualification branches sitting indefinitely without an explicit disposition.
+
+Every branch created by an agent must end in exactly one of these states:
+
+1. **MERGED_AND_DELETED** — completed reusable infrastructure work is merged into its intended base branch and the working branch is deleted;
+2. **ACTIVE_WITH_OPEN_PR** — unfinished or review-pending work has an open pull request that states the owner/purpose, remaining work, intended base branch, and whether the branch is an execution/request branch that must not be merged; or
+3. **CLOSED_WITH_RECORDED_DISPOSITION** — the branch is intentionally not being merged because it is obsolete, superseded, rejected, a completed trace/request branch, or preserved only for recovery/history. Before retiring it, preserve any uniquely valuable code/evidence in the appropriate active path or `CurveYield2/archive` and record why it is not being merged.
+
+Mandatory rules:
+
+- Creating a branch creates an obligation to close its lifecycle before the task ends.
+- Do not use branches as permanent storage or as a substitute for the archive repository, workflow artifacts, or canonical evidence storage.
+- Atomic V7 request branches are intentionally non-mergeable into trusted `main`, but they are still temporary. After the execution/evidence identity is durably recorded and no retry requires the exact branch, close the trace PR and retire/delete the request branch.
+- Do not leave a completed branch merely because work was cherry-picked, squash-merged, reproduced elsewhere, or superseded; compare it against current `main`, inspect every unique changed file, preserve anything useful, then retire it.
+- Before declaring a branch disposable, inspect unique implementation, tests, fixtures, workflow changes, evidence, documentation, and recovery material. Do not assume old agent work was pointless.
+- If a branch remains active at the end of an agent turn, it MUST have an open PR or an explicit handoff identifying branch, owner/purpose, exact current status, and next action.
+- After a normal implementation PR is merged, delete the merged branch unless repository policy explicitly requires it to remain.
+- Periodically audit non-main branches and clean up stale branches.
 
 ## Canonical V7 control surface
 
@@ -30,7 +51,7 @@ Normal operations are:
 
 - execute: `npm run v7:execute -- --request <request.json>`
 - submit an atomic request: `npm run v7:submit -- --request <request.json>`
-- create a Phase-6 harness bundle: `npm run v7:harness:init -- --request <request.json>`
+- create a Phase-6 harness bundle: `npm run v7:harness:init -- --request <request.json> [--campaign discovery|property|targeted]`
 - validate a Phase-6 harness bundle: `npm run v7:harness:validate -- --bundle <bundle-id> --request <request.json>`
 - verify the generated runner manifest: `npm run v7:manifest -- --check`
 
