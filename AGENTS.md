@@ -1,6 +1,24 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v9
+Policy version: v10
+
+## Mandatory preflight before execution — universal hard gate
+
+**NO EXECUTION WITHOUT PREFLIGHT.** Every workflow, mutation, transfer, branch/PR operation, source-staging action, build, analyzer, fuzz campaign, fork simulation, live probe, remediation rerun, publication, or cleanup action must pass a type-specific preflight before the substantive operation starts.
+
+The canonical policy is `docs/MANDATORY_PREFLIGHT_POLICY_v1.md`.
+
+Mandatory behavior:
+
+- New deterministic operation types default to `PREFLIGHT_REQUIRED` until explicitly classified.
+- A passing preflight is bound to the exact repository/ref/source/request/harness/input state it checked. Any material input/state change invalidates it.
+- After any workflow/execution failure, state returns to `PREFLIGHT_REQUIRED`. Inspect evidence, classify the failure, run the smallest targeted diagnostic/regression, repair the cause, and rerun preflight before another full attempt.
+- Blind full-workflow retries are forbidden. A second failure in the same class requires new diagnosis, not another identical attempt.
+- Every resolved failure that consumed an execution attempt should become a preflight check, regression test, known failure signature, or an explicit explanation why earlier detection is impossible.
+- File moves/transfers are not exempt. Same-repository moves should normally reuse the existing blob SHA in one Git tree transaction; normal transfers must never be implemented by splitting a file into hundreds/thousands of chunks and reassembling them.
+- A separate preflight may be omitted only for a registry-approved trivial read-only inspection where the read itself supplies the prerequisite state.
+
+If an existing deterministic CLI path performs the operation and its preflight, agents MUST use it instead of manually reconstructing lower-level Git/RPC/file operations.
 
 ## Archive boundary — mandatory
 
@@ -158,9 +176,7 @@ If infrastructure must change after campaign admission, preserve the failed atte
 
 ## Dependency locking status
 
-The repository currently has no recoverable `package-lock.json`. The canonical workflows therefore prefer `npm ci` when a lockfile exists but temporarily fall back to `npm install --no-package-lock` and record `V7_DEPENDENCY_LOCKED=false` when it does not.
-
-Do not claim dependency resolution is locked until a valid lockfile is generated from the repository dependency graph and committed. Do not fabricate a lockfile.
+The canonical workflow/static-check path requires a valid repository `package-lock.json` for reproducible V7 GitHub execution. Do not fabricate or manually rewrite a lockfile; if dependency state changes, regenerate/validate it through the admitted repository workflow and requalify the runner.
 
 ## Audit execution boundary
 
