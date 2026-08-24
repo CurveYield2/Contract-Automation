@@ -4,6 +4,7 @@ import { validateDeepAssuranceRequestWithV26V1 } from './schema-v26.mjs';
 import { runGitHubNativeJob as runGitHubNativeJobV1 } from './run-job-file.mjs';
 import { runPhase6ExecutionPreflightV1 } from './phase6-execution-preflight-v1.mjs';
 import { createPhase6MutableRpcSession, phase6MutableRpcRuntime } from './phase6-mutable-rpc-v1.mjs';
+import { runTargetCompilePreflightV1 } from './compile-target-preflight-v1.mjs';
 import { runTargetMedusaPreflightV1 } from './medusa-target-preflight-v1.mjs';
 import { runTargetFoundryPreflightV1 } from './foundry-target-preflight-v1.mjs';
 import { runProcess } from './execution.mjs';
@@ -44,8 +45,27 @@ function phase6RequiresMutableRpc(request) {
   return medusaRequested || nativeFuzzRequested || coverageRequested;
 }
 
+function expectedCompileArtifacts(request) {
+  return (request?.configuration?.deploymentGas?.deployableContracts ?? [])
+    .filter((item) => item?.sourceName && item?.contractName)
+    .map((item) => `${item.sourceName}:${item.contractName}`);
+}
+
+function compilePreflightInput(request, projectRoot, expectedSourceSnapshotDigest = null) {
+  return {
+    projectRoot,
+    ...(expectedSourceSnapshotDigest ? { expectedSourceSnapshotDigest } : {}),
+    requestedCompilers: request.configuration?.compilers ?? [],
+    optimizer: request.configuration?.optimizer ?? null,
+    evmVersion: request.configuration?.evmVersion ?? null,
+    viaIR: request.configuration?.viaIR ?? false,
+    expectedArtifacts: expectedCompileArtifacts(request),
+  };
+}
+
 function phase6DelegateOptions(delegateOptions, preflight, mutableRpcSession) {
   const options = { ...delegateOptions };
+  delete options.runTargetCompilePreflight;
   delete options.runTargetMedusaPreflight;
   delete options.runTargetFoundryPreflight;
   if (preflight?.mutableRpc?.status === 'PASS') {
@@ -93,6 +113,7 @@ async function executePhase6V2({
   let phase6Snapshot = null;
   let mutableRpcSession = null;
   let executionSnapshot = null;
+  let targetCompilePreflight = null;
   let targetFoundryPreflight = null;
   try {
     phase6Snapshot = await stagePhase6Snapshot(legacyRequest, {
@@ -183,6 +204,15 @@ async function executePhase6V2({
       return executionSnapshot;
     };
 
+    delegated.preflightBuild = async ({ projectRoot }) => {
+      const runner = delegateOptions.runTargetCompilePreflight ?? runTargetCompilePreflightV1;
+      targetCompilePreflight = await runner(
+        compilePreflightInput(legacyRequest, projectRoot, phase6Snapshot.snapshotDigestSha256),
+        { runCommand: delegateOptions.runCommand ?? runProcess },
+      );
+      return targetCompilePreflight;
+    };
+
     if (preflight.nativeFuzz?.status === 'PASS') {
       delegated.preflightNativeFuzz = async ({ projectRoot, medusa, phase6MutableRpc }) => {
         const runner = delegateOptions.runTargetFoundryPreflight ?? runTargetFoundryPreflightV1;
@@ -212,12 +242,32 @@ async function executePhase6V2({
       ...delegated,
     });
 
+    if (targetCompilePreflight && targetCompilePreflight.status !== 'PREFLIGHT_PASS') {
+      result = {
+        ...result,
+        preflight: {
+          ...preflight,
+          targetCompile: targetCompilePreflight,
+          targetCompileRequired: true,
+          targetCompilePassed: false,
+          executionSnapshotDigestSha256: executionSnapshot?.snapshotDigestSha256 ?? null,
+          executionSnapshotVerified: executionSnapshot?.snapshotDigestSha256 === phase6Snapshot?.snapshotDigestSha256,
+          secondNetworkCheckoutPerformed: false,
+          secondOverlayMaterializationPerformed: false,
+        },
+      };
+      return attachExecutionDisposition({ request, result, requestPath });
+    }
+
     result = normalizePhase6TerminalSemantics(result);
     const verified = executionSnapshot?.snapshotDigestSha256 === phase6Snapshot?.snapshotDigestSha256;
     result = {
       ...result,
       preflight: {
         ...preflight,
+        targetCompile: targetCompilePreflight ?? result.preflight?.compile ?? { status: 'NOT_RUN', reason: 'BUILD_BOUNDARY_NOT_REACHED' },
+        targetCompileRequired: true,
+        targetCompilePassed: targetCompilePreflight ? targetCompilePreflight.status === 'PREFLIGHT_PASS' : null,
         targetFoundry: preflight.nativeFuzz?.status === 'PASS'
           ? (targetFoundryPreflight ?? { status: 'NOT_RUN', reason: 'NATIVE_FUZZ_ACTION_BOUNDARY_NOT_REACHED' })
           : { status: 'NOT_APPLICABLE', reason: preflight.nativeFuzz?.reason ?? 'NATIVE_FUZZ_NOT_REQUESTED' },
@@ -277,12 +327,32 @@ export async function runGitHubNativeJobV2(input, {
     return attachExecutionDisposition({ request: v26Request, result: preflightFailure(v26Request, preflight), requestPath });
   }
 
+  const executionOptions = { ...delegateOptions };
+  const targetCompileRunner = executionOptions.runTargetCompilePreflight ?? runTargetCompilePreflightV1;
+  delete executionOptions.runTargetCompilePreflight;
+  if (!executionOptions.preflightBuild) {
+    executionOptions.preflightBuild = async ({ projectRoot }) => targetCompileRunner(
+      compilePreflightInput(request, projectRoot),
+      { runCommand: delegateOptions.runCommand ?? runProcess },
+    );
+  }
+
   let result = await runGitHubNativeJobV1(request, {
     workspaceRoot: path.join(workspaceRoot, 'execution'),
     environment,
-    ...delegateOptions,
+    ...executionOptions,
   });
-  result = { ...result, preflight };
+  if (preflight) {
+    result = {
+      ...result,
+      preflight: {
+        ...preflight,
+        targetCompile: result.preflight?.compile ?? { status: 'NOT_RUN', reason: 'BUILD_BOUNDARY_NOT_REACHED' },
+        targetCompileRequired: true,
+        targetCompilePassed: result.preflight?.compile ? result.preflight.compile.status === 'PREFLIGHT_PASS' : null,
+      },
+    };
+  }
 
   if (v26Request.phaseId === 'fork-simulation-lifecycle') {
     result = await enrichPhase7V26EvidenceV1({ request: v26Request, result, environment, fetchImpl: delegateOptions.fetchImpl ?? globalThis.fetch });
