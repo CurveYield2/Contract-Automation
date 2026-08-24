@@ -4,34 +4,42 @@ const BASE_RECIPES = {
   'external-readiness-v1': {
     purpose: 'Pinned external dependency identity and state assertions.',
     allowedActions: ['staticCall', 'assertCall', 'snapshot'],
+    requiresFreshDeployment: false,
   },
   'deploy-configure-smoke-v1': {
     purpose: 'Deploy exact accepted artifacts and exercise intended configuration ordering.',
     allowedActions: ['deploy', 'call', 'staticCall', 'assertCall', 'expectRevert'],
+    requiresFreshDeployment: true,
   },
   'deposit-withdraw-cycle-v1': {
     purpose: 'Complete custody, share-accounting, fee and withdrawal lifecycle.',
-    allowedActions: ['setBalance', 'call', 'staticCall', 'assertCall', 'assertBalance', 'increaseTime', 'mine'],
+    allowedActions: ['deploy', 'setBalance', 'call', 'staticCall', 'assertCall', 'assertBalance', 'increaseTime', 'mine'],
+    requiresFreshDeployment: true,
   },
   'reward-accrual-claim-v1': {
     purpose: 'Reward index, checkpoint, zero-supply, accrual and claim lifecycle.',
-    allowedActions: ['setBalance', 'call', 'increaseTime', 'mine', 'staticCall', 'assertCall'],
+    allowedActions: ['deploy', 'setBalance', 'call', 'increaseTime', 'mine', 'staticCall', 'assertCall'],
+    requiresFreshDeployment: true,
   },
   'privilege-transition-v1': {
     purpose: 'Owner, DAO, operator, keeper or delegation transition and stale-state assertions.',
-    allowedActions: ['call', 'expectRevert', 'staticCall', 'assertCall', 'snapshot', 'revertSnapshot'],
+    allowedActions: ['deploy', 'call', 'expectRevert', 'staticCall', 'assertCall', 'snapshot', 'revertSnapshot'],
+    requiresFreshDeployment: true,
   },
   'external-swap-minout-v1': {
     purpose: 'External route identity, units and atomic final minOut protection.',
-    allowedActions: ['setBalance', 'call', 'staticCall', 'expectRevert', 'snapshot', 'revertSnapshot'],
+    allowedActions: ['deploy', 'setBalance', 'call', 'staticCall', 'expectRevert', 'snapshot', 'revertSnapshot'],
+    requiresFreshDeployment: true,
   },
   'zero-supply-restart-v1': {
     purpose: 'Final-exit and first-redeposit value attribution across zero supply.',
-    allowedActions: ['call', 'increaseTime', 'mine', 'staticCall', 'assertCall', 'snapshot'],
+    allowedActions: ['deploy', 'call', 'increaseTime', 'mine', 'staticCall', 'assertCall', 'snapshot'],
+    requiresFreshDeployment: true,
   },
   'repeated-lifecycle-v1': {
     purpose: 'Catch state that becomes unsafe only after multiple cycles.',
     allowedActions: ['deploy','call','staticCall','expectRevert','setBalance','transferNative','mine','increaseTime','snapshot','revertSnapshot','assertBalance','assertCall'],
+    requiresFreshDeployment: true,
     repeatedLifecycle: true,
   },
 };
@@ -39,6 +47,7 @@ const BASE_RECIPES = {
 const GOVERNANCE_STAKING_ZERO_SUPPLY_RESTART = {
   purpose: 'Deploy GovernanceStaking on the pinned Ethereum fork and prove custody, zero-working-supply reward handling, first-redeposit attribution, claimability, and restart behavior.',
   allowedActions: ['snapshot', 'setBalance', 'deploy', 'call', 'assertCall', 'staticCall', 'increaseTime', 'mine', 'revertSnapshot'],
+  requiresFreshDeployment: true,
   requiredLabels: [
     'pin lifecycle baseline',
     'fund staking user with forked SDT',
@@ -80,6 +89,45 @@ function repeatedLifecycleGaps(steps){
   return gaps;
 }
 
+const LOCAL_ALIAS_TARGET = /^\$([A-Za-z][A-Za-z0-9_]*)$/;
+const FUNCTION_TEST_ACTIONS = new Set(['call', 'staticCall', 'assertCall', 'expectRevert']);
+
+function validateFreshDeploymentPrerequisite(recipe, steps) {
+  if (!recipe.requiresFreshDeployment) return { status: 'NOT_REQUIRED', aliasesUsedBeforeDeployment: [] };
+
+  const deployedAliases = new Set();
+  const aliasesUsedBeforeDeployment = new Set();
+  let deploymentCount = 0;
+  let deployedAliasFunctionTests = 0;
+
+  for (const step of steps) {
+    if (step?.action === 'deploy') {
+      if (typeof step.alias === 'string' && step.alias.length > 0) deployedAliases.add(step.alias);
+      deploymentCount += 1;
+      continue;
+    }
+    if (!FUNCTION_TEST_ACTIONS.has(step?.action) || typeof step?.target !== 'string') continue;
+    const match = step.target.match(LOCAL_ALIAS_TARGET);
+    if (!match) continue; // literal addresses are pinned external dependencies, not freshly deployed audited contracts.
+    const alias = match[1];
+    if (/^account\d+$/.test(alias)) continue;
+    if (!deployedAliases.has(alias)) aliasesUsedBeforeDeployment.add(alias);
+    else deployedAliasFunctionTests += 1;
+  }
+
+  const aliases = [...aliasesUsedBeforeDeployment].sort();
+  if (deploymentCount === 0) {
+    return { status: 'MISSING_FRESH_DEPLOYMENT', deploymentCount, deployedAliasFunctionTests, aliasesUsedBeforeDeployment: aliases };
+  }
+  if (aliases.length > 0) {
+    return { status: 'ALIAS_USED_BEFORE_DEPLOYMENT', deploymentCount, deployedAliasFunctionTests, aliasesUsedBeforeDeployment: aliases };
+  }
+  if (deployedAliasFunctionTests === 0) {
+    return { status: 'MISSING_DEPLOYED_FUNCTION_TEST', deploymentCount, deployedAliasFunctionTests, aliasesUsedBeforeDeployment: [] };
+  }
+  return { status: 'SATISFIED', deploymentCount, deployedAliasFunctionTests, aliasesUsedBeforeDeployment: [] };
+}
+
 export function validateWorkflowAgainstV7RecipeV1(recipeId, workflow) {
   const resolved = getV7LifecycleRecipeV1(recipeId);
   if (resolved.status !== 'SUPPORTED') return resolved;
@@ -89,8 +137,14 @@ export function validateWorkflowAgainstV7RecipeV1(recipeId, workflow) {
   const labels = new Set(steps.map((step)=>step?.label).filter((label)=>typeof label==='string'));
   const missingRequiredLabels = (resolved.recipe.requiredLabels ?? []).filter((label)=>!labels.has(label));
   const repeatedLifecycleFailures = recipeId==='repeated-lifecycle-v1' ? repeatedLifecycleGaps(steps) : [];
-  const status = unsupported.length===0&&missingRequiredLabels.length===0&&repeatedLifecycleFailures.length===0 ? 'SUPPORTED' : 'RECIPE_GAP';
-  return { status, recipeId, unsupported, missingRequiredLabels, repeatedLifecycleFailures, recipe: resolved.recipe };
+  const deploymentPrerequisite = validateFreshDeploymentPrerequisite(resolved.recipe, steps);
+  const status = unsupported.length===0
+    && missingRequiredLabels.length===0
+    && repeatedLifecycleFailures.length===0
+    && ['NOT_REQUIRED','SATISFIED'].includes(deploymentPrerequisite.status)
+    ? 'SUPPORTED'
+    : 'RECIPE_GAP';
+  return { status, recipeId, unsupported, missingRequiredLabels, repeatedLifecycleFailures, deploymentPrerequisite, recipe: resolved.recipe };
 }
 
 export function registerV7LifecycleRecipeExtensionV1(baseRegistry, extension){
@@ -100,7 +154,12 @@ export function registerV7LifecycleRecipeExtensionV1(baseRegistry, extension){
   if(!Array.isArray(extension.allowedActions)||extension.allowedActions.length===0) throw new Error('extension allowedActions must be non-empty');
   for(const action of extension.allowedActions) if(!RUNTIME_ACTIONS.includes(action)) throw new Error(`unsupported action in recipe extension: ${action}`);
   if(extension.requiredLabels!==undefined&&(!Array.isArray(extension.requiredLabels)||extension.requiredLabels.some(x=>typeof x!=='string'||!x.trim()))) throw new Error('malformed required labels');
-  const recipe=freezeRecipe({purpose:typeof extension.purpose==='string'?extension.purpose:'Code-reviewed V7 lifecycle recipe extension.',allowedActions:[...new Set(extension.allowedActions)],requiredLabels:extension.requiredLabels?[...new Set(extension.requiredLabels)]:undefined});
+  const recipe=freezeRecipe({
+    purpose:typeof extension.purpose==='string'?extension.purpose:'Code-reviewed V7 lifecycle recipe extension.',
+    allowedActions:[...new Set(extension.allowedActions)],
+    requiresFreshDeployment:extension.requiresFreshDeployment===true,
+    requiredLabels:extension.requiredLabels?[...new Set(extension.requiredLabels)]:undefined
+  });
   return Object.freeze({...baseRegistry,[id]:recipe});
 }
 
