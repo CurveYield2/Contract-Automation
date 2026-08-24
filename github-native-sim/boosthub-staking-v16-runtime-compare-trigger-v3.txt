@@ -1,0 +1,1 @@
+Compile and compare original v2 and remediated v4 BoostHubStaking-v16 with Vyper 0.4.3.
