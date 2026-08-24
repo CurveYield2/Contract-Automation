@@ -1,0 +1,155 @@
+{
+  "schemaVersion": "curveyield-v7-current-qualification-status-v1",
+  "status": "PASS",
+  "qualifiedCommit": "224c54eb10e4c51bb1435b70475d5c172b941ae9",
+  "workflowRunId": "32676582609",
+  "qualifiedAt": "2026-08-24T00:25:59.577Z",
+  "requestSchema": "deep-assurance-github-request-v2",
+  "profiles": [
+    "github-native-compile-v2",
+    "github-native-simulate-v2"
+  ],
+  "dependencyLockPresent": true,
+  "toolchain": {
+    "schemaVersion": "curveyield-v7-toolchain-verification-v1",
+    "status": "PASS",
+    "tools": {
+      "slither": {
+        "name": "slither",
+        "command": "slither",
+        "expectedVersion": "0.11.6",
+        "status": "PASS",
+        "failureKind": null,
+        "exitCode": 0,
+        "observedVersionOutput": "0.11.6"
+      },
+      "medusa": {
+        "name": "medusa",
+        "command": "medusa",
+        "expectedVersion": "1.5.1",
+        "status": "PASS",
+        "failureKind": null,
+        "exitCode": 0,
+        "observedVersionOutput": "medusa version 1.5.1"
+      },
+      "forge": {
+        "name": "forge",
+        "command": "forge",
+        "expectedVersion": "1.7.1",
+        "status": "PASS",
+        "failureKind": null,
+        "exitCode": 0,
+        "observedVersionOutput": "forge Version: 1.7.1\nCommit SHA: 4072e48705af9d93e3c0f6e29e93b5e9a40caed8\nBuild Timestamp: 2026-05-08T07:50:55.527285345Z (1778226655)\nBuild Profile: dist"
+      }
+    }
+  },
+  "testMatrix": {
+    "githubNative": "PASS",
+    "anvilRunner": "PASS",
+    "fullNodeSuite": "PASS",
+    "staticChecks": "PASS",
+    "buildChecks": "PASS",
+    "toolchainVerification": "PASS"
+  },
+  "phase6": {
+    "status": "PASS",
+    "identityNormalization": {
+      "status": "PASS",
+      "observedUpstreamChainId": 15597657,
+      "observedNormalizedChainId": 1,
+      "upstreamIdentityVirtualized": true,
+      "mode": "EXISTING_RPC_IDENTITY_PROXY",
+      "rawIdentityProbeBypassUsed": false
+    },
+    "runtime": {
+      "identityNormalized": true,
+      "blockNumber": 25821347,
+      "blockHash": "0xcd3c288a4a63b7cee5ba5b4d5600dfeae94125eba8811c09814158d739d9b11e",
+      "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
+      "rpcUrlExposed": false
+    }
+  },
+  "phase7": {
+    "status": "PASS",
+    "checks": {
+      "anvilLauncher": {
+        "status": "PASS",
+        "engine": "anvil"
+      },
+      "exactHardfork": {
+        "status": "PASS",
+        "requested": "cancun",
+        "launchArgumentMode": "EXACT_REQUESTED_HARDFORK_NO_DOWNGRADE",
+        "downgradeAllowed": false
+      },
+      "archiveRpcSecret": {
+        "status": "PASS",
+        "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01"
+      },
+      "chainIdentity": {
+        "status": "PASS",
+        "expectedChainId": 1,
+        "remoteChainId": 15597657,
+        "remoteNetworkId": 15597657,
+        "directIdentityMatch": false,
+        "sampleTransactionChainId": 1,
+        "transactionChainMatch": true,
+        "upstreamBlockHash": "0xb7f45fdc91b604d7c0450a505cf5c9571c9bb6267c86b6a8d535f4bc11b3f4ee",
+        "localAnvilBlockHash": "0xb7f45fdc91b604d7c0450a505cf5c9571c9bb6267c86b6a8d535f4bc11b3f4ee",
+        "localHashMatch": true,
+        "reconciliationMode": "IDENTITY_PROXY_STATE_RECONCILED",
+        "identityProxyRequired": true,
+        "anvilChainId": 1,
+        "anvilChainIdMatchesExpected": true
+      },
+      "pinnedBlockState": {
+        "status": "PASS",
+        "number": 25817400,
+        "localHash": "0xb7f45fdc91b604d7c0450a505cf5c9571c9bb6267c86b6a8d535f4bc11b3f4ee",
+        "upstreamHash": "0xb7f45fdc91b604d7c0450a505cf5c9571c9bb6267c86b6a8d535f4bc11b3f4ee",
+        "stateRoot": "0x98dc3442f4ba7b3850587501695dfb8787ee84a6268bdc47d9c1843a5788d859"
+      },
+      "targetCode": {
+        "status": "PASS",
+        "targets": [
+          {
+            "address": "0x73968b9a57c6e53d41345fd57a6e6ae27d6cdb2f",
+            "byteLength": 3666,
+            "status": "PASS"
+          }
+        ]
+      },
+      "impersonationBalanceControl": {
+        "status": "PASS",
+        "actor": "0x000000000000000000000000000000000000dEaD",
+        "impersonationSucceeded": true,
+        "balanceMutationSucceeded": true,
+        "observedBalance": "1000000000000000000"
+      },
+      "workflowActions": {
+        "status": "PASS",
+        "unsupported": [],
+        "supportedActions": [
+          "assertBalance",
+          "assertCall",
+          "call",
+          "deploy",
+          "expectRevert",
+          "increaseTime",
+          "mine",
+          "revertSnapshot",
+          "setBalance",
+          "snapshot",
+          "staticCall",
+          "transferNative"
+        ]
+      },
+      "lifecycleRecipe": {
+        "status": "PASS",
+        "recipeId": "external-readiness-v1",
+        "purpose": "Pinned external dependency identity and state assertions.",
+        "requiredLabels": []
+      }
+    }
+  }
+}
