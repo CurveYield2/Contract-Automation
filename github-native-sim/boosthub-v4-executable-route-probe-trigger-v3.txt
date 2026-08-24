@@ -1,0 +1,1 @@
+Rerun pinned executable-route probe to independently retest BH-V2-RR2-LOW-002 after V17 staking remediation. Strategy source is unchanged from canonical v4.
