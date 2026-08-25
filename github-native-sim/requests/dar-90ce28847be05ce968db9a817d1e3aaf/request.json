@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "cyvlsdt-v30-audit-v29-r1",
+  "assignmentId": "reviewer-2B-phase6b-p6-1-medusa-discovery-v3",
+  "phaseId": "build-and-test",
+  "gateId": "phase-6b-v29-r1-p6-1-medusa-broad-discovery-v3",
+  "profileId": "github-native-simulate-v2",
+  "source": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "projectPath": "CurveYield-cyvlSDT-Deployment-Package-v30",
+    "archivePath": "campaigns/cyvlSDT v30 Audit v29/source/CurveYield-cyvlSDT-Deployment-Package-v30.zip",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "configuration": {
+    "compilers": [
+      {
+        "language": "solidity",
+        "version": "0.8.28"
+      },
+      {
+        "language": "vyper",
+        "version": "0.3.10"
+      }
+    ],
+    "timeoutMinutes": 35,
+    "analysis": {
+      "slither": false,
+      "medusa": {
+        "version": "1.5.1",
+        "frozenBlockNumber": 25827826,
+        "frozenBlockHash": "0x1c2d63e86243eaa4779f90e84263a47685c6ecc907421bd14ef00b46ce9bf4d7"
+      },
+      "nativeFuzz": false
+    },
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun",
+    "viaIR": true,
+    "build": {
+      "purpose": "P6.1 v3 repaired broad Medusa discovery on exact source and admitted frozen block; no Foundry security execution"
+    },
+    "coverage": {
+      "required": true
+    },
+    "properties": [
+      "P6.1 Gate A broad discovery with all inherited Phase-6 scope preserved.",
+      "Attempts v1/v2 remain immutable failed evidence; v3 repairs audit funding order only."
+    ],
+    "harness": {
+      "kind": "runner-owned-audit-overlay-v1",
+      "bundleId": "cyvlsdt-v30-v29-phase6b-p6-1-discovery-v3"
+    },
+    "actions": {
+      "ordering": "MEDUSA_P6_1_V3_TERMINAL_ONLY__FOUNDRY_SECURITY_EXECUTION_DISABLED"
+    }
+  },
+  "requestId": "dar-90ce28847be05ce968db9a817d1e3aaf",
+  "requestDigest": "90ce28847be05ce968db9a817d1e3aaf76ab184215019a5d67a774136b613ea4"
+}
