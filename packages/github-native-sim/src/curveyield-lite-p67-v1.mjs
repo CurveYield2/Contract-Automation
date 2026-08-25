@@ -20,6 +20,13 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function sanitizeFailureText(value) {
+  const redacted = String(value ?? '')
+    .replaceAll(DEV_PRIVATE_KEY, '[REDACTED_DEV_PRIVATE_KEY]')
+    .replace(/https?:\/\/[^\s"']+/gi, '[REDACTED_URL]');
+  return redacted.slice(-12000);
+}
+
 function exactAction(request) {
   const action = request?.configuration?.actions;
   return request?.campaignId === EXACT.campaignId
@@ -109,6 +116,7 @@ export async function runCurveYieldLiteP67({ request, projectRoot, environment =
     command: 'npm run ops:test',
     ...commandEvidence(testResult),
     summary: vitestSummary(testResult.stdout),
+    ...(testResult.exitCode === 0 ? {} : { failureOutput: { stdoutTail: sanitizeFailureText(testResult.stdout), stderrTail: sanitizeFailureText(testResult.stderr) } }),
     retainedCoverage: [
       'candidate-specific-deterministic-simulation',
       'basic-targeted-fuzzing',
@@ -119,9 +127,28 @@ export async function runCurveYieldLiteP67({ request, projectRoot, environment =
     command: 'node tooling/scripts/simulateCurveYieldDexFresh.mjs',
     ...commandEvidence(simulationResult),
     evidence: deploymentConfigurationSimulation,
+    ...(simulationResult.exitCode === 0 ? {} : { failureOutput: { stdoutTail: sanitizeFailureText(simulationResult.stdout), stderrTail: sanitizeFailureText(simulationResult.stderr) } }),
     retainedCoverage: ['complete-deployment-configuration-simulation'],
   };
   const status = testEvidence.status === 'PASS' && simulationEvidence.status === 'PASS' ? 'completed' : 'failed';
+  const logSummary = {
+    status,
+    sourceToolingTests: {
+      status: testEvidence.status,
+      exitCode: testEvidence.exitCode,
+      summary: testEvidence.summary,
+      ...(testEvidence.failureOutput ? { failureOutput: testEvidence.failureOutput } : {}),
+    },
+    deploymentConfigurationSimulation: {
+      status: simulationEvidence.status,
+      exitCode: simulationEvidence.exitCode,
+      reportFile: deploymentConfigurationSimulation?.file ?? null,
+      reportSha256: deploymentConfigurationSimulation?.sha256 ?? null,
+      simulation: deploymentConfigurationSimulation?.report?.simulation ?? null,
+      reportReadError: deploymentConfigurationSimulation?.reportReadError ?? null,
+      ...(simulationEvidence.failureOutput ? { failureOutput: simulationEvidence.failureOutput } : {}),
+    },
+  };
 
   return {
     schemaVersion: 'audit-v7-lite-p67-execution-v1',
@@ -140,5 +167,6 @@ export async function runCurveYieldLiteP67({ request, projectRoot, environment =
     ],
     sourceToolingTests: testEvidence,
     deploymentConfigurationSimulation: simulationEvidence,
+    logSummary,
   };
 }
