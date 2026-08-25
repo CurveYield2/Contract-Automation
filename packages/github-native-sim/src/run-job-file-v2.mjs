@@ -86,7 +86,12 @@ async function executePhase6V2({
     });
 
     if (phase6RequiresMutableRpc(request)) {
-      mutableRpcSession = await createMutableRpcSession({ environment });
+      const medusaForkPin = request.configuration?.analysis?.medusa;
+      mutableRpcSession = await createMutableRpcSession({
+        environment,
+        frozenBlockNumber: medusaForkPin && medusaForkPin !== false ? medusaForkPin.frozenBlockNumber ?? null : null,
+        frozenBlockHash: medusaForkPin && medusaForkPin !== false ? medusaForkPin.frozenBlockHash ?? null : null,
+      });
     }
 
     let preflight = await runPhase6ExecutionPreflightV1({
