@@ -158,7 +158,10 @@ export async function runSlitherAnalysis(input, { runCommand = runProcess } = {}
   const versionResult = await runCommand({ command: 'slither', args: ['--version'], cwd: input.projectRoot });
   if (!versionResult || versionResult.exitCode !== 0) return slitherResult(input, { status:'failed', terminal:true, failureKind:'TOOL_FAILURE', componentStatus:'FAILED', continuationDisposition:'CONTINUE_WITH_LIMITATION', rawOutput:raw(versionResult) });
   if (!versionMatches(versionResult, EXACT_SLITHER_VERSION)) throw new V7ExecutionError('TOOLCHAIN_INTEGRITY_FAILURE', 'Slither version does not match the V7 policy pin', { expectedVersion:EXACT_SLITHER_VERSION, stdout:String(versionResult.stdout ?? ''), stderr:String(versionResult.stderr ?? '') });
-  const slitherArgs = input.standardJsonPath\n    ? [input.standardJsonPath, '--solc-standard-json', '--json', '-']\n    : ['.', '--json', '-'];\n  const analysisResult = await runCommand({ command: 'slither', args: slitherArgs, cwd: input.projectRoot });
+  const slitherArgs = input.standardJsonPath
+    ? [input.standardJsonPath, '--solc-standard-json', '--json', '-']
+    : ['.', '--json', '-'];
+  const analysisResult = await runCommand({ command: 'slither', args: slitherArgs, cwd: input.projectRoot });
   if (!analysisResult || analysisResult.exitCode < 0) return slitherResult(input, { status:'failed', terminal:true, failureKind:'TOOL_FAILURE', componentStatus:'FAILED', continuationDisposition:'CONTINUE_WITH_LIMITATION', rawOutput:raw(analysisResult) });
   const parsed = parseSlitherOutput(analysisResult.stdout);
   if (parsed?.success === true) return slitherResult(input, { status:parsed.findingCount > 0 ? 'completed_with_findings' : 'completed', terminal:true, componentStatus:'COMPLETED', continuationDisposition:'COMPLETE_EVIDENCE', authoritativeFinding:false, findingCount:parsed.findingCount, detectors:parsed.detectors, rawOutput:raw(analysisResult) });
