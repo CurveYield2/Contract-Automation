@@ -22,5 +22,5 @@ test('canonical V7 execution emits sanitized durable result and controller evide
   assert.match(cli, /failedStepCount:\s*result\.failedStepCount/);
   assert.match(cli, /controller-evidence\.json/);
   assert.match(cli, /execution-summary\.json/);
-  assert.match(cli, /process\.stdout\.write\(`\$\{JSON\.stringify\(summary, null, 2\)\}\\n`\)/);
+  assert.match(cli, /process\.stdout\.write\(`\$\{JSON\.stringify\(\{ \.\.\.summary, \.\.\.\(result\.error \? \{ error: result\.error \} : \{\}\) \}, null, 2\)\}\\n`\)/);
 });
