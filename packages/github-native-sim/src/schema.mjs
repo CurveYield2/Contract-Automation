@@ -208,6 +208,16 @@ function validateSimulation(simulation, { required = false } = {}) {
   }
 }
 
+function validateActions(actions, input) {
+  if (actions === undefined) return;
+  object(actions, 'configuration.actions');
+  const allowed = new Set(['kind', 'executionSet']);
+  for (const key of Object.keys(actions)) if (!allowed.has(key)) fail(`configuration.actions.${key}`, 'is not allowed');
+  if (input.campaignId !== 'curveyield-dex-fresh-audit-r1' || input.phaseId !== 'lite-p67') fail('configuration.actions', 'is allowed only for the exact CurveYield Lite P6-7 campaign');
+  if (actions.kind !== 'curveyield-lite-p67-v1') fail('configuration.actions.kind', 'must equal curveyield-lite-p67-v1');
+  if (actions.executionSet !== 'retained-lite-v1') fail('configuration.actions.executionSet', 'must equal retained-lite-v1');
+}
+
 function validateConfiguration(configuration, input) {
   object(configuration, 'configuration');
   for (const key of Object.keys(configuration)) if (!CONFIGURATION_FIELDS.has(key)) fail(`configuration.${key}`, 'is not allowed');
@@ -215,6 +225,7 @@ function validateConfiguration(configuration, input) {
   validateCompilers(configuration.compilers);
   validateAnalysis(configuration.analysis);
   validateHarness(configuration.harness, input);
+  validateActions(configuration.actions, input);
   if ('timeoutMinutes' in configuration) {
     const value = configuration.timeoutMinutes;
     if (!Number.isInteger(value) || value < 1 || value > 35) fail('configuration.timeoutMinutes', 'must be an integer from 1 to 35');
