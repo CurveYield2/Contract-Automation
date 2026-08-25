@@ -155,7 +155,13 @@ async function executePhase7Simulation({ request, build, environment, startSimul
 async function executeSlither({ request, checkout, build, runSlither, runCommand }) {
   if (runSlither) return runSlither({ projectRoot: checkout.projectRoot, request, build });
   const slitherVersion = request.configuration.analysis?.slither?.version ?? V7_POLICY.tools.slither;
-  return runSlitherAnalysis({ projectRoot: checkout.projectRoot, version: slitherVersion, sourceCommit: request.source.commit, rawArtifactRef: rawArtifactRef('slither/raw.json') }, { ...(runCommand ? { runCommand } : {}) });
+  return runSlitherAnalysis({
+    projectRoot: checkout.projectRoot,
+    version: slitherVersion,
+    sourceCommit: request.source.commit,
+    rawArtifactRef: rawArtifactRef('slither/raw.json'),
+    standardJsonPath: build?.slitherStandardJsonPath ?? null
+  }, { ...(runCommand ? { runCommand } : {}) });
 }
 
 async function executeMedusa({ request, checkout, build, phase6MutableRpc, runMedusa, runCommand }) {
@@ -286,6 +292,7 @@ export async function runGitHubNativeJob(input, {
     source: structuredClone(request.source),
     status: 'completed',
     build,
+    sbom: build?.sbom ?? null,
     deploymentGasEvidence,
     analysis,
     simulation,

@@ -1,4 +1,5 @@
 import { collectSoliditySources, compileProject } from './compiler.mjs';
+import { compileRepoHermeticStandardJson, shouldUseHermeticStandardJson } from './hermetic-standard-json.mjs';
 import { compileRepoNativeHardhat, detectNativeBuild } from './native-build.mjs';
 import { compileVyperSources as defaultCompileVyperSources } from './vyper-build.mjs';
 
@@ -35,13 +36,21 @@ export async function buildProject({
   fsApi,
   compileStandardJson = compileProject,
   collectSources = collectSoliditySources,
-  compileVyper = defaultCompileVyperSources
+  compileVyper = defaultCompileVyperSources,
+  compileHermetic = compileRepoHermeticStandardJson
 }) {
   const compiler = requestedSolidityCompiler(request);
   const detected = await detectNativeBuild(projectRoot, { ...(fsApi ? { fsApi } : {}) });
   let solidityBuild;
 
-  if (detected.system === 'hardhat-native') {
+  if (shouldUseHermeticStandardJson(request)) {
+    solidityBuild = await compileHermetic({
+      projectRoot,
+      request,
+      ...(runCommand ? { runCommand } : {}),
+      ...(fsApi ? { fsApi } : {})
+    });
+  } else if (detected.system === 'hardhat-native') {
     const native = await compileRepoNativeHardhat({
       projectRoot,
       ...(runCommand ? { runCommand } : {}),
