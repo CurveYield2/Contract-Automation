@@ -1,8 +1,8 @@
 import fs from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { runProcess } from './execution.mjs';
 
@@ -15,6 +15,7 @@ const EXACT = Object.freeze({
   actionKind: 'curveyield-lite-p67-v1',
   executionSet: 'retained-lite-v1',
 });
+const RUNNER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const DEV_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
 function sha256(value) {
@@ -28,16 +29,12 @@ function sanitizeFailureText(value) {
   return redacted.slice(-12000);
 }
 
-async function findExecutable(name, environment) {
-  for (const directory of String(environment.PATH ?? '').split(path.delimiter)) {
-    if (!directory) continue;
-    const candidate = path.join(directory, name);
-    try {
-      await fs.access(candidate, fsConstants.X_OK);
-      return candidate;
-    } catch {}
-  }
-  throw new Error(`Required executable not found on qualified runner PATH: ${name}`);
+
+export async function resolveCurveYieldLiteP67Anvil() {
+  const candidate = path.join(RUNNER_ROOT, 'node_modules', '@foundry-rs', 'anvil', 'bin.mjs');
+  await fs.access(candidate);
+  await fs.chmod(candidate, 0o755);
+  return candidate;
 }
 
 async function waitForRpc(url, child) {
@@ -126,7 +123,7 @@ async function readNewSimulationReport(projectRoot, before) {
 export async function runCurveYieldLiteP67({ request, projectRoot, environment = process.env, runCommand = runProcess }) {
   if (!exactAction(request)) throw new Error('CurveYield Lite P6-7 action is not admitted for this exact campaign/source/action identity');
 
-  const anvilPath = await findExecutable('anvil', environment);
+  const anvilPath = await resolveCurveYieldLiteP67Anvil();
   const targetedTests = [
     'tooling/test/curveYieldDexAuditRuntime.test.mjs',
     'tooling/test/curveYieldDexPermanentLiquidityRuntime.test.mjs',

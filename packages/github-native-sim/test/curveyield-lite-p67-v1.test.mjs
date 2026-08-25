@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateDeepAssuranceRequestV2 } from '../src/schema.mjs';
-import { isCurveYieldLiteP67Request } from '../src/curveyield-lite-p67-v1.mjs';
+import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { isCurveYieldLiteP67Request, resolveCurveYieldLiteP67Anvil } from '../src/curveyield-lite-p67-v1.mjs';
 
 function request() {
   return {
@@ -54,4 +56,10 @@ test('admits only the exact CurveYield Lite P67 action envelope', () => {
   const otherCampaign = request();
   otherCampaign.campaignId = 'other';
   assert.throws(() => validateDeepAssuranceRequestV2(otherCampaign), /exact CurveYield Lite P6-7 campaign/);
+});
+
+test('resolves and marks the pinned request-runtime Anvil wrapper executable', async () => {
+  const anvilPath = await resolveCurveYieldLiteP67Anvil();
+  assert.match(anvilPath, /node_modules\/@foundry-rs\/anvil\/bin\.mjs$/);
+  await fs.access(anvilPath, fsConstants.X_OK);
 });
