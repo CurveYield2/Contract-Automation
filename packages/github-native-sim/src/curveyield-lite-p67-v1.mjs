@@ -30,6 +30,13 @@ function sanitizeFailureText(value) {
 }
 
 
+export async function resolveCurveYieldLiteP67Anvil() {
+  const candidate = path.join(RUNNER_ROOT, 'node_modules', '@foundry-rs', 'anvil', 'bin.mjs');
+  await fs.access(candidate);
+  await fs.chmod(candidate, 0o755);
+  return candidate;
+}
+
 async function waitForRpc(url, child) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (child.exitCode !== null) throw new Error(`Local Anvil exited before readiness with code ${child.exitCode}`);
@@ -116,9 +123,7 @@ async function readNewSimulationReport(projectRoot, before) {
 export async function runCurveYieldLiteP67({ request, projectRoot, environment = process.env, runCommand = runProcess }) {
   if (!exactAction(request)) throw new Error('CurveYield Lite P6-7 action is not admitted for this exact campaign/source/action identity');
 
-  const anvilPath = path.join(RUNNER_ROOT, 'node_modules', '@foundry-rs', 'anvil', 'bin.mjs');
-  await fs.access(anvilPath);
-  await fs.chmod(anvilPath, 0o755);
+  const anvilPath = await resolveCurveYieldLiteP67Anvil();
   const targetedTests = [
     'tooling/test/curveYieldDexAuditRuntime.test.mjs',
     'tooling/test/curveYieldDexPermanentLiquidityRuntime.test.mjs',
