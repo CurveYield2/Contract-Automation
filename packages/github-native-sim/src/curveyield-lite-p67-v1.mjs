@@ -4,7 +4,6 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { runProcess } from './execution.mjs';
 
 const EXACT = Object.freeze({
@@ -16,7 +15,6 @@ const EXACT = Object.freeze({
   actionKind: 'curveyield-lite-p67-v1',
   executionSet: 'retained-lite-v1',
 });
-const RUNNER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const DEV_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
 
 function sha256(value) {
