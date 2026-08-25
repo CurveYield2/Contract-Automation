@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "cyvlsdt-v30-audit-v29-r1",
+  "assignmentId": "reviewer-2B-phase6b-p6-6-medusa-campaign-dm-v1",
+  "phaseId": "build-and-test",
+  "gateId": "phase-6b-v29-r1-p6-6-medusa-campaign-dm-v1",
+  "profileId": "github-native-simulate-v2",
+  "source": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "1dc9b042ebd78ef23827a766afb34fa373f16c20",
+    "projectPath": "CurveYield-cyvlSDT-Deployment-Package-v30",
+    "archivePath": "campaigns/cyvlSDT v30 Audit v29/source/CurveYield-cyvlSDT-Deployment-Package-v30.zip",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "configuration": {
+    "compilers": [
+      {
+        "language": "solidity",
+        "version": "0.8.28"
+      },
+      {
+        "language": "vyper",
+        "version": "0.3.10"
+      }
+    ],
+    "timeoutMinutes": 40,
+    "analysis": {
+      "slither": false,
+      "medusa": {
+        "version": "1.5.1",
+        "frozenBlockNumber": 25827826,
+        "frozenBlockHash": "0x1c2d63e86243eaa4779f90e84263a47685c6ecc907421bd14ef00b46ce9bf4d7"
+      },
+      "nativeFuzz": false
+    },
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun",
+    "viaIR": true,
+    "build": {
+      "purpose": "P6.6 triggered Medusa Campaign D-M for Processes 8-11 on exact V30 vault source"
+    },
+    "coverage": {
+      "required": true
+    },
+    "properties": [
+      "Process 8: six persistent vault actors exercise depositor, withdrawer, transfer-recipient, quote-manipulator and strategy-donor roles under eight randomized senders.",
+      "Processes 9-10: exact V30 vault shares are compared against an independent normative no-realized-yield reference.",
+      "Process 11: advanced selector, sender, sequence-depth, shrink, timing and block escalation; P2/P4 properties retained."
+    ],
+    "harness": {
+      "kind": "runner-owned-audit-overlay-v1",
+      "bundleId": "cyvlsdt-v30-v29-phase6b-p6-6-campaign-dm-v1"
+    },
+    "actions": {
+      "ordering": "MEDUSA_P6_6_CAMPAIGN_D_M_TERMINAL_ONLY__FOUNDRY_SECURITY_EXECUTION_DISABLED"
+    }
+  },
+  "requestId": "dar-6059790a83d166ebd0a0e14680547998",
+  "requestDigest": "6059790a83d166ebd0a0e14680547998f7da4da52900bfded36a9c0f1ed63e27"
+}
