@@ -25,15 +25,29 @@ async function rpcCall(url, method, params, fetchImpl) {
   return payload.result;
 }
 
-async function probeNormalizedRpc(url, fetchImpl) {
+async function probeNormalizedRpc(url, fetchImpl, { frozenBlockNumber = null, frozenBlockHash = null } = {}) {
   const chainIdHex = await rpcCall(url, 'eth_chainId', [], fetchImpl);
   const chainId = hexQuantity(chainIdHex, 'eth_chainId');
-  const blockNumberHex = await rpcCall(url, 'eth_blockNumber', [], fetchImpl);
-  const blockNumber = hexQuantity(blockNumberHex, 'eth_blockNumber');
+  const requestPinned = Number.isSafeInteger(frozenBlockNumber) && frozenBlockNumber >= 0 && typeof frozenBlockHash === 'string';
+  const blockNumberHex = requestPinned
+    ? `0x${frozenBlockNumber.toString(16)}`
+    : await rpcCall(url, 'eth_blockNumber', [], fetchImpl);
+  const blockNumber = hexQuantity(blockNumberHex, requestPinned ? 'frozenBlockNumber' : 'eth_blockNumber');
   const block = await rpcCall(url, 'eth_getBlockByNumber', [blockNumberHex, false], fetchImpl);
   const blockHash = typeof block?.hash === 'string' ? block.hash : null;
   const chainIdMatchesExpected = chainId === PHASE6_MUTABLE_RPC_CHAIN_ID;
-  return { status: chainIdMatchesExpected && blockHash ? 'PASS' : 'FAIL', chainId, chainIdMatchesExpected, blockNumber, blockHash };
+  const blockHashMatchesExpected = requestPinned ? blockHash?.toLowerCase() === frozenBlockHash.toLowerCase() : Boolean(blockHash);
+  return {
+    status: chainIdMatchesExpected && Boolean(blockHash) && blockHashMatchesExpected ? 'PASS' : 'FAIL',
+    chainId,
+    chainIdMatchesExpected,
+    blockNumber,
+    blockHash,
+    requestPinned,
+    expectedBlockNumber: requestPinned ? frozenBlockNumber : null,
+    expectedBlockHash: requestPinned ? frozenBlockHash : null,
+    blockHashMatchesExpected,
+  };
 }
 
 export function resolvePhase6MutableRpcUrl(environment = process.env) {
@@ -59,7 +73,13 @@ function observedUpstreamChainId(proxy) {
   catch { return null; }
 }
 
-export async function createPhase6MutableRpcSession({ environment = process.env, fetchImpl = globalThis.fetch, startIdentityProxy = startRpcIdentityProxy } = {}) {
+export async function createPhase6MutableRpcSession({
+  environment = process.env,
+  fetchImpl = globalThis.fetch,
+  startIdentityProxy = startRpcIdentityProxy,
+  frozenBlockNumber = null,
+  frozenBlockHash = null,
+} = {}) {
   let upstreamUrl;
   try { upstreamUrl = resolvePhase6MutableRpcUrl(environment); }
   catch (error) {
@@ -69,17 +89,28 @@ export async function createPhase6MutableRpcSession({ environment = process.env,
   let proxy;
   try {
     proxy = await startIdentityProxy({ upstreamUrl, chainId: PHASE6_MUTABLE_RPC_CHAIN_ID, fetchImpl });
-    const normalized = await probeNormalizedRpc(proxy.url, fetchImpl);
+    const normalized = await probeNormalizedRpc(proxy.url, fetchImpl, { frozenBlockNumber, frozenBlockHash });
     const upstreamChainId = observedUpstreamChainId(proxy);
     if (normalized.status !== 'PASS') {
       await proxy.close().catch(() => {});
       return {
         evidence: {
-          ...failedSessionEvidence('MUTABLE_RPC_IDENTITY_FAILURE', 'Identity-normalized Phase 6 RPC did not reconcile to Ethereum'),
+          ...failedSessionEvidence(
+            normalized.requestPinned && normalized.blockHashMatchesExpected === false
+              ? 'MUTABLE_RPC_FROZEN_BLOCK_MISMATCH'
+              : 'MUTABLE_RPC_IDENTITY_FAILURE',
+            normalized.requestPinned && normalized.blockHashMatchesExpected === false
+              ? 'Identity-normalized Phase 6 RPC did not return the admitted frozen block hash'
+              : 'Identity-normalized Phase 6 RPC did not reconcile to Ethereum'
+          ),
           observedChainId: normalized.chainId,
           chainIdMatchesExpected: normalized.chainIdMatchesExpected,
           blockNumber: normalized.blockNumber,
           blockHash: normalized.blockHash,
+          requestPinned: normalized.requestPinned,
+          expectedBlockNumber: normalized.expectedBlockNumber,
+          expectedBlockHash: normalized.expectedBlockHash,
+          blockHashMatchesExpected: normalized.blockHashMatchesExpected,
           identityNormalization: {
             status: 'FAIL', observedUpstreamChainId: upstreamChainId, observedNormalizedChainId: normalized.chainId,
             upstreamIdentityVirtualized: upstreamChainId === null ? null : upstreamChainId !== PHASE6_MUTABLE_RPC_CHAIN_ID,
@@ -95,6 +126,10 @@ export async function createPhase6MutableRpcSession({ environment = process.env,
       status: 'PASS', failureKind: null, profile: PHASE6_MUTABLE_RPC_ENV, chain: PHASE6_MUTABLE_RPC_CHAIN,
       expectedChainId: PHASE6_MUTABLE_RPC_CHAIN_ID, observedChainId: normalized.chainId, chainIdMatchesExpected: true,
       blockNumber: normalized.blockNumber, blockHash: normalized.blockHash,
+      requestPinned: normalized.requestPinned,
+      expectedBlockNumber: normalized.expectedBlockNumber,
+      expectedBlockHash: normalized.expectedBlockHash,
+      blockHashMatchesExpected: normalized.blockHashMatchesExpected,
       backendPolicy: V7_POLICY.mutableRpc.backendPolicy,
       requesterSuppliedRpcAllowed: V7_POLICY.mutableRpc.requesterSuppliedRpcAllowed,
       rpcUrlExposedInEvidence: false,
@@ -106,6 +141,7 @@ export async function createPhase6MutableRpcSession({ environment = process.env,
     };
     const runtime = {
       url: proxy.url, blockNumber: normalized.blockNumber, blockHash: normalized.blockHash,
+      requestPinned: normalized.requestPinned,
       chain: PHASE6_MUTABLE_RPC_CHAIN, chainId: PHASE6_MUTABLE_RPC_CHAIN_ID,
       profile: PHASE6_MUTABLE_RPC_ENV, identityNormalized: true,
     };

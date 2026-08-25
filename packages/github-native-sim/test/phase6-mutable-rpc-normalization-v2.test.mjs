@@ -64,3 +64,62 @@ test('Phase 6 keeps virtual identity discovery inside the proxy and hands the sa
     await session.close();
   }
 });
+
+test('Phase 6 request pin selects and verifies the admitted historical block instead of the mutable head', async () => {
+  const expectedHash = `0x${'a'.repeat(64)}`;
+  const observedMethods = [];
+  async function pinnedFetch(url, options) {
+    if (url !== 'https://virtual-mutable-anvil.example/rpc') return fetch(url, options);
+    const request = JSON.parse(options.body);
+    observedMethods.push({ method: request.method, params: request.params });
+    let result = null;
+    if (request.method === 'eth_chainId') result = '0xee0059';
+    else if (request.method === 'net_version') result = '15597657';
+    else if (request.method === 'eth_blockNumber') result = '0x20';
+    else if (request.method === 'eth_getBlockByNumber') result = { number: request.params[0], hash: expectedHash };
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+  const session = await createPhase6MutableRpcSession({
+    environment: { [PHASE6_MUTABLE_RPC_ENV]: 'https://virtual-mutable-anvil.example/rpc' },
+    fetchImpl: pinnedFetch,
+    frozenBlockNumber: 16,
+    frozenBlockHash: expectedHash,
+  });
+  try {
+    assert.equal(session.evidence.status, 'PASS');
+    assert.equal(session.evidence.requestPinned, true);
+    assert.equal(session.evidence.blockNumber, 16);
+    assert.equal(session.evidence.blockHash, expectedHash);
+    assert.equal(session.evidence.blockHashMatchesExpected, true);
+    assert.equal(session.runtime.blockNumber, 16);
+    assert.equal(observedMethods.some((entry) => entry.method === 'eth_blockNumber'), false);
+    assert.deepEqual(observedMethods.find((entry) => entry.method === 'eth_getBlockByNumber').params, ['0x10', false]);
+  } finally {
+    await session.close();
+  }
+});
+
+test('Phase 6 frozen block hash mismatch fails closed', async () => {
+  async function mismatchFetch(url, options) {
+    if (url !== 'https://virtual-mutable-anvil.example/rpc') return fetch(url, options);
+    const request = JSON.parse(options.body);
+    let result = null;
+    if (request.method === 'eth_chainId') result = '0xee0059';
+    else if (request.method === 'net_version') result = '15597657';
+    else if (request.method === 'eth_getBlockByNumber') result = { number: request.params[0], hash: `0x${'b'.repeat(64)}` };
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+  const session = await createPhase6MutableRpcSession({
+    environment: { [PHASE6_MUTABLE_RPC_ENV]: 'https://virtual-mutable-anvil.example/rpc' },
+    fetchImpl: mismatchFetch,
+    frozenBlockNumber: 16,
+    frozenBlockHash: `0x${'a'.repeat(64)}`,
+  });
+  try {
+    assert.equal(session.evidence.status, 'FAIL');
+    assert.equal(session.evidence.failureKind, 'MUTABLE_RPC_FROZEN_BLOCK_MISMATCH');
+    assert.equal(session.runtime, null);
+  } finally {
+    await session.close();
+  }
+});

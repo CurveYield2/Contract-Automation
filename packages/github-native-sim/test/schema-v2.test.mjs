@@ -183,3 +183,28 @@ test('rejects unknown top-level/configuration fields and invalid timeout bounds'
     configuration: { ...request.configuration, arbitraryExecution: { shell: 'bash' } }
   }), /arbitraryExecution/);
 });
+
+test('Phase 6 accepts an exact paired Medusa frozen block identity and rejects partial or malformed pins', () => {
+  const request = baseRequest();
+  const pinned = {
+    ...request,
+    configuration: {
+      ...request.configuration,
+      analysis: {
+        ...request.configuration.analysis,
+        medusa: {
+          version: '1.5.1',
+          frozenBlockNumber: 25827826,
+          frozenBlockHash: '0x1c2d63e86243eaa4779f90e84263a47685c6ecc907421bd14ef00b46ce9bf4d7'
+        }
+      }
+    }
+  };
+  assert.deepEqual(validateDeepAssuranceRequestV2(pinned), pinned);
+  const partial = structuredClone(pinned);
+  delete partial.configuration.analysis.medusa.frozenBlockHash;
+  assert.throws(() => validateDeepAssuranceRequestV2(partial), /provided together/);
+  const malformed = structuredClone(pinned);
+  malformed.configuration.analysis.medusa.frozenBlockHash = '0x1234';
+  assert.throws(() => validateDeepAssuranceRequestV2(malformed), /frozenBlockHash/);
+});

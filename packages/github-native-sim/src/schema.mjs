@@ -136,7 +136,15 @@ function validateAnalysis(analysis) {
   }
   if (analysis.medusa !== undefined && analysis.medusa !== false) {
     object(analysis.medusa, 'configuration.analysis.medusa');
-    for (const key of Object.keys(analysis.medusa)) if (key !== 'version') fail(`configuration.analysis.medusa.${key}`, 'is not allowed');
+    const allowed = new Set(['version', 'frozenBlockNumber', 'frozenBlockHash']);
+    for (const key of Object.keys(analysis.medusa)) if (!allowed.has(key)) fail(`configuration.analysis.medusa.${key}`, 'is not allowed');
+    const hasFrozenNumber = Object.prototype.hasOwnProperty.call(analysis.medusa, 'frozenBlockNumber');
+    const hasFrozenHash = Object.prototype.hasOwnProperty.call(analysis.medusa, 'frozenBlockHash');
+    if (hasFrozenNumber !== hasFrozenHash) fail('configuration.analysis.medusa', 'frozenBlockNumber and frozenBlockHash must be provided together');
+    if (hasFrozenNumber) {
+      if (!Number.isSafeInteger(analysis.medusa.frozenBlockNumber) || analysis.medusa.frozenBlockNumber < 0) fail('configuration.analysis.medusa.frozenBlockNumber', 'must be a non-negative safe integer');
+      string(analysis.medusa.frozenBlockHash, 'configuration.analysis.medusa.frozenBlockHash', { min: 66, max: 66, pattern: /^0x[0-9a-fA-F]{64}$/ });
+    }
   }
   validateNativeFuzz(analysis.nativeFuzz);
 }
