@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { detectNativeBuild, compileRepoNativeHardhat } from '../../runner/src/native-build.mjs';
+import { detectNativeBuild, compileRepoNativeHardhat, materializeFrozenVendorRootAdapter } from '../../runner/src/native-build.mjs';
 import { runGitHubNativeJob } from '../src/run-job-file.mjs';
 
 const commit = (c) => c.repeat(40);
@@ -50,6 +50,41 @@ async function hardhatFixture({ lockfile = true } = {}) {
   if (lockfile) await fs.writeFile(path.join(root, 'package-lock.json'), '{"name":"fixture","lockfileVersion":3,"packages":{}}\n');
   return root;
 }
+
+
+test('runner-owned adapter materializes the frozen Balancer vendor-root topology without changing source', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'v7-frozen-vendor-'));
+  const workspace = path.join(root, 'workspace');
+  const projectRoot = path.join(workspace, 'contracts-repo', 'CurveYield DEX');
+  const packageRoots = new Map([
+    ['v3-interfaces', path.join(workspace, 'vendor', 'balancer-v3-upstream', 'pkg', 'interfaces')],
+    ['v3-vault', path.join(workspace, 'vendor', 'balancer-v3-upstream', 'pkg', 'vault')],
+    ['v3-pool-utils', path.join(workspace, 'vendor', 'balancer-v3-upstream', 'pkg', 'pool-utils')],
+    ['v3-solidity-utils', path.join(workspace, 'vendor', 'balancer-v3-upstream', 'pkg', 'solidity-utils')],
+    ['v3-pool-weighted', path.join(workspace, 'vendor', 'balancer-v3-upstream', 'pkg', 'pool-weighted')],
+    ['v3-pool-stable', path.join(workspace, 'vendor', 'balancer-v3-upstream', 'pkg', 'pool-stable')],
+    ['v3-pool-hooks', path.join(workspace, 'vendor', 'balancer-v3-upstream', 'pkg', 'pool-hooks')],
+    ['v3-pool-reclamm', path.join(workspace, 'vendor', 'balancer-reclamm-upstream')],
+    ['v3-standalone-utils', path.join(workspace, 'vendor', 'balancer-v3-upstream', 'pkg', 'standalone-utils')]
+  ]);
+  for (const target of packageRoots.values()) await fs.mkdir(target, { recursive: true });
+  const permit2Target = path.join(projectRoot, 'node_modules', '@uniswap', 'permit2');
+  await fs.mkdir(permit2Target, { recursive: true });
+
+  const evidence = await materializeFrozenVendorRootAdapter(projectRoot);
+  assert.equal(evidence.status, 'materialized');
+  assert.equal(evidence.adapterVersion, 'balancer-frozen-vendor-root-v1');
+  assert.equal(evidence.workspaceRelativeToProject, '../..');
+
+  for (const [packageName, target] of packageRoots) {
+    const linked = path.join(projectRoot, 'node_modules', '@balancer-labs', packageName);
+    assert.equal((await fs.lstat(linked)).isSymbolicLink(), true);
+    assert.equal(await fs.realpath(linked), await fs.realpath(target));
+  }
+  const permit2Link = path.join(projectRoot, 'node_modules', 'permit2');
+  assert.equal((await fs.lstat(permit2Link)).isSymbolicLink(), true);
+  assert.equal(await fs.realpath(permit2Link), await fs.realpath(permit2Target));
+});
 
 test('Hardhat native build admission requires a committed npm lockfile', async () => {
   const root = await hardhatFixture({ lockfile: false });
