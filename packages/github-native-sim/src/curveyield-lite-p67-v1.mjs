@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { once } from 'node:events';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -52,6 +53,70 @@ async function waitForRpc(url, child) {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error('Local Anvil did not become ready for retained Lite deployment simulation');
+}
+
+async function rpcRequest(url, method, params = []) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  });
+  const payload = await response.json();
+  if (payload.error) throw new Error(`Local RPC ${method} failed: ${payload.error.message}`);
+  return payload.result;
+}
+
+async function executeSequentialSimulation(upstreamUrl, params) {
+  const blockStateCalls = params?.[0]?.blockStateCalls ?? [];
+  const blocks = [];
+  for (const entry of blockStateCalls) {
+    const sourceCall = entry?.calls?.[0];
+    if (!sourceCall) throw new Error('Sequential simulation received an empty blockStateCall');
+    const transaction = { ...sourceCall, gas: '0x1dcd6500' };
+    const hash = await rpcRequest(upstreamUrl, 'eth_sendTransaction', [transaction]);
+    const receipt = await rpcRequest(upstreamUrl, 'eth_getTransactionReceipt', [hash]);
+    const block = await rpcRequest(upstreamUrl, 'eth_getBlockByNumber', [receipt.blockNumber, false]);
+    blocks.push({
+      baseFeePerGas: block?.baseFeePerGas ?? '0x0',
+      gasUsed: receipt.gasUsed,
+      calls: [{
+        status: receipt.status,
+        gasUsed: receipt.gasUsed,
+        returnData: '0x',
+        logs: receipt.logs ?? [],
+      }],
+    });
+  }
+  return blocks;
+}
+
+async function startSequentialSimulationBridge(upstreamUrl, port) {
+  const server = createServer(async (request, response) => {
+    let body = '';
+    request.setEncoding('utf8');
+    for await (const chunk of request) body += chunk;
+    try {
+      const payload = JSON.parse(body);
+      const result = payload.method === 'eth_simulateV1'
+        ? await executeSequentialSimulation(upstreamUrl, payload.params)
+        : await rpcRequest(upstreamUrl, payload.method, payload.params);
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ jsonrpc: '2.0', id: payload.id, result }));
+    } catch (error) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ jsonrpc: '2.0', id: 1, error: { code: -32000, message: error.message } }));
+    }
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', resolve);
+  });
+  return server;
+}
+
+async function stopServer(server) {
+  if (!server) return;
+  await new Promise((resolve) => server.close(resolve));
 }
 
 async function stopProcess(child) {
@@ -144,13 +209,16 @@ export async function runCurveYieldLiteP67({ request, projectRoot, environment =
   });
 
   const before = await reportInventory(projectRoot);
-  const rpcUrl = 'http://127.0.0.1:8640';
+  const upstreamRpcUrl = 'http://127.0.0.1:8640';
+  const simulationRpcUrl = 'http://127.0.0.1:8641';
   const anvil = spawn(anvilPath, [
     '--port', '8640', '--silent', '--chain-id', '8453', '--gas-limit', '1000000000', '--disable-code-size-limit',
   ], { cwd: projectRoot, env: environment, stdio: 'ignore' });
+  let bridge = null;
   let simulationResult;
   try {
-    await waitForRpc(rpcUrl, anvil);
+    await waitForRpc(upstreamRpcUrl, anvil);
+    bridge = await startSequentialSimulationBridge(upstreamRpcUrl, 8641);
     simulationResult = await runCommand({
       command: 'node',
       args: ['tooling/scripts/simulateCurveYieldDexFresh.mjs'],
@@ -158,11 +226,12 @@ export async function runCurveYieldLiteP67({ request, projectRoot, environment =
       env: {
         ...environment,
         DEPLOYER_PRIVATE_KEY: DEV_PRIVATE_KEY,
-        SIMULATION_BASE_RPC_URL: rpcUrl,
+        SIMULATION_BASE_RPC_URL: simulationRpcUrl,
         MAX_FEE_PER_GAS_WEI: '10000000000',
       },
     });
   } finally {
+    await stopServer(bridge);
     await stopProcess(anvil);
   }
   let deploymentConfigurationSimulation = null;
@@ -185,10 +254,11 @@ export async function runCurveYieldLiteP67({ request, projectRoot, environment =
   };
   const simulationEvidence = {
     status: simulationResult.exitCode === 0 && deploymentConfigurationSimulation?.report?.simulation?.success === true ? 'PASS' : 'FAIL',
-    command: 'node tooling/scripts/simulateCurveYieldDexFresh.mjs',
+    command: 'node tooling/scripts/simulateCurveYieldDexFresh.mjs via runner-owned-sequential-local-anvil-v1',
     ...commandEvidence(simulationResult),
     evidence: deploymentConfigurationSimulation,
     ...(simulationResult.exitCode === 0 ? {} : { failureOutput: { stdoutTail: sanitizeFailureText(simulationResult.stdout), stderrTail: sanitizeFailureText(simulationResult.stderr) } }),
+    method: 'runner-owned-sequential-local-anvil-v1',
     retainedCoverage: ['complete-deployment-configuration-simulation'],
   };
   const status = testEvidence.status === 'PASS' && simulationEvidence.status === 'PASS' ? 'completed' : 'failed';
