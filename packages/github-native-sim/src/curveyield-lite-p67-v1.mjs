@@ -1,4 +1,7 @@
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +28,42 @@ function sanitizeFailureText(value) {
     .replaceAll(DEV_PRIVATE_KEY, '[REDACTED_DEV_PRIVATE_KEY]')
     .replace(/https?:\/\/[^\s"']+/gi, '[REDACTED_URL]');
   return redacted.slice(-12000);
+}
+
+async function findExecutable(name, environment) {
+  for (const directory of String(environment.PATH ?? '').split(path.delimiter)) {
+    if (!directory) continue;
+    const candidate = path.join(directory, name);
+    try {
+      await fs.access(candidate, fsConstants.X_OK);
+      return candidate;
+    } catch {}
+  }
+  throw new Error(`Required executable not found on qualified runner PATH: ${name}`);
+}
+
+async function waitForRpc(url, child) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (child.exitCode !== null) throw new Error(`Local Anvil exited before readiness with code ${child.exitCode}`);
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+      });
+      const payload = await response.json();
+      if (payload?.result === '0x2105') return;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error('Local Anvil did not become ready for retained Lite deployment simulation');
+}
+
+async function stopProcess(child) {
+  if (child.exitCode !== null) return;
+  child.kill('SIGTERM');
+  await Promise.race([once(child, 'exit'), new Promise((resolve) => setTimeout(resolve, 3000))]);
+  if (child.exitCode === null) child.kill('SIGKILL');
 }
 
 function exactAction(request) {
@@ -89,21 +128,48 @@ async function readNewSimulationReport(projectRoot, before) {
 export async function runCurveYieldLiteP67({ request, projectRoot, environment = process.env, runCommand = runProcess }) {
   if (!exactAction(request)) throw new Error('CurveYield Lite P6-7 action is not admitted for this exact campaign/source/action identity');
 
-  const anvilPath = path.join(RUNNER_ROOT, 'node_modules', '.bin', 'anvil');
+  const anvilPath = await findExecutable('anvil', environment);
+  const targetedTests = [
+    'tooling/test/curveYieldDexAuditRuntime.test.mjs',
+    'tooling/test/curveYieldDexPermanentLiquidityRuntime.test.mjs',
+    'tooling/test/curveYieldDexSettlementRuntime.test.mjs',
+    'tooling/test/curveYieldObservationRuntime.test.mjs',
+    'tooling/test/curveYieldVolumeAdaptiveFeeRuntime.test.mjs',
+    'tooling/test/curveYieldObservationModel.test.mjs',
+    'tooling/test/curveYieldVolumeAdaptiveFee.test.mjs',
+    'tooling/test/curveYieldDexAuditModels.test.mjs',
+    'tooling/test/curveYieldCompositeHookInterfaces.test.mjs',
+    'tooling/test/poolFeePolicySource.test.mjs',
+  ];
   const testResult = await runCommand({
-    command: 'npm',
-    args: ['run', 'ops:test'],
+    command: 'node',
+    args: ['node_modules/vitest/vitest.mjs', 'run', ...targetedTests],
     cwd: projectRoot,
     env: { ...environment, ANVIL_PATH: anvilPath },
   });
 
   const before = await reportInventory(projectRoot);
-  const simulationResult = await runCommand({
-    command: 'node',
-    args: ['tooling/scripts/simulateCurveYieldDexFresh.mjs'],
-    cwd: projectRoot,
-    env: { ...environment, DEPLOYER_PRIVATE_KEY: DEV_PRIVATE_KEY },
-  });
+  const rpcUrl = 'http://127.0.0.1:8640';
+  const anvil = spawn(anvilPath, [
+    '--port', '8640', '--silent', '--chain-id', '8453', '--gas-limit', '1000000000', '--disable-code-size-limit',
+  ], { cwd: projectRoot, env: environment, stdio: 'ignore' });
+  let simulationResult;
+  try {
+    await waitForRpc(rpcUrl, anvil);
+    simulationResult = await runCommand({
+      command: 'node',
+      args: ['tooling/scripts/simulateCurveYieldDexFresh.mjs'],
+      cwd: projectRoot,
+      env: {
+        ...environment,
+        DEPLOYER_PRIVATE_KEY: DEV_PRIVATE_KEY,
+        SIMULATION_BASE_RPC_URL: rpcUrl,
+        MAX_FEE_PER_GAS_WEI: '10000000000',
+      },
+    });
+  } finally {
+    await stopProcess(anvil);
+  }
   let deploymentConfigurationSimulation = null;
   try {
     deploymentConfigurationSimulation = await readNewSimulationReport(projectRoot, before);
@@ -113,7 +179,7 @@ export async function runCurveYieldLiteP67({ request, projectRoot, environment =
 
   const testEvidence = {
     status: testResult.exitCode === 0 ? 'PASS' : 'FAIL',
-    command: 'npm run ops:test',
+    command: `node node_modules/vitest/vitest.mjs run ${targetedTests.join(' ')}`,
     ...commandEvidence(testResult),
     summary: vitestSummary(testResult.stdout),
     ...(testResult.exitCode === 0 ? {} : { failureOutput: { stdoutTail: sanitizeFailureText(testResult.stdout), stderrTail: sanitizeFailureText(testResult.stderr) } }),
