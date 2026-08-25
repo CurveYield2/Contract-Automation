@@ -165,7 +165,10 @@ test('compile-v2 build admission failure stops before Slither and preserves type
     },
     buildProject: async () => {
       calls.push('build');
-      throw new Error('Hardhat exact build requires a committed npm lockfile');
+      const error = new Error('Repository-native Hardhat compilation failed');
+      error.code = 'native_build_failed';
+      error.result = { exitCode: 1, stdout: 'compile stdout', stderr: 'compile stderr' };
+      throw error;
     },
     runSlither: async () => {
       calls.push('slither');
@@ -175,7 +178,9 @@ test('compile-v2 build admission failure stops before Slither and preserves type
   assert.deepEqual(calls, ['checkout', 'build']);
   assert.equal(result.status, 'failed');
   assert.equal(result.profileId, 'github-native-compile-v2');
-  assert.equal(result.error.message, 'Hardhat exact build requires a committed npm lockfile');
+  assert.equal(result.error.message, 'Repository-native Hardhat compilation failed');
+  assert.equal(result.error.code, 'native_build_failed');
+  assert.deepEqual(result.error.commandEvidence, { exitCode: 1, stdout: 'compile stdout', stderr: 'compile stderr' });
   assert.equal(result.analysis.slither, undefined);
   assert.equal(result.analysisComponentFailureCount, 0);
   assert.equal(result.continuityDisposition, 'COMPLETE_EVIDENCE');
