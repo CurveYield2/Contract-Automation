@@ -5,6 +5,7 @@ import { startCompatibleForkEngine } from '../../runner/src/anvil-engine.mjs';
 import { executeWorkflow } from '../../runner/src/workflow.mjs';
 import { runMedusaAnalysis, runSlitherAnalysis } from './analysis.mjs';
 import { normalizeDeploymentGasEvidence } from './deployment-gas-v1.mjs';
+import { isCurveYieldLiteP67Request, runCurveYieldLiteP67 } from './curveyield-lite-p67-v1.mjs';
 import { checkoutExactSource, safeRepositoryProjectPath, stageExactArchiveSource } from './execution.mjs';
 import { runNativeFuzzAnalysis } from './native-fuzz.mjs';
 import { validateDeepAssuranceRequestV2 } from './schema.mjs';
@@ -45,6 +46,7 @@ function failureResult(request, startedAt, error, partial = {}, now) {
     deploymentGasEvidence: partial.deploymentGasEvidence ?? null,
     analysis: partial.analysis ?? {},
     simulation: partial.simulation ?? null,
+    liteRetainedExecution: partial.liteRetainedExecution ?? null,
     analysisComponentFailureCount: partial.analysisComponentFailureCount ?? 0,
     failedStepCount: partial.failedStepCount ?? 0,
     failedSteps: partial.failedSteps ?? [],
@@ -227,14 +229,46 @@ export async function runGitHubNativeJob(input, {
   let checkout;
   let deploymentGasEvidence = null;
   let simulation = null;
+  let liteRetainedExecution = null;
 
   try {
     checkout = await checkoutSource(request.source, { workspaceRoot, runCommand, environment });
     if (!checkout || checkout.commit !== request.source.commit) throw new Error(`Exact source checkout mismatch: expected ${request.source.commit}, got ${checkout?.commit ?? 'missing'}`);
     build = await buildProject({ projectRoot: checkout.projectRoot, request, ...(runCommand ? { runCommand } : {}) });
     deploymentGasEvidence = buildDeploymentGasEvidence(request, build);
+    if (isCurveYieldLiteP67Request(request)) {
+      liteRetainedExecution = await runCurveYieldLiteP67({ request, projectRoot: checkout.projectRoot, environment, ...(runCommand ? { runCommand } : {}) });
+    }
   } catch (error) {
-    return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation }, now);
+    return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, liteRetainedExecution }, now);
+  }
+
+  if (liteRetainedExecution) {
+    if (liteRetainedExecution.status !== 'completed') {
+      const error = new Error('CurveYield Lite P6-7 retained execution failed');
+      error.kind = 'LITE_RETAINED_EXECUTION_FAILURE';
+      return failureResult(request, startedAt, error, { build, deploymentGasEvidence, analysis, simulation, liteRetainedExecution, continuityDisposition: 'CONTINUE_WITH_LIMITATION' }, now);
+    }
+    return {
+      schemaVersion: 'deep-assurance-github-native-execution-v2',
+      requestId: request.requestId,
+      requestDigest: request.requestDigest,
+      profileId: request.profileId,
+      source: structuredClone(request.source),
+      status: 'completed',
+      build,
+      sbom: build?.sbom ?? null,
+      deploymentGasEvidence,
+      analysis,
+      simulation,
+      liteRetainedExecution,
+      analysisComponentFailureCount: 0,
+      failedStepCount: 0,
+      failedSteps: [],
+      continuityDisposition: 'COMPLETE_EVIDENCE',
+      startedAt,
+      finishedAt: nowIso(now)
+    };
   }
 
   if (request.profileId === V7_POLICY.profiles.compile) {
