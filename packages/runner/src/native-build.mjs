@@ -11,6 +11,83 @@ const HARDHAT_CONFIGS = [
 ];
 const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json'];
 
+const FROZEN_BALANCER_VENDOR_PACKAGES = Object.freeze([
+  ['v3-interfaces', ['vendor', 'balancer-v3-upstream', 'pkg', 'interfaces']],
+  ['v3-vault', ['vendor', 'balancer-v3-upstream', 'pkg', 'vault']],
+  ['v3-pool-utils', ['vendor', 'balancer-v3-upstream', 'pkg', 'pool-utils']],
+  ['v3-solidity-utils', ['vendor', 'balancer-v3-upstream', 'pkg', 'solidity-utils']],
+  ['v3-pool-weighted', ['vendor', 'balancer-v3-upstream', 'pkg', 'pool-weighted']],
+  ['v3-pool-stable', ['vendor', 'balancer-v3-upstream', 'pkg', 'pool-stable']],
+  ['v3-pool-hooks', ['vendor', 'balancer-v3-upstream', 'pkg', 'pool-hooks']],
+  ['v3-pool-reclamm', ['vendor', 'balancer-reclamm-upstream']],
+  ['v3-standalone-utils', ['vendor', 'balancer-v3-upstream', 'pkg', 'standalone-utils']]
+]);
+
+async function directoryExists(directory, fsApi = fs) {
+  try {
+    return (await fsApi.stat(directory)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function findFrozenVendorWorkspaceRoot(projectRoot, fsApi = fs) {
+  let candidate = path.resolve(projectRoot);
+  for (let depth = 0; depth < 7; depth += 1) {
+    const interfaces = path.join(candidate, 'vendor', 'balancer-v3-upstream', 'pkg', 'interfaces');
+    const reclamm = path.join(candidate, 'vendor', 'balancer-reclamm-upstream');
+    if (await directoryExists(interfaces, fsApi) && await directoryExists(reclamm, fsApi)) return candidate;
+    const parent = path.dirname(candidate);
+    if (parent === candidate) break;
+    candidate = parent;
+  }
+  return null;
+}
+
+async function ensureDirectorySymlink(destination, target, fsApi = fs) {
+  try {
+    const existing = await fsApi.lstat(destination);
+    if (!existing.isSymbolicLink()) throw new Error(`Frozen vendor adapter destination already exists and is not a symlink: ${destination}`);
+    const [actual, expected] = await Promise.all([fsApi.realpath(destination), fsApi.realpath(target)]);
+    if (actual !== expected) throw new Error(`Frozen vendor adapter destination points to the wrong target: ${destination}`);
+    return;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  await fsApi.symlink(target, destination, 'dir');
+}
+
+export async function materializeFrozenVendorRootAdapter(projectRoot, { fsApi = fs } = {}) {
+  const workspaceRoot = await findFrozenVendorWorkspaceRoot(projectRoot, fsApi);
+  if (!workspaceRoot) return { status: 'not-applicable', adapterVersion: 'balancer-frozen-vendor-root-v1' };
+
+  const nodeModulesRoot = path.join(projectRoot, 'node_modules');
+  if (!await directoryExists(nodeModulesRoot, fsApi)) {
+    throw new Error('Frozen vendor adapter requires the admitted locked dependency installation');
+  }
+  const balancerModulesRoot = path.join(nodeModulesRoot, '@balancer-labs');
+  await fsApi.mkdir(balancerModulesRoot, { recursive: true });
+
+  const packages = [];
+  for (const [packageName, targetParts] of FROZEN_BALANCER_VENDOR_PACKAGES) {
+    const target = path.join(workspaceRoot, ...targetParts);
+    if (!await directoryExists(target, fsApi)) throw new Error(`Frozen vendor package is missing: ${packageName}`);
+    await ensureDirectorySymlink(path.join(balancerModulesRoot, packageName), target, fsApi);
+    packages.push(`@balancer-labs/${packageName}`);
+  }
+
+  const permit2Target = path.join(nodeModulesRoot, '@uniswap', 'permit2');
+  if (!await directoryExists(permit2Target, fsApi)) throw new Error('Frozen vendor adapter requires installed @uniswap/permit2');
+  await ensureDirectorySymlink(path.join(nodeModulesRoot, 'permit2'), permit2Target, fsApi);
+
+  return {
+    status: 'materialized',
+    adapterVersion: 'balancer-frozen-vendor-root-v1',
+    workspaceRelativeToProject: path.relative(projectRoot, workspaceRoot).split(path.sep).join('/') || '.',
+    packages: [...packages, 'permit2'].sort()
+  };
+}
+
 async function exists(file, fsApi = fs) {
   try {
     const stat = await fsApi.stat(file);
@@ -147,7 +224,8 @@ function commandFailure(message, result) {
 export async function compileRepoNativeHardhat({
   projectRoot,
   runCommand = runProcess,
-  fsApi = fs
+  fsApi = fs,
+  materializeVendorAdapter = materializeFrozenVendorRootAdapter
 }) {
   const detected = await detectNativeBuild(projectRoot, { fsApi });
   if (detected.system !== 'hardhat-native') throw new Error('Repository is not an admitted Hardhat native build');
@@ -158,6 +236,8 @@ export async function compileRepoNativeHardhat({
     cwd: projectRoot
   });
   if (!install || install.exitCode !== 0) throw commandFailure('Hardhat locked dependency installation failed', install);
+
+  const vendorRootAdapter = await materializeVendorAdapter(projectRoot, { fsApi });
 
   const compile = await runCommand({
     command: 'npx',
@@ -183,6 +263,7 @@ export async function compileRepoNativeHardhat({
     buildInfoCount: buildInfo.length,
     artifacts,
     sourceInventory: sources,
-    sourceInventoryFiles: sources.length
+    sourceInventoryFiles: sources.length,
+    vendorRootAdapter
   };
 }
