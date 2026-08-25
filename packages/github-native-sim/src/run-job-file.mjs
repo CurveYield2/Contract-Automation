@@ -49,7 +49,19 @@ function failureResult(request, startedAt, error, partial = {}, now) {
     failedStepCount: partial.failedStepCount ?? 0,
     failedSteps: partial.failedSteps ?? [],
     continuityDisposition: partial.continuityDisposition ?? 'COMPLETE_EVIDENCE',
-    error: { name: error?.name ?? 'Error', message: error?.message ?? String(error), ...(error?.code ? { code: error.code } : {}), ...(error?.kind ? { kind: error.kind } : {}) },
+    error: {
+      name: error?.name ?? 'Error',
+      message: error?.message ?? String(error),
+      ...(error?.code ? { code: error.code } : {}),
+      ...(error?.kind ? { kind: error.kind } : {}),
+      ...(error?.result ? {
+        commandEvidence: {
+          exitCode: Number.isInteger(error.result.exitCode) ? error.result.exitCode : -1,
+          stdout: String(error.result.stdout ?? ''),
+          stderr: String(error.result.stderr ?? '')
+        }
+      } : {})
+    },
     startedAt,
     finishedAt: nowIso(now)
   };
