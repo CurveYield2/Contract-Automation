@@ -103,7 +103,7 @@ jobs:
           assert old in s, 'stale Vyper constant-getter block missing'
           p.write_text(s.replace(old,new,1))
           PY
-          test "$(sha256sum "$VERIFIER" | awk '{print $1}')" = '0d4e7c414dccbc1ebf5401615367e4f242f42b4c89e6e2496f375b79602dcc9a'
+          test "$(sha256sum "$VERIFIER" | awk '{print $1}')" = '71fe077decb87b8a84cef49f2b77b16d2282e3eb79cfdfafff84e4c38a785a3b'
           node --check "$VERIFIER"
           python "$ROOT/verification-v24/governance-staking-static-v2.py" | tee "$GITHUB_WORKSPACE/cyvlsdt-v30-v3-governance-staking-static.txt"
 
