@@ -13,6 +13,8 @@ jobs:
   rpc-block-diagnostic:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      ETH_RPC: https://ethereum-rpc.publicnode.com
     steps:
       - name: Checkout trusted runner
         uses: actions/checkout@v4
@@ -26,13 +28,10 @@ jobs:
         with:
           version: v1.7.1
 
-      - name: Probe trusted RPC_ETHEREUM JSON-RPC methods
-        env:
-          ETH_RPC: ${{ secrets.RPC_ETHEREUM }}
+      - name: Probe PublicNode Ethereum JSON-RPC methods
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$ETH_RPC"
           python - <<'PY'
           import json, os, urllib.request, urllib.error
           url=os.environ['ETH_RPC']
@@ -73,10 +72,8 @@ jobs:
           assert out[4].get('resultSummary',{}).get('byteLength',0)>0, out[4]
           PY
 
-      - name: Start Anvil from trusted RPC_ETHEREUM at exact cyGOV block
+      - name: Start Anvil from PublicNode at exact cyGOV block
         id: anvil
-        env:
-          ETH_RPC: ${{ secrets.RPC_ETHEREUM }}
         shell: bash
         run: |
           set -euo pipefail
@@ -90,7 +87,9 @@ jobs:
           test "$(cast code 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b --rpc-url http://127.0.0.1:8545)" != '0x'
           OWNER="$(cast call 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b 'owner()(address)' --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
           test "${OWNER,,}" = '0x11b78837cadc8e894f1c6e13fa9f3a085a75fa35'
+          HASH="$(cast block 25835948 --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
           echo "$OWNER" | tee cyvlsdt-rpc-diagnostic-owner-v1.txt
+          printf 'block=25835948\nhash=%s\nprovider=publicnode\n' "$HASH" | tee cyvlsdt-rpc-diagnostic-fork-v1.txt
 
       - name: Upload diagnostic evidence
         if: always()
@@ -101,6 +100,7 @@ jobs:
             cyvlsdt-rpc-diagnostic-v1.json
             cyvlsdt-rpc-diagnostic-anvil-v1.log
             cyvlsdt-rpc-diagnostic-owner-v1.txt
+            cyvlsdt-rpc-diagnostic-fork-v1.txt
           if-no-files-found: warn
           retention-days: 7
 
