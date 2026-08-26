@@ -36,7 +36,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CurveYield2/Audit-Controller
-          ref: 63462f8723a55c148ae6000a6a88aecc60662982
+          ref: 37319eab51d1ac1fc6a58916683114716157b922
           token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: .controller-fixture
           persist-credentials: false
@@ -80,7 +80,7 @@ jobs:
           printf 'frozen_archive_sha256=%s\nfrozen_source_commit=%s\nremediation_fixture_commit=%s\nruntime_patch_sha256=%s\n' \
             'cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a' \
             '6bde63416a4611e127b8bb3a5958e6b6d874c188' \
-            '63462f8723a55c148ae6000a6a88aecc60662982' \
+            '37319eab51d1ac1fc6a58916683114716157b922' \
             'fdd73714fad9076789c09368f6423c381165c17121e559e517701d9c141d2ae2' | tee cyvlsdt-v30-source-binding-v1.txt
           echo "ROOT=$(realpath "$ROOT")" >> "$GITHUB_ENV"
 
@@ -97,6 +97,15 @@ jobs:
           node --check "$ROOT/deployment-v27/deploy-cyvlsdt-v27-v1.js"
           node --check "$ROOT/deployment-v27/post-deploy-configure-cyvlsdt-v27-v1.js"
           node --check "$ROOT/deployment-v27/verify-production-cyvlsdt-v27-v1.js"
+
+      - name: Apply Vyper 0.3.10 build-helper compatibility fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .controller-fixture/campaigns/cyvlsdt-v30-remediation-v2-livefork/vyper-0310-build.patch.gz.b64 | gzip -dc > vyper-0310-build.patch
+          test "$(sha256sum vyper-0310-build.patch | awk '{print $1}')" = 'c5af9e97f34b03338e02210f0888c7339aec4c6d9cbc3d5f0bf08468555899eb'
+          (cd "$ROOT" && patch -p1 --batch < "$GITHUB_WORKSPACE/vyper-0310-build.patch")
+          test "$(sha256sum "$ROOT/scripts-v24/build-governance-staking-vyper-artifact-v2.py" | awk '{print $1}')" = '81aa1454a5df08c83c8700f4c50a1edbd2e122f7a09428028893f01f39c01336'
 
       - name: Materialize simulation-only economic inputs
         shell: bash
