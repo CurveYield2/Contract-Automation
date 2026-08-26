@@ -172,7 +172,7 @@ jobs:
           set -euo pipefail
           test "$(cast chain-id --rpc-url "$FORK_RPC")" = '1'
           test "$(cast code 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b --rpc-url "$FORK_RPC" --block 25835948)" != '0x'
-          anvil --fork-url "$FORK_RPC" --fork-block-number 25835948 --chain-id 1 --hardfork cancun --port 8545 > cyvlsdt-v30-anvil-v1.log 2>&1 &
+          anvil --fork-url "$FORK_RPC" --fork-block-number 25835948 --chain-id 1 --hardfork cancun --block-time 1 --port 8545 > cyvlsdt-v30-anvil-v1.log 2>&1 &
           echo $! > .anvil.pid
           for i in $(seq 1 60); do
             if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
