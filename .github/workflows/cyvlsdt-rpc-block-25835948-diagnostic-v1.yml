@@ -39,8 +39,8 @@ jobs:
             ('eth_chainId', []),
             ('net_version', []),
             ('eth_blockNumber', []),
-            ('eth_getBlockByNumber', ['0x18a35ac', False]),
-            ('eth_getCode', ['0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b','0x18a35ac']),
+            ('eth_getBlockByNumber', ['0x18a39ac', False]),
+            ('eth_getCode', ['0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b','0x18a39ac']),
           ]
           out=[]
           for i,(method,params) in enumerate(probes,1):
