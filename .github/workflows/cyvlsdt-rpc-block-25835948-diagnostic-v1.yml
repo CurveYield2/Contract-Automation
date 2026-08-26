@@ -1,0 +1,81 @@
+name: cyvlSDT RPC Block 25835948 Diagnostic v1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/cyvlsdt-rpc-block-25835948-diagnostic-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  rpc-block-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ETH_RPC: https://rpc.flashbots.net
+    steps:
+      - name: Checkout trusted runner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install exact Foundry used by successful cyGOV V7 run
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Prove Flashbots fork prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cast chain-id --rpc-url "$ETH_RPC")" = '1'
+          HASH="$(cast block 25835948 --field hash --rpc-url "$ETH_RPC" | tr -d '\r\n')"
+          test "${HASH,,}" = '0x0b184e111de903ae1bf4618377a20763cabb3db48a3652bdda4f622a47eb46b8'
+          CODE="$(cast code 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b --rpc-url "$ETH_RPC" --block 25835948)"
+          test "$CODE" != '0x'
+          BAL="$(cast balance 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65 --rpc-url "$ETH_RPC" --block 25835948)"
+          NONCE="$(cast nonce 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65 --rpc-url "$ETH_RPC" --block 25835948)"
+          printf 'provider=flashbots\nblock=25835948\nhash=%s\ncygov_code_bytes=%s\ndefault_account_balance=%s\ndefault_account_nonce=%s\n' "$HASH" "$(( (${#CODE}-2)/2 ))" "$BAL" "$NONCE" | tee cyvlsdt-rpc-diagnostic-v1.txt
+
+      - name: Start Anvil from Flashbots at exact cyGOV block
+        shell: bash
+        run: |
+          set -euo pipefail
+          anvil --fork-url "$ETH_RPC" --fork-block-number 25835948 --chain-id 1 --hardfork cancun --port 8545 > cyvlsdt-rpc-diagnostic-anvil-v1.log 2>&1 &
+          echo $! > .diag-anvil.pid
+          for i in $(seq 1 45); do
+            if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = '1'
+          CODE="$(cast code 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b --rpc-url http://127.0.0.1:8545)"
+          test "$CODE" != '0x'
+          OWNER="$(cast call 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b 'owner()(address)' --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
+          test "${OWNER,,}" = '0x11b78837cadc8e894f1c6e13fa9f3a085a75fa35'
+          HASH="$(cast block 25835948 --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
+          test "${HASH,,}" = '0x0b184e111de903ae1bf4618377a20763cabb3db48a3652bdda4f622a47eb46b8'
+          echo "$OWNER" | tee cyvlsdt-rpc-diagnostic-owner-v1.txt
+          printf 'block=25835948\nhash=%s\nprovider=flashbots\n' "$HASH" | tee cyvlsdt-rpc-diagnostic-fork-v1.txt
+
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyvlsdt-rpc-block-25835948-diagnostic-v1
+          path: |
+            cyvlsdt-rpc-diagnostic-v1.txt
+            cyvlsdt-rpc-diagnostic-anvil-v1.log
+            cyvlsdt-rpc-diagnostic-owner-v1.txt
+            cyvlsdt-rpc-diagnostic-fork-v1.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop diagnostic Anvil
+        if: always()
+        shell: bash
+        run: |
+          if [ -f .diag-anvil.pid ]; then kill "$(cat .diag-anvil.pid)" 2>/dev/null || true; fi
