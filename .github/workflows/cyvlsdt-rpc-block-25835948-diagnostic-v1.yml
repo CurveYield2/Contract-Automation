@@ -13,6 +13,8 @@ jobs:
   rpc-block-diagnostic:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      ETH_RPC: https://rpc.flashbots.net
     steps:
       - name: Checkout trusted runner
         uses: actions/checkout@v4
@@ -26,68 +28,24 @@ jobs:
         with:
           version: v1.7.1
 
-      - name: Probe independent Ethereum RPC providers and select one
+      - name: Prove Flashbots fork prerequisites
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json, urllib.request, urllib.error, os
-          candidates=[
-            ('drpc','https://eth.drpc.org/'),
-            ('1rpc','https://public.1rpc.io/eth'),
-            ('ankr','https://rpc.ankr.com/eth'),
-            ('cloudflare','https://cloudflare-eth.com'),
-            ('flashbots','https://rpc.flashbots.net'),
-          ]
-          block='0x18a39ac'
-          cygov='0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b'
-          def rpc(url, method, params, timeout=12):
-            req=urllib.request.Request(url,data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode(),headers={'content-type':'application/json','user-agent':'CurveYield-GitHub-Anvil-Diagnostic/1.0'},method='POST')
-            try:
-              with urllib.request.urlopen(req,timeout=timeout) as r:
-                body=r.read().decode('utf-8','replace')
-                try: payload=json.loads(body)
-                except Exception: return {'ok':False,'httpStatus':r.status,'body':body[:300]}
-                return {'ok':200 <= r.status < 300 and payload.get('error') is None,'httpStatus':r.status,'result':payload.get('result'),'rpcError':payload.get('error')}
-            except urllib.error.HTTPError as e:
-              return {'ok':False,'httpStatus':e.code,'body':e.read().decode('utf-8','replace')[:300]}
-            except Exception as e:
-              return {'ok':False,'httpStatus':None,'error':type(e).__name__+': '+str(e)}
-          evidence=[]; selected=None
-          for name,url in candidates:
-            chain=rpc(url,'eth_chainId',[])
-            blockr=rpc(url,'eth_getBlockByNumber',[block,False]) if chain.get('ok') else {'ok':False,'skipped':True}
-            code=rpc(url,'eth_getCode',[cygov,block]) if blockr.get('ok') else {'ok':False,'skipped':True}
-            code_result=code.get('result') if isinstance(code.get('result'),str) else None
-            row={
-              'provider':name,
-              'chain':{k:v for k,v in chain.items() if k!='result'},
-              'chainId':chain.get('result'),
-              'block':{k:v for k,v in blockr.items() if k!='result'},
-              'blockNumber':blockr.get('result',{}).get('number') if isinstance(blockr.get('result'),dict) else None,
-              'blockHash':blockr.get('result',{}).get('hash') if isinstance(blockr.get('result'),dict) else None,
-              'code':{k:v for k,v in code.items() if k!='result'},
-              'codeByteLength':0 if code_result in (None,'0x') else (len(code_result)-2)//2,
-            }
-            good=(chain.get('ok') and chain.get('result')=='0x1' and blockr.get('ok') and row['blockNumber']==block and code.get('ok') and row['codeByteLength']>0)
-            row['qualified']=bool(good)
-            evidence.append(row)
-            if good and selected is None: selected=(name,url,row['blockHash'])
-          print(json.dumps(evidence,indent=2))
-          open('cyvlsdt-rpc-diagnostic-v1.json','w').write(json.dumps(evidence,indent=2)+'\n')
-          if selected is None: raise SystemExit('No candidate RPC qualified')
-          name,url,block_hash=selected
-          with open(os.environ['GITHUB_ENV'],'a') as f:
-            f.write(f'SELECTED_RPC={url}\nSELECTED_PROVIDER={name}\nEXPECTED_BLOCK_HASH={block_hash}\n')
-          print(f'selected_provider={name}')
-          print(f'expected_block_hash={block_hash}')
-          PY
+          test "$(cast chain-id --rpc-url "$ETH_RPC")" = '1'
+          HASH="$(cast block 25835948 --field hash --rpc-url "$ETH_RPC" | tr -d '\r\n')"
+          test "${HASH,,}" = '0x0b184e111de903ae1bf4618377a20763cabb3db48a3652bdda4f622a47eb46b8'
+          CODE="$(cast code 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b --rpc-url "$ETH_RPC" --block 25835948)"
+          test "$CODE" != '0x'
+          BAL="$(cast balance 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65 --rpc-url "$ETH_RPC" --block 25835948)"
+          NONCE="$(cast nonce 0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65 --rpc-url "$ETH_RPC" --block 25835948)"
+          printf 'provider=flashbots\nblock=25835948\nhash=%s\ncygov_code_bytes=%s\ndefault_account_balance=%s\ndefault_account_nonce=%s\n' "$HASH" "$(( (${#CODE}-2)/2 ))" "$BAL" "$NONCE" | tee cyvlsdt-rpc-diagnostic-v1.txt
 
-      - name: Start Anvil from selected RPC at exact cyGOV block
+      - name: Start Anvil from Flashbots at exact cyGOV block
         shell: bash
         run: |
           set -euo pipefail
-          anvil --fork-url "$SELECTED_RPC" --fork-block-number 25835948 --chain-id 1 --hardfork cancun --port 8545 > cyvlsdt-rpc-diagnostic-anvil-v1.log 2>&1 &
+          anvil --fork-url "$ETH_RPC" --fork-block-number 25835948 --chain-id 1 --hardfork cancun --port 8545 > cyvlsdt-rpc-diagnostic-anvil-v1.log 2>&1 &
           echo $! > .diag-anvil.pid
           for i in $(seq 1 45); do
             if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
@@ -99,9 +57,9 @@ jobs:
           OWNER="$(cast call 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b 'owner()(address)' --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
           test "${OWNER,,}" = '0x11b78837cadc8e894f1c6e13fa9f3a085a75fa35'
           HASH="$(cast block 25835948 --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
-          test "${HASH,,}" = "${EXPECTED_BLOCK_HASH,,}"
+          test "${HASH,,}" = '0x0b184e111de903ae1bf4618377a20763cabb3db48a3652bdda4f622a47eb46b8'
           echo "$OWNER" | tee cyvlsdt-rpc-diagnostic-owner-v1.txt
-          printf 'block=25835948\nhash=%s\nprovider=%s\n' "$HASH" "$SELECTED_PROVIDER" | tee cyvlsdt-rpc-diagnostic-fork-v1.txt
+          printf 'block=25835948\nhash=%s\nprovider=flashbots\n' "$HASH" | tee cyvlsdt-rpc-diagnostic-fork-v1.txt
 
       - name: Upload diagnostic evidence
         if: always()
@@ -109,7 +67,7 @@ jobs:
         with:
           name: cyvlsdt-rpc-block-25835948-diagnostic-v1
           path: |
-            cyvlsdt-rpc-diagnostic-v1.json
+            cyvlsdt-rpc-diagnostic-v1.txt
             cyvlsdt-rpc-diagnostic-anvil-v1.log
             cyvlsdt-rpc-diagnostic-owner-v1.txt
             cyvlsdt-rpc-diagnostic-fork-v1.txt
