@@ -163,44 +163,16 @@ jobs:
           npm run --silent build:governance-staking:v30 2>&1 | tee "$GITHUB_WORKSPACE/cyvlsdt-v30-vyper-compile-v1.txt"
           test -f artifacts-vyper/CurveYieldGovernanceStaking.json
 
-      - name: Start canonical V7 RPC identity proxy
-        env:
-          ARCHIVE_RPC: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -f .cyvlsdt-v30-rpc-proxy-url
-          node --input-type=module > .cyvlsdt-v30-rpc-proxy-url 2> cyvlsdt-v30-rpc-proxy-v1.log <<'NODE' &
-          import { startRpcIdentityProxy } from './packages/runner/src/rpc-identity-proxy-v1.mjs';
-          const proxy = await startRpcIdentityProxy({
-            upstreamUrl: process.env.ARCHIVE_RPC,
-            chainId: 1,
-          });
-          console.log(proxy.url);
-          const stop = async () => {
-            await proxy.close().catch(() => {});
-            process.exit(0);
-          };
-          process.on('SIGTERM', stop);
-          process.on('SIGINT', stop);
-          await new Promise(() => {});
-          NODE
-          echo $! > .rpc-proxy.pid
-          for i in $(seq 1 60); do
-            if [ -s .cyvlsdt-v30-rpc-proxy-url ]; then break; fi
-            sleep 0.25
-          done
-          RPC_PROXY="$(head -n1 .cyvlsdt-v30-rpc-proxy-url | tr -d '\r\n')"
-          test -n "$RPC_PROXY"
-          test "$(cast chain-id --rpc-url "$RPC_PROXY")" = '1'
-          echo "RPC_PROXY=$RPC_PROXY" >> "$GITHUB_ENV"
-          printf 'proxy_chain_id=1\nproxy_mode=canonical-v7-rpc-identity-proxy-v1\n' | tee cyvlsdt-v30-rpc-proxy-evidence-v1.txt
-
       - name: Start pinned Ethereum mainnet Anvil fork
+        env:
+          FORK_RPC: https://rpc.flashbots.net
+          EXPECTED_BLOCK_HASH: 0x0b184e111de903ae1bf4618377a20763cabb3db48a3652bdda4f622a47eb46b8
         shell: bash
         run: |
           set -euo pipefail
-          anvil --fork-url "$RPC_PROXY" --fork-block-number 25835948 --chain-id 1 --hardfork cancun --port 8545 > cyvlsdt-v30-anvil-v1.log 2>&1 &
+          test "$(cast chain-id --rpc-url "$FORK_RPC")" = '1'
+          test "$(cast code 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b --rpc-url "$FORK_RPC" --block 25835948)" != '0x'
+          anvil --fork-url "$FORK_RPC" --fork-block-number 25835948 --chain-id 1 --hardfork cancun --port 8545 > cyvlsdt-v30-anvil-v1.log 2>&1 &
           echo $! > .anvil.pid
           for i in $(seq 1 60); do
             if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
@@ -208,7 +180,8 @@ jobs:
           done
           test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = '1'
           BLOCK_HASH="$(cast block 25835948 --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
-          printf 'fork_block=25835948\nfork_block_hash=%s\n' "$BLOCK_HASH" | tee cyvlsdt-v30-fork-identity-v1.txt
+          test "${BLOCK_HASH,,}" = "${EXPECTED_BLOCK_HASH,,}"
+          printf 'fork_block=25835948\nfork_block_hash=%s\nfork_provider=flashbots\n' "$BLOCK_HASH" | tee cyvlsdt-v30-fork-identity-v1.txt
 
       - name: Prove live cyGOV identity and owner
         shell: bash
@@ -315,8 +288,6 @@ jobs:
             cyvlsdt-v30-simulation-inputs-v1.json
             cyvlsdt-v30-solidity-compile-v1.txt
             cyvlsdt-v30-vyper-compile-v1.txt
-            cyvlsdt-v30-rpc-proxy-v1.log
-            cyvlsdt-v30-rpc-proxy-evidence-v1.txt
             cyvlsdt-v30-anvil-v1.log
             cyvlsdt-v30-fork-identity-v1.txt
             cyvlsdt-v30-cygov-preflight-v1.txt
@@ -342,9 +313,8 @@ jobs:
             exit 1
           fi
 
-      - name: Stop Anvil and RPC identity proxy
+      - name: Stop Anvil
         if: always()
         shell: bash
         run: |
           if [ -f .anvil.pid ]; then kill "$(cat .anvil.pid)" 2>/dev/null || true; fi
-          if [ -f .rpc-proxy.pid ]; then kill "$(cat .rpc-proxy.pid)" 2>/dev/null || true; fi
