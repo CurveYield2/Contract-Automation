@@ -26,15 +26,16 @@ jobs:
         with:
           version: v1.7.1
 
-      - name: Probe exact upstream JSON-RPC methods
+      - name: Probe trusted RPC_ETHEREUM JSON-RPC methods
         env:
-          ARCHIVE_RPC: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          ETH_RPC: ${{ secrets.RPC_ETHEREUM }}
         shell: bash
         run: |
           set -euo pipefail
+          test -n "$ETH_RPC"
           python - <<'PY'
           import json, os, urllib.request, urllib.error
-          url=os.environ['ARCHIVE_RPC']
+          url=os.environ['ETH_RPC']
           probes=[
             ('eth_chainId', []),
             ('net_version', []),
@@ -49,18 +50,15 @@ jobs:
               with urllib.request.urlopen(req,timeout=20) as r:
                 body=r.read().decode('utf-8','replace')
                 item={'method':method,'httpStatus':r.status,'ok':200 <= r.status < 300}
-                try:
-                  payload=json.loads(body)
-                  result=payload.get('result')
-                  if method=='eth_getCode' and isinstance(result,str):
-                    item['resultSummary']={'byteLength':0 if result=='0x' else (len(result)-2)//2}
-                  elif method=='eth_getBlockByNumber' and isinstance(result,dict):
-                    item['resultSummary']={k:result.get(k) for k in ('number','hash','stateRoot','timestamp')}
-                  else:
-                    item['result']=result
-                  if payload.get('error') is not None: item['rpcError']=payload.get('error')
-                except Exception:
-                  item['body']=body[:1000]
+                payload=json.loads(body)
+                result=payload.get('result')
+                if method=='eth_getCode' and isinstance(result,str):
+                  item['resultSummary']={'byteLength':0 if result=='0x' else (len(result)-2)//2}
+                elif method=='eth_getBlockByNumber' and isinstance(result,dict):
+                  item['resultSummary']={k:result.get(k) for k in ('number','hash','stateRoot','timestamp')}
+                else:
+                  item['result']=result
+                if payload.get('error') is not None: item['rpcError']=payload.get('error')
                 out.append(item)
             except urllib.error.HTTPError as e:
               body=e.read().decode('utf-8','replace')
@@ -69,17 +67,20 @@ jobs:
               out.append({'method':method,'httpStatus':None,'ok':False,'error':type(e).__name__+': '+str(e)})
           print(json.dumps(out,indent=2))
           open('cyvlsdt-rpc-diagnostic-v1.json','w').write(json.dumps(out,indent=2)+'\n')
+          assert all(x['ok'] for x in out), out
+          assert int(out[0]['result'],16)==1, out[0]
+          assert out[3].get('resultSummary',{}).get('number')=='0x18a39ac', out[3]
+          assert out[4].get('resultSummary',{}).get('byteLength',0)>0, out[4]
           PY
 
-      - name: Start Anvil exactly like successful BoostHub workflow at cyGOV block
+      - name: Start Anvil from trusted RPC_ETHEREUM at exact cyGOV block
         id: anvil
-        continue-on-error: true
         env:
-          ARCHIVE_RPC: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          ETH_RPC: ${{ secrets.RPC_ETHEREUM }}
         shell: bash
         run: |
           set -euo pipefail
-          anvil --fork-url "$ARCHIVE_RPC" --fork-block-number 25835948 --chain-id 1 --port 8545 > cyvlsdt-rpc-diagnostic-anvil-v1.log 2>&1 &
+          anvil --fork-url "$ETH_RPC" --fork-block-number 25835948 --chain-id 1 --hardfork cancun --port 8545 > cyvlsdt-rpc-diagnostic-anvil-v1.log 2>&1 &
           echo $! > .diag-anvil.pid
           for i in $(seq 1 30); do
             if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
@@ -87,13 +88,9 @@ jobs:
           done
           test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = '1'
           test "$(cast code 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b --rpc-url http://127.0.0.1:8545)" != '0x'
-          cast call 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b 'owner()(address)' --rpc-url http://127.0.0.1:8545 | tee cyvlsdt-rpc-diagnostic-owner-v1.txt
-
-      - name: Print Anvil diagnostic log
-        if: always()
-        shell: bash
-        run: |
-          cat cyvlsdt-rpc-diagnostic-anvil-v1.log 2>/dev/null || true
+          OWNER="$(cast call 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b 'owner()(address)' --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
+          test "${OWNER,,}" = '0x11b78837cadc8e894f1c6e13fa9f3a085a75fa35'
+          echo "$OWNER" | tee cyvlsdt-rpc-diagnostic-owner-v1.txt
 
       - name: Upload diagnostic evidence
         if: always()
@@ -112,9 +109,3 @@ jobs:
         shell: bash
         run: |
           if [ -f .diag-anvil.pid ]; then kill "$(cat .diag-anvil.pid)" 2>/dev/null || true; fi
-
-      - name: Require exact block fork to start
-        if: always()
-        shell: bash
-        run: |
-          test '${{ steps.anvil.outcome }}' = 'success'
