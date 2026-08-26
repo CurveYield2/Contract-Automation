@@ -13,8 +13,6 @@ jobs:
   rpc-block-diagnostic:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      ETH_RPC: https://ethereum-rpc.publicnode.com
     steps:
       - name: Checkout trusted runner
         uses: actions/checkout@v4
@@ -28,68 +26,82 @@ jobs:
         with:
           version: v1.7.1
 
-      - name: Probe PublicNode Ethereum JSON-RPC methods
+      - name: Probe independent Ethereum RPC providers and select one
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json, os, urllib.request, urllib.error
-          url=os.environ['ETH_RPC']
-          probes=[
-            ('eth_chainId', []),
-            ('net_version', []),
-            ('eth_blockNumber', []),
-            ('eth_getBlockByNumber', ['0x18a39ac', False]),
-            ('eth_getCode', ['0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b','0x18a39ac']),
+          import json, urllib.request, urllib.error, os
+          candidates=[
+            ('drpc','https://eth.drpc.org/'),
+            ('1rpc','https://public.1rpc.io/eth'),
+            ('ankr','https://rpc.ankr.com/eth'),
+            ('cloudflare','https://cloudflare-eth.com'),
+            ('flashbots','https://rpc.flashbots.net'),
           ]
-          out=[]
-          for i,(method,params) in enumerate(probes,1):
-            req=urllib.request.Request(url,data=json.dumps({'jsonrpc':'2.0','id':i,'method':method,'params':params}).encode(),headers={'content-type':'application/json'},method='POST')
+          block='0x18a39ac'
+          cygov='0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b'
+          def rpc(url, method, params, timeout=12):
+            req=urllib.request.Request(url,data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode(),headers={'content-type':'application/json','user-agent':'CurveYield-GitHub-Anvil-Diagnostic/1.0'},method='POST')
             try:
-              with urllib.request.urlopen(req,timeout=20) as r:
+              with urllib.request.urlopen(req,timeout=timeout) as r:
                 body=r.read().decode('utf-8','replace')
-                item={'method':method,'httpStatus':r.status,'ok':200 <= r.status < 300}
-                payload=json.loads(body)
-                result=payload.get('result')
-                if method=='eth_getCode' and isinstance(result,str):
-                  item['resultSummary']={'byteLength':0 if result=='0x' else (len(result)-2)//2}
-                elif method=='eth_getBlockByNumber' and isinstance(result,dict):
-                  item['resultSummary']={k:result.get(k) for k in ('number','hash','stateRoot','timestamp')}
-                else:
-                  item['result']=result
-                if payload.get('error') is not None: item['rpcError']=payload.get('error')
-                out.append(item)
+                try: payload=json.loads(body)
+                except Exception: return {'ok':False,'httpStatus':r.status,'body':body[:300]}
+                return {'ok':200 <= r.status < 300 and payload.get('error') is None,'httpStatus':r.status,'result':payload.get('result'),'rpcError':payload.get('error')}
             except urllib.error.HTTPError as e:
-              body=e.read().decode('utf-8','replace')
-              out.append({'method':method,'httpStatus':e.code,'ok':False,'body':body[:1000]})
+              return {'ok':False,'httpStatus':e.code,'body':e.read().decode('utf-8','replace')[:300]}
             except Exception as e:
-              out.append({'method':method,'httpStatus':None,'ok':False,'error':type(e).__name__+': '+str(e)})
-          print(json.dumps(out,indent=2))
-          open('cyvlsdt-rpc-diagnostic-v1.json','w').write(json.dumps(out,indent=2)+'\n')
-          assert all(x['ok'] for x in out), out
-          assert int(out[0]['result'],16)==1, out[0]
-          assert out[3].get('resultSummary',{}).get('number')=='0x18a39ac', out[3]
-          assert out[4].get('resultSummary',{}).get('byteLength',0)>0, out[4]
+              return {'ok':False,'httpStatus':None,'error':type(e).__name__+': '+str(e)}
+          evidence=[]; selected=None
+          for name,url in candidates:
+            chain=rpc(url,'eth_chainId',[])
+            blockr=rpc(url,'eth_getBlockByNumber',[block,False]) if chain.get('ok') else {'ok':False,'skipped':True}
+            code=rpc(url,'eth_getCode',[cygov,block]) if blockr.get('ok') else {'ok':False,'skipped':True}
+            code_result=code.get('result') if isinstance(code.get('result'),str) else None
+            row={
+              'provider':name,
+              'chain':{k:v for k,v in chain.items() if k!='result'},
+              'chainId':chain.get('result'),
+              'block':{k:v for k,v in blockr.items() if k!='result'},
+              'blockNumber':blockr.get('result',{}).get('number') if isinstance(blockr.get('result'),dict) else None,
+              'blockHash':blockr.get('result',{}).get('hash') if isinstance(blockr.get('result'),dict) else None,
+              'code':{k:v for k,v in code.items() if k!='result'},
+              'codeByteLength':0 if code_result in (None,'0x') else (len(code_result)-2)//2,
+            }
+            good=(chain.get('ok') and chain.get('result')=='0x1' and blockr.get('ok') and row['blockNumber']==block and code.get('ok') and row['codeByteLength']>0)
+            row['qualified']=bool(good)
+            evidence.append(row)
+            if good and selected is None: selected=(name,url,row['blockHash'])
+          print(json.dumps(evidence,indent=2))
+          open('cyvlsdt-rpc-diagnostic-v1.json','w').write(json.dumps(evidence,indent=2)+'\n')
+          if selected is None: raise SystemExit('No candidate RPC qualified')
+          name,url,block_hash=selected
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+            f.write(f'SELECTED_RPC={url}\nSELECTED_PROVIDER={name}\nEXPECTED_BLOCK_HASH={block_hash}\n')
+          print(f'selected_provider={name}')
+          print(f'expected_block_hash={block_hash}')
           PY
 
-      - name: Start Anvil from PublicNode at exact cyGOV block
-        id: anvil
+      - name: Start Anvil from selected RPC at exact cyGOV block
         shell: bash
         run: |
           set -euo pipefail
-          anvil --fork-url "$ETH_RPC" --fork-block-number 25835948 --chain-id 1 --hardfork cancun --port 8545 > cyvlsdt-rpc-diagnostic-anvil-v1.log 2>&1 &
+          anvil --fork-url "$SELECTED_RPC" --fork-block-number 25835948 --chain-id 1 --hardfork cancun --port 8545 > cyvlsdt-rpc-diagnostic-anvil-v1.log 2>&1 &
           echo $! > .diag-anvil.pid
-          for i in $(seq 1 30); do
+          for i in $(seq 1 45); do
             if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
             sleep 1
           done
           test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = '1'
-          test "$(cast code 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b --rpc-url http://127.0.0.1:8545)" != '0x'
+          CODE="$(cast code 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b --rpc-url http://127.0.0.1:8545)"
+          test "$CODE" != '0x'
           OWNER="$(cast call 0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b 'owner()(address)' --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
           test "${OWNER,,}" = '0x11b78837cadc8e894f1c6e13fa9f3a085a75fa35'
           HASH="$(cast block 25835948 --field hash --rpc-url http://127.0.0.1:8545 | tr -d '\r\n')"
+          test "${HASH,,}" = "${EXPECTED_BLOCK_HASH,,}"
           echo "$OWNER" | tee cyvlsdt-rpc-diagnostic-owner-v1.txt
-          printf 'block=25835948\nhash=%s\nprovider=publicnode\n' "$HASH" | tee cyvlsdt-rpc-diagnostic-fork-v1.txt
+          printf 'block=25835948\nhash=%s\nprovider=%s\n' "$HASH" "$SELECTED_PROVIDER" | tee cyvlsdt-rpc-diagnostic-fork-v1.txt
 
       - name: Upload diagnostic evidence
         if: always()
