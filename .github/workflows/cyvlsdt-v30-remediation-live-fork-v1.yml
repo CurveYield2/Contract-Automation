@@ -166,7 +166,7 @@ jobs:
       - name: Start pinned Ethereum mainnet Anvil fork
         env:
           FORK_RPC: https://rpc.flashbots.net
-          EXPECTED_BLOCK_HASH: 0x0b184e111de903ae1bf4618377a20763cabb3db48a3652bdda4f622a47eb46b8
+          EXPECTED_BLOCK_HASH: '0x0b184e111de903ae1bf4618377a20763cabb3db48a3652bdda4f622a47eb46b8'
         shell: bash
         run: |
           set -euo pipefail
