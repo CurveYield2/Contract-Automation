@@ -17,7 +17,7 @@ function bool(v) { return String(v || '').toLowerCase() === 'true'; }
 
 async function loadModules() {
   const [{ chromium }, browserbaseMod] = await Promise.all([
-    import('playwright'),
+    import('playwright-core'),
     import('@browserbasehq/sdk').catch(() => ({ default: null })),
   ]);
   return { chromium, Browserbase: browserbaseMod.Browserbase || browserbaseMod.default || null };
@@ -140,7 +140,7 @@ async function localProvider(chromium) {
     ? JSON.parse(Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'))
     : undefined;
   if (!storage) throw new Error('CHATGPT_STORAGE_STATE_B64 missing');
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   const context = await browser.newContext({ storageState: storage });
   const page = await context.newPage();
   return { browser, context, page, close: () => browser.close() };
