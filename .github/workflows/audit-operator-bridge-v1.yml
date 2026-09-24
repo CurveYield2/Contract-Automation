@@ -227,3 +227,80 @@ jobs:
         shell: bash
         run: |
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "Audit operator request failed closed. No private audit evidence is copied into this public issue. Inspect this workflow run and repair/retry through the bridge."
+
+
+  verify-private-controller:
+    if: >-
+      startsWith(github.event.issue.title, '[agent] verify-audit-controller ') &&
+      !github.event.issue.pull_request &&
+      (github.event.issue.user.login == 'CurveYield-Developer-DK' || github.event.issue.user.login == 'JamesNexus')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Parse exact private controller commit
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const match = process.env.ISSUE_TITLE.match(/^\[agent\] verify-audit-controller ([0-9a-f]{40})$/);
+          if (!match) throw new Error('title must be exactly: [agent] verify-audit-controller <40-hex-commit>');
+          fs.appendFileSync(process.env.GITHUB_ENV, `AUDIT_CONTROLLER_REF=${match[1]}\n`);
+          NODE
+
+      - name: Verify private-controller bridge credential
+        env:
+          CONTROLLER_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${CONTROLLER_TOKEN:-}" ]; then
+            echo "::error::AUDIT_CONTROLLER_GITHUB_TOKEN is missing"
+            exit 41
+          fi
+          if ! GH_TOKEN="$CONTROLLER_TOKEN" gh api "repos/CurveYield2/Audit-Controller" --silent; then
+            echo "::error::AUDIT_CONTROLLER_GITHUB_TOKEN cannot read CurveYield2/Audit-Controller"
+            exit 42
+          fi
+
+      - name: Checkout exact private controller commit
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Audit-Controller
+          ref: ${{ env.AUDIT_CONTROLLER_REF }}
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .audit-controller
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run complete Audit-Controller verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          npm run verify
+
+      - name: Close successful verification issue
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed             --comment "Exact Audit-Controller commit $AUDIT_CONTROLLER_REF passed the complete npm run verify suite on the public Contract-Automation runner."
+
+      - name: Publish failed verification marker
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "Exact Audit-Controller verification failed closed. Inspect this workflow run. No private repository contents are published in this issue."

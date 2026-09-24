@@ -107,6 +107,14 @@ The corresponding private request lives at:
 
 `.deep-assurance/operator/requests/<request-id>.json`
 
+For exact private-controller code verification without creating or writing an operator request, a web agent can create an issue titled:
+
+```text
+[agent] verify-audit-controller <exact-40-hex-Audit-Controller-commit>
+```
+
+The same public workflow checks out exactly that private commit and runs the complete `npm run verify` suite with no writeback.
+
 Supported v1 operations are:
 - `PROJECT_CURRENT_STATE`
 - `BUILD_EXECUTION_REQUEST`
