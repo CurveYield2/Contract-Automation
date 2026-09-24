@@ -83,7 +83,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test .audit-controller/packages/controller-core/test/audit-workload-reduction-v1.test.mjs
+          node --test .audit-controller/packages/controller-core/test/audit-workload-reduction-v1.test.mjs .audit-controller/packages/controller-core/test/audit-workload-reduction-extended-v1.test.mjs
 
       - name: Validate private operator request
         shell: bash
@@ -95,6 +95,9 @@ jobs:
           import fs from 'node:fs';
           const request = JSON.parse(fs.readFileSync(`.audit-controller/${process.env.OPERATOR_REQUEST_PATH}`, 'utf8'));
           if (request.schemaVersion !== 'audit-workload-reduction-request-v1') throw new Error('request schemaVersion mismatch');
+          const operations = new Set(['PROJECT_CURRENT_STATE','BUILD_EXECUTION_REQUEST','INGEST_EXECUTION_EVIDENCE','BUILD_SUCCESSOR_HANDOFF']);
+          const operation = request.operation ?? 'PROJECT_CURRENT_STATE';
+          if (!operations.has(operation)) throw new Error('unsupported operator operation');
           if (request.requestId !== process.env.OPERATOR_REQUEST_ID) throw new Error('request id mismatch');
           for (const [field, pattern] of [
             ['skillPackagePath', /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+/],
