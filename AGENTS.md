@@ -2,6 +2,14 @@
 
 Policy version: v9
 
+## Browser-agent blockchain workstation — start here
+
+For ChatGPT/web-agent blockchain development, testing, simulation, deployment orchestration, or Audit V7 work, read:
+
+`docs/BROWSER_AGENT_BLOCKCHAIN_WORKSTATION_v1.md`
+
+That guide is the browser-agent navigation layer. It does not replace this policy, the canonical V7 CLI, runner manifest, or qualification state.
+
 ## Archive boundary — mandatory
 
 `CurveYield2/archive` is the only repository-level home for superseded, deprecated, obsolete, historical-only, backup, or replaced Contract-Automation files.
