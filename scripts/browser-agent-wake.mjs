@@ -149,9 +149,9 @@ async function localProvider(chromium) {
 async function browserlessProvider(chromium) {
   if (!env.BROWSERLESS_TOKEN) throw new Error('BROWSERLESS_TOKEN missing');
   const profile = encodeURIComponent(env.BROWSERLESS_PROFILE || 'chatgpt');
-  const ws = 'wss://production-sfo.browserless.io/chromium/playwright?token=' +
+  const ws = 'wss://production-sfo.browserless.io?token=' +
     encodeURIComponent(env.BROWSERLESS_TOKEN) + '&profile=' + profile;
-  const browser = await chromium.connect(ws);
+  const browser = await chromium.connectOverCDP(ws);
   const context = browser.contexts()[0] || await browser.newContext();
   const page = context.pages()[0] || await context.newPage();
   return { browser, context, page, close: () => browser.close() };
