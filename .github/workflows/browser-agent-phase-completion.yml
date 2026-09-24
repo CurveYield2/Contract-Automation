@@ -72,13 +72,18 @@ jobs:
             .status == "READY_FOR_AUTOMATION_APPROVAL" and
             (.campaignId|type=="string" and length>0) and
             (.phaseId|type=="string" and length>0) and
-            (.completionReport|type=="object") and
-            .completionReport.repository == "CurveYield2/Audit-Controller" and
-            (.completionReport.ref|type=="string" and length>0) and
-            (.completionReport.path|type=="string" and length>0) and
-            (.completionReport.sha256|test("^[0-9a-f]{64}$")) and
-            ((.completionReport.statusField // "status")|type=="string") and
-            ((.completionReport.terminalValues // ["PASS","COMPLETE","COMPLETED","SEALED"])|type=="array" and length>0) and
+            (.phaseReport|type=="object") and
+            .phaseReport.repository == "CurveYield2/Audit-Controller" and
+            (.phaseReport.ref|type=="string" and length>0) and
+            (.phaseReport.path|type=="string" and length>0) and
+            (.phaseReport.sha256|test("^[0-9a-f]{64}$")) and
+            (.approvalEvidence|type=="object") and
+            .approvalEvidence.repository == "CurveYield2/Audit-Controller" and
+            (.approvalEvidence.ref|type=="string" and length>0) and
+            (.approvalEvidence.path|type=="string" and length>0) and
+            (.approvalEvidence.sha256|test("^[0-9a-f]{64}$")) and
+            ((.approvalEvidence.statusField // "status")|type=="string") and
+            ((.approvalEvidence.terminalValues // ["PASS"])|type=="array" and length>0) and
             ((.workflowRuns // [])|type=="array")
           ' "$REPORT" >/dev/null
 
@@ -87,19 +92,21 @@ jobs:
           [[ "$campaign_id" =~ ^[A-Za-z0-9._[:space:]-]{1,200}$ ]]
           [[ "$phase_id" =~ ^[A-Za-z0-9._:-]{1,120}$ ]]
 
-          completion_ref="$(jq -r '.completionReport.ref' "$REPORT")"
-          completion_path="$(jq -r '.completionReport.path' "$REPORT")"
-          [[ "$completion_ref" =~ ^[A-Za-z0-9._/-]+$ ]]
-          [[ "$completion_path" != /* ]]
-          [[ "$completion_path" != *'..'* ]]
-          [[ "$completion_path" != *'\\'* ]]
+          for section in phaseReport approvalEvidence; do
+            item_ref="$(jq -r ".$section.ref" "$REPORT")"
+            item_path="$(jq -r ".$section.path" "$REPORT")"
+            [[ "$item_ref" =~ ^[A-Za-z0-9._/-]+$ ]]
+            [[ "$item_path" != /* ]]
+            [[ "$item_path" != *'..'* ]]
+            [[ "$item_path" != *'\\'* ]]
+          done
 
           echo "campaign_id=$campaign_id" >> "$GITHUB_OUTPUT"
           echo "phase_id=$phase_id" >> "$GITHUB_OUTPUT"
           echo "safe_campaign=$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')" >> "$GITHUB_OUTPUT"
           echo "safe_phase=$(printf '%s' "$phase_id" | tr -c 'A-Za-z0-9._-' '_')" >> "$GITHUB_OUTPUT"
 
-      - name: Verify canonical Audit-Controller completion report
+      - name: Verify canonical phase report and automation approval evidence
         if: steps.report.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -108,25 +115,33 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${GH_TOKEN:-}"
-          repo="$(jq -r '.completionReport.repository' "$REPORT")"
-          ref="$(jq -r '.completionReport.ref' "$REPORT")"
-          path="$(jq -r '.completionReport.path' "$REPORT")"
-          expected_sha="$(jq -r '.completionReport.sha256' "$REPORT")"
-          status_field="$(jq -r '.completionReport.statusField // "status"' "$REPORT")"
 
-          encoded="$(gh api "repos/$repo/contents/$path?ref=$ref" --jq '.content')"
-          printf '%s' "$encoded" | base64 -d > /tmp/canonical-phase-report.json
-          actual_sha="$(sha256sum /tmp/canonical-phase-report.json | awk '{print $1}')"
-          test "$actual_sha" = "$expected_sha"
+          fetch_and_hash() {
+            local section="$1"
+            local output="$2"
+            local repo ref path expected_sha encoded actual_sha
+            repo="$(jq -r ".$section.repository" "$REPORT")"
+            ref="$(jq -r ".$section.ref" "$REPORT")"
+            path="$(jq -r ".$section.path" "$REPORT")"
+            expected_sha="$(jq -r ".$section.sha256" "$REPORT")"
+            encoded="$(gh api "repos/$repo/contents/$path?ref=$ref" --jq '.content')"
+            printf '%s' "$encoded" | base64 -d > "$output"
+            actual_sha="$(sha256sum "$output" | awk '{print $1}')"
+            test "$actual_sha" = "$expected_sha"
+          }
 
-          jq -e . /tmp/canonical-phase-report.json >/dev/null
-          observed_status="$(jq -r --arg f "$status_field" 'getpath($f|split(".")) // empty' /tmp/canonical-phase-report.json)"
-          jq -e --arg s "$observed_status" '(.completionReport.terminalValues // ["PASS","COMPLETE","COMPLETED","SEALED"]) | index($s) != null' "$REPORT" >/dev/null
+          fetch_and_hash phaseReport /tmp/canonical-phase-report
+          fetch_and_hash approvalEvidence /tmp/automation-approval.json
+
+          jq -e . /tmp/automation-approval.json >/dev/null
+          status_field="$(jq -r '.approvalEvidence.statusField // "status"' "$REPORT")"
+          observed_status="$(jq -r --arg f "$status_field" 'getpath($f|split(".")) // empty' /tmp/automation-approval.json)"
+          jq -e --arg s "$observed_status" '(.approvalEvidence.terminalValues // ["PASS"]) | index($s) != null' "$REPORT" >/dev/null
 
           campaign_id="$(jq -r '.campaignId' "$REPORT")"
           phase_id="$(jq -r '.phaseId' "$REPORT")"
-          report_campaign="$(jq -r '.campaignId // .campaign_id // empty' /tmp/canonical-phase-report.json)"
-          report_phase="$(jq -r '.phaseId // .phase_id // empty' /tmp/canonical-phase-report.json)"
+          report_campaign="$(jq -r '.campaignId // .campaign_id // empty' /tmp/automation-approval.json)"
+          report_phase="$(jq -r '.phaseId // .phase_id // empty' /tmp/automation-approval.json)"
           if [ -n "$report_campaign" ]; then test "$report_campaign" = "$campaign_id"; fi
           if [ -n "$report_phase" ]; then test "$report_phase" = "$phase_id"; fi
 
@@ -173,15 +188,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          canonical_sha="$(sha256sum /tmp/canonical-phase-report.json | awk '{print $1}')"
+          phase_report_sha="$(sha256sum /tmp/canonical-phase-report | awk '{print $1}')"
+          approval_sha="$(sha256sum /tmp/automation-approval.json | awk '{print $1}')"
           jq -n \
             --arg schemaVersion 'curveyield-browser-agent-phase-approval-v1' \
             --arg campaignId "$CAMPAIGN_ID" \
             --arg phaseId "$PHASE_ID" \
             --arg sourceReport "$REPORT" \
-            --arg canonicalSha "$canonical_sha" \
+            --arg phaseReportSha "$phase_report_sha" \
+            --arg approvalEvidenceSha "$approval_sha" \
             --arg approvalRunId "$GITHUB_RUN_ID" \
-            '{schemaVersion:$schemaVersion,campaignId:$campaignId,phaseId:$phaseId,status:"APPROVED",sourceReport:$sourceReport,canonicalCompletionReportSha256:$canonicalSha,approvalWorkflowRunId:$approvalRunId,approvedAt:(now|todate)}' \
+            '{schemaVersion:$schemaVersion,campaignId:$campaignId,phaseId:$phaseId,status:"APPROVED",sourceReport:$sourceReport,phaseReportSha256:$phaseReportSha,approvalEvidenceSha256:$approvalEvidenceSha,approvalWorkflowRunId:$approvalRunId,approvedAt:(now|todate)}' \
             > /tmp/approved-phase.json
 
           api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-phase-reports/approved/${SAFE_CAMPAIGN}__${SAFE_PHASE}.json"
