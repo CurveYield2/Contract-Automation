@@ -12,8 +12,12 @@ test('canonical V7 execution workflow scopes private controller auth and archive
   assert.equal(fs.existsSync(workflowPath), true, 'canonical V7 execution workflow must exist');
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   assert.match(workflow, /workflow_dispatch:/);
-  assert.match(workflow, /name:\s*Checkout private Solo Audit Controller for manual dispatch/);
+  assert.match(workflow, /name:\s*Checkout private Audit Controller for manual dispatch/);
   assert.match(workflow, /token:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
+
+  assert.match(workflow, /name:\s*Checkout exact private controller for controller operation/);
+  assert.match(workflow, /if:\s*env\.V7_REQUEST_KIND == 'controller-operation'/);
+  assert.match(workflow, /persist-credentials:\s*true/);
   assert.match(workflow, /name:\s*Execute V7 request/);
   assert.match(workflow, /AUDIT_CONTROLLER_GITHUB_TOKEN:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
   assert.match(workflow, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01:\s*\$\{\{ secrets\.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 \}\}/);
