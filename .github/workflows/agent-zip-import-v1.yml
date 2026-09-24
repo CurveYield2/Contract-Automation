@@ -1,0 +1,186 @@
+name: Agent ZIP Import v1
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".agent-upload/requests/*.json"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-zip-import-v1
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Locate newest import request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQUEST="$(git diff-tree --no-commit-id --name-only -r "${GITHUB_SHA}" -- '.agent-upload/requests/*.json' | tail -n 1)"
+          if [ -z "${REQUEST}" ]; then
+            echo "No import request found in triggering commit."
+            exit 1
+          fi
+          echo "path=${REQUEST}" >> "${GITHUB_OUTPUT}"
+          echo "Using request: ${REQUEST}"
+
+      - name: Validate request
+        id: meta
+        shell: bash
+        env:
+          REQUEST: ${{ steps.request.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          SOURCE_URL="$(jq -r '.source.url' "${REQUEST}")"
+          FILENAME="$(jq -r '.source.filename' "${REQUEST}")"
+          SHA256="$(jq -r '.source.sha256 // empty' "${REQUEST}")"
+          SIZE="$(jq -r '.source.size // empty' "${REQUEST}")"
+          TARGET_PATH="$(jq -r '.target.path // "."' "${REQUEST}")"
+          MODE="$(jq -r '.target.mode // "archive"' "${REQUEST}")"
+
+          if [ -z "${SOURCE_URL}" ] || [ "${SOURCE_URL}" = "null" ]; then
+            echo "Missing source.url"
+            exit 1
+          fi
+
+          if [ -z "${FILENAME}" ] || [ "${FILENAME}" = "null" ]; then
+            echo "Missing source.filename"
+            exit 1
+          fi
+
+          if [ "$(basename -- "${FILENAME}")" != "${FILENAME}" ]; then
+            echo "Unsafe filename: ${FILENAME}"
+            exit 1
+          fi
+
+          if [[ "${TARGET_PATH}" == /* ]] || [[ "${TARGET_PATH}" == *".."* ]]; then
+            echo "Unsafe target path: ${TARGET_PATH}"
+            exit 1
+          fi
+
+          if [ "${MODE}" != "archive" ]; then
+            echo "v1 importer currently accepts mode=archive only."
+            exit 1
+          fi
+
+          echo "source_url=${SOURCE_URL}" >> "${GITHUB_OUTPUT}"
+          echo "filename=${FILENAME}" >> "${GITHUB_OUTPUT}"
+          echo "sha256=${SHA256}" >> "${GITHUB_OUTPUT}"
+          echo "size=${SIZE}" >> "${GITHUB_OUTPUT}"
+          echo "target_path=${TARGET_PATH}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download ZIP
+        shell: bash
+        env:
+          SOURCE_URL: ${{ steps.meta.outputs.source_url }}
+          FILENAME: ${{ steps.meta.outputs.filename }}
+        run: |
+          set -euo pipefail
+
+          URL="${SOURCE_URL}"
+
+          if [[ "${URL}" =~ drive\.google\.com/file/d/([^/]+) ]]; then
+            FILE_ID="${BASH_REMATCH[1]}"
+            URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=t"
+          fi
+
+          echo "Downloading ${FILENAME}"
+          curl --fail --location --retry 4 --retry-all-errors --connect-timeout 20             --output "/tmp/${FILENAME}" "${URL}"
+
+          test -s "/tmp/${FILENAME}"
+
+          MAGIC="$(xxd -p -l 4 "/tmp/${FILENAME}")"
+          case "${MAGIC}" in
+            504b0304|504b0506|504b0708) ;;
+            *)
+              echo "Downloaded object is not a ZIP. Magic: ${MAGIC}"
+              file "/tmp/${FILENAME}" || true
+              head -c 300 "/tmp/${FILENAME}" || true
+              exit 1
+              ;;
+          esac
+
+      - name: Verify ZIP identity
+        shell: bash
+        env:
+          FILENAME: ${{ steps.meta.outputs.filename }}
+          EXPECTED_SHA256: ${{ steps.meta.outputs.sha256 }}
+          EXPECTED_SIZE: ${{ steps.meta.outputs.size }}
+        run: |
+          set -euo pipefail
+
+          ACTUAL_SHA256="$(sha256sum "/tmp/${FILENAME}" | awk '{print $1}')"
+          ACTUAL_SIZE="$(stat -c '%s' "/tmp/${FILENAME}")"
+
+          echo "SHA-256: ${ACTUAL_SHA256}"
+          echo "Size: ${ACTUAL_SIZE}"
+
+          if [ -n "${EXPECTED_SHA256}" ] && [ "${EXPECTED_SHA256}" != "null" ] && [ "${ACTUAL_SHA256}" != "${EXPECTED_SHA256}" ]; then
+            echo "SHA-256 mismatch"
+            exit 1
+          fi
+
+          if [ -n "${EXPECTED_SIZE}" ] && [ "${EXPECTED_SIZE}" != "null" ] && [ "${ACTUAL_SIZE}" != "${EXPECTED_SIZE}" ]; then
+            echo "Size mismatch"
+            exit 1
+          fi
+
+      - name: Place ZIP in repository
+        shell: bash
+        env:
+          FILENAME: ${{ steps.meta.outputs.filename }}
+          TARGET_PATH: ${{ steps.meta.outputs.target_path }}
+        run: |
+          set -euo pipefail
+
+          if [ "${TARGET_PATH}" = "." ] || [ -z "${TARGET_PATH}" ]; then
+            DEST="${FILENAME}"
+          else
+            mkdir -p "${TARGET_PATH}"
+            DEST="${TARGET_PATH}/${FILENAME}"
+          fi
+
+          cp "/tmp/${FILENAME}" "${DEST}"
+          echo "Imported to ${DEST}"
+
+      - name: Commit imported ZIP
+        shell: bash
+        env:
+          FILENAME: ${{ steps.meta.outputs.filename }}
+          TARGET_PATH: ${{ steps.meta.outputs.target_path }}
+          REQUEST: ${{ steps.request.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "curveyield-agent-import"
+          git config user.email "curveyield-agent-import@users.noreply.github.com"
+
+          if [ "${TARGET_PATH}" = "." ] || [ -z "${TARGET_PATH}" ]; then
+            DEST="${FILENAME}"
+          else
+            DEST="${TARGET_PATH}/${FILENAME}"
+          fi
+
+          git add -- "${DEST}"
+
+          if git diff --cached --quiet; then
+            echo "No repository change required; destination already matches."
+            exit 0
+          fi
+
+          git commit -m "Import ${FILENAME} via agent ZIP importer v1"
+          git push origin HEAD:main
