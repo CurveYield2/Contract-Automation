@@ -55,7 +55,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: browser-agent-wake-\${{ inputs.wake_id }}
+  group: browser-agent-wake-${{ inputs.wake_id }}
   cancel-in-progress: false
 
 jobs:
@@ -63,17 +63,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      WAKE_ID: \${{ inputs.wake_id }}
-      CAMPAIGN_ID: \${{ inputs.campaign_id }}
-      PHASE_ID: \${{ inputs.phase_id }}
-      WAKE_MODE: \${{ inputs.mode }}
-      CHAT_URL: \${{ inputs.chat_url }}
-      CHATGPT_STORAGE_STATE_B64: \${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
-      BROWSERLESS_TOKEN: \${{ secrets.BROWSERLESS_TOKEN }}
-      BROWSERLESS_PROFILE: \${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
-      BROWSERBASE_API_KEY: \${{ secrets.BROWSERBASE_API_KEY }}
-      BROWSERBASE_PROJECT_ID: \${{ secrets.BROWSERBASE_PROJECT_ID }}
-      BROWSERBASE_CONTEXT_ID: \${{ secrets.BROWSERBASE_CONTEXT_ID }}
+      WAKE_ID: ${{ inputs.wake_id }}
+      CAMPAIGN_ID: ${{ inputs.campaign_id }}
+      PHASE_ID: ${{ inputs.phase_id }}
+      WAKE_MODE: ${{ inputs.mode }}
+      CHAT_URL: ${{ inputs.chat_url }}
+      CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+      BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
+      BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
+      BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
+      BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
 
     steps:
       - name: Checkout trusted Contract-Automation
@@ -99,8 +99,8 @@ jobs:
 
       - name: Decode wake messages
         env:
-          WAKE_MESSAGE_B64: \${{ inputs.wake_message_b64 }}
-          WATCHDOG_MESSAGE_B64: \${{ inputs.watchdog_message_b64 }}
+          WAKE_MESSAGE_B64: ${{ inputs.wake_message_b64 }}
+          WATCHDOG_MESSAGE_B64: ${{ inputs.watchdog_message_b64 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -126,17 +126,17 @@ jobs:
           echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
 
       - name: Create watchdog state
-        if: \${{ inputs.watchdog_enabled }}
+        if: ${{ inputs.watchdog_enabled }}
         env:
-          CHAT_URL_RESOLVED: \${{ steps.deliver.outputs.chat_url }}
-          PROVIDER: \${{ steps.deliver.outputs.provider }}
-          ASSISTANT_COUNT: \${{ steps.deliver.outputs.assistant_count }}
-          LAST_HASH: \${{ steps.deliver.outputs.last_hash }}
-          COMPLETION_REPOSITORY: \${{ inputs.completion_repository }}
-          COMPLETION_REF: \${{ inputs.completion_ref }}
-          COMPLETION_PATH: \${{ inputs.completion_path }}
-          COMPLETION_STATUS_FIELD: \${{ inputs.completion_status_field }}
-          COMPLETION_TERMINAL_VALUES_CSV: \${{ inputs.completion_terminal_values_csv }}
+          CHAT_URL_RESOLVED: ${{ steps.deliver.outputs.chat_url }}
+          PROVIDER: ${{ steps.deliver.outputs.provider }}
+          ASSISTANT_COUNT: ${{ steps.deliver.outputs.assistant_count }}
+          LAST_HASH: ${{ steps.deliver.outputs.last_hash }}
+          COMPLETION_REPOSITORY: ${{ inputs.completion_repository }}
+          COMPLETION_REF: ${{ inputs.completion_ref }}
+          COMPLETION_PATH: ${{ inputs.completion_path }}
+          COMPLETION_STATUS_FIELD: ${{ inputs.completion_status_field }}
+          COMPLETION_TERMINAL_VALUES_CSV: ${{ inputs.completion_terminal_values_csv }}
         shell: bash
         run: |
           set -euo pipefail
@@ -168,9 +168,9 @@ jobs:
           echo "WATCHDOG_SAFE_ID=$safe_id" >> "$GITHUB_ENV"
 
       - name: Persist watchdog state
-        if: \${{ inputs.watchdog_enabled }}
+        if: ${{ inputs.watchdog_enabled }}
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -184,10 +184,10 @@ jobs:
           fi
 
       - name: Persist fresh-chat URL into campaign registration
-        if: \${{ inputs.mode == 'create_fresh' }}
+        if: ${{ inputs.mode == 'create_fresh' }}
         env:
-          GH_TOKEN: \${{ github.token }}
-          NEW_CHAT_URL: \${{ steps.deliver.outputs.chat_url }}
+          GH_TOKEN: ${{ github.token }}
+          NEW_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}
         shell: bash
         run: |
           set -euo pipefail
@@ -201,9 +201,9 @@ jobs:
           gh api --method PUT "$api" -f message="chore(wake): bind fresh chat for $CAMPAIGN_ID" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
 
       - name: Arm immediate watchdog observation
-        if: \${{ inputs.watchdog_enabled }}
+        if: ${{ inputs.watchdog_enabled }}
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
