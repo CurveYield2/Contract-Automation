@@ -20,7 +20,7 @@ async function loadModules() {
     import('playwright'),
     import('@browserbasehq/sdk').catch(() => ({ default: null })),
   ]);
-  return { chromium, Browserbase: browserbaseMod.default };
+  return { chromium, Browserbase: browserbaseMod.Browserbase || browserbaseMod.default || null };
 }
 
 async function firstVisible(page, selectors) {
