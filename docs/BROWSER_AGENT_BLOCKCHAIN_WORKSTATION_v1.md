@@ -87,41 +87,38 @@ The full trigger guide is:
 
 ## Audit workload-reduction operator
 
-For deterministic audit navigation/bookkeeping operations, use the existing public workflow:
+Deterministic audit navigation/bookkeeping operations use the **same canonical V7 atomic request bridge** as technical execution:
 
-`.github/workflows/audit-operator-bridge-v1.yml`
+`.github/workflows/audit-controller-execution.yml`
 
-A web agent triggers it by creating an issue with:
+Do not create or use a parallel audit-operator workflow.
 
-```text
-[agent] audit-operator <request-id>
-```
-
-and body:
-
-```text
-controller_ref=<exact 40-hex Audit-Controller commit containing the request>
-```
-
-The corresponding private request lives at:
+The private operation request lives in Audit-Controller at:
 
 `.deep-assurance/operator/requests/<request-id>.json`
 
-For exact private-controller code verification without creating or writing an operator request, a web agent can create an issue titled:
+The public atomic pointer is a single request file in this repository under:
 
-```text
-[agent] verify-audit-controller <exact-40-hex-Audit-Controller-commit>
-```
+`github-native-sim/requests/<request-id>/request.json`
 
-The same public workflow checks out exactly that private commit and runs the complete `npm run verify` suite with no writeback.
+with schema `audit-controller-operation-pointer-v1`. It binds only:
+- the exact private Audit-Controller commit;
+- the exact private operation-request path;
+- whether that exact controller commit must run its full verification suite before the operation.
 
-Supported v1 operations are:
+Submit the pointer through the existing byte-safe command:
+
+`npm run v7:submit -- --request <pointer.json>`
+
+That existing submitter creates the trace-only request branch/PR, and the existing canonical workflow executes the operation. Controller-only requests skip the heavyweight Foundry/Medusa/toolchain setup.
+
+Supported private operation types are:
 - `PROJECT_CURRENT_STATE`
 - `BUILD_EXECUTION_REQUEST`
 - `INGEST_EXECUTION_EVIDENCE`
 - `BUILD_SUCCESSOR_HANDOFF`
 
-The public workflow never publishes private audit evidence into the public issue. Generated files are written back to the private Audit-Controller branch specified by the request.
+Generated private audit outputs are not uploaded as public artifacts. The canonical workflow writes them only to the private Audit-Controller branch specified by the private request after exact-head verification.
 
 ## Fast readiness check for Audit V7
 
