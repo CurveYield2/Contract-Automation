@@ -93,7 +93,7 @@ jobs:
         run: |
           set -euo pipefail
           npm install --no-save --ignore-scripts playwright @browserbasehq/sdk
-          if [ -n "\${CHATGPT_STORAGE_STATE_B64:-}" ]; then
+          if [ -n "${CHATGPT_STORAGE_STATE_B64:-}" ]; then
             npx playwright install --with-deps chromium
           fi
 
@@ -105,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
-          if [ -n "\${WATCHDOG_MESSAGE_B64:-}" ]; then
+          if [ -n "${WATCHDOG_MESSAGE_B64:-}" ]; then
             printf '%s' "$WATCHDOG_MESSAGE_B64" | base64 -d > /tmp/watchdog-message.txt
           else
             printf '%s\n' '[AUDIT_AGENT_WATCHDOG_V1]' 'GET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.' > /tmp/watchdog-message.txt
@@ -156,7 +156,7 @@ jobs:
             --arg statusField "$COMPLETION_STATUS_FIELD" \
             --arg terminalCsv "$COMPLETION_TERMINAL_VALUES_CSV" \
             --arg lastHash "$LAST_HASH" \
-            --argjson assistantCount "\${ASSISTANT_COUNT:-0}" \
+            --argjson assistantCount "${ASSISTANT_COUNT:-0}" \
             '{
               schemaVersion:$schemaVersion,wakeId:$wakeId,campaignId:$campaignId,phaseId:$phaseId,
               status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,
