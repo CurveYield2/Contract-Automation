@@ -48,7 +48,7 @@ jobs:
         run: |
           set -euo pipefail
           npm install --no-save --ignore-scripts playwright @browserbasehq/sdk
-          if [ -n "\${CHATGPT_STORAGE_STATE_B64:-}" ]; then
+          if [ -n "${CHATGPT_STORAGE_STATE_B64:-}" ]; then
             npx playwright install --with-deps chromium
           fi
 
