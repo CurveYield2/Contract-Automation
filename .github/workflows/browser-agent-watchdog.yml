@@ -1,35 +1,34 @@
 name: Browser Agent Watchdog
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       wake_id:
-        description: Optional single wake ID; empty scans all active watchdog states
-        required: false
+        description: Active wake/watchdog identifier
+        required: true
         type: string
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
-  group: browser-agent-watchdog
+  group: browser-agent-watchdog-${{ inputs.wake_id }}
   cancel-in-progress: false
 
 jobs:
   observe-and-poke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 355
     env:
-      REQUESTED_WAKE_ID: \${{ inputs.wake_id }}
-      CHATGPT_STORAGE_STATE_B64: \${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
-      BROWSERLESS_TOKEN: \${{ secrets.BROWSERLESS_TOKEN }}
-      BROWSERLESS_PROFILE: \${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
-      BROWSERBASE_API_KEY: \${{ secrets.BROWSERBASE_API_KEY }}
-      BROWSERBASE_PROJECT_ID: \${{ secrets.BROWSERBASE_PROJECT_ID }}
-      BROWSERBASE_CONTEXT_ID: \${{ secrets.BROWSERBASE_CONTEXT_ID }}
-      AUDIT_CONTROLLER_GITHUB_TOKEN: \${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+      REQUESTED_WAKE_ID: ${{ inputs.wake_id }}
+      CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+      BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
+      BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
+      BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
+      BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
+      AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
 
     steps:
       - name: Checkout trusted Contract-Automation
@@ -53,103 +52,110 @@ jobs:
             npx playwright install --with-deps chromium
           fi
 
-      - name: Observe active agents and poke only idle chats
+      - name: Observe every five minutes and poke only idle chats
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          states=(process/browser-agent-watchdog/active/*.json)
-          if [ "\${#states[@]}" -eq 0 ]; then
-            echo 'No active browser-agent watchdog states.'
-            exit 0
-          fi
+
+          safe_id="$(printf '%s' "$REQUESTED_WAKE_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          active_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active/$safe_id.json"
+          completed_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/completed/$safe_id.json"
+
+          load_state() {
+            local encoded
+            encoded="$(gh api "$active_api?ref=main" --jq '.content' 2>/dev/null || true)"
+            if [ -z "$encoded" ]; then return 1; fi
+            printf '%s' "$encoded" | base64 -d > /tmp/watchdog-state.json
+          }
 
           persist_state() {
-            local file="$1"
-            local safe_id="$2"
-            local api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active/$safe_id.json"
-            local sha
-            sha="$(gh api "$api?ref=main" --jq '.sha')"
-            local content
-            content="$(base64 -w0 "$file")"
-            gh api --method PUT "$api" -f message="chore(watchdog): observe $safe_id" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+            local sha content
+            sha="$(gh api "$active_api?ref=main" --jq '.sha')"
+            content="$(base64 -w0 /tmp/watchdog-state.json)"
+            gh api --method PUT "$active_api" \
+              -f message="chore(watchdog): observe $REQUESTED_WAKE_ID" \
+              -f content="$content" -f sha="$sha" -f branch=main >/dev/null
           }
 
           complete_state() {
-            local file="$1"
-            local safe_id="$2"
-            local active_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active/$safe_id.json"
-            local completed_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/completed/$safe_id.json"
-            jq '.status="COMPLETED" | .completedAt=(now|todate)' "$file" > /tmp/completed-state.json
+            jq '.status="COMPLETED" | .completedAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-completed.json
             local content active_sha existing_completed
-            content="$(base64 -w0 /tmp/completed-state.json)"
+            content="$(base64 -w0 /tmp/watchdog-completed.json)"
             active_sha="$(gh api "$active_api?ref=main" --jq '.sha')"
             existing_completed="$(gh api "$completed_api?ref=main" --jq '.sha' 2>/dev/null || true)"
             if [ -n "$existing_completed" ]; then
-              gh api --method PUT "$completed_api" -f message="chore(watchdog): complete $safe_id" -f content="$content" -f sha="$existing_completed" -f branch=main >/dev/null
+              gh api --method PUT "$completed_api" \
+                -f message="chore(watchdog): complete $REQUESTED_WAKE_ID" \
+                -f content="$content" -f sha="$existing_completed" -f branch=main >/dev/null
             else
-              gh api --method PUT "$completed_api" -f message="chore(watchdog): complete $safe_id" -f content="$content" -f branch=main >/dev/null
+              gh api --method PUT "$completed_api" \
+                -f message="chore(watchdog): complete $REQUESTED_WAKE_ID" \
+                -f content="$content" -f branch=main >/dev/null
             fi
-            gh api --method DELETE "$active_api" -f message="chore(watchdog): retire $safe_id" -f sha="$active_sha" -f branch=main >/dev/null
+            gh api --method DELETE "$active_api" \
+              -f message="chore(watchdog): retire $REQUESTED_WAKE_ID" \
+              -f sha="$active_sha" -f branch=main >/dev/null
           }
 
-          for state in "\${states[@]}"; do
-            wake_id="$(jq -r '.wakeId' "$state")"
-            if [ -n "\${REQUESTED_WAKE_ID:-}" ] && [ "$wake_id" != "$REQUESTED_WAKE_ID" ]; then
-              continue
+          completion_is_terminal() {
+            local repo ref path field token encoded status
+            repo="$(jq -r '.completion.repository // empty' /tmp/watchdog-state.json)"
+            ref="$(jq -r '.completion.ref // "main"' /tmp/watchdog-state.json)"
+            path="$(jq -r '.completion.path // empty' /tmp/watchdog-state.json)"
+            field="$(jq -r '.completion.statusField // "status"' /tmp/watchdog-state.json)"
+            [ -n "$repo" ] && [ -n "$path" ] || return 1
+            token="$AUDIT_CONTROLLER_GITHUB_TOKEN"
+            if [ "$repo" = "$GITHUB_REPOSITORY" ]; then token="$GH_TOKEN"; fi
+            [ -n "$token" ] || return 1
+            encoded="$(GH_TOKEN="$token" gh api "repos/$repo/contents/$path?ref=$ref" --jq '.content' 2>/dev/null || true)"
+            [ -n "$encoded" ] || return 1
+            printf '%s' "$encoded" | base64 -d > /tmp/completion.json
+            status="$(jq -r --arg f "$field" 'getpath($f|split(".")) // empty' /tmp/completion.json 2>/dev/null || true)"
+            jq -e --arg s "$status" '.completion.terminalValues | index($s) != null' /tmp/watchdog-state.json >/dev/null
+          }
+
+          # Wake workflow starts this watchdog immediately. Give the agent five full
+          # minutes to work before the first liveness decision.
+          sleep 300
+
+          for iteration in $(seq 1 69); do
+            if ! load_state; then
+              echo "Watchdog state no longer active; stopping."
+              exit 0
             fi
-            safe_id="$(basename "$state" .json)"
-            chat_url="$(jq -r '.chatUrl // empty' "$state")"
+
+            if completion_is_terminal; then
+              echo "Terminal audit completion observed; retiring watchdog."
+              complete_state
+              exit 0
+            fi
+
+            chat_url="$(jq -r '.chatUrl // empty' /tmp/watchdog-state.json)"
             if [ -z "$chat_url" ]; then
-              echo "::warning::Watchdog $wake_id has no chat URL; leaving active for repair."
+              echo "::warning::Watchdog has no chat URL; retrying after five minutes."
+              sleep 300
               continue
             fi
 
-            completion_repo="$(jq -r '.completion.repository // empty' "$state")"
-            completion_ref="$(jq -r '.completion.ref // "main"' "$state")"
-            completion_path="$(jq -r '.completion.path // empty' "$state")"
-            status_field="$(jq -r '.completion.statusField // "status"' "$state")"
-
-            terminal=false
-            if [ -n "$completion_repo" ] && [ -n "$completion_path" ]; then
-              token="$AUDIT_CONTROLLER_GITHUB_TOKEN"
-              if [ "$completion_repo" = "$GITHUB_REPOSITORY" ]; then token="$GH_TOKEN"; fi
-              if [ -n "$token" ]; then
-                encoded="$(GH_TOKEN="$token" gh api "repos/$completion_repo/contents/$completion_path?ref=$completion_ref" --jq '.content' 2>/dev/null || true)"
-                if [ -n "$encoded" ]; then
-                  printf '%s' "$encoded" | base64 -d > /tmp/completion.json
-                  status="$(jq -r --arg f "$status_field" 'getpath($f|split(".")) // empty' /tmp/completion.json 2>/dev/null || true)"
-                  if jq -e --arg s "$status" '.completion.terminalValues | index($s) != null' "$state" >/dev/null; then
-                    terminal=true
-                  fi
-                fi
-              fi
-            fi
-
-            if [ "$terminal" = true ]; then
-              echo "Watchdog $wake_id observed terminal completion; retiring."
-              complete_state "$state" "$safe_id"
-              continue
-            fi
-
-            export WAKE_ID="$wake_id"
+            export WAKE_ID="$REQUESTED_WAKE_ID"
             export WAKE_MODE='resume_existing'
             export CHAT_URL="$chat_url"
             export WAKE_ACTION='observe'
-            export WAKE_RESULT_PATH="/tmp/$safe_id-observe.json"
+            export WAKE_RESULT_PATH='/tmp/watchdog-observe.json'
 
             if ! node scripts/browser-agent-wake.mjs; then
-              echo "::warning::Observation failed for $wake_id; next 5-minute watchdog cycle will retry."
+              echo "::warning::All observation providers failed; retrying in five minutes."
+              sleep 300
               continue
             fi
 
             generating="$(jq -r '.generating // false' "$WAKE_RESULT_PATH")"
             current_count="$(jq -r '.assistantCount // 0' "$WAKE_RESULT_PATH")"
             current_hash="$(jq -r '.lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
-            previous_count="$(jq -r '.observation.assistantCount // 0' "$state")"
-            previous_hash="$(jq -r '.observation.lastAssistantHash // empty' "$state")"
+            previous_count="$(jq -r '.observation.assistantCount // 0' /tmp/watchdog-state.json)"
+            previous_hash="$(jq -r '.observation.lastAssistantHash // empty' /tmp/watchdog-state.json)"
 
             productive=false
             reason=''
@@ -165,7 +171,7 @@ jobs:
             fi
 
             if [ "$productive" = true ]; then
-              echo "Watchdog $wake_id: PRODUCTIVE ($reason); no interruption."
+              echo "PRODUCTIVE ($reason); watchdog will not interrupt."
               jq \
                 --argjson count "$current_count" \
                 --arg hash "$current_hash" \
@@ -175,32 +181,44 @@ jobs:
                  | .observation.observedAt=(now|todate)
                  | .lastProductiveAt=(now|todate)
                  | .lastDecision=("PRODUCTIVE_"+$reason)' \
-                "$state" > /tmp/watchdog-state.json
-              cp /tmp/watchdog-state.json "$state"
-              persist_state "$state" "$safe_id"
-              continue
+                /tmp/watchdog-state.json > /tmp/watchdog-next.json
+              mv /tmp/watchdog-next.json /tmp/watchdog-state.json
+              persist_state
+            else
+              echo "IDLE; sending the registered GET BACK TO WORK message."
+              export WAKE_ACTION='wake'
+              export WAKE_MESSAGE="$(jq -r '.idleMessage' /tmp/watchdog-state.json)"
+              export WAKE_RESULT_PATH='/tmp/watchdog-poke.json'
+              if node scripts/browser-agent-wake.mjs; then
+                next_count="$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")"
+                next_hash="$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
+                jq \
+                  --argjson count "$next_count" \
+                  --arg hash "$next_hash" \
+                  '.observation.assistantCount=$count
+                   | .observation.lastAssistantHash=$hash
+                   | .observation.observedAt=(now|todate)
+                   | .lastPokedAt=(now|todate)
+                   | .pokeCount=((.pokeCount // 0)+1)
+                   | .lastDecision="IDLE_POKED"' \
+                  /tmp/watchdog-state.json > /tmp/watchdog-next.json
+                mv /tmp/watchdog-next.json /tmp/watchdog-state.json
+                persist_state
+              else
+                echo "::warning::Idle poke failed on all providers; retrying in five minutes."
+              fi
             fi
 
-            echo "Watchdog $wake_id: IDLE; sending GET BACK TO WORK."
-            export WAKE_ACTION='wake'
-            export WAKE_MESSAGE="$(jq -r '.idleMessage' "$state")"
-            export WAKE_RESULT_PATH="/tmp/$safe_id-poke.json"
-            if node scripts/browser-agent-wake.mjs; then
-              next_count="$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")"
-              next_hash="$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
-              jq \
-                --argjson count "$next_count" \
-                --arg hash "$next_hash" \
-                '.observation.assistantCount=$count
-                 | .observation.lastAssistantHash=$hash
-                 | .observation.observedAt=(now|todate)
-                 | .lastPokedAt=(now|todate)
-                 | .pokeCount=((.pokeCount // 0)+1)
-                 | .lastDecision="IDLE_POKED"' \
-                "$state" > /tmp/watchdog-state.json
-              cp /tmp/watchdog-state.json "$state"
-              persist_state "$state" "$safe_id"
-            else
-              echo "::warning::Idle poke failed for $wake_id; next cycle will retry."
-            fi
+            if [ "$iteration" -lt 69 ]; then sleep 300; fi
           done
+
+          # GitHub-hosted jobs have a finite lifetime. Chain another watchdog run
+          # rather than silently dropping supervision on a still-active audit.
+          if load_state && ! completion_is_terminal; then
+            echo "Watchdog window reached; self-dispatching continuation."
+            gh workflow run browser-agent-watchdog.yml \
+              --repo "$GITHUB_REPOSITORY" --ref main \
+              -f wake_id="$REQUESTED_WAKE_ID"
+          elif load_state; then
+            complete_state
+          fi
