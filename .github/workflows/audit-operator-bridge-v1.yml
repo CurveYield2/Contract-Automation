@@ -79,14 +79,13 @@ jobs:
             ['skillPackagePath', /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+/],
             ['writebackDirectory', /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+/],
             ['writebackRef', /^[A-Za-z0-9._\/-]+$/],
-            ['expectedWritebackHead', /^[0-9a-f]{40}$/],
           ]) {
             if (typeof request[field] !== 'string' || !pattern.test(request[field])) throw new Error(`invalid ${field}`);
           }
           fs.appendFileSync(process.env.GITHUB_ENV, `SKILL_PACKAGE_PATH=${request.skillPackagePath}\n`);
           fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_DIRECTORY=${request.writebackDirectory}\n`);
           fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_REF=${request.writebackRef}\n`);
-          fs.appendFileSync(process.env.GITHUB_ENV, `EXPECTED_WRITEBACK_HEAD=${request.expectedWritebackHead}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `EXPECTED_WRITEBACK_HEAD=${process.env.AUDIT_CONTROLLER_REF}\n`);
           NODE
 
       - name: Extract exact admitted skill package
