@@ -55,14 +55,20 @@ jobs:
 
       - name: Checkout private Audit Controller for manual dispatch
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@v4
-        with:
-          repository: CurveYield2/Audit-Controller
-          ref: ${{ inputs.controller_ref }}
-          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          path: .controller-request
-          persist-credentials: false
-          fetch-depth: 1
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CONTROLLER_REF: ${{ inputs.controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          gh api repos/CurveYield2/Audit-Controller --silent
+          rm -rf .controller-request
+          gh auth setup-git
+          gh repo clone CurveYield2/Audit-Controller .controller-request -- --filter=blob:none --no-checkout
+          cd .controller-request
+          git fetch --depth=1 origin "$CONTROLLER_REF"
+          git checkout --detach FETCH_HEAD
 
       - name: Resolve and validate PR request
         if: github.event_name == 'pull_request'
@@ -112,14 +118,20 @@ jobs:
 
       - name: Checkout exact private controller for controller operation
         if: env.V7_REQUEST_KIND == 'controller-operation'
-        uses: actions/checkout@v4
-        with:
-          repository: CurveYield2/Audit-Controller
-          ref: ${{ env.AUDIT_CONTROLLER_REF }}
-          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          path: .controller-operation
-          persist-credentials: true
-          fetch-depth: 1
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          gh api repos/CurveYield2/Audit-Controller --silent
+          rm -rf .controller-operation
+          gh auth setup-git
+          gh repo clone CurveYield2/Audit-Controller .controller-operation -- --filter=blob:none --no-checkout
+          cd .controller-operation
+          git fetch --depth=1 origin "$AUDIT_CONTROLLER_REF"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$AUDIT_CONTROLLER_REF"
 
       - name: Verify exact controller code when requested
         if: env.V7_REQUEST_KIND == 'controller-operation' && env.VERIFY_AUDIT_CONTROLLER == 'true'
@@ -245,9 +257,13 @@ jobs:
 
       - name: Write controller-operation result back to exact private branch
         if: env.V7_REQUEST_KIND == 'controller-operation'
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          gh auth setup-git
           cd .controller-operation
           git fetch origin "$WRITEBACK_REF"
           remote_head="$(git rev-parse "origin/$WRITEBACK_REF")"
