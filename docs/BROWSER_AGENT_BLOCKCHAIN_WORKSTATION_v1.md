@@ -85,6 +85,36 @@ For an existing workflow:
 The full trigger guide is:
 `docs/CHATGPT_GITHUB_ACTIONS_VIA_GITHUB_APP.md`
 
+## Audit workload-reduction operator
+
+For deterministic audit navigation/bookkeeping operations, use the existing public workflow:
+
+`.github/workflows/audit-operator-bridge-v1.yml`
+
+A web agent triggers it by creating an issue with:
+
+```text
+[agent] audit-operator <request-id>
+```
+
+and body:
+
+```text
+controller_ref=<exact 40-hex Audit-Controller commit containing the request>
+```
+
+The corresponding private request lives at:
+
+`.deep-assurance/operator/requests/<request-id>.json`
+
+Supported v1 operations are:
+- `PROJECT_CURRENT_STATE`
+- `BUILD_EXECUTION_REQUEST`
+- `INGEST_EXECUTION_EVIDENCE`
+- `BUILD_SUCCESSOR_HANDOFF`
+
+The public workflow never publishes private audit evidence into the public issue. Generated files are written back to the private Audit-Controller branch specified by the request.
+
 ## Fast readiness check for Audit V7
 
 First inspect:
