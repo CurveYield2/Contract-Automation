@@ -183,4 +183,25 @@ jobs:
           fi
 
           git commit -m "Import ${FILENAME} via agent ZIP importer v1"
-          git push origin HEAD:main
+
+          for attempt in 1 2 3 4 5; do
+            echo "Push attempt ${attempt}/5"
+            git fetch origin main
+
+            if ! git rebase origin/main; then
+              echo "Rebase failed"
+              git rebase --abort || true
+              exit 1
+            fi
+
+            if git push origin HEAD:main; then
+              echo "Import push succeeded"
+              exit 0
+            fi
+
+            echo "Push raced with another main update; retrying."
+            sleep $((attempt * 2))
+          done
+
+          echo "Unable to push imported ZIP after 5 attempts."
+          exit 1
