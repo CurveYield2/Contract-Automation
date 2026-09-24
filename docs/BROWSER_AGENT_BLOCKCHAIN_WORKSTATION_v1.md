@@ -4,6 +4,19 @@ Version: v1
 
 This file is the browser-agent entrypoint for blockchain development, testing, simulation, and Audit V7 work in the CurveYield2 GitHub organization.
 
+## Audit-process authority and progressive disclosure
+
+For an audit campaign, the **exact skill packet supplied/admitted for that campaign is the audit-navigation and methodology authority**. This workstation guide is only an infrastructure/navigation aid for operating GitHub and Contract-Automation; it must never replace, broaden, reorder, or preload the audit skill.
+
+When an audit is active:
+
+1. Start from the exact campaign skill homepage (`SKILL.md`) only.
+2. Resolve exact campaign generation, source identity, current phase/revision, and reviewer lineage from durable controller state.
+3. Open only the current phase `START_HERE.md`, its `PHASE_CONTRACT.json`, and resources explicitly linked/triggered by the active step.
+4. Preserve the skill's planned sequential reviewer boundaries and fresh-reviewer handoffs.
+5. Do not introduce concurrent semantic audit reviewers or parallel agent ownership unless the exact active skill/mode explicitly authorizes it.
+6. Automation may perform mechanical routing, validation, evidence collection, artifact normalization, checkpointing, and filing, but it must not invent security judgment, silently waive mandatory work, or convert tool output into a finding without the authorized reviewer.
+
 ## Repository roles
 
 ### CurveYield2/Audit-Controller
