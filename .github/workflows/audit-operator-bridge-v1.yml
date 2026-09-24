@@ -79,11 +79,12 @@ jobs:
           persist-credentials: true
           fetch-depth: 0
 
-      - name: Run controller workload-reduction regression tests
+      - name: Verify complete private controller codebase on public runner
         shell: bash
         run: |
           set -euo pipefail
-          node --test .audit-controller/packages/controller-core/test/audit-workload-reduction-v1.test.mjs .audit-controller/packages/controller-core/test/audit-workload-reduction-extended-v1.test.mjs
+          cd .audit-controller
+          npm run verify
 
       - name: Validate private operator request
         shell: bash
