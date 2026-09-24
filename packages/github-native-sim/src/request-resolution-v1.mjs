@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { validateDeepAssuranceRequestV2 } from './schema.mjs';
+import { validateControllerOperationPointerV1 } from './controller-operation-pointer-v1.mjs';
 
 async function exists(file) {
   try { return (await fs.stat(file)).isFile(); }
@@ -37,7 +38,10 @@ async function validateRequestFile(file) {
   let parsed;
   try { parsed = JSON.parse(text); }
   catch (error) { throw new Error(`Resolved V7 request is not valid JSON: ${error.message}`); }
-  return validateDeepAssuranceRequestV2(parsed);
+  if (parsed?.schemaVersion === 'audit-controller-operation-pointer-v1') {
+    return { requestKind: 'controller-operation', request: validateControllerOperationPointerV1(parsed) };
+  }
+  return { requestKind: 'v7-execution', request: validateDeepAssuranceRequestV2(parsed) };
 }
 
 export async function resolveV7Request({ mode, sourceRoot, requestPath = null, outputPath } = {}) {
@@ -56,7 +60,8 @@ export async function resolveV7Request({ mode, sourceRoot, requestPath = null, o
     if (!(await exists(source))) throw new Error(`Controller request path does not exist: ${relative}`);
   }
 
-  const request = await validateRequestFile(source);
+  const resolved = await validateRequestFile(source);
+  const request = resolved.request;
   const destination = path.resolve(outputPath);
   await fs.mkdir(path.dirname(destination), { recursive: true });
   await fs.copyFile(source, destination);
@@ -65,8 +70,12 @@ export async function resolveV7Request({ mode, sourceRoot, requestPath = null, o
     mode,
     source,
     outputPath: destination,
+    requestKind: resolved.requestKind,
     requestId: request.requestId,
-    phaseId: request.phaseId,
-    profileId: request.profileId,
+    phaseId: request.phaseId ?? null,
+    profileId: request.profileId ?? null,
+    controllerCommit: request.controller?.commit ?? null,
+    controllerRequestPath: request.controller?.requestPath ?? null,
+    verifyController: request.verifyController === true,
   };
 }
