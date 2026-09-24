@@ -1,0 +1,13 @@
+{
+  "schema": "curveyield-audit-source-fanout/v2",
+  "request_id": "REPLACE_WITH_STABLE_UNIQUE_REQUEST_ID",
+  "audit_name": "REPLACE_WITH_EXACT_AUDIT_NAME",
+  "source": {
+    "type": "google-drive",
+    "url": "REPLACE_WITH_ANYONE_WITH_LINK_URL",
+    "drive_file_id": "REPLACE_WITH_DRIVE_FILE_ID",
+    "filename": "REPLACE_WITH_EXACT_SOURCE_ZIP_FILENAME.zip",
+    "sha256": "REPLACE_WITH_64_HEX_SHA256",
+    "size": 1
+  }
+}
