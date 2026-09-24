@@ -1,0 +1,228 @@
+name: Browser Agent Phase Completion Approval
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/browser-agent-phase-reports/inbox/*.json'
+  workflow_dispatch:
+    inputs:
+      report_path:
+        description: Repository-relative phase report path under process/browser-agent-phase-reports/inbox/
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: browser-agent-phase-completion-approval
+  cancel-in-progress: false
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Resolve submitted phase report
+        id: report
+        shell: bash
+        env:
+          INPUT_REPORT_PATH: ${{ inputs.report_path }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = 'workflow_dispatch' ]; then
+            report="$INPUT_REPORT_PATH"
+          else
+            report="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- 'process/browser-agent-phase-reports/inbox/*.json' | tail -n1)"
+          fi
+          if [ -z "$report" ] || [ ! -f "$report" ]; then
+            echo 'No live phase-report file to approve; likely a cleanup/delete commit.'
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$report" in
+            process/browser-agent-phase-reports/inbox/*.json) ;;
+            *) echo 'Invalid phase report path' >&2; exit 1 ;;
+          esac
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "path=$report" >> "$GITHUB_OUTPUT"
+
+      - name: Validate submitted report schema
+        if: steps.report.outputs.skip != 'true'
+        id: meta
+        shell: bash
+        env:
+          REPORT: ${{ steps.report.outputs.path }}
+        run: |
+          set -euo pipefail
+          jq -e '
+            .schemaVersion == "curveyield-browser-agent-phase-report-v1" and
+            .status == "READY_FOR_AUTOMATION_APPROVAL" and
+            (.campaignId|type=="string" and length>0) and
+            (.phaseId|type=="string" and length>0) and
+            (.completionReport|type=="object") and
+            .completionReport.repository == "CurveYield2/Audit-Controller" and
+            (.completionReport.ref|type=="string" and length>0) and
+            (.completionReport.path|type=="string" and length>0) and
+            (.completionReport.sha256|test("^[0-9a-f]{64}$")) and
+            ((.completionReport.statusField // "status")|type=="string") and
+            ((.completionReport.terminalValues // ["PASS","COMPLETE","COMPLETED","SEALED"])|type=="array" and length>0) and
+            ((.workflowRuns // [])|type=="array")
+          ' "$REPORT" >/dev/null
+
+          campaign_id="$(jq -r '.campaignId' "$REPORT")"
+          phase_id="$(jq -r '.phaseId' "$REPORT")"
+          [[ "$campaign_id" =~ ^[A-Za-z0-9._[:space:]-]{1,200}$ ]]
+          [[ "$phase_id" =~ ^[A-Za-z0-9._:-]{1,120}$ ]]
+
+          completion_ref="$(jq -r '.completionReport.ref' "$REPORT")"
+          completion_path="$(jq -r '.completionReport.path' "$REPORT")"
+          [[ "$completion_ref" =~ ^[A-Za-z0-9._/-]+$ ]]
+          [[ "$completion_path" != /* ]]
+          [[ "$completion_path" != *'..'* ]]
+          [[ "$completion_path" != *'\\'* ]]
+
+          echo "campaign_id=$campaign_id" >> "$GITHUB_OUTPUT"
+          echo "phase_id=$phase_id" >> "$GITHUB_OUTPUT"
+          echo "safe_campaign=$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')" >> "$GITHUB_OUTPUT"
+          echo "safe_phase=$(printf '%s' "$phase_id" | tr -c 'A-Za-z0-9._-' '_')" >> "$GITHUB_OUTPUT"
+
+      - name: Verify canonical Audit-Controller completion report
+        if: steps.report.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          REPORT: ${{ steps.report.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          repo="$(jq -r '.completionReport.repository' "$REPORT")"
+          ref="$(jq -r '.completionReport.ref' "$REPORT")"
+          path="$(jq -r '.completionReport.path' "$REPORT")"
+          expected_sha="$(jq -r '.completionReport.sha256' "$REPORT")"
+          status_field="$(jq -r '.completionReport.statusField // "status"' "$REPORT")"
+
+          encoded="$(gh api "repos/$repo/contents/$path?ref=$ref" --jq '.content')"
+          printf '%s' "$encoded" | base64 -d > /tmp/canonical-phase-report.json
+          actual_sha="$(sha256sum /tmp/canonical-phase-report.json | awk '{print $1}')"
+          test "$actual_sha" = "$expected_sha"
+
+          jq -e . /tmp/canonical-phase-report.json >/dev/null
+          observed_status="$(jq -r --arg f "$status_field" 'getpath($f|split(".")) // empty' /tmp/canonical-phase-report.json)"
+          jq -e --arg s "$observed_status" '(.completionReport.terminalValues // ["PASS","COMPLETE","COMPLETED","SEALED"]) | index($s) != null' "$REPORT" >/dev/null
+
+          campaign_id="$(jq -r '.campaignId' "$REPORT")"
+          phase_id="$(jq -r '.phaseId' "$REPORT")"
+          report_campaign="$(jq -r '.campaignId // .campaign_id // empty' /tmp/canonical-phase-report.json)"
+          report_phase="$(jq -r '.phaseId // .phase_id // empty' /tmp/canonical-phase-report.json)"
+          if [ -n "$report_campaign" ]; then test "$report_campaign" = "$campaign_id"; fi
+          if [ -n "$report_phase" ]; then test "$report_phase" = "$phase_id"; fi
+
+      - name: Verify claimed Contract-Automation workflow evidence
+        if: steps.report.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ steps.report.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          count="$(jq '.workflowRuns // [] | length' "$REPORT")"
+          for index in $(seq 0 $((count-1)) 2>/dev/null || true); do
+            repo="$(jq -r ".workflowRuns[$index].repository // \"$GITHUB_REPOSITORY\"" "$REPORT")"
+            run_id="$(jq -r ".workflowRuns[$index].runId" "$REPORT")"
+            job_id="$(jq -r ".workflowRuns[$index].jobId // empty" "$REPORT")"
+            test "$repo" = "$GITHUB_REPOSITORY"
+            [[ "$run_id" =~ ^[0-9]+$ ]]
+            run="$(gh api "repos/$repo/actions/runs/$run_id")"
+            test "$(jq -r '.status' <<<"$run")" = 'completed'
+            test "$(jq -r '.conclusion' <<<"$run")" = 'success'
+            if [ -n "$job_id" ]; then
+              [[ "$job_id" =~ ^[0-9]+$ ]]
+              job="$(gh api "repos/$repo/actions/jobs/$job_id")"
+              test "$(jq -r '.run_id' <<<"$job")" = "$run_id"
+              test "$(jq -r '.status' <<<"$job")" = 'completed'
+              test "$(jq -r '.conclusion' <<<"$job")" = 'success'
+            fi
+          done
+
+      - name: Publish automation-approved phase marker
+        if: steps.report.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ steps.report.outputs.path }}
+          CAMPAIGN_ID: ${{ steps.meta.outputs.campaign_id }}
+          PHASE_ID: ${{ steps.meta.outputs.phase_id }}
+          SAFE_CAMPAIGN: ${{ steps.meta.outputs.safe_campaign }}
+          SAFE_PHASE: ${{ steps.meta.outputs.safe_phase }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          canonical_sha="$(sha256sum /tmp/canonical-phase-report.json | awk '{print $1}')"
+          jq -n \
+            --arg schemaVersion 'curveyield-browser-agent-phase-approval-v1' \
+            --arg campaignId "$CAMPAIGN_ID" \
+            --arg phaseId "$PHASE_ID" \
+            --arg sourceReport "$REPORT" \
+            --arg canonicalSha "$canonical_sha" \
+            --arg approvalRunId "$GITHUB_RUN_ID" \
+            '{schemaVersion:$schemaVersion,campaignId:$campaignId,phaseId:$phaseId,status:"APPROVED",sourceReport:$sourceReport,canonicalCompletionReportSha256:$canonicalSha,approvalWorkflowRunId:$approvalRunId,approvedAt:(now|todate)}' \
+            > /tmp/approved-phase.json
+
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-phase-reports/approved/${SAFE_CAMPAIGN}__${SAFE_PHASE}.json"
+          content="$(base64 -w0 /tmp/approved-phase.json)"
+          existing="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            gh api --method PUT "$api" -f message="chore(phase): refresh approved $CAMPAIGN_ID $PHASE_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$api" -f message="chore(phase): approve $CAMPAIGN_ID $PHASE_ID" -f content="$content" -f branch=main >/dev/null
+          fi
+
+      - name: Immediately retire matching watchdogs
+        if: steps.report.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAMPAIGN_ID: ${{ steps.meta.outputs.campaign_id }}
+          PHASE_ID: ${{ steps.meta.outputs.phase_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          listing="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active?ref=main" 2>/dev/null || printf '[]')"
+          mapfile -t names < <(jq -r '.[]? | select(.type=="file" and (.name|endswith(".json"))) | .name' <<<"$listing")
+          for name in "${names[@]}"; do
+            active_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active/$name"
+            encoded="$(gh api "$active_api?ref=main" --jq '.content' 2>/dev/null || true)"
+            [ -n "$encoded" ] || continue
+            printf '%s' "$encoded" | base64 -d > /tmp/active-watchdog.json
+            state_campaign="$(jq -r '.campaignId // empty' /tmp/active-watchdog.json)"
+            state_phase="$(jq -r '.phaseId // empty' /tmp/active-watchdog.json)"
+            if [ "$state_campaign" != "$CAMPAIGN_ID" ] || [ "$state_phase" != "$PHASE_ID" ]; then continue; fi
+
+            run_id="$(jq -r '.watchdogRunId // empty' /tmp/active-watchdog.json)"
+            jq --arg approval "$GITHUB_RUN_ID" '.status="COMPLETED_APPROVED_PHASE_REPORT" | .completionApprovalRunId=$approval | .completedAt=(now|todate)' /tmp/active-watchdog.json > /tmp/completed-watchdog.json
+            completed_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/completed/$name"
+            completed_content="$(base64 -w0 /tmp/completed-watchdog.json)"
+            existing_completed="$(gh api "$completed_api?ref=main" --jq '.sha' 2>/dev/null || true)"
+            if [ -n "$existing_completed" ]; then
+              gh api --method PUT "$completed_api" -f message="chore(watchdog): approve completion $name" -f content="$completed_content" -f sha="$existing_completed" -f branch=main >/dev/null
+            else
+              gh api --method PUT "$completed_api" -f message="chore(watchdog): approve completion $name" -f content="$completed_content" -f branch=main >/dev/null
+            fi
+            active_sha="$(gh api "$active_api?ref=main" --jq '.sha')"
+            gh api --method DELETE "$active_api" -f message="chore(watchdog): retire approved $name" -f sha="$active_sha" -f branch=main >/dev/null
+
+            if [[ "$run_id" =~ ^[0-9]+$ ]] && [ "$run_id" != "$GITHUB_RUN_ID" ]; then
+              gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/cancel" >/dev/null 2>&1 || true
+            fi
+          done
