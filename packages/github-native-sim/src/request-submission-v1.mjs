@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { validateDeepAssuranceRequestWithV26V1 } from './schema-v26.mjs';
+import { validateControllerOperationPointerV1 } from './controller-operation-pointer-v1.mjs';
 
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -65,7 +66,7 @@ async function ensureAtomicDiff({ repository, token, base, head, requestPath }) 
   return changed;
 }
 
-async function ensureTracePullRequest({ repository, token, base, branch, request }) {
+async function ensureTracePullRequest({ repository, token, base, branch, request, requestKind }) {
   const [owner] = repository.split('/');
   const pulls = await githubApi({
     repository,
@@ -73,16 +74,19 @@ async function ensureTracePullRequest({ repository, token, base, branch, request
     route: `/pulls?state=open&base=${encodeURIComponent(base)}&head=${encodeURIComponent(`${owner}:${branch}`)}`,
   });
   if (Array.isArray(pulls) && pulls.length > 0) return pulls[0];
+  const execution = requestKind === 'v7-execution';
   return githubApi({
     repository,
     token,
     method: 'POST',
     route: '/pulls',
     body: {
-      title: `V7 request ${request.requestId} — ${request.phaseId}`,
+      title: execution ? `V7 request ${request.requestId} — ${request.phaseId}` : `V7 controller operation ${request.requestId}`,
       head: branch,
       base,
-      body: `Trace-only V7 execution request. Do not merge.\n\nRequest: ${request.requestId}\nPhase: ${request.phaseId}\nSource: ${request.source.repository}@${request.source.commit}`,
+      body: execution
+        ? `Trace-only V7 execution request. Do not merge.\n\nRequest: ${request.requestId}\nPhase: ${request.phaseId}\nSource: ${request.source.repository}@${request.source.commit}`
+        : `Trace-only V7 controller-operation pointer. Do not merge.\n\nRequest: ${request.requestId}\nController: ${request.controller.repository}@${request.controller.commit}`,
       draft: false,
     },
   });
@@ -102,7 +106,10 @@ export async function submitV7Request({
   let parsed;
   try { parsed = JSON.parse(bytes.toString('utf8')); }
   catch (error) { throw new Error(`Request JSON parse failed before submission: ${error.message}`); }
-  const request = validateDeepAssuranceRequestWithV26V1(parsed);
+  const requestKind = parsed?.schemaVersion === 'audit-controller-operation-pointer-v1' ? 'controller-operation' : 'v7-execution';
+  const request = requestKind === 'controller-operation'
+    ? validateControllerOperationPointerV1(parsed)
+    : validateDeepAssuranceRequestWithV26V1(parsed);
   const transportSha256 = sha256(bytes);
   const targetPath = `github-native-sim/requests/${request.requestId}/request.json`;
   const requestBranch = branch ?? `audit-request/${request.requestId}-${transportSha256.slice(0, 8)}`;
@@ -115,11 +122,12 @@ export async function submitV7Request({
     if (!entry) throw new Error(`Existing request branch ${requestBranch} does not contain ${targetPath}`);
     const verified = await verifyBlobBytes({ repository, token, blobSha: entry.sha, expectedBytes: bytes });
     await ensureAtomicDiff({ repository, token, base, head: requestBranch, requestPath: targetPath });
-    const pr = createPullRequest ? await ensureTracePullRequest({ repository, token, base, branch: requestBranch, request }) : null;
+    const pr = createPullRequest ? await ensureTracePullRequest({ repository, token, base, branch: requestBranch, request, requestKind }) : null;
     return {
       status: 'ALREADY_SUBMITTED_VERIFIED',
+      requestKind,
       requestId: request.requestId,
-      requestDigest: request.requestDigest,
+      requestDigest: request.requestDigest ?? null,
       transportSha256,
       bytes: verified.bytes,
       repository,
@@ -172,12 +180,13 @@ export async function submitV7Request({
   const verified = await verifyBlobBytes({ repository, token, blobSha: blob.sha, expectedBytes: bytes });
   if (verified.sha256 !== transportSha256 || verified.bytes !== bytes.length) throw new Error('Remote request verification digest/length mismatch');
   await ensureAtomicDiff({ repository, token, base, head: requestBranch, requestPath: targetPath });
-  const pr = createPullRequest ? await ensureTracePullRequest({ repository, token, base, branch: requestBranch, request }) : null;
+  const pr = createPullRequest ? await ensureTracePullRequest({ repository, token, base, branch: requestBranch, request, requestKind }) : null;
 
   return {
     status: 'SUBMITTED_VERIFIED',
+    requestKind,
     requestId: request.requestId,
-    requestDigest: request.requestDigest,
+    requestDigest: request.requestDigest ?? null,
     transportSha256,
     bytes: bytes.length,
     repository,

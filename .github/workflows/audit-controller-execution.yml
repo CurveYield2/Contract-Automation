@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: v7-execution-${{ github.event.pull_request.number || inputs.request_path || github.ref }}
@@ -42,32 +43,6 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Cache npm download cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: v7-npm-${{ runner.os }}-${{ hashFiles('package-lock.json', 'package.json') }}
-          restore-keys: |
-            v7-npm-${{ runner.os }}-
-
-      - name: Install trusted runner dependencies
-        shell: bash
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci --force
-            echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
-          else
-            npm install --no-package-lock
-            echo "V7_DEPENDENCY_LOCKED=false" >> "$GITHUB_ENV"
-            echo "::warning::package-lock.json is not yet present; dependency resolution is not fully locked"
-          fi
-
-      - name: Install and verify canonical V7 toolchain
-        uses: ./.github/actions/setup-v7-toolchain
-
-      - name: Verify canonical runner manifest
-        run: npm run v7:manifest -- --check
-
       - name: Checkout atomic request source for PR
         if: github.event_name == 'pull_request'
         uses: actions/checkout@v4
@@ -78,7 +53,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Checkout private Solo Audit Controller for manual dispatch
+      - name: Checkout private Audit Controller for manual dispatch
         if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
         with:
@@ -97,14 +72,202 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: npm run v7 -- resolve --mode dispatch --source .controller-request --request-path "${{ inputs.request_path }}" --output .v7-request/request.json
 
+      # Existing V7 technical execution lane. Controller-operation requests skip this setup.
+      - name: Cache npm download cache
+        if: env.V7_REQUEST_KIND == 'v7-execution'
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: v7-npm-${{ runner.os }}-${{ hashFiles('package-lock.json', 'package.json') }}
+          restore-keys: |
+            v7-npm-${{ runner.os }}-
+
+      - name: Install trusted runner dependencies
+        if: env.V7_REQUEST_KIND == 'v7-execution'
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --force
+            echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
+          else
+            npm install --no-package-lock
+            echo "V7_DEPENDENCY_LOCKED=false" >> "$GITHUB_ENV"
+            echo "::warning::package-lock.json is not yet present; dependency resolution is not fully locked"
+          fi
+
+      - name: Install and verify canonical V7 toolchain
+        if: env.V7_REQUEST_KIND == 'v7-execution'
+        uses: ./.github/actions/setup-v7-toolchain
+
+      - name: Verify canonical runner manifest
+        if: env.V7_REQUEST_KIND == 'v7-execution'
+        run: npm run v7:manifest -- --check
+
       - name: Execute V7 request
+        if: env.V7_REQUEST_KIND == 'v7-execution'
         env:
           AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
         run: npm run v7:execute -- --request .v7-request/request.json
 
+      - name: Checkout exact private controller for controller operation
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Audit-Controller
+          ref: ${{ env.AUDIT_CONTROLLER_REF }}
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller-operation
+          persist-credentials: true
+          fetch-depth: 1
+
+      - name: Verify exact controller code when requested
+        if: env.V7_REQUEST_KIND == 'controller-operation' && env.VERIFY_AUDIT_CONTROLLER == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .controller-operation
+          npm run verify
+
+      - name: Validate private controller operation request
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const pointer = JSON.parse(fs.readFileSync('.v7-request/request.json', 'utf8'));
+          const privatePath = process.env.AUDIT_CONTROLLER_REQUEST_PATH;
+          const fullPath = `.controller-operation/${privatePath}`;
+          const request = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+          if (request.schemaVersion !== 'audit-workload-reduction-request-v1') throw new Error('private operator request schemaVersion mismatch');
+          if (request.requestId !== pointer.requestId) throw new Error('private operator requestId does not match public pointer');
+          const operations = new Set(['PROJECT_CURRENT_STATE','BUILD_EXECUTION_REQUEST','INGEST_EXECUTION_EVIDENCE','BUILD_SUCCESSOR_HANDOFF']);
+          if (!operations.has(request.operation)) throw new Error('unsupported private operator operation');
+          const safePath = /^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.(?:\/|$)).+/;
+          for (const field of [
+            'campaignPath','campaignStatePath','phaseContractPath','phaseStartPath','completionReportPath',
+            'automationCompletionReportPath','executionTemplatePath','semanticInputPath','executionRequestPath',
+            'executionEvidencePath','qualificationPath','handoffInputPath','currentWorkPacketPath','skillPackagePath',
+            'writebackDirectory'
+          ]) {
+            if (request[field] !== undefined && (typeof request[field] !== 'string' || !safePath.test(request[field]))) {
+              throw new Error(`invalid ${field}`);
+            }
+          }
+          if (typeof request.writebackDirectory !== 'string' || !safePath.test(request.writebackDirectory)) throw new Error('writebackDirectory is required');
+          if (typeof request.writebackRef !== 'string' || !/^[A-Za-z0-9._\/-]+$/.test(request.writebackRef)) throw new Error('invalid writebackRef');
+          if (request.expectedSkillSha256 !== undefined && !/^[0-9a-f]{64}$/.test(request.expectedSkillSha256)) throw new Error('invalid expectedSkillSha256');
+          fs.appendFileSync(process.env.GITHUB_ENV, `OPERATOR_OPERATION=${request.operation}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_DIRECTORY=${request.writebackDirectory}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_REF=${request.writebackRef}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `SKILL_PACKAGE_PATH=${request.skillPackagePath ?? ''}\n`);
+          NODE
+
+      - name: Verify claimed Contract-Automation executions
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const request = JSON.parse(fs.readFileSync(`.controller-operation/${process.env.AUDIT_CONTROLLER_REQUEST_PATH}`, 'utf8'));
+          if (!request.automationCompletionReportPath) process.exit(0);
+          const report = JSON.parse(fs.readFileSync(`.controller-operation/${request.automationCompletionReportPath}`, 'utf8'));
+          const api = (endpoint) => JSON.parse(execFileSync('gh', ['api', endpoint], { encoding:'utf8', env:process.env }));
+          for (const execution of report.executions ?? []) {
+            if (execution.repository !== process.env.GITHUB_REPOSITORY) throw new Error(`unsupported execution repository ${execution.repository}`);
+            const run = api(`repos/${execution.repository}/actions/runs/${execution.runId}`);
+            if (run.status !== 'completed' || run.conclusion !== 'success') throw new Error(`run ${execution.runId} is not successful terminal evidence`);
+            if (execution.jobId) {
+              const job = api(`repos/${execution.repository}/actions/jobs/${execution.jobId}`);
+              if (job.run_id !== execution.runId || job.status !== 'completed' || job.conclusion !== 'success') {
+                throw new Error(`job ${execution.jobId} is not successful terminal evidence for run ${execution.runId}`);
+              }
+            }
+            if (execution.artifactId) {
+              const artifact = api(`repos/${execution.repository}/actions/artifacts/${execution.artifactId}`);
+              if (artifact.expired) throw new Error(`artifact ${execution.artifactId} is expired`);
+              if (artifact.workflow_run?.id && artifact.workflow_run.id !== execution.runId) throw new Error(`artifact ${execution.artifactId} run mismatch`);
+              if (execution.artifactDigest && artifact.digest) {
+                const observed = String(artifact.digest).replace(/^sha256:/,'');
+                if (observed !== execution.artifactDigest) throw new Error(`artifact ${execution.artifactId} digest mismatch`);
+              }
+            }
+          }
+          if (report.qualification) {
+            const run = api(`repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${report.qualification.workflowRunId}`);
+            if (run.status !== 'completed' || run.conclusion !== 'success') throw new Error('qualification run is not successful terminal evidence');
+            if (run.head_sha !== report.qualification.qualifiedCommit) throw new Error('qualification commit mismatch');
+          }
+          NODE
+
+      - name: Resolve exact admitted skill for controller operation
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${SKILL_PACKAGE_PATH:-}" ]; then
+            echo "SKILL_ROOT=.controller-operation" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          skill_zip=".controller-operation/$SKILL_PACKAGE_PATH"
+          test -f "$skill_zip"
+          expected_skill_sha="$(node -e "const r=require('./.controller-operation/' + process.env.AUDIT_CONTROLLER_REQUEST_PATH); process.stdout.write(r.expectedSkillSha256 || '')")"
+          if [ -n "$expected_skill_sha" ]; then
+            observed_skill_sha="$(sha256sum "$skill_zip" | awk '{print $1}')"
+            test "$observed_skill_sha" = "$expected_skill_sha"
+          fi
+          rm -rf .audit-skill
+          mkdir -p .audit-skill
+          unzip -q "$skill_zip" -d .audit-skill
+          skill_home="$(find .audit-skill -type f -name SKILL.md -not -path '*/optional-modes/lite-pathway/SKILL.md' | head -n1)"
+          test -n "$skill_home"
+          echo "SKILL_ROOT=$(dirname "$skill_home")" >> "$GITHUB_ENV"
+
+      - name: Execute deterministic controller operation
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .operator-output
+          mkdir -p .operator-output
+          node .controller-operation/packages/controller-core/src/audit-operator-cli-v1.mjs \
+            --request ".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH" \
+            --controller-root ".controller-operation" \
+            --skill-root "$SKILL_ROOT" \
+            --output-dir ".operator-output" \
+            > /tmp/audit-operator-summary.json
+          test -f .operator-output/RESULT_v1.json
+
+      - name: Write controller-operation result back to exact private branch
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .controller-operation
+          git fetch origin "$WRITEBACK_REF"
+          remote_head="$(git rev-parse "origin/$WRITEBACK_REF")"
+          if [ "$remote_head" != "$AUDIT_CONTROLLER_REF" ]; then
+            echo "Writeback head changed: expected $AUDIT_CONTROLLER_REF observed $remote_head" >&2
+            exit 1
+          fi
+          git checkout -B "$WRITEBACK_REF" "origin/$WRITEBACK_REF"
+          mkdir -p "$WRITEBACK_DIRECTORY"
+          cp ../.operator-output/* "$WRITEBACK_DIRECTORY"/
+          git add "$WRITEBACK_DIRECTORY"
+          if ! git diff --cached --quiet; then
+            git config user.name 'CurveYield Audit Controller Automation'
+            git config user.email 'audit-controller-automation@users.noreply.github.com'
+            git commit -m "chore(audit): apply deterministic operator result $V7_REQUEST_ID"
+            git push origin "HEAD:$WRITEBACK_REF"
+          fi
+
       - name: Upload request-addressable V7 evidence
-        if: always()
+        if: always() && env.V7_REQUEST_KIND == 'v7-execution'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.V7_ARTIFACT_NAME || 'v7-execution-unresolved' }}
