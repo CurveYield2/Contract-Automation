@@ -1,0 +1,210 @@
+name: Browser Agent Wake
+
+on:
+  workflow_dispatch:
+    inputs:
+      wake_id:
+        required: true
+        type: string
+      campaign_id:
+        required: true
+        type: string
+      phase_id:
+        required: true
+        type: string
+      mode:
+        required: true
+        default: resume_existing
+        type: choice
+        options: [resume_existing, create_fresh]
+      chat_url:
+        required: false
+        type: string
+      wake_message_b64:
+        required: true
+        type: string
+      watchdog_enabled:
+        required: true
+        default: true
+        type: boolean
+      watchdog_message_b64:
+        required: false
+        type: string
+      completion_repository:
+        required: false
+        default: CurveYield2/Audit-Controller
+        type: string
+      completion_ref:
+        required: false
+        default: main
+        type: string
+      completion_path:
+        required: false
+        type: string
+      completion_status_field:
+        required: false
+        default: status
+        type: string
+      completion_terminal_values_csv:
+        required: false
+        default: PASS,COMPLETE,COMPLETED,SEALED
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: browser-agent-wake-\${{ inputs.wake_id }}
+  cancel-in-progress: false
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      WAKE_ID: \${{ inputs.wake_id }}
+      CAMPAIGN_ID: \${{ inputs.campaign_id }}
+      PHASE_ID: \${{ inputs.phase_id }}
+      WAKE_MODE: \${{ inputs.mode }}
+      CHAT_URL: \${{ inputs.chat_url }}
+      CHATGPT_STORAGE_STATE_B64: \${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      BROWSERLESS_TOKEN: \${{ secrets.BROWSERLESS_TOKEN }}
+      BROWSERLESS_PROFILE: \${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
+      BROWSERBASE_API_KEY: \${{ secrets.BROWSERBASE_API_KEY }}
+      BROWSERBASE_PROJECT_ID: \${{ secrets.BROWSERBASE_PROJECT_ID }}
+      BROWSERBASE_CONTEXT_ID: \${{ secrets.BROWSERBASE_CONTEXT_ID }}
+
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install ephemeral wake dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --ignore-scripts playwright @browserbasehq/sdk
+          if [ -n "\${CHATGPT_STORAGE_STATE_B64:-}" ]; then
+            npx playwright install --with-deps chromium
+          fi
+
+      - name: Decode wake messages
+        env:
+          WAKE_MESSAGE_B64: \${{ inputs.wake_message_b64 }}
+          WATCHDOG_MESSAGE_B64: \${{ inputs.watchdog_message_b64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
+          if [ -n "\${WATCHDOG_MESSAGE_B64:-}" ]; then
+            printf '%s' "$WATCHDOG_MESSAGE_B64" | base64 -d > /tmp/watchdog-message.txt
+          else
+            printf '%s\n' '[AUDIT_AGENT_WATCHDOG_V1]' 'GET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.' > /tmp/watchdog-message.txt
+          fi
+
+      - name: Deliver wake with redundant providers
+        id: deliver
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WAKE_ACTION='wake'
+          export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
+          export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
+          node scripts/browser-agent-wake.mjs
+          echo "chat_url=$(jq -r '.chatUrl // .after.url // .url // empty' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
+          echo "provider=$(jq -r '.provider // empty' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
+          echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
+          echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Create watchdog state
+        if: \${{ inputs.watchdog_enabled }}
+        env:
+          CHAT_URL_RESOLVED: \${{ steps.deliver.outputs.chat_url }}
+          PROVIDER: \${{ steps.deliver.outputs.provider }}
+          ASSISTANT_COUNT: \${{ steps.deliver.outputs.assistant_count }}
+          LAST_HASH: \${{ steps.deliver.outputs.last_hash }}
+          COMPLETION_REPOSITORY: \${{ inputs.completion_repository }}
+          COMPLETION_REF: \${{ inputs.completion_ref }}
+          COMPLETION_PATH: \${{ inputs.completion_path }}
+          COMPLETION_STATUS_FIELD: \${{ inputs.completion_status_field }}
+          COMPLETION_TERMINAL_VALUES_CSV: \${{ inputs.completion_terminal_values_csv }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_id="$(printf '%s' "$WAKE_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          jq -n \
+            --arg schemaVersion 'curveyield-browser-agent-watchdog-state-v1' \
+            --arg wakeId "$WAKE_ID" \
+            --arg campaignId "$CAMPAIGN_ID" \
+            --arg phaseId "$PHASE_ID" \
+            --arg chatUrl "$CHAT_URL_RESOLVED" \
+            --arg provider "$PROVIDER" \
+            --arg armedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg idleMessage "$(cat /tmp/watchdog-message.txt)" \
+            --arg completionRepository "$COMPLETION_REPOSITORY" \
+            --arg completionRef "$COMPLETION_REF" \
+            --arg completionPath "$COMPLETION_PATH" \
+            --arg statusField "$COMPLETION_STATUS_FIELD" \
+            --arg terminalCsv "$COMPLETION_TERMINAL_VALUES_CSV" \
+            --arg lastHash "$LAST_HASH" \
+            --argjson assistantCount "\${ASSISTANT_COUNT:-0}" \
+            '{
+              schemaVersion:$schemaVersion,wakeId:$wakeId,campaignId:$campaignId,phaseId:$phaseId,
+              status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,
+              idleMessage:$idleMessage,
+              observation:{assistantCount:$assistantCount,lastAssistantHash:$lastHash,observedAt:$armedAt},
+              completion:{repository:$completionRepository,ref:$completionRef,path:$completionPath,statusField:$statusField,terminalValues:($terminalCsv|split(",")|map(gsub("^ +| +$";"")))}
+            }' > "/tmp/$safe_id.json"
+          echo "WATCHDOG_STATE=/tmp/$safe_id.json" >> "$GITHUB_ENV"
+          echo "WATCHDOG_SAFE_ID=$safe_id" >> "$GITHUB_ENV"
+
+      - name: Persist watchdog state
+        if: \${{ inputs.watchdog_enabled }}
+        env:
+          GH_TOKEN: \${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content="$(base64 -w0 "$WATCHDOG_STATE")"
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active/$WATCHDOG_SAFE_ID.json"
+          existing="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            gh api --method PUT "$api" -f message="chore(watchdog): refresh $WAKE_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$api" -f message="chore(watchdog): arm $WAKE_ID" -f content="$content" -f branch=main >/dev/null
+          fi
+
+      - name: Persist fresh-chat URL into campaign registration
+        if: \${{ inputs.mode == 'create_fresh' }}
+        env:
+          GH_TOKEN: \${{ github.token }}
+          NEW_CHAT_URL: \${{ steps.deliver.outputs.chat_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
+          tmp=/tmp/registration.json
+          gh api "$api?ref=main" --jq '.content' | base64 -d > "$tmp"
+          jq --arg url "$NEW_CHAT_URL" '.mode="resume_existing" | .chatUrl=$url | .updatedAt=(now|todate)' "$tmp" > /tmp/registration-updated.json
+          sha="$(gh api "$api?ref=main" --jq '.sha')"
+          content="$(base64 -w0 /tmp/registration-updated.json)"
+          gh api --method PUT "$api" -f message="chore(wake): bind fresh chat for $CAMPAIGN_ID" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+
+      - name: Arm immediate watchdog observation
+        if: \${{ inputs.watchdog_enabled }}
+        env:
+          GH_TOKEN: \${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$WAKE_ID"
