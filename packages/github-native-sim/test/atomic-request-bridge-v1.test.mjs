@@ -94,3 +94,14 @@ test('canonical V7 atomic request bridge does not modify the generic PreflightSi
   assert.match(generic, /PreflightSim GitHub Issue Bridge/);
   assert.doesNotMatch(generic, /github-native-sim\/requests/);
 });
+
+
+test('V7 resolve command remains lightweight before execution dependencies are installed', () => {
+  const cliPath = path.join(repoRoot, 'packages/github-native-sim/src/v7-cli.mjs');
+  const cli = fs.readFileSync(cliPath, 'utf8');
+  assert.doesNotMatch(cli, /^import .*run-job-file-v2\.mjs/m);
+  assert.doesNotMatch(cli, /^import .*phase6-harness-authoring-v1\.mjs/m);
+  assert.doesNotMatch(cli, /^import .*runner-manifest-v2\.mjs/m);
+  assert.doesNotMatch(cli, /^import .*v7-toolchain-v1\.mjs/m);
+  assert.match(cli, /await import\('\.\/run-job-file-v2\.mjs'\)/);
+});
