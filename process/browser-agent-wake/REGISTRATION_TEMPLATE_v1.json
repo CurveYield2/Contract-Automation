@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
+  "campaignId": "REPLACE_WITH_EXACT_CAMPAIGN_ID",
+  "mode": "resume_existing",
+  "chatUrl": "https://chatgpt.com/c/REPLACE_FOR_RESUME_EXISTING",
+  "wakeMessage": "[AUDIT_AUTOMATION_WAKE_V1]\nResume the admitted audit from the latest durable completion evidence. Do not restart completed work. Continue the current assignment until its required terminal state.",
+  "watchdog": {
+    "enabled": true,
+    "idleMessage": "[AUDIT_AGENT_WATCHDOG_V1]\nGET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.",
+    "completion": {
+      "repository": "CurveYield2/Audit-Controller",
+      "ref": "main",
+      "path": "campaigns/REPLACE_WITH_AUDIT_NAME/REPLACE_WITH_TERMINAL_COMPLETION_REPORT.json",
+      "statusField": "status",
+      "terminalValues": ["PASS", "COMPLETE", "COMPLETED", "SEALED"]
+    }
+  }
+}
