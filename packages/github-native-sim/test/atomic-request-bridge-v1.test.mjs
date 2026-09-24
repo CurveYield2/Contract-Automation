@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validateControllerOperationPointerV1 } from '../src/controller-operation-pointer-v1.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
@@ -26,34 +27,65 @@ test('canonical V7 bridge resolves exactly one atomic request file from request 
   assert.doesNotMatch(workflow, /push:\s*[\s\S]*github-native-sim\/requests/);
 });
 
-test('canonical V7 bridge executes trusted main runner code and treats the PR checkout as request data only', () => {
+test('canonical bridge preserves existing V7 execution lane and adds controller operations inside the same workflow', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
-  assert.match(workflow, /name:\s*Checkout trusted Contract-Automation runner/);
-  assert.match(workflow, /ref:\s*main/);
-  assert.match(workflow, /name:\s*Checkout atomic request source for PR/);
-  assert.match(workflow, /repository:\s*\$\{\{ github\.repository \}\}/);
-  assert.match(workflow, /ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \}\}/);
-  assert.match(workflow, /path:\s*\.request-source/);
-  assert.match(workflow, /npm run v7 -- resolve --mode pr/);
+  assert.match(workflow, /name:\s*Execute V7 request/);
+  assert.match(workflow, /if:\s*env\.V7_REQUEST_KIND == 'v7-execution'/);
   assert.match(workflow, /npm run v7:execute -- --request \.v7-request\/request\.json/);
-  assert.doesNotMatch(workflow, /Checkout exact Contract Automation request branch/);
+  assert.match(workflow, /name:\s*Checkout exact private controller for controller operation/);
+  assert.match(workflow, /if:\s*env\.V7_REQUEST_KIND == 'controller-operation'/);
+  assert.match(workflow, /audit-operator-cli-v1\.mjs/);
+  assert.equal(fs.existsSync(path.join(repoRoot, '.github/workflows/audit-operator-bridge-v1.yml')), false, 'parallel audit operator workflow must not exist');
 });
 
-test('canonical V7 bridge scopes private credentials to private checkout and execution rather than PR source checkout', () => {
+test('controller-only requests skip heavyweight V7 technical setup', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  for (const step of [
+    'Cache npm download cache',
+    'Install trusted runner dependencies',
+    'Install and verify canonical V7 toolchain',
+    'Verify canonical runner manifest',
+  ]) {
+    const start = workflow.indexOf(`- name: ${step}`);
+    assert.ok(start >= 0, `missing step ${step}`);
+    const slice = workflow.slice(start, workflow.indexOf('\n      - name:', start + 1) === -1 ? undefined : workflow.indexOf('\n      - name:', start + 1));
+    assert.match(slice, /if:\s*env\.V7_REQUEST_KIND == 'v7-execution'/);
+  }
+});
+
+test('canonical V7 bridge keeps untrusted PR request checkout free of private credentials', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   const prCheckoutStart = workflow.indexOf('- name: Checkout atomic request source for PR');
-  const dispatchCheckoutStart = workflow.indexOf('- name: Checkout private Solo Audit Controller for manual dispatch');
-  const executionStart = workflow.indexOf('- name: Execute V7 request');
-  assert.ok(prCheckoutStart >= 0 && dispatchCheckoutStart > prCheckoutStart && executionStart > dispatchCheckoutStart);
-
-  const prCheckout = workflow.slice(prCheckoutStart, dispatchCheckoutStart);
+  const manualPrivateCheckoutStart = workflow.indexOf('- name: Checkout private Audit Controller for manual dispatch');
+  assert.ok(prCheckoutStart >= 0 && manualPrivateCheckoutStart > prCheckoutStart);
+  const prCheckout = workflow.slice(prCheckoutStart, manualPrivateCheckoutStart);
   assert.doesNotMatch(prCheckout, /AUDIT_CONTROLLER_GITHUB_TOKEN/);
   assert.doesNotMatch(prCheckout, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01/);
+  assert.match(workflow.slice(manualPrivateCheckoutStart), /token:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
+});
 
-  const dispatchAndExecution = workflow.slice(dispatchCheckoutStart);
-  assert.match(dispatchAndExecution, /token:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
-  assert.match(dispatchAndExecution, /AUDIT_CONTROLLER_GITHUB_TOKEN:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
-  assert.match(dispatchAndExecution, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01:\s*\$\{\{ secrets\.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 \}\}/);
+test('controller operation pointer is exact, minimal, and bound to one private request path', () => {
+  const pointer = validateControllerOperationPointerV1({
+    schemaVersion: 'audit-controller-operation-pointer-v1',
+    processId: 'audit-v7-independent-review',
+    requestId: 'awr-test-v1',
+    controller: {
+      repository: 'CurveYield2/Audit-Controller',
+      commit: 'a'.repeat(40),
+      requestPath: '.deep-assurance/operator/requests/awr-test-v1.json',
+    },
+    verifyController: true,
+  });
+  assert.equal(pointer.controller.commit, 'a'.repeat(40));
+  assert.equal(pointer.verifyController, true);
+  assert.throws(() => validateControllerOperationPointerV1({
+    ...pointer,
+    controller: { ...pointer.controller, requestPath: '../secret.json' },
+  }), /requestPath/);
+  assert.throws(() => validateControllerOperationPointerV1({
+    ...pointer,
+    controller: { ...pointer.controller, repository: 'CurveYield2/Other' },
+  }), /repository/);
 });
 
 test('canonical V7 atomic request bridge does not modify the generic PreflightSim issue bridge', () => {
