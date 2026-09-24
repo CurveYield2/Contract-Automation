@@ -1,0 +1,243 @@
+# Browser Agent Blockchain Workstation — START HERE
+
+Version: v1
+
+This file is the browser-agent entrypoint for blockchain development, testing, simulation, and Audit V7 work in the CurveYield2 GitHub organization.
+
+## Repository roles
+
+### CurveYield2/Audit-Controller
+Control plane only.
+
+Use it for:
+- audit methodology and phase authority;
+- campaign state;
+- admitted source identities;
+- Source Intelligence references;
+- candidate/finding ledgers;
+- evidence identities;
+- reports;
+- reviewer handoffs.
+
+Do not move generic compilation, fuzzing, Foundry/Medusa, Anvil, fork simulation, or reusable technical workloads into Audit-Controller.
+
+### CurveYield2/Contract-Automation
+Execution plane.
+
+Use it for:
+- compilation;
+- Solidity/Vyper technical execution;
+- Slither;
+- Foundry/Forge;
+- Medusa;
+- fuzzing and invariant testing;
+- Anvil fork simulation;
+- deployment/lifecycle simulation;
+- live read-only chain probing;
+- reusable technical audit workloads;
+- workflow evidence/artifacts.
+
+## Mandatory first reads
+
+Before changing or running anything:
+
+1. Read `AGENTS.md` in the repository you are operating in.
+2. For GitHub Actions operation, read:
+   `docs/CHATGPT_GITHUB_ACTIONS_VIA_GITHUB_APP.md`
+3. For Audit V7 execution, inspect:
+   `process/V7_QUALIFICATION_STATUS.json`
+4. For Audit V7 CLI operations, use the canonical commands documented in `AGENTS.md`.
+
+Do not create duplicate workflows, duplicate runners, alternate RPC systems, or replacement V7 entrypoints merely because the existing trigger is not obvious.
+
+## Browser-agent GitHub Actions rule
+
+The ChatGPT GitHub app does not need a direct Run Workflow button.
+
+For an existing workflow:
+
+`READ WORKFLOW -> IDENTIFY on: EVENT -> CREATE THAT EVENT -> VERIFY RUN -> INSPECT JOBS/LOGS/ARTIFACTS`
+
+The full trigger guide is:
+`docs/CHATGPT_GITHUB_ACTIONS_VIA_GITHUB_APP.md`
+
+## Fast readiness check for Audit V7
+
+First inspect:
+
+`process/V7_QUALIFICATION_STATUS.json`
+
+If the current status is `PASS`, use the admitted qualified runner identity recorded there. Do not assume a newer raw `main` commit is qualified.
+
+If a fresh qualification is required, a browser agent can trigger the existing qualification bridge by creating a GitHub issue in `CurveYield2/Contract-Automation` with this exact title:
+
+`[agent] run-v7-qualification`
+
+The existing `.github/workflows/v7-agent-qualification-bridge.yml` workflow dispatches and observes the canonical V7 qualification and records the latest attempt.
+
+Do not create a second qualification workflow.
+
+## Canonical Audit V7 operations
+
+Use the existing CLI rather than reconstructing Git/RPC/file operations manually:
+
+```bash
+npm run v7:execute -- --request <request.json>
+npm run v7:submit -- --request <request.json>
+npm run v7:harness:init -- --request <request.json> [--campaign discovery|property|targeted]
+npm run v7:harness:validate -- --bundle <bundle-id> --request <request.json>
+npm run v7:manifest -- --check
+```
+
+Respect the terminal disposition returned by the runner. If it supplies `nextAction`, `retryFrom`, or `recoveryCommand`, consume those fields directly before inventing another repair path.
+
+## Audit execution flow
+
+For an Audit V7 campaign:
+
+1. Read the current Audit-Controller campaign state and applicable audit authority.
+2. Preserve exact source/build/campaign identities.
+3. Reuse accepted Source Intelligence when source/build identity matches.
+4. Submit technical work to Contract-Automation through the canonical V7 execution path.
+5. Observe the resulting GitHub Actions run.
+6. Retrieve logs/artifacts/evidence.
+7. Interpret the evidence in the Audit-Controller campaign.
+8. Preserve evidence identities and phase obligations.
+9. Continue from the current phase. Never restart sealed phases.
+10. At required reviewer boundaries, use the canonical successor handoff protocol.
+
+## Phase 6 harness rule
+
+Before authoring or repairing a Phase-6 harness, open:
+
+`packages/github-native-sim/harness-skeletons-v2/README_v2.md`
+
+Then use:
+
+```bash
+npm run v7:harness:init -- --request <request.json> [--campaign discovery|property|targeted]
+npm run v7:harness:validate -- --bundle <bundle-id> --request <request.json>
+```
+
+Missing harness support is not permission to modify production source or bypass required testing.
+
+## Anvil/RPC rule
+
+Authoritative Audit V7 full simulation uses Anvil only.
+
+The approved Audit V7 mutable Ethereum RPC profile is:
+
+`SIM_ARCHIVE_PRIMARY_ETHEREUM_01`
+
+Never serialize its URL into requests, configs, logs, artifacts, or reports.
+
+Do not substitute an arbitrary RPC when the V7 policy requires the approved profile.
+
+For general non-V7 development/fork tooling, use the repository's already-configured RPC infrastructure and existing workflows. Do not invent new secret names or providers until you have inspected the current setup.
+
+## General blockchain development/testing
+
+Before creating a new workflow, inspect:
+- existing `.github/workflows/`;
+- `docs/setup.md`;
+- package scripts in `package.json`;
+- existing reusable actions;
+- project-specific deployment/test scripts.
+
+Prefer existing infrastructure.
+
+For ordinary development, the desired loop is:
+
+`SOURCE -> COMPILE -> STATIC ANALYSIS -> UNIT TEST -> FUZZ/INVARIANT -> ANVIL FORK -> DEPLOYMENT/LIFECYCLE SIMULATION -> EVIDENCE`
+
+For testnet or production broadcasting, use only an existing approved signing/deployment path. Never place a private key, mnemonic, signed transaction, or secret RPC URL in:
+- request JSON;
+- source;
+- workflow YAML;
+- issue bodies;
+- PR bodies;
+- logs;
+- committed configuration.
+
+## Important workflow distinction
+
+`.github/workflows/deploy.yml` currently deploys the CurveYield Preflight web/Worker service infrastructure.
+
+It is not, by itself, a generic smart-contract production broadcast workflow.
+
+Do not confuse application deployment with on-chain contract broadcasting.
+
+For on-chain deployment, first locate and inspect the applicable project-specific deployment/broadcast workflow or script and its environment protections.
+
+## Evidence is the browser agent's persistent workspace
+
+Do not rely on temporary terminal state.
+
+For important technical runs, preserve and consume:
+- workflow run ID;
+- commit SHA;
+- request ID/digest;
+- source/archive digest;
+- fork block/hash;
+- compiler/EVM profile;
+- logs;
+- uploaded artifacts;
+- terminal disposition;
+- deployment/simulation receipts where applicable.
+
+A fresh agent must be able to resume from GitHub evidence without requiring another agent's local machine.
+
+## Safe operating rings
+
+### Ring 1 — Audit/fork simulation
+Permitted through approved execution paths:
+- compile;
+- static analysis;
+- fuzzing;
+- invariant testing;
+- Anvil;
+- fork-state mutation;
+- impersonation;
+- exploit reproduction;
+- deployment/lifecycle simulation.
+
+### Ring 2 — Live-chain read
+Use approved read-only infrastructure for:
+- calls;
+- storage;
+- logs;
+- bytecode;
+- balances;
+- historical state;
+- traces where supported.
+
+### Ring 3 — Testnet write
+Use only the repository's configured testnet signing/deployment path and secrets.
+
+### Ring 4 — Mainnet write
+Use only the repository's approved protected production signing/deployment path. Respect any human approval gate. Never weaken or bypass it.
+
+## If something fails
+
+Use:
+
+`DIAGNOSE -> REPAIR -> RETRY -> VERIFY -> CONTINUE`
+
+Before creating new infrastructure, check:
+1. whether the capability already exists;
+2. whether an existing workflow has a different trigger;
+3. whether the V7 terminal disposition provides recovery instructions;
+4. whether the failure is source-specific, request-specific, RPC-specific, or runner-specific;
+5. whether a runner repair requires qualification/rebind.
+
+Do not silently change audited source to compensate for runner infrastructure failures.
+
+## Final browser-agent rule
+
+Use GitHub as the durable workstation.
+
+Do not ask the human to manually perform work that the GitHub connector and existing Actions infrastructure can perform.
+
+Do not invent parallel tooling when the repository already has a canonical implementation.
+
+Operate from current repository authority, preserve exact identities, execute through existing trusted lanes, and leave durable evidence that the next browser agent can resume.
