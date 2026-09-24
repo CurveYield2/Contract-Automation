@@ -63,6 +63,17 @@ Before changing or running anything:
 
 Do not create duplicate workflows, duplicate runners, alternate RPC systems, or replacement V7 entrypoints merely because the existing trigger is not obvious.
 
+## Private Actions budget rule — mandatory
+
+`CurveYield2/Audit-Controller` is a private control/evidence plane and its limited private GitHub Actions allotment must be preserved.
+
+- Put new generic, reusable, compute-heavy, recurring, technical, audit, testing, orchestration, packet-generation, validation, reconciliation, and recovery workloads in public `CurveYield2/Contract-Automation` whenever technically possible.
+- Use the existing Audit-Controller → Contract-Automation bridge/request/event pattern so Audit-Controller supplies authority/state and Contract-Automation supplies execution.
+- Audit-Controller may contain deterministic controller/library code and durable campaign state that Contract-Automation checks out and executes on the public runner.
+- Do not add a new Audit-Controller workflow merely because it is convenient.
+- A private Audit-Controller Action is permitted only when the work is literally not safely/technically executable through the existing public execution plane (for example the explicitly allowlisted private audit-PDF subsystem).
+- Before adding any private workflow, prove why the existing Contract-Automation bridge cannot perform the task.
+
 ## Browser-agent GitHub Actions rule
 
 The ChatGPT GitHub app does not need a direct Run Workflow button.
