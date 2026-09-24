@@ -9,11 +9,11 @@ on:
   workflow_dispatch:
     inputs:
       request_path:
-        description: Repository-relative deep-assurance-github-request-v2 JSON path in Solo-Audit-Controller
+        description: Repository-relative deep-assurance-github-request-v2 JSON path in Audit-Controller
         required: true
         type: string
       controller_ref:
-        description: Solo-Audit-Controller ref containing the request file
+        description: Audit-Controller ref containing the request file
         required: true
         default: main
         type: string
@@ -82,7 +82,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
         with:
-          repository: CurveYield2/Solo-Audit-Controller
+          repository: CurveYield2/Audit-Controller
           ref: ${{ inputs.controller_ref }}
           token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: .controller-request
