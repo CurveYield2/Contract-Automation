@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "curveyield-dex-katana-lite-audit-r1",
+  "assignmentId": "reviewer-1-phase-1-v1",
+  "phaseId": "scope-and-provenance",
+  "gateId": "exact-scope-provenance-complete",
+  "profileId": "github-native-compile-v2",
+  "source": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "7fb95f3cfc6449bde8994e00cb5649574020db07",
+    "projectPath": "CurveYield DEX",
+    "archivePath": "campaigns/CurveYield DEX Katana Lite Audit/source/50287b8a-077f-4aaf-83a8-81057d9d2869.zip",
+    "archiveSha256": "bec88bf9cf8317e1789de6cd05004cd0546e89511bace217f7ecc18c5a9c0530"
+  },
+  "configuration": {
+    "compilers": [
+      {
+        "language": "solidity",
+        "version": "0.8.30"
+      }
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 1000
+    },
+    "viaIR": true,
+    "timeoutMinutes": 20,
+    "analysis": {
+      "slither": {
+        "version": "0.11.6"
+      }
+    },
+    "sbom": {
+      "enabled": true
+    }
+  },
+  "requestId": "dar-0754718f52964619348c704eff2859e4",
+  "requestDigest": "cab0b922250ddd0a6d139b5a3c4e9dd3c04ec9fbc731bdebe9c2c719ca0cb929"
+}
