@@ -1,0 +1,156 @@
+name: Audit Operator Bridge v1
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: audit-operator-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  project-private-controller-state:
+    if: >-
+      startsWith(github.event.issue.title, '[agent] audit-operator ') &&
+      !github.event.issue.pull_request &&
+      (github.event.issue.user.login == 'CurveYield-Developer-DK' || github.event.issue.user.login == 'JamesNexus')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AUDIT_CONTROLLER_REPOSITORY: CurveYield2/Audit-Controller
+    steps:
+      - name: Checkout trusted public bridge
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Parse immutable operator trigger
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { parseAuditOperatorIssueV1 } from './packages/audit-operator-bridge/src/issue-trigger-v1.mjs';
+          const parsed = parseAuditOperatorIssueV1({ title: process.env.ISSUE_TITLE, body: process.env.ISSUE_BODY });
+          fs.writeFileSync('/tmp/audit-operator-trigger.json', JSON.stringify(parsed, null, 2) + '\n');
+          for (const [key, value] of Object.entries({
+            OPERATOR_REQUEST_ID: parsed.requestId,
+            AUDIT_CONTROLLER_REF: parsed.controllerRef,
+            OPERATOR_REQUEST_PATH: parsed.requestPath,
+          })) fs.appendFileSync(process.env.GITHUB_ENV, `${key}=${value}\n`);
+          NODE
+
+      - name: Checkout exact private controller commit
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Audit-Controller
+          ref: ${{ env.AUDIT_CONTROLLER_REF }}
+          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .audit-controller
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Validate private operator request
+        shell: bash
+        run: |
+          set -euo pipefail
+          request=".audit-controller/$OPERATOR_REQUEST_PATH"
+          test -f "$request"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const request = JSON.parse(fs.readFileSync(`.audit-controller/${process.env.OPERATOR_REQUEST_PATH}`, 'utf8'));
+          if (request.schemaVersion !== 'audit-workload-reduction-request-v1') throw new Error('request schemaVersion mismatch');
+          if (request.requestId !== process.env.OPERATOR_REQUEST_ID) throw new Error('request id mismatch');
+          for (const [field, pattern] of [
+            ['skillPackagePath', /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+/],
+            ['writebackDirectory', /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+/],
+            ['writebackRef', /^[A-Za-z0-9._\/-]+$/],
+            ['expectedWritebackHead', /^[0-9a-f]{40}$/],
+          ]) {
+            if (typeof request[field] !== 'string' || !pattern.test(request[field])) throw new Error(`invalid ${field}`);
+          }
+          fs.appendFileSync(process.env.GITHUB_ENV, `SKILL_PACKAGE_PATH=${request.skillPackagePath}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_DIRECTORY=${request.writebackDirectory}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_REF=${request.writebackRef}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `EXPECTED_WRITEBACK_HEAD=${request.expectedWritebackHead}\n`);
+          NODE
+
+      - name: Extract exact admitted skill package
+        shell: bash
+        run: |
+          set -euo pipefail
+          skill_zip=".audit-controller/$SKILL_PACKAGE_PATH"
+          test -f "$skill_zip"
+          rm -rf .audit-skill
+          mkdir -p .audit-skill
+          unzip -q "$skill_zip" -d .audit-skill
+          skill_home="$(find .audit-skill -type f -name SKILL.md -not -path '*/optional-modes/lite-pathway/SKILL.md' | head -n1)"
+          test -n "$skill_home"
+          echo "SKILL_ROOT=$(dirname "$skill_home")" >> "$GITHUB_ENV"
+
+      - name: Generate deterministic work projection
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .operator-output
+          mkdir -p .operator-output
+          node .audit-controller/packages/controller-core/src/audit-operator-cli-v1.mjs             --request ".audit-controller/$OPERATOR_REQUEST_PATH"             --controller-root ".audit-controller"             --skill-root "$SKILL_ROOT"             --output-dir ".operator-output"
+          test -f .operator-output/RESULT_v1.json
+
+      - name: Write projection back to private controller branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git fetch origin "$WRITEBACK_REF"
+          remote_head="$(git rev-parse "origin/$WRITEBACK_REF")"
+          if [ "$remote_head" != "$EXPECTED_WRITEBACK_HEAD" ]; then
+            echo "Writeback head changed: expected $EXPECTED_WRITEBACK_HEAD observed $remote_head" >&2
+            exit 1
+          fi
+          git checkout -B "$WRITEBACK_REF" "origin/$WRITEBACK_REF"
+          mkdir -p "$WRITEBACK_DIRECTORY"
+          cp ../.operator-output/* "$WRITEBACK_DIRECTORY"/
+          git add "$WRITEBACK_DIRECTORY"
+          if git diff --cached --quiet; then
+            echo "No writeback changes required."
+          else
+            git config user.name 'CurveYield Audit Operator'
+            git config user.email 'audit-operator@users.noreply.github.com'
+            git commit -m "chore(audit): refresh workload projection $OPERATOR_REQUEST_ID"
+            git push origin "HEAD:$WRITEBACK_REF"
+          fi
+
+      - name: Publish non-sensitive completion marker
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          retirement="$(node -e "const r=require('./.operator-output/RESULT_v1.json'); process.stdout.write(String(r.retirementAllowed))")"
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed             --comment "Audit operator request $OPERATOR_REQUEST_ID completed on the exact private controller commit. Results were written back only to the private Audit-Controller branch. retirementAllowed=$retirement."
+
+      - name: Publish failure marker
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "Audit operator request failed closed. No private audit evidence is copied into this public issue. Inspect this workflow run and repair/retry through the bridge."
