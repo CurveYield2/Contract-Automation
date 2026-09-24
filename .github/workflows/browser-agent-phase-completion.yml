@@ -139,7 +139,11 @@ jobs:
         run: |
           set -euo pipefail
           count="$(jq '.workflowRuns // [] | length' "$REPORT")"
-          for index in $(seq 0 $((count-1)) 2>/dev/null || true); do
+          if [ "$count" -eq 0 ]; then
+            echo 'No workflowRuns claimed; canonical completion report remains the approval authority.'
+            exit 0
+          fi
+          for index in $(seq 0 $((count-1))); do
             repo="$(jq -r ".workflowRuns[$index].repository // \"$GITHUB_REPOSITORY\"" "$REPORT")"
             run_id="$(jq -r ".workflowRuns[$index].runId" "$REPORT")"
             job_id="$(jq -r ".workflowRuns[$index].jobId // empty" "$REPORT")"
