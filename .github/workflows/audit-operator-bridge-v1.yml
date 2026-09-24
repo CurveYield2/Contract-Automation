@@ -101,13 +101,18 @@ jobs:
           if (typeof request.operation !== 'string' || !operations.has(request.operation)) throw new Error('explicit supported operator operation is required');
           const operation = request.operation;
           if (request.requestId !== process.env.OPERATOR_REQUEST_ID) throw new Error('request id mismatch');
-          for (const [field, pattern] of [
-            ['skillPackagePath', /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+/],
-            ['writebackDirectory', /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+/],
-            ['writebackRef', /^[A-Za-z0-9._\/-]+$/],
-          ]) {
-            if (typeof request[field] !== 'string' || !pattern.test(request[field])) throw new Error(`invalid ${field}`);
+          const safePath = /^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.(?:\/|$)).+/;
+          for (const field of ['skillPackagePath','writebackDirectory']) {
+            if (typeof request[field] !== 'string' || !safePath.test(request[field])) throw new Error(`invalid ${field}`);
           }
+          for (const field of [
+            'campaignPath','campaignStatePath','phaseContractPath','phaseStartPath','completionReportPath',
+            'automationCompletionReportPath','executionTemplatePath','semanticInputPath','executionRequestPath',
+            'executionEvidencePath','qualificationPath','handoffInputPath','currentWorkPacketPath'
+          ]) {
+            if (request[field] !== undefined && (typeof request[field] !== 'string' || !safePath.test(request[field]))) throw new Error(`invalid ${field}`);
+          }
+          if (typeof request.writebackRef !== 'string' || !/^[A-Za-z0-9._\/-]+$/.test(request.writebackRef)) throw new Error('invalid writebackRef');
           fs.appendFileSync(process.env.GITHUB_ENV, `SKILL_PACKAGE_PATH=${request.skillPackagePath}\n`);
           fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_DIRECTORY=${request.writebackDirectory}\n`);
           fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_REF=${request.writebackRef}\n`);
