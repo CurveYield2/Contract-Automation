@@ -61,7 +61,11 @@ test('canonical V7 bridge keeps untrusted PR request checkout free of private cr
   const prCheckout = workflow.slice(prCheckoutStart, manualPrivateCheckoutStart);
   assert.doesNotMatch(prCheckout, /AUDIT_CONTROLLER_GITHUB_TOKEN/);
   assert.doesNotMatch(prCheckout, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01/);
-  assert.match(workflow.slice(manualPrivateCheckoutStart), /token:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
+  const privateLane = workflow.slice(manualPrivateCheckoutStart);
+  assert.match(privateLane, /GH_TOKEN:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
+  assert.match(privateLane, /gh api repos\/CurveYield2\/Audit-Controller --silent/);
+  assert.match(privateLane, /gh repo clone CurveYield2\/Audit-Controller/);
+  assert.doesNotMatch(privateLane, /PREFLIGHTSIM_GITHUB_TOKEN/);
 });
 
 test('controller operation pointer is exact, minimal, and bound to one private request path', () => {
