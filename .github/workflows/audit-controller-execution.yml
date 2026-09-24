@@ -20,7 +20,7 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
 
 concurrency:
   group: v7-execution-${{ github.event.pull_request.number || inputs.request_path || github.ref }}
@@ -266,6 +266,68 @@ jobs:
             git push origin "HEAD:$WRITEBACK_REF"
           fi
 
+      - name: Dispatch registered browser-agent wake
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          campaign_id="$(jq -r '.campaignId // empty' .v7-request/request.json)"
+          phase_id="$(jq -r '.phaseId // empty' .v7-request/request.json)"
+          if [ -z "$campaign_id" ]; then
+            echo 'No campaignId on this request; browser-agent wake not applicable.'
+            exit 0
+          fi
+
+          safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
+          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          if [ ! -f "$registration" ]; then
+            echo "No browser-agent wake registration for $campaign_id; execution remains unchanged."
+            exit 0
+          fi
+
+          test "$(jq -r '.schemaVersion // empty' "$registration")" = 'curveyield-browser-agent-wake-registration-v1'
+          test "$(jq -r '.campaignId // empty' "$registration")" = "$campaign_id"
+          mode="$(jq -r '.mode // "resume_existing"' "$registration")"
+          chat_url="$(jq -r '.chatUrl // empty' "$registration")"
+          wake_message="$(jq -r '.wakeMessage // empty' "$registration")"
+          if [ -z "$wake_message" ]; then
+            wake_message="[AUDIT_AUTOMATION_WAKE_V1]
+campaign=$campaign_id
+phase=$phase_id
+workflow_run=$GITHUB_RUN_ID
+status=PASS
+
+Resume the admitted audit from the latest durable completion evidence. Do not restart completed work."
+          fi
+
+          watchdog_enabled="$(jq -r '.watchdog.enabled // true' "$registration")"
+          watchdog_message="$(jq -r '.watchdog.idleMessage // empty' "$registration")"
+          completion_repo="$(jq -r '.watchdog.completion.repository // "CurveYield2/Audit-Controller"' "$registration")"
+          completion_ref="$(jq -r '.watchdog.completion.ref // "main"' "$registration")"
+          completion_path="$(jq -r '.watchdog.completion.path // empty' "$registration")"
+          completion_field="$(jq -r '.watchdog.completion.statusField // "status"' "$registration")"
+          completion_values="$(jq -r '(.watchdog.completion.terminalValues // ["PASS","COMPLETE","COMPLETED","SEALED"]) | join(",")' "$registration")"
+
+          wake_id="$campaign_id-$phase_id-$GITHUB_RUN_ID"
+          wake_b64="$(printf '%s' "$wake_message" | base64 -w0)"
+          watchdog_b64="$(printf '%s' "$watchdog_message" | base64 -w0)"
+
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$wake_id" \
+            -f campaign_id="$campaign_id" \
+            -f phase_id="$phase_id" \
+            -f mode="$mode" \
+            -f chat_url="$chat_url" \
+            -f wake_message_b64="$wake_b64" \
+            -f watchdog_enabled="$watchdog_enabled" \
+            -f watchdog_message_b64="$watchdog_b64" \
+            -f completion_repository="$completion_repo" \
+            -f completion_ref="$completion_ref" \
+            -f completion_path="$completion_path" \
+            -f completion_status_field="$completion_field" \
+            -f completion_terminal_values_csv="$completion_values"
       - name: Upload request-addressable V7 evidence
         if: always() && env.V7_REQUEST_KIND == 'v7-execution'
         uses: actions/upload-artifact@v4
