@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      TARGET_TOKEN: \${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+      TARGET_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
 
     steps:
       - name: Checkout Contract-Automation control plane
@@ -40,7 +40,7 @@ jobs:
       - name: Validate universal audit-source request
         id: meta
         env:
-          REQUEST: \${{ steps.request.outputs.path }}
+          REQUEST: ${{ steps.request.outputs.path }}
         shell: bash
         run: |
           set -euo pipefail
@@ -73,7 +73,7 @@ jobs:
 
       - name: Verify cross-repository credential
         env:
-          GH_TOKEN: \${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -83,8 +83,8 @@ jobs:
 
       - name: Download source ZIP once
         env:
-          SOURCE_URL: \${{ steps.meta.outputs.source_url }}
-          FILENAME: \${{ steps.meta.outputs.filename }}
+          SOURCE_URL: ${{ steps.meta.outputs.source_url }}
+          FILENAME: ${{ steps.meta.outputs.filename }}
         shell: bash
         run: |
           set -euo pipefail
@@ -104,9 +104,9 @@ jobs:
 
       - name: Verify exact source identity
         env:
-          FILENAME: \${{ steps.meta.outputs.filename }}
-          EXPECTED_SHA256: \${{ steps.meta.outputs.sha256 }}
-          EXPECTED_SIZE: \${{ steps.meta.outputs.size }}
+          FILENAME: ${{ steps.meta.outputs.filename }}
+          EXPECTED_SHA256: ${{ steps.meta.outputs.sha256 }}
+          EXPECTED_SIZE: ${{ steps.meta.outputs.size }}
         shell: bash
         run: |
           set -euo pipefail
@@ -117,10 +117,10 @@ jobs:
 
       - name: Fan out identical ZIP to Audit-Controller and Audits
         env:
-          GH_TOKEN: \${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          FILENAME: \${{ steps.meta.outputs.filename }}
-          AUDIT_NAME: \${{ steps.meta.outputs.audit_name }}
-          EXPECTED_SHA256: \${{ steps.meta.outputs.sha256 }}
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          FILENAME: ${{ steps.meta.outputs.filename }}
+          AUDIT_NAME: ${{ steps.meta.outputs.audit_name }}
+          EXPECTED_SHA256: ${{ steps.meta.outputs.sha256 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -170,12 +170,12 @@ jobs:
 
       - name: Publish source-fanout completion report
         env:
-          GH_TOKEN: \${{ github.token }}
-          REQUEST_ID: \${{ steps.meta.outputs.request_id }}
-          AUDIT_NAME: \${{ steps.meta.outputs.audit_name }}
-          FILENAME: \${{ steps.meta.outputs.filename }}
-          SHA256: \${{ steps.meta.outputs.sha256 }}
-          SIZE: \${{ steps.meta.outputs.size }}
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_ID: ${{ steps.meta.outputs.request_id }}
+          AUDIT_NAME: ${{ steps.meta.outputs.audit_name }}
+          FILENAME: ${{ steps.meta.outputs.filename }}
+          SHA256: ${{ steps.meta.outputs.sha256 }}
+          SIZE: ${{ steps.meta.outputs.size }}
         shell: bash
         run: |
           set -euo pipefail
