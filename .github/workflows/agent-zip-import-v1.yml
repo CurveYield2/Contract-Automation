@@ -1,207 +1,211 @@
-name: Agent ZIP Import v1
+name: Agent Audit Source Fanout v2
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - ".agent-upload/requests/*.json"
+      - '.agent-upload/requests/*.json'
 
 permissions:
   contents: write
 
 concurrency:
-  group: agent-zip-import-v1
+  group: agent-audit-source-fanout
   cancel-in-progress: false
 
 jobs:
-  import:
+  fanout:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TARGET_TOKEN: \${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Contract-Automation control plane
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
 
-      - name: Locate newest import request
+      - name: Locate triggering source-fanout request
         id: request
         shell: bash
         run: |
           set -euo pipefail
-          REQUEST="$(git diff-tree --no-commit-id --name-only -r "${GITHUB_SHA}" -- '.agent-upload/requests/*.json' | tail -n 1)"
-          if [ -z "${REQUEST}" ]; then
-            echo "No import request found in triggering commit."
-            exit 1
-          fi
-          echo "path=${REQUEST}" >> "${GITHUB_OUTPUT}"
-          echo "Using request: ${REQUEST}"
+          request="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- '.agent-upload/requests/*.json' | tail -n1)"
+          test -n "$request"
+          echo "path=$request" >> "$GITHUB_OUTPUT"
 
-      - name: Validate request
+      - name: Validate universal audit-source request
         id: meta
-        shell: bash
         env:
-          REQUEST: ${{ steps.request.outputs.path }}
+          REQUEST: \${{ steps.request.outputs.path }}
+        shell: bash
         run: |
           set -euo pipefail
+          schema="$(jq -r '.schema // empty' "$REQUEST")"
+          request_id="$(jq -r '.request_id // empty' "$REQUEST")"
+          audit_name="$(jq -r '.audit_name // empty' "$REQUEST")"
+          source_url="$(jq -r '.source.url // empty' "$REQUEST")"
+          filename="$(jq -r '.source.filename // empty' "$REQUEST")"
+          sha256="$(jq -r '.source.sha256 // empty' "$REQUEST")"
+          size="$(jq -r '.source.size // empty' "$REQUEST")"
 
-          SOURCE_URL="$(jq -r '.source.url' "${REQUEST}")"
-          FILENAME="$(jq -r '.source.filename' "${REQUEST}")"
-          SHA256="$(jq -r '.source.sha256 // empty' "${REQUEST}")"
-          SIZE="$(jq -r '.source.size // empty' "${REQUEST}")"
-          TARGET_PATH="$(jq -r '.target.path // "."' "${REQUEST}")"
-          MODE="$(jq -r '.target.mode // "archive"' "${REQUEST}")"
+          test "$schema" = 'curveyield-audit-source-fanout/v2'
+          [[ "$request_id" =~ ^[A-Za-z0-9._-]{1,160}$ ]]
+          test -n "$audit_name"
+          [[ "$audit_name" != *"/"* ]]
+          [[ "$audit_name" != *"\\"* ]]
+          [ "$audit_name" != "." ] && [ "$audit_name" != ".." ]
+          test -n "$source_url"
+          [[ "$filename" == *.zip ]]
+          [ "$(basename -- "$filename")" = "$filename" ]
+          [[ "$sha256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -gt 0 ]
 
-          if [ -z "${SOURCE_URL}" ] || [ "${SOURCE_URL}" = "null" ]; then
-            echo "Missing source.url"
-            exit 1
-          fi
+          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          echo "audit_name=$audit_name" >> "$GITHUB_OUTPUT"
+          echo "source_url=$source_url" >> "$GITHUB_OUTPUT"
+          echo "filename=$filename" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "size=$size" >> "$GITHUB_OUTPUT"
 
-          if [ -z "${FILENAME}" ] || [ "${FILENAME}" = "null" ]; then
-            echo "Missing source.filename"
-            exit 1
-          fi
-
-          if [ "$(basename -- "${FILENAME}")" != "${FILENAME}" ]; then
-            echo "Unsafe filename: ${FILENAME}"
-            exit 1
-          fi
-
-          if [[ "${TARGET_PATH}" == /* ]] || [[ "${TARGET_PATH}" == *".."* ]]; then
-            echo "Unsafe target path: ${TARGET_PATH}"
-            exit 1
-          fi
-
-          if [ "${MODE}" != "archive" ]; then
-            echo "v1 importer currently accepts mode=archive only."
-            exit 1
-          fi
-
-          echo "source_url=${SOURCE_URL}" >> "${GITHUB_OUTPUT}"
-          echo "filename=${FILENAME}" >> "${GITHUB_OUTPUT}"
-          echo "sha256=${SHA256}" >> "${GITHUB_OUTPUT}"
-          echo "size=${SIZE}" >> "${GITHUB_OUTPUT}"
-          echo "target_path=${TARGET_PATH}" >> "${GITHUB_OUTPUT}"
-
-      - name: Download ZIP
-        shell: bash
+      - name: Verify cross-repository credential
         env:
-          SOURCE_URL: ${{ steps.meta.outputs.source_url }}
-          FILENAME: ${{ steps.meta.outputs.filename }}
+          GH_TOKEN: \${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
         run: |
           set -euo pipefail
+          test -n "\${GH_TOKEN:-}"
+          gh api repos/CurveYield2/Audit-Controller --silent
+          gh api repos/CurveYield2/Audits --silent
 
-          URL="${SOURCE_URL}"
-
-          if [[ "${URL}" =~ drive\.google\.com/file/d/([^/]+) ]]; then
-            FILE_ID="${BASH_REMATCH[1]}"
-            URL="https://drive.usercontent.google.com/download?id=${FILE_ID}&export=download&confirm=t"
+      - name: Download source ZIP once
+        env:
+          SOURCE_URL: \${{ steps.meta.outputs.source_url }}
+          FILENAME: \${{ steps.meta.outputs.filename }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="$SOURCE_URL"
+          if [[ "$url" =~ drive\.google\.com/file/d/([^/]+) ]]; then
+            file_id="\${BASH_REMATCH[1]}"
+            url="https://drive.usercontent.google.com/download?id=$file_id&export=download&confirm=t"
           fi
-
-          echo "Downloading ${FILENAME}"
-          curl --fail --location --retry 4 --retry-all-errors --connect-timeout 20             --output "/tmp/${FILENAME}" "${URL}"
-
-          test -s "/tmp/${FILENAME}"
-
-          MAGIC="$(xxd -p -l 4 "/tmp/${FILENAME}")"
-          case "${MAGIC}" in
+          curl --fail --location --retry 4 --retry-all-errors --connect-timeout 20 \
+            --output "/tmp/$FILENAME" "$url"
+          test -s "/tmp/$FILENAME"
+          magic="$(xxd -p -l 4 "/tmp/$FILENAME")"
+          case "$magic" in
             504b0304|504b0506|504b0708) ;;
-            *)
-              echo "Downloaded object is not a ZIP. Magic: ${MAGIC}"
-              file "/tmp/${FILENAME}" || true
-              head -c 300 "/tmp/${FILENAME}" || true
-              exit 1
-              ;;
+            *) echo "Not a ZIP: magic=$magic" >&2; exit 1 ;;
           esac
 
-      - name: Verify ZIP identity
-        shell: bash
+      - name: Verify exact source identity
         env:
-          FILENAME: ${{ steps.meta.outputs.filename }}
-          EXPECTED_SHA256: ${{ steps.meta.outputs.sha256 }}
-          EXPECTED_SIZE: ${{ steps.meta.outputs.size }}
+          FILENAME: \${{ steps.meta.outputs.filename }}
+          EXPECTED_SHA256: \${{ steps.meta.outputs.sha256 }}
+          EXPECTED_SIZE: \${{ steps.meta.outputs.size }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_sha="$(sha256sum "/tmp/$FILENAME" | awk '{print $1}')"
+          actual_size="$(stat -c '%s' "/tmp/$FILENAME")"
+          test "$actual_sha" = "$EXPECTED_SHA256"
+          test "$actual_size" = "$EXPECTED_SIZE"
+
+      - name: Fan out identical ZIP to Audit-Controller and Audits
+        env:
+          GH_TOKEN: \${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          FILENAME: \${{ steps.meta.outputs.filename }}
+          AUDIT_NAME: \${{ steps.meta.outputs.audit_name }}
+          EXPECTED_SHA256: \${{ steps.meta.outputs.sha256 }}
+        shell: bash
         run: |
           set -euo pipefail
 
-          ACTUAL_SHA256="$(sha256sum "/tmp/${FILENAME}" | awk '{print $1}')"
-          ACTUAL_SIZE="$(stat -c '%s' "/tmp/${FILENAME}")"
+          import_one() {
+            repo="$1"
+            destination="$2"
+            work="/tmp/$(basename "$repo")-fanout"
+            rm -rf "$work"
+            gh repo clone "$repo" "$work" -- --depth=1 --branch main
+            cd "$work"
+            mkdir -p "$(dirname "$destination")"
+            cp "/tmp/$FILENAME" "$destination"
 
-          echo "SHA-256: ${ACTUAL_SHA256}"
-          echo "Size: ${ACTUAL_SIZE}"
+            git config user.name 'CurveYield Audit Source Fanout'
+            git config user.email 'audit-source-fanout@users.noreply.github.com'
+            git add -- "$destination"
+            if ! git diff --cached --quiet; then
+              git commit -m "chore(audit): admit source for $AUDIT_NAME"
+              for attempt in 1 2 3 4 5; do
+                git fetch origin main
+                if ! git rebase origin/main; then
+                  git rebase --abort || true
+                  return 1
+                fi
+                if git push origin HEAD:main; then break; fi
+                if [ "$attempt" -eq 5 ]; then return 1; fi
+                sleep $((attempt * 2))
+              done
+            fi
 
-          if [ -n "${EXPECTED_SHA256}" ] && [ "${EXPECTED_SHA256}" != "null" ] && [ "${ACTUAL_SHA256}" != "${EXPECTED_SHA256}" ]; then
-            echo "SHA-256 mismatch"
-            exit 1
-          fi
-
-          if [ -n "${EXPECTED_SIZE}" ] && [ "${EXPECTED_SIZE}" != "null" ] && [ "${ACTUAL_SIZE}" != "${EXPECTED_SIZE}" ]; then
-            echo "Size mismatch"
-            exit 1
-          fi
-
-      - name: Place ZIP in repository
-        shell: bash
-        env:
-          FILENAME: ${{ steps.meta.outputs.filename }}
-          TARGET_PATH: ${{ steps.meta.outputs.target_path }}
-        run: |
-          set -euo pipefail
-
-          if [ "${TARGET_PATH}" = "." ] || [ -z "${TARGET_PATH}" ]; then
-            DEST="${FILENAME}"
-          else
-            mkdir -p "${TARGET_PATH}"
-            DEST="${TARGET_PATH}/${FILENAME}"
-          fi
-
-          cp "/tmp/${FILENAME}" "${DEST}"
-          echo "Imported to ${DEST}"
-
-      - name: Commit imported ZIP
-        shell: bash
-        env:
-          FILENAME: ${{ steps.meta.outputs.filename }}
-          TARGET_PATH: ${{ steps.meta.outputs.target_path }}
-          REQUEST: ${{ steps.request.outputs.path }}
-        run: |
-          set -euo pipefail
-
-          git config user.name "curveyield-agent-import"
-          git config user.email "curveyield-agent-import@users.noreply.github.com"
-
-          if [ "${TARGET_PATH}" = "." ] || [ -z "${TARGET_PATH}" ]; then
-            DEST="${FILENAME}"
-          else
-            DEST="${TARGET_PATH}/${FILENAME}"
-          fi
-
-          git add -- "${DEST}"
-
-          if git diff --cached --quiet; then
-            echo "No repository change required; destination already matches."
-            exit 0
-          fi
-
-          git commit -m "Import ${FILENAME} via agent ZIP importer v1"
-
-          for attempt in 1 2 3 4 5; do
-            echo "Push attempt ${attempt}/5"
             git fetch origin main
+            git show "origin/main:$destination" > /tmp/remote-verify.zip
+            remote_sha="$(sha256sum /tmp/remote-verify.zip | awk '{print $1}')"
+            test "$remote_sha" = "$EXPECTED_SHA256"
+            cd - >/dev/null
+          }
 
-            if ! git rebase origin/main; then
-              echo "Rebase failed"
-              git rebase --abort || true
-              exit 1
-            fi
+          controller_path="campaigns/$AUDIT_NAME/source/$FILENAME"
+          audits_path="$AUDIT_NAME/source/$FILENAME"
 
-            if git push origin HEAD:main; then
-              echo "Import push succeeded"
-              exit 0
-            fi
+          import_one 'CurveYield2/Audit-Controller' "$controller_path"
+          import_one 'CurveYield2/Audits' "$audits_path"
 
-            echo "Push raced with another main update; retrying."
-            sleep $((attempt * 2))
-          done
+          printf '%s\n' "$controller_path" > /tmp/controller-path.txt
+          printf '%s\n' "$audits_path" > /tmp/audits-path.txt
 
-          echo "Unable to push imported ZIP after 5 attempts."
-          exit 1
+      - name: Publish source-fanout completion report
+        env:
+          GH_TOKEN: \${{ github.token }}
+          REQUEST_ID: \${{ steps.meta.outputs.request_id }}
+          AUDIT_NAME: \${{ steps.meta.outputs.audit_name }}
+          FILENAME: \${{ steps.meta.outputs.filename }}
+          SHA256: \${{ steps.meta.outputs.sha256 }}
+          SIZE: \${{ steps.meta.outputs.size }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg requestId "$REQUEST_ID" \
+            --arg auditName "$AUDIT_NAME" \
+            --arg filename "$FILENAME" \
+            --arg sha256 "$SHA256" \
+            --argjson size "$SIZE" \
+            --arg controllerPath "$(cat /tmp/controller-path.txt)" \
+            --arg auditsPath "$(cat /tmp/audits-path.txt)" \
+            --arg runId "$GITHUB_RUN_ID" \
+            '{
+              schemaVersion:"curveyield-audit-source-fanout-report-v2",
+              requestId:$requestId,auditName:$auditName,status:"PASS",
+              source:{filename:$filename,sha256:$sha256,size:$size},
+              destinations:[
+                {repository:"CurveYield2/Audit-Controller",ref:"main",path:$controllerPath,verified:true},
+                {repository:"CurveYield2/Audits",ref:"main",path:$auditsPath,verified:true}
+              ],
+              workflowRunId:$runId,
+              completedAt:(now|todate)
+            }' > /tmp/fanout-report.json
+
+          safe_id="$(printf '%s' "$REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          api="repos/$GITHUB_REPOSITORY/contents/process/source-fanout/reports/$safe_id.json"
+          content="$(base64 -w0 /tmp/fanout-report.json)"
+          existing="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            gh api --method PUT "$api" -f message="chore(source): refresh fanout report $REQUEST_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$api" -f message="chore(source): record fanout report $REQUEST_ID" -f content="$content" -f branch=main >/dev/null
+          fi
