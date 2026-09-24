@@ -7,6 +7,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: read
 
 concurrency:
   group: audit-operator-${{ github.event.issue.number }}
@@ -77,7 +78,7 @@ jobs:
           token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: .audit-controller
           persist-credentials: true
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Verify complete private controller codebase on public runner
         shell: bash
@@ -97,8 +98,8 @@ jobs:
           const request = JSON.parse(fs.readFileSync(`.audit-controller/${process.env.OPERATOR_REQUEST_PATH}`, 'utf8'));
           if (request.schemaVersion !== 'audit-workload-reduction-request-v1') throw new Error('request schemaVersion mismatch');
           const operations = new Set(['PROJECT_CURRENT_STATE','BUILD_EXECUTION_REQUEST','INGEST_EXECUTION_EVIDENCE','BUILD_SUCCESSOR_HANDOFF']);
-          const operation = request.operation ?? 'PROJECT_CURRENT_STATE';
-          if (!operations.has(operation)) throw new Error('unsupported operator operation');
+          if (typeof request.operation !== 'string' || !operations.has(request.operation)) throw new Error('explicit supported operator operation is required');
+          const operation = request.operation;
           if (request.requestId !== process.env.OPERATOR_REQUEST_ID) throw new Error('request id mismatch');
           for (const [field, pattern] of [
             ['skillPackagePath', /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+/],
@@ -111,6 +112,49 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_DIRECTORY=${request.writebackDirectory}\n`);
           fs.appendFileSync(process.env.GITHUB_ENV, `WRITEBACK_REF=${request.writebackRef}\n`);
           fs.appendFileSync(process.env.GITHUB_ENV, `EXPECTED_WRITEBACK_HEAD=${process.env.AUDIT_CONTROLLER_REF}\n`);
+          NODE
+
+      - name: Verify claimed Contract-Automation executions against GitHub
+        if: ${{ success() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const request = JSON.parse(fs.readFileSync(`.audit-controller/${process.env.OPERATOR_REQUEST_PATH}`, 'utf8'));
+          if (!request.automationCompletionReportPath) process.exit(0);
+          const reportPath = `.audit-controller/${request.automationCompletionReportPath}`;
+          const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+          const api = (endpoint) => JSON.parse(execFileSync('gh', ['api', endpoint], { encoding:'utf8', env:process.env }));
+          for (const execution of report.executions ?? []) {
+            if (execution.repository !== process.env.GITHUB_REPOSITORY) throw new Error(`unsupported execution repository ${execution.repository}`);
+            const run = api(`repos/${execution.repository}/actions/runs/${execution.runId}`);
+            if (run.status !== 'completed') throw new Error(`run ${execution.runId} is not completed`);
+            if (run.conclusion !== 'success') throw new Error(`run ${execution.runId} conclusion is ${run.conclusion}`);
+            if (execution.jobId) {
+              const job = api(`repos/${execution.repository}/actions/jobs/${execution.jobId}`);
+              if (job.run_id !== execution.runId) throw new Error(`job ${execution.jobId} does not belong to run ${execution.runId}`);
+              if (job.status !== 'completed' || job.conclusion !== 'success') throw new Error(`job ${execution.jobId} is not successful terminal evidence`);
+            }
+            if (execution.artifactId) {
+              const artifact = api(`repos/${execution.repository}/actions/artifacts/${execution.artifactId}`);
+              if (artifact.expired) throw new Error(`artifact ${execution.artifactId} is expired`);
+              if (artifact.workflow_run?.id && artifact.workflow_run.id !== execution.runId) throw new Error(`artifact ${execution.artifactId} run mismatch`);
+              if (execution.artifactDigest && artifact.digest) {
+                const observed = String(artifact.digest).replace(/^sha256:/,'');
+                if (observed !== execution.artifactDigest) throw new Error(`artifact ${execution.artifactId} digest mismatch`);
+              }
+            }
+          }
+          if (report.qualification) {
+            const q = report.qualification;
+            const run = api(`repos/${process.env.GITHUB_REPOSITORY}/actions/runs/${q.workflowRunId}`);
+            if (run.status !== 'completed' || run.conclusion !== 'success') throw new Error('qualification run is not successful terminal evidence');
+            if (run.head_sha !== q.qualifiedCommit) throw new Error('qualification commit mismatch');
+          }
           NODE
 
       - name: Extract exact admitted skill package
