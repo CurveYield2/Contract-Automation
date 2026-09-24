@@ -293,13 +293,14 @@ jobs:
           chat_url="$(jq -r '.chatUrl // empty' "$registration")"
           wake_message="$(jq -r '.wakeMessage // empty' "$registration")"
           if [ -z "$wake_message" ]; then
-            wake_message="[AUDIT_AUTOMATION_WAKE_V1]
-campaign=$campaign_id
-phase=$phase_id
-workflow_run=$GITHUB_RUN_ID
-status=PASS
-
-Resume the admitted audit from the latest durable completion evidence. Do not restart completed work."
+            wake_message="$(printf '%s\n' \
+              '[AUDIT_AUTOMATION_WAKE_V1]' \
+              "campaign=$campaign_id" \
+              "phase=$phase_id" \
+              "workflow_run=$GITHUB_RUN_ID" \
+              'status=PASS' \
+              '' \
+              'Resume the admitted audit from the latest durable completion evidence. Do not restart completed work.')"
           fi
 
           watchdog_enabled="$(jq -r '.watchdog.enabled // true' "$registration")"
