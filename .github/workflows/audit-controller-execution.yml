@@ -350,6 +350,30 @@ jobs:
             git commit -m "chore(audit): apply deterministic operator result $V7_REQUEST_ID"
             git push origin "HEAD:$WRITEBACK_REF"
           fi
+          writeback_commit="$(git rev-parse HEAD)"
+          echo "CONTROLLER_WRITEBACK_COMMIT=$writeback_commit" >> "$GITHUB_ENV"
+
+      - name: Dispatch generated V7 execution request
+        if: env.V7_REQUEST_KIND == 'controller-operation' && env.OPERATOR_OPERATION == 'BUILD_EXECUTION_REQUEST'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CONTROLLER_WRITEBACK_COMMIT:-}"
+          request_path="${WRITEBACK_DIRECTORY%/}/EXECUTION_REQUEST_v1.json"
+          test -f ".controller-operation/$request_path"
+          test "$(jq -r '.schemaVersion // empty' ".controller-operation/$request_path")" = 'deep-assurance-github-request-v2'
+          gh workflow run audit-controller-execution.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f request_path="$request_path" \
+            -f controller_ref="$CONTROLLER_WRITEBACK_COMMIT"
+          {
+            echo "automatic_execution_dispatch=true"
+            echo "execution_request_path=$request_path"
+            echo "controller_ref=$CONTROLLER_WRITEBACK_COMMIT"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Dispatch registered browser-agent wake
         if: success()
@@ -358,6 +382,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "${OPERATOR_OPERATION:-}" = 'BUILD_EXECUTION_REQUEST' ]; then
+            echo 'Generated execution request was dispatched automatically; browser wake waits for the terminal execution run.'
+            exit 0
+          fi
           campaign_id="$(jq -r '.campaignId // empty' .v7-request/request.json)"
           phase_id="$(jq -r '.phaseId // empty' .v7-request/request.json)"
           if [ -z "$campaign_id" ]; then
