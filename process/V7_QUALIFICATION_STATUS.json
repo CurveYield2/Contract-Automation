@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-v7-current-qualification-status-v1",
   "status": "PASS",
-  "qualifiedCommit": "350e1a6f4b4ffa45009659acefcc542e7bfaa939",
-  "workflowRunId": "36094148749",
-  "qualifiedAt": "2026-09-25T04:23:07.998Z",
+  "qualifiedCommit": "17899bd3e3f877f2ec37108bc6cac0d3328bd041",
+  "workflowRunId": "36095125206",
+  "qualifiedAt": "2026-09-25T04:38:07.338Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
@@ -95,8 +95,8 @@
     },
     "runtime": {
       "identityNormalized": true,
-      "blockNumber": 26052050,
-      "blockHash": "0xb000b0a5ba29437307934e7617a3a3cc6a183acb3d6cf54d2c5bc60f60312af6",
+      "blockNumber": 26052125,
+      "blockHash": "0xf3fbb3f31ea7c187d0d413b7b7a32a2de9904d61a04aa191137140d733978261",
       "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
       "rpcUrlExposed": false
     },
@@ -105,8 +105,8 @@
       "status": "PASS",
       "rpc": {
         "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
-        "blockNumber": 26052050,
-        "blockHash": "0xb000b0a5ba29437307934e7617a3a3cc6a183acb3d6cf54d2c5bc60f60312af6",
+        "blockNumber": 26052125,
+        "blockHash": "0xf3fbb3f31ea7c187d0d413b7b7a32a2de9904d61a04aa191137140d733978261",
         "urlExposed": false
       },
       "checks": {
