@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "awr-interphase-p63-e2e-v1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "8d04ba073f05edffcb82f5dd7c427eab82b59fdf",
+    "requestPath": ".deep-assurance/operator/requests/awr-interphase-p63-e2e-v1.json"
+  },
+  "verifyController": true
+}
