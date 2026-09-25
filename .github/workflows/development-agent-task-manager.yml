@@ -106,9 +106,10 @@ jobs:
           spec_sha="$(sha256sum /tmp/task-manager-spec.md | awk '{print $1}')"
           skill_sha="$(sha256sum /tmp/task-manager-skill.md | awk '{print $1}')"
 
-          target_head="$(gh api "repos/$TARGET_REPOSITORY/git/ref/heads/$TARGET_BRANCH" --jq '.object.sha' 2>/dev/null || true)"
+          target_branch_uri="$(jq -rn --arg v "$TARGET_BRANCH" '$v|@uri')"
+          target_head="$(gh api "repos/$TARGET_REPOSITORY/git/ref/heads/$target_branch_uri" --jq '.object.sha' 2>/dev/null || true)"
           if [ -z "$target_head" ]; then
-            base_sha="$(gh api "repos/$TARGET_REPOSITORY/commits/$BASE_REF" --jq '.sha')"
+            base_sha="$(gh api -X GET "repos/$TARGET_REPOSITORY/commits" -f sha="$BASE_REF" -f per_page=1 --jq '.[0].sha')"
             gh api --method POST "repos/$TARGET_REPOSITORY/git/refs"               -f ref="refs/heads/$TARGET_BRANCH" -f sha="$base_sha" >/dev/null
             target_head="$base_sha"
           fi
@@ -471,7 +472,7 @@ jobs:
             fi
 
             if [ "$dead" = true ]; then
-              checkpoint_sha="$(gh api "repos/$target_repo/commits/$target_branch" --jq '.sha')"
+              checkpoint_sha="$(gh api -X GET "repos/$target_repo/commits" -f sha="$target_branch" -f per_page=1 --jq '.[0].sha')"
               [[ "$checkpoint_sha" =~ ^[0-9a-f]{40}$ ]]
               generation="$(jq -r '.generation' /tmp/task-manager-state.json)"
               next_generation=$((generation + 1))
