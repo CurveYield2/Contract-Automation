@@ -10,7 +10,7 @@ const watchdog = fs.readFileSync(path.join(root, '.github/workflows/browser-agen
 const wake = fs.readFileSync(path.join(root, '.github/workflows/browser-agent-wake.yml'), 'utf8');
 
 test('watchdog uses the existing workflow as a five-minute scheduled sweep', () => {
-  assert.match(watchdog, /schedule:\s*\n\s*- cron: '2\/5 \* \* \* \*'/);
+  assert.match(watchdog, /schedule:\s*\n\s*- cron: '2-59\/5 \* \* \* \*'/);
   assert.match(watchdog, /Discover active watchdog targets/);
   assert.match(watchdog, /process\/browser-agent-watchdog\/active/);
   assert.match(watchdog, /matrix:\s*\n\s*wake_id:\s*\$\{\{ fromJSON\(needs\.discover\.outputs\.targets\) \}\}/);
@@ -57,4 +57,13 @@ test('terminal watchdog state retention is bounded without touching active state
   assert.match(watchdog, /--method DELETE "\$completed_dir_api\/\$file_name"/);
   assert.match(watchdog, /prune_completed_states\s*\n\s*\}/);
   assert.doesNotMatch(watchdog, /DELETE[^\n]*process\/browser-agent-wake\/registrations/);
+});
+
+
+test('watchdog workflow contains one complete sweep body and no duplicated corrupt tail', () => {
+  const lines = watchdog.split(/\r?\n/);
+  assert.equal(lines.some((line) => line.startsWith('\\t')), false, 'literal \\t must never escape the run block');
+  assert.equal(lines.some((line) => /^\t/.test(line)), false, 'YAML indentation must never use tab characters');
+  assert.equal((watchdog.match(/launch_lite_successor\(\) \{/g) ?? []).length, 1);
+  assert.equal((watchdog.match(/Watchdog sweep complete; active state remains for the next scheduled sweep\./g) ?? []).length, 1);
 });
