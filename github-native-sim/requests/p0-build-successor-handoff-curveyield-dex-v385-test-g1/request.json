@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "p0-build-successor-handoff-curveyield-dex-v385-test-g1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "03d25745cd3739d10a15a0fde8729ca3b1594fa7",
+    "requestPath": ".deep-assurance/operator/requests/p0-build-successor-handoff-curveyield-dex-v385-test-g1.json"
+  },
+  "verifyController": true
+}
