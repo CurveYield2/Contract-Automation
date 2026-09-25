@@ -1,11 +1,11 @@
 {
   "schemaVersion": "audit-controller-operation-pointer-v1",
   "processId": "audit-v7-independent-review",
-  "requestId": "awr-final-evidence-index-e2e-v2",
+  "requestId": "awr-report-scaffold-e2e-v2",
   "controller": {
     "repository": "CurveYield2/Audit-Controller",
-    "commit": "076fc7741621e912f7c80ad541b56775dd87cca5",
-    "requestPath": ".deep-assurance/operator/requests/awr-final-evidence-index-e2e-v2.json"
+    "commit": "17b408e940b98a0eaead79224458777c4da82c91",
+    "requestPath": ".deep-assurance/operator/requests/awr-report-scaffold-e2e-v2.json"
   },
   "verifyController": true
 }
