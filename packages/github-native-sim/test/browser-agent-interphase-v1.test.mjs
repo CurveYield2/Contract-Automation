@@ -72,3 +72,10 @@ test('interphase work packet and completion schemas are strict machine contracts
   assert.ok(completion.required.includes('workPacketSha256'));
   assert.ok(completion.required.includes('outputs'));
 });
+
+
+test('mechanical wake payload is encoded from the generated packet file', () => {
+  const watchdog = fs.readFileSync(watchdogPath, 'utf8');
+  assert.match(watchdog, /mechanical_b64="\$\(base64 -w0 \/tmp\/lite-interphase-wake\.txt\)"/);
+  assert.doesNotMatch(watchdog, /mechanical_b64="\$\(printf '%s' "\$mechanical_message" \| base64 -w0\)"/);
+});
