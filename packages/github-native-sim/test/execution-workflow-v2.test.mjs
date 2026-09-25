@@ -103,7 +103,7 @@ test('generated execution request does not wake the semantic reviewer before ter
   const wakeBlock = workflow.slice(wakeStart);
   assert.match(wakeBlock, /V7_REQUEST_KIND:-/);
   assert.match(wakeBlock, /BUILD_EXECUTION_REQUEST/);
-  assert.match(wakeBlock, /browser wake waits for the terminal execution run/);
+  assert.match(wakeBlock, /browser wake waits for terminal technical execution/);
 });
 
 
@@ -138,4 +138,60 @@ test('semantic reviewer wake consumes the terminal observer route instead of pol
   assert.match(wakeBlock, /disposition=\$disposition/);
   assert.match(wakeBlock, /next_action=\$next_action/);
   assert.match(wakeBlock, /Technical execution is terminal and its observer receipt is durable/);
+});
+
+
+test('technical execution uses the canonical FULL-qualified runner commit rather than mutable main', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const cli = fs.readFileSync(path.join(repoRoot, 'packages/github-native-sim/src/v7-cli.mjs'), 'utf8');
+  assert.match(workflow, /name:\s*Resolve canonical qualified Contract-Automation runner/);
+  assert.match(workflow, /V7_QUALIFICATION_STATUS\.json\?ref=main/);
+  assert.match(workflow, /ref:\s*\$\{\{ steps\.qualified_runner\.outputs\.commit \}\}/);
+  assert.match(workflow, /V7_RUNNER_COMMIT=\$observed/);
+  assert.match(cli, /process\.env\.V7_RUNNER_COMMIT\?\?process\.env\.GITHUB_SHA/);
+});
+
+test('C5 carries the exact private writeback branch into terminal execution for C7 ingestion', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.match(workflow, /controller_writeback_ref:/);
+  assert.match(workflow, /-f controller_writeback_ref="\$WRITEBACK_REF"/);
+});
+
+test('Lite C7 stages terminal evidence and dispatches the existing INGEST_EXECUTION_EVIDENCE operation', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const ingest = workflow.indexOf('- name: Prepare automatic Lite evidence ingestion');
+  const wake = workflow.indexOf('- name: Dispatch registered browser-agent wake');
+  assert.ok(ingest >= 0);
+  assert.ok(wake > ingest);
+  assert.match(workflow, /EXECUTION_OBSERVER_ROUTE == 'EVIDENCE_INGESTION'/);
+  assert.match(workflow, /test "\$remote_head" = "\$CONTROLLER_SOURCE_REF"/);
+  assert.match(workflow, /operation:"INGEST_EXECUTION_EVIDENCE"/);
+  assert.match(workflow, /executionRequestPath:\$execution_request/);
+  assert.match(workflow, /executionEvidencePath:\$execution_evidence/);
+  assert.match(workflow, /qualificationPath:\$qualification/);
+  assert.match(workflow, /verifyController:true/);
+  assert.match(workflow, /gh workflow run audit-controller-execution\.yml/);
+  assert.match(workflow, /AUTO_INGESTION_DISPATCHED=true/);
+});
+
+test('semantic reviewer wake waits for durable ingestion receipt on successful technical execution', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const wakeStart = workflow.indexOf('- name: Dispatch registered browser-agent wake');
+  assert.ok(wakeStart >= 0);
+  const wakeBlock = workflow.slice(wakeStart);
+  assert.match(wakeBlock, /Terminal evidence ingestion was dispatched automatically; semantic reviewer wake waits for the durable ingestion receipt/);
+  assert.match(wakeBlock, /OPERATOR_OPERATION:-.*INGEST_EXECUTION_EVIDENCE|OPERATOR_OPERATION:-\}" = 'INGEST_EXECUTION_EVIDENCE'/s);
+  assert.match(wakeBlock, /EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1\.json/);
+  assert.match(wakeBlock, /route=EVIDENCE_INGESTED/);
+  assert.match(wakeBlock, /security_disposition=\$security_disposition/);
+  assert.match(wakeBlock, /finding_promotion=\$finding_promotion/);
+  assert.match(wakeBlock, /do not rerun completed technical work/);
+});
+
+test('canonical execution workflow tail is singular and free of the prior duplicated corruption', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.equal((workflow.match(/- name: Upload request-addressable V7 evidence/g) ?? []).length, 1);
+  assert.equal((workflow.match(/- name: Dispatch registered browser-agent wake/g) ?? []).length, 1);
+  assert.equal((workflow.match(/- name: Prepare automatic Lite evidence ingestion/g) ?? []).length, 1);
+  assert.equal(workflow.includes("\\\\n\\\\n\'"), false);
 });

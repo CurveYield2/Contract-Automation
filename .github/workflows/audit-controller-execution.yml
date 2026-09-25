@@ -17,6 +17,11 @@ on:
         required: true
         default: main
         type: string
+      controller_writeback_ref:
+        description: Exact private Audit-Controller branch to receive automatic Lite execution evidence ingestion
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -31,12 +36,37 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
+      - name: Resolve canonical qualified Contract-Automation runner
+        id: qualified_runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          status_json="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d)"
+          test "$(printf '%s' "$status_json" | jq -r '.status // empty')" = 'PASS'
+          qualified_commit="$(printf '%s' "$status_json" | jq -r '.qualifiedCommit // empty')"
+          qualification_run="$(printf '%s' "$status_json" | jq -r '.workflowRunId // empty')"
+          [[ "$qualified_commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$qualification_run" =~ ^[0-9]+$ ]]
+          echo "commit=$qualified_commit" >> "$GITHUB_OUTPUT"
+          echo "run_id=$qualification_run" >> "$GITHUB_OUTPUT"
+
       - name: Checkout trusted Contract-Automation runner
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ steps.qualified_runner.outputs.commit }}
           persist-credentials: false
           fetch-depth: 1
+
+      - name: Bind checked-out qualified runner identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          observed="$(git rev-parse HEAD)"
+          test "$observed" = "${{ steps.qualified_runner.outputs.commit }}"
+          echo "V7_RUNNER_COMMIT=$observed" >> "$GITHUB_ENV"
+          echo "V7_RUNNER_QUALIFICATION_RUN=${{ steps.qualified_runner.outputs.run_id }}" >> "$GITHUB_ENV"
 
       - name: Set up Node.js 22
         uses: actions/setup-node@v4
@@ -368,7 +398,8 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f request_path="$request_path" \
-            -f controller_ref="$CONTROLLER_WRITEBACK_COMMIT"
+            -f controller_ref="$CONTROLLER_WRITEBACK_COMMIT" \
+            -f controller_writeback_ref="$WRITEBACK_REF"
           {
             echo "automatic_execution_dispatch=true"
             echo "execution_request_path=$request_path"
@@ -477,6 +508,124 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Prepare automatic Lite evidence ingestion
+        id: auto_ingestion
+        if: always() && env.V7_REQUEST_KIND == 'v7-execution' && env.EXECUTION_OBSERVER_ROUTE == 'EVIDENCE_INGESTION' && inputs.controller_writeback_ref != ''
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CONTROLLER_SOURCE_REF: ${{ inputs.controller_ref }}
+          CONTROLLER_WRITEBACK_REF: ${{ inputs.controller_writeback_ref }}
+          EXECUTION_REQUEST_PATH: ${{ inputs.request_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          test -n "${CONTROLLER_SOURCE_REF:-}"
+          test -n "${CONTROLLER_WRITEBACK_REF:-}"
+          test -n "${EXECUTION_REQUEST_PATH:-}"
+          test -n "${V7_RUNNER_COMMIT:-}"
+          campaign_id="$(jq -r '.campaignId // empty' .v7-request/request.json)"
+          phase_id="$(jq -r '.phaseId // empty' .v7-request/request.json)"
+          test -n "$campaign_id"
+          test -n "$phase_id"
+
+          safe_request="$(printf '%s' "$V7_REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          ingest_id="ingest-$safe_request"
+          evidence_dir="campaigns/$campaign_id/controller/automation/$safe_request"
+          evidence_rel="$evidence_dir/EXECUTION_EVIDENCE_v1.json"
+          observer_rel="$evidence_dir/EXECUTION_OBSERVER_RECEIPT_v1.json"
+          qualification_rel="$evidence_dir/V7_QUALIFICATION_STATUS.json"
+          operator_rel=".deep-assurance/operator/requests/$ingest_id.json"
+          pointer_rel="campaigns/$campaign_id/requests/$ingest_id.json"
+          receipt_dir="$evidence_dir/ingestion"
+          pointer_branch="automation/ingest-pointer-$safe_request"
+
+          test -s ".audit-evidence/v7-execution/$V7_REQUEST_ID/controller-evidence.json"
+          test -s ".audit-evidence/v7-execution/$V7_REQUEST_ID/EXECUTION_OBSERVER_RECEIPT_v1.json"
+
+          gh auth setup-git
+          cd .controller-request
+          git fetch origin "$CONTROLLER_WRITEBACK_REF"
+          remote_head="$(git rev-parse "origin/$CONTROLLER_WRITEBACK_REF")"
+          test "$remote_head" = "$CONTROLLER_SOURCE_REF"
+          git checkout -B "$CONTROLLER_WRITEBACK_REF" "origin/$CONTROLLER_WRITEBACK_REF"
+          test -f "$EXECUTION_REQUEST_PATH"
+          cmp "../.v7-request/request.json" "$EXECUTION_REQUEST_PATH"
+
+          mkdir -p "$evidence_dir" "$(dirname "$operator_rel")"
+          cp "../.audit-evidence/v7-execution/$V7_REQUEST_ID/controller-evidence.json" "$evidence_rel"
+          cp "../.audit-evidence/v7-execution/$V7_REQUEST_ID/EXECUTION_OBSERVER_RECEIPT_v1.json" "$observer_rel"
+          gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d > "$qualification_rel"
+          test "$(jq -r '.status // empty' "$qualification_rel")" = 'PASS'
+          test "$(jq -r '.qualifiedCommit // empty' "$qualification_rel")" = "$V7_RUNNER_COMMIT"
+
+          jq -n \
+            --arg request_id "$ingest_id" \
+            --arg campaign_id "$campaign_id" \
+            --arg phase_id "$phase_id" \
+            --arg execution_request "$EXECUTION_REQUEST_PATH" \
+            --arg execution_evidence "$evidence_rel" \
+            --arg qualification "$qualification_rel" \
+            --arg writeback_directory "$receipt_dir" \
+            --arg writeback_ref "$CONTROLLER_WRITEBACK_REF" \
+            '{
+              schemaVersion:"audit-workload-reduction-request-v1",
+              requestId:$request_id,
+              operation:"INGEST_EXECUTION_EVIDENCE",
+              campaignId:$campaign_id,
+              phaseId:$phase_id,
+              assuranceMode:"LITE",
+              executionRequestPath:$execution_request,
+              executionEvidencePath:$execution_evidence,
+              qualificationPath:$qualification,
+              writebackDirectory:$writeback_directory,
+              writebackRef:$writeback_ref
+            }' > "$operator_rel"
+
+          git add "$evidence_rel" "$observer_rel" "$qualification_rel" "$operator_rel"
+          git config user.name 'CurveYield Audit Controller Automation'
+          git config user.email 'audit-controller-automation@users.noreply.github.com'
+          git commit -m "chore(audit): stage execution evidence for ingestion $V7_REQUEST_ID"
+          git push origin "HEAD:$CONTROLLER_WRITEBACK_REF"
+          payload_commit="$(git rev-parse HEAD)"
+
+          git checkout -B "$pointer_branch" "$payload_commit"
+          mkdir -p "$(dirname "$pointer_rel")"
+          jq -n \
+            --arg request_id "$ingest_id" \
+            --arg commit "$payload_commit" \
+            --arg request_path "$operator_rel" \
+            '{
+              schemaVersion:"audit-controller-operation-pointer-v1",
+              processId:"audit-v7-independent-review",
+              requestId:$request_id,
+              controller:{
+                repository:"CurveYield2/Audit-Controller",
+                commit:$commit,
+                requestPath:$request_path
+              },
+              verifyController:true
+            }' > "$pointer_rel"
+          git add "$pointer_rel"
+          git commit -m "chore(audit): dispatch evidence ingestion $V7_REQUEST_ID"
+          git push origin "HEAD:$pointer_branch"
+          pointer_commit="$(git rev-parse HEAD)"
+
+          cd ..
+          gh workflow run audit-controller-execution.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f request_path="$pointer_rel" \
+            -f controller_ref="$pointer_commit"
+
+          echo "AUTO_INGESTION_DISPATCHED=true" >> "$GITHUB_ENV"
+          echo "AUTO_INGESTION_POINTER_REF=$pointer_commit" >> "$GITHUB_ENV"
+          {
+            echo "automatic_evidence_ingestion=true"
+            echo "ingestion_pointer_ref=$pointer_commit"
+            echo "ingestion_writeback_ref=$CONTROLLER_WRITEBACK_REF"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Dispatch registered browser-agent wake
         if: always() && (env.V7_REQUEST_KIND == 'v7-execution' || success())
         env:
@@ -485,11 +634,24 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "${OPERATOR_OPERATION:-}" = 'BUILD_EXECUTION_REQUEST' ]; then
-            echo 'Generated execution request was dispatched automatically; browser wake waits for the terminal execution run.'
+            echo 'Generated execution request was dispatched automatically; browser wake waits for terminal technical execution.'
             exit 0
           fi
-          campaign_id="$(jq -r '.campaignId // empty' .v7-request/request.json)"
-          phase_id="$(jq -r '.phaseId // empty' .v7-request/request.json)"
+
+          if [ "${V7_REQUEST_KIND:-}" = 'v7-execution' ] && [ "${EXECUTION_OBSERVER_ROUTE:-}" = 'EVIDENCE_INGESTION' ] && [ -n "${{ inputs.controller_writeback_ref }}" ]; then
+            if [ "${AUTO_INGESTION_DISPATCHED:-}" = 'true' ]; then
+              echo 'Terminal evidence ingestion was dispatched automatically; semantic reviewer wake waits for the durable ingestion receipt.'
+              exit 0
+            fi
+          fi
+
+          if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ]; then
+            campaign_id="$(jq -r '.campaignId // empty' ".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH")"
+            phase_id="$(jq -r '.phaseId // empty' ".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH")"
+          else
+            campaign_id="$(jq -r '.campaignId // empty' .v7-request/request.json)"
+            phase_id="$(jq -r '.phaseId // empty' .v7-request/request.json)"
+          fi
           if [ -z "$campaign_id" ]; then
             echo 'No campaignId on this request; browser-agent wake not applicable.'
             exit 0
@@ -507,7 +669,30 @@ jobs:
           mode="$(jq -r '.mode // "resume_existing"' "$registration")"
           chat_url="$(jq -r '.chatUrl // empty' "$registration")"
           wake_message="$(jq -r '.wakeMessage // empty' "$registration")"
-          if [ "${V7_REQUEST_KIND:-}" = 'v7-execution' ]; then
+
+          if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "${OPERATOR_OPERATION:-}" = 'INGEST_EXECUTION_EVIDENCE' ]; then
+            receipt='.operator-output/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json'
+            test -s "$receipt"
+            security_disposition="$(jq -r '.securityDisposition' "$receipt")"
+            finding_promotion="$(jq -r '.findingPromotion' "$receipt")"
+            ingestion_digest="$(jq -r '.ingestionDigest' "$receipt")"
+            terminal_message="$(printf '%s\n' \
+              '[AUDIT_AUTOMATION_WAKE_V1]' \
+              "campaign=$campaign_id" \
+              "phase=$phase_id" \
+              "workflow_run=$GITHUB_RUN_ID" \
+              'route=EVIDENCE_INGESTED' \
+              "security_disposition=$security_disposition" \
+              "finding_promotion=$finding_promotion" \
+              "ingestion_digest=$ingestion_digest" \
+              '' \
+              'Technical evidence has been ingested and the receipt is durable on the private campaign branch. Resume semantic review from the admitted evidence; do not rerun completed technical work.')"
+            if [ -n "$wake_message" ]; then
+              wake_message="$terminal_message"$'\n\n'"$wake_message"
+            else
+              wake_message="$terminal_message"
+            fi
+          elif [ "${V7_REQUEST_KIND:-}" = 'v7-execution' ]; then
             observer="${EXECUTION_OBSERVER_RECEIPT:-.audit-evidence/v7-execution/${V7_REQUEST_ID}/EXECUTION_OBSERVER_RECEIPT_v1.json}"
             test -s "$observer"
             route="$(jq -r '.route' "$observer")"
@@ -516,6 +701,11 @@ jobs:
             next_action="$(jq -r '.terminal.nextAction' "$observer")"
             retry_from="$(jq -r '.terminal.retryFrom // empty' "$observer")"
             recovery_command="$(jq -r '.terminal.recoveryCommand // empty' "$observer")"
+            if [ "$route" = 'EVIDENCE_INGESTION' ] && [ -n "${{ inputs.controller_writeback_ref }}" ] && [ "${AUTO_INGESTION_DISPATCHED:-}" != 'true' ]; then
+              route='EVIDENCE_INGESTION_DISPATCH_FAILED'
+              owner='RUNNER_MAINTAINER'
+              next_action='RECOVER_AUTOMATIC_EVIDENCE_INGESTION'
+            fi
             terminal_message="$(printf '%s\n' \
               '[AUDIT_AUTOMATION_WAKE_V1]' \
               "campaign=$campaign_id" \
@@ -528,44 +718,9 @@ jobs:
               "retry_from=$retry_from" \
               "recovery_command=$recovery_command" \
               '' \
-              'Technical execution is terminal and its observer receipt is durable in the request-addressable V7 evidence artifact. Follow the typed route; do not poll or rerun completed work.')"
+              'Technical execution is terminal and its observer receipt is durable. Follow the typed route; do not poll or rerun completed work.')"
             if [ -n "$wake_message" ]; then
-              wake_message="$terminal_message"
-          watchdog_enabled="$(jq -r '.watchdog.enabled // true' "$registration")"
-          watchdog_message="$(jq -r '.watchdog.idleMessage // empty' "$registration")"
-          gate_mode="$(jq -r '.watchdog.gate.mode // "FULL_V26"' "$registration")"
-          gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' "$registration")"
-          gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$registration")"
-          gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' "$registration")"
-          gate_expected_phase="$(jq -r '.watchdog.gate.expectedPhaseId // empty' "$registration")"
-          gate_expected_milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' "$registration")"
-          gate_pointer_path="$(jq -r '.watchdog.gate.activePointerPath // empty' "$registration")"
-          gate_stop_states="$(jq -r '(.watchdog.gate.stopStates // ["WAITING_FOR_HUMAN_RESPONSE","WAITING_FOR_SUCCESSOR_AGENT","CLOSED","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
-          gate_stop_campaign_statuses="$(jq -r '(.watchdog.gate.stopCampaignStatuses // ["COMPLETE","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
-
-          wake_id="$campaign_id-$phase_id-$GITHUB_RUN_ID"
-          wake_b64="$(printf '%s' "$wake_message" | base64 -w0)"
-          watchdog_b64="$(printf '%s' "$watchdog_message" | base64 -w0)"
-
-          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            -f wake_id="$wake_id" \
-            -f campaign_id="$campaign_id" \
-            -f phase_id="$phase_id" \
-            -f mode="$mode" \
-            -f chat_url="$chat_url" \
-            -f wake_message_b64="$wake_b64" \
-            -f watchdog_enabled="$watchdog_enabled" \
-            -f watchdog_message_b64="$watchdog_b64" \
-            -f gate_mode="$gate_mode" \
-            -f gate_repository="$gate_repo" \
-            -f gate_ref="$gate_ref" \
-            -f gate_state_path="$gate_state_path" \
-            -f gate_expected_phase_id="$gate_expected_phase" \
-            -f gate_expected_milestone_id="$gate_expected_milestone" \
-            -f gate_active_pointer_path="$gate_pointer_path" \
-            -f gate_stop_states_csv="$gate_stop_states" \
-            -f gate_stop_campaign_statuses_csv="$gate_stop_campaign_statuses"
-\n\n'"$wake_message"
+              wake_message="$terminal_message"$'\n\n'"$wake_message"
             else
               wake_message="$terminal_message"
             fi
@@ -614,11 +769,3 @@ jobs:
             -f gate_active_pointer_path="$gate_pointer_path" \
             -f gate_stop_states_csv="$gate_stop_states" \
             -f gate_stop_campaign_statuses_csv="$gate_stop_campaign_statuses"
-      - name: Upload request-addressable V7 evidence
-        if: always() && env.V7_REQUEST_KIND == 'v7-execution'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.V7_ARTIFACT_NAME || 'v7-execution-unresolved' }}
-          path: .audit-evidence/v7-execution
-          if-no-files-found: warn
-          retention-days: 30
