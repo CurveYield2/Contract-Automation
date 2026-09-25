@@ -24,12 +24,19 @@ jobs:
       - name: Dispatch canonical V7 qualification
         env:
           GH_TOKEN: ${{ github.token }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
         shell: bash
         run: |
           set -euo pipefail
           workflow='v7-execution-infrastructure-qualification.yml'
+          controller_ref="$(printf '%s\n' "$ISSUE_BODY" | sed -n 's/^[[:space:]]*controller_ref[[:space:]]*=[[:space:]]*\([0-9a-fA-F]\{40\}\)[[:space:]]*$/\1/p' | tail -n1)"
           before="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$workflow" --limit 1 --json databaseId --jq '.[0].databaseId // 0')"
-          gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref main
+          if [ -n "$controller_ref" ]; then
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref main -f controller_ref="$controller_ref"
+            echo "controller_ref=$controller_ref" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref main
+          fi
 
           run_id=''
           for _ in $(seq 1 30); do
