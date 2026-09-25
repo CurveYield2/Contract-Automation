@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
   "campaignId": "REPLACE_WITH_EXACT_CAMPAIGN_ID",
-  "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/c/REPLACE_FOR_RESUME_EXISTING",
-  "wakeMessage": "[AUDIT_AUTOMATION_WAKE_V1]\nResume the admitted audit from the latest durable completion evidence. Do not restart completed work. Continue the current assignment until its required terminal state.",
+  "mode": "create_fresh",
+  "chatUrl": "",
+  "wakeMessage": "[AUDIT_AUTOMATION_WAKE_V1]\nYou are the dedicated Lite Phase-0 web-bootstrap agent. Recover the admitted source-fanout report and campaign state, execute Phase 0 exactly as required by the active Lite skill, create and seal P0_TO_P1, then allow the machine wake chain to launch reviewer-1. Do not restart completed work.",
   "watchdog": {
     "enabled": true,
     "idleMessage": "[AUDIT_AGENT_WATCHDOG_V1]\nGET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.",
