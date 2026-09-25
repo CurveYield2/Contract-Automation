@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: agent-audit-source-fanout
@@ -46,6 +47,7 @@ jobs:
           set -euo pipefail
           schema="$(jq -r '.schema // empty' "$REQUEST")"
           request_id="$(jq -r '.request_id // empty' "$REQUEST")"
+          campaign_id="$(jq -r '.campaign_id // empty' "$REQUEST")"
           audit_name="$(jq -r '.audit_name // empty' "$REQUEST")"
           source_url="$(jq -r '.source.url // empty' "$REQUEST")"
           filename="$(jq -r '.source.filename // empty' "$REQUEST")"
@@ -54,6 +56,7 @@ jobs:
 
           test "$schema" = 'curveyield-audit-source-fanout/v2'
           [[ "$request_id" =~ ^[A-Za-z0-9._-]{1,160}$ ]]
+          [[ "$campaign_id" =~ ^[A-Za-z0-9._-]{1,200}$ ]]
           test -n "$audit_name"
           [[ "$audit_name" != *"/"* ]]
           [[ "$audit_name" != *"\\"* ]]
@@ -65,6 +68,7 @@ jobs:
           [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -gt 0 ]
 
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          echo "campaign_id=$campaign_id" >> "$GITHUB_OUTPUT"
           echo "audit_name=$audit_name" >> "$GITHUB_OUTPUT"
           echo "source_url=$source_url" >> "$GITHUB_OUTPUT"
           echo "filename=$filename" >> "$GITHUB_OUTPUT"
@@ -172,6 +176,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUEST_ID: ${{ steps.meta.outputs.request_id }}
+          CAMPAIGN_ID: ${{ steps.meta.outputs.campaign_id }}
           AUDIT_NAME: ${{ steps.meta.outputs.audit_name }}
           FILENAME: ${{ steps.meta.outputs.filename }}
           SHA256: ${{ steps.meta.outputs.sha256 }}
@@ -181,6 +186,7 @@ jobs:
           set -euo pipefail
           jq -n \
             --arg requestId "$REQUEST_ID" \
+            --arg campaignId "$CAMPAIGN_ID" \
             --arg auditName "$AUDIT_NAME" \
             --arg filename "$FILENAME" \
             --arg sha256 "$SHA256" \
@@ -190,7 +196,7 @@ jobs:
             --arg runId "$GITHUB_RUN_ID" \
             '{
               schemaVersion:"curveyield-audit-source-fanout-report-v2",
-              requestId:$requestId,auditName:$auditName,status:"PASS",
+              requestId:$requestId,campaignId:$campaignId,auditName:$auditName,status:"PASS",
               source:{filename:$filename,sha256:$sha256,size:$size},
               destinations:[
                 {repository:"CurveYield2/Audit-Controller",ref:"main",path:$controllerPath,verified:true},
@@ -209,3 +215,61 @@ jobs:
           else
             gh api --method PUT "$api" -f message="chore(source): record fanout report $REQUEST_ID" -f content="$content" -f branch=main >/dev/null
           fi
+
+      - name: Launch registered Phase-0 browser agent
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAMPAIGN_ID: ${{ steps.meta.outputs.campaign_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          if [ ! -f "$registration" ]; then
+            echo "No browser-agent registration for $CAMPAIGN_ID; source fan-out is complete and no browser wake was requested."
+            exit 0
+          fi
+
+          test "$(jq -r '.schemaVersion // empty' "$registration")" = 'curveyield-browser-agent-wake-registration-v1'
+          test "$(jq -r '.campaignId // empty' "$registration")" = "$CAMPAIGN_ID"
+
+          mode="$(jq -r '.mode // "create_fresh"' "$registration")"
+          chat_url="$(jq -r '.chatUrl // empty' "$registration")"
+          wake_message="$(jq -r '.wakeMessage // empty' "$registration")"
+          test -n "$wake_message"
+
+          watchdog_enabled="$(jq -r '.watchdog.enabled // true' "$registration")"
+          watchdog_message="$(jq -r '.watchdog.idleMessage // empty' "$registration")"
+          gate_mode="$(jq -r '.watchdog.gate.mode // "LITE"' "$registration")"
+          gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' "$registration")"
+          gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$registration")"
+          gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' "$registration")"
+          gate_expected_phase="$(jq -r '.watchdog.gate.expectedPhaseId // "phase-0"' "$registration")"
+          gate_expected_milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // "P0_BOOTSTRAP"' "$registration")"
+          gate_pointer_path="$(jq -r '.watchdog.gate.activePointerPath // empty' "$registration")"
+          gate_stop_states="$(jq -r '(.watchdog.gate.stopStates // ["WAITING_FOR_HUMAN_RESPONSE","WAITING_FOR_SUCCESSOR_AGENT","CLOSED","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
+          gate_stop_campaign_statuses="$(jq -r '(.watchdog.gate.stopCampaignStatuses // ["COMPLETE","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
+
+          wake_id="$CAMPAIGN_ID-phase0-source-fanout-$GITHUB_RUN_ID"
+          wake_b64="$(printf '%s' "$wake_message" | base64 -w0)"
+          watchdog_b64="$(printf '%s' "$watchdog_message" | base64 -w0)"
+
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$wake_id" \
+            -f campaign_id="$CAMPAIGN_ID" \
+            -f phase_id="phase-0" \
+            -f mode="$mode" \
+            -f chat_url="$chat_url" \
+            -f wake_message_b64="$wake_b64" \
+            -f watchdog_enabled="$watchdog_enabled" \
+            -f watchdog_message_b64="$watchdog_b64" \
+            -f gate_mode="$gate_mode" \
+            -f gate_repository="$gate_repo" \
+            -f gate_ref="$gate_ref" \
+            -f gate_state_path="$gate_state_path" \
+            -f gate_expected_phase_id="$gate_expected_phase" \
+            -f gate_expected_milestone_id="$gate_expected_milestone" \
+            -f gate_active_pointer_path="$gate_pointer_path" \
+            -f gate_stop_states_csv="$gate_stop_states" \
+            -f gate_stop_campaign_statuses_csv="$gate_stop_campaign_statuses"
+
