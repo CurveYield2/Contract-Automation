@@ -115,7 +115,7 @@ and binds:
 - exact authoritative handoff path;
 - explicit `taskClass: MECHANICAL_ONLY`;
 - deterministic mechanical instructions with no unresolved placeholders;
-- exact required output paths.
+- exact required output paths, all confined to the handoff's `MECHANICAL/` subdirectory.
 
 Example:
 
@@ -129,7 +129,7 @@ Example:
   "instructions": "Reconcile the filed evidence index and carried-forward obligation references. Do not make security findings or severity decisions.",
   "requiredOutputs": [
     {
-      "path": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL_EVIDENCE_INDEX_v1.json",
+      "path": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL/MECHANICAL_EVIDENCE_INDEX_v1.json",
       "purpose": "Exact evidence-reference projection for the successor reviewer"
     }
   ]
@@ -159,7 +159,7 @@ Example:
   "workPacketSha256": "<64 lowercase hex>",
   "outputs": [
     {
-      "path": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL_EVIDENCE_INDEX_v1.json",
+      "path": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL/MECHANICAL_EVIDENCE_INDEX_v1.json",
       "sha256": "<64 lowercase hex>"
     }
   ],
@@ -172,8 +172,9 @@ Before launching the normal successor reviewer, the existing watchdog verifies:
 1. the completion receipt is bound to the exact campaign, milestone, handoff, and work-packet path;
 2. the work-packet SHA-256 matches the exact filed packet bytes;
 3. the completion output set exactly matches the work packet's required-output set;
-4. every required output still exists in Audit-Controller;
-5. every required output's current SHA-256 matches the completion receipt.
+4. every required output is confined to the authoritative handoff's `MECHANICAL/` subdirectory;
+5. every required output still exists in Audit-Controller;
+6. every required output's current SHA-256 matches the completion receipt.
 
 A fresh mechanical chat does **not** replace the campaign's registered reviewer chat URL. Only reviewer-role fresh chats update the campaign registration.
 
