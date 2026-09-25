@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "p0-final-state-curveyield-dex-fresh-audit-v38-3-5-test-g1-20260925T180100Z",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "b4a3e250d63eef8fe90bd251219f005ef64088a4",
+    "requestPath": ".deep-assurance/operator/requests/p0-final-state-curveyield-dex-fresh-audit-v38-3-5-test-g1-20260925T180100Z.json"
+  },
+  "verifyController": true
+}
