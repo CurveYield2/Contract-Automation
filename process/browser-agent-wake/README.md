@@ -66,9 +66,13 @@ The canonical V7 execution workflow checks for a matching registration only afte
 
 A successful wake arms `.github/workflows/browser-agent-watchdog.yml`.
 
-The watchdog is one long-lived four-hour segment that checks the agent about every five minutes. It does **not** interrupt a productive agent. A check is productive when ChatGPT is visibly generating or the assistant message count/content has advanced since the preceding observation. Only an idle/stalled conversation receives the configured `GET BACK TO WORK` message.
+The watchdog uses short scheduled sweeps rather than holding a GitHub runner open while it sleeps. `.github/workflows/browser-agent-watchdog.yml` runs every five minutes (offset from the top of the hour), discovers the durable active watchdog states under `process/browser-agent-watchdog/active/`, and supervises each active agent once. A successful wake also dispatches an immediate first sweep, so a newly woken agent does not wait for the next schedule tick.
 
-If work is still active near the end of a four-hour segment, the watchdog self-dispatches the next four-hour segment. No hourly Scheduled Task or ChatGPT Work dependency is used.
+Each active wake ID has its own workflow concurrency key, preventing an immediate/manual sweep and a scheduled sweep from supervising the same chat simultaneously. Up to four distinct active agents may be checked in parallel.
+
+The productivity rule is unchanged: the watchdog does **not** interrupt a productive agent. A check is productive when ChatGPT is visibly generating or the assistant message count/content has advanced since the preceding observation. Only an idle/stalled conversation receives the configured `GET BACK TO WORK` message.
+
+No watchdog job sleeps between observations and no watchdog self-chains into a four-hour segment. If GitHub's scheduled trigger is briefly delayed, the canonical Audit-Controller state and handoff gates remain authoritative; only the timing of the next observation/poke or successor dispatch is delayed.
 
 ## Lite automatic successor launch
 
@@ -215,4 +219,4 @@ Wake delivery tries independent providers in this order and stops at the first v
 2. Browserless using `BROWSERLESS_TOKEN` and persisted profile `BROWSERLESS_PROFILE` (default `chatgpt`);
 3. Browserbase using `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and `BROWSERBASE_CONTEXT_ID`.
 
-The wake ID is durable and the persisted registration/chat URL makes retries safe. Provider failures are retried by later watchdog cycles rather than blocking the audit permanently.
+The wake ID is durable and the persisted registration/chat URL makes retries safe. Provider failures are retried by later scheduled watchdog sweeps rather than blocking the audit permanently.
