@@ -57,7 +57,7 @@ gh() {
   if [ "$1" = api ]; then
     case "$2" in
       *MECHANICAL_WORK_PACKET_v1.json*) base64 -w0 "$FIXTURE_DIR/packet";;
-      *MECHANICAL_WORK_COMPLETION_v1.json*) base64 -w0 "$FIXTURE_DIR/receipt";;
+      *MECHANICAL_WORK_COMPLETION_v1.json*) [ "$MISSING_RECEIPT" = no ] && base64 -w0 "$FIXTURE_DIR/receipt" || return 1;;
       *MECHANICAL/INDEX_v1.json*) [ "$MISSING_OUTPUT" = no ] && base64 -w0 "$FIXTURE_DIR/output" || return 1;;
       *pointer.json*) base64 -w0 "$FIXTURE_DIR/pointer";;
       *WAKE_UP_MESSAGE.md*) base64 -w0 "$FIXTURE_DIR/wake";;
@@ -80,8 +80,15 @@ gate_path=campaigns/synthetic/state.json
 gate_expected_phase=phase-0
 cp "$FIXTURE_DIR/state" /tmp/watchdog-state.json
 `;
-    const command = script + functions + (launch
+    const command = script + functions + (launch === 'mechanical'
       ? String.raw`
+if launch_lite_successor campaigns/synthetic/pointer.json P0_BOOTSTRAP CurveYield2/Audit-Controller main; then
+  exit 42
+else
+  [ "$?" -eq 4 ]
+fi
+`
+      : launch ? String.raw`
 if verify_lite_interphase_completion "$PACKET_PATH" "$COMPLETION_PATH" "$HANDOFF_PATH" P0_BOOTSTRAP CurveYield2/Audit-Controller main; then
   launch_lite_successor campaigns/synthetic/pointer.json P0_BOOTSTRAP CurveYield2/Audit-Controller main
 else
@@ -94,7 +101,8 @@ verify_lite_interphase_completion "$PACKET_PATH" "$COMPLETION_PATH" "$HANDOFF_PA
     const result = spawnSync('bash', ['-c', command], { encoding: 'utf8', env: {
       ...process.env, FIXTURE_DIR: temp, PACKET_PATH: packetPath,
       COMPLETION_PATH: completionPath, HANDOFF_PATH: handoff,
-      MISSING_OUTPUT: files.missingOutput ? 'yes' : 'no'
+      MISSING_OUTPUT: files.missingOutput ? 'yes' : 'no',
+      MISSING_RECEIPT: files.missingReceipt ? 'yes' : 'no'
     } });
     return { result, dispatched: fs.existsSync(path.join(temp, 'dispatch'))
       ? fs.readFileSync(path.join(temp, 'dispatch'), 'utf8') : '' };
@@ -111,6 +119,8 @@ test('sealed P0 synthetic packet validates and dispatches one successor', () => 
 test('interphase gate fails closed across packet and receipt mutations', () => {
   const cases = [
     (p) => { p.taskClass = 'SEMANTIC'; },
+    (p) => { p.schemaVersion = 'invalid'; },
+    (p, f) => { f.receipt = { handoffPath: 'other' }; },
     (p) => { p.requiredOutputs = []; },
     (p, f) => { f.pinnedSha = '0'.repeat(64); },
     (p, f) => { f.missingOutput = true; },
@@ -127,4 +137,19 @@ test('interphase gate fails closed across packet and receipt mutations', () => {
     assert.notEqual(result.status, 0, mutate.toString());
     assert.equal(dispatched, '', mutate.toString());
   }
+});
+
+test('sealed P0 dispatches a bounded mechanical wake before a receipt exists', () => {
+  const { result, dispatched } = exercise((packet, files) => {
+    files.missingReceipt = true;
+  }, 'mechanical');
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(dispatched, /worker_role=interphase_mechanical/);
+  assert.doesNotMatch(dispatched, /phase_id=phase-1/);
+  const encoded = dispatched.match(/wake_message_b64=([A-Za-z0-9+/=]+)/)?.[1];
+  assert.ok(encoded, dispatched);
+  const message = Buffer.from(encoded, 'base64').toString('utf8');
+  assert.match(message, /work_packet_sha256=[a-f0-9]{64}/);
+  assert.match(message, /Do not make, promote, reject, grade, or remediate security findings/);
+  assert.match(message, /Index the synthetic evidence bytes/);
 });
