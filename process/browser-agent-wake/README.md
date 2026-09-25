@@ -10,12 +10,13 @@ The safe campaign ID is the campaign ID with any character outside `A-Za-z0-9._-
 
 ## Lite registration
 
-Lite audits use the existing compressed milestone topology:
+Lite audits use the existing compressed milestone topology, with a separate mechanical bootstrap boundary:
 
-- `P0_1` — reviewer-1, Phases 0–1
-- `P2_5` — reviewer-2, Phases 2–5
-- `P6_7` — reviewer-3L, Phases 6–7
-- `P8_10` — reviewer-4, Phases 8–10
+- `P0_BOOTSTRAP` — gate identity for the dedicated web-bootstrap agent executing Phase 0; this is not a semantic-review milestone.
+- `P0_1` — reviewer-1 consumes the sealed Phase-0 bootstrap and completes Phase 1, sealing the combined Phase 0–1 milestone.
+- `P2_5` — reviewer-2, Phases 2–5.
+- `P6_7` — reviewer-3L, Phases 6–7.
+- `P8_10` — reviewer-4, Phases 8–10.
 
 Use:
 
@@ -23,8 +24,8 @@ Use:
 {
   "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
   "campaignId": "REPLACE_WITH_EXACT_CAMPAIGN_ID",
-  "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/c/REPLACE_FOR_RESUME_EXISTING",
+  "mode": "create_fresh",
+  "chatUrl": "",
   "wakeMessage": "[AUDIT_AUTOMATION_WAKE_V1]\nResume the admitted audit from the latest durable completion evidence. Do not restart completed work. Continue the current assignment until its required terminal state.",
   "watchdog": {
     "enabled": true,
@@ -35,7 +36,7 @@ Use:
       "ref": "main",
       "statePath": "campaigns/REPLACE_WITH_AUDIT_NAME/controller/CAMPAIGN_STATE_v1.json",
       "expectedPhaseId": "phase-0",
-      "expectedMilestoneId": "P0_1",
+      "expectedMilestoneId": "P0_BOOTSTRAP",
       "activePointerPath": "campaigns/REPLACE_WITH_AUDIT_NAME/controller/ACTIVE_PHASE_POINTER_v1.json",
       "stopStates": [
         "WAITING_FOR_HUMAN_RESPONSE",
@@ -52,7 +53,7 @@ Use:
 }
 ```
 
-Phase 0 should write the exact current ordinary ChatGPT web-chat URL into `chatUrl` and register the current Lite milestone before long-running automation begins.
+The human-woken bootstrap chat should create this registration **before** submitting the source-fanout request. Initial mode is `create_fresh` and `chatUrl` is empty. After source fan-out reaches PASS, the existing source-fanout workflow launches a dedicated normal ChatGPT Phase-0 conversation, captures its `chatgpt.com/c/...` URL, rewrites the registration to `resume_existing`, and arms its watchdog. The original human-woken bootstrap chat may then retire after verifying that rebound.
 
 ## Wake modes
 
@@ -80,7 +81,7 @@ For a Lite registration it reads:
 - the handoff named by `authoritativeHandoff`
 - `WAKE_UP_MESSAGE.md` in that same handoff folder
 
-The current browser agent remains supervised until the expected milestone is machine-sealed. A successor is launched only when all of these are coherent:
+The Phase-0 browser agent is supervised under the gate-only identity `P0_BOOTSTRAP`; when the canonical controller reaches the sealed `P0_TO_P1` successor boundary, reviewer-1 is launched automatically. Later browser agents remain supervised until their expected Lite milestone is machine-sealed. A successor is launched only when all of these are coherent:
 
 1. the expected milestone is terminal in the canonical Lite campaign state;
 2. the active pointer says the same milestone is the completed milestone;
