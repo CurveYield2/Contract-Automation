@@ -125,11 +125,25 @@ verify_lite_interphase_completion "$PACKET_PATH" "$COMPLETION_PATH" "$HANDOFF_PA
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 }
 
-test('sealed P0 synthetic packet validates and dispatches one successor', () => {
+test('sealed P0 synthetic packet validates and dispatches one successor with verified mechanical context', () => {
   const { result, dispatched } = exercise(() => {}, true);
   assert.equal(result.status, 0, result.stderr);
   assert.match(dispatched, /browser-agent-wake.yml/);
   assert.match(dispatched, /phase_id=phase-1/);
+
+  const encoded = dispatched.match(/wake_message_b64=([A-Za-z0-9+/=]+)/)?.[1];
+  assert.ok(encoded, dispatched);
+  const message = Buffer.from(encoded, 'base64').toString('utf8');
+  assert.match(message, /Synthetic successor instructions/);
+  assert.match(message, /\[VERIFIED_INTERPHASE_MECHANICAL_RESULTS_V2\]/);
+  assert.match(message, /work_packet=.*MECHANICAL_WORK_PACKET_v2\.json/);
+  assert.match(message, /completion_receipt=.*MECHANICAL_WORK_COMPLETION_v2\.json/);
+  assert.match(message, /reconciliation_output=.*FINAL_RECONCILIATION_v2\.json/);
+  assert.match(message, /verified_output_count=11/);
+  assert.match(message, /security_meaning=MECHANICAL_ONLY/);
+  assert.match(message, /read_order=Read the final reconciliation output first/);
+  assert.match(message, /verified_unit_outputs:[\s\S]*UNIT_01_v2\.json[\s\S]*UNIT_10_v2\.json/);
+  assert.doesNotMatch(message, /verified_unit_outputs:[\s\S]*FINAL_RECONCILIATION_v2\.json/);
 });
 
 test('interphase gate fails closed across packet and receipt mutations', () => {
@@ -177,4 +191,5 @@ test('sealed P0 dispatches a bounded mechanical wake before a receipt exists', (
   assert.match(message, /prohibited_semantic_work=/);
   assert.match(message, /Do not make, promote, reject, grade, or remediate security findings/);
   assert.match(message, /Complete all ten synthetic evidence reconciliation units/);
+  assert.doesNotMatch(message, /VERIFIED_INTERPHASE_MECHANICAL_RESULTS_V2/);
 });

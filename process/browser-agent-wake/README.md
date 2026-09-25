@@ -193,6 +193,27 @@ The web agent is explicitly prohibited from finding promotion/rejection, severit
 
 A fresh mechanical chat does not replace the campaign reviewer-chat registration. When v2 completion is machine-valid, the same watchdog invokes the existing Lite successor-launch path and retires the mechanical worker.
 
+## Successor context after mechanical completion
+
+After `MECHANICAL_WORK_COMPLETION_v2.json` passes the existing machine validation, the same Lite successor-launch path augments the dispatched successor wake message with a compact:
+
+`[VERIFIED_INTERPHASE_MECHANICAL_RESULTS_V2]`
+
+section.
+
+The sealed handoff and stored `WAKE_UP_MESSAGE.md` are **not mutated**. The additional context exists only in the runtime wake message.
+
+The injected section contains:
+- exact v2 work-packet path;
+- exact v2 completion-receipt path;
+- final reconciliation output path;
+- verified output count;
+- an explicit `MECHANICAL_ONLY` security-meaning warning;
+- progressive-disclosure instruction to read the final reconciliation first;
+- the ten verified unit-output paths for drill-down only when needed.
+
+This lets the reasoning reviewer benefit from the web worker immediately without rediscovering the files or preloading all unit outputs. A failed, missing, mutated, or otherwise unverified mechanical completion can never produce this verified-results section.
+
 ## Qualification efficiency
 
 Changes confined to the browser-agent/control-plane allowlist are qualified through the existing V7 qualification workflow's `CONTROL_LIGHT` lane. That lane runs the relevant browser/auth/bridge regressions plus repository static/build checks without installing the blockchain runner toolchain. Any runner-critical, mixed, unknown, explicit/manual, or qualification-infrastructure change fails safe to the full V7 qualification lane.
