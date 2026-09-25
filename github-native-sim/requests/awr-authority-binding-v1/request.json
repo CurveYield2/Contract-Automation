@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "awr-authority-binding-v1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "92f48532dbeb93ae8df2dc72dcd86e7366cbef09",
+    "requestPath": ".deep-assurance/operator/requests/awr-authority-binding-v1.json"
+  },
+  "verifyController": true
+}
