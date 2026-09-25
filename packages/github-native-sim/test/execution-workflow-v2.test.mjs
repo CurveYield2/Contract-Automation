@@ -13,8 +13,10 @@ test('canonical V7 execution workflow scopes private controller auth and archive
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /name:\s*Checkout private Audit Controller for manual dispatch/);
-  assert.match(workflow, /GH_TOKEN:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \|\| secrets\.PREFLIGHTSIM_GITHUB_TOKEN \}\}/);
-  assert.match(workflow, /gh api repos\/CurveYield2\/Audit-Controller --silent/);
+  assert.match(workflow, /AUDIT_CONTROLLER_TOKEN_PRIMARY:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
+  assert.match(workflow, /AUDIT_CONTROLLER_TOKEN_FALLBACK:\s*\$\{\{ secrets\.PREFLIGHTSIM_GITHUB_TOKEN \}\}/);
+  assert.match(workflow, /GH_TOKEN="\$AUDIT_CONTROLLER_TOKEN_PRIMARY" gh api repos\/CurveYield2\/Audit-Controller --silent/);
+  assert.match(workflow, /GH_TOKEN="\$AUDIT_CONTROLLER_TOKEN_FALLBACK" gh api repos\/CurveYield2\/Audit-Controller --silent/);
   assert.match(workflow, /gh repo clone CurveYield2\/Audit-Controller \.controller-request/);
 
   assert.match(workflow, /name:\s*Checkout exact private controller for controller operation/);
