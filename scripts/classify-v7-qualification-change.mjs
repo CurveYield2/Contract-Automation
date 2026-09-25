@@ -5,7 +5,6 @@ const LIGHT_PATTERNS = [
   /^\.github\/workflows\/browser-agent-wake\.yml$/,
   /^\.github\/workflows\/browser-agent-watchdog\.yml$/,
   /^\.github\/workflows\/development-agent-task-manager\.yml$/,
-  /^\.github\/workflows\/development-agent-task-manager\.yml$/,
   /^\.github\/workflows\/agent-zip-import-v1\.yml$/,
   /^scripts\/browser-agent-wake\.mjs$/,
   /^scripts\/select-audit-controller-token\.sh$/,
@@ -13,7 +12,6 @@ const LIGHT_PATTERNS = [
   /^docs\//,
   /^process\/browser-agent-wake\//,
   /^process\/browser-agent-watchdog\//,
-  /^process\/development-agent-task-manager\//,
   /^process\/development-agent-task-manager\//,
   /^process\/V7_QUALIFICATION_STATUS\.json$/,
   /^process\/V7_QUALIFICATION_LAST_RUN\.json$/,
@@ -45,3 +43,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const result = classifyV7QualificationChanges(input.split(/\r?\n/), { forceFull });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
+
