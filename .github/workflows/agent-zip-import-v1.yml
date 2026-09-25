@@ -501,3 +501,26 @@ jobs:
             -f gate_stop_states_csv="$gate_stop_states" \
             -f gate_stop_campaign_statuses_csv="$gate_stop_campaign_statuses"
 
+      - name: Record import failure run
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST: ${{ steps.request.outputs.path }}
+        shell: bash
+        run: |
+          set -u
+          request_id="run-$GITHUB_RUN_ID"
+          if [ -n "${REQUEST:-}" ] && [ -f "$REQUEST" ]; then
+            observed="$(jq -r '.request_id // empty' "$REQUEST" 2>/dev/null || true)"
+            if [ -n "$observed" ]; then request_id="$observed"; fi
+          fi
+          safe_id="$(printf '%s' "$request_id" | tr -c 'A-Za-z0-9._-' '_')"
+          printf '{"schemaVersion":"curveyield-agent-file-import-failure-v1","requestId":"%s","status":"FAIL","workflowRunId":"%s"}\n' "$request_id" "$GITHUB_RUN_ID" > /tmp/import-failure.json
+          encoded="$(base64 -w0 /tmp/import-failure.json)"
+          api="repos/$GITHUB_REPOSITORY/contents/process/agent-file-import/failures/$safe_id.json"
+          existing="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [[ "$existing" =~ ^[0-9a-f]{40}$ ]]; then
+            gh api --method PUT "$api" -f message="chore(import): record failure $request_id" -f content="$encoded" -f sha="$existing" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$api" -f message="chore(import): record failure $request_id" -f content="$encoded" -f branch=main >/dev/null
+          fi
