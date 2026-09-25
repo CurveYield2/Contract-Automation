@@ -266,6 +266,7 @@ jobs:
           fetch-depth: 1
 
       - name: Load and validate active manager state
+        id: manager_state
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -273,7 +274,10 @@ jobs:
           set -euo pipefail
           api="repos/$GITHUB_REPOSITORY/contents/process/development-agent-task-manager/active/$SAFE_ID.json"
           encoded="$(gh api "$api?ref=main" --jq '.content' 2>/dev/null || true)"
-          [ -n "$encoded" ] || exit 0
+          if [ -z "$encoded" ]; then
+            echo 'valid=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           printf '%s' "$encoded" | base64 -d > /tmp/task-manager-state.json
           jq -e --arg safe "$SAFE_ID" '
             .schemaVersion=="curveyield-development-agent-task-manager-state-v1"
@@ -290,8 +294,10 @@ jobs:
             and .responsePolicy.refreshBetweenAttempts==true
           ' /tmp/task-manager-state.json >/dev/null
           echo "STATE_API=$api" >> "$GITHUB_ENV"
+          echo 'valid=true' >> "$GITHUB_OUTPUT"
 
       - name: Verify pinned development authorities
+        if: steps.manager_state.outputs.valid == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -316,6 +322,7 @@ jobs:
           }
 
       - name: Check machine completion gate
+        if: steps.manager_state.outputs.valid == 'true'
         id: completion
         env:
           GH_TOKEN: ${{ github.token }}
@@ -353,7 +360,7 @@ jobs:
           echo "completion_head=$current_head" >> "$GITHUB_OUTPUT"
 
       - name: Retire completed manager
-        if: steps.completion.outputs.complete == 'true'
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -372,22 +379,22 @@ jobs:
           gh api --method DELETE "$STATE_API" -f message="chore(task-manager): retire $SAFE_ID" -f sha="$active_sha" -f branch=main >/dev/null
 
       - name: Stop after completion
-        if: steps.completion.outputs.complete == 'true'
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete == 'true'
         shell: bash
         run: exit 0
 
       - name: Set up Node.js
-        if: steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Set up isolated browser-agent runtime
-        if: steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
         uses: ./.github/actions/setup-browser-agent-runtime
 
       - name: Observe worker and execute bounded recovery policy
-        if: steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
