@@ -1,0 +1,46 @@
+name: Generate Canonical Root Lock Temp v1
+
+on:
+  push:
+    branches:
+      - fix/canonical-dependency-lock-v2
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout lock branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/canonical-dependency-lock-v2
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Generate exact root dependency lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f package-lock.json
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          test -s package-lock.json
+          node -e "const p=require('./package-lock.json'); if(p.lockfileVersion!==3) process.exit(1)"
+
+      - name: Commit generated lock to branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package-lock.json
+          git diff --cached --exit-code && { echo 'package-lock.json was not generated as a branch change' >&2; exit 1; } || true
+          git commit -m 'chore(v7): add canonical root dependency lock'
+          git push origin HEAD:fix/canonical-dependency-lock-v2
