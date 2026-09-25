@@ -1,6 +1,23 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v9
+Policy version: v10
+
+## Bounded auxiliary work — anti-loop policy
+
+Agent-authored queues, checklists, optimization sweeps, recovery notes, and follow-up issues are **subordinate work aids**. They MUST NOT become independent controlling specifications or recursively expand their own scope.
+
+Mandatory rules:
+
+- The active human-approved specification, campaign authority, and latest verified handoff outrank any agent-authored queue or issue.
+- An auxiliary queue MUST state a finite scope, exact deliverables, and an explicit terminal exit condition before work begins.
+- An auxiliary queue MUST NOT contain unbounded directives such as "continue continuously", "audit everything again", "keep finding improvements", or equivalent open-ended successor instructions.
+- An agent MUST NOT create a successor task whose sole purpose is to repeat the same broad audit/sweep after the stated deliverables are complete.
+- Before resuming an inherited queue, compare it against current `main`, the governing specification, and completed work. If the queue is stale, superseded, or broader than the governing specification, retire it rather than resume it.
+- Tests and qualification are evidence for a defined change, not a source of new scope. A passing or failing test may justify repairing the evidenced defect, but MUST NOT automatically trigger another repository-wide sweep.
+- After the bounded deliverables are complete, the agent MUST return to the next unfinished item in the governing specification or stop if the specification is complete.
+- Any future handoff MUST name the governing specification and exact resume point. It MUST NOT direct a successor to an open-ended self-authored queue as the primary authority.
+
+This rule exists to prevent self-perpetuating agent loops that consume time without advancing the approved objective.
 
 ## Browser-agent blockchain workstation — start here
 
