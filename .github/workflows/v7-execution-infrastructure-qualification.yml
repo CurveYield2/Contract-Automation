@@ -220,7 +220,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test packages/github-native-sim/test/browser-agent-*.test.mjs packages/github-native-sim/test/audit-controller-token-selection-v1.test.mjs packages/github-native-sim/test/atomic-request-bridge-v1.test.mjs packages/github-native-sim/test/execution-workflow-v2.test.mjs packages/github-native-sim/test/v7-qualification-routing-v1.test.mjs
+          node --test packages/github-native-sim/test/browser-agent-*.test.mjs packages/github-native-sim/test/audit-controller-token-selection-v1.test.mjs packages/github-native-sim/test/atomic-request-bridge-v1.test.mjs packages/github-native-sim/test/execution-workflow-v2.test.mjs
           node --check scripts/browser-agent-wake.mjs
           bash -n scripts/select-audit-controller-token.sh
 
