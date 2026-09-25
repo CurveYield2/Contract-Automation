@@ -129,14 +129,21 @@ jobs:
 
       - name: Checkout exact private Audit-Controller candidate
         if: inputs.controller_ref != ''
-        uses: actions/checkout@v4
-        with:
-          repository: CurveYield2/Audit-Controller
-          ref: ${{ inputs.controller_ref }}
-          token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          path: .controller-under-test
-          persist-credentials: false
-          fetch-depth: 1
+        env:
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CONTROLLER_REF: ${{ inputs.controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          gh api repos/CurveYield2/Audit-Controller --silent
+          rm -rf .controller-under-test
+          gh auth setup-git
+          gh repo clone CurveYield2/Audit-Controller .controller-under-test -- --filter=blob:none --no-checkout
+          cd .controller-under-test
+          git fetch --depth=1 origin "$CONTROLLER_REF"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$CONTROLLER_REF"
 
       - name: Verify private Audit-Controller v26 suite
         if: inputs.controller_ref != ''
