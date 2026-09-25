@@ -127,10 +127,19 @@ jobs:
       - name: Repository build checks
         run: npm run build
 
+      - name: Select working Audit-Controller credential
+        if: inputs.controller_ref != ''
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
       - name: Checkout exact private Audit-Controller candidate
         if: inputs.controller_ref != ''
         env:
-          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN || secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           CONTROLLER_REF: ${{ inputs.controller_ref }}
         shell: bash
         run: |
