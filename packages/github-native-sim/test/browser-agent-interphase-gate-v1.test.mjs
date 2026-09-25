@@ -153,7 +153,11 @@ test('sealed P0 dispatches a bounded mechanical wake before a receipt exists', (
   const encoded = dispatched.match(/wake_message_b64=([A-Za-z0-9+/=]+)/)?.[1];
   assert.ok(encoded, dispatched);
   const message = Buffer.from(encoded, 'base64').toString('utf8');
+  assert.match(message, /repository=CurveYield2\/Audit-Controller/);
   assert.match(message, /work_packet_sha256=[a-f0-9]{64}/);
+  assert.match(message, /required_outputs:[\s\S]*MECHANICAL\/INDEX_v1\.json/);
+  assert.match(message, /do_not_repeat=/);
+  assert.match(message, /prohibited_semantic_work=/);
   assert.match(message, /Do not make, promote, reject, grade, or remediate security findings/);
   assert.match(message, /Index the synthetic evidence bytes/);
 });
