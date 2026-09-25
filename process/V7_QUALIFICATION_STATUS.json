@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-v7-current-qualification-status-v1",
   "status": "PASS",
-  "qualifiedCommit": "a08cc3432cfa8876ef86a320daae59b8a7e8b3b0",
-  "workflowRunId": "36080539498",
-  "qualifiedAt": "2026-09-25T01:07:33.037Z",
+  "qualifiedCommit": "118214bf5e93780d5467ab50f32ac3a9bea52722",
+  "workflowRunId": "36081122221",
+  "qualifiedAt": "2026-09-25T01:15:29.407Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
@@ -40,35 +40,7 @@
       ]
     }
   },
-  "controllerQualification": {
-    "schemaVersion": "v26-controller-qualification-v1",
-    "controllerCommit": "c0121cc45c57e5340e2b5b5d6056fe85616c6c52",
-    "controllerRef": "c0121cc45c57e5340e2b5b5d6056fe85616c6c52",
-    "status": "PASS",
-    "testedSchemas": [
-      "audit-v7-sequential-review-state-v3",
-      "v26-phase-contract-v1",
-      "v26-successor-handoff-v1",
-      "v26-security-traceability-graph-v1",
-      "v26-obligation-ledger-v1",
-      "v26-domain-applicability-v1",
-      "v26-evidence-invalidation-v1",
-      "v26-phase6-subgate-state-v1",
-      "v26-audit-closure-manifest-v1"
-    ],
-    "testedGates": [
-      "reviewer-lineage",
-      "successor-handoffs",
-      "phase-contracts",
-      "traceability",
-      "obligations",
-      "domains",
-      "evidence-invalidation",
-      "P6.0-P6.8",
-      "Phase-10-closure",
-      "v26-machine-conformance"
-    ]
-  },
+  "controllerQualification": null,
   "dependencyLockPresent": true,
   "toolchain": {
     "schemaVersion": "curveyield-v7-toolchain-verification-v1",
