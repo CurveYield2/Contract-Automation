@@ -68,3 +68,11 @@ test('controller-only publication re-reads current remote qualification status b
   assert.match(workflow, /canonical runner qualification run changed during controller-only qualification/);
   assert.match(workflow, /-f sha="\$existing_sha"/);
 });
+
+
+test('qualification concurrency cancels duplicates without collapsing independent controller proofs', () => {
+  assert.match(workflow, /inputs\.controller_ref/);
+  assert.match(workflow, /inputs\.qualification_lane/);
+  assert.match(workflow, /format\('runner-\{0\}', github\.ref\)/);
+  assert.match(workflow, /cancel-in-progress:\s*true/);
+});
