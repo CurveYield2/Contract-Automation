@@ -30,6 +30,11 @@ on:
       watchdog_message_b64:
         required: false
         type: string
+      gate_mode:
+        required: false
+        default: FULL_V26
+        type: choice
+        options: [FULL_V26, LITE]
       gate_repository:
         required: false
         default: CurveYield2/Audit-Controller
@@ -42,6 +47,12 @@ on:
         required: false
         type: string
       gate_expected_phase_id:
+        required: false
+        type: string
+      gate_expected_milestone_id:
+        required: false
+        type: string
+      gate_active_pointer_path:
         required: false
         type: string
       gate_stop_states_csv:
@@ -132,10 +143,13 @@ jobs:
           PROVIDER: ${{ steps.deliver.outputs.provider }}
           ASSISTANT_COUNT: ${{ steps.deliver.outputs.assistant_count }}
           LAST_HASH: ${{ steps.deliver.outputs.last_hash }}
+          GATE_MODE: ${{ inputs.gate_mode }}
           GATE_REPOSITORY: ${{ inputs.gate_repository }}
           GATE_REF: ${{ inputs.gate_ref }}
           GATE_STATE_PATH: ${{ inputs.gate_state_path }}
           GATE_EXPECTED_PHASE_ID: ${{ inputs.gate_expected_phase_id }}
+          GATE_EXPECTED_MILESTONE_ID: ${{ inputs.gate_expected_milestone_id }}
+          GATE_ACTIVE_POINTER_PATH: ${{ inputs.gate_active_pointer_path }}
           GATE_STOP_STATES_CSV: ${{ inputs.gate_stop_states_csv }}
           GATE_STOP_CAMPAIGN_STATUSES_CSV: ${{ inputs.gate_stop_campaign_statuses_csv }}
         shell: bash
@@ -151,10 +165,13 @@ jobs:
             --arg provider "$PROVIDER" \
             --arg armedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg idleMessage "$(cat /tmp/watchdog-message.txt)" \
+            --arg gateMode "$GATE_MODE" \
             --arg gateRepository "$GATE_REPOSITORY" \
             --arg gateRef "$GATE_REF" \
             --arg gateStatePath "$GATE_STATE_PATH" \
             --arg gateExpectedPhaseId "$GATE_EXPECTED_PHASE_ID" \
+            --arg gateExpectedMilestoneId "$GATE_EXPECTED_MILESTONE_ID" \
+            --arg gateActivePointerPath "$GATE_ACTIVE_POINTER_PATH" \
             --arg gateStopStatesCsv "$GATE_STOP_STATES_CSV" \
             --arg gateStopCampaignStatusesCsv "$GATE_STOP_CAMPAIGN_STATUSES_CSV" \
             --arg lastHash "$LAST_HASH" \
@@ -165,10 +182,13 @@ jobs:
               idleMessage:$idleMessage,
               observation:{assistantCount:$assistantCount,lastAssistantHash:$lastHash,observedAt:$armedAt},
               gate:{
+                mode:$gateMode,
                 repository:$gateRepository,
                 ref:$gateRef,
                 statePath:$gateStatePath,
                 expectedPhaseId:$gateExpectedPhaseId,
+                expectedMilestoneId:$gateExpectedMilestoneId,
+                activePointerPath:$gateActivePointerPath,
                 stopStates:($gateStopStatesCsv|split(",")|map(gsub("^ +| +$";""))),
                 stopCampaignStatuses:($gateStopCampaignStatusesCsv|split(",")|map(gsub("^ +| +$";"")))
               }
