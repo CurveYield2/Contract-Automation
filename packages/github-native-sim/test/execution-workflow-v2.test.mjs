@@ -193,5 +193,5 @@ test('canonical execution workflow tail is singular and free of the prior duplic
   assert.equal((workflow.match(/- name: Upload request-addressable V7 evidence/g) ?? []).length, 1);
   assert.equal((workflow.match(/- name: Dispatch registered browser-agent wake/g) ?? []).length, 1);
   assert.equal((workflow.match(/- name: Prepare automatic Lite evidence ingestion/g) ?? []).length, 1);
-  assert.equal(workflow.includes("\\n\\n'\\"$wake_message\\""), false);
+  assert.equal(workflow.includes("\\\\n\\\\n\'"), false);
 });
