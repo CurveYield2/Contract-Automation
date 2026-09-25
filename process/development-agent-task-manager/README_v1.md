@@ -17,11 +17,35 @@ All GitHub Actions workflows remain in `CurveYield2/Contract-Automation`. `Curve
 
 ## Starting a managed development task
 
-Dispatch:
+Two equivalent start surfaces feed the **same** task-manager workflow.
 
-`.github/workflows/development-agent-task-manager.yml`
+### Declarative request file — preferred for automation
 
-with:
+Create exactly one JSON file per commit under:
+
+`process/development-agent-task-manager/requests/<REQUEST_ID>.json`
+
+using schema:
+
+`protocol/schemas/curveyield-development-agent-task-request-v1.schema.json`
+
+A push of that file to `main` triggers the existing `.github/workflows/development-agent-task-manager.yml` start lane automatically. No second workflow or external dispatcher is introduced.
+
+The request binds:
+- stable manager ID;
+- specification path;
+- supporting skill/authority path;
+- authority ref;
+- target repository;
+- durable target branch;
+- base ref if needed;
+- optional initial assignment.
+
+If the same manager ID already has active state, request-file intake fails closed rather than spawning a duplicate agent.
+
+### Manual workflow dispatch
+
+The same workflow can also be dispatched manually with:
 
 - `operation=start`
 - a stable `manager_id`
