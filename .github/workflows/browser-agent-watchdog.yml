@@ -368,7 +368,7 @@ jobs:
             local gate_ref="$4"
             local encoded_pointer completed_id completed_status next_id next_state handoff_path handoff_dir wake_path encoded_wake wake_b64 next_phase successor_wake_id
             local packet_path completion_path encoded_packet packet_sha instructions mechanical_message mechanical_b64 mechanical_wake_id
-            local legacy_packet_path legacy_encoded
+            local legacy_packet_path legacy_encoded reconciliation_output verified_output_count
 
             [ -n "$pointer_path" ] || return 2
             encoded_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$pointer_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
@@ -454,6 +454,24 @@ jobs:
             if grep -Eiq '\b(TBD|TODO)\b|\{\{[^}]+\}\}|<[^>]*(placeholder|fill|insert)[^>]*>' /tmp/lite-successor-wake.txt; then
               echo "::warning::Lite successor wake packet contains unresolved placeholder material."
               return 2
+            fi
+
+            if [ -n "$encoded_packet" ] && [ -s /tmp/lite-interphase-completion.json ] && [ -s /tmp/lite-interphase-work-packet.json ]; then
+              reconciliation_output="$(jq -r '.reconciliationOutputPath // empty' /tmp/lite-interphase-work-packet.json)"
+              verified_output_count="$(jq '.outputs | length' /tmp/lite-interphase-completion.json)"
+              {
+                cat /tmp/lite-successor-wake.txt
+                printf '\n%s\n' '[VERIFIED_INTERPHASE_MECHANICAL_RESULTS_V2]'
+                printf 'work_packet=%s\n' "$packet_path"
+                printf 'completion_receipt=%s\n' "$completion_path"
+                printf 'reconciliation_output=%s\n' "$reconciliation_output"
+                printf 'verified_output_count=%s\n' "$verified_output_count"
+                printf '%s\n' 'security_meaning=MECHANICAL_ONLY; these artifacts are not findings, severity decisions, exploit validation, remediation approval, or residual-risk conclusions.'
+                printf '%s\n' 'read_order=Read the final reconciliation output first. Open individual unit outputs only when the active reviewer task needs the underlying mechanical detail.'
+                printf '%s\n' 'verified_unit_outputs:'
+                jq -r --arg reconciliation "$reconciliation_output" '.outputs[] | select(.path != $reconciliation) | "- " + .path' /tmp/lite-interphase-completion.json
+              } > /tmp/lite-successor-wake-with-mechanical.txt
+              mv /tmp/lite-successor-wake-with-mechanical.txt /tmp/lite-successor-wake.txt
             fi
 
             next_phase="$(jq -r '.nextMilestone.phaseRange[0] // empty' /tmp/lite-active-pointer.json)"
