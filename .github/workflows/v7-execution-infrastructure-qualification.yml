@@ -279,6 +279,8 @@ jobs:
           set -euo pipefail
           controller_commit="$(git -C .controller-under-test rev-parse HEAD)"
           qualified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          runner_commit="${V7_BASELINE_QUALIFIED_COMMIT:-$(git rev-parse HEAD)}"
+          runner_run="${V7_BASELINE_QUALIFICATION_RUN_ID:-$GITHUB_RUN_ID}"
           cat > .audit-evidence/v7-infrastructure-qualification/controller.json <<JSON
           {
             "schemaVersion": "v26-controller-qualification-v1",
@@ -287,8 +289,8 @@ jobs:
             "status": "PASS",
             "qualificationRunId": "$GITHUB_RUN_ID",
             "qualifiedAt": "$qualified_at",
-            "runnerQualifiedCommit": "${V7_BASELINE_QUALIFIED_COMMIT:-}",
-            "runnerQualificationRunId": "${V7_BASELINE_QUALIFICATION_RUN_ID:-}",
+            "runnerQualifiedCommit": "$runner_commit",
+            "runnerQualificationRunId": "$runner_run",
             "testedSchemas": [
               "audit-v7-sequential-review-state-v3",
               "v26-phase-contract-v1",
@@ -322,13 +324,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          status_path='process/V7_QUALIFICATION_STATUS.json'
           controller_path='.audit-evidence/v7-infrastructure-qualification/controller.json'
-          test -s "$status_path"
           test -s "$controller_path"
+          status_api="repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main"
+          gh api "$status_api" --jq '.content' | base64 -d > /tmp/current-v7-status.json
+          existing_sha="$(gh api "$status_api" --jq '.sha')"
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
-          const status=JSON.parse(fs.readFileSync('process/V7_QUALIFICATION_STATUS.json','utf8'));
+          const status=JSON.parse(fs.readFileSync('/tmp/current-v7-status.json','utf8'));
           const controller=JSON.parse(fs.readFileSync('.audit-evidence/v7-infrastructure-qualification/controller.json','utf8'));
           if(status.status!=='PASS') throw new Error('canonical runner qualification is not PASS');
           if(status.qualifiedCommit!==process.env.V7_BASELINE_QUALIFIED_COMMIT) throw new Error('canonical runner qualified commit changed during controller-only qualification');
@@ -340,8 +343,7 @@ jobs:
           fs.writeFileSync('.audit-evidence/v7-infrastructure-qualification/current-status.json',JSON.stringify(status,null,2)+'\n');
           NODE
           content="$(base64 -w0 .audit-evidence/v7-infrastructure-qualification/current-status.json)"
-          existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.sha')"
-          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json"             -f message='chore(v7): refresh controller qualification status'             -f content="$content" -f sha="$existing_sha" -f branch='main' >/dev/null
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json" -f message='chore(v7): refresh controller qualification status' -f content="$content" -f sha="$existing_sha" -f branch='main' >/dev/null
 
       - name: Live trusted-main Phase 6 and Phase 7 mutable-Anvil qualification
         if: github.event_name != 'pull_request' && env.V7_QUALIFICATION_LANE == 'FULL'
