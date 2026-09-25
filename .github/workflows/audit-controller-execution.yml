@@ -321,11 +321,15 @@ jobs:
 
           watchdog_enabled="$(jq -r '.watchdog.enabled // true' "$registration")"
           watchdog_message="$(jq -r '.watchdog.idleMessage // empty' "$registration")"
-          completion_repo="$(jq -r '.watchdog.completion.repository // "CurveYield2/Audit-Controller"' "$registration")"
-          completion_ref="$(jq -r '.watchdog.completion.ref // "main"' "$registration")"
-          completion_path="$(jq -r '.watchdog.completion.path // empty' "$registration")"
-          completion_field="$(jq -r '.watchdog.completion.statusField // "status"' "$registration")"
-          completion_values="$(jq -r '(.watchdog.completion.terminalValues // ["PASS","COMPLETE","COMPLETED","SEALED"]) | join(",")' "$registration")"
+          gate_mode="$(jq -r '.watchdog.gate.mode // "FULL_V26"' "$registration")"
+          gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' "$registration")"
+          gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$registration")"
+          gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' "$registration")"
+          gate_expected_phase="$(jq -r '.watchdog.gate.expectedPhaseId // empty' "$registration")"
+          gate_expected_milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' "$registration")"
+          gate_pointer_path="$(jq -r '.watchdog.gate.activePointerPath // empty' "$registration")"
+          gate_stop_states="$(jq -r '(.watchdog.gate.stopStates // ["WAITING_FOR_HUMAN_RESPONSE","WAITING_FOR_SUCCESSOR_AGENT","CLOSED","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
+          gate_stop_campaign_statuses="$(jq -r '(.watchdog.gate.stopCampaignStatuses // ["COMPLETE","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
 
           wake_id="$campaign_id-$phase_id-$GITHUB_RUN_ID"
           wake_b64="$(printf '%s' "$wake_message" | base64 -w0)"
@@ -340,11 +344,15 @@ jobs:
             -f wake_message_b64="$wake_b64" \
             -f watchdog_enabled="$watchdog_enabled" \
             -f watchdog_message_b64="$watchdog_b64" \
-            -f completion_repository="$completion_repo" \
-            -f completion_ref="$completion_ref" \
-            -f completion_path="$completion_path" \
-            -f completion_status_field="$completion_field" \
-            -f completion_terminal_values_csv="$completion_values"
+            -f gate_mode="$gate_mode" \
+            -f gate_repository="$gate_repo" \
+            -f gate_ref="$gate_ref" \
+            -f gate_state_path="$gate_state_path" \
+            -f gate_expected_phase_id="$gate_expected_phase" \
+            -f gate_expected_milestone_id="$gate_expected_milestone" \
+            -f gate_active_pointer_path="$gate_pointer_path" \
+            -f gate_stop_states_csv="$gate_stop_states" \
+            -f gate_stop_campaign_statuses_csv="$gate_stop_campaign_statuses"
       - name: Upload request-addressable V7 evidence
         if: always() && env.V7_REQUEST_KIND == 'v7-execution'
         uses: actions/upload-artifact@v4
