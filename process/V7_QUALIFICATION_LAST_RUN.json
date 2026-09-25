@@ -1,8 +1,8 @@
 {
   "schemaVersion": "curveyield-v7-agent-qualification-last-run-v1",
-  "bridgeWorkflowRunId": "36083804307",
-  "triggerIssue": 273,
-  "recordedAt": "2026-09-25T01:53:04.053Z",
+  "bridgeWorkflowRunId": "36084893294",
+  "triggerIssue": 276,
+  "recordedAt": "2026-09-25T02:06:49.681Z",
   "canonicalRun": {
     "conclusion": "success",
     "createdAt": "2026-09-25T01:51:35Z",
