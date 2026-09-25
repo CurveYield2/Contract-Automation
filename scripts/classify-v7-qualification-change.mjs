@@ -8,6 +8,8 @@ const LIGHT_PATTERNS = [
   /^scripts\/browser-agent-wake\.mjs$/,
   /^scripts\/select-audit-controller-token\.sh$/,
   /^process\/browser-agent-wake\//,
+  /^process\/V7_QUALIFICATION_STATUS\.json$/,
+  /^process\/V7_QUALIFICATION_LAST_RUN\.json$/,
   /^protocol\/schemas\/curveyield-lite-interphase-.*\.schema\.json$/,
   /^packages\/github-native-sim\/test\/browser-agent-.*\.test\.mjs$/,
   /^packages\/github-native-sim\/test\/audit-controller-token-selection-v1\.test\.mjs$/,
