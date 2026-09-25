@@ -1,6 +1,8 @@
 name: Browser Agent Watchdog
 
 on:
+  schedule:
+    - cron: '2-59/5 * * * *'
   workflow_dispatch:
     inputs:
       wake_id:
@@ -12,16 +14,61 @@ permissions:
   contents: write
   actions: write
 
-concurrency:
-  group: browser-agent-watchdog-${{ inputs.wake_id }}
-  cancel-in-progress: false
-
 jobs:
-  supervise:
+  discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 5
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+      has_targets: ${{ steps.targets.outputs.has_targets }}
+    steps:
+      - name: Discover active watchdog targets
+        id: targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_WAKE_ID: ${{ inputs.wake_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            jq -cn --arg id "$REQUESTED_WAKE_ID" '[$id]' > /tmp/watchdog-targets.json
+          else
+            api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active?ref=main"
+            if gh api "$api" --jq '.[]? | select(.type=="file") | .name' > /tmp/watchdog-active-files.txt 2>/dev/null; then
+              sed -n 's/\.json$//p' /tmp/watchdog-active-files.txt | LC_ALL=C sort -u | jq -R -s 'split("\n") | map(select(length>0))' > /tmp/watchdog-targets.json
+            else
+              printf '[]\n' > /tmp/watchdog-targets.json
+            fi
+          fi
+
+          count="$(jq 'length' /tmp/watchdog-targets.json)"
+          if [ "$count" -eq 0 ]; then
+            targets='["__NO_ACTIVE_WATCHDOG__"]'
+            has_targets=false
+          else
+            targets="$(jq -c . /tmp/watchdog-targets.json)"
+            has_targets=true
+          fi
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+          echo "has_targets=$has_targets" >> "$GITHUB_OUTPUT"
+          echo "watchdog_targets=$count" >> "$GITHUB_STEP_SUMMARY"
+
+  supervise:
+    needs: discover
+    if: needs.discover.outputs.has_targets == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        wake_id: ${{ fromJSON(needs.discover.outputs.targets) }}
+    concurrency:
+      group: browser-agent-watchdog-${{ matrix.wake_id }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
-      WAKE_ID: ${{ inputs.wake_id }}
+      WAKE_ID: ${{ matrix.wake_id }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
       BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
       BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
@@ -53,7 +100,7 @@ jobs:
       - name: Set up isolated browser-agent runtime
         uses: ./.github/actions/setup-browser-agent-runtime
 
-      - name: Supervise agent for four-hour segment
+      - name: Supervise agent for one watchdog sweep
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -327,12 +374,12 @@ jobs:
           fi
 
           jq --arg run "$GITHUB_RUN_ID" \
-            '.watchdogRunId=$run | .watchdogSegmentStartedAt=(now|todate)' \
+            '.watchdogRunId=$run | .watchdogSweepStartedAt=(now|todate)' \
             /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
           mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
           persist_state || true
 
-          for cycle in $(seq 1 46); do
+          for cycle in 1; do
             if ! fetch_state; then
               echo 'Watchdog state was retired by approved completion; exiting immediately.'
               exit 0
@@ -463,8 +510,7 @@ jobs:
             fi
 
             if [ -z "$chat_url" ]; then
-              echo "::warning::No chat URL for $WAKE_ID; retrying next cycle."
-              sleep 300
+              echo "::warning::No chat URL for $WAKE_ID; next scheduled sweep will retry."
               continue
             fi
 
@@ -474,11 +520,10 @@ jobs:
             export WAKE_RESULT_PATH="/tmp/$safe_id-observe.json"
 
             if ! node scripts/browser-agent-wake.mjs; then
-              echo "::warning::Observation failed for $WAKE_ID on cycle $cycle; provider stack will retry in five minutes."
+              echo "::warning::Observation failed for $WAKE_ID; the next scheduled sweep will retry."
               jq '.lastDecision="OBSERVATION_FAILED" | .lastObservationFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
               mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
               persist_state || true
-              if [ "$cycle" -lt 46 ]; then sleep 300; fi
               continue
             fi
 
@@ -524,12 +569,10 @@ jobs:
 
             mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
             persist_state || true
-            if [ "$cycle" -lt 46 ]; then sleep 300; fi
-          done
+           done
 
           if fetch_state; then
-            echo 'Four-hour watchdog segment complete and audit is still active; chaining the next segment.'
-            gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$WAKE_ID"
+            echo 'Watchdog sweep complete; active state remains for the next scheduled sweep.'
           else
-            echo 'Watchdog was retired before segment rollover.'
+            echo 'Watchdog was retired during this sweep.'
           fi
