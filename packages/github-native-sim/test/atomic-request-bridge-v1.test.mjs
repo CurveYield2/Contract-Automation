@@ -56,10 +56,12 @@ test('controller-only requests skip heavyweight V7 technical setup', () => {
 test('canonical V7 bridge keeps untrusted PR request checkout free of private credentials', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   const prCheckoutStart = workflow.indexOf('- name: Checkout atomic request source for PR');
+  const prCheckoutEnd = workflow.indexOf('\n      - name:', prCheckoutStart + 1);
   const manualPrivateCheckoutStart = workflow.indexOf('- name: Checkout private Audit Controller for manual dispatch');
-  assert.ok(prCheckoutStart >= 0 && manualPrivateCheckoutStart > prCheckoutStart);
-  const prCheckout = workflow.slice(prCheckoutStart, manualPrivateCheckoutStart);
+  assert.ok(prCheckoutStart >= 0 && prCheckoutEnd > prCheckoutStart && manualPrivateCheckoutStart > prCheckoutStart);
+  const prCheckout = workflow.slice(prCheckoutStart, prCheckoutEnd);
   assert.doesNotMatch(prCheckout, /AUDIT_CONTROLLER_GITHUB_TOKEN/);
+  assert.doesNotMatch(prCheckout, /PREFLIGHTSIM_GITHUB_TOKEN/);
   assert.doesNotMatch(prCheckout, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01/);
   const privateLane = workflow.slice(manualPrivateCheckoutStart);
   assert.match(privateLane, /AUDIT_CONTROLLER_PRIMARY_TOKEN:\s*\$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
