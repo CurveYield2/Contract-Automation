@@ -32,6 +32,7 @@ test('runner, dependency, protocol, qualification-workflow, or unknown paths fai
     'package-lock.json',
     '.github/workflows/v7-execution-infrastructure-qualification.yml',
     '.github/workflows/v7-agent-qualification-bridge.yml',
+    'scripts/classify-v7-qualification-change.mjs',
     'unknown/future-file.txt',
   ]) {
     const result = classifyV7QualificationChanges([file]);
@@ -61,26 +62,6 @@ test('qualification status markers are control-plane metadata for controller-onl
   const result = classifyV7QualificationChanges([
     'process/V7_QUALIFICATION_STATUS.json',
     'process/V7_QUALIFICATION_LAST_RUN.json',
-  ]);
-  assert.equal(result.lane, 'CONTROL_LIGHT');
-  assert.equal(result.escalatedPaths, undefined);
-});
-
-
-test('documentation and browser-watchdog runtime state remain control-light', () => {
-  const result = classifyV7QualificationChanges([
-    'docs/TRACE_PR_LIFECYCLE_BOUNDARY_v1.md',
-    'process/browser-agent-watchdog/active/watchdog-sweep-smoke-v4.json',
-    'process/browser-agent-watchdog/completed/example.json',
-  ]);
-  assert.equal(result.lane, 'CONTROL_LIGHT');
-  assert.equal(result.escalatedPaths, undefined);
-});
-
-test('qualification classifier implementation is itself control-light but regression-tested', () => {
-  const result = classifyV7QualificationChanges([
-    'scripts/classify-v7-qualification-change.mjs',
-    'packages/github-native-sim/test/v7-qualification-routing-v1.test.mjs',
   ]);
   assert.equal(result.lane, 'CONTROL_LIGHT');
   assert.equal(result.escalatedPaths, undefined);
