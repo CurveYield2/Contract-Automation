@@ -26,14 +26,22 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Locate triggering source-fanout request
+      - name: Locate triggering import request
         id: request
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          request="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" -- '.agent-upload/requests/*.json' | tail -n1)"
-          test -n "$request"
-          echo "path=$request" >> "$GITHUB_OUTPUT"
+          mapfile -t requests < <(
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" \
+              --jq '.files[]? | select(.status!="removed") | .filename | select(startswith(".agent-upload/requests/") and endswith(".json"))'
+          )
+          [ "${#requests[@]}" -eq 1 ] || {
+            echo "::error::Exactly one import request file must be created or changed per triggering commit."
+            exit 1
+          }
+          echo "path=${requests[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Validate admitted import request
         id: meta
