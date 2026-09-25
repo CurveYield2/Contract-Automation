@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "awr-post-merge-controller-main-v1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "24da8c1b0f4f8cbad93eac4fedddd61844fc6592",
+    "requestPath": ".deep-assurance/operator/requests/awr-post-merge-controller-main-v1.json"
+  },
+  "verifyController": true
+}
