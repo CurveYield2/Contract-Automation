@@ -17,6 +17,7 @@ const LIGHT_PATTERNS = [
   /^process\/V7_QUALIFICATION_LAST_RUN\.json$/,
   /^protocol\/schemas\/curveyield-lite-interphase-.*\.schema\.json$/,
   /^protocol\/schemas\/curveyield-development-task-completion-v1\.schema\.json$/,
+  /^protocol\/schemas\/curveyield-development-agent-task-request-v1\.schema\.json$/,
   /^packages\/github-native-sim\/test\/browser-agent-.*\.test\.mjs$/,
   /^packages\/github-native-sim\/test\/development-agent-task-manager-v1\.test\.mjs$/,
   /^packages\/github-native-sim\/test\/development-agent-task-manager-.*\.test\.mjs$/,
