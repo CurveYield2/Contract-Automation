@@ -9,11 +9,13 @@ on:
         default: ''
         type: string
       qualification_lane:
-        description: FULL reruns runner/toolchain qualification; CONTROLLER_ONLY reuses the current qualified runner and verifies only the private controller plus lightweight control-plane checks
+        description: 'Qualification scope: FULL or CONTROLLER_ONLY'
         required: true
         default: FULL
         type: choice
-        options: [FULL, CONTROLLER_ONLY]
+        options:
+          - FULL
+          - CONTROLLER_ONLY
   push:
     branches: [main]
     paths:
@@ -158,15 +160,13 @@ jobs:
           observed_lane="$(printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).lane))")"
           if [ "$observed_lane" != 'CONTROL_LIGHT' ]; then
             echo 'CONTROLLER_ONLY refused: current main contains runner/dependency/protocol/unknown changes since the last FULL-qualified runner.' >&2
-            printf '%s
-' "$result" >&2
+            printf '%s\\n' "$result" >&2
             exit 1
           fi
 
           echo "V7_BASELINE_QUALIFIED_COMMIT=$qualified_commit" >> "$GITHUB_ENV"
           echo "V7_BASELINE_QUALIFICATION_RUN_ID=$qualified_run" >> "$GITHUB_ENV"
-          printf '%s
-' "$result" > .audit-evidence/v7-infrastructure-qualification/controller-only-baseline.json
+          printf '%s\\n' "$result" > .audit-evidence/v7-infrastructure-qualification/controller-only-baseline.json
           {
             echo "controller_only_runner_commit=$qualified_commit"
             echo "controller_only_runner_run=$qualified_run"
