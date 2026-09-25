@@ -165,9 +165,11 @@ jobs:
 
           target_branch_uri="$(jq -rn --arg v "$TARGET_BRANCH" '$v|@uri')"
           target_head="$(gh api "repos/$TARGET_REPOSITORY/git/ref/heads/$target_branch_uri" --jq '.object.sha' 2>/dev/null || true)"
-          if [ -z "$target_head" ]; then
+          if ! [[ "$target_head" =~ ^[0-9a-f]{40}$ ]]; then
             base_sha="$(gh api -X GET "repos/$TARGET_REPOSITORY/commits" -f sha="$BASE_REF" -f per_page=1 --jq '.[0].sha')"
-            gh api --method POST "repos/$TARGET_REPOSITORY/git/refs"               -f ref="refs/heads/$TARGET_BRANCH" -f sha="$base_sha" >/dev/null
+            [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
+            gh api --method POST "repos/$TARGET_REPOSITORY/git/refs" \
+              -f ref="refs/heads/$TARGET_BRANCH" -f sha="$base_sha" >/dev/null
             target_head="$base_sha"
           fi
           [[ "$target_head" =~ ^[0-9a-f]{40}$ ]]

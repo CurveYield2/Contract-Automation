@@ -40,6 +40,12 @@ test('development task manager is a scheduled watchdog-derived supervisor that r
   assert.doesNotMatch(workflow, /playwright-core|@browserbasehq\/sdk/);
 });
 
+test('missing target branch refs are treated as absent unless they return a real SHA', () => {
+  assert.match(workflow, /if ! \[\[ "\$target_head" =~ \^\[0-9a-f\]\{40\}\$ \]\]; then/);
+  assert.match(workflow, /\[\[ "\$base_sha" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+  assert.doesNotMatch(workflow, /if \[ -z "\$target_head" \]; then/);
+});
+
 test('slash-delimited target branches use ref-safe repository lookups', () => {
   assert.match(workflow, /target_branch_uri=.*@uri/);
   assert.match(workflow, /git\/ref\/heads\/\$target_branch_uri/);
