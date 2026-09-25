@@ -93,12 +93,110 @@ jobs:
             fi
             gh api --method DELETE "$active_api" -f message="chore(watchdog): retire active $WAKE_ID" -f sha="$active_sha" -f branch=main >/dev/null
           }
+          safe_repo_path() {
+            local value="$1"
+            [ -n "$value" ] || return 1
+            case "$value" in
+              /*|*\*|../*|*/../*|*/..|..) return 1 ;;
+            esac
+            return 0
+          }
+
+          load_lite_interphase_packet() {
+            local packet_path="$1"
+            local handoff_path="$2"
+            local expected_milestone="$3"
+            local gate_repo="$4"
+            local gate_ref="$5"
+            local encoded path allowed_prefix
+
+            safe_repo_path "$packet_path" || return 2
+            allowed_prefix="$(dirname "$handoff_path")/MECHANICAL/"
+            encoded="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+            [ -n "$encoded" ] || return 1
+            printf '%s' "$encoded" | base64 -d > /tmp/lite-interphase-work-packet.json
+
+            jq -e               --arg campaign "$campaign_id"               --arg milestone "$expected_milestone"               --arg handoff "$handoff_path"               '.schemaVersion=="curveyield-lite-interphase-work-packet-v1"
+               and .taskClass=="MECHANICAL_ONLY"
+               and .campaignId==$campaign
+               and .completedMilestoneId==$milestone
+               and .handoffPath==$handoff
+               and (.instructions|type=="string" and length>0)
+               and (.requiredOutputs|type=="array")'               /tmp/lite-interphase-work-packet.json >/dev/null || return 2
+
+            if grep -Eiq '\b(TBD|TODO)\b|\{\{[^}]+\}\}|<[^>]*(placeholder|fill|insert)[^>]*>' /tmp/lite-interphase-work-packet.json; then
+              return 2
+            fi
+            required_total="$(jq '.requiredOutputs | length' /tmp/lite-interphase-work-packet.json)"
+            required_unique="$(jq -r '.requiredOutputs[]?.path // empty' /tmp/lite-interphase-work-packet.json | LC_ALL=C sort -u | wc -l | tr -d ' ')"
+            [ "$required_total" = "$required_unique" ] || return 2
+            while IFS= read -r path; do
+              safe_repo_path "$path" || return 2
+              case "$path" in
+                "$allowed_prefix"*) ;;
+                *) return 2 ;;
+              esac
+            done < <(jq -r '.requiredOutputs[]?.path // empty' /tmp/lite-interphase-work-packet.json)
+
+            sha256sum /tmp/lite-interphase-work-packet.json | awk '{print $1}' > /tmp/lite-interphase-work-packet.sha256
+            return 0
+          }
+
+          verify_lite_interphase_completion() {
+            local packet_path="$1"
+            local completion_path="$2"
+            local handoff_path="$3"
+            local expected_milestone="$4"
+            local gate_repo="$5"
+            local gate_ref="$6"
+            local encoded packet_sha required observed output_path expected_sha output_encoded observed_sha
+
+            load_lite_interphase_packet "$packet_path" "$handoff_path" "$expected_milestone" "$gate_repo" "$gate_ref" || return 1
+            packet_sha="$(cat /tmp/lite-interphase-work-packet.sha256)"
+            safe_repo_path "$completion_path" || return 1
+            encoded="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$completion_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+            [ -n "$encoded" ] || return 1
+            printf '%s' "$encoded" | base64 -d > /tmp/lite-interphase-completion.json
+
+            jq -e               --arg campaign "$campaign_id"               --arg milestone "$expected_milestone"               --arg handoff "$handoff_path"               --arg packet "$packet_path"               --arg packetSha "$packet_sha"               '.schemaVersion=="curveyield-lite-interphase-completion-v1"
+               and .status=="PASS"
+               and .campaignId==$campaign
+               and .completedMilestoneId==$milestone
+               and .handoffPath==$handoff
+               and .workPacketPath==$packet
+               and .workPacketSha256==$packetSha
+               and (.outputs|type=="array")
+               and (.completedAt|type=="string" and length>0)'               /tmp/lite-interphase-completion.json >/dev/null || return 1
+
+            required="$(jq -r '.requiredOutputs[]?.path // empty' /tmp/lite-interphase-work-packet.json | LC_ALL=C sort -u)"
+            observed="$(jq -r '.outputs[]?.path // empty' /tmp/lite-interphase-completion.json | LC_ALL=C sort -u)"
+            observed_total="$(jq '.outputs | length' /tmp/lite-interphase-completion.json)"
+            observed_unique="$(jq -r '.outputs[]?.path // empty' /tmp/lite-interphase-completion.json | LC_ALL=C sort -u | wc -l | tr -d ' ')"
+            [ "$observed_total" = "$observed_unique" ] || return 1
+            [ "$required" = "$observed" ] || return 1
+
+            while IFS= read -r output_path; do
+              [ -n "$output_path" ] || continue
+              safe_repo_path "$output_path" || return 1
+              expected_sha="$(jq -r --arg p "$output_path" '.outputs[] | select(.path==$p) | .sha256 // empty' /tmp/lite-interphase-completion.json | tail -n1)"
+              [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]] || return 1
+              output_encoded="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$output_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+              [ -n "$output_encoded" ] || return 1
+              printf '%s' "$output_encoded" | base64 -d > /tmp/lite-interphase-output.bin
+              observed_sha="$(sha256sum /tmp/lite-interphase-output.bin | awk '{print $1}')"
+              [ "$observed_sha" = "$expected_sha" ] || return 1
+            done <<< "$required"
+
+            return 0
+          }
+
           launch_lite_successor() {
             local pointer_path="$1"
             local expected_milestone="$2"
             local gate_repo="$3"
             local gate_ref="$4"
             local encoded_pointer completed_id completed_status next_id next_state handoff_path handoff_dir wake_path encoded_wake wake_b64 next_phase successor_wake_id
+            local packet_path completion_path encoded_packet packet_sha instructions mechanical_message mechanical_b64 mechanical_wake_id
 
             [ -n "$pointer_path" ] || return 2
             encoded_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$pointer_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
@@ -124,6 +222,41 @@ jobs:
             handoff_path="$(jq -r '.authoritativeHandoff // empty' /tmp/lite-active-pointer.json)"
             [ -n "$handoff_path" ] || return 2
             handoff_dir="$(dirname "$handoff_path")"
+
+            packet_path="$handoff_dir/MECHANICAL_WORK_PACKET_v1.json"
+            completion_path="$handoff_dir/MECHANICAL_WORK_COMPLETION_v1.json"
+            encoded_packet="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+            if [ -n "$encoded_packet" ]; then
+              if verify_lite_interphase_completion "$packet_path" "$completion_path" "$handoff_path" "$expected_milestone" "$gate_repo" "$gate_ref"; then
+                echo "Validated inter-phase mechanical completion for $expected_milestone; successor launch may proceed."
+              else
+                if ! load_lite_interphase_packet "$packet_path" "$handoff_path" "$expected_milestone" "$gate_repo" "$gate_ref"; then
+                  echo "::warning::Inter-phase mechanical packet exists but is invalid; keeping current worker supervised."
+                  return 2
+                fi
+                packet_sha="$(cat /tmp/lite-interphase-work-packet.sha256)"
+                instructions="$(jq -r '.instructions' /tmp/lite-interphase-work-packet.json)"
+                mechanical_wake_id="${campaign_id}-${completed_id}-interphase-${GITHUB_RUN_ID}-${cycle}"
+                {
+                  printf '%s\n' '[AUDIT_INTERPHASE_MECHANICAL_V1]'
+                  printf 'campaign=%s\n' "$campaign_id"
+                  printf 'completed_milestone=%s\n' "$completed_id"
+                  printf 'next_milestone=%s\n' "$next_id"
+                  printf 'handoff=%s\n' "$handoff_path"
+                  printf 'work_packet=%s\n' "$packet_path"
+                  printf 'work_packet_sha256=%s\n' "$packet_sha"
+                  printf 'completion_receipt=%s\n' "$completion_path"
+                  printf '\n%s\n\n' 'You are a mechanical inter-phase worker. Perform only the deterministic/repetitive work in the packet below. Do not make, promote, reject, grade, or remediate security findings; do not reinterpret audit methodology. Use the GitHub repository tools to write the required outputs and the completion receipt. The completion receipt must use schema curveyield-lite-interphase-completion-v1 and include exact SHA-256 values for every required output.'
+                  printf '%s\n' "$instructions"
+                } > /tmp/lite-interphase-wake.txt
+                mechanical_b64="$(printf '%s' "$mechanical_message" | base64 -w0)"
+
+                echo "Lite machine gate PASS: $expected_milestone requires an inter-phase mechanical pass before $next_id."
+                gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$mechanical_wake_id" -f campaign_id="$campaign_id" -f phase_id="interphase-$completed_id-to-$next_id" -f mode="create_fresh" -f chat_url="" -f wake_message_b64="$mechanical_b64" -f watchdog_enabled="true" -f worker_role="interphase_mechanical" -f watchdog_message_b64="" -f gate_mode="LITE" -f gate_repository="$gate_repo" -f gate_ref="$gate_ref" -f gate_state_path="$gate_path" -f gate_expected_phase_id="$gate_expected_phase" -f gate_expected_milestone_id="$expected_milestone" -f gate_active_pointer_path="$pointer_path" -f gate_interphase_handoff_path="$handoff_path" -f gate_interphase_work_packet_path="$packet_path" -f gate_interphase_completion_path="$completion_path" -f gate_interphase_work_packet_sha256="$packet_sha"
+                return 4
+              fi
+            fi
+
             wake_path="$handoff_dir/WAKE_UP_MESSAGE.md"
             encoded_wake="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$wake_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
             [ -n "$encoded_wake" ] || return 2
@@ -178,6 +311,7 @@ jobs:
 
             campaign_id="$(jq -r '.campaignId' /tmp/watchdog-state.json)"
             phase_id="$(jq -r '.phaseId' /tmp/watchdog-state.json)"
+            worker_role="$(jq -r '.workerRole // "reviewer"' /tmp/watchdog-state.json)"
             chat_url="$(jq -r '.chatUrl // empty' /tmp/watchdog-state.json)"
 
             gate_mode="$(jq -r '.gate.mode // "FULL_V26"' /tmp/watchdog-state.json)"
@@ -187,6 +321,9 @@ jobs:
             gate_expected_phase="$(jq -r '.gate.expectedPhaseId // empty' /tmp/watchdog-state.json)"
             gate_expected_milestone="$(jq -r '.gate.expectedMilestoneId // empty' /tmp/watchdog-state.json)"
             gate_pointer_path="$(jq -r '.gate.activePointerPath // empty' /tmp/watchdog-state.json)"
+            gate_interphase_handoff_path="$(jq -r '.gate.interphase.handoffPath // empty' /tmp/watchdog-state.json)"
+            gate_interphase_work_packet_path="$(jq -r '.gate.interphase.workPacketPath // empty' /tmp/watchdog-state.json)"
+            gate_interphase_completion_path="$(jq -r '.gate.interphase.completionPath // empty' /tmp/watchdog-state.json)"
 
             if [ -n "$gate_path" ] && [ -n "${AUDIT_CONTROLLER_GITHUB_TOKEN:-}" ]; then
               encoded_state="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$gate_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
@@ -194,6 +331,27 @@ jobs:
                 printf '%s' "$encoded_state" | base64 -d > /tmp/canonical-campaign-state.json
 
                 if [ "$gate_mode" = "LITE" ]; then
+                  if [ "$worker_role" = "interphase_mechanical" ]; then
+                    if verify_lite_interphase_completion "$gate_interphase_work_packet_path" "$gate_interphase_completion_path" "$gate_interphase_handoff_path" "$gate_expected_milestone" "$gate_repo" "$gate_ref"; then
+                      echo "Inter-phase mechanical completion is machine-valid; launching the existing Lite successor path."
+                      if launch_lite_successor "$gate_pointer_path" "$gate_expected_milestone" "$gate_repo" "$gate_ref"; then
+                        retire_state "LITE_INTERPHASE_COMPLETE_SUCCESSOR_DISPATCHED_$gate_expected_milestone"
+                        exit 0
+                      else
+                        rc=$?
+                        if [ "$rc" -eq 3 ]; then
+                          retire_state "LITE_INTERPHASE_COMPLETE_NO_SUCCESSOR_$gate_expected_milestone"
+                          exit 0
+                        fi
+                        echo "::warning::Mechanical completion is valid, but successor packet is not machine-ready yet; keeping mechanical worker supervised."
+                      fi
+                    fi
+                    lite_campaign_status="$(jq -r '.campaignStatus // empty' /tmp/canonical-campaign-state.json)"
+                    if [ "$lite_campaign_status" = "COMPLETE" ]; then
+                      retire_state "LITE_CAMPAIGN_COMPLETE_DURING_INTERPHASE"
+                      exit 0
+                    fi
+                  else
                   lite_campaign_status="$(jq -r '.campaignStatus // empty' /tmp/canonical-campaign-state.json)"
                   lite_phase_id="$(jq -r '.phase.id // empty' /tmp/canonical-campaign-state.json)"
                   lite_phase_state="$(jq -r '.phase.state // empty' /tmp/canonical-campaign-state.json)"
@@ -209,8 +367,14 @@ jobs:
                     if launch_lite_successor "$gate_pointer_path" "$gate_expected_milestone" "$gate_repo" "$gate_ref"; then
                       retire_state "LITE_SUCCESSOR_DISPATCHED_P0_BOOTSTRAP"
                       exit 0
+                    else
+                      rc=$?
+                      if [ "$rc" -eq 4 ]; then
+                        retire_state "LITE_INTERPHASE_DISPATCHED_P0_BOOTSTRAP"
+                        exit 0
+                      fi
                     fi
-                    echo "::warning::Phase-0 bootstrap is waiting for successor, but P0_TO_P1 packet is not machine-ready yet; keeping bootstrap agent supervised."
+                    echo "::warning::Phase-0 bootstrap is waiting for successor, but its transition packet is not machine-ready yet; keeping bootstrap agent supervised."
                   fi
 
                   case "$lite_worker_status" in
@@ -225,6 +389,10 @@ jobs:
                         exit 0
                       else
                         rc=$?
+                        if [ "$rc" -eq 4 ]; then
+                          retire_state "LITE_INTERPHASE_DISPATCHED_$gate_expected_milestone"
+                          exit 0
+                        fi
                         if [ "$rc" -eq 3 ]; then
                           echo "Lite milestone is terminal with no successor; retiring watchdog."
                           retire_state "LITE_NO_SUCCESSOR_$gate_expected_milestone"
@@ -237,6 +405,7 @@ jobs:
 
                   if [ -n "$gate_expected_phase" ] && [ -n "$lite_phase_id" ] && [ "$lite_phase_id" != "$gate_expected_phase" ] && [ "$lite_worker_status" != "ACTIVE" ]; then
                     echo "Lite phase moved beyond $gate_expected_phase but successor packet is not yet ready; keeping watchdog active for handoff completion."
+                  fi
                   fi
                 else
                   canonical_state="$(jq -r '.state // empty' /tmp/canonical-campaign-state.json)"

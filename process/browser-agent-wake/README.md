@@ -96,6 +96,91 @@ The final `P8_10` milestone does not spawn another reviewer; once terminal it re
 
 This is a Lite-only automatic alternative. The existing Full/V26 human-response path is not modified.
 
+## Optional Lite inter-phase mechanical worker
+
+Lite handoffs can now request a bounded mechanical web-agent pass **without adding another workflow or changing the normal successor path**.
+
+The feature is opt-in per handoff. If the handoff directory contains:
+
+`MECHANICAL_WORK_PACKET_v1.json`
+
+the existing watchdog inserts a fresh `interphase_mechanical` ChatGPT worker before launching the next reviewer. If the file is absent, the existing direct successor launch remains unchanged.
+
+The work packet uses schema:
+
+`curveyield-lite-interphase-work-packet-v1`
+
+and binds:
+- exact campaign ID;
+- exact completed milestone ID;
+- exact authoritative handoff path;
+- explicit `taskClass: MECHANICAL_ONLY`;
+- deterministic mechanical instructions with no unresolved placeholders;
+- exact required output paths, all confined to the handoff's `MECHANICAL/` subdirectory.
+
+Example:
+
+```json
+{
+  "schemaVersion": "curveyield-lite-interphase-work-packet-v1",
+  "campaignId": "example-campaign",
+  "completedMilestoneId": "P2_5",
+  "handoffPath": "campaigns/example/handoffs/P5_TO_P6/SUCCESSOR_HANDOFF.json",
+  "taskClass": "MECHANICAL_ONLY",
+  "instructions": "Reconcile the filed evidence index and carried-forward obligation references. Do not make security findings or severity decisions.",
+  "requiredOutputs": [
+    {
+      "path": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL/MECHANICAL_EVIDENCE_INDEX_v1.json",
+      "purpose": "Exact evidence-reference projection for the successor reviewer"
+    }
+  ]
+}
+```
+
+The mechanical worker is instructed to perform only deterministic/repetitive work and is explicitly prohibited from making, promoting, rejecting, grading, or remediating security findings.
+
+When finished, it writes:
+
+`MECHANICAL_WORK_COMPLETION_v1.json`
+
+in the same handoff directory using schema:
+
+`curveyield-lite-interphase-completion-v1`
+
+Example:
+
+```json
+{
+  "schemaVersion": "curveyield-lite-interphase-completion-v1",
+  "status": "PASS",
+  "campaignId": "example-campaign",
+  "completedMilestoneId": "P2_5",
+  "handoffPath": "campaigns/example/handoffs/P5_TO_P6/SUCCESSOR_HANDOFF.json",
+  "workPacketPath": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL_WORK_PACKET_v1.json",
+  "workPacketSha256": "<64 lowercase hex>",
+  "outputs": [
+    {
+      "path": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL/MECHANICAL_EVIDENCE_INDEX_v1.json",
+      "sha256": "<64 lowercase hex>"
+    }
+  ],
+  "completedAt": "2026-09-25T00:00:00Z"
+}
+```
+
+Before launching the normal successor reviewer, the existing watchdog verifies:
+
+1. the completion receipt is bound to the exact campaign, milestone, handoff, and work-packet path;
+2. the work-packet SHA-256 matches the exact filed packet bytes;
+3. the completion output set exactly matches the work packet's required-output set;
+4. every required output is confined to the authoritative handoff's `MECHANICAL/` subdirectory;
+5. every required output still exists in Audit-Controller;
+6. every required output's current SHA-256 matches the completion receipt.
+
+A fresh mechanical chat does **not** replace the campaign's registered reviewer chat URL. Only reviewer-role fresh chats update the campaign registration.
+
+The mechanical worker is supervised by the same five-minute productivity-aware watchdog. Once its completion receipt is machine-valid, the watchdog reuses the existing Lite successor-launch path and retires the mechanical worker.
+
 ## Browser-provider redundancy
 
 Wake delivery tries independent providers in this order and stops at the first verified success:

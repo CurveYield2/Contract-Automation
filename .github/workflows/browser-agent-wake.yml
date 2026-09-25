@@ -27,6 +27,11 @@ on:
         required: true
         default: true
         type: boolean
+      worker_role:
+        required: false
+        default: reviewer
+        type: choice
+        options: [reviewer, interphase_mechanical]
       watchdog_message_b64:
         required: false
         type: string
@@ -55,6 +60,18 @@ on:
       gate_active_pointer_path:
         required: false
         type: string
+      gate_interphase_handoff_path:
+        required: false
+        type: string
+      gate_interphase_work_packet_path:
+        required: false
+        type: string
+      gate_interphase_completion_path:
+        required: false
+        type: string
+      gate_interphase_work_packet_sha256:
+        required: false
+        type: string
       gate_stop_states_csv:
         required: false
         default: WAITING_FOR_HUMAN_RESPONSE,WAITING_FOR_SUCCESSOR_AGENT,CLOSED,STOPPED_BY_HUMAN
@@ -80,6 +97,7 @@ jobs:
       WAKE_ID: ${{ inputs.wake_id }}
       CAMPAIGN_ID: ${{ inputs.campaign_id }}
       PHASE_ID: ${{ inputs.phase_id }}
+      WORKER_ROLE: ${{ inputs.worker_role }}
       WAKE_MODE: ${{ inputs.mode }}
       CHAT_URL: ${{ inputs.chat_url }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
@@ -150,6 +168,10 @@ jobs:
           GATE_EXPECTED_PHASE_ID: ${{ inputs.gate_expected_phase_id }}
           GATE_EXPECTED_MILESTONE_ID: ${{ inputs.gate_expected_milestone_id }}
           GATE_ACTIVE_POINTER_PATH: ${{ inputs.gate_active_pointer_path }}
+          GATE_INTERPHASE_HANDOFF_PATH: ${{ inputs.gate_interphase_handoff_path }}
+          GATE_INTERPHASE_WORK_PACKET_PATH: ${{ inputs.gate_interphase_work_packet_path }}
+          GATE_INTERPHASE_COMPLETION_PATH: ${{ inputs.gate_interphase_completion_path }}
+          GATE_INTERPHASE_WORK_PACKET_SHA256: ${{ inputs.gate_interphase_work_packet_sha256 }}
           GATE_STOP_STATES_CSV: ${{ inputs.gate_stop_states_csv }}
           GATE_STOP_CAMPAIGN_STATUSES_CSV: ${{ inputs.gate_stop_campaign_statuses_csv }}
         shell: bash
@@ -177,7 +199,7 @@ jobs:
             --arg lastHash "$LAST_HASH" \
             --argjson assistantCount "${ASSISTANT_COUNT:-0}" \
             '{
-              schemaVersion:$schemaVersion,wakeId:$wakeId,campaignId:$campaignId,phaseId:$phaseId,
+              schemaVersion:$schemaVersion,wakeId:$wakeId,campaignId:$campaignId,phaseId:$phaseId,workerRole:$workerRole,
               status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,
               idleMessage:$idleMessage,
               observation:{assistantCount:$assistantCount,lastAssistantHash:$lastHash,observedAt:$armedAt},
@@ -189,6 +211,12 @@ jobs:
                 expectedPhaseId:$gateExpectedPhaseId,
                 expectedMilestoneId:$gateExpectedMilestoneId,
                 activePointerPath:$gateActivePointerPath,
+                interphase:{
+                  handoffPath:$gateInterphaseHandoffPath,
+                  workPacketPath:$gateInterphaseWorkPacketPath,
+                  completionPath:$gateInterphaseCompletionPath,
+                  workPacketSha256:$gateInterphaseWorkPacketSha256
+                },
                 stopStates:($gateStopStatesCsv|split(",")|map(gsub("^ +| +$";""))),
                 stopCampaignStatuses:($gateStopCampaignStatusesCsv|split(",")|map(gsub("^ +| +$";"")))
               }
@@ -213,7 +241,7 @@ jobs:
           fi
 
       - name: Persist fresh-chat URL into campaign registration
-        if: ${{ inputs.mode == 'create_fresh' }}
+        if: ${{ inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer' }}
         env:
           GH_TOKEN: ${{ github.token }}
           NEW_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}
