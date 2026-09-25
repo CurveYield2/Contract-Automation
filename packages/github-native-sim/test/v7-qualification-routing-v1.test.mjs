@@ -56,3 +56,13 @@ test('empty or explicitly forced qualification is FULL', () => {
     '.github/workflows/browser-agent-wake.yml',
   ], { forceFull: true }).lane, 'FULL');
 });
+
+
+test('qualification status markers are control-plane metadata for controller-only baseline reuse', () => {
+  const result = classifyV7QualificationChanges([
+    'process/V7_QUALIFICATION_STATUS.json',
+    'process/V7_QUALIFICATION_LAST_RUN.json',
+  ]);
+  assert.equal(result.lane, 'CONTROL_LIGHT');
+  assert.equal(result.escalatedPaths, undefined);
+});
