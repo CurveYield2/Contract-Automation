@@ -4,7 +4,7 @@
   "requestId": "p0-build-execution-curveyield-dex-fresh-audit-v38-3-5-test-g1-20260925T180100Z",
   "controller": {
     "repository": "CurveYield2/Audit-Controller",
-    "commit": "1cbd6c09cd17b7fe79d06b8d004360c33172145c",
+    "commit": "2007c0c86eb2f2f4231037dfa8d913a96f30e145",
     "requestPath": ".deep-assurance/operator/requests/p0-build-execution-curveyield-dex-fresh-audit-v38-3-5-test-g1-20260925T180100Z.json"
   },
   "verifyController": true
