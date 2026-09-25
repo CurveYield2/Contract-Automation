@@ -286,10 +286,34 @@ jobs:
             and (.target.branch|type=="string" and length>0)
             and (.chat.url|type=="string")
             and .responsePolicy.attempts==3
-            and .responsePolicy.minimumWaitMsPerAttempt>=120000
+            and .responsePolicy.minimumWaitMsPerAttempt==120000
             and .responsePolicy.refreshBetweenAttempts==true
           ' /tmp/task-manager-state.json >/dev/null
           echo "STATE_API=$api" >> "$GITHUB_ENV"
+
+      - name: Verify pinned development authorities
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          spec_path="$(jq -r '.specification.path' /tmp/task-manager-state.json)"
+          spec_ref="$(jq -r '.specification.ref' /tmp/task-manager-state.json)"
+          spec_sha="$(jq -r '.specification.sha256' /tmp/task-manager-state.json)"
+          skill_path="$(jq -r '.skill.path' /tmp/task-manager-state.json)"
+          skill_ref="$(jq -r '.skill.ref' /tmp/task-manager-state.json)"
+          skill_sha="$(jq -r '.skill.sha256' /tmp/task-manager-state.json)"
+
+          observed_spec="$(gh api -X GET "repos/$GITHUB_REPOSITORY/contents/$spec_path" -f ref="$spec_ref" --jq '.content' | base64 -d | sha256sum | awk '{print $1}')"
+          observed_skill="$(gh api -X GET "repos/$GITHUB_REPOSITORY/contents/$skill_path" -f ref="$skill_ref" --jq '.content' | base64 -d | sha256sum | awk '{print $1}')"
+          [ "$observed_spec" = "$spec_sha" ] || {
+            echo "::error::Development specification bytes changed after manager admission."
+            exit 1
+          }
+          [ "$observed_skill" = "$skill_sha" ] || {
+            echo "::error::Skill authority bytes changed after manager admission."
+            exit 1
+          }
 
       - name: Check machine completion gate
         id: completion
@@ -388,13 +412,13 @@ jobs:
             jq '.lastDecision="OBSERVATION_PROVIDER_FAILURE" | .updatedAt=(now|todate)' /tmp/task-manager-state.json > /tmp/task-manager-next.json
             mv /tmp/task-manager-next.json /tmp/task-manager-state.json
           else
-            composer_visible="$(jq -r '.composerVisible // false' /tmp/task-manager-observe.json)"
+            chat_viewable="$(jq -r '.chatViewable // false' /tmp/task-manager-observe.json)"
             generating="$(jq -r '.generating // false' /tmp/task-manager-observe.json)"
             current_count="$(jq -r '.assistantCount // 0' /tmp/task-manager-observe.json)"
             current_hash="$(jq -r '.lastAssistantHash // empty' /tmp/task-manager-observe.json)"
             dead=false
 
-            if [ "$composer_visible" != true ]; then
+            if [ "$chat_viewable" != true ]; then
               dead=true
               failure_reason='CHAT_UNVIEWABLE'
             elif [ "$generating" = true ] || [ "$current_count" -gt "$previous_count" ] || { [ -n "$current_hash" ] && [ "$current_hash" != "$previous_hash" ]; }; then
@@ -412,6 +436,12 @@ jobs:
                   echo "::warning::Prompt attempt $attempt hit a browser-provider failure; preserving the worker instead of declaring it dead."
                   dead=false
                   failure_reason='PROMPT_PROVIDER_FAILURE'
+                  break
+                fi
+                attempt_dead_reason="$(jq -r '.deadReason // empty' "$WAKE_RESULT_PATH")"
+                if [ "$attempt_dead_reason" = 'CHAT_UNVIEWABLE' ]; then
+                  dead=true
+                  failure_reason='CHAT_UNVIEWABLE'
                   break
                 fi
                 if [ "$(jq -r '.responded // false' "$WAKE_RESULT_PATH")" = true ]; then
