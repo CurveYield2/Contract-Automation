@@ -4,7 +4,7 @@
   "requestId": "awr-runner-rebind-v1",
   "controller": {
     "repository": "CurveYield2/Audit-Controller",
-    "commit": "404c08d1a5a4ae396051dc1b8560cf7ae592c624",
+    "commit": "764be45e574c1e011b116d7869bf7f0e2febbe1e",
     "requestPath": ".deep-assurance/operator/requests/awr-runner-rebind-v1.json"
   },
   "verifyController": true
