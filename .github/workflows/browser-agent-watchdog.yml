@@ -205,6 +205,14 @@ jobs:
                     exit 0
                   fi
 
+                  if [ "$gate_expected_milestone" = "P0_BOOTSTRAP" ] && [ "$lite_phase_state" = "WAITING_FOR_SUCCESSOR_AGENT" ]; then
+                    if launch_lite_successor "$gate_pointer_path" "$gate_expected_milestone" "$gate_repo" "$gate_ref"; then
+                      retire_state "LITE_SUCCESSOR_DISPATCHED_P0_BOOTSTRAP"
+                      exit 0
+                    fi
+                    echo "::warning::Phase-0 bootstrap is waiting for successor, but P0_TO_P1 packet is not machine-ready yet; keeping bootstrap agent supervised."
+                  fi
+
                   case "$lite_worker_status" in
                     COMPLETE|COMPLETED|SEALED|PASS)
                       if [ "$gate_expected_milestone" = "P8_10" ]; then
