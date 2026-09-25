@@ -122,10 +122,10 @@ jobs:
           manager_id="$(jq -r '.managerId' /tmp/task-manager-request.json)"
           safe_id="$(printf '%s' "$manager_id" | tr -c 'A-Za-z0-9._-' '_')"
           active_probe="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/development-agent-task-manager/active/$safe_id.json?ref=main" --jq '.sha' 2>/dev/null || true)"
-          [ -z "$active_probe" ] || {
+          if [[ "$active_probe" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::Manager $manager_id is already active; refusing to create a duplicate agent."
             exit 1
-          }
+          fi
 
           {
             echo "MANAGER_ID=$manager_id"
@@ -251,7 +251,7 @@ jobs:
           api="repos/$GITHUB_REPOSITORY/contents/process/development-agent-task-manager/active/$TASK_MANAGER_SAFE_ID.json"
           content="$(base64 -w0 /tmp/task-manager-state.json)"
           existing="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
-          if [ -n "$existing" ]; then
+          if [[ "$existing" =~ ^[0-9a-f]{40}$ ]]; then
             gh api --method PUT "$api" -f message="chore(task-manager): restart $MANAGER_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
           else
             gh api --method PUT "$api" -f message="chore(task-manager): start $MANAGER_ID" -f content="$content" -f branch=main >/dev/null
@@ -432,7 +432,7 @@ jobs:
           completed_api="repos/$GITHUB_REPOSITORY/contents/process/development-agent-task-manager/completed/$SAFE_ID.json"
           content="$(base64 -w0 /tmp/task-manager-completed.json)"
           existing="$(gh api "$completed_api?ref=main" --jq '.sha' 2>/dev/null || true)"
-          if [ -n "$existing" ]; then
+          if [[ "$existing" =~ ^[0-9a-f]{40}$ ]]; then
             gh api --method PUT "$completed_api" -f message="chore(task-manager): complete $SAFE_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
           else
             gh api --method PUT "$completed_api" -f message="chore(task-manager): complete $SAFE_ID" -f content="$content" -f branch=main >/dev/null
