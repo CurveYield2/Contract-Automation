@@ -120,6 +120,10 @@ test('interphase gate fails closed across packet and receipt mutations', () => {
   const cases = [
     (p) => { p.taskClass = 'SEMANTIC'; },
     (p) => { p.schemaVersion = 'invalid'; },
+    (p) => { p.unexpectedApproval = true; },
+    (p) => { p.requiredOutputs[0].securityDisposition = 'APPROVED'; },
+    (p, f) => { f.receipt = { semanticApproval: true }; },
+    (p, f) => { f.receipt = { outputs: [{ path: outputPath, sha256: sha('{"indexed":true}\n'), semanticApproval: true }] }; },
     (p, f) => { f.receipt = { handoffPath: 'other' }; },
     (p) => { p.requiredOutputs = []; },
     (p, f) => { f.pinnedSha = '0'.repeat(64); },
