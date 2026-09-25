@@ -31,5 +31,7 @@
     },
     "stopStates": [],
     "stopCampaignStatuses": []
-  }
+  },
+  "watchdogRunId": "36086949075",
+  "watchdogSweepStartedAt": "2026-09-25T02:36:34Z"
 }
