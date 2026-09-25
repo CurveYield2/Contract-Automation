@@ -203,6 +203,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          gh auth setup-git
 
           import_one() {
             repo="$1"
