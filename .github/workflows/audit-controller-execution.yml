@@ -531,12 +531,18 @@ jobs:
 
           safe_request="$(printf '%s' "$V7_REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
           ingest_id="ingest-$safe_request"
-          evidence_dir="campaigns/$campaign_id/controller/automation/$safe_request"
+          case "$EXECUTION_REQUEST_PATH" in
+            campaigns/*/controller/*) ;;
+            *) echo "Execution request path is not inside an admitted campaign workspace: $EXECUTION_REQUEST_PATH" >&2; exit 1 ;;
+          esac
+          campaign_root="${EXECUTION_REQUEST_PATH%%/controller/*}"
+          test -n "$campaign_root"
+          evidence_dir="$campaign_root/controller/automation/$safe_request"
           evidence_rel="$evidence_dir/EXECUTION_EVIDENCE_v1.json"
           observer_rel="$evidence_dir/EXECUTION_OBSERVER_RECEIPT_v1.json"
           qualification_rel="$evidence_dir/V7_QUALIFICATION_STATUS.json"
           operator_rel=".deep-assurance/operator/requests/$ingest_id.json"
-          pointer_rel="campaigns/$campaign_id/requests/$ingest_id.json"
+          pointer_rel="$campaign_root/requests/$ingest_id.json"
           receipt_dir="$evidence_dir/ingestion"
           pointer_branch="automation/ingest-pointer-$safe_request"
 
