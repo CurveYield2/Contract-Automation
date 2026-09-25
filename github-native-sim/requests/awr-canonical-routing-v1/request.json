@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "awr-canonical-routing-v1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "692d4b226e8b20bfe342c2a45ef0e1f56b35075e",
+    "requestPath": ".deep-assurance/operator/requests/awr-canonical-routing-v1.json"
+  },
+  "verifyController": true
+}
