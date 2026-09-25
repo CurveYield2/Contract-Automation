@@ -23,6 +23,14 @@ test('canonical audit-controller execution workflow is control-plane, not runner
   assert.equal(result.lane, 'CONTROL_LIGHT');
 });
 
+test('qualification classifier policy edits use the light lane and remain covered by control-plane regression tests', () => {
+  const result = classifyV7QualificationChanges([
+    'scripts/classify-v7-qualification-change.mjs',
+  ]);
+  assert.equal(result.lane, 'CONTROL_LIGHT');
+  assert.equal(result.escalatedPaths, undefined);
+});
+
 test('runner, dependency, protocol, qualification-workflow, or unknown paths fail safe to FULL', () => {
   for (const file of [
     'packages/github-native-sim/src/run-job-file-v2.mjs',
@@ -32,7 +40,6 @@ test('runner, dependency, protocol, qualification-workflow, or unknown paths fai
     'package-lock.json',
     '.github/workflows/v7-execution-infrastructure-qualification.yml',
     '.github/workflows/v7-agent-qualification-bridge.yml',
-    'scripts/classify-v7-qualification-change.mjs',
     'unknown/future-file.txt',
   ]) {
     const result = classifyV7QualificationChanges([file]);
@@ -56,7 +63,6 @@ test('empty or explicitly forced qualification is FULL', () => {
     '.github/workflows/browser-agent-wake.yml',
   ], { forceFull: true }).lane, 'FULL');
 });
-
 
 test('qualification status markers are control-plane metadata for controller-only baseline reuse', () => {
   const result = classifyV7QualificationChanges([
