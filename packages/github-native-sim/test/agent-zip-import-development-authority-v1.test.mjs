@@ -12,6 +12,12 @@ const schema = JSON.parse(fs.readFileSync(
   'utf8'
 ));
 
+test('trigger request discovery is commit-API based and shallow-checkout safe', () => {
+  assert.match(workflow, /gh api "repos\/\$GITHUB_REPOSITORY\/commits\/\$GITHUB_SHA"/);
+  assert.match(workflow, /Exactly one import request file must be created or changed per triggering commit/);
+  assert.doesNotMatch(workflow, /git diff-tree/);
+});
+
 test('existing audit source fanout schema remains admitted and unchanged in purpose', () => {
   assert.match(workflow, /curveyield-audit-source-fanout\/v2/);
   assert.match(workflow, /Fan out identical ZIP to Audit-Controller and Audits/);
