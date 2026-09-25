@@ -1,4 +1,4 @@
-name: Agent Audit Source Fanout v2
+name: Agent File Import v3
 
 on:
   push:
@@ -35,7 +35,7 @@ jobs:
           test -n "$request"
           echo "path=$request" >> "$GITHUB_OUTPUT"
 
-      - name: Validate universal audit-source request
+      - name: Validate admitted import request
         id: meta
         env:
           REQUEST: ${{ steps.request.outputs.path }}
@@ -44,35 +44,75 @@ jobs:
           set -euo pipefail
           schema="$(jq -r '.schema // empty' "$REQUEST")"
           request_id="$(jq -r '.request_id // empty' "$REQUEST")"
-          campaign_id="$(jq -r '.campaign_id // empty' "$REQUEST")"
-          audit_name="$(jq -r '.audit_name // empty' "$REQUEST")"
           source_url="$(jq -r '.source.url // empty' "$REQUEST")"
+          drive_file_id="$(jq -r '.source.drive_file_id // empty' "$REQUEST")"
           filename="$(jq -r '.source.filename // empty' "$REQUEST")"
           sha256="$(jq -r '.source.sha256 // empty' "$REQUEST")"
           size="$(jq -r '.source.size // empty' "$REQUEST")"
 
-          test "$schema" = 'curveyield-audit-source-fanout/v2'
           [[ "$request_id" =~ ^[A-Za-z0-9._-]{1,160}$ ]]
-          [[ "$campaign_id" =~ ^[A-Za-z0-9._-]{1,200}$ ]]
-          test -n "$audit_name"
-          [[ "$audit_name" != *"/"* ]]
-          [[ "$audit_name" != *"\\"* ]]
-          [ "$audit_name" != "." ] && [ "$audit_name" != ".." ]
           test -n "$source_url"
-          [[ "$filename" == *.zip ]]
           [ "$(basename -- "$filename")" = "$filename" ]
           [[ "$sha256" =~ ^[0-9a-f]{64}$ ]]
           [[ "$size" =~ ^[0-9]+$ ]] && [ "$size" -gt 0 ]
 
+          case "$schema" in
+            curveyield-audit-source-fanout/v2)
+              mode='audit_source_fanout'
+              campaign_id="$(jq -r '.campaign_id // empty' "$REQUEST")"
+              audit_name="$(jq -r '.audit_name // empty' "$REQUEST")"
+              format='zip'
+              target_path=''
+              [[ "$campaign_id" =~ ^[A-Za-z0-9._-]{1,200}$ ]]
+              test -n "$audit_name"
+              [[ "$audit_name" != *"/"* ]]
+              [[ "$audit_name" != *"\\"* ]]
+              [ "$audit_name" != "." ] && [ "$audit_name" != ".." ]
+              [[ "$filename" == *.zip ]]
+              ;;
+            curveyield-development-authority-import/v1)
+              mode='development_authority'
+              campaign_id=''
+              audit_name=''
+              source_type="$(jq -r '.source.type // empty' "$REQUEST")"
+              format="$(jq -r '.source.format // empty' "$REQUEST")"
+              target_repo="$(jq -r '.target.repository // empty' "$REQUEST")"
+              target_branch="$(jq -r '.target.branch // empty' "$REQUEST")"
+              target_path="$(jq -r '.target.path // empty' "$REQUEST")"
+              test "$source_type" = 'google-drive'
+              [[ "$drive_file_id" =~ ^[A-Za-z0-9_-]{10,200}$ ]]
+              [[ "$source_url" == *"drive.google.com/file/d/$drive_file_id"* ]]
+              [[ "$format" =~ ^(raw|zip)$ ]]
+              if [ "$format" = 'zip' ]; then [[ "$filename" == *.zip ]]; fi
+              test "$target_repo" = "$GITHUB_REPOSITORY"
+              test "$target_branch" = 'main'
+              [[ "$target_path" == process/development-agent-task-manager/* ]]
+              [[ "$target_path" != /* ]]
+              [[ "$target_path" != *".."* ]]
+              [[ "$target_path" != *"\\"* ]]
+              [ "$(basename -- "$target_path")" = "$filename" ]
+              ;;
+            *)
+              echo "::error::Unsupported import schema: $schema"
+              exit 1
+              ;;
+          esac
+
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "schema=$schema" >> "$GITHUB_OUTPUT"
           echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
           echo "campaign_id=$campaign_id" >> "$GITHUB_OUTPUT"
           echo "audit_name=$audit_name" >> "$GITHUB_OUTPUT"
           echo "source_url=$source_url" >> "$GITHUB_OUTPUT"
+          echo "drive_file_id=$drive_file_id" >> "$GITHUB_OUTPUT"
           echo "filename=$filename" >> "$GITHUB_OUTPUT"
+          echo "format=$format" >> "$GITHUB_OUTPUT"
           echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
           echo "size=$size" >> "$GITHUB_OUTPUT"
+          echo "target_path=$target_path" >> "$GITHUB_OUTPUT"
 
       - name: Select working Audit-Controller credential
+        if: steps.meta.outputs.mode == 'audit_source_fanout'
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
@@ -81,6 +121,7 @@ jobs:
         run: bash scripts/select-audit-controller-token.sh
 
       - name: Verify cross-repository credential
+        if: steps.meta.outputs.mode == 'audit_source_fanout'
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
@@ -90,26 +131,31 @@ jobs:
           gh api repos/CurveYield2/Audit-Controller --silent
           gh api repos/CurveYield2/Audits --silent
 
-      - name: Download source ZIP once
+      - name: Download import object once
         env:
           SOURCE_URL: ${{ steps.meta.outputs.source_url }}
+          DRIVE_FILE_ID: ${{ steps.meta.outputs.drive_file_id }}
           FILENAME: ${{ steps.meta.outputs.filename }}
+          FORMAT: ${{ steps.meta.outputs.format }}
         shell: bash
         run: |
           set -euo pipefail
           url="$SOURCE_URL"
           if [[ "$url" =~ drive\.google\.com/file/d/([^/]+) ]]; then
-            file_id="${BASH_REMATCH[1]}"
-            url="https://drive.usercontent.google.com/download?id=$file_id&export=download&confirm=t"
+            observed_file_id="${BASH_REMATCH[1]}"
+            if [ -n "$DRIVE_FILE_ID" ]; then test "$observed_file_id" = "$DRIVE_FILE_ID"; fi
+            url="https://drive.usercontent.google.com/download?id=$observed_file_id&export=download&confirm=t"
           fi
           curl --fail --location --retry 4 --retry-all-errors --connect-timeout 20 \
             --output "/tmp/$FILENAME" "$url"
           test -s "/tmp/$FILENAME"
-          magic="$(xxd -p -l 4 "/tmp/$FILENAME")"
-          case "$magic" in
-            504b0304|504b0506|504b0708) ;;
-            *) echo "Not a ZIP: magic=$magic" >&2; exit 1 ;;
-          esac
+          if [ "$FORMAT" = 'zip' ]; then
+            magic="$(xxd -p -l 4 "/tmp/$FILENAME")"
+            case "$magic" in
+              504b0304|504b0506|504b0708) ;;
+              *) echo "Not a ZIP: magic=$magic" >&2; exit 1 ;;
+            esac
+          fi
 
       - name: Verify exact source identity
         env:
@@ -125,6 +171,7 @@ jobs:
           test "$actual_size" = "$EXPECTED_SIZE"
 
       - name: Fan out identical ZIP to Audit-Controller and Audits
+        if: steps.meta.outputs.mode == 'audit_source_fanout'
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           FILENAME: ${{ steps.meta.outputs.filename }}
@@ -177,51 +224,126 @@ jobs:
           printf '%s\n' "$controller_path" > /tmp/controller-path.txt
           printf '%s\n' "$audits_path" > /tmp/audits-path.txt
 
-      - name: Publish source-fanout completion report
+      - name: Import verified development authority into Contract-Automation
+        if: steps.meta.outputs.mode == 'development_authority'
         env:
           GH_TOKEN: ${{ github.token }}
+          FILENAME: ${{ steps.meta.outputs.filename }}
+          TARGET_PATH: ${{ steps.meta.outputs.target_path }}
+          EXPECTED_SHA256: ${{ steps.meta.outputs.sha256 }}
+          REQUEST_ID: ${{ steps.meta.outputs.request_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          work='/tmp/development-authority-import'
+          rm -rf "$work"
+          gh repo clone "$GITHUB_REPOSITORY" "$work" -- --depth=1 --branch main
+          cd "$work"
+          mkdir -p "$(dirname "$TARGET_PATH")"
+          cp "/tmp/$FILENAME" "$TARGET_PATH"
+
+          git config user.name 'CurveYield Development Authority Import'
+          git config user.email 'development-authority-import@users.noreply.github.com'
+          git add -- "$TARGET_PATH"
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(task-manager): import authority $REQUEST_ID"
+            for attempt in 1 2 3 4 5; do
+              git fetch origin main
+              if ! git rebase origin/main; then
+                git rebase --abort || true
+                exit 1
+              fi
+              if git push origin HEAD:main; then break; fi
+              if [ "$attempt" -eq 5 ]; then exit 1; fi
+              sleep $((attempt * 2))
+            done
+          fi
+
+          git fetch origin main
+          git show "origin/main:$TARGET_PATH" > /tmp/development-authority-remote-verify
+          remote_sha="$(sha256sum /tmp/development-authority-remote-verify | awk '{print $1}')"
+          remote_size="$(stat -c '%s' /tmp/development-authority-remote-verify)"
+          test "$remote_sha" = "$EXPECTED_SHA256"
+          printf '%s\n' "$remote_sha" > /tmp/authority-remote-sha.txt
+          printf '%s\n' "$remote_size" > /tmp/authority-remote-size.txt
+          printf '%s\n' "$TARGET_PATH" > /tmp/authority-target-path.txt
+
+      - name: Publish import completion report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ steps.meta.outputs.mode }}
           REQUEST_ID: ${{ steps.meta.outputs.request_id }}
           CAMPAIGN_ID: ${{ steps.meta.outputs.campaign_id }}
           AUDIT_NAME: ${{ steps.meta.outputs.audit_name }}
+          DRIVE_FILE_ID: ${{ steps.meta.outputs.drive_file_id }}
+          SOURCE_URL: ${{ steps.meta.outputs.source_url }}
           FILENAME: ${{ steps.meta.outputs.filename }}
           SHA256: ${{ steps.meta.outputs.sha256 }}
           SIZE: ${{ steps.meta.outputs.size }}
         shell: bash
         run: |
           set -euo pipefail
-          jq -n \
-            --arg requestId "$REQUEST_ID" \
-            --arg campaignId "$CAMPAIGN_ID" \
-            --arg auditName "$AUDIT_NAME" \
-            --arg filename "$FILENAME" \
-            --arg sha256 "$SHA256" \
-            --argjson size "$SIZE" \
-            --arg controllerPath "$(cat /tmp/controller-path.txt)" \
-            --arg auditsPath "$(cat /tmp/audits-path.txt)" \
-            --arg runId "$GITHUB_RUN_ID" \
-            '{
-              schemaVersion:"curveyield-audit-source-fanout-report-v2",
-              requestId:$requestId,campaignId:$campaignId,auditName:$auditName,status:"PASS",
-              source:{filename:$filename,sha256:$sha256,size:$size},
-              destinations:[
-                {repository:"CurveYield2/Audit-Controller",ref:"main",path:$controllerPath,verified:true},
-                {repository:"CurveYield2/Audits",ref:"main",path:$auditsPath,verified:true}
-              ],
-              workflowRunId:$runId,
-              completedAt:(now|todate)
-            }' > /tmp/fanout-report.json
-
           safe_id="$(printf '%s' "$REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
-          api="repos/$GITHUB_REPOSITORY/contents/process/source-fanout/reports/$safe_id.json"
-          content="$(base64 -w0 /tmp/fanout-report.json)"
-          existing="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
-          if [ -n "$existing" ]; then
-            gh api --method PUT "$api" -f message="chore(source): refresh fanout report $REQUEST_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
+
+          if [ "$MODE" = 'audit_source_fanout' ]; then
+            jq -n \
+              --arg requestId "$REQUEST_ID" \
+              --arg campaignId "$CAMPAIGN_ID" \
+              --arg auditName "$AUDIT_NAME" \
+              --arg filename "$FILENAME" \
+              --arg sha256 "$SHA256" \
+              --argjson size "$SIZE" \
+              --arg controllerPath "$(cat /tmp/controller-path.txt)" \
+              --arg auditsPath "$(cat /tmp/audits-path.txt)" \
+              --arg runId "$GITHUB_RUN_ID" \
+              '{
+                schemaVersion:"curveyield-audit-source-fanout-report-v2",
+                requestId:$requestId,campaignId:$campaignId,auditName:$auditName,status:"PASS",
+                source:{filename:$filename,sha256:$sha256,size:$size},
+                destinations:[
+                  {repository:"CurveYield2/Audit-Controller",ref:"main",path:$controllerPath,verified:true},
+                  {repository:"CurveYield2/Audits",ref:"main",path:$auditsPath,verified:true}
+                ],
+                workflowRunId:$runId,
+                completedAt:(now|todate)
+              }' > /tmp/import-report.json
+            report_dir='process/source-fanout/reports'
+            report_message='chore(source): record fanout report'
           else
-            gh api --method PUT "$api" -f message="chore(source): record fanout report $REQUEST_ID" -f content="$content" -f branch=main >/dev/null
+            jq -n \
+              --arg requestId "$REQUEST_ID" \
+              --arg driveFileId "$DRIVE_FILE_ID" \
+              --arg sourceUrl "$SOURCE_URL" \
+              --arg filename "$FILENAME" \
+              --arg sha256 "$SHA256" \
+              --argjson size "$SIZE" \
+              --arg path "$(cat /tmp/authority-target-path.txt)" \
+              --arg remoteSha "$(cat /tmp/authority-remote-sha.txt)" \
+              --argjson remoteSize "$(cat /tmp/authority-remote-size.txt)" \
+              --arg runId "$GITHUB_RUN_ID" \
+              '{
+                schemaVersion:"curveyield-development-authority-import-report-v1",
+                requestId:$requestId,status:"PASS",
+                source:{type:"google-drive",driveFileId:$driveFileId,url:$sourceUrl,filename:$filename,sha256:$sha256,size:$size},
+                destination:{repository:env.GITHUB_REPOSITORY,ref:"main",path:$path,sha256:$remoteSha,size:$remoteSize,verified:true},
+                workflowRunId:$runId,
+                completedAt:(now|todate)
+              }' > /tmp/import-report.json
+            report_dir='process/development-agent-task-manager/authority-import/reports'
+            report_message='chore(task-manager): record authority import'
+          fi
+
+          api="repos/$GITHUB_REPOSITORY/contents/$report_dir/$safe_id.json"
+          content="$(base64 -w0 /tmp/import-report.json)"
+          existing="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [[ "$existing" =~ ^[0-9a-f]{40}$ ]]; then
+            gh api --method PUT "$api" -f message="$report_message $REQUEST_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$api" -f message="$report_message $REQUEST_ID" -f content="$content" -f branch=main >/dev/null
           fi
 
       - name: Launch registered Phase-0 browser agent
+        if: steps.meta.outputs.mode == 'audit_source_fanout'
         env:
           GH_TOKEN: ${{ github.token }}
           CAMPAIGN_ID: ${{ steps.meta.outputs.campaign_id }}
