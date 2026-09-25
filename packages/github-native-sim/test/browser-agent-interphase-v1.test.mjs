@@ -34,7 +34,10 @@ test('mechanical completion is bound to exact work packet and required output by
   const watchdog = fs.readFileSync(watchdogPath, 'utf8');
   assert.match(watchdog, /curveyield-lite-interphase-work-packet-v1/);
   assert.match(watchdog, /curveyield-lite-interphase-completion-v1/);
+  assert.match(watchdog, /\.taskClass=="MECHANICAL_ONLY"/);
   assert.match(watchdog, /\.workPacketSha256==\$packetSha/);
+  assert.match(watchdog, /required_total/);
+  assert.match(watchdog, /observed_total/);
   assert.match(watchdog, /\[ "\$required" = "\$observed" \]/);
   assert.match(watchdog, /sha256sum \/tmp\/lite-interphase-output\.bin/);
   assert.match(watchdog, /\[ "\$observed_sha" = "\$expected_sha" \]/);
@@ -62,6 +65,8 @@ test('interphase work packet and completion schemas are strict machine contracts
   assert.equal(completion.additionalProperties, false);
   assert.equal(packet.properties.schemaVersion.const, 'curveyield-lite-interphase-work-packet-v1');
   assert.equal(completion.properties.schemaVersion.const, 'curveyield-lite-interphase-completion-v1');
+  assert.ok(packet.required.includes('taskClass'));
+  assert.equal(packet.properties.taskClass.const, 'MECHANICAL_ONLY');
   assert.ok(packet.required.includes('requiredOutputs'));
   assert.ok(completion.required.includes('workPacketSha256'));
   assert.ok(completion.required.includes('outputs'));
