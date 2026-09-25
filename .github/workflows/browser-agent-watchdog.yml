@@ -84,7 +84,46 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Validate active watchdog target before browser setup
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_id="$(printf '%s' "$WAKE_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active/$safe_id.json?ref=main"
+          encoded="$(gh api "$api" --jq '.content' 2>/dev/null || true)"
+          if [ -z "$encoded" ]; then
+            echo 'valid=false' >> "$GITHUB_OUTPUT"
+            echo "Watchdog target disappeared before supervision: $WAKE_ID"
+            exit 0
+          fi
+          if ! printf '%s' "$encoded" | base64 -d | jq -e --arg wake "$WAKE_ID" '
+            type=="object"
+            and .schemaVersion=="curveyield-browser-agent-watchdog-state-v1"
+            and .wakeId==$wake
+            and .status=="ACTIVE"
+            and (.campaignId|type=="string" and length>0)
+            and (.phaseId|type=="string" and length>0)
+            and (.workerRole=="reviewer" or .workerRole=="interphase_mechanical")
+            and (.chatUrl|type=="string")
+            and (.idleMessage|type=="string")
+            and (.observation|type=="object")
+            and (.gate|type=="object")
+            and (.gate.mode=="FULL_V26" or .gate.mode=="LITE")
+            and (.gate.repository|type=="string" and length>0)
+            and (.gate.ref|type=="string" and length>0)
+            and (.gate.statePath|type=="string")
+          ' >/dev/null; then
+            echo 'valid=false' >> "$GITHUB_OUTPUT"
+            echo "::warning::Malformed or stale watchdog state for $WAKE_ID; browser setup and supervision skipped."
+            exit 0
+          fi
+          echo 'valid=true' >> "$GITHUB_OUTPUT"
+
       - name: Select optional Audit-Controller credential
+        if: steps.target.outputs.valid == 'true'
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
@@ -93,14 +132,17 @@ jobs:
         run: bash scripts/select-audit-controller-token.sh
 
       - name: Set up Node.js
+        if: steps.target.outputs.valid == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Set up isolated browser-agent runtime
+        if: steps.target.outputs.valid == 'true'
         uses: ./.github/actions/setup-browser-agent-runtime
 
       - name: Supervise agent for one watchdog sweep
+        if: steps.target.outputs.valid == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -113,7 +155,24 @@ jobs:
             local encoded
             encoded="$(gh api "$active_api?ref=main" --jq '.content' 2>/dev/null || true)"
             if [ -z "$encoded" ]; then return 1; fi
-            printf '%s' "$encoded" | base64 -d > /tmp/watchdog-state.json
+            printf '%s' "$encoded" | base64 -d > /tmp/watchdog-state.json || return 1
+            jq -e --arg wake "$WAKE_ID" '
+              type=="object"
+              and .schemaVersion=="curveyield-browser-agent-watchdog-state-v1"
+              and .wakeId==$wake
+              and .status=="ACTIVE"
+              and (.campaignId|type=="string" and length>0)
+              and (.phaseId|type=="string" and length>0)
+              and (.workerRole=="reviewer" or .workerRole=="interphase_mechanical")
+              and (.chatUrl|type=="string")
+              and (.idleMessage|type=="string")
+              and (.observation|type=="object")
+              and (.gate|type=="object")
+              and (.gate.mode=="FULL_V26" or .gate.mode=="LITE")
+              and (.gate.repository|type=="string" and length>0)
+              and (.gate.ref|type=="string" and length>0)
+              and (.gate.statePath|type=="string")
+            ' /tmp/watchdog-state.json >/dev/null || return 1
           }
 
           persist_state() {
