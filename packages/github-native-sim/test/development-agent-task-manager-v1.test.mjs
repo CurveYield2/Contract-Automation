@@ -43,10 +43,16 @@ test('dead-agent decision uses exactly three immediate prompt attempts with at l
 });
 
 test('unviewable chat can trigger immediate replacement while provider failures fail safe', () => {
-  assert.match(workflow, /composer_visible=.*composerVisible/);
+  assert.match(workflow, /chat_viewable=.*chatViewable/);
   assert.match(workflow, /failure_reason='CHAT_UNVIEWABLE'/);
   assert.match(workflow, /OBSERVATION_PROVIDER_FAILURE/);
   assert.match(workflow, /preserving the current worker for the next sweep rather than guessing that the agent died/);
+});
+
+test('state disappearance after discovery fails closed without running supervision', () => {
+  assert.match(workflow, /id: manager_state/);
+  assert.match(workflow, /echo 'valid=false' >> "\$GITHUB_OUTPUT"/);
+  assert.match(workflow, /if: steps\.manager_state\.outputs\.valid == 'true' && steps\.completion\.outputs\.complete != 'true'/);
 });
 
 test('replacement agent resumes from durable branch head instead of predecessor chat memory', () => {
