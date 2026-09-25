@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "awr-runner-rebind-v1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "06b5372a729a9a25a2e779bf9a25c696cb08b465",
+    "requestPath": ".deep-assurance/operator/requests/awr-runner-rebind-v1.json"
+  },
+  "verifyController": true
+}
