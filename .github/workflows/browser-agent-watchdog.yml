@@ -108,9 +108,10 @@ jobs:
             local expected_milestone="$3"
             local gate_repo="$4"
             local gate_ref="$5"
-            local encoded path
+            local encoded path allowed_prefix
 
             safe_repo_path "$packet_path" || return 2
+            allowed_prefix="$(dirname "$handoff_path")/MECHANICAL/"
             encoded="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
             [ -n "$encoded" ] || return 1
             printf '%s' "$encoded" | base64 -d > /tmp/lite-interphase-work-packet.json
@@ -131,6 +132,10 @@ jobs:
             [ "$required_total" = "$required_unique" ] || return 2
             while IFS= read -r path; do
               safe_repo_path "$path" || return 2
+              case "$path" in
+                "$allowed_prefix"*) ;;
+                *) return 2 ;;
+              esac
             done < <(jq -r '.requiredOutputs[]?.path // empty' /tmp/lite-interphase-work-packet.json)
 
             sha256sum /tmp/lite-interphase-work-packet.json | awk '{print $1}' > /tmp/lite-interphase-work-packet.sha256
