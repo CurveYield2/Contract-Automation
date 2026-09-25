@@ -353,9 +353,12 @@ jobs:
             exit 0
           fi
           implementation_head="$(jq -r '.implementationHeadSha' /tmp/task-manager-completion.json)"
-          current_head="$(gh api "repos/$target_repo/commits/$target_branch" --jq '.sha')"
-          compare_status="$(gh api "repos/$target_repo/compare/$implementation_head...$current_head" --jq '.status' 2>/dev/null || true)"
-          case "$compare_status" in identical|ahead) ;; *) echo 'complete=false' >> "$GITHUB_OUTPUT"; exit 0;; esac
+          current_head="$(gh api -X GET "repos/$target_repo/commits" -f sha="$target_branch" -f per_page=1 --jq '.[0].sha')"
+          receipt_commit="$(gh api -X GET "repos/$target_repo/commits" -f sha="$target_branch" -f path="$receipt_path" -f per_page=1 --jq '.[0].sha // empty' 2>/dev/null || true)"
+          [ -n "$receipt_commit" ] || { echo 'complete=false' >> "$GITHUB_OUTPUT"; exit 0; }
+          [ "$receipt_commit" = "$current_head" ] || { echo 'complete=false' >> "$GITHUB_OUTPUT"; exit 0; }
+          receipt_parent="$(gh api "repos/$target_repo/commits/$receipt_commit" --jq '.parents[0].sha // empty')"
+          [ "$receipt_parent" = "$implementation_head" ] || { echo 'complete=false' >> "$GITHUB_OUTPUT"; exit 0; }
           echo 'complete=true' >> "$GITHUB_OUTPUT"
           echo "completion_head=$current_head" >> "$GITHUB_OUTPUT"
 
@@ -479,6 +482,17 @@ jobs:
               skill_ref="$(jq -r '.skill.ref' /tmp/task-manager-state.json)"
               skill_sha="$(jq -r '.skill.sha256' /tmp/task-manager-state.json)"
               predecessor="$chat_url"
+
+              jq --arg predecessor "$predecessor" --arg reason "$failure_reason" --arg head "$checkpoint_sha"                 '.predecessorChatUrl=$predecessor
+                 | .lastReplacementReason=$reason
+                 | .target.lastCheckpointSha=$head
+                 | .lastDecision="AGENT_DEAD_CHECKPOINT_SAVED"
+                 | .checkpointSavedAt=(now|todate)
+                 | .updatedAt=(now|todate)'                 /tmp/task-manager-state.json > /tmp/task-manager-next.json
+              mv /tmp/task-manager-next.json /tmp/task-manager-state.json
+              checkpoint_state_sha="$(gh api "$STATE_API?ref=main" --jq '.sha')"
+              checkpoint_content="$(base64 -w0 /tmp/task-manager-state.json)"
+              gh api --method PUT "$STATE_API"                 -f message="chore(task-manager): checkpoint dead agent $SAFE_ID"                 -f content="$checkpoint_content" -f sha="$checkpoint_state_sha" -f branch=main >/dev/null
 
               cat > /tmp/task-manager-recovery.txt <<EOF
               [DEVELOPMENT_AGENT_RECOVERY_V1]
