@@ -27,3 +27,4 @@ Use the GitHub connector app inside the exact current campaign `workspacePath`. 
 At a fresh-reviewer boundary, the successor reads the campaign-local `START_HERE_SUCCESSOR.md` **first**, then verifies the authoritative `SUCCESSOR_HANDOFF.json` and creates `SUCCESSOR_HANDOFF_RECEIPT.json`. The bootstrap packet is routing-only and never replaces the authoritative handoff.
 
 Never substitute another campaign/generation's handoff. Each receiving phase card contains the exact reception checklist and recovery ladder.
+

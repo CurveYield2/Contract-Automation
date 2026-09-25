@@ -78,7 +78,7 @@ test('dead-agent recovery saves durable branch state before creating a fresh rep
   assert.ok(checkpoint >= 0);
   assert.ok(persist > checkpoint);
   assert.ok(replacement > persist);
-  assert.match(workflow, /checkpoint_sha=.*repos\/\$target_repo\/commits\/\$target_branch/);
+  assert.match(workflow, /checkpoint_sha=.*gh api -X GET "repos\/\$target_repo\/commits" -f sha="\$target_branch"/);
   assert.match(workflow, /exact_resume_head=\$checkpoint_sha/);
   assert.match(workflow, /predecessor_chat=\$predecessor/);
   assert.match(workflow, /replacement_reason=\$failure_reason/);
