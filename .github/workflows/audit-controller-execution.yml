@@ -375,8 +375,110 @@ jobs:
             echo "controller_ref=$CONTROLLER_WRITEBACK_COMMIT"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Record terminal V7 execution observer receipt
+        if: always() && env.V7_REQUEST_KIND == 'v7-execution'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir=".audit-evidence/v7-execution/${V7_REQUEST_ID}"
+          mkdir -p "$evidence_dir"
+          raw_result="$evidence_dir/raw-result.json"
+          job_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | select(.name=="execute-v7-request") | .id' | head -n1)"
+          artifact_name="${V7_ARTIFACT_NAME:-v7-execution-unresolved}"
+
+          if [ -s "$raw_result" ]; then
+            request_digest="$(jq -r '.requestDigest // empty' "$raw_result")"
+            execution_status="$(jq -r '.status // "unknown"' "$raw_result")"
+            disposition="$(jq -r '.disposition // "UNCLASSIFIED"' "$raw_result")"
+            blocking="$(jq -r '.blocking // false' "$raw_result")"
+            owner="$(jq -r '.owner // "UNASSIGNED"' "$raw_result")"
+            next_action="$(jq -r '.nextAction // "REVIEW_TERMINAL_EVIDENCE"' "$raw_result")"
+            retry_from="$(jq -r '.retryFrom // empty' "$raw_result")"
+            recovery_command="$(jq -r '.recoveryCommand // empty' "$raw_result")"
+
+            if [ "$execution_status" = 'completed' ]; then
+              route='EVIDENCE_INGESTION'
+            elif [ "$owner" = 'RUNNER_MAINTAINER' ]; then
+              route='RUNNER_REPAIR_REQUIRED'
+            elif [ "$next_action" = 'CREATE_OR_REPAIR_PHASE6_HARNESS' ]; then
+              route='SEMANTIC_HARNESS_REPAIR_REQUIRED'
+            else
+              route='TYPED_FAILURE_REVIEW_REQUIRED'
+            fi
+          else
+            request_digest="${V7_REQUEST_DIGEST:-}"
+            execution_status='evidence_missing'
+            disposition='EVIDENCE_MISSING'
+            blocking='true'
+            owner='RUNNER_MAINTAINER'
+            next_action='RECOVER_EXECUTION_EVIDENCE'
+            retry_from="${V7_PHASE_ID:-}"
+            recovery_command=''
+            route='EVIDENCE_RECOVERY_REQUIRED'
+          fi
+
+          payload="$(jq -n \
+            --arg request_id "${V7_REQUEST_ID:-}" \
+            --arg request_digest "$request_digest" \
+            --arg phase_id "${V7_PHASE_ID:-}" \
+            --argjson workflow_run_id "$GITHUB_RUN_ID" \
+            --arg job_id "$job_id" \
+            --arg artifact_name "$artifact_name" \
+            --arg execution_status "$execution_status" \
+            --arg disposition "$disposition" \
+            --arg blocking "$blocking" \
+            --arg owner "$owner" \
+            --arg next_action "$next_action" \
+            --arg retry_from "$retry_from" \
+            --arg recovery_command "$recovery_command" \
+            --arg route "$route" \
+            '{
+              schemaVersion:"curveyield-lite-execution-observer-receipt-v1",
+              requestId:$request_id,
+              requestDigest:$request_digest,
+              phaseId:$phase_id,
+              workflowRunId:$workflow_run_id,
+              jobId:(if $job_id=="" then null else ($job_id|tonumber) end),
+              artifactName:$artifact_name,
+              terminal:{
+                status:$execution_status,
+                disposition:$disposition,
+                blocking:($blocking=="true"),
+                owner:$owner,
+                nextAction:$next_action,
+                retryFrom:(if $retry_from=="" then null else $retry_from end),
+                recoveryCommand:(if $recovery_command=="" then null else $recovery_command end)
+              },
+              route:$route,
+              semanticReviewerPollingRequired:false
+            }')"
+          receipt_digest="$(printf '%s' "$payload" | jq -S -c . | sha256sum | awk '{print $1}')"
+          printf '%s' "$payload" | jq --arg digest "$receipt_digest" '. + {receiptDigest:$digest}' > "$evidence_dir/EXECUTION_OBSERVER_RECEIPT_v1.json"
+
+          echo "EXECUTION_OBSERVER_ROUTE=$route" >> "$GITHUB_ENV"
+          echo "EXECUTION_OBSERVER_RECEIPT=$evidence_dir/EXECUTION_OBSERVER_RECEIPT_v1.json" >> "$GITHUB_ENV"
+          {
+            echo "execution_observer_route=$route"
+            echo "execution_disposition=$disposition"
+            echo "execution_owner=$owner"
+            echo "execution_next_action=$next_action"
+            echo "semantic_reviewer_polling_required=false"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload request-addressable V7 evidence
+        id: execution_evidence
+        if: always() && env.V7_REQUEST_KIND == 'v7-execution'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.V7_ARTIFACT_NAME || 'v7-execution-unresolved' }}
+          path: .audit-evidence/v7-execution
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Dispatch registered browser-agent wake
-        if: success()
+        if: always() && (env.V7_REQUEST_KIND == 'v7-execution' || success())
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -405,7 +507,69 @@ jobs:
           mode="$(jq -r '.mode // "resume_existing"' "$registration")"
           chat_url="$(jq -r '.chatUrl // empty' "$registration")"
           wake_message="$(jq -r '.wakeMessage // empty' "$registration")"
-          if [ -z "$wake_message" ]; then
+          if [ "${V7_REQUEST_KIND:-}" = 'v7-execution' ]; then
+            observer="${EXECUTION_OBSERVER_RECEIPT:-.audit-evidence/v7-execution/${V7_REQUEST_ID}/EXECUTION_OBSERVER_RECEIPT_v1.json}"
+            test -s "$observer"
+            route="$(jq -r '.route' "$observer")"
+            disposition="$(jq -r '.terminal.disposition' "$observer")"
+            owner="$(jq -r '.terminal.owner' "$observer")"
+            next_action="$(jq -r '.terminal.nextAction' "$observer")"
+            retry_from="$(jq -r '.terminal.retryFrom // empty' "$observer")"
+            recovery_command="$(jq -r '.terminal.recoveryCommand // empty' "$observer")"
+            terminal_message="$(printf '%s\n' \
+              '[AUDIT_AUTOMATION_WAKE_V1]' \
+              "campaign=$campaign_id" \
+              "phase=$phase_id" \
+              "workflow_run=$GITHUB_RUN_ID" \
+              "route=$route" \
+              "disposition=$disposition" \
+              "owner=$owner" \
+              "next_action=$next_action" \
+              "retry_from=$retry_from" \
+              "recovery_command=$recovery_command" \
+              '' \
+              'Technical execution is terminal and its observer receipt is durable in the request-addressable V7 evidence artifact. Follow the typed route; do not poll or rerun completed work.')"
+            if [ -n "$wake_message" ]; then
+              wake_message="$terminal_message"
+          watchdog_enabled="$(jq -r '.watchdog.enabled // true' "$registration")"
+          watchdog_message="$(jq -r '.watchdog.idleMessage // empty' "$registration")"
+          gate_mode="$(jq -r '.watchdog.gate.mode // "FULL_V26"' "$registration")"
+          gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' "$registration")"
+          gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$registration")"
+          gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' "$registration")"
+          gate_expected_phase="$(jq -r '.watchdog.gate.expectedPhaseId // empty' "$registration")"
+          gate_expected_milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' "$registration")"
+          gate_pointer_path="$(jq -r '.watchdog.gate.activePointerPath // empty' "$registration")"
+          gate_stop_states="$(jq -r '(.watchdog.gate.stopStates // ["WAITING_FOR_HUMAN_RESPONSE","WAITING_FOR_SUCCESSOR_AGENT","CLOSED","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
+          gate_stop_campaign_statuses="$(jq -r '(.watchdog.gate.stopCampaignStatuses // ["COMPLETE","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
+
+          wake_id="$campaign_id-$phase_id-$GITHUB_RUN_ID"
+          wake_b64="$(printf '%s' "$wake_message" | base64 -w0)"
+          watchdog_b64="$(printf '%s' "$watchdog_message" | base64 -w0)"
+
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$wake_id" \
+            -f campaign_id="$campaign_id" \
+            -f phase_id="$phase_id" \
+            -f mode="$mode" \
+            -f chat_url="$chat_url" \
+            -f wake_message_b64="$wake_b64" \
+            -f watchdog_enabled="$watchdog_enabled" \
+            -f watchdog_message_b64="$watchdog_b64" \
+            -f gate_mode="$gate_mode" \
+            -f gate_repository="$gate_repo" \
+            -f gate_ref="$gate_ref" \
+            -f gate_state_path="$gate_state_path" \
+            -f gate_expected_phase_id="$gate_expected_phase" \
+            -f gate_expected_milestone_id="$gate_expected_milestone" \
+            -f gate_active_pointer_path="$gate_pointer_path" \
+            -f gate_stop_states_csv="$gate_stop_states" \
+            -f gate_stop_campaign_statuses_csv="$gate_stop_campaign_statuses"
+\n\n'"$wake_message"
+            else
+              wake_message="$terminal_message"
+            fi
+          elif [ -z "$wake_message" ]; then
             wake_message="$(printf '%s\n' \
               '[AUDIT_AUTOMATION_WAKE_V1]' \
               "campaign=$campaign_id" \
