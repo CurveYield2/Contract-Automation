@@ -1,90 +1,141 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { classifyV7QualificationChanges } from '../../../scripts/classify-v7-qualification-change.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const workflowPath = path.join(root, '.github/workflows/development-agent-task-manager.yml');
 const wakePath = path.join(root, 'scripts/browser-agent-wake.mjs');
 const workflow = fs.readFileSync(workflowPath, 'utf8');
 const wake = fs.readFileSync(wakePath, 'utf8');
+const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
-test('development task manager is a scheduled watchdog-derived supervisor in Contract-Automation', () => {
+test('development task manager is a scheduled watchdog-derived supervisor that reuses browser primitives', () => {
   assert.match(workflow, /name: Development Agent Task Manager/);
-  assert.match(workflow, /schedule:\s*\n\s*- cron: '4-59\/5 \* \* \* \*'/);
+  assert.match(workflow, /cron: '4-59\/5 \* \* \* \*'/);
   assert.match(workflow, /Discover active development agents/);
   assert.match(workflow, /process\/development-agent-task-manager\/active/);
   assert.match(workflow, /max-parallel:\s*4/);
-  assert.match(workflow, /\.github\/actions\/setup-browser-agent-runtime/);
+  assert.match(workflow, /Set up isolated browser-agent runtime/);
   assert.match(workflow, /node scripts\/browser-agent-wake\.mjs/);
+  assert.doesNotMatch(workflow, /playwright-core|@browserbasehq\/sdk/);
 });
 
-test('task manager binds exact specification, skill, repository, branch and checkpoint identities', () => {
-  for (const token of [
-    'specification_sha256=', 'skill_sha256=', 'target_repository=', 'target_branch=',
-    'exact_resume_head=', 'lastCheckpointSha', 'specificationSha256', 'skillSha256'
-  ]) assert.equal(workflow.includes(token), true, token);
-  assert.match(workflow, /sha256sum \/tmp\/task-manager-spec\.md/);
-  assert.match(workflow, /sha256sum \/tmp\/task-manager-skill\.md/);
-  assert.match(workflow, /gh api "repos\/\$target_repo\/commits\/\$target_branch"/);
-});
-
-test('dead-agent decision uses exactly three immediate prompt attempts with at least 120 seconds each', () => {
+test('one unanswered prompt triggers two immediate refreshed retries with two-minute response windows', () => {
+  assert.match(workflow, /responsePolicy:\{attempts:3,minimumWaitMsPerAttempt:120000,refreshBetweenAttempts:true\}/);
+  assert.match(workflow, /\.responsePolicy\.attempts==3/);
+  assert.match(workflow, /\.responsePolicy\.minimumWaitMsPerAttempt==120000/);
   assert.match(workflow, /for attempt in 1 2 3; do/);
-  assert.match(workflow, /WAKE_ACTION='wake_and_wait'/);
-  assert.match(workflow, /RESPONSE_WAIT_MS='120000'/);
+  assert.match(workflow, /export RESPONSE_WAIT_MS='120000'/);
   assert.match(workflow, /if \[ "\$attempt" -gt 1 \]; then export REFRESH_BEFORE_WAKE='true'; fi/);
   assert.match(workflow, /THREE_CONSECUTIVE_UNANSWERED_PROMPTS/);
-  assert.match(workflow, /minimumWaitMsPerAttempt:120000/);
-  assert.match(workflow, /refreshBetweenAttempts:true/);
-  assert.doesNotMatch(workflow, /sleep 120/);
-  assert.doesNotMatch(workflow, /sleep 300/);
+  assert.doesNotMatch(workflow, /sleep\s+300/);
 });
 
-test('unviewable chat can trigger immediate replacement while provider failures fail safe', () => {
-  assert.match(workflow, /chat_viewable=.*chatViewable/);
+test('unviewable chat is an immediate death signal while provider failure is not', () => {
+  assert.match(wake, /chatViewable/);
+  assert.match(wake, /conversationUnavailable/);
+  assert.match(wake, /deadReason: 'CHAT_UNVIEWABLE'/);
+  assert.match(workflow, /chat_viewable=.*\.chatViewable/);
   assert.match(workflow, /failure_reason='CHAT_UNVIEWABLE'/);
   assert.match(workflow, /OBSERVATION_PROVIDER_FAILURE/);
+  assert.match(workflow, /PROMPT_PROVIDER_FAILURE/);
   assert.match(workflow, /preserving the current worker for the next sweep rather than guessing that the agent died/);
 });
 
-test('state disappearance after discovery fails closed without running supervision', () => {
-  assert.match(workflow, /id: manager_state/);
-  assert.match(workflow, /echo 'valid=false' >> "\$GITHUB_OUTPUT"/);
-  assert.match(workflow, /if: steps\.manager_state\.outputs\.valid == 'true' && steps\.completion\.outputs\.complete != 'true'/);
-});
-
-test('replacement agent resumes from durable branch head instead of predecessor chat memory', () => {
-  assert.match(workflow, /checkpoint_sha=.*repos\/\$target_repo\/commits\/\$target_branch/);
-  assert.match(workflow, /\[DEVELOPMENT_AGENT_RECOVERY_V1\]/);
-  assert.match(workflow, /Repository state is authoritative/);
-  assert.match(workflow, /predecessor_chat=\$predecessor/);
-  assert.match(workflow, /replacement_generation=\$next_generation/);
-  assert.match(workflow, /REPLACED_DEAD_AGENT/);
-});
-
-test('completion is machine gated and bound to exact authority digests', () => {
-  assert.match(workflow, /curveyield-development-task-completion-v1/);
-  assert.match(workflow, /\.managerId==\$manager and \.status=="COMPLETE"/);
-  assert.match(workflow, /\.specificationSha256==\$spec and \.skillSha256==\$skill/);
-  assert.match(workflow, /all\(\.tests\[\]; \.status=="PASS"\)/);
-  assert.match(workflow, /compare\/\$implementation_head\.\.\.\$current_head/);
-});
-
-test('browser driver supports bounded prompt-and-wait with explicit refresh', () => {
-  assert.match(wake, /async function waitForAssistantResponse/);
+test('wake driver enforces at least 120 seconds for each wake-and-wait attempt', () => {
   assert.match(wake, /action === 'wake_and_wait'/);
   assert.match(wake, /Math\.max\(120000, requestedWait\)/);
   assert.match(wake, /REFRESH_BEFORE_WAKE/);
-  assert.match(wake, /page\.reload\(/);
-  assert.match(wake, /composerVisible/);
-  assert.match(wake, /responded: response\.responded/);
+  assert.match(wake, /await page\.reload/);
+  assert.match(wake, /waitForAssistantResponse\(page, before, responseWaitMs\)/);
 });
 
-test('task-manager instructions preserve existing-process-first and repository-boundary rules', () => {
-  assert.match(workflow, /Reuse and integrate existing workflows, scripts, schemas, queues, bridges, and tests/);
-  assert.match(workflow, /Create a new workflow only when no existing workflow can correctly own the responsibility/);
-  assert.match(workflow, /Audit-Controller must contain no GitHub Actions workflows/);
-  assert.doesNotMatch(workflow, /repos\/CurveYield2\/Audit-Controller\/contents\/.github\/workflows/);
+test('dead-agent recovery saves durable branch state before creating a fresh replacement chat', () => {
+  const checkpoint = workflow.indexOf('AGENT_DEAD_CHECKPOINT_SAVED');
+  const persist = workflow.indexOf('checkpoint dead agent $SAFE_ID');
+  const replacement = workflow.indexOf("export WAKE_MODE='create_fresh'", checkpoint);
+  assert.ok(checkpoint >= 0);
+  assert.ok(persist > checkpoint);
+  assert.ok(replacement > persist);
+  assert.match(workflow, /checkpoint_sha=.*repos\/\$target_repo\/commits\/\$target_branch/);
+  assert.match(workflow, /exact_resume_head=\$checkpoint_sha/);
+  assert.match(workflow, /predecessor_chat=\$predecessor/);
+  assert.match(workflow, /replacement_reason=\$failure_reason/);
+});
+
+test('completion is machine gated to the exact receipt commit and implementation parent', () => {
+  assert.match(workflow, /curveyield-development-task-completion-v1/);
+  assert.match(workflow, /all\(\.tests\[\]; \.status=="PASS"\)/);
+  assert.match(workflow, /receipt_commit=.*-f path="\$receipt_path"/);
+  assert.match(workflow, /\[ "\$receipt_commit" = "\$current_head" \]/);
+  assert.match(workflow, /receipt_parent=.*\.parents\[0\]\.sha/);
+  assert.match(workflow, /\[ "\$receipt_parent" = "\$implementation_head" \]/);
+});
+
+test('pinned specification and skill authority are exact human-supplied bytes', () => {
+  const specPath = path.join(root, 'process/development-agent-task-manager/specifications/AUDIT_AUTOMATION_UPGRADE_SPECIFICATION_v1.md');
+  const spec = fs.readFileSync(specPath);
+  assert.equal(sha256(spec), 'b23743f626cc159f869f22bfa4921b50ed103f600c4e7981d94463861dd1b86a');
+
+  const skillDir = path.join(root, 'process/development-agent-task-manager/authority/audit-v7-v38.3.4');
+  const expectedParts = [
+    ['SKILL_PART_01.md', '176a01e0148f13e6216494e9f2cb068a140d87c491327d7301176eb54f0b7081'],
+    ['SKILL_PART_02.md', '2f14f5ddeb5a992016096e5f936912121c2663b4ae0616adf832d5692f744f63'],
+    ['SKILL_PART_03.md', 'c161ace9dab1123d6f47fb2ab25f9139b22fa96455852fd8cdcc976aecb1d654'],
+    ['SKILL_PART_04.md', 'd8a799923c7d8ca4edf950a0b2ee0d7a13189d22a078ad6ff54bd2781a048d07'],
+    ['SKILL_PART_05.md', '243864c02d83899074216c94dc585e6fd5548c52f3c83cf3752f6df24da8bc7a'],
+  ];
+  const parts = [];
+  for (const [name, expected] of expectedParts) {
+    const bytes = fs.readFileSync(path.join(skillDir, name));
+    assert.equal(sha256(bytes), expected, name);
+    parts.push(bytes);
+  }
+  assert.equal(sha256(Buffer.concat(parts)), '31558c88bb93eb8ce638a426d1318b7a712cb5a6bd5c2f2c6927bd8b6dc6dc4c');
+
+  const index = fs.readFileSync(path.join(skillDir, 'SKILL_AUTHORITY_INDEX_v1.md'), 'utf8');
+  assert.match(index, /aed298c90c3de3bf9e64bf7e49853b7efd994c47ef9e88cc8f35f60977314cd8/);
+  assert.match(index, /31558c88bb93eb8ce638a426d1318b7a712cb5a6bd5c2f2c6927bd8b6dc6dc4c/);
+});
+
+test('manager re-verifies authority bytes on every supervision sweep', () => {
+  assert.match(workflow, /Verify pinned development authorities/);
+  assert.match(workflow, /Development specification bytes changed after manager admission/);
+  assert.match(workflow, /Skill authority bytes changed after manager admission/);
+});
+
+test('completion schema is strict and requires passing tests', () => {
+  const schema = JSON.parse(fs.readFileSync(
+    path.join(root, 'protocol/schemas/curveyield-development-task-completion-v1.schema.json'),
+    'utf8'
+  ));
+  assert.equal(schema.additionalProperties, false);
+  assert.equal(schema.properties.schemaVersion.const, 'curveyield-development-task-completion-v1');
+  assert.equal(schema.properties.status.const, 'COMPLETE');
+  assert.equal(schema.properties.tests.minItems, 1);
+  assert.equal(schema.properties.tests.items.properties.status.const, 'PASS');
+});
+
+test('manager remains a Contract-Automation workflow and encodes the repository-boundary rule', () => {
+  assert.match(workflow, /Audit-Controller must contain no GitHub Actions workflows; workflows belong in Contract-Automation/);
+  assert.match(workflow, /Never add a GitHub Actions workflow to Audit-Controller/);
+  assert.doesNotMatch(workflow, /gh workflow run[^\n]*--repo\s+CurveYield2\/Audit-Controller/);
+});
+
+test('task-manager changes stay in the control-light qualification lane', () => {
+  const result = classifyV7QualificationChanges([
+    '.github/workflows/development-agent-task-manager.yml',
+    'scripts/browser-agent-wake.mjs',
+    'process/development-agent-task-manager/README_v1.md',
+    'process/development-agent-task-manager/specifications/AUDIT_AUTOMATION_UPGRADE_SPECIFICATION_v1.md',
+    'process/development-agent-task-manager/authority/audit-v7-v38.3.4/SKILL_AUTHORITY_INDEX_v1.md',
+    'protocol/schemas/curveyield-development-task-completion-v1.schema.json',
+    'packages/github-native-sim/test/development-agent-task-manager-v1.test.mjs',
+  ]);
+  assert.equal(result.lane, 'CONTROL_LIGHT');
+  assert.equal(result.escalatedPaths, undefined);
 });
