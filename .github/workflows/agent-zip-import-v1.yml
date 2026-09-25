@@ -18,9 +18,6 @@ jobs:
   fanout:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      TARGET_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN || secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
-
     steps:
       - name: Checkout Contract-Automation control plane
         uses: actions/checkout@v4
@@ -75,9 +72,17 @@ jobs:
           echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
           echo "size=$size" >> "$GITHUB_OUTPUT"
 
+      - name: Select working Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
       - name: Verify cross-repository credential
         env:
-          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN || secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -121,7 +126,7 @@ jobs:
 
       - name: Fan out identical ZIP to Audit-Controller and Audits
         env:
-          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN || secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           FILENAME: ${{ steps.meta.outputs.filename }}
           AUDIT_NAME: ${{ steps.meta.outputs.audit_name }}
           EXPECTED_SHA256: ${{ steps.meta.outputs.sha256 }}
