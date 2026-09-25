@@ -48,6 +48,12 @@ async function snapshot(page) {
     'button[aria-label*="Stop"]',
     'button:has-text("Stop generating")'
   ]);
+  const composer = await firstVisible(page, [
+    '#prompt-textarea',
+    'textarea[placeholder*="Message"]',
+    '[contenteditable="true"][data-lexical-editor="true"]',
+    '[contenteditable="true"]'
+  ]);
   const assistant = page.locator('[data-message-author-role="assistant"]');
   const user = page.locator('[data-message-author-role="user"]');
   const aCount = await assistant.count().catch(() => 0);
@@ -56,6 +62,7 @@ async function snapshot(page) {
   if (aCount) last = await assistant.nth(aCount - 1).innerText().catch(() => '');
   return {
     generating: !!stop,
+    composerVisible: !!composer,
     assistantCount: aCount,
     userCount: uCount,
     lastAssistantHash: sha(last),
@@ -73,6 +80,23 @@ async function ensureComposer(page) {
   ]);
   if (!composer) throw new Error('ChatGPT composer not found');
   return composer;
+}
+
+async function waitForAssistantResponse(page, before, timeoutMs) {
+  const started = Date.now();
+  let current = await snapshot(page);
+  const changed = () =>
+    current.generating ||
+    current.assistantCount > before.assistantCount ||
+    (current.lastAssistantHash && current.lastAssistantHash !== before.lastAssistantHash);
+  if (changed()) return { responded: true, waitedMs: Date.now() - started, snapshot: current };
+  while (Date.now() - started < timeoutMs) {
+    const remaining = timeoutMs - (Date.now() - started);
+    await page.waitForTimeout(Math.min(5000, Math.max(250, remaining)));
+    current = await snapshot(page);
+    if (changed()) return { responded: true, waitedMs: Date.now() - started, snapshot: current };
+  }
+  return { responded: false, waitedMs: Date.now() - started, snapshot: current };
 }
 
 async function post(page, message) {
@@ -115,6 +139,10 @@ async function runWithPage(providerName, connect) {
     }
 
     await page.waitForTimeout(1500);
+    if (bool(env.REFRESH_BEFORE_WAKE)) {
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+      await page.waitForTimeout(1500);
+    }
     const before = await snapshot(page);
 
     if (action === 'observe') {
@@ -130,15 +158,29 @@ async function runWithPage(providerName, connect) {
     }
 
     await post(page, wakeMessage);
-    await page.waitForTimeout(1500);
-    const after = await snapshot(page);
+
+    let response = null;
+    let after;
+    if (action === 'wake_and_wait') {
+      const requestedWait = Number.parseInt(env.RESPONSE_WAIT_MS || '120000', 10);
+      const responseWaitMs = Number.isFinite(requestedWait) ? Math.max(120000, requestedWait) : 120000;
+      response = await waitForAssistantResponse(page, before, responseWaitMs);
+      after = response.snapshot;
+    } else {
+      await page.waitForTimeout(1500);
+      after = await snapshot(page);
+    }
 
     if (mode === 'create_fresh' && !/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(after.url)) {
       await page.waitForURL(/https:\/\/chatgpt\.com\/c\//, { timeout: 15000 }).catch(()=>{});
       after.url = page.url();
     }
 
-    const result = { ok: true, provider: providerName, action, wakeId, posted: true, before, after, chatUrl: after.url };
+    const result = {
+      ok: true, provider: providerName, action, wakeId, posted: true, before, after,
+      chatUrl: after.url,
+      ...(response ? { responded: response.responded, waitedMs: response.waitedMs } : {})
+    };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
     return result;
   } finally {
