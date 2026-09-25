@@ -9,26 +9,52 @@
     "campaignId",
     "completedMilestoneId",
     "handoffPath",
+    "taskClass",
     "instructions",
     "requiredOutputs"
   ],
   "properties": {
-    "schemaVersion": { "const": "curveyield-lite-interphase-work-packet-v1" },
-    "campaignId": { "type": "string", "minLength": 1 },
-    "completedMilestoneId": { "type": "string", "minLength": 1 },
-    "handoffPath": { "type": "string", "minLength": 1 },
-    "instructions": { "type": "string", "minLength": 1 },
+    "schemaVersion": {
+      "const": "curveyield-lite-interphase-work-packet-v1"
+    },
+    "campaignId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "completedMilestoneId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoffPath": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instructions": {
+      "type": "string",
+      "minLength": 1
+    },
     "requiredOutputs": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path"],
+        "required": [
+          "path"
+        ],
         "properties": {
-          "path": { "type": "string", "minLength": 1 },
-          "purpose": { "type": "string" }
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "purpose": {
+            "type": "string"
+          }
         }
-      }
+      },
+      "uniqueItems": true
+    },
+    "taskClass": {
+      "const": "MECHANICAL_ONLY"
     }
   }
 }
