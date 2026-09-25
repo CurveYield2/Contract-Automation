@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "p0-build-successor-wake-curveyield-dex-v385-test-g1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "83be2e5fc1cd67bc787707256e8e164b28327db1",
+    "requestPath": ".deep-assurance/operator/requests/p0-build-successor-wake-curveyield-dex-v385-test-g1.json"
+  },
+  "verifyController": true
+}
