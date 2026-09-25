@@ -232,21 +232,18 @@ jobs:
                 packet_sha="$(cat /tmp/lite-interphase-work-packet.sha256)"
                 instructions="$(jq -r '.instructions' /tmp/lite-interphase-work-packet.json)"
                 mechanical_wake_id="${campaign_id}-${completed_id}-interphase-${GITHUB_RUN_ID}-${cycle}"
-                mechanical_message="$(cat <<EOF
-[AUDIT_INTERPHASE_MECHANICAL_V1]
-campaign=$campaign_id
-completed_milestone=$completed_id
-next_milestone=$next_id
-handoff=$handoff_path
-work_packet=$packet_path
-work_packet_sha256=$packet_sha
-completion_receipt=$completion_path
-
-You are a mechanical inter-phase worker. Perform only the deterministic/repetitive work in the packet below. Do not make, promote, reject, grade, or remediate security findings; do not reinterpret audit methodology. Use the GitHub repository tools to write the required outputs and the completion receipt. The completion receipt must use schema curveyield-lite-interphase-completion-v1 and include exact SHA-256 values for every required output.
-
-$instructions
-EOF
-)"
+                {
+                  printf '%s\n' '[AUDIT_INTERPHASE_MECHANICAL_V1]'
+                  printf 'campaign=%s\n' "$campaign_id"
+                  printf 'completed_milestone=%s\n' "$completed_id"
+                  printf 'next_milestone=%s\n' "$next_id"
+                  printf 'handoff=%s\n' "$handoff_path"
+                  printf 'work_packet=%s\n' "$packet_path"
+                  printf 'work_packet_sha256=%s\n' "$packet_sha"
+                  printf 'completion_receipt=%s\n' "$completion_path"
+                  printf '\n%s\n\n' 'You are a mechanical inter-phase worker. Perform only the deterministic/repetitive work in the packet below. Do not make, promote, reject, grade, or remediate security findings; do not reinterpret audit methodology. Use the GitHub repository tools to write the required outputs and the completion receipt. The completion receipt must use schema curveyield-lite-interphase-completion-v1 and include exact SHA-256 values for every required output.'
+                  printf '%s\n' "$instructions"
+                } > /tmp/lite-interphase-wake.txt
                 mechanical_b64="$(printf '%s' "$mechanical_message" | base64 -w0)"
 
                 echo "Lite machine gate PASS: $expected_milestone requires an inter-phase mechanical pass before $next_id."
