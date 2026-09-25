@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-v7-current-qualification-status-v1",
   "status": "PASS",
-  "qualifiedCommit": "a08cc3432cfa8876ef86a320daae59b8a7e8b3b0",
-  "workflowRunId": "36080539498",
-  "qualifiedAt": "2026-09-25T01:07:33.037Z",
+  "qualifiedCommit": "9dfad5afda28c7707d0d57e7e59b7d878267e780",
+  "workflowRunId": "36080665166",
+  "qualifiedAt": "2026-09-25T01:09:53.030Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
@@ -42,8 +42,8 @@
   },
   "controllerQualification": {
     "schemaVersion": "v26-controller-qualification-v1",
-    "controllerCommit": "c0121cc45c57e5340e2b5b5d6056fe85616c6c52",
-    "controllerRef": "c0121cc45c57e5340e2b5b5d6056fe85616c6c52",
+    "controllerCommit": "f875646cd32a59fceef1d2dc92a5b85cf4e3585a",
+    "controllerRef": "f875646cd32a59fceef1d2dc92a5b85cf4e3585a",
     "status": "PASS",
     "testedSchemas": [
       "audit-v7-sequential-review-state-v3",
