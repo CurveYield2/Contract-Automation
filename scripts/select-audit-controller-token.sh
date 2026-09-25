@@ -22,7 +22,7 @@ elif probe_token "$fallback"; then
   selected="$fallback"
   source="PREFLIGHTSIM_GITHUB_TOKEN"
 elif [ "$required" = "true" ]; then
-  echo "::error::No configured Audit-Controller credential successfully authenticated to $repository"
+  echo "::error::No configured Audit-Controller credential successfully authenticated to $repository" >&2
   exit 1
 fi
 
