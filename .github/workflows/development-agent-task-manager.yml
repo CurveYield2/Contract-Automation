@@ -3,6 +3,10 @@ name: Development Agent Task Manager
 on:
   schedule:
     - cron: '4-59/5 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'process/development-agent-task-manager/requests/*.json'
   workflow_dispatch:
     inputs:
       operation:
@@ -53,12 +57,12 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: development-agent-task-manager-${{ inputs.manager_id || github.run_id }}
+  group: development-agent-task-manager-${{ inputs.manager_id || github.sha || github.run_id }}
   cancel-in-progress: false
 
 jobs:
   start:
-    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'start'
+    if: (github.event_name == 'workflow_dispatch' && inputs.operation == 'start') || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -83,6 +87,59 @@ jobs:
           ref: main
           persist-credentials: false
           fetch-depth: 1
+
+      - name: Resolve declarative start request
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t request_paths < <(
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA"               --jq '.files[]? | select(.status!="removed") | .filename | select(startswith("process/development-agent-task-manager/requests/") and endswith(".json"))'
+          )
+          [ "${#request_paths[@]}" -eq 1 ] || {
+            echo "::error::Exactly one task-manager request file must be created or changed per triggering commit."
+            exit 1
+          }
+          request_path="${request_paths[0]}"
+          encoded="$(gh api -X GET "repos/$GITHUB_REPOSITORY/contents/$request_path" -f ref="$GITHUB_SHA" --jq '.content')"
+          printf '%s' "$encoded" | base64 -d > /tmp/task-manager-request.json
+          jq -e '
+            type=="object"
+            and .schemaVersion=="curveyield-development-agent-task-request-v1"
+            and .status=="READY"
+            and (.managerId|type=="string" and test("^[A-Za-z0-9._-]{1,160}$"))
+            and (.specificationPath|type=="string" and length>0)
+            and (.skillPath|type=="string" and length>0)
+            and ((.authorityRef // "main")|type=="string" and length>0)
+            and (.targetRepository|type=="string" and length>0)
+            and (.targetBranch|type=="string" and length>0)
+            and ((.baseRef // "main")|type=="string" and length>0)
+            and ((.initialAssignment // "")|type=="string")
+          ' /tmp/task-manager-request.json >/dev/null
+
+          manager_id="$(jq -r '.managerId' /tmp/task-manager-request.json)"
+          safe_id="$(printf '%s' "$manager_id" | tr -c 'A-Za-z0-9._-' '_')"
+          active_probe="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/development-agent-task-manager/active/$safe_id.json?ref=main" --jq '.sha' 2>/dev/null || true)"
+          [ -z "$active_probe" ] || {
+            echo "::error::Manager $manager_id is already active; refusing to create a duplicate agent."
+            exit 1
+          }
+
+          {
+            echo "MANAGER_ID=$manager_id"
+            echo "SPEC_PATH=$(jq -r '.specificationPath' /tmp/task-manager-request.json)"
+            echo "SKILL_PATH=$(jq -r '.skillPath' /tmp/task-manager-request.json)"
+            echo "AUTHORITY_REF=$(jq -r '.authorityRef // "main"' /tmp/task-manager-request.json)"
+            echo "TARGET_REPOSITORY=$(jq -r '.targetRepository' /tmp/task-manager-request.json)"
+            echo "TARGET_BRANCH=$(jq -r '.targetBranch' /tmp/task-manager-request.json)"
+            echo "BASE_REF=$(jq -r '.baseRef // "main"' /tmp/task-manager-request.json)"
+            echo "TASK_MANAGER_REQUEST_PATH=$request_path"
+            echo 'INITIAL_ASSIGNMENT<<__TASK_MANAGER_INITIAL_ASSIGNMENT__'
+            jq -r '.initialAssignment // ""' /tmp/task-manager-request.json
+            echo '__TASK_MANAGER_INITIAL_ASSIGNMENT__'
+          } >> "$GITHUB_ENV"
 
       - name: Validate specification and durable branch
         env:

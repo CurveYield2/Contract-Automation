@@ -13,6 +13,16 @@ const workflow = fs.readFileSync(workflowPath, 'utf8');
 const wake = fs.readFileSync(wakePath, 'utf8');
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
+test('declarative request files can start the existing task-manager workflow without manual dispatch', () => {
+  assert.match(workflow, /push:\s*\n\s+branches: \[main\][\s\S]*process\/development-agent-task-manager\/requests\/\*\.json/);
+  assert.match(workflow, /github\.event_name == 'push'/);
+  assert.match(workflow, /Resolve declarative start request/);
+  assert.match(workflow, /curveyield-development-agent-task-request-v1/);
+  assert.match(workflow, /Exactly one task-manager request file must be created or changed per triggering commit/);
+  assert.match(workflow, /is already active; refusing to create a duplicate agent/);
+  assert.match(workflow, /TASK_MANAGER_REQUEST_PATH=\$request_path/);
+});
+
 test('development task manager is a scheduled watchdog-derived supervisor that reuses browser primitives', () => {
   assert.match(workflow, /name: Development Agent Task Manager/);
   assert.match(workflow, /cron: '4-59\/5 \* \* \* \*'/);
@@ -113,6 +123,19 @@ test('manager re-verifies authority bytes on every supervision sweep', () => {
   assert.match(workflow, /Verify pinned development authorities/);
   assert.match(workflow, /Development specification bytes changed after manager admission/);
   assert.match(workflow, /Skill authority bytes changed after manager admission/);
+});
+
+test('declarative request schema is strict and binds a durable target branch', () => {
+  const schema = JSON.parse(fs.readFileSync(
+    path.join(root, 'protocol/schemas/curveyield-development-agent-task-request-v1.schema.json'),
+    'utf8'
+  ));
+  assert.equal(schema.additionalProperties, false);
+  assert.equal(schema.properties.schemaVersion.const, 'curveyield-development-agent-task-request-v1');
+  assert.equal(schema.properties.status.const, 'READY');
+  for (const field of ['managerId', 'specificationPath', 'skillPath', 'targetRepository', 'targetBranch']) {
+    assert.ok(schema.required.includes(field), field);
+  }
 });
 
 test('completion schema is strict and requires passing tests', () => {
