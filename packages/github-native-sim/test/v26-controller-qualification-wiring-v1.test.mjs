@@ -58,3 +58,13 @@ test('FULL-only expensive steps remain gated away from controller-only lane', ()
     assert.match(block,/V7_QUALIFICATION_LANE == 'FULL'/,name);
   }
 });
+
+
+test('controller-only publication re-reads current remote qualification status before CAS update', () => {
+  assert.match(workflow, /status_api="repos\/\$GITHUB_REPOSITORY\/contents\/process\/V7_QUALIFICATION_STATUS\.json\?ref=main"/);
+  assert.match(workflow, /gh api "\$status_api" --jq '\.content' \| base64 -d > \/tmp\/current-v7-status\.json/);
+  assert.match(workflow, /fs\.readFileSync\('\/tmp\/current-v7-status\.json','utf8'\)/);
+  assert.match(workflow, /canonical runner qualified commit changed during controller-only qualification/);
+  assert.match(workflow, /canonical runner qualification run changed during controller-only qualification/);
+  assert.match(workflow, /-f sha="\$existing_sha"/);
+});
