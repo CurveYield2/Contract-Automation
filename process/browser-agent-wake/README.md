@@ -181,6 +181,10 @@ A fresh mechanical chat does **not** replace the campaign's registered reviewer 
 
 The mechanical worker is supervised by the same five-minute productivity-aware watchdog. Once its completion receipt is machine-valid, the watchdog reuses the existing Lite successor-launch path and retires the mechanical worker.
 
+## Qualification efficiency
+
+Changes confined to the browser-agent/control-plane allowlist are qualified through the existing V7 qualification workflow's `CONTROL_LIGHT` lane. That lane runs the relevant browser/auth/bridge regressions plus repository static/build checks without installing the blockchain runner toolchain. Any runner-critical, mixed, unknown, explicit/manual, or qualification-infrastructure change fails safe to the full V7 qualification lane.
+
 ## Browser-provider redundancy
 
 Wake delivery tries independent providers in this order and stops at the first verified success:
