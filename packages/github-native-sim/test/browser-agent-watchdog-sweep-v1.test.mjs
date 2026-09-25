@@ -10,7 +10,7 @@ const watchdog = fs.readFileSync(path.join(root, '.github/workflows/browser-agen
 const wake = fs.readFileSync(path.join(root, '.github/workflows/browser-agent-wake.yml'), 'utf8');
 
 test('watchdog uses the existing workflow as a five-minute scheduled sweep', () => {
-  assert.match(watchdog, /schedule:\s*\n\s*- cron: '2-59\/5 \* \* \* \*'/);
+  assert.match(watchdog, /schedule:\s*\n\s*- cron: '2\/5 \* \* \* \*'/);
   assert.match(watchdog, /Discover active watchdog targets/);
   assert.match(watchdog, /process\/browser-agent-watchdog\/active/);
   assert.match(watchdog, /matrix:\s*\n\s*wake_id:\s*\$\{\{ fromJSON\(needs\.discover\.outputs\.targets\) \}\}/);
