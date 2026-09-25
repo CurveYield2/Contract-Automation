@@ -42,11 +42,11 @@
   },
   "controllerQualification": {
     "schemaVersion": "v26-controller-qualification-v1",
-    "controllerCommit": "74f05033f4544f634672763c43449a0786fcb6f5",
-    "controllerRef": "74f05033f4544f634672763c43449a0786fcb6f5",
+    "controllerCommit": "b062524d95267c002f9ed9bcdcc522cbd2da94e3",
+    "controllerRef": "b062524d95267c002f9ed9bcdcc522cbd2da94e3",
     "status": "PASS",
-    "qualificationRunId": "36091231096",
-    "qualifiedAt": "2026-09-25T03:39:34Z",
+    "qualificationRunId": "36091920422",
+    "qualifiedAt": "2026-09-25T03:49:46Z",
     "runnerQualifiedCommit": "37b30e01227f2fc927700c95602f692a9ee01e65",
     "runnerQualificationRunId": "36090563924",
     "testedSchemas": [
