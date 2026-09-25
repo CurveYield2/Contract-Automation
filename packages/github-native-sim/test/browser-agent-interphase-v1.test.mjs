@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { classifyV7QualificationChanges } from '../../../scripts/classify-v7-qualification-change.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
@@ -125,4 +126,16 @@ test('v2 requires a real extended mechanical batch rather than a trivial one-fil
   assert.match(watchdog, /receipt_units/);
   assert.match(watchdog, /reconciliationOutputPath/);
   assert.match(watchdog, /Legacy inter-phase packet v1 is no longer admitted/);
+});
+
+
+test('qualification classifier keeps docs and watchdog runtime state in control-light lane', () => {
+  const result = classifyV7QualificationChanges([
+    'docs/TRACE_PR_LIFECYCLE_BOUNDARY_v1.md',
+    'process/browser-agent-watchdog/active/watchdog-sweep-smoke-v4.json',
+    'process/browser-agent-watchdog/completed/example.json',
+    'scripts/classify-v7-qualification-change.mjs',
+  ]);
+  assert.equal(result.lane, 'CONTROL_LIGHT');
+  assert.equal(result.escalatedPaths, undefined);
 });
