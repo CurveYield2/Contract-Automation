@@ -50,11 +50,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install ephemeral watchdog dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --no-save --ignore-scripts playwright-core @browserbasehq/sdk
+      - name: Set up isolated browser-agent runtime
+        uses: ./.github/actions/setup-browser-agent-runtime
 
       - name: Supervise agent for four-hour segment
         env:
