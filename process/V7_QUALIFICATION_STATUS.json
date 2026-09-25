@@ -40,7 +40,39 @@
       ]
     }
   },
-  "controllerQualification": null,
+  "controllerQualification": {
+    "schemaVersion": "v26-controller-qualification-v1",
+    "controllerCommit": "7b60298b1b1372405fbb32bf3bcebb66ec9004d9",
+    "controllerRef": "7b60298b1b1372405fbb32bf3bcebb66ec9004d9",
+    "status": "PASS",
+    "qualificationRunId": "36087269194",
+    "qualifiedAt": "2026-09-25T02:41:23Z",
+    "runnerQualifiedCommit": "5135e1a043699f6c88bbf22b044ac8e0ff26a8d5",
+    "runnerQualificationRunId": "36087143719",
+    "testedSchemas": [
+      "audit-v7-sequential-review-state-v3",
+      "v26-phase-contract-v1",
+      "v26-successor-handoff-v1",
+      "v26-security-traceability-graph-v1",
+      "v26-obligation-ledger-v1",
+      "v26-domain-applicability-v1",
+      "v26-evidence-invalidation-v1",
+      "v26-phase6-subgate-state-v1",
+      "v26-audit-closure-manifest-v1"
+    ],
+    "testedGates": [
+      "reviewer-lineage",
+      "successor-handoffs",
+      "phase-contracts",
+      "traceability",
+      "obligations",
+      "domains",
+      "evidence-invalidation",
+      "P6.0-P6.8",
+      "Phase-10-closure",
+      "v26-machine-conformance"
+    ]
+  },
   "dependencyLockPresent": true,
   "toolchain": {
     "schemaVersion": "curveyield-v7-toolchain-verification-v1",
