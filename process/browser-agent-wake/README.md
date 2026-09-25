@@ -185,6 +185,28 @@ The mechanical worker is supervised by the same five-minute productivity-aware w
 
 Changes confined to the browser-agent/control-plane allowlist are qualified through the existing V7 qualification workflow's `CONTROL_LIGHT` lane. That lane runs the relevant browser/auth/bridge regressions plus repository static/build checks without installing the blockchain runner toolchain. Any runner-critical, mixed, unknown, explicit/manual, or qualification-infrastructure change fails safe to the full V7 qualification lane.
 
+## Isolated browser-agent runtime
+
+Wake and watchdog jobs do not install browser libraries into the Contract-Automation root project.
+
+Both existing workflows reuse:
+
+`.github/actions/setup-browser-agent-runtime/action.yml`
+
+The shared action restores or installs only:
+
+`tools/browser-agent-runtime/node_modules`
+
+using exact direct pins from:
+
+`tools/browser-agent-runtime/package.json`
+
+The runtime is intentionally outside the repository's `packages/*` and `apps/*` workspaces, so browser automation does not pull or mutate the contract runner dependency graph.
+
+On a cache hit, no npm install runs. On a cache miss, npm is scoped with `--prefix tools/browser-agent-runtime`; the root Foundry/Forge/solc/ethers dependencies are never part of the browser-runtime install.
+
+The wake script resolves `playwright-core` and `@browserbasehq/sdk` from `BROWSER_AGENT_RUNTIME_ROOT`. The root package remains free of those browser-only dependencies.
+
 ## Browser-provider redundancy
 
 Wake delivery tries independent providers in this order and stops at the first verified success:
