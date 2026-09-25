@@ -116,3 +116,16 @@ test('every direct private controller checkout selects a probed credential first
   }
   assert.ok(checked >= 24, 'private controller checkouts must remain covered');
 });
+
+
+test('source fanout preserves independent push requests instead of sharing one lossy pending queue', () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/agent-zip-import-v1.yml'), 'utf8');
+  assert.match(workflow, /group:\s*agent-audit-source-fanout-\$\{\{\s*github\.sha\s*\}\}/);
+  assert.doesNotMatch(workflow, /group:\s*agent-audit-source-fanout\s*(?:\r?\n|$)/);
+});
+
+test('source fanout never cancels an already-running independent request', () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/agent-zip-import-v1.yml'), 'utf8');
+  assert.match(workflow, /cancel-in-progress:\s*false/);
+  assert.match(workflow, /git diff-tree --no-commit-id --name-only -r "\$GITHUB_SHA"/);
+});

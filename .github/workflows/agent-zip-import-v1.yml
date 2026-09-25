@@ -11,7 +11,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: agent-audit-source-fanout
+  group: agent-audit-source-fanout-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
