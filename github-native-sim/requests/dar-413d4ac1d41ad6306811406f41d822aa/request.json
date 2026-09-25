@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "curveyield-dex-fresh-audit-r1",
+  "assignmentId": "reviewer-2-phase2-runner-repair-rebind-v1",
+  "phaseId": "scope-and-provenance",
+  "gateId": "PHASE2_EXACT_BUILD_REPAIR_REBIND",
+  "profileId": "github-native-compile-v2",
+  "source": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "c41958422daf46c3b929182f90e53b872cedada6",
+    "projectPath": "CurveYield_DEX_Fresh_Audit_Package_2026-08-16/workspace/contracts-repo/CurveYield DEX",
+    "archivePath": "campaigns/CurveYield DEX Fresh Audit/source/9aad3d30-2e47-4661-a88e-0bde262f5210.zip",
+    "archiveSha256": "526a729ce73d493f2ccbb568378a18dd1eec0788d0165e02dc5ceb773b9953ed"
+  },
+  "configuration": {
+    "compilers": [
+      {
+        "language": "solidity",
+        "version": "0.8.30"
+      }
+    ],
+    "timeoutMinutes": 35,
+    "optimizer": {
+      "enabled": true,
+      "runs": 1000
+    },
+    "viaIR": true,
+    "analysis": {
+      "slither": {
+        "version": "0.11.6"
+      }
+    }
+  },
+  "requestId": "dar-413d4ac1d41ad6306811406f41d822aa",
+  "requestDigest": "413d4ac1d41ad6306811406f41d822aaa583c817210ba4c66731e25ac5d14dce"
+}
