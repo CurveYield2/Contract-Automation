@@ -10,6 +10,7 @@ import { checkoutExactSource, safeRepositoryProjectPath, stageExactArchiveSource
 import { runNativeFuzzAnalysis } from './native-fuzz.mjs';
 import { validateDeepAssuranceRequestV2 } from './schema.mjs';
 import { runStage2aAnalysis } from './stage2a-toolchain.mjs';
+import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligence-technical-v1.mjs';
 import { V7_POLICY } from './v7-policy.mjs';
 
 function nowIso(now = () => new Date()) { return now().toISOString(); }
@@ -215,6 +216,7 @@ export async function runGitHubNativeJob(input, {
   runSlither,
   runMedusa,
   runNativeFuzz,
+  generateSourceIntelligence = generateSourceIntelligenceTechnicalBundleV1,
   runCommand,
   environment = process.env,
   phase6MutableRpc = null,
@@ -230,6 +232,7 @@ export async function runGitHubNativeJob(input, {
   let deploymentGasEvidence = null;
   let simulation = null;
   let liteRetainedExecution = null;
+  let sourceIntelligenceTechnicalBundle = null;
 
   try {
     checkout = await checkoutSource(request.source, { workspaceRoot, runCommand, environment });
@@ -276,6 +279,24 @@ export async function runGitHubNativeJob(input, {
       analysis.slither = await executeSlither({ request, checkout, build, runSlither, runCommand });
     } catch (error) {
       analysis.slither = { backend: 'slither', status: 'failed', terminal: true, componentStatus: 'FAILED', continuationDisposition: 'CONTINUE_WITH_LIMITATION', failureKind: error?.kind ?? 'ANALYSIS_COMPONENT_FAILURE', error: { name: error?.name ?? 'Error', message: error?.message ?? String(error) } };
+    }
+    try {
+      sourceIntelligenceTechnicalBundle = await generateSourceIntelligence({
+        projectRoot: checkout.projectRoot,
+        request,
+        build,
+        analysis,
+      });
+    } catch (error) {
+      if (!error.code) error.code = 'source_intelligence_generation_failed';
+      return failureResult(request, startedAt, error, {
+        build,
+        deploymentGasEvidence,
+        analysis,
+        simulation,
+        sourceIntelligenceTechnicalBundle,
+        continuityDisposition: 'PREFLIGHT_BLOCKED',
+      }, now);
     }
   } else {
     const requestedAnalysis = request.configuration.analysis ?? {};
@@ -330,6 +351,7 @@ export async function runGitHubNativeJob(input, {
     deploymentGasEvidence,
     analysis,
     simulation,
+    sourceIntelligenceTechnicalBundle,
     analysisComponentFailureCount: componentFailures,
     failedStepCount: failedSteps.length,
     failedSteps,
