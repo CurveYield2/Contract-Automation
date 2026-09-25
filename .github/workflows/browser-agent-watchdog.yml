@@ -129,7 +129,8 @@ jobs:
                and .completedMilestoneId==$milestone
                and .handoffPath==$handoff
                and (.instructions|type=="string" and length>0)
-               and (.requiredOutputs|type=="array")'               /tmp/lite-interphase-work-packet.json >/dev/null || return 2
+               and (.requiredOutputs|type=="array" and length>0)
+               and all(.requiredOutputs[]; type=="object" and (.path|type=="string" and length>0))'               /tmp/lite-interphase-work-packet.json >/dev/null || return 2
 
             if grep -Eiq '\b(TBD|TODO)\b|\{\{[^}]+\}\}|<[^>]*(placeholder|fill|insert)[^>]*>' /tmp/lite-interphase-work-packet.json; then
               return 2
@@ -160,6 +161,13 @@ jobs:
 
             load_lite_interphase_packet "$packet_path" "$handoff_path" "$expected_milestone" "$gate_repo" "$gate_ref" || return 1
             packet_sha="$(cat /tmp/lite-interphase-work-packet.sha256)"
+            if [ "$worker_role" = "interphase_mechanical" ]; then
+              [ "$packet_path" = "$gate_interphase_work_packet_path" ] || return 1
+              [ "$completion_path" = "$gate_interphase_completion_path" ] || return 1
+              [ "$handoff_path" = "$gate_interphase_handoff_path" ] || return 1
+              [ "$packet_sha" = "$(jq -r '.gate.interphase.workPacketSha256 // empty' /tmp/watchdog-state.json)" ] || return 1
+            fi
+            [ "$completion_path" = "$(dirname "$handoff_path")/MECHANICAL_WORK_COMPLETION_v1.json" ] || return 1
             safe_repo_path "$completion_path" || return 1
             encoded="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$completion_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
             [ -n "$encoded" ] || return 1
@@ -180,6 +188,7 @@ jobs:
             observed_total="$(jq '.outputs | length' /tmp/lite-interphase-completion.json)"
             observed_unique="$(jq -r '.outputs[]?.path // empty' /tmp/lite-interphase-completion.json | LC_ALL=C sort -u | wc -l | tr -d ' ')"
             [ "$observed_total" = "$observed_unique" ] || return 1
+            [ "$observed_total" = "$(jq '.requiredOutputs | length' /tmp/lite-interphase-work-packet.json)" ] || return 1
             [ "$required" = "$observed" ] || return 1
 
             while IFS= read -r output_path; do
@@ -228,6 +237,7 @@ jobs:
 
             handoff_path="$(jq -r '.authoritativeHandoff // empty' /tmp/lite-active-pointer.json)"
             [ -n "$handoff_path" ] || return 2
+            safe_repo_path "$handoff_path" || return 2
             handoff_dir="$(dirname "$handoff_path")"
 
             packet_path="$handoff_dir/MECHANICAL_WORK_PACKET_v1.json"
