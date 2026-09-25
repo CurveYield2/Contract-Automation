@@ -93,6 +93,71 @@ jobs:
             fi
             gh api --method DELETE "$active_api" -f message="chore(watchdog): retire active $WAKE_ID" -f sha="$active_sha" -f branch=main >/dev/null
           }
+          launch_lite_successor() {
+            local pointer_path="$1"
+            local expected_milestone="$2"
+            local gate_repo="$3"
+            local gate_ref="$4"
+            local encoded_pointer completed_id completed_status next_id next_state handoff_path handoff_dir wake_path encoded_wake wake_b64 next_phase successor_wake_id
+
+            [ -n "$pointer_path" ] || return 2
+            encoded_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$pointer_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+            [ -n "$encoded_pointer" ] || return 2
+            printf '%s' "$encoded_pointer" | base64 -d > /tmp/lite-active-pointer.json
+
+            completed_id="$(jq -r '.completedMilestone.id // empty' /tmp/lite-active-pointer.json)"
+            completed_status="$(jq -r '.completedMilestone.status // empty' /tmp/lite-active-pointer.json)"
+            next_id="$(jq -r '.nextMilestone.id // empty' /tmp/lite-active-pointer.json)"
+            next_state="$(jq -r '.nextMilestone.state // empty' /tmp/lite-active-pointer.json)"
+
+            [ "$completed_id" = "$expected_milestone" ] || return 2
+            case "$completed_status" in
+              SEALED|COMPLETE|COMPLETED|PASS) ;;
+              *) return 2 ;;
+            esac
+            [ -n "$next_id" ] || return 3
+            case "$next_state" in
+              WAITING_FOR_SUCCESSOR_AGENT|READY|NOT_STARTED|ACTIVE) ;;
+              *) return 2 ;;
+            esac
+
+            handoff_path="$(jq -r '.authoritativeHandoff // empty' /tmp/lite-active-pointer.json)"
+            [ -n "$handoff_path" ] || return 2
+            handoff_dir="$(dirname "$handoff_path")"
+            wake_path="$handoff_dir/WAKE_UP_MESSAGE.md"
+            encoded_wake="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$wake_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+            [ -n "$encoded_wake" ] || return 2
+            printf '%s' "$encoded_wake" | base64 -d > /tmp/lite-successor-wake.txt
+            test -s /tmp/lite-successor-wake.txt
+            if grep -Eiq '\b(TBD|TODO)\b|\{\{[^}]+\}\}|<[^>]*(placeholder|fill|insert)[^>]*>' /tmp/lite-successor-wake.txt; then
+              echo "::warning::Lite successor wake packet contains unresolved placeholder material."
+              return 2
+            fi
+
+            next_phase="$(jq -r '.nextMilestone.phaseRange[0] // empty' /tmp/lite-active-pointer.json)"
+            if [ -n "$next_phase" ]; then next_phase="phase-$next_phase"; else next_phase="$next_id"; fi
+            successor_wake_id="${campaign_id}-${next_id}-${GITHUB_RUN_ID}-${cycle}"
+            wake_b64="$(base64 -w0 /tmp/lite-successor-wake.txt)"
+
+            echo "Lite machine gate PASS: $expected_milestone -> $next_id. Creating fresh normal ChatGPT web successor."
+            gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              -f wake_id="$successor_wake_id" \
+              -f campaign_id="$campaign_id" \
+              -f phase_id="$next_phase" \
+              -f mode="create_fresh" \
+              -f chat_url="" \
+              -f wake_message_b64="$wake_b64" \
+              -f watchdog_enabled="true" \
+              -f watchdog_message_b64="" \
+              -f gate_mode="LITE" \
+              -f gate_repository="$gate_repo" \
+              -f gate_ref="$gate_ref" \
+              -f gate_state_path="$gate_path" \
+              -f gate_expected_phase_id="$next_phase" \
+              -f gate_expected_milestone_id="$next_id" \
+              -f gate_active_pointer_path="$pointer_path"
+            return 0
+          }
 
           if ! fetch_state; then
             echo 'Watchdog state already retired; nothing to supervise.'
@@ -115,36 +180,79 @@ jobs:
             phase_id="$(jq -r '.phaseId' /tmp/watchdog-state.json)"
             chat_url="$(jq -r '.chatUrl // empty' /tmp/watchdog-state.json)"
 
+            gate_mode="$(jq -r '.gate.mode // "FULL_V26"' /tmp/watchdog-state.json)"
             gate_repo="$(jq -r '.gate.repository // "CurveYield2/Audit-Controller"' /tmp/watchdog-state.json)"
             gate_ref="$(jq -r '.gate.ref // "main"' /tmp/watchdog-state.json)"
             gate_path="$(jq -r '.gate.statePath // empty' /tmp/watchdog-state.json)"
             gate_expected_phase="$(jq -r '.gate.expectedPhaseId // empty' /tmp/watchdog-state.json)"
+            gate_expected_milestone="$(jq -r '.gate.expectedMilestoneId // empty' /tmp/watchdog-state.json)"
+            gate_pointer_path="$(jq -r '.gate.activePointerPath // empty' /tmp/watchdog-state.json)"
 
             if [ -n "$gate_path" ] && [ -n "${AUDIT_CONTROLLER_GITHUB_TOKEN:-}" ]; then
               encoded_state="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$gate_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
               if [ -n "$encoded_state" ]; then
                 printf '%s' "$encoded_state" | base64 -d > /tmp/canonical-campaign-state.json
-                canonical_state="$(jq -r '.state // empty' /tmp/canonical-campaign-state.json)"
-                canonical_campaign_status="$(jq -r '.campaignStatus // empty' /tmp/canonical-campaign-state.json)"
-                canonical_phase="$(jq -r '.currentPhase // empty' /tmp/canonical-campaign-state.json)"
 
-                if jq -e --arg s "$canonical_state" '.gate.stopStates | index($s) != null' /tmp/watchdog-state.json >/dev/null; then
-                  echo "Canonical V26 gate reached terminal agent state $canonical_state; retiring watchdog."
-                  retire_state "CANONICAL_GATE_STATE_$canonical_state"
-                  exit 0
-                fi
-                if jq -e --arg s "$canonical_campaign_status" '.gate.stopCampaignStatuses | index($s) != null' /tmp/watchdog-state.json >/dev/null; then
-                  echo "Canonical campaign status $canonical_campaign_status is terminal; retiring watchdog."
-                  retire_state "CANONICAL_CAMPAIGN_STATUS_$canonical_campaign_status"
-                  exit 0
-                fi
-                if [ -n "$gate_expected_phase" ] && [ -n "$canonical_phase" ] && [ "$canonical_phase" != "$gate_expected_phase" ]; then
-                  echo "Canonical V26 gate advanced from $gate_expected_phase to $canonical_phase; retiring watchdog."
-                  retire_state "CANONICAL_PHASE_ADVANCED_TO_$canonical_phase"
-                  exit 0
+                if [ "$gate_mode" = "LITE" ]; then
+                  lite_campaign_status="$(jq -r '.campaignStatus // empty' /tmp/canonical-campaign-state.json)"
+                  lite_phase_id="$(jq -r '.phase.id // empty' /tmp/canonical-campaign-state.json)"
+                  lite_phase_state="$(jq -r '.phase.state // empty' /tmp/canonical-campaign-state.json)"
+                  lite_worker_status="$(jq -r --arg m "$gate_expected_milestone" '.routingPlan.workers[]? | select(.milestone==$m) | .status' /tmp/canonical-campaign-state.json | tail -n1)"
+
+                  if [ "$lite_campaign_status" = "COMPLETE" ] || [ "$lite_phase_state" = "CLOSED" ]; then
+                    echo "Lite campaign is complete; retiring watchdog."
+                    retire_state "LITE_CAMPAIGN_COMPLETE"
+                    exit 0
+                  fi
+
+                  case "$lite_worker_status" in
+                    COMPLETE|COMPLETED|SEALED|PASS)
+                      if [ "$gate_expected_milestone" = "P8_10" ]; then
+                        echo "Final Lite milestone is sealed; retiring watchdog."
+                        retire_state "LITE_FINAL_MILESTONE_$lite_worker_status"
+                        exit 0
+                      fi
+                      if launch_lite_successor "$gate_pointer_path" "$gate_expected_milestone" "$gate_repo" "$gate_ref"; then
+                        retire_state "LITE_SUCCESSOR_DISPATCHED_$gate_expected_milestone"
+                        exit 0
+                      else
+                        rc=$?
+                        if [ "$rc" -eq 3 ]; then
+                          echo "Lite milestone is terminal with no successor; retiring watchdog."
+                          retire_state "LITE_NO_SUCCESSOR_$gate_expected_milestone"
+                          exit 0
+                        fi
+                        echo "::warning::Lite milestone is sealed but successor packet is not machine-ready yet; current agent remains supervised."
+                      fi
+                      ;;
+                  esac
+
+                  if [ -n "$gate_expected_phase" ] && [ -n "$lite_phase_id" ] && [ "$lite_phase_id" != "$gate_expected_phase" ] && [ "$lite_worker_status" != "ACTIVE" ]; then
+                    echo "Lite phase moved beyond $gate_expected_phase but successor packet is not yet ready; keeping watchdog active for handoff completion."
+                  fi
+                else
+                  canonical_state="$(jq -r '.state // empty' /tmp/canonical-campaign-state.json)"
+                  canonical_campaign_status="$(jq -r '.campaignStatus // empty' /tmp/canonical-campaign-state.json)"
+                  canonical_phase="$(jq -r '.currentPhase // empty' /tmp/canonical-campaign-state.json)"
+
+                  if jq -e --arg s "$canonical_state" '.gate.stopStates | index($s) != null' /tmp/watchdog-state.json >/dev/null; then
+                    echo "Canonical V26 gate reached terminal agent state $canonical_state; retiring watchdog."
+                    retire_state "CANONICAL_GATE_STATE_$canonical_state"
+                    exit 0
+                  fi
+                  if jq -e --arg s "$canonical_campaign_status" '.gate.stopCampaignStatuses | index($s) != null' /tmp/watchdog-state.json >/dev/null; then
+                    echo "Canonical campaign status $canonical_campaign_status is terminal; retiring watchdog."
+                    retire_state "CANONICAL_CAMPAIGN_STATUS_$canonical_campaign_status"
+                    exit 0
+                  fi
+                  if [ -n "$gate_expected_phase" ] && [ -n "$canonical_phase" ] && [ "$canonical_phase" != "$gate_expected_phase" ]; then
+                    echo "Canonical V26 gate advanced from $gate_expected_phase to $canonical_phase; retiring watchdog."
+                    retire_state "CANONICAL_PHASE_ADVANCED_TO_$canonical_phase"
+                    exit 0
+                  fi
                 fi
               else
-                echo "::warning::Canonical V26 campaign state could not be read; watchdog will continue and retry."
+                echo "::warning::Canonical campaign state could not be read; watchdog will continue and retry."
               fi
             fi
 
