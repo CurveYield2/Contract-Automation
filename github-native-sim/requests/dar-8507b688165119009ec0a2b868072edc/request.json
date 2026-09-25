@@ -1,0 +1,137 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "cyvlSDT v30",
+  "assignmentId": "reviewer-3-phase7-whole-suite-deploy-config-smoke-v1",
+  "phaseId": "fork-simulation-lifecycle",
+  "gateId": "phase7-whole-suite-deploy-config-smoke-v1",
+  "profileId": "github-native-simulate-v2",
+  "source": {
+    "repository": "CurveYield2/Solo-Audit-Controller",
+    "commit": "6bde63416a4611e127b8bb3a5958e6b6d874c188",
+    "projectPath": "CurveYield-cyvlSDT-Deployment-Package-v30",
+    "archivePath": "campaigns/CurveYield-cyvlSDT-Deployment-Package-v30.zip",
+    "archiveSha256": "cc5c4dc6f8aa5d2e48043f6c3a837317ce6a4590c291e7e0571e4206c7d9877a"
+  },
+  "configuration": {
+    "compilers": [
+      {"language":"solidity","version":"0.8.28"},
+      {"language":"vyper","version":"0.3.10"}
+    ],
+    "timeoutMinutes": 35,
+    "analysis": {"slither":false,"medusa":false,"nativeFuzz":false},
+    "optimizer": {"enabled":true,"runs":200},
+    "evmVersion": "cancun",
+    "viaIR": true,
+    "deploymentGas": {
+      "deployableContracts": [
+        {"sourceName":"contracts/CurveYieldVlSDTLocker.sol","contractName":"CurveYieldVlSDTLocker"},
+        {"sourceName":"contracts/CurveYieldVlSDTToken.sol","contractName":"CurveYieldVlSDTToken"},
+        {"sourceName":"contracts/CurveYieldVlSDTRevenueStaking.sol","contractName":"CurveYieldVlSDTRevenueStaking"},
+        {"sourceName":"contracts/CurveYieldVault.sol","contractName":"CurveYieldVault"},
+        {"sourceName":"contracts/CurveYieldRevenueStrategyV20.sol","contractName":"CurveYieldRevenueStrategyV7"},
+        {"sourceName":"contracts/CurveYieldRevenueConverter.sol","contractName":"CurveYieldRevenueConverter"},
+        {"sourceName":"contracts/CurveYieldUsdcToSdtConverter.sol","contractName":"CurveYieldUsdcToSdtConverter"},
+        {"sourceName":"contracts/CurveYieldVlSDTBoostStaking.sol","contractName":"CurveYieldVlSDTBoostStaking"},
+        {"sourceName":"contracts/CurveYieldVlSDTBoostMerchant.sol","contractName":"CurveYieldVlSDTBoostMerchant"},
+        {"sourceName":"contracts/CurveYieldGovernanceToken.sol","contractName":"CurveYieldGovernanceToken"},
+        {"sourceName":"contracts/CurveYieldGovernanceMintController.sol","contractName":"CurveYieldGovernanceMintController"},
+        {"sourceName":"contracts/CurveYieldGovernanceStaking.vy","contractName":"CurveYieldGovernanceStaking"},
+        {"sourceName":"contracts/CurveYieldCyGovYieldStaking.sol","contractName":"CurveYieldCyGovYieldStaking"},
+        {"sourceName":"contracts/CurveYieldCyGovFraxswapConverter.sol","contractName":"CurveYieldCyGovFraxswapConverter"},
+        {"sourceName":"contracts/CurveYieldCyGovDiscountedSaleConverterV9.sol","contractName":"CurveYieldCyGovDiscountedSaleConverter"}
+      ]
+    },
+    "build": {"purpose":"Phase 7 exact-v30 whole-suite fresh deployment and configuration smoke; deploy audited contracts before any protocol-function testing"},
+    "sbom": {"reconcile":true},
+    "coverage": {"required":false},
+    "properties": [
+      "Freshly deploy exact audited production artifacts before exercising protocol functions",
+      "Deploy the complete 15-implementation v30 suite on one pinned mutable Ethereum fork",
+      "Use real pinned StakeDAO and Curve external dependencies where production binds them",
+      "Reproduce P3-CAND-001 removed RevenueStaking recipientOperator/setRecipientOperator ABI against the freshly deployed v30 contract",
+      "Exercise valid one-time/internal configuration only after the relevant production contracts have been deployed",
+      "Record deployed addresses, code presence, constructor outcomes, gas, call outcomes and revert data"
+    ],
+    "harness": {"recipeId":"deploy-configure-smoke-v1"},
+    "simulation": {
+      "chain":"ethereum",
+      "block":25817400,
+      "workflow":{"steps":[
+        {"action":"snapshot","alias":"suiteBaseline","label":"pin whole-suite deployment baseline"},
+
+        {"action":"deploy","alias":"governanceToken","contract":"CurveYieldGovernanceToken","source":"contracts/CurveYieldGovernanceToken.sol","args":["$account0","CurveYield Governance","cyGOV"],"from":"$account0","label":"deploy governance token"},
+        {"action":"staticCall","target":"$governanceToken","function":"owner() view returns (address)","args":[],"saveAs":"governanceTokenOwner","label":"test governance token owner"},
+
+        {"action":"deploy","alias":"governanceStaking","contract":"CurveYieldGovernanceStaking","source":"contracts/CurveYieldGovernanceStaking.vy","args":["0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F","$account0"],"from":"$account0","label":"deploy governance staking"},
+        {"action":"staticCall","target":"$governanceStaking","function":"manager() view returns (address)","args":[],"saveAs":"governanceStakingManager","label":"test governance staking manager"},
+
+        {"action":"deploy","alias":"cyvlSdt","contract":"CurveYieldVlSDTToken","source":"contracts/CurveYieldVlSDTToken.sol","args":["$account0"],"from":"$account0","label":"deploy cyvlSDT token"},
+        {"action":"staticCall","target":"$cyvlSdt","function":"locker() view returns (address)","args":[],"saveAs":"initialTokenLocker","label":"test initial token locker"},
+
+        {"action":"deploy","alias":"revenueStaking","contract":"CurveYieldVlSDTRevenueStaking","source":"contracts/CurveYieldVlSDTRevenueStaking.sol","args":["$account0","$account0","$account0","$cyvlSdt","$governanceToken"],"from":"$account0","label":"deploy revenue staking"},
+        {"action":"staticCall","target":"$revenueStaking","function":"admin() view returns (address)","args":[],"saveAs":"revenueStakingAdmin","label":"test revenue staking admin"},
+
+        {"action":"deploy","alias":"locker","contract":"CurveYieldVlSDTLocker","source":"contracts/CurveYieldVlSDTLocker.sol","args":["$account0","$account0","0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F","0x94818A7baa7e9F5dC62ce4da1B52ef9a760b80B8","0xaB05ca46d1c78CAbB051efFE35099714Cad2AddA","0x0f542fA75c871EB1b93Ef881b73e46acF733392f","0xCa94395469a88E9cAC0D5E5e308910E298270d30","0x6d57d34259f6dc31c9a241c199822861940d38f9","0xbc38D256E559FEd3fA95A6cdC633C667283fb6b8","$cyvlSdt"],"from":"$account0","label":"deploy locker with live StakeDAO dependencies"},
+        {"action":"staticCall","target":"$locker","function":"CYVLSDT() view returns (address)","args":[],"saveAs":"lockerCyvlSdt","label":"test locker token binding"},
+
+        {"action":"deploy","alias":"revenueConverter","contract":"CurveYieldRevenueConverter","source":"contracts/CurveYieldRevenueConverter.sol","args":["$account0","0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F","$cyvlSdt","$locker"],"from":"$account0","label":"deploy revenue converter"},
+        {"action":"staticCall","target":"$revenueConverter","function":"owner() view returns (address)","args":[],"saveAs":"revenueConverterOwner","label":"test revenue converter owner"},
+
+        {"action":"deploy","alias":"usdcToSdtConverter","contract":"CurveYieldUsdcToSdtConverter","source":"contracts/CurveYieldUsdcToSdtConverter.sol","args":["$revenueConverter","0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48","0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599","0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2","0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F","0x7F86Bf177Dd4F3494b841a37e810A34dD56c829B","0xA19bf6fBf05624282cb6ed498f4761f22e084Edd"],"from":"$account0","label":"deploy USDC to SDT converter"},
+        {"action":"staticCall","target":"$usdcToSdtConverter","function":"USDC() view returns (address)","args":[],"saveAs":"converterUsdc","label":"test USDC converter binding"},
+
+        {"action":"deploy","alias":"vault","contract":"CurveYieldVault","source":"contracts/CurveYieldVault.sol","args":["CurveYield cyvlSDT Vault","cvcyvlSDT","$account0","$account0",18],"from":"$account0","label":"deploy vault"},
+        {"action":"staticCall","target":"$vault","function":"configurator() view returns (address)","args":[],"saveAs":"vaultConfigurator","label":"test vault configurator"},
+
+        {"action":"deploy","alias":"strategy","contract":"CurveYieldRevenueStrategyV7","source":"contracts/CurveYieldRevenueStrategyV20.sol","args":["$account0","$vault","$cyvlSdt","0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F","$governanceToken","$revenueStaking","$revenueConverter",0,0,0],"from":"$account0","label":"deploy revenue strategy"},
+        {"action":"staticCall","target":"$strategy","function":"vault() view returns (address)","args":[],"saveAs":"strategyVault","label":"test strategy vault binding"},
+
+        {"action":"deploy","alias":"boostStaking","contract":"CurveYieldVlSDTBoostStaking","source":"contracts/CurveYieldVlSDTBoostStaking.sol","args":["$account0","$cyvlSdt","$locker","$governanceToken"],"from":"$account0","label":"deploy boost staking"},
+        {"action":"staticCall","target":"$boostStaking","function":"totalDeposited() view returns (uint256)","args":[],"saveAs":"boostStakingSupply","label":"test boost staking accounting"},
+
+        {"action":"deploy","alias":"boostMerchant","contract":"CurveYieldVlSDTBoostMerchant","source":"contracts/CurveYieldVlSDTBoostMerchant.sol","args":["$account0","$locker","$revenueStaking","0xbc38D256E559FEd3fA95A6cdC633C667283fb6b8"],"from":"$account0","label":"deploy boost merchant"},
+        {"action":"staticCall","target":"$boostMerchant","function":"owner() view returns (address)","args":[],"saveAs":"boostMerchantOwner","label":"test boost merchant owner"},
+
+        {"action":"deploy","alias":"yieldStaking","contract":"CurveYieldCyGovYieldStaking","source":"contracts/CurveYieldCyGovYieldStaking.sol","args":["$account0","$cyvlSdt","$governanceToken","$account0"],"from":"$account0","label":"deploy cyGOV yield staking"},
+        {"action":"staticCall","target":"$yieldStaking","function":"totalStaked() view returns (uint256)","args":[],"saveAs":"yieldStakingSupply","label":"test yield staking accounting"},
+
+        {"action":"deploy","alias":"mintController","contract":"CurveYieldGovernanceMintController","source":"contracts/CurveYieldGovernanceMintController.sol","args":["$account0","$governanceToken","$governanceStaking"],"from":"$account0","label":"deploy governance mint controller"},
+        {"action":"staticCall","target":"$mintController","function":"governanceStaking() view returns (address)","args":[],"saveAs":"mintControllerStaking","label":"test mint controller staking binding"},
+
+        {"action":"call","target":"$governanceToken","function":"setTransferWhitelist(address,bool)","args":["$revenueStaking",true],"from":"$account0","label":"configure pre-failure cyGOV transfer whitelist"},
+        {"action":"expectRevert","target":"$revenueStaking","function":"recipientOperator(address) view returns (bool)","args":["$strategy"],"from":"$account0","label":"reproduce removed revenue staking recipient operator getter"},
+        {"action":"expectRevert","target":"$revenueStaking","function":"setRecipientOperator(address,bool)","args":["$strategy",true],"from":"$account0","label":"reproduce removed revenue staking recipient operator setter"},
+
+        {"action":"call","target":"$cyvlSdt","function":"setLocker(address)","args":["$locker"],"from":"$account0","label":"configure token locker after deployed locker exists"},
+        {"action":"call","target":"$locker","function":"configureSystem(address,address,address)","args":["$revenueStaking","$boostMerchant","$boostStaking"],"from":"$account0","label":"configure deployed locker system"},
+        {"action":"call","target":"$revenueStaking","function":"setNotifier(address,bool)","args":["$strategy",true],"from":"$account0","label":"configure deployed strategy notifier"},
+        {"action":"call","target":"$governanceToken","function":"setMinter(address,bool)","args":["$mintController",true],"from":"$account0","label":"configure mint controller as minter"},
+        {"action":"call","target":"$governanceToken","function":"setMinter(address,bool)","args":["$yieldStaking",true],"from":"$account0","label":"configure yield staking as minter"},
+        {"action":"call","target":"$vault","function":"setStrategy(address)","args":["$strategy"],"from":"$account0","label":"bind freshly deployed vault strategy"},
+        {"action":"call","target":"$revenueConverter","function":"setUsdcRoute(address,address)","args":["0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48","$usdcToSdtConverter"],"from":"$account0","label":"configure USDC revenue route"},
+
+        {"action":"deploy","alias":"fraxswapConverter","contract":"CurveYieldCyGovFraxswapConverter","source":"contracts/CurveYieldCyGovFraxswapConverter.sol","args":["$account0","$governanceToken","$account0","0x31351Bf3fba544863FBff44DDC27bA880916A199",0,0,0],"from":"$account0","label":"deploy cyGOV Fraxswap converter against live Fraxswap pair"},
+        {"action":"staticCall","target":"$fraxswapConverter","function":"primaryPool() view returns (address)","args":[],"saveAs":"fraxswapPrimaryPool","label":"test Fraxswap converter primary pool"},
+
+        {"action":"deploy","alias":"discountedSaleConverter","contract":"CurveYieldCyGovDiscountedSaleConverter","source":"contracts/CurveYieldCyGovDiscountedSaleConverterV9.sol","args":["$governanceToken","$governanceStaking","$fraxswapConverter"],"from":"$account0","label":"deploy discounted sale converter"},
+        {"action":"staticCall","target":"$discountedSaleConverter","function":"annualBaseCreditRate() view returns (uint256)","args":[],"saveAs":"discountedBaseRate","label":"test discounted sale converter rate"},
+        {"action":"call","target":"$discountedSaleConverter","function":"activate()","args":[],"from":"$account0","label":"activate deployed discounted sale converter"},
+
+        {"action":"revertSnapshot","snapshot":"$suiteBaseline","label":"restore whole-suite deployment baseline"}
+      ]}
+    }
+  },
+  "requestId":"dar-8507b688165119009ec0a2b868072edc",
+  "requestDigest":"8507b688165119009ec0a2b868072edcab2e2eb023dd5d1bf00d8e81f2185429"
+}
