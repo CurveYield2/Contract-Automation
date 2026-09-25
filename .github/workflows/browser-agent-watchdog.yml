@@ -286,6 +286,7 @@ jobs:
             local gate_repo="$5"
             local gate_ref="$6"
             local encoded packet_sha required observed output_path expected_sha output_encoded observed_sha
+            local packet_units receipt_units receipt_unit_count receipt_unit_unique unit_id unit_path unit_receipt_sha output_sha
 
             load_lite_interphase_packet "$packet_path" "$handoff_path" "$expected_milestone" "$gate_repo" "$gate_ref" || return 1
             packet_sha="$(cat /tmp/lite-interphase-work-packet.sha256)"
@@ -338,7 +339,12 @@ jobs:
             [ "$receipt_unit_count" = "$receipt_unit_unique" ] || return 1
             [ "$packet_units" = "$receipt_units" ] || return 1
 
-            while IFS=
+            while IFS="$(printf '\t')" read -r unit_id unit_path; do
+              [ -n "$unit_id" ] || continue
+              unit_receipt_sha="$(jq -r --arg id "$unit_id" '.workUnitReceipts[] | select(.id==$id) | .sha256 // empty' /tmp/lite-interphase-completion.json | tail -n1)"
+              output_sha="$(jq -r --arg p "$unit_path" '.outputs[] | select(.path==$p) | .sha256 // empty' /tmp/lite-interphase-completion.json | tail -n1)"
+              [ "$unit_receipt_sha" = "$output_sha" ] || return 1
+            done <<< "$packet_units"
 
             while IFS= read -r output_path; do
               [ -n "$output_path" ] || continue
@@ -362,6 +368,7 @@ jobs:
             local gate_ref="$4"
             local encoded_pointer completed_id completed_status next_id next_state handoff_path handoff_dir wake_path encoded_wake wake_b64 next_phase successor_wake_id
             local packet_path completion_path encoded_packet packet_sha instructions mechanical_message mechanical_b64 mechanical_wake_id
+            local legacy_packet_path legacy_encoded
 
             [ -n "$pointer_path" ] || return 2
             encoded_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$pointer_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
