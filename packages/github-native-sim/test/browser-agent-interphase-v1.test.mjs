@@ -98,7 +98,7 @@ test('mechanical watchdog rejects a changed packet, missing output, or mismatche
   const watchdog = fs.readFileSync(watchdogPath, 'utf8');
   assert.match(watchdog, /workPacketSha256 \/\/ empty/);
   assert.match(watchdog, /\[ "\$packet_sha" = "\$\(jq -r/);
-  assert.match(watchdog, /\.requiredOutputs\|type=="array" and length>0/);
+  assert.match(watchdog, /\.requiredOutputs\|type=="array" and length>=11/);
   assert.match(watchdog, /\[ "\$observed_total" = "\$\(jq/);
   assert.match(watchdog, /\[ "\$required" = "\$observed" \]/);
 });
