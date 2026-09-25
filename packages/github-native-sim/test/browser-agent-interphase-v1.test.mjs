@@ -38,6 +38,7 @@ test('mechanical completion is bound to exact work packet and required output by
   assert.match(watchdog, /\.workPacketSha256==\$packetSha/);
   assert.match(watchdog, /required_total/);
   assert.match(watchdog, /observed_total/);
+  assert.match(watchdog, /MECHANICAL\//);
   assert.match(watchdog, /\[ "\$required" = "\$observed" \]/);
   assert.match(watchdog, /sha256sum \/tmp\/lite-interphase-output\.bin/);
   assert.match(watchdog, /\[ "\$observed_sha" = "\$expected_sha" \]/);
