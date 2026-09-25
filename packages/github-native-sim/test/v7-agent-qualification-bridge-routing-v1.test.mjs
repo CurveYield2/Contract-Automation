@@ -17,3 +17,23 @@ test('qualification bridge keeps explicit FULL override and rejects unsafe contr
   assert.match(workflow,/qualification_lane=CONTROLLER_ONLY requires controller_ref/);
   assert.match(workflow,/qualification_lane must be FULL or CONTROLLER_ONLY/);
 });
+
+
+test('qualification bridge drains durable open issues so GitHub pending-run replacement cannot lose work',()=> {
+  assert.match(workflow,/workflow_dispatch:/);
+  assert.match(workflow,/group:\s*v7-agent-qualification-bridge/);
+  assert.match(workflow,/cancel-in-progress:\s*false/);
+  assert.match(workflow,/name:\s*Resolve oldest queued qualification issue/);
+  assert.match(workflow,/sort_by\(\.number\)/);
+  assert.match(workflow,/\.title=="\[agent\] run-v7-qualification"/);
+  assert.match(workflow,/\.author\.login=="CurveYield-Developer-DK"/);
+  assert.match(workflow,/\.author\.login=="JamesNexus"/);
+  assert.match(workflow,/issue_body_b64/);
+  assert.match(workflow,/steps\.queue\.outputs\.issue_number/);
+  assert.match(workflow,/gh workflow run v7-agent-qualification-bridge\.yml/);
+});
+
+test('manual queue-drain runs are admitted without requiring synthetic issue event fields',()=> {
+  assert.match(workflow,/github\.event_name == 'workflow_dispatch'/);
+  assert.match(workflow,/steps\.queue\.outputs\.has_issue == 'true'/);
+});
