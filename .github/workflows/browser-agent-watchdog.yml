@@ -84,7 +84,7 @@ jobs:
 
           if ! verify_versions; then
             rm -rf node_modules/playwright-core node_modules/@browserbasehq
-            npm install --no-save --ignore-scripts \
+            npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund \
               "playwright-core@$BROWSER_AGENT_PLAYWRIGHT_CORE_VERSION" \
               "@browserbasehq/sdk@$BROWSER_AGENT_BROWSERBASE_SDK_VERSION"
           fi
