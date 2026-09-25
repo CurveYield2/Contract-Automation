@@ -125,12 +125,16 @@ jobs:
 
             jq -e               --arg campaign "$campaign_id"               --arg milestone "$expected_milestone"               --arg handoff "$handoff_path"               '.schemaVersion=="curveyield-lite-interphase-work-packet-v1"
                and .taskClass=="MECHANICAL_ONLY"
+               and ((keys|sort)==(["schemaVersion","taskClass","campaignId","completedMilestoneId","handoffPath","instructions","requiredOutputs"]|sort))
                and .campaignId==$campaign
                and .completedMilestoneId==$milestone
                and .handoffPath==$handoff
                and (.instructions|type=="string" and length>0)
                and (.requiredOutputs|type=="array" and length>0)
-               and all(.requiredOutputs[]; type=="object" and (.path|type=="string" and length>0))'               /tmp/lite-interphase-work-packet.json >/dev/null || return 2
+               and all(.requiredOutputs[]; type=="object"
+                 and ((keys|sort)==(["path"]|sort) or (keys|sort)==(["path","purpose"]|sort))
+                 and (.path|type=="string" and length>0)
+                 and ((has("purpose")|not) or (.purpose|type=="string")))'               /tmp/lite-interphase-work-packet.json >/dev/null || return 2
 
             if grep -Eiq '\b(TBD|TODO)\b|\{\{[^}]+\}\}|<[^>]*(placeholder|fill|insert)[^>]*>' /tmp/lite-interphase-work-packet.json; then
               return 2
@@ -175,12 +179,17 @@ jobs:
 
             jq -e               --arg campaign "$campaign_id"               --arg milestone "$expected_milestone"               --arg handoff "$handoff_path"               --arg packet "$packet_path"               --arg packetSha "$packet_sha"               '.schemaVersion=="curveyield-lite-interphase-completion-v1"
                and .status=="PASS"
+               and ((keys|sort)==(["schemaVersion","status","campaignId","completedMilestoneId","handoffPath","workPacketPath","workPacketSha256","outputs","completedAt"]|sort))
                and .campaignId==$campaign
                and .completedMilestoneId==$milestone
                and .handoffPath==$handoff
                and .workPacketPath==$packet
                and .workPacketSha256==$packetSha
-               and (.outputs|type=="array")
+               and (.outputs|type=="array" and length>0)
+               and all(.outputs[]; type=="object"
+                 and ((keys|sort)==(["path","sha256"]|sort))
+                 and (.path|type=="string" and length>0)
+                 and (.sha256|type=="string" and test("^[0-9a-f]{64}$")))
                and (.completedAt|type=="string" and length>0)'               /tmp/lite-interphase-completion.json >/dev/null || return 1
 
             required="$(jq -r '.requiredOutputs[]?.path // empty' /tmp/lite-interphase-work-packet.json | LC_ALL=C sort -u)"
