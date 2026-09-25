@@ -4,7 +4,7 @@
   "requestId": "awr-e2e-canonical-v1",
   "controller": {
     "repository": "CurveYield2/Audit-Controller",
-    "commit": "ae7568ae57dede1a182f79e8badf769892296d2d",
+    "commit": "ef1b0efb1c0965dab8753b52c43a4d0d1c9212ac",
     "requestPath": ".deep-assurance/operator/requests/awr-e2e-canonical-v1.json"
   },
   "verifyController": true
