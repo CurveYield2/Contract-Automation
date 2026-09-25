@@ -12,31 +12,46 @@ const workflow = fs.readFileSync(path.join(root, '.github/workflows/browser-agen
 const functions = workflow.slice(workflow.indexOf('          safe_repo_path() {'), workflow.indexOf('          if ! fetch_state; then'));
 const handoff = 'campaigns/synthetic/handoffs/P0_TO_P1/START_HERE.md';
 const dir = path.posix.dirname(handoff);
-const packetPath = dir + '/MECHANICAL_WORK_PACKET_v1.json';
-const completionPath = dir + '/MECHANICAL_WORK_COMPLETION_v1.json';
-const outputPath = dir + '/MECHANICAL/INDEX_v1.json';
+const packetPath = dir + '/MECHANICAL_WORK_PACKET_v2.json';
+const completionPath = dir + '/MECHANICAL_WORK_COMPLETION_v2.json';
+const unitOutputPaths = Array.from({ length: 10 }, (_, i) => dir + `/MECHANICAL/UNIT_${String(i + 1).padStart(2, '0')}_v2.json`);
+const reconciliationPath = dir + '/MECHANICAL/FINAL_RECONCILIATION_v2.json';
+const outputPath = unitOutputPaths[0];
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 function exercise(mutate = () => {}, launch = false) {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'lite-interphase-'));
   try {
     const output = '{"indexed":true}\n';
+    const workUnits = unitOutputPaths.map((unitPath, index) => ({
+      id: `unit-${String(index + 1).padStart(2, '0')}`,
+      instructions: `Mechanically reconcile synthetic evidence partition ${index + 1}.`,
+      outputPath: unitPath,
+      verification: 'Output must match the exact filed synthetic evidence bytes.'
+    }));
+    const requiredOutputs = [
+      ...unitOutputPaths.map((unitPath) => ({ path: unitPath })),
+      { path: reconciliationPath }
+    ];
     const packet = {
-      schemaVersion: 'curveyield-lite-interphase-work-packet-v1',
+      schemaVersion: 'curveyield-lite-interphase-work-packet-v2',
       taskClass: 'MECHANICAL_ONLY', campaignId: 'synthetic',
       completedMilestoneId: 'P0_BOOTSTRAP', handoffPath: handoff,
-      instructions: 'Index the synthetic evidence bytes.',
-      requiredOutputs: [{ path: outputPath }]
+      instructions: 'Complete all ten synthetic evidence reconciliation units and the final reconciliation output.',
+      workUnits,
+      reconciliationOutputPath: reconciliationPath,
+      requiredOutputs
     };
     const files = { output };
     mutate(packet, files);
     const packetBytes = JSON.stringify(packet);
     const receipt = {
-      schemaVersion: 'curveyield-lite-interphase-completion-v1',
+      schemaVersion: 'curveyield-lite-interphase-completion-v2',
       status: 'PASS', campaignId: 'synthetic',
       completedMilestoneId: 'P0_BOOTSTRAP', handoffPath: handoff,
       workPacketPath: packetPath, workPacketSha256: sha(packetBytes),
-      outputs: [{ path: outputPath, sha256: sha(output) }],
+      workUnitReceipts: workUnits.map((unit) => ({ id: unit.id, outputPath: unit.outputPath, sha256: sha(output) })),
+      outputs: requiredOutputs.map((entry) => ({ path: entry.path, sha256: sha(output) })),
       completedAt: '2026-09-25T00:00:00Z'
     };
     if (files.receipt) Object.assign(receipt, files.receipt);
@@ -56,9 +71,10 @@ set -euo pipefail
 gh() {
   if [ "$1" = api ]; then
     case "$2" in
-      *MECHANICAL_WORK_PACKET_v1.json*) base64 -w0 "$FIXTURE_DIR/packet";;
-      *MECHANICAL_WORK_COMPLETION_v1.json*) [ "$MISSING_RECEIPT" = no ] && base64 -w0 "$FIXTURE_DIR/receipt" || return 1;;
-      *MECHANICAL/INDEX_v1.json*) [ "$MISSING_OUTPUT" = no ] && base64 -w0 "$FIXTURE_DIR/output" || return 1;;
+      *MECHANICAL_WORK_PACKET_v1.json*) return 1;;
+      *MECHANICAL_WORK_PACKET_v2.json*) base64 -w0 "$FIXTURE_DIR/packet";;
+      *MECHANICAL_WORK_COMPLETION_v2.json*) [ "$MISSING_RECEIPT" = no ] && base64 -w0 "$FIXTURE_DIR/receipt" || return 1;;
+      *MECHANICAL/*.json*) [ "$MISSING_OUTPUT" = no ] && base64 -w0 "$FIXTURE_DIR/output" || return 1;;
       *pointer.json*) base64 -w0 "$FIXTURE_DIR/pointer";;
       *WAKE_UP_MESSAGE.md*) base64 -w0 "$FIXTURE_DIR/wake";;
       *) return 1;;
@@ -155,9 +171,10 @@ test('sealed P0 dispatches a bounded mechanical wake before a receipt exists', (
   const message = Buffer.from(encoded, 'base64').toString('utf8');
   assert.match(message, /repository=CurveYield2\/Audit-Controller/);
   assert.match(message, /work_packet_sha256=[a-f0-9]{64}/);
-  assert.match(message, /required_outputs:[\s\S]*MECHANICAL\/INDEX_v1\.json/);
+  assert.match(message, /work_units:[\s\S]*unit-01[\s\S]*unit-10/);
+  assert.match(message, /required_outputs:[\s\S]*MECHANICAL\/UNIT_01_v2\.json[\s\S]*FINAL_RECONCILIATION_v2\.json/);
   assert.match(message, /do_not_repeat=/);
   assert.match(message, /prohibited_semantic_work=/);
   assert.match(message, /Do not make, promote, reject, grade, or remediate security findings/);
-  assert.match(message, /Index the synthetic evidence bytes/);
+  assert.match(message, /Complete all ten synthetic evidence reconciliation units/);
 });
