@@ -4,7 +4,7 @@
   "requestId": "awr-public-entrypoint-v1",
   "controller": {
     "repository": "CurveYield2/Audit-Controller",
-    "commit": "69684e60eedc95c0baa8af855bbcd206145f861c",
+    "commit": "ce53f426e82d5efc549c7eeb39ec54ace2a74790",
     "requestPath": ".deep-assurance/operator/requests/awr-public-entrypoint-v1.json"
   },
   "verifyController": true
