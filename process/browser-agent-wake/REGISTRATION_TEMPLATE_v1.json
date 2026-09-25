@@ -7,12 +7,24 @@
   "watchdog": {
     "enabled": true,
     "idleMessage": "[AUDIT_AGENT_WATCHDOG_V1]\nGET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.",
-    "completion": {
+    "gate": {
+      "mode": "LITE",
       "repository": "CurveYield2/Audit-Controller",
       "ref": "main",
-      "path": "campaigns/REPLACE_WITH_AUDIT_NAME/REPLACE_WITH_TERMINAL_COMPLETION_REPORT.json",
-      "statusField": "status",
-      "terminalValues": ["PASS", "COMPLETE", "COMPLETED", "SEALED"]
+      "statePath": "campaigns/REPLACE_WITH_AUDIT_NAME/controller/CAMPAIGN_STATE_v1.json",
+      "expectedPhaseId": "phase-0",
+      "expectedMilestoneId": "P0_1",
+      "activePointerPath": "campaigns/REPLACE_WITH_AUDIT_NAME/controller/ACTIVE_PHASE_POINTER_v1.json",
+      "stopStates": [
+        "WAITING_FOR_HUMAN_RESPONSE",
+        "WAITING_FOR_SUCCESSOR_AGENT",
+        "CLOSED",
+        "STOPPED_BY_HUMAN"
+      ],
+      "stopCampaignStatuses": [
+        "COMPLETE",
+        "STOPPED_BY_HUMAN"
+      ]
     }
   }
 }
