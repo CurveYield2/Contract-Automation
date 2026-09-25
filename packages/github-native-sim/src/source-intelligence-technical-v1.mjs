@@ -125,3 +125,67 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
         functions.push({functionId:id,contractId,signature:sig,selector:selector?`0x${selector.replace(/^0x/,'')}`:null,visibility:fn?.node?.visibility??'PUBLIC_OR_EXTERNAL_ABI',
           stateMutability:abi.stateMutability??fn?.node?.stateMutability??null,payable:(abi.stateMutability??fn?.node?.stateMutability)==='payable',modifiers,
           sourceLocation:fLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',confidenceClass:'COMPILER_FACT',basis:fLoc?'ABI_METHOD_IDENTIFIERS_AND_SOLIDITY_AST':'ABI_AND_METHOD_IDENTIFIERS'});
+        if (fLoc) sourceAnchors.push({anchorId:`ANCHOR-${pad(sourceAnchors.length+1,4)}`,sourceId,symbolId:id,startLine:fLoc.startLine,endLine:fLoc.endLine,sourceDigestSha256:source.sha256,basis:'SOLIDITY_AST_SRC'});
+        for (const m of fn?.node?.modifiers??[]) privilegeCandidates.push({candidateId:`PRIV-${pad(privilegeCandidates.length+1,4)}`,contractId,functionId:id,candidateKind:'MODIFIER_INVOCATION',
+          modifierOrGuard:modifierName(m),authorityExpression:modifierName(m),sourceLocation:loc(source,m.src)?.label??fLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',
+          status:'CANDIDATE',confidenceClass:'SOURCE_SYNTAX_FACT',basis:'SOLIDITY_AST_MODIFIER_INVOCATION',securityInterpretation:'DEFER_TO_PHASE_3_AND_4'});
+      } else if (abi.type==='event' || abi.type==='error') {
+        eventsAndErrors.push({itemId:`EVERR-${pad(eventsAndErrors.length+1,4)}`,contractId,kind:abi.type.toUpperCase(),signatureOrName:signature(abi),
+          sourceLocation:'ABI_ONLY_SOURCE_LOCATION_UNAVAILABLE',confidenceClass:'COMPILER_FACT',basis:'COMPILER_ABI'});
+      }
+    }
+    for (const item of a.storageLayout?.storage??[]) {
+      const node=Number.isInteger(item.astId)?ast.nodes.get(item.astId):null, sLoc=loc(byPath.get(node?.sourceName??a.sourceName),node?.node?.src);
+      storageLayout.push({storageId:`STORE-${pad(storageLayout.length+1,4)}`,contractId,label:item.label??null,slot:String(item.slot??''),offset:String(item.offset??''),
+        type:a.storageLayout?.types?.[item.type]?.label??item.type??null,sourceLocation:sLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',status:'CURRENT',confidenceClass:'COMPILER_FACT',basis:'COMPILER_STORAGE_LAYOUT'});
+    }
+  }
+
+  for (const [qualifiedName,entry] of ast.contracts.entries()) {
+    const derived=contractByQualified.get(qualifiedName); if (!derived) continue;
+    for (const base of entry.node?.baseContracts??[]) {
+      const baseId=base?.baseName?.referencedDeclaration, baseContractId=contractByAstId.get(baseId); if (!baseContractId) continue;
+      inheritanceGraph.push({edgeId:`INHERIT-${pad(inheritanceGraph.length+1,4)}`,derivedContractId:derived,baseContractId,
+        linearizedOrder:(entry.node.linearizedBaseContracts??[]).indexOf(baseId),sourceLocation:loc(entry.source,base.src)?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',
+        confidenceClass:'COMPILER_FACT',basis:'SOLIDITY_AST_BASE_CONTRACT'});
+    }
+  }
+
+  const sourceIdentity={repository:request.source.repository,commit:request.source.commit,projectPath:request.source.projectPath,archivePath:request.source.archivePath??null,archiveSha256:request.source.archiveSha256??null,
+    sourceTreeDigestSha256:digestCanonicalV1(sourceFiles.map(({path,language,sha256})=>({path,language,sha256})))};
+  const buildCore={system:build.system??null,compilers:clone(request.configuration.compilers??[]),optimizer:clone(request.configuration.optimizer??null),evmVersion:request.configuration.evmVersion??null,
+    viaIR:request.configuration.viaIR===true,sourceFiles:sourceFiles.map(({path,language,sha256})=>({path,language,sha256})),
+    artifacts:compilerArtifacts.map(({qualifiedName,abiDigestSha256,creationBytecodeDigestSha256,deployedBytecodeDigestSha256})=>({qualifiedName,abiDigestSha256,creationBytecodeDigestSha256,deployedBytecodeDigestSha256}))};
+  const sbom=await generateBuildSbomV1({projectRoot,request,build:{compilerDescriptors:clone(request.configuration.compilers??[]),optimizer:clone(request.configuration.optimizer??null),evmVersion:request.configuration.evmVersion??null,viaIR:request.configuration.viaIR===true,sourceCommit:request.source.commit,artifacts:clone(build.artifacts??[])}});
+  const slither=analysis.slither??null, detectors=Array.isArray(slither?.detectors)?slither.detectors:[];
+  const limitations=[];
+  if (sourceFiles.some(x=>x.language==='SOLIDITY') && Object.keys(build.sourceAsts??{}).length===0) limitations.push({limitationId:'SI-TECH-LIM-001',category:'SOLIDITY_AST_UNAVAILABLE',
+    affectedSections:['inheritanceGraph','sourceAnchors','privilegeCandidates'],reason:'The admitted Solidity build did not expose source ASTs.',downstreamRequiredAction:'Carry the limitation; do not fabricate AST-derived facts.'});
+  if (sourceFiles.some(x=>x.language==='VYPER')) limitations.push({limitationId:`SI-TECH-LIM-${pad(limitations.length+1)}`,category:'VYPER_AST_STRUCTURAL_LIMITATION',
+    affectedSections:['inheritanceGraph','callGraph','privilegeCandidates','externalInterfaces','valueFlowCandidates','sourceAnchors','storageLayout'],reason:'Pinned Vyper build exposes ABI/bytecode but not equivalent AST/storage layout.',
+    downstreamRequiredAction:'Preserve Vyper compiler facts and require semantic raw-source review.'});
+  limitations.push({limitationId:`SI-TECH-LIM-${pad(limitations.length+1)}`,category:'SEMANTIC_CALL_AND_VALUE_FLOW_DEFERRED',
+    affectedSections:['callGraph','externalInterfaces','valueFlowCandidates','protocolTopology'],reason:'Stage C.4 emits build/ABI/AST structural facts; semantic call/value-flow/topology classification remains reviewer-owned.',
+    downstreamRequiredAction:'Later Lite reviewers reuse this bundle and extend semantically without rebuilding the structural inventory.'});
+  if (!slither || !['completed','completed_with_findings'].includes(slither.status)) limitations.push({limitationId:`SI-TECH-LIM-${pad(limitations.length+1)}`,category:'STATIC_RECON_LIMITATION',
+    affectedSections:['staticRecon.slither'],reason:`Slither terminal status was ${slither?.status??'UNAVAILABLE'}.`,downstreamRequiredAction:'Carry exact analyzer limitation and raw evidence.'});
+
+  const bundle={
+    schemaVersion:'curveyield-v7-source-intelligence-technical-bundle-v1',artifactType:'SOURCE_INTELLIGENCE_TECHNICAL_BUNDLE',
+    neutrality:{securityDisposition:'REVIEWER_REQUIRED',findingPromotion:'FORBIDDEN_BY_GENERATOR',statement:'Compiler/source/static facts and neutral candidates only; no finding, severity, exploitability, or trust conclusion.'},
+    requestIdentity:{requestId:request.requestId,requestDigest:request.requestDigest,campaignId:request.campaignId,assignmentId:request.assignmentId,phaseId:request.phaseId,profileId:request.profileId},
+    sourceIdentity,buildIdentity:{...buildCore,digestSha256:digestCanonicalV1(buildCore)},sourceFiles,compilerArtifacts,contracts,functions,storageLayout,inheritanceGraph,
+    callGraph:[],privilegeCandidates,externalInterfaces:[],valueFlowCandidates:[],eventsAndErrors,sourceAnchors,
+    securitySurfaces:[{surfaceId:'SURFACE-CALLABLE',surfaceClass:'CALLABLE_SURFACE',sourceIds:sourceFiles.map(x=>x.sourceId),contractIds:contracts.map(x=>x.contractId),functionIds:functions.map(x=>x.functionId),
+      storageIds:storageLayout.map(x=>x.storageId),externalInterfaceIds:[],privilegeCandidateIds:privilegeCandidates.map(x=>x.candidateId),valueFlowCandidateIds:[],sourceAnchorIds:sourceAnchors.map(x=>x.anchorId),
+      phase1Ownership:'STRUCTURAL_INVENTORY',laterPhaseTreatment:'REUSE_VERIFY_EXTEND_SEMANTICALLY',status:'CURRENT',basis:'ADMITTED_COMPILER_AND_AST_FACTS'}],
+    protocolTopology:{upgradeabilityEdges:[],dependencyEdges:[],crossChainEdges:[],offchainAutomationEdges:[],topologyLimitations:['SEMANTIC_PROTOCOL_TOPOLOGY_REMAINS_REVIEWER_OWNED']},
+    staticRecon:{slither:{status:slither?.status??'UNAVAILABLE',version:slither?.version??null,rawEvidenceRef:slither?.rawArtifactRef??null,candidateCount:detectors.length,
+      candidateIndex:detectors.map((d,i)=>({candidateId:`SLITHER-${pad(i+1,4)}`,check:d?.check??d?.description??d?.impact??'UNNAMED_DETECTOR',confidence:d?.confidence??null,impact:d?.impact??null,status:'NEUTRAL_ANALYZER_CANDIDATE'})),
+      limitation:slither&&['completed','completed_with_findings'].includes(slither.status)?null:`SLITHER_${String(slither?.status??'UNAVAILABLE').toUpperCase()}`},
+      sbom:{status:'COMPLETED',digestSha256:sbom.sbomDigest,sourceFileCount:sbom.sourceFiles?.length??0,dependencyFileCount:sbom.dependencyFiles?.length??0,artifactCount:sbom.artifacts?.length??0}},
+    limitations,completion:{status:'TECHNICAL_BUNDLE_COMPLETE_WITH_TYPED_LIMITATIONS',exactSourceBound:true,exactBuildBound:true,staticReconAttached:slither!==null,secondSourceCheckoutPerformed:false,secondBuildPerformed:false,
+      canonicalSourceIntelligenceProjectionOwner:'AUDIT_CONTROLLER',semanticReviewRequired:true}
+  };
+  return {...bundle,technicalBundleDigest:digestCanonicalV1(bundle)};
+}
