@@ -27,3 +27,15 @@ test('FULL qualification requires the committed lock and never manufactures one'
   assert.doesNotMatch(workflow, /contents\/package-lock\.json/);
   assert.doesNotMatch(workflow, /package_lock_published/);
 });
+
+test('V7 execution requires the same committed root lock before toolchain setup', () => {
+  const workflow = fs.readFileSync(
+    path.join(root, '.github/workflows/audit-controller-execution.yml'), 'utf8');
+  const install = workflow.split('      - name: Install trusted runner dependencies')[1]
+    .split('      - name: Install and verify canonical V7 toolchain')[0];
+  assert.match(install, /if: env\.V7_REQUEST_KIND == 'v7-execution'/);
+  assert.match(install, /test -s package-lock\.json/);
+  assert.match(install, /npm ci --force/);
+  assert.match(install, /V7_DEPENDENCY_LOCKED=true/);
+  assert.doesNotMatch(install, /npm install|V7_DEPENDENCY_LOCKED=false/);
+});
