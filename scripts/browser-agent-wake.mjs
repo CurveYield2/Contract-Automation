@@ -60,14 +60,24 @@ async function snapshot(page) {
   const uCount = await user.count().catch(() => 0);
   let last = '';
   if (aCount) last = await assistant.nth(aCount - 1).innerText().catch(() => '');
+  const currentUrl = page.url();
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const conversationUnavailable =
+    /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText);
+  const chatViewable =
+    /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(currentUrl) &&
+    !!composer &&
+    !conversationUnavailable;
   return {
     generating: !!stop,
     composerVisible: !!composer,
+    conversationUnavailable,
+    chatViewable,
     assistantCount: aCount,
     userCount: uCount,
     lastAssistantHash: sha(last),
     lastAssistantLength: last.length,
-    url: page.url(),
+    url: currentUrl,
   };
 }
 
@@ -154,6 +164,16 @@ async function runWithPage(providerName, connect) {
     }
     if (before.generating && !bool(env.FORCE_WAKE)) {
       const result = { ok: true, provider: providerName, action, wakeId, skipped: 'PRODUCTIVE_GENERATING', ...before };
+      await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
+      return result;
+    }
+
+    if (action === 'wake_and_wait' && mode === 'resume_existing' && !before.chatViewable) {
+      const result = {
+        ok: true, provider: providerName, action, wakeId,
+        posted: false, responded: false, deadReason: 'CHAT_UNVIEWABLE',
+        before, after: before, chatUrl: before.url
+      };
       await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
       return result;
     }
