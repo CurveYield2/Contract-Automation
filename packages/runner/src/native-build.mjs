@@ -183,6 +183,9 @@ export async function collectNativeContractArtifacts(projectRoot, fsApi = fs) {
           sourceName,
           contractName,
           abi: raw?.abi ?? [],
+          metadata: raw?.metadata ?? null,
+          storageLayout: raw?.storageLayout ?? null,
+          methodIdentifiers: raw?.evm?.methodIdentifiers ?? {},
           bytecode: bytecodeObject ? `0x${String(bytecodeObject).replace(/^0x/, '')}` : '0x',
           deployedBytecode: deployedObject ? `0x${String(deployedObject).replace(/^0x/, '')}` : '0x',
           gasEstimates: raw?.evm?.gasEstimates ?? null,
@@ -193,6 +196,32 @@ export async function collectNativeContractArtifacts(projectRoot, fsApi = fs) {
     }
   }
   return [...byQualifiedName.values()].sort((a, b) => `${a.sourceName}:${a.contractName}`.localeCompare(`${b.sourceName}:${b.contractName}`));
+}
+
+export async function collectNativeSourceAsts(projectRoot, fsApi = fs) {
+  const bySource = new Map();
+  for (const absolute of await buildInfoFiles(projectRoot, fsApi)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(await fsApi.readFile(absolute, 'utf8'));
+    } catch {
+      continue;
+    }
+    for (const [sourceName, source] of Object.entries(parsed?.output?.sources ?? {})) {
+      if (!source?.ast) continue;
+      const serialized = JSON.stringify(source.ast);
+      const existing = bySource.get(sourceName);
+      if (existing && existing.serialized !== serialized) {
+        throw new Error(`Hardhat build-info AST mismatch for ${sourceName}`);
+      }
+      if (!existing) bySource.set(sourceName, { ast: source.ast, serialized });
+    }
+  }
+  return Object.fromEntries(
+    [...bySource.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([sourceName, entry]) => [sourceName, entry.ast])
+  );
 }
 
 async function solidityInventory(projectRoot, fsApi = fs) {
@@ -248,6 +277,7 @@ export async function compileRepoNativeHardhat({
 
   const buildInfo = await listBuildInfo(projectRoot, fsApi);
   const artifacts = await collectNativeContractArtifacts(projectRoot, fsApi);
+  const sourceAsts = await collectNativeSourceAsts(projectRoot, fsApi);
   const sources = await solidityInventory(projectRoot, fsApi);
   return {
     status: 'completed',
@@ -262,6 +292,7 @@ export async function compileRepoNativeHardhat({
     buildInfo,
     buildInfoCount: buildInfo.length,
     artifacts,
+    sourceAsts,
     sourceInventory: sources,
     sourceInventoryFiles: sources.length,
     vendorRootAdapter

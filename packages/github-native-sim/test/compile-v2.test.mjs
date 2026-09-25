@@ -143,9 +143,14 @@ test('compile-v2 executes exact checkout and build before neutral Slither', asyn
         componentStatus: 'COMPLETED', continuationDisposition: 'COMPLETE_EVIDENCE', authoritativeFinding: false,
         rawOutput: { exitCode: 255, stdout: '{"success":true,"results":{"detectors":[{}]}}', stderr: '' }
       };
+    },
+    generateSourceIntelligence: async ({ analysis }) => {
+      calls.push('source-intelligence');
+      assert.equal(analysis.slither.componentStatus, 'COMPLETED');
+      return { schemaVersion: 'curveyield-v7-source-intelligence-technical-bundle-v1', technicalBundleDigest: sha('9') };
     }
   });
-  assert.deepEqual(calls, ['checkout', 'build', 'slither']);
+  assert.deepEqual(calls, ['checkout', 'build', 'slither', 'source-intelligence']);
   assert.equal(result.profileId, 'github-native-compile-v2');
   assert.equal(result.status, 'completed');
   assert.equal(result.source.commit, commit('1'));

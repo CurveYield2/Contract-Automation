@@ -58,7 +58,7 @@ export function buildCompilerInput(sources, settings = {}) {
   const compilerSettings = {
     optimizer: settings.optimizer ?? { enabled: true, runs: 200 },
     viaIR: settings.viaIR ?? false,
-    outputSelection: { '*': { '*': OUTPUT_SELECTION } }
+    outputSelection: { '*': { '*': OUTPUT_SELECTION, '': ['ast'] } }
   };
   if (settings.evmVersion) compilerSettings.evmVersion = settings.evmVersion;
   return {
@@ -165,5 +165,11 @@ export async function compileProject({ sources, compilerVersion, settings, openZ
     failure.compilerDiagnostics = diagnostics;
     throw failure;
   }
-  return { output, diagnostics, artifacts: contractArtifactMap(output), input };
+  const sourceAsts = Object.fromEntries(
+    Object.entries(output.sources ?? {})
+      .filter(([, value]) => value?.ast)
+      .map(([sourceName, value]) => [sourceName, value.ast])
+      .sort(([left], [right]) => left.localeCompare(right))
+  );
+  return { output, diagnostics, artifacts: contractArtifactMap(output), input, sourceAsts };
 }
