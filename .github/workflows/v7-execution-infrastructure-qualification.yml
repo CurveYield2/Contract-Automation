@@ -130,7 +130,7 @@ jobs:
       - name: Checkout exact private Audit-Controller candidate
         if: inputs.controller_ref != ''
         env:
-          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN || secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           CONTROLLER_REF: ${{ inputs.controller_ref }}
         shell: bash
         run: |
