@@ -133,33 +133,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f package-lock.json ]; then
-            npm ci --force
-            echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
-          else
-            npm install --package-lock-only --ignore-scripts
-            npm ci --force
-            echo "V7_DEPENDENCY_LOCKED=false" >> "$GITHUB_ENV"
-          fi
-
-      - name: Bootstrap package-lock into trusted main
-        if: env.V7_QUALIFICATION_LANE == 'FULL' && github.event_name != 'pull_request' && env.V7_DEPENDENCY_LOCKED != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/package-lock.json?ref=main" --jq '.sha' 2>/dev/null || true)"
-          if [ -z "$existing_sha" ]; then
-            content="$(base64 -w0 package-lock.json)"
-            gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/package-lock.json" \
-              -f message='chore(v7): generate canonical dependency lock' \
-              -f content="$content" \
-              -f branch='main' >/dev/null
-            echo "package_lock_published=true" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "package_lock_already_present=true" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          test -s package-lock.json
+          node -e "const p=require('./package-lock.json'); if(p.lockfileVersion!==3) process.exit(1)"
+          npm ci --force
+          echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
 
       - name: Install and verify canonical V7 toolchain
         if: env.V7_QUALIFICATION_LANE == 'FULL'
@@ -337,7 +314,7 @@ jobs:
           const preflight=await runPhase7ForkPreflightV2({request,environment:process.env});
           const observed=preflight.observedPinnedBlockHash?.toLowerCase()??null;
           const checks={
-            dependencyLockPresent:fs.existsSync('package-lock.json'),
+            dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true' && fs.existsSync('package-lock.json'),
             phase6MutableRpcPass:phase6.status==='PASS',
             phase6IdentityNormalized:phase6.runtime?.identityNormalized===true && phase6.identityNormalization?.status==='PASS',
             phase6RpcSecretNotExposed:JSON.stringify(phase6).includes(process.env.SIM_ARCHIVE_PRIMARY_ETHEREUM_01)===false,
@@ -375,7 +352,7 @@ jobs:
             capabilities,
             recipes,
             controllerQualification,
-            dependencyLockPresent:fs.existsSync('package-lock.json'),
+            dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true' && fs.existsSync('package-lock.json'),
             testMatrix:{githubNative:'PASS',anvilRunner:'PASS',fullNodeSuite:'PASS',staticChecks:'PASS',buildChecks:'PASS',toolchainVerification:'PASS'},
             phase6,
             phase6MedusaSmoke,
