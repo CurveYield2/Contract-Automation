@@ -130,13 +130,26 @@ jobs:
       - name: Checkout exact private Audit-Controller candidate
         if: inputs.controller_ref != ''
         env:
-          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN || secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_PRIMARY: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_FALLBACK: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           CONTROLLER_REF: ${{ inputs.controller_ref }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${GH_TOKEN:-}"
-          gh api repos/CurveYield2/Audit-Controller --silent
+          select_controller_token() {
+            if [ -n "${AUDIT_CONTROLLER_TOKEN_PRIMARY:-}" ] && GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_PRIMARY" gh api repos/CurveYield2/Audit-Controller --silent >/dev/null 2>&1; then
+              GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_PRIMARY"
+              return 0
+            fi
+            if [ -n "${AUDIT_CONTROLLER_TOKEN_FALLBACK:-}" ] && GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_FALLBACK" gh api repos/CurveYield2/Audit-Controller --silent >/dev/null 2>&1; then
+              GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_FALLBACK"
+              return 0
+            fi
+            echo 'No configured private-controller credential can authenticate to CurveYield2/Audit-Controller' >&2
+            return 1
+          }
+          select_controller_token
+          export GH_TOKEN
           rm -rf .controller-under-test
           gh auth setup-git
           gh repo clone CurveYield2/Audit-Controller .controller-under-test -- --filter=blob:none --no-checkout
