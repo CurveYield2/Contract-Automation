@@ -127,97 +127,6 @@ async function post(page, message) {
 }
 
 
-async function chatIsViewable(page) {
-  if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(page.url())) return false;
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  if (/Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText)) return false;
-  try {
-    await ensureComposer(page);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForAssistantResponse(page, baseline, timeoutMs) {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const current = await snapshot(page);
-    if (current.generating ||
-        current.assistantCount > baseline.assistantCount ||
-        (current.lastAssistantHash && current.lastAssistantHash !== baseline.lastAssistantHash)) {
-      return { responded: true, elapsedMs: Date.now() - started, snapshot: current };
-    }
-    await page.waitForTimeout(2000);
-  }
-  return { responded: false, elapsedMs: Date.now() - started, snapshot: await snapshot(page) };
-}
-
-async function probeAgent(page, providerName) {
-  const responseWindowMs = Number(env.WAKE_RESPONSE_TIMEOUT_MS || 120000);
-  const maxAttempts = Number(env.WAKE_MAX_ATTEMPTS || 3);
-  if (!Number.isInteger(responseWindowMs) || responseWindowMs < 120000) {
-    throw new Error('WAKE_RESPONSE_TIMEOUT_MS must be at least 120000');
-  }
-  if (maxAttempts !== 3) {
-    throw new Error('WAKE_MAX_ATTEMPTS must be exactly 3');
-  }
-
-  if (!await chatIsViewable(page)) {
-    return {
-      ok: true, provider: providerName, action: 'probe', wakeId,
-      alive: false, deadReason: 'CHAT_UNVIEWABLE', attempts: 0, chatUrl: page.url()
-    };
-  }
-
-  const initial = await snapshot(page);
-  if (initial.generating) {
-    return {
-      ok: true, provider: providerName, action: 'probe', wakeId,
-      alive: true, reason: 'PRODUCTIVE_GENERATING', attempts: 0, ...initial, chatUrl: page.url()
-    };
-  }
-
-  const attempts = [];
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const baseline = await snapshot(page);
-    await post(page, wakeMessage);
-    const response = await waitForAssistantResponse(page, baseline, responseWindowMs);
-    attempts.push({
-      attempt,
-      responded: response.responded,
-      elapsedMs: response.elapsedMs,
-      assistantCount: response.snapshot.assistantCount,
-      lastAssistantHash: response.snapshot.lastAssistantHash
-    });
-    if (response.responded) {
-      return {
-        ok: true, provider: providerName, action: 'probe', wakeId,
-        alive: true, reason: 'RESPONDED_ATTEMPT_' + attempt, attempts: attempt,
-        attemptLog: attempts, ...response.snapshot, chatUrl: page.url()
-      };
-    }
-
-    if (attempt < maxAttempts) {
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.waitForTimeout(1500);
-      if (!await chatIsViewable(page)) {
-        return {
-          ok: true, provider: providerName, action: 'probe', wakeId,
-          alive: false, deadReason: 'CHAT_UNVIEWABLE_AFTER_REFRESH',
-          attempts: attempt, attemptLog: attempts, chatUrl: page.url()
-        };
-      }
-    }
-  }
-
-  const terminal = await snapshot(page);
-  return {
-    ok: true, provider: providerName, action: 'probe', wakeId,
-    alive: false, deadReason: 'THREE_UNANSWERED_PROMPTS',
-    attempts: maxAttempts, attemptLog: attempts, ...terminal, chatUrl: page.url()
-  };
-}
 
 async function runWithPage(providerName, connect) {
   const { browser, context, page, close } = await connect();
@@ -243,14 +152,6 @@ async function runWithPage(providerName, connect) {
       await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
       return result;
     }
-
-    if (action === 'probe') {
-      if (mode !== 'resume_existing') throw new Error('probe requires resume_existing mode');
-      const result = await probeAgent(page, providerName);
-      await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
-      return result;
-    }
-
     if (before.generating && !bool(env.FORCE_WAKE)) {
       const result = { ok: true, provider: providerName, action, wakeId, skipped: 'PRODUCTIVE_GENERATING', ...before };
       await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
