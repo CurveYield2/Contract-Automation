@@ -30,24 +30,27 @@ on:
       watchdog_message_b64:
         required: false
         type: string
-      completion_repository:
+      gate_repository:
         required: false
         default: CurveYield2/Audit-Controller
         type: string
-      completion_ref:
+      gate_ref:
         required: false
         default: main
         type: string
-      completion_path:
+      gate_state_path:
         required: false
         type: string
-      completion_status_field:
+      gate_expected_phase_id:
         required: false
-        default: status
         type: string
-      completion_terminal_values_csv:
+      gate_stop_states_csv:
         required: false
-        default: PASS,COMPLETE,COMPLETED,SEALED
+        default: WAITING_FOR_HUMAN_RESPONSE,WAITING_FOR_SUCCESSOR_AGENT,CLOSED,STOPPED_BY_HUMAN
+        type: string
+      gate_stop_campaign_statuses_csv:
+        required: false
+        default: COMPLETE,STOPPED_BY_HUMAN
         type: string
 
 permissions:
@@ -129,11 +132,12 @@ jobs:
           PROVIDER: ${{ steps.deliver.outputs.provider }}
           ASSISTANT_COUNT: ${{ steps.deliver.outputs.assistant_count }}
           LAST_HASH: ${{ steps.deliver.outputs.last_hash }}
-          COMPLETION_REPOSITORY: ${{ inputs.completion_repository }}
-          COMPLETION_REF: ${{ inputs.completion_ref }}
-          COMPLETION_PATH: ${{ inputs.completion_path }}
-          COMPLETION_STATUS_FIELD: ${{ inputs.completion_status_field }}
-          COMPLETION_TERMINAL_VALUES_CSV: ${{ inputs.completion_terminal_values_csv }}
+          GATE_REPOSITORY: ${{ inputs.gate_repository }}
+          GATE_REF: ${{ inputs.gate_ref }}
+          GATE_STATE_PATH: ${{ inputs.gate_state_path }}
+          GATE_EXPECTED_PHASE_ID: ${{ inputs.gate_expected_phase_id }}
+          GATE_STOP_STATES_CSV: ${{ inputs.gate_stop_states_csv }}
+          GATE_STOP_CAMPAIGN_STATUSES_CSV: ${{ inputs.gate_stop_campaign_statuses_csv }}
         shell: bash
         run: |
           set -euo pipefail
@@ -147,11 +151,12 @@ jobs:
             --arg provider "$PROVIDER" \
             --arg armedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --arg idleMessage "$(cat /tmp/watchdog-message.txt)" \
-            --arg completionRepository "$COMPLETION_REPOSITORY" \
-            --arg completionRef "$COMPLETION_REF" \
-            --arg completionPath "$COMPLETION_PATH" \
-            --arg statusField "$COMPLETION_STATUS_FIELD" \
-            --arg terminalCsv "$COMPLETION_TERMINAL_VALUES_CSV" \
+            --arg gateRepository "$GATE_REPOSITORY" \
+            --arg gateRef "$GATE_REF" \
+            --arg gateStatePath "$GATE_STATE_PATH" \
+            --arg gateExpectedPhaseId "$GATE_EXPECTED_PHASE_ID" \
+            --arg gateStopStatesCsv "$GATE_STOP_STATES_CSV" \
+            --arg gateStopCampaignStatusesCsv "$GATE_STOP_CAMPAIGN_STATUSES_CSV" \
             --arg lastHash "$LAST_HASH" \
             --argjson assistantCount "${ASSISTANT_COUNT:-0}" \
             '{
@@ -159,7 +164,14 @@ jobs:
               status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,
               idleMessage:$idleMessage,
               observation:{assistantCount:$assistantCount,lastAssistantHash:$lastHash,observedAt:$armedAt},
-              completion:{repository:$completionRepository,ref:$completionRef,path:$completionPath,statusField:$statusField,terminalValues:($terminalCsv|split(",")|map(gsub("^ +| +$";"")))}
+              gate:{
+                repository:$gateRepository,
+                ref:$gateRef,
+                statePath:$gateStatePath,
+                expectedPhaseId:$gateExpectedPhaseId,
+                stopStates:($gateStopStatesCsv|split(",")|map(gsub("^ +| +$";""))),
+                stopCampaignStatuses:($gateStopCampaignStatusesCsv|split(",")|map(gsub("^ +| +$";"")))
+              }
             }' > "/tmp/$safe_id.json"
           echo "WATCHDOG_STATE=/tmp/$safe_id.json" >> "$GITHUB_ENV"
           echo "WATCHDOG_SAFE_ID=$safe_id" >> "$GITHUB_ENV"
