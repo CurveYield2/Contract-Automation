@@ -51,7 +51,8 @@
           }
         }
       },
-      "uniqueItems": true
+      "uniqueItems": true,
+      "description": "Every output must be a repository-relative path under the authoritative handoff directory's MECHANICAL/ subdirectory."
     },
     "taskClass": {
       "const": "MECHANICAL_ONLY"
