@@ -47,3 +47,14 @@ test('no parallel watchdog workflow is introduced', () => {
     false
   );
 });
+
+
+test('terminal watchdog state retention is bounded without touching active state or registrations', () => {
+  assert.match(watchdog, /prune_completed_states\(\)/);
+  assert.match(watchdog, /WATCHDOG_COMPLETED_RETENTION_MAX:-100/);
+  assert.match(watchdog, /status=="COMPLETED_CANONICAL_GATE"/);
+  assert.match(watchdog, /process\/browser-agent-watchdog\/active\/\$file_name/);
+  assert.match(watchdog, /--method DELETE "\$completed_dir_api\/\$file_name"/);
+  assert.match(watchdog, /prune_completed_states\s*\n\s*\}/);
+  assert.doesNotMatch(watchdog, /DELETE[^\n]*process\/browser-agent-wake\/registrations/);
+});

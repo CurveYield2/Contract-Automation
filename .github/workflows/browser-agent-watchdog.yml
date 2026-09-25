@@ -185,6 +185,59 @@ jobs:
               -f content="$content" -f sha="$sha" -f branch=main >/dev/null
           }
 
+          prune_completed_states() {
+            local completed_dir_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/completed"
+            local retention_max="${WATCHDOG_COMPLETED_RETENTION_MAX:-100}"
+            local listing total excess file_name safe_name active_probe encoded completed_at completed_epoch current_sha
+            local valid_count prune_count
+            local index_file='/tmp/watchdog-completed-retention.txt'
+            : > "$index_file"
+
+            listing="$(gh api "$completed_dir_api?ref=main" --jq '.[]? | select(.type=="file" and (.name|endswith(".json"))) | .name' 2>/dev/null || true)"
+            [ -n "$listing" ] || return 0
+            total="$(printf '%s\n' "$listing" | sed '/^$/d' | wc -l | tr -d ' ')"
+            [[ "$retention_max" =~ ^[0-9]+$ ]] || retention_max=100
+            [ "$retention_max" -ge 1 ] || retention_max=100
+            [ "$total" -gt "$retention_max" ] || return 0
+            excess=$((total - retention_max))
+
+            while IFS= read -r file_name; do
+              [ -n "$file_name" ] || continue
+              [[ "$file_name" =~ ^[A-Za-z0-9._-]+\.json$ ]] || continue
+              safe_name="${file_name%.json}"
+              active_probe="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active/$file_name?ref=main" --jq '.sha' 2>/dev/null || true)"
+              [ -z "$active_probe" ] || continue
+              encoded="$(gh api "$completed_dir_api/$file_name?ref=main" --jq '.content' 2>/dev/null || true)"
+              [ -n "$encoded" ] || continue
+              printf '%s' "$encoded" | base64 -d > /tmp/watchdog-retention-candidate.json 2>/dev/null || continue
+              if ! jq -e --arg safe "$safe_name" '
+                type=="object"
+                and .schemaVersion=="curveyield-browser-agent-watchdog-state-v1"
+                and .status=="COMPLETED_CANONICAL_GATE"
+                and (.completedAt|type=="string" and length>0)
+                and (.wakeId|type=="string" and (gsub("[^A-Za-z0-9._-]";"_"))==$safe)
+              ' /tmp/watchdog-retention-candidate.json >/dev/null; then
+                continue
+              fi
+              completed_at="$(jq -r '.completedAt' /tmp/watchdog-retention-candidate.json)"
+              completed_epoch="$(date -u -d "$completed_at" +%s 2>/dev/null || true)"
+              [[ "$completed_epoch" =~ ^[0-9]+$ ]] || continue
+              current_sha="$(gh api "$completed_dir_api/$file_name?ref=main" --jq '.sha' 2>/dev/null || true)"
+              [ -n "$current_sha" ] || continue
+              printf '%020d|%s|%s\n' "$completed_epoch" "$file_name" "$current_sha" >> "$index_file"
+            done <<< "$listing"
+
+            valid_count="$(wc -l < "$index_file" | tr -d ' ')"
+            [ "$valid_count" -gt 0 ] || return 0
+            prune_count="$excess"
+            [ "$prune_count" -le "$valid_count" ] || prune_count="$valid_count"
+            LC_ALL=C sort -n "$index_file" | head -n "$prune_count" | while IFS='|' read -r _ file_name current_sha; do
+              [ -n "$file_name" ] || continue
+              gh api --method DELETE "$completed_dir_api/$file_name" \
+                -f message="chore(watchdog): prune terminal state $file_name" \
+                -f sha="$current_sha" -f branch=main >/dev/null 2>&1 || true
+            done
+          }
           retire_state() {
             local reason="$1"
             local active_sha completed_api completed_sha content
@@ -202,6 +255,7 @@ jobs:
               gh api --method PUT "$completed_api" -f message="chore(watchdog): retire $WAKE_ID" -f content="$content" -f branch=main >/dev/null
             fi
             gh api --method DELETE "$active_api" -f message="chore(watchdog): retire active $WAKE_ID" -f sha="$active_sha" -f branch=main >/dev/null
+            prune_completed_states
           }
           safe_repo_path() {
             local value="$1"
