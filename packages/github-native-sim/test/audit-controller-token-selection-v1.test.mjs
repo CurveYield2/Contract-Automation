@@ -127,5 +127,6 @@ test('source fanout preserves independent push requests instead of sharing one l
 test('source fanout never cancels an already-running independent request', () => {
   const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/agent-zip-import-v1.yml'), 'utf8');
   assert.match(workflow, /cancel-in-progress:\s*false/);
-  assert.match(workflow, /git diff-tree --no-commit-id --name-only -r "\$GITHUB_SHA"/);
+  assert.match(workflow, /gh api "repos\/\$GITHUB_REPOSITORY\/commits\/\$GITHUB_SHA"/);
+  assert.doesNotMatch(workflow, /git diff-tree/);
 });
