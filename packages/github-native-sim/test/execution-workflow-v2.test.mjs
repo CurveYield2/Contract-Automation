@@ -44,3 +44,26 @@ test('generic PreflightSim bridge remains a separate workflow', () => {
   assert.doesNotMatch(generic, /AUDIT_CONTROLLER_GITHUB_TOKEN/);
   assert.doesNotMatch(generic, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01/);
 });
+
+
+test('controller operations reuse only exact successful canonical controller qualification and fall back to inline verify', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.match(workflow, /name:\s*Reuse exact controller qualification when available/);
+  assert.match(workflow, /controller\.controllerCommit===exact/);
+  assert.match(workflow, /controller\.controllerRef===exact/);
+  assert.match(workflow, /controller\.runnerQualifiedCommit===status\.qualifiedCommit/);
+  assert.match(workflow, /controller\.runnerQualificationRunId/);
+  assert.match(workflow, /repos\/\$GITHUB_REPOSITORY\/actions\/runs\/\$run_id/);
+  assert.match(workflow, /run\.status!==['"]completed['"]/);
+  assert.match(workflow, /run\.conclusion!==['"]success['"]/);
+  assert.match(workflow, /run\.name!==['"]V7 Execution Infrastructure Qualification['"]/);
+  assert.match(workflow, /run\.event!==['"]workflow_dispatch['"]/);
+  assert.match(workflow, /CONTROLLER_VERIFICATION_REUSED=true/);
+
+  const verifyStart=workflow.indexOf('- name: Verify exact controller code when requested');
+  assert.ok(verifyStart>=0);
+  const verifyEnd=workflow.indexOf('\n      - name:',verifyStart+1);
+  const verifyBlock=workflow.slice(verifyStart,verifyEnd===-1?undefined:verifyEnd);
+  assert.match(verifyBlock,/CONTROLLER_VERIFICATION_REUSED != 'true'/);
+  assert.match(verifyBlock,/npm run verify/);
+});
