@@ -243,6 +243,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          gh auth setup-git
           work='/tmp/development-authority-import'
           rm -rf "$work"
           gh repo clone "$GITHUB_REPOSITORY" "$work" -- --depth=1 --branch main
