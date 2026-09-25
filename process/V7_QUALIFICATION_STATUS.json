@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-v7-current-qualification-status-v1",
   "status": "PASS",
-  "qualifiedCommit": "ad0b28653684ef05c415c5e78339828c4ab04d43",
-  "workflowRunId": "36174814427",
-  "qualifiedAt": "2026-09-25T18:42:34.760Z",
+  "qualifiedCommit": "3acdd56cb12cc7832199965c08d4cbb5c61c7371",
+  "workflowRunId": "36183957359",
+  "qualifiedAt": "2026-09-25T20:09:52.416Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
@@ -40,39 +40,7 @@
       ]
     }
   },
-  "controllerQualification": {
-    "schemaVersion": "v26-controller-qualification-v1",
-    "controllerCommit": "cded0aae011b8484ad96f94c2866f9561379d897",
-    "controllerRef": "cded0aae011b8484ad96f94c2866f9561379d897",
-    "status": "PASS",
-    "qualificationRunId": "36182784651",
-    "qualifiedAt": "2026-09-25T19:57:32Z",
-    "runnerQualifiedCommit": "ad0b28653684ef05c415c5e78339828c4ab04d43",
-    "runnerQualificationRunId": "36174814427",
-    "testedSchemas": [
-      "audit-v7-sequential-review-state-v3",
-      "v26-phase-contract-v1",
-      "v26-successor-handoff-v1",
-      "v26-security-traceability-graph-v1",
-      "v26-obligation-ledger-v1",
-      "v26-domain-applicability-v1",
-      "v26-evidence-invalidation-v1",
-      "v26-phase6-subgate-state-v1",
-      "v26-audit-closure-manifest-v1"
-    ],
-    "testedGates": [
-      "reviewer-lineage",
-      "successor-handoffs",
-      "phase-contracts",
-      "traceability",
-      "obligations",
-      "domains",
-      "evidence-invalidation",
-      "P6.0-P6.8",
-      "Phase-10-closure",
-      "v26-machine-conformance"
-    ]
-  },
+  "controllerQualification": null,
   "dependencyLockPresent": true,
   "toolchain": {
     "schemaVersion": "curveyield-v7-toolchain-verification-v1",
@@ -127,8 +95,8 @@
     },
     "runtime": {
       "identityNormalized": true,
-      "blockNumber": 26056311,
-      "blockHash": "0x81f10f02bf222304db4e265c0b1ab2b66356c6dc757adf64f2c84eecd85e10b8",
+      "blockNumber": 26056758,
+      "blockHash": "0x37aa0b27aba8a24ccca66a15397f36f7e9110f0860d2b84ef6057c4ccc661037",
       "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
       "rpcUrlExposed": false
     },
@@ -137,8 +105,8 @@
       "status": "PASS",
       "rpc": {
         "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
-        "blockNumber": 26056311,
-        "blockHash": "0x81f10f02bf222304db4e265c0b1ab2b66356c6dc757adf64f2c84eecd85e10b8",
+        "blockNumber": 26056758,
+        "blockHash": "0x37aa0b27aba8a24ccca66a15397f36f7e9110f0860d2b84ef6057c4ccc661037",
         "urlExposed": false
       },
       "checks": {
