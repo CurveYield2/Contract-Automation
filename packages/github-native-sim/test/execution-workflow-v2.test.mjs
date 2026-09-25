@@ -82,3 +82,26 @@ test('exact duplicate V7 executions may supersede while different request revisi
   assert.match(workflow, /inputs\.controller_ref/);
   assert.match(workflow, /inputs\.request_path/);
 });
+
+
+test('Lite BUILD_EXECUTION_REQUEST controller operation auto-dispatches the exact generated request after writeback', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.match(workflow, /name:\s*Dispatch generated V7 execution request/);
+  assert.match(workflow, /OPERATOR_OPERATION == 'BUILD_EXECUTION_REQUEST'/);
+  assert.match(workflow, /CONTROLLER_WRITEBACK_COMMIT=\$writeback_commit/);
+  assert.match(workflow, /request_path="\$\{WRITEBACK_DIRECTORY%\/\}\/EXECUTION_REQUEST_v1\.json"/);
+  assert.match(workflow, /gh workflow run audit-controller-execution\.yml/);
+  assert.match(workflow, /-f request_path="\$request_path"/);
+  assert.match(workflow, /-f controller_ref="\$CONTROLLER_WRITEBACK_COMMIT"/);
+  assert.match(workflow, /deep-assurance-github-request-v2/);
+});
+
+test('generated execution request does not wake the semantic reviewer before terminal technical execution', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const wakeStart = workflow.indexOf('- name: Dispatch registered browser-agent wake');
+  assert.ok(wakeStart >= 0);
+  const wakeBlock = workflow.slice(wakeStart);
+  assert.match(wakeBlock, /V7_REQUEST_KIND:-/);
+  assert.match(wakeBlock, /BUILD_EXECUTION_REQUEST/);
+  assert.match(wakeBlock, /browser wake waits for the terminal execution run/);
+});
