@@ -67,3 +67,18 @@ test('controller operations reuse only exact successful canonical controller qua
   assert.match(verifyBlock,/CONTROLLER_VERIFICATION_REUSED != 'true'/);
   assert.match(verifyBlock,/npm run verify/);
 });
+
+
+test('V7 execution concurrency is bound to exact request identity rather than mutable PR number alone', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.match(workflow, /group:\s*v7-execution-\$\{\{\s*github\.event\.pull_request\.head\.sha\s*\|\|\s*format\('\{0\}-\{1\}',\s*inputs\.controller_ref,\s*inputs\.request_path\)\s*\}\}/);
+  assert.doesNotMatch(workflow, /group:\s*v7-execution-\$\{\{\s*github\.event\.pull_request\.number\s*\|\|/);
+});
+
+test('exact duplicate V7 executions may supersede while different request revisions remain independent', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  assert.match(workflow, /cancel-in-progress:\s*true/);
+  assert.match(workflow, /github\.event\.pull_request\.head\.sha/);
+  assert.match(workflow, /inputs\.controller_ref/);
+  assert.match(workflow, /inputs\.request_path/);
+});
