@@ -79,3 +79,26 @@ test('mechanical wake payload is encoded from the generated packet file', () => 
   assert.match(watchdog, /mechanical_b64="\$\(base64 -w0 \/tmp\/lite-interphase-wake\.txt\)"/);
   assert.doesNotMatch(watchdog, /mechanical_b64="\$\(printf '%s' "\$mechanical_message" \| base64 -w0\)"/);
 });
+
+test('watchdog state builder binds every jq variable it references', () => {
+  const wake = fs.readFileSync(wakePath, 'utf8');
+  const builder = wake.split('      - name: Create watchdog state')[1]
+    .split('      - name: Persist watchdog state')[0];
+  const bound = new Set([...builder.matchAll(/--arg(?:json)?\s+(\w+)\s/g)].map((match) => match[1]));
+  const filter = builder.slice(builder.indexOf("            '{"), builder.indexOf("}' >"));
+  const used = new Set([...filter.matchAll(/\$(\w+)/g)].map((match) => match[1]));
+  assert.deepEqual([...used].filter((name) => !bound.has(name)), []);
+  for (const field of ['workerRole', 'gateInterphaseHandoffPath', 'gateInterphaseWorkPacketPath',
+    'gateInterphaseCompletionPath', 'gateInterphaseWorkPacketSha256']) {
+    assert.ok(bound.has(field), field);
+  }
+});
+
+test('mechanical watchdog rejects a changed packet, missing output, or mismatched count', () => {
+  const watchdog = fs.readFileSync(watchdogPath, 'utf8');
+  assert.match(watchdog, /workPacketSha256 \/\/ empty/);
+  assert.match(watchdog, /\[ "\$packet_sha" = "\$\(jq -r/);
+  assert.match(watchdog, /\.requiredOutputs\|type=="array" and length>0/);
+  assert.match(watchdog, /\[ "\$observed_total" = "\$\(jq/);
+  assert.match(watchdog, /\[ "\$required" = "\$observed" \]/);
+});

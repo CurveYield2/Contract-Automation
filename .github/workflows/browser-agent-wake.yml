@@ -183,6 +183,7 @@ jobs:
             --arg wakeId "$WAKE_ID" \
             --arg campaignId "$CAMPAIGN_ID" \
             --arg phaseId "$PHASE_ID" \
+            --arg workerRole "$WORKER_ROLE" \
             --arg chatUrl "$CHAT_URL_RESOLVED" \
             --arg provider "$PROVIDER" \
             --arg armedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -194,6 +195,10 @@ jobs:
             --arg gateExpectedPhaseId "$GATE_EXPECTED_PHASE_ID" \
             --arg gateExpectedMilestoneId "$GATE_EXPECTED_MILESTONE_ID" \
             --arg gateActivePointerPath "$GATE_ACTIVE_POINTER_PATH" \
+            --arg gateInterphaseHandoffPath "$GATE_INTERPHASE_HANDOFF_PATH" \
+            --arg gateInterphaseWorkPacketPath "$GATE_INTERPHASE_WORK_PACKET_PATH" \
+            --arg gateInterphaseCompletionPath "$GATE_INTERPHASE_COMPLETION_PATH" \
+            --arg gateInterphaseWorkPacketSha256 "$GATE_INTERPHASE_WORK_PACKET_SHA256" \
             --arg gateStopStatesCsv "$GATE_STOP_STATES_CSV" \
             --arg gateStopCampaignStatusesCsv "$GATE_STOP_CAMPAIGN_STATUSES_CSV" \
             --arg lastHash "$LAST_HASH" \

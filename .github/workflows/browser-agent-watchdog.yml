@@ -125,11 +125,16 @@ jobs:
 
             jq -e               --arg campaign "$campaign_id"               --arg milestone "$expected_milestone"               --arg handoff "$handoff_path"               '.schemaVersion=="curveyield-lite-interphase-work-packet-v1"
                and .taskClass=="MECHANICAL_ONLY"
+               and ((keys|sort)==(["schemaVersion","taskClass","campaignId","completedMilestoneId","handoffPath","instructions","requiredOutputs"]|sort))
                and .campaignId==$campaign
                and .completedMilestoneId==$milestone
                and .handoffPath==$handoff
                and (.instructions|type=="string" and length>0)
-               and (.requiredOutputs|type=="array")'               /tmp/lite-interphase-work-packet.json >/dev/null || return 2
+               and (.requiredOutputs|type=="array" and length>0)
+               and all(.requiredOutputs[]; type=="object"
+                 and ((keys|sort)==(["path"]|sort) or (keys|sort)==(["path","purpose"]|sort))
+                 and (.path|type=="string" and length>0)
+                 and ((has("purpose")|not) or (.purpose|type=="string")))'               /tmp/lite-interphase-work-packet.json >/dev/null || return 2
 
             if grep -Eiq '\b(TBD|TODO)\b|\{\{[^}]+\}\}|<[^>]*(placeholder|fill|insert)[^>]*>' /tmp/lite-interphase-work-packet.json; then
               return 2
@@ -160,6 +165,13 @@ jobs:
 
             load_lite_interphase_packet "$packet_path" "$handoff_path" "$expected_milestone" "$gate_repo" "$gate_ref" || return 1
             packet_sha="$(cat /tmp/lite-interphase-work-packet.sha256)"
+            if [ "$worker_role" = "interphase_mechanical" ]; then
+              [ "$packet_path" = "$gate_interphase_work_packet_path" ] || return 1
+              [ "$completion_path" = "$gate_interphase_completion_path" ] || return 1
+              [ "$handoff_path" = "$gate_interphase_handoff_path" ] || return 1
+              [ "$packet_sha" = "$(jq -r '.gate.interphase.workPacketSha256 // empty' /tmp/watchdog-state.json)" ] || return 1
+            fi
+            [ "$completion_path" = "$(dirname "$handoff_path")/MECHANICAL_WORK_COMPLETION_v1.json" ] || return 1
             safe_repo_path "$completion_path" || return 1
             encoded="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$completion_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
             [ -n "$encoded" ] || return 1
@@ -167,12 +179,17 @@ jobs:
 
             jq -e               --arg campaign "$campaign_id"               --arg milestone "$expected_milestone"               --arg handoff "$handoff_path"               --arg packet "$packet_path"               --arg packetSha "$packet_sha"               '.schemaVersion=="curveyield-lite-interphase-completion-v1"
                and .status=="PASS"
+               and ((keys|sort)==(["schemaVersion","status","campaignId","completedMilestoneId","handoffPath","workPacketPath","workPacketSha256","outputs","completedAt"]|sort))
                and .campaignId==$campaign
                and .completedMilestoneId==$milestone
                and .handoffPath==$handoff
                and .workPacketPath==$packet
                and .workPacketSha256==$packetSha
-               and (.outputs|type=="array")
+               and (.outputs|type=="array" and length>0)
+               and all(.outputs[]; type=="object"
+                 and ((keys|sort)==(["path","sha256"]|sort))
+                 and (.path|type=="string" and length>0)
+                 and (.sha256|type=="string" and test("^[0-9a-f]{64}$")))
                and (.completedAt|type=="string" and length>0)'               /tmp/lite-interphase-completion.json >/dev/null || return 1
 
             required="$(jq -r '.requiredOutputs[]?.path // empty' /tmp/lite-interphase-work-packet.json | LC_ALL=C sort -u)"
@@ -180,6 +197,7 @@ jobs:
             observed_total="$(jq '.outputs | length' /tmp/lite-interphase-completion.json)"
             observed_unique="$(jq -r '.outputs[]?.path // empty' /tmp/lite-interphase-completion.json | LC_ALL=C sort -u | wc -l | tr -d ' ')"
             [ "$observed_total" = "$observed_unique" ] || return 1
+            [ "$observed_total" = "$(jq '.requiredOutputs | length' /tmp/lite-interphase-work-packet.json)" ] || return 1
             [ "$required" = "$observed" ] || return 1
 
             while IFS= read -r output_path; do
@@ -228,6 +246,7 @@ jobs:
 
             handoff_path="$(jq -r '.authoritativeHandoff // empty' /tmp/lite-active-pointer.json)"
             [ -n "$handoff_path" ] || return 2
+            safe_repo_path "$handoff_path" || return 2
             handoff_dir="$(dirname "$handoff_path")"
 
             packet_path="$handoff_dir/MECHANICAL_WORK_PACKET_v1.json"
@@ -246,6 +265,8 @@ jobs:
                 mechanical_wake_id="${campaign_id}-${completed_id}-interphase-${GITHUB_RUN_ID}-${cycle}"
                 {
                   printf '%s\n' '[AUDIT_INTERPHASE_MECHANICAL_V1]'
+                  printf 'repository=%s\n' "$gate_repo"
+                  printf 'repository_ref=%s\n' "$gate_ref"
                   printf 'campaign=%s\n' "$campaign_id"
                   printf 'completed_milestone=%s\n' "$completed_id"
                   printf 'next_milestone=%s\n' "$next_id"
@@ -253,7 +274,11 @@ jobs:
                   printf 'work_packet=%s\n' "$packet_path"
                   printf 'work_packet_sha256=%s\n' "$packet_sha"
                   printf 'completion_receipt=%s\n' "$completion_path"
-                  printf '\n%s\n\n' 'You are a mechanical inter-phase worker. Perform only the deterministic/repetitive work in the packet below. Do not make, promote, reject, grade, or remediate security findings; do not reinterpret audit methodology. Use the GitHub repository tools to write the required outputs and the completion receipt. The completion receipt must use schema curveyield-lite-interphase-completion-v1 and include exact SHA-256 values for every required output.'
+                  printf '%s\n' 'do_not_repeat=Do not repeat the sealed reviewer milestone or change sealed reviewer outputs.'
+                  printf '%s\n' 'prohibited_semantic_work=No finding promotion or rejection, severity grading, exploit or economic judgment, remediation approval, or residual-risk conclusions.'
+                  printf '%s\n' 'required_outputs:'
+                  jq -r '.requiredOutputs[].path' /tmp/lite-interphase-work-packet.json
+                  printf '\n%s\n\n' 'You are a mechanical inter-phase worker. Perform only the deterministic/repetitive work in the packet below. Do not make, promote, reject, grade, or remediate security findings; do not reinterpret audit methodology. Use the GitHub repository tools to write the required outputs and the completion receipt. The completion receipt must use schema curveyield-lite-interphase-completion-v1 and include exact SHA-256 values for every required output. A PASS receipt certifies byte completeness only and never approves security conclusions.'
                   printf '%s\n' "$instructions"
                 } > /tmp/lite-interphase-wake.txt
                 mechanical_b64="$(base64 -w0 /tmp/lite-interphase-wake.txt)"

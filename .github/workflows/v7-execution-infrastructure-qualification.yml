@@ -202,6 +202,7 @@ jobs:
         run: npm run lint
 
       - name: Repository build checks
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: npm run build
 
       - name: Select working Audit-Controller credential
