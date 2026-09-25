@@ -155,7 +155,24 @@ jobs:
             local encoded
             encoded="$(gh api "$active_api?ref=main" --jq '.content' 2>/dev/null || true)"
             if [ -z "$encoded" ]; then return 1; fi
-            printf '%s' "$encoded" | base64 -d > /tmp/watchdog-state.json
+            printf '%s' "$encoded" | base64 -d > /tmp/watchdog-state.json || return 1
+            jq -e --arg wake "$WAKE_ID" '
+              type=="object"
+              and .schemaVersion=="curveyield-browser-agent-watchdog-state-v1"
+              and .wakeId==$wake
+              and .status=="ACTIVE"
+              and (.campaignId|type=="string" and length>0)
+              and (.phaseId|type=="string" and length>0)
+              and (.workerRole=="reviewer" or .workerRole=="interphase_mechanical")
+              and (.chatUrl|type=="string")
+              and (.idleMessage|type=="string")
+              and (.observation|type=="object")
+              and (.gate|type=="object")
+              and (.gate.mode=="FULL_V26" or .gate.mode=="LITE")
+              and (.gate.repository|type=="string" and length>0)
+              and (.gate.ref|type=="string" and length>0)
+              and (.gate.statePath|type=="string")
+            ' /tmp/watchdog-state.json >/dev/null || return 1
           }
 
           persist_state() {
