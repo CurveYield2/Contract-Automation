@@ -4,7 +4,7 @@
   "requestId": "awr-report-scaffold-e2e-v2",
   "controller": {
     "repository": "CurveYield2/Audit-Controller",
-    "commit": "17b408e940b98a0eaead79224458777c4da82c91",
+    "commit": "18ecb020032138082bd7c3a96d5d39412543b11a",
     "requestPath": ".deep-assurance/operator/requests/awr-report-scaffold-e2e-v2.json"
   },
   "verifyController": true
