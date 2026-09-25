@@ -3,6 +3,7 @@ name: V7 Agent Qualification Bridge
 on:
   issues:
     types: [opened]
+  workflow_dispatch:
 
 permissions:
   actions: write
@@ -16,18 +17,43 @@ concurrency:
 jobs:
   dispatch-and-observe:
     if: >-
-      github.event.issue.title == '[agent] run-v7-qualification' &&
-      (github.event.issue.user.login == 'CurveYield-Developer-DK' || github.event.issue.user.login == 'JamesNexus')
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.issue.title == '[agent] run-v7-qualification' &&
+        (github.event.issue.user.login == 'CurveYield-Developer-DK' || github.event.issue.user.login == 'JamesNexus')
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Dispatch canonical V7 qualification
+      - name: Resolve oldest queued qualification issue
+        id: queue
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
         shell: bash
         run: |
           set -euo pipefail
+          queue="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title,author,body)"
+          selected="$(printf '%s' "$queue" | jq -c '[.[] | select(.title=="[agent] run-v7-qualification") | select(.author.login=="CurveYield-Developer-DK" or .author.login=="JamesNexus")] | sort_by(.number) | .[0] // empty')"
+          if [ -z "$selected" ]; then
+            echo 'has_issue=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          issue_number="$(printf '%s' "$selected" | jq -r '.number')"
+          issue_body_b64="$(printf '%s' "$selected" | jq -r '.body // ""' | base64 -w0)"
+          echo 'has_issue=true' >> "$GITHUB_OUTPUT"
+          echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
+          echo "issue_body_b64=$issue_body_b64" >> "$GITHUB_OUTPUT"
+          echo "queue_issue=$issue_number" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch canonical V7 qualification
+        if: steps.queue.outputs.has_issue == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_BODY_B64: ${{ steps.queue.outputs.issue_body_b64 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ISSUE_BODY="$(printf '%s' "$ISSUE_BODY_B64" | base64 -d)"
           workflow='v7-execution-infrastructure-qualification.yml'
           controller_ref="$(printf '%s\n' "$ISSUE_BODY" | awk -F= '/^[[:space:]]*controller_ref[[:space:]]*=/{gsub(/[[:space:]]/,"",$2); print $2}' | tail -n1)"
           requested_lane="$(printf '%s\n' "$ISSUE_BODY" | awk -F= '/^[[:space:]]*qualification_lane[[:space:]]*=/{gsub(/[[:space:]]/,"",$2); print $2}' | tail -n1)"
@@ -71,6 +97,7 @@ jobs:
           echo "canonical_run_id=$run_id" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Observe canonical V7 qualification
+        if: steps.queue.outputs.has_issue == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -79,10 +106,10 @@ jobs:
           gh run watch "$CANONICAL_RUN_ID" --repo "$GITHUB_REPOSITORY" --exit-status
 
       - name: Publish last qualification attempt marker
-        if: always()
+        if: always() && steps.queue.outputs.has_issue == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_NUMBER: ${{ steps.queue.outputs.issue_number }}
         shell: bash
         run: |
           set -euo pipefail
@@ -122,12 +149,25 @@ jobs:
           fi
 
       - name: Close trigger issue
-        if: always()
+        if: always() && steps.queue.outputs.has_issue == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          ISSUE_NUMBER: ${{ steps.queue.outputs.issue_number }}
         shell: bash
         run: |
           run_id="${CANONICAL_RUN_ID:-unavailable}"
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed \
             --comment "Canonical V7 qualification dispatch handled. Run ID: $run_id. See process/V7_QUALIFICATION_LAST_RUN.json for the recorded outcome."
+
+      - name: Continue queued qualification issues
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          remaining="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title,author --jq '[.[] | select(.title=="[agent] run-v7-qualification") | select(.author.login=="CurveYield-Developer-DK" or .author.login=="JamesNexus")] | length')"
+          echo "remaining_qualification_issues=$remaining" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$remaining" -gt 0 ]; then
+            gh workflow run v7-agent-qualification-bridge.yml --repo "$GITHUB_REPOSITORY" --ref main
+          fi
