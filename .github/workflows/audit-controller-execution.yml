@@ -160,8 +160,54 @@ jobs:
           git checkout --detach FETCH_HEAD
           test "$(git rev-parse HEAD)" = "$AUDIT_CONTROLLER_REF"
 
-      - name: Verify exact controller code when requested
+      - name: Reuse exact controller qualification when available
         if: env.V7_REQUEST_KIND == 'controller-operation' && env.VERIFY_AUDIT_CONTROLLER == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CONTROLLER_VERIFICATION_REUSED=false" >> "$GITHUB_ENV"
+          status_path='process/V7_QUALIFICATION_STATUS.json'
+          [ -s "$status_path" ] || exit 0
+
+          run_id="$(node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const status=JSON.parse(fs.readFileSync('process/V7_QUALIFICATION_STATUS.json','utf8'));
+          const controller=status.controllerQualification;
+          const exact=process.env.AUDIT_CONTROLLER_REF;
+          const reusable=
+            status.status==='PASS' &&
+            /^[0-9a-f]{40}$/.test(status.qualifiedCommit ?? '') &&
+            /^[0-9]+$/.test(String(status.workflowRunId ?? '')) &&
+            controller?.status==='PASS' &&
+            controller.controllerCommit===exact &&
+            controller.controllerRef===exact &&
+            controller.runnerQualifiedCommit===status.qualifiedCommit &&
+            String(controller.runnerQualificationRunId)===String(status.workflowRunId) &&
+            /^[0-9]+$/.test(String(controller.qualificationRunId ?? ''));
+          if (reusable) process.stdout.write(String(controller.qualificationRunId));
+          NODE
+          )"
+
+          if [ -z "$run_id" ]; then
+            echo "No exact reusable controller qualification; inline verification remains required."
+            exit 0
+          fi
+
+          qualification_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+          node --input-type=module - "$qualification_run" <<'NODE'
+          const run=JSON.parse(process.argv[2]);
+          if(run.status!=='completed' || run.conclusion!=='success') throw new Error('controller qualification run is not successful terminal evidence');
+          if(run.name!=='V7 Execution Infrastructure Qualification') throw new Error('controller qualification run used an unexpected workflow');
+          if(run.event!=='workflow_dispatch') throw new Error('controller qualification run must be an explicit workflow_dispatch proof');
+          NODE
+
+          echo "CONTROLLER_VERIFICATION_REUSED=true" >> "$GITHUB_ENV"
+          echo "Reusing exact controller qualification run $run_id for $AUDIT_CONTROLLER_REF." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify exact controller code when requested
+        if: env.V7_REQUEST_KIND == 'controller-operation' && env.VERIFY_AUDIT_CONTROLLER == 'true' && env.CONTROLLER_VERIFICATION_REUSED != 'true'
         shell: bash
         run: |
           set -euo pipefail
