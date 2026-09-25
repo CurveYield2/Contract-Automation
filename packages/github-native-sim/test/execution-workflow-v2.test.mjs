@@ -105,3 +105,37 @@ test('generated execution request does not wake the semantic reviewer before ter
   assert.match(wakeBlock, /BUILD_EXECUTION_REQUEST/);
   assert.match(wakeBlock, /browser wake waits for the terminal execution run/);
 });
+
+
+test('terminal V7 execution writes a durable typed observer receipt before reviewer wake', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const observer = workflow.indexOf('- name: Record terminal V7 execution observer receipt');
+  const upload = workflow.indexOf('- name: Upload request-addressable V7 evidence');
+  const wake = workflow.indexOf('- name: Dispatch registered browser-agent wake');
+  assert.ok(observer >= 0);
+  assert.ok(upload > observer);
+  assert.ok(wake > upload);
+  assert.match(workflow, /curveyield-lite-execution-observer-receipt-v1/);
+  assert.match(workflow, /semanticReviewerPollingRequired:false/);
+  assert.match(workflow, /route='EVIDENCE_INGESTION'/);
+  assert.match(workflow, /route='RUNNER_REPAIR_REQUIRED'/);
+  assert.match(workflow, /route='SEMANTIC_HARNESS_REPAIR_REQUIRED'/);
+  assert.match(workflow, /route='TYPED_FAILURE_REVIEW_REQUIRED'/);
+  assert.match(workflow, /route='EVIDENCE_RECOVERY_REQUIRED'/);
+  assert.match(workflow, /EXECUTION_OBSERVER_RECEIPT_v1\.json/);
+  assert.match(workflow, /workflowRunId:\$workflow_run_id/);
+  assert.match(workflow, /artifactName:\$artifact_name/);
+});
+
+test('semantic reviewer wake consumes the terminal observer route instead of polling execution', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const wakeStart = workflow.indexOf('- name: Dispatch registered browser-agent wake');
+  assert.ok(wakeStart >= 0);
+  const wakeBlock = workflow.slice(wakeStart);
+  assert.match(wakeBlock, /if:\s*always\(\) && \(env\.V7_REQUEST_KIND == 'v7-execution' \|\| success\(\)\)/);
+  assert.match(wakeBlock, /EXECUTION_OBSERVER_RECEIPT/);
+  assert.match(wakeBlock, /route=\$route/);
+  assert.match(wakeBlock, /disposition=\$disposition/);
+  assert.match(wakeBlock, /next_action=\$next_action/);
+  assert.match(wakeBlock, /Technical execution is terminal and its observer receipt is durable/);
+});
