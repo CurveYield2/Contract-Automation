@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { validateDeepAssuranceRequestV2 } from './schema.mjs';
+import { validateDeepAssuranceRequestWithV26V1 } from './schema-v26.mjs';
 import { validateControllerOperationPointerV1 } from './controller-operation-pointer-v1.mjs';
 
 async function exists(file) {
@@ -43,7 +43,7 @@ async function validateRequestFile(file) {
   if (parsed?.schemaVersion === 'audit-controller-operation-pointer-v1') {
     return { requestKind: 'controller-operation', request: validateControllerOperationPointerV1(parsed) };
   }
-  return { requestKind: 'v7-execution', request: validateDeepAssuranceRequestV2(parsed) };
+  return { requestKind: 'v7-execution', request: validateDeepAssuranceRequestWithV26V1(parsed) };
 }
 
 export async function resolveV7Request({ mode, sourceRoot, requestPath = null, outputPath } = {}) {
