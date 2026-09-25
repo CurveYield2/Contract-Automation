@@ -1,0 +1,171 @@
+{
+  "schemaVersion": "adversarial-kb-existing-asset-inventory-v1",
+  "repository": "CurveYield2/Contract-Automation",
+  "baselineMainSha": "468b749076fb5b9c166c14a187fdd29a6f967acd",
+  "scannedScopes": [
+    "AGENTS.md",
+    ".github/workflows/**",
+    "fixtures/**",
+    "packages/github-native-sim/harness-skeletons-v2/**",
+    "packages/github-native-sim/audit-harnesses/**",
+    "packages/github-native-sim/src/**",
+    "packages/github-native-sim/runner/**",
+    "packages/github-native-sim/test/**",
+    "process/RUNNER_MANIFEST.json",
+    "open PR #122 changed paths",
+    "open PR #126 changed paths"
+  ],
+  "assets": [
+    {
+      "assetId": "ASSET-HARNESS-SKELETONS-V2",
+      "category": "HARNESS_SKELETON",
+      "classification": "REUSE",
+      "paths": ["packages/github-native-sim/harness-skeletons-v2/**"],
+      "rationale": "Canonical Phase-6 Medusa, Foundry, ghost-model, and harness-manifest skeleton kit. The repository policy requires agents to start here instead of recreating harnesses."
+    },
+    {
+      "assetId": "ASSET-AUDIT-HARNESSES",
+      "category": "HARNESS_EXAMPLE",
+      "classification": "ADAPT",
+      "paths": ["packages/github-native-sim/audit-harnesses/**"],
+      "rationale": "Campaign-specific harnesses are useful implementation examples but must not become global attack conclusions or be copied without rebinding."
+    },
+    {
+      "assetId": "ASSET-PHASE6-HARNESS-AUTHORING",
+      "category": "HARNESS_AUTHORING",
+      "classification": "REUSE",
+      "paths": ["packages/github-native-sim/src/phase6-harness-authoring-v1.mjs", "packages/github-native-sim/src/phase6-harness-overlay-v1.mjs"],
+      "rationale": "Existing source-bound harness authoring and overlay mechanics should be used for KB adaptations rather than a parallel materialization layer."
+    },
+    {
+      "assetId": "ASSET-CYVLSDT-SOURCE-MODEL",
+      "category": "TARGET_SPECIFIC_MODEL",
+      "classification": "ARCHIVE",
+      "paths": ["packages/github-native-sim/src/cyvlsdt-v30-phase6-source-model-v1.mjs"],
+      "rationale": "Useful campaign evidence/model history, but target-specific and therefore not a reusable global KB primitive."
+    },
+    {
+      "assetId": "ASSET-PHASE7-LIFECYCLE-RECIPES",
+      "category": "PHASE7_LIFECYCLE_RECIPE",
+      "classification": "REUSE",
+      "paths": ["packages/github-native-sim/src/lifecycle-recipes-v1.mjs"],
+      "rationale": "Existing base lifecycle recipes already cover readiness, deploy/configure, deposit/withdraw, reward accrual, privilege transitions, minOut, and zero-supply restart workflows."
+    },
+    {
+      "assetId": "ASSET-HISTORICAL-EXPLOIT-FIXTURE-CORPUS",
+      "category": "HISTORICAL_EXPLOIT_FIXTURE",
+      "classification": "MISSING",
+      "paths": [],
+      "reason": "No dedicated reusable historical-exploit incident/reproduction corpus exists on the scanned baseline under the v3 KB identity.",
+      "rationale": "K07-K14 must introduce the first evidence-backed incident and controlled/historical/generalized reproduction without pretending current campaign scripts are historical proof."
+    },
+    {
+      "assetId": "ASSET-GENERIC-CONTROLLED-FIXTURES",
+      "category": "CONTROLLED_FIXTURE",
+      "classification": "ADAPT",
+      "paths": ["fixtures/contracts/VaultSystem.sol", "fixtures/vault-workflow.json"],
+      "rationale": "Existing deterministic vault fixture/workflow can seed controlled tests where topology fits, but it is not itself a historical exploit fixture."
+    },
+    {
+      "assetId": "ASSET-PHASE6-PREFLIGHT",
+      "category": "EXECUTION_EVIDENCE_PREFLIGHT",
+      "classification": "REUSE",
+      "paths": ["packages/github-native-sim/src/phase6-execution-preflight-v1.mjs"],
+      "rationale": "Existing Phase-6 execution preflight is the canonical gate for Medusa/Foundry Phase-6 work."
+    },
+    {
+      "assetId": "ASSET-PHASE7-ANVIL-PREFLIGHT",
+      "category": "EXECUTION_EVIDENCE_PREFLIGHT",
+      "classification": "REUSE",
+      "paths": ["packages/github-native-sim/src/phase7-fork-preflight-v1.mjs", "packages/github-native-sim/src/phase7-fork-preflight-v2.mjs"],
+      "rationale": "Historical/full lifecycle Anvil work must reuse the existing fork preflight path and pinned-state checks."
+    },
+    {
+      "assetId": "ASSET-ARCHIVE-READINESS",
+      "category": "EXECUTION_EVIDENCE_PREFLIGHT",
+      "classification": "REUSE",
+      "paths": ["packages/github-native-sim/src/archive-contract-code-readiness-v1.mjs", "packages/github-native-sim/src/archive-rpc-identity-v1.mjs", "packages/github-native-sim/src/archive-rpc-state-readiness-v1.mjs"],
+      "rationale": "Archive RPC identity/state and historical code-readiness helpers directly support future historical replay qualification."
+    },
+    {
+      "assetId": "ASSET-EXECUTION-NORMALIZATION",
+      "category": "EXECUTION_EVIDENCE_PREFLIGHT",
+      "classification": "REUSE",
+      "paths": ["packages/github-native-sim/src/execution.mjs", "packages/github-native-sim/src/execution-disposition-v1.mjs", "packages/github-native-sim/src/result.mjs", "packages/github-native-sim/src/schema.mjs"],
+      "rationale": "Existing execution/result/disposition/schema machinery is the evidence normalization surface to extend rather than replace."
+    },
+    {
+      "assetId": "ASSET-MUTABLE-RPC-AND-SNAPSHOT",
+      "category": "ANVIL_RUNTIME",
+      "classification": "REUSE",
+      "paths": ["packages/github-native-sim/src/mutable-rpc.mjs", "packages/github-native-sim/src/staged-snapshot-v1.mjs"],
+      "rationale": "Existing trusted mutable-RPC and staged snapshot abstractions preserve fork identity and secret isolation for simulations."
+    },
+    {
+      "assetId": "ASSET-MEDUSA-SMOKE",
+      "category": "MEDUSA_RUNTIME",
+      "classification": "REUSE",
+      "paths": ["packages/github-native-sim/src/medusa-e2e-smoke-v1.mjs"],
+      "rationale": "Existing Medusa smoke execution is reusable qualification evidence for backend integration."
+    },
+    {
+      "assetId": "ASSET-ANVIL-RUNNER",
+      "category": "ANVIL_RUNTIME",
+      "classification": "REUSE",
+      "paths": ["packages/github-native-sim/runner/**"],
+      "rationale": "The repository policy makes the existing Anvil-backed runner authoritative for full mutable simulations; no parallel Anvil backend should be created."
+    },
+    {
+      "assetId": "ASSET-CANONICAL-V7-WORKFLOWS",
+      "category": "EXECUTION_WORKFLOW",
+      "classification": "REUSE",
+      "paths": [".github/workflows/audit-controller-execution.yml", ".github/workflows/v7-execution-infrastructure-qualification.yml"],
+      "rationale": "Repository policy defines exactly one canonical execution workflow and one qualification workflow. Exploit cases must remain data/content, not per-exploit workflow definitions."
+    },
+    {
+      "assetId": "ASSET-RUNNER-MANIFEST",
+      "category": "EXECUTION_MANIFEST",
+      "classification": "REUSE",
+      "paths": ["process/RUNNER_MANIFEST.json"],
+      "rationale": "Existing runner manifest is the capability discovery surface for execution-plane integration."
+    },
+    {
+      "assetId": "ASSET-FAILURE-REGRESSION-CORPUS",
+      "category": "FAILURE_CORPUS",
+      "classification": "REUSE",
+      "paths": ["packages/github-native-sim/test/medusa-cli-v1.test.mjs", "packages/github-native-sim/test/medusa-no-tests-v1.test.mjs", "packages/github-native-sim/test/archive-code-readiness-v1.test.mjs", "packages/github-native-sim/test/archive-rpc-readiness-v1.test.mjs", "packages/github-native-sim/test/request-resolution-v1.test.mjs", "packages/github-native-sim/test/result.test.mjs"],
+      "rationale": "Existing negative/regression tests encode useful failure signatures for future K21 failure-doctor integration."
+    },
+    {
+      "assetId": "ASSET-HISTORICAL-CAMPAIGN-WORKFLOWS",
+      "category": "HISTORICAL_CAMPAIGN_SIMULATION",
+      "classification": "ADAPT",
+      "paths": [".github/workflows/boosthub-*.yml", ".github/workflows/*lifecycle*.yml", "packages/github-native-sim/requests/**"],
+      "rationale": "Prior BoostHub/lifecycle campaign executions are useful recipe candidates and evidence examples, but they are campaign-specific and must be normalized into reusable recipes instead of imported as global truth."
+    }
+  ],
+  "activeOverlaps": [
+    {
+      "pullRequest": 126,
+      "head": "feat/v26-machine-execution-v1",
+      "classification": "ADAPT",
+      "state": "ACTIVE_PR_PENDING_MERGE",
+      "paths": ["packages/github-native-sim/src/canonical-json-v1.mjs", "packages/github-native-sim/src/foundry-coverage-v1.mjs", "packages/github-native-sim/src/phase6-campaign-controller-v1.mjs", "packages/github-native-sim/src/reproduction-v1.mjs", "packages/github-native-sim/src/simulation-ledger-v1.mjs", "packages/github-native-sim/src/live-deployment-attestation-v1.mjs", "packages/github-native-sim/src/sbom-v1.mjs", "packages/github-native-sim/src/v26-execution-evidence-v1.mjs", "process/RUNNER_MANIFEST.json"],
+      "rationale": "High-value candidate integration surface for KB proof/evidence/reproduction, but unmerged code is not treated as canonical."
+    },
+    {
+      "pullRequest": 122,
+      "head": "policy/mandatory-preflight-v1",
+      "classification": "ADAPT",
+      "state": "ACTIVE_PR_PENDING_MERGE",
+      "paths": ["packages/github-native-sim/src/operation-preflight-v1.mjs", "packages/github-native-sim/test/operation-preflight-v1.test.mjs", "docs/MANDATORY_PREFLIGHT_POLICY_v1.md"],
+      "rationale": "KB operation classes should integrate with the universal preflight contract if merged; do not clone the pending implementation."
+    }
+  ],
+  "coverageAssertions": {
+    "allReusableSimulationScopesClassified": true,
+    "unclassifiedKnownReusableAssets": [],
+    "bulkHarnessLibraryCreationAllowed": false,
+    "perExploitWorkflowCreationAllowed": false
+  }
+}

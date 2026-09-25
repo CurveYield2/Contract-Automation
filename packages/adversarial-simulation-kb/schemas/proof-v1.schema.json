@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://curveyield.dev/schemas/adversarial-kb/proof-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion","proofId","knowledgeRef","proofTier","status","claim","evidenceRefs","artifactDigests","runIds","qualifiedAtCommit","limitations"],
+  "properties": {
+    "schemaVersion": {"const": "adversarial-kb-proof-v1"},
+    "proofId": {"type": "string", "pattern": "^PROOF-[0-9]{4}$"},
+    "knowledgeRef": {"type": "string", "pattern": "^(EXP-[0-9]{4}-[0-9]{4}|PATTERN-[0-9]{4}|RECIPE-[0-9]{4}|EXEC-[0-9]{4})$"},
+    "proofTier": {"type": "string", "enum": ["REFERENCE_ONLY","SCHEMA_VALID","COMPILES","CONTROLLED_REPRODUCTION","HISTORICAL_REPRODUCTION","GENERALIZED_VARIANT_PROVEN","QUALIFIED"]},
+    "status": {"type": "string", "enum": ["ACTIVE","REQUALIFICATION_REQUIRED","REFERENCE_ONLY","DEPRECATED","SUPERSEDED","DISPUTED"]},
+    "claim": {"type": "string", "minLength": 1},
+    "evidenceRefs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "artifactDigests": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "runIds": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "qualifiedAtCommit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "limitations": {"type": "array", "items": {}}
+  }
+}

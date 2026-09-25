@@ -1,0 +1,303 @@
+{
+  "schemaVersion": "curve-yield-development-recovery-v1",
+  "projectId": "HISTORICAL_EXPLOIT_ADVERSARIAL_SIMULATION_KB",
+  "planVersion": "v3",
+  "repository": "CurveYield2/Contract-Automation",
+  "branch": "feat/adversarial-simulation-kb-v1",
+  "pullRequest": 131,
+  "baselineMainSha": "468b749076fb5b9c166c14a187fdd29a6f967acd",
+  "lastKnownGoodCommit": "488c82399def0cd3428ccf33f87e8d9976cd6f27",
+  "currentCommit": "488c82399def0cd3428ccf33f87e8d9976cd6f27",
+  "overallStatus": "IN_PROGRESS",
+  "currentModuleId": "K13",
+  "currentStepId": "K13-S03",
+  "currentStepStatus": "IN_PROGRESS",
+  "lastCompletedModuleId": "K12",
+  "lastCompletedStepId": "K12-S07",
+  "nextExactAction": "Observe the K13 RED checked-in Phase 7 request binding qualification. It must fail only because the checked-in atomic controller request is still the K12 request; then replace that single request with the builder output pinned to commit 488c82399def0cd3428ccf33f87e8d9976cd6f27.",
+  "activeExternalRun": {
+    "status": "REQUESTED",
+    "operation": "K13 RED checked-in Phase 7 archive-preflight request binding validation",
+    "expectedWorkflow": "Adversarial Simulation KB Qualification v1",
+    "branch": "feat/adversarial-simulation-kb-v1",
+    "expectedArtifacts": [
+      "GitHub Actions unit-test log"
+    ],
+    "successCondition": "The new submission-binding test fails only because github-native-sim/requests/dar-12000000000000000000000000000001/request.json remains the prior K12 request.",
+    "failureCondition": "Any pre-existing test fails, or the new test fails for a reason other than the unreplaced K12 request.",
+    "nextActionIfPass": "Replace the single atomic request with the K13 builder output, then inspect controller evidence.",
+    "nextActionIfFail": "Record failure diagnosis before repair."
+  },
+  "openBlockers": [],
+  "knownFailures": [],
+  "modifiedPaths": [
+    "packages/adversarial-simulation-kb/fixtures/pattern-0001-controlled-v1/foundry.toml",
+    "packages/adversarial-simulation-kb/fixtures/pattern-0001-controlled-v1/src/ControlledLendingFixture.sol",
+    "packages/adversarial-simulation-kb/fixtures/pattern-0001-controlled-v1/test/Pattern0001ControlledReproduction.t.sol",
+    "packages/adversarial-simulation-kb/executables/EXEC-0001/executable.json",
+    "packages/adversarial-simulation-kb/executables/EXEC-0001/proof.json",
+    "packages/adversarial-simulation-kb/registry/EXECUTABLE_REGISTRY_v1.json",
+    "packages/adversarial-simulation-kb/registry/BY_PROOF_STATUS_v1.json",
+    "packages/adversarial-simulation-kb/test/controlled-executable-v1.test.mjs",
+    "packages/adversarial-simulation-kb/test/recipe-binding-v1.test.mjs",
+    "packages/adversarial-simulation-kb/recipes/RECIPE-0001/proof.json",
+    "packages/adversarial-simulation-kb/incidents/EXP-2023-0001/proof.json",
+    "github-native-sim/requests/dar-12000000000000000000000000000001/request.json",
+    "docs/development-state/DEVELOPMENT_RECOVERY_STATE_v1.json",
+    "docs/development-state/CURRENT_STATUS_v1.md",
+    "docs/development-state/DECISION_LOG_v1.md",
+    "docs/development-state/TEST_AND_PROOF_INDEX_v1.json",
+    "docs/ADVERSARIAL_SIMULATION_KB_IMPLEMENTATION_STATUS_v1.md",
+    "packages/adversarial-simulation-kb/test/historical-reproduction-v1.test.mjs",
+    "packages/adversarial-simulation-kb/src/historical/reproduction-v1.mjs",
+    "packages/adversarial-simulation-kb/test/historical-archive-preflight-request-v1.test.mjs",
+    "packages/adversarial-simulation-kb/src/historical/archive-preflight-request-v1.mjs",
+    "packages/adversarial-simulation-kb/test/historical-archive-preflight-submission-v1.test.mjs"
+  ],
+  "moduleStates": {
+    "K00": {
+      "name": "Development Recovery System",
+      "status": "COMPLETE",
+      "hardGate": "PASS"
+    },
+    "K01": {
+      "name": "Existing Harness/Simulation/Failure Corpus Inventory",
+      "status": "COMPLETE",
+      "hardGate": "PASS"
+    },
+    "K02": {
+      "name": "Stable IDs and Core Schemas",
+      "status": "COMPLETE",
+      "hardGate": "PASS"
+    },
+    "K03": {
+      "name": "Attack Primitive Taxonomy",
+      "status": "COMPLETE",
+      "hardGate": "PASS"
+    },
+    "K04": {
+      "name": "Source/Reference Registry + Confidence",
+      "status": "COMPLETE",
+      "hardGate": "PASS"
+    },
+    "K05": {
+      "name": "Incident Deduplication and Relationship Model",
+      "status": "COMPLETE",
+      "hardGate": "PASS"
+    },
+    "K06": {
+      "name": "Deterministic Registries and Index Generator",
+      "status": "COMPLETE",
+      "hardGate": "PASS"
+    },
+    "K07": {
+      "name": "First Verified Incident Record",
+      "status": "COMPLETE",
+      "hardGate": "PASS"
+    },
+    "K08": {
+      "name": "Root-Cause Fingerprint + First Abstract Pattern",
+      "status": "COMPLETE",
+      "hardGate": "PASS"
+    },
+    "K09": {
+      "name": "First Recipe",
+      "status": "COMPLETE",
+      "steps": {
+        "K09-S01": "PASS",
+        "K09-S02": "PASS",
+        "K09-S03": "PASS",
+        "K09-S04": "PASS",
+        "K09-S05": "PASS",
+        "K09-S06": "PASS",
+        "K09-S07": "PASS"
+      },
+      "hardGate": "PASS"
+    },
+    "K10": {
+      "name": "Proof Model / Qualification State Machine",
+      "status": "COMPLETE",
+      "steps": {
+        "K10-S01": "PASS",
+        "K10-S02": "PASS",
+        "K10-S03": "PASS",
+        "K10-S04": "PASS",
+        "K10-S05": "PASS"
+      },
+      "hardGate": "PASS"
+    },
+    "K11": {
+      "name": "Backend-Neutral Executable Contract",
+      "status": "COMPLETE",
+      "steps": {
+        "K11-S01": "PASS",
+        "K11-S02": "PASS",
+        "K11-S03": "PASS",
+        "K11-S04": "PASS",
+        "K11-S05": "PASS"
+      },
+      "hardGate": "PASS"
+    },
+    "K12": {
+      "name": "Foundry Vertical-Slice Reproduction",
+      "status": "COMPLETE",
+      "steps": {
+        "K12-S01": "PASS",
+        "K12-S02": "PASS",
+        "K12-S03": "PASS",
+        "K12-S04": "PASS",
+        "K12-S05": "PASS",
+        "K12-S06": "PASS",
+        "K12-S07": "PASS"
+      },
+      "hardGate": "PASS"
+    },
+    "K13": {
+      "name": "Historical Reproduction Path",
+      "status": "IN_PROGRESS",
+      "steps": {
+        "K13-S01": "READY",
+        "K13-S02": "READY",
+        "K13-S03": "READY",
+        "K13-S04": "READY",
+        "K13-S05": "READY",
+        "K13-S06": "READY",
+        "K13-S07": "READY"
+      },
+      "hardGate": "PENDING"
+    }
+  },
+  "testSummary": {
+    "githubQualificationV1": {
+      "status": "PASS",
+      "runId": "32709590393",
+      "sourceCommit": "3f08213fc9b4ff8f9258024cbbf1c55c2921e5b7",
+      "passed": 63,
+      "failed": 0,
+      "secretLiteralCheck": "PASS"
+    },
+    "k12AuthoritativeRed": {
+      "status": "PASS",
+      "runId": "32708299604",
+      "sourceCommit": "78a9a272a08bbe6b7bb9398aae67ab71741e2eee",
+      "expectedFailure": "SOLVENCY",
+      "nativeFuzzStatus": "FAILED",
+      "failureKind": "HARD_FAILURE",
+      "continuationDisposition": "STOP_EXECUTION"
+    },
+    "k12AuthoritativeGreen": {
+      "status": "PASS",
+      "runId": "32708603994",
+      "sourceCommit": "295975e5d5b984c787bf1b42c6d113f494d3b719",
+      "foundryPassed": 1,
+      "foundryFailed": 0,
+      "controlledStateDelta": "health 20000->14000; attacker net value 100->110; protocol liquidity 1000->890"
+    },
+    "forgeWrapperFailureClassificationRepair": {
+      "status": "PASS",
+      "pullRequest": 144,
+      "mergeCommit": "bb8637f31b891b5b995019dbc09db5a4f5107b33",
+      "redRunId": "32707884631",
+      "greenRunId": "32708011530"
+    }
+  },
+  "proofSummary": {
+    "K00": {
+      "status": "PASS",
+      "hardGate": "PASS"
+    },
+    "K01": {
+      "status": "PASS",
+      "hardGate": "PASS"
+    },
+    "K02": {
+      "status": "PASS",
+      "hardGate": "PASS"
+    },
+    "K03": {
+      "status": "PASS",
+      "hardGate": "PASS"
+    },
+    "K04": {
+      "status": "PASS",
+      "hardGate": "PASS"
+    },
+    "K05": {
+      "status": "PASS",
+      "hardGate": "PASS"
+    },
+    "K06": {
+      "status": "PASS",
+      "hardGate": "PASS"
+    },
+    "K07": {
+      "status": "PASS",
+      "hardGate": "PASS",
+      "atomicCommit": "172164c39f5fe09be143479a0c6cc402d0572959"
+    },
+    "K08": {
+      "status": "PASS",
+      "hardGate": "PASS",
+      "atomicCommit": "d27a34df1f889e1fe833d6a78c12cdd77a288857"
+    },
+    "K09": {
+      "status": "PASS",
+      "hardGate": "PASS",
+      "atomicCommit": "fa7c386f09276640de5c2fe8b92bd202ba2e617b",
+      "recipeId": "RECIPE-0001",
+      "proofId": "PROOF-0002",
+      "proofTier": "SCHEMA_VALID",
+      "executionClaimed": false
+    },
+    "K10": {
+      "status": "PASS",
+      "hardGate": "PASS",
+      "atomicCommit": "9db631e93f562a67b0fedb13840ce74c80e2f3dc",
+      "githubRunId": "32700908341",
+      "testsPassed": 52,
+      "testsFailed": 0
+    },
+    "K11": {
+      "status": "PASS",
+      "hardGate": "PASS",
+      "atomicCommit": "5d9ae423765916975ea176abaf68f258a33849c9",
+      "githubRunId": "32703124345",
+      "testsPassed": 58,
+      "testsFailed": 0,
+      "knowledgeRevisionDigestBinding": "PASS",
+      "controlledHistoricalModes": "PASS",
+      "secretAndShellFieldNegatives": "PASS",
+      "executionClaimed": false
+    },
+    "K12": {
+      "status": "PASS",
+      "hardGate": "PASS",
+      "executableId": "EXEC-0001",
+      "proofId": "PROOF-0003",
+      "proofTier": "CONTROLLED_REPRODUCTION",
+      "authoritativeRedRunId": "32708299604",
+      "authoritativeGreenRunId": "32708603994",
+      "finalQualificationRunId": "32709590393",
+      "controlledReproduction": true,
+      "historicalReproductionClaimed": false,
+      "productionTargetExploitabilityClaimed": false,
+      "greenControllerArtifactDigest": "8458feed625a435ae4b46cb456e8f0fc47f80787bcd16296317df692239138b1",
+      "greenArtifactZipDigest": "d8c9a0d29c6205219d7b6c8ab49203a0defc89cb85b797038ad1a508668325a5",
+      "greenSnapshotDigest": "2f4a1c689c110ac6058a2e50c2c807d02b87f6123e3a2ccac50938d5cc2536ac"
+    }
+  },
+  "decisions": [
+    "D-0001",
+    "D-0002",
+    "D-0003",
+    "D-0004",
+    "D-0005",
+    "D-0006",
+    "D-0007",
+    "D-0008",
+    "D-0009",
+    "D-0010",
+    "D-0011"
+  ],
+  "lastUpdatedAt": "2026-08-24T21:25:00Z"
+}
