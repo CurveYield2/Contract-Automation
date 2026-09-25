@@ -16,25 +16,57 @@
     "completedAt"
   ],
   "properties": {
-    "schemaVersion": { "const": "curveyield-lite-interphase-completion-v1" },
-    "status": { "const": "PASS" },
-    "campaignId": { "type": "string", "minLength": 1 },
-    "completedMilestoneId": { "type": "string", "minLength": 1 },
-    "handoffPath": { "type": "string", "minLength": 1 },
-    "workPacketPath": { "type": "string", "minLength": 1 },
-    "workPacketSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "schemaVersion": {
+      "const": "curveyield-lite-interphase-completion-v1"
+    },
+    "status": {
+      "const": "PASS"
+    },
+    "campaignId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "completedMilestoneId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoffPath": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workPacketPath": {
+      "type": "string",
+      "minLength": 1
+    },
+    "workPacketSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "outputs": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path", "sha256"],
+        "required": [
+          "path",
+          "sha256"
+        ],
         "properties": {
-          "path": { "type": "string", "minLength": 1 },
-          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
         }
-      }
+      },
+      "uniqueItems": true
     },
-    "completedAt": { "type": "string", "format": "date-time" }
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
   }
 }
