@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 const env = process.env;
 const action = env.WAKE_ACTION || 'wake';
@@ -15,10 +18,18 @@ function sha(text='') {
 }
 function bool(v) { return String(v || '').toLowerCase() === 'true'; }
 
+async function importBrowserRuntimeModule(specifier) {
+  const runtimeRoot = env.BROWSER_AGENT_RUNTIME_ROOT || '';
+  if (!runtimeRoot) return import(specifier);
+  const runtimeRequire = createRequire(path.join(runtimeRoot, 'package.json'));
+  const resolved = runtimeRequire.resolve(specifier);
+  return import(pathToFileURL(resolved).href);
+}
+
 async function loadModules() {
   const [{ chromium }, browserbaseMod] = await Promise.all([
-    import('playwright-core'),
-    import('@browserbasehq/sdk').catch(() => ({ default: null })),
+    importBrowserRuntimeModule('playwright-core'),
+    importBrowserRuntimeModule('@browserbasehq/sdk').catch(() => ({ default: null })),
   ]);
   return { chromium, Browserbase: browserbaseMod.Browserbase || browserbaseMod.default || null };
 }
