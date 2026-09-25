@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "awr-evidence-derived-progress-v1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "7b2531a327502edb3ce4a1f96f556f1e11f0d488",
+    "requestPath": ".deep-assurance/operator/requests/awr-evidence-derived-progress-v1.json"
+  },
+  "verifyController": true
+}
