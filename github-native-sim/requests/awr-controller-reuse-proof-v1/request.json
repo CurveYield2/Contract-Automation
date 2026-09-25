@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "awr-controller-reuse-proof-v1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "73d3211b0cd30a29deb564859a8d9db174de5fae",
+    "requestPath": ".deep-assurance/operator/requests/awr-controller-reuse-proof-v1.json"
+  },
+  "verifyController": true
+}
