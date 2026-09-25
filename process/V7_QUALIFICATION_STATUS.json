@@ -2,8 +2,8 @@
   "schemaVersion": "curveyield-v7-current-qualification-status-v1",
   "status": "PASS",
   "qualifiedCommit": "ad0b28653684ef05c415c5e78339828c4ab04d43",
-  "workflowRunId": "36174780979",
-  "qualifiedAt": "2026-09-25T18:40:28.722Z",
+  "workflowRunId": "36174814427",
+  "qualifiedAt": "2026-09-25T18:42:34.760Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
