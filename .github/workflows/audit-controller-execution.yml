@@ -181,14 +181,14 @@ jobs:
           const request = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
           if (request.schemaVersion !== 'audit-workload-reduction-request-v1') throw new Error('private operator request schemaVersion mismatch');
           if (request.requestId !== pointer.requestId) throw new Error('private operator requestId does not match public pointer');
-          const operations = new Set(['PROJECT_CURRENT_STATE','BUILD_EXECUTION_REQUEST','INGEST_EXECUTION_EVIDENCE','BUILD_SUCCESSOR_HANDOFF']);
+          const operations = new Set(['PROJECT_CURRENT_STATE','BUILD_EXECUTION_REQUEST','INGEST_EXECUTION_EVIDENCE','BUILD_SUCCESSOR_HANDOFF','BUILD_FINAL_EVIDENCE_INDEX','BUILD_REPORT_SCAFFOLD']);
           if (!operations.has(request.operation)) throw new Error('unsupported private operator operation');
           const safePath = /^(?!\/)(?!.*\\)(?!.*(?:^|\/)\.\.(?:\/|$)).+/;
           for (const field of [
             'campaignPath','campaignStatePath','phaseContractPath','phaseStartPath','completionReportPath',
             'automationCompletionReportPath','executionTemplatePath','semanticInputPath','executionRequestPath',
             'executionEvidencePath','qualificationPath','handoffInputPath','currentWorkPacketPath','skillPackagePath',
-            'writebackDirectory'
+            'evidenceIndexInputPath','reportScaffoldInputPath','writebackDirectory'
           ]) {
             if (request[field] !== undefined && (typeof request[field] !== 'string' || !safePath.test(request[field]))) {
               throw new Error(`invalid ${field}`);
