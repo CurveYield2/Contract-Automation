@@ -24,6 +24,13 @@ test('development task manager is a scheduled watchdog-derived supervisor that r
   assert.doesNotMatch(workflow, /playwright-core|@browserbasehq\/sdk/);
 });
 
+test('slash-delimited target branches use ref-safe repository lookups', () => {
+  assert.match(workflow, /target_branch_uri=.*@uri/);
+  assert.match(workflow, /git\/ref\/heads\/\$target_branch_uri/);
+  assert.match(workflow, /repos\/\$target_repo\/commits" -f sha="\$target_branch"/);
+  assert.doesNotMatch(workflow, /repos\/\$target_repo\/commits\/\$target_branch/);
+});
+
 test('one unanswered prompt triggers two immediate refreshed retries with two-minute response windows', () => {
   assert.match(workflow, /responsePolicy:\{attempts:3,minimumWaitMsPerAttempt:120000,refreshBetweenAttempts:true\}/);
   assert.match(workflow, /\.responsePolicy\.attempts==3/);
