@@ -6,8 +6,10 @@ const workflow = fs.readFileSync('.github/workflows/v7-execution-infrastructure-
 
 test('qualification workflow can verify an explicit private Audit-Controller ref without publishing feature qualification as main status', () => {
   assert.match(workflow, /controller_ref:/);
-  assert.match(workflow, /repository:\s*CurveYield2\/Audit-Controller/);
   assert.match(workflow, /secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN/);
+  assert.match(workflow, /gh repo clone CurveYield2\/Audit-Controller \.controller-under-test/);
+  assert.match(workflow, /git fetch --depth=1 origin "\$CONTROLLER_REF"/);
+  assert.match(workflow, /test "\$\(git rev-parse HEAD\)" = "\$CONTROLLER_REF"/);
   assert.match(workflow, /working-directory:\s*\.controller-under-test/);
   assert.match(workflow, /npm test/);
   assert.match(workflow, /npm run check/);
