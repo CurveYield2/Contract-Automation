@@ -48,3 +48,11 @@ test('malformed or stale target never reaches browser setup', () => {
       "\\n\\s+if: steps\\.target\\.outputs\\.valid == 'true'"));
   }
 });
+
+test('a state changed after discovery is revalidated before every sweep action', () => {
+  const filters = [...workflow.matchAll(/jq -e --arg wake "\$WAKE_ID" '([\s\S]*?)' (?:>\/dev\/null|\/tmp\/watchdog-state\.json >\/dev\/null)/g)]
+    .map((match) => match[1].trim().replace(/\s+/g, ' '));
+  assert.equal(filters.length, 2);
+  assert.equal(filters[0], filters[1]);
+  assert.match(workflow, /fetch_state\(\) \{[\s\S]*\.wakeId==\$wake[\s\S]*\.status=="ACTIVE"[\s\S]*\|\| return 1/);
+});
