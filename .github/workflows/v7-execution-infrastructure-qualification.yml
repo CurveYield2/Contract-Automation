@@ -12,6 +12,15 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/v7-execution-infrastructure-qualification.yml'
+      - '.github/workflows/audit-controller-execution.yml'
+      - '.github/workflows/browser-agent-wake.yml'
+      - '.github/workflows/browser-agent-watchdog.yml'
+      - '.github/workflows/agent-zip-import-v1.yml'
+      - '.github/workflows/v7-agent-qualification-bridge.yml'
+      - 'scripts/browser-agent-wake.mjs'
+      - 'scripts/select-audit-controller-token.sh'
+      - 'process/browser-agent-wake/**'
+      - 'protocol/schemas/curveyield-lite-interphase-*.schema.json'
       - '.github/actions/setup-v7-toolchain/**'
       - 'packages/github-native-sim/src/**'
       - 'packages/github-native-sim/test/**'
@@ -26,6 +35,15 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.github/workflows/v7-execution-infrastructure-qualification.yml'
+      - '.github/workflows/audit-controller-execution.yml'
+      - '.github/workflows/browser-agent-wake.yml'
+      - '.github/workflows/browser-agent-watchdog.yml'
+      - '.github/workflows/agent-zip-import-v1.yml'
+      - '.github/workflows/v7-agent-qualification-bridge.yml'
+      - 'scripts/browser-agent-wake.mjs'
+      - 'scripts/select-audit-controller-token.sh'
+      - 'process/browser-agent-wake/**'
+      - 'protocol/schemas/curveyield-lite-interphase-*.schema.json'
       - '.github/actions/setup-v7-toolchain/**'
       - 'packages/github-native-sim/src/**'
       - 'packages/github-native-sim/test/**'
@@ -60,7 +78,49 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Classify qualification scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .audit-evidence/v7-infrastructure-qualification
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            result='{"lane":"FULL","paths":[],"reason":"EXPLICIT_FULL"}'
+          else
+            base=''
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              base="$PR_BASE_SHA"
+            else
+              base="$BEFORE_SHA"
+            fi
+
+            if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then
+              result='{"lane":"FULL","paths":[],"reason":"MISSING_BASE_SHA"}'
+            elif git fetch --no-tags --depth=1 origin "$base" >/dev/null 2>&1; then
+              git diff --name-only "$base" HEAD > /tmp/v7-qualification-changed-paths.txt
+              result="$(node scripts/classify-v7-qualification-change.mjs < /tmp/v7-qualification-changed-paths.txt)"
+            else
+              result='{"lane":"FULL","paths":[],"reason":"BASE_FETCH_FAILED"}'
+            fi
+          fi
+
+          lane="$(printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).lane))")"
+          reason="$(printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).reason))")"
+          echo "V7_QUALIFICATION_LANE=$lane" >> "$GITHUB_ENV"
+          echo "V7_QUALIFICATION_REASON=$reason" >> "$GITHUB_ENV"
+          printf '%s\n' "$result" > .audit-evidence/v7-infrastructure-qualification/scope.json
+          {
+            echo "qualification_lane=$lane"
+            echo "qualification_reason=$reason"
+            echo 'changed_paths:'
+            printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{for(const p of JSON.parse(s).paths??[]) console.log('- '+p)})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Cache npm download cache
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
         uses: actions/cache@v4
         with:
           path: ~/.npm
@@ -69,6 +129,7 @@ jobs:
             v7-qualification-npm-${{ runner.os }}-
 
       - name: Install exact Node dependencies
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
         shell: bash
         run: |
           set -euo pipefail
@@ -82,7 +143,7 @@ jobs:
           fi
 
       - name: Bootstrap package-lock into trusted main
-        if: github.event_name != 'pull_request' && env.V7_DEPENDENCY_LOCKED != 'true'
+        if: env.V7_QUALIFICATION_LANE == 'FULL' && github.event_name != 'pull_request' && env.V7_DEPENDENCY_LOCKED != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -101,24 +162,39 @@ jobs:
           fi
 
       - name: Install and verify canonical V7 toolchain
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
         uses: ./.github/actions/setup-v7-toolchain
 
       - name: Initialize qualification evidence
         run: mkdir -p .audit-evidence/v7-infrastructure-qualification
 
       - name: Record exact toolchain verification evidence
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: node packages/github-native-sim/src/v7-cli.mjs toolchain:verify > .audit-evidence/v7-infrastructure-qualification/toolchain.json
 
       - name: Verify canonical runner manifest
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: npm run v7:manifest -- --check
 
       - name: V7 request and execution contract qualification
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: node --test packages/github-native-sim/test/*.test.mjs
 
       - name: Anvil-only runner qualification
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: node --test packages/runner/test/anvil-*.test.mjs packages/runner/test/full-simulation-anvil-only-v1.test.mjs
 
+      - name: Control-plane lightweight qualification
+        if: env.V7_QUALIFICATION_LANE == 'CONTROL_LIGHT'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test packages/github-native-sim/test/browser-agent-*.test.mjs packages/github-native-sim/test/audit-controller-token-selection-v1.test.mjs packages/github-native-sim/test/atomic-request-bridge-v1.test.mjs packages/github-native-sim/test/execution-workflow-v2.test.mjs
+          node --check scripts/browser-agent-wake.mjs
+          bash -n scripts/select-audit-controller-token.sh
+
       - name: Full repository Node test suite
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: npm test
 
       - name: Repository static checks
@@ -202,7 +278,7 @@ jobs:
           JSON
 
       - name: Live trusted-main Phase 6 and Phase 7 mutable-Anvil qualification
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && env.V7_QUALIFICATION_LANE == 'FULL'
         env:
           SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
         run: |
@@ -310,7 +386,7 @@ jobs:
           NODE
 
       - name: Publish canonical current qualification status
-        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && env.V7_QUALIFICATION_LANE == 'FULL'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
