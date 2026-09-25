@@ -28,6 +28,8 @@ jobs:
       BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
       BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
       BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
+      BROWSER_AGENT_PLAYWRIGHT_CORE_VERSION: '1.63.0'
+      BROWSER_AGENT_BROWSERBASE_SDK_VERSION: '2.20.0'
       AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN || secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
 
     steps:
@@ -43,11 +45,51 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install ephemeral watchdog dependencies
+      - name: Cache browser-agent runtime dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.npm
+          key: browser-agent-runtime-${{ runner.os }}-node22-pw-${{ env.BROWSER_AGENT_PLAYWRIGHT_CORE_VERSION }}-bb-${{ env.BROWSER_AGENT_BROWSERBASE_SDK_VERSION }}
+
+      - name: Verify or repair browser-agent runtime dependencies
         shell: bash
         run: |
           set -euo pipefail
-          npm install --no-save --ignore-scripts playwright-core @browserbasehq/sdk
+
+          verify_versions() {
+            node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const expected = {
+            'playwright-core': process.env.BROWSER_AGENT_PLAYWRIGHT_CORE_VERSION,
+            '@browserbasehq/sdk': process.env.BROWSER_AGENT_BROWSERBASE_SDK_VERSION,
+          };
+
+          for (const [name, version] of Object.entries(expected)) {
+            const packagePath = `node_modules/${name}/package.json`;
+            if (!fs.existsSync(packagePath)) process.exit(1);
+            const observed = JSON.parse(fs.readFileSync(packagePath, 'utf8')).version;
+            if (observed !== version) {
+              console.error(`${name} version mismatch: expected ${version}, observed ${observed}`);
+              process.exit(1);
+            }
+          }
+
+          await import('playwright-core');
+          await import('@browserbasehq/sdk');
+          NODE
+          }
+
+          if ! verify_versions; then
+            rm -rf node_modules/playwright-core node_modules/@browserbasehq
+            npm install --no-save --ignore-scripts \
+              "playwright-core@$BROWSER_AGENT_PLAYWRIGHT_CORE_VERSION" \
+              "@browserbasehq/sdk@$BROWSER_AGENT_BROWSERBASE_SDK_VERSION"
+          fi
+
+          verify_versions
 
       - name: Supervise agent for four-hour segment
         env:
