@@ -265,6 +265,8 @@ jobs:
                 mechanical_wake_id="${campaign_id}-${completed_id}-interphase-${GITHUB_RUN_ID}-${cycle}"
                 {
                   printf '%s\n' '[AUDIT_INTERPHASE_MECHANICAL_V1]'
+                  printf 'repository=%s\n' "$gate_repo"
+                  printf 'repository_ref=%s\n' "$gate_ref"
                   printf 'campaign=%s\n' "$campaign_id"
                   printf 'completed_milestone=%s\n' "$completed_id"
                   printf 'next_milestone=%s\n' "$next_id"
@@ -272,7 +274,11 @@ jobs:
                   printf 'work_packet=%s\n' "$packet_path"
                   printf 'work_packet_sha256=%s\n' "$packet_sha"
                   printf 'completion_receipt=%s\n' "$completion_path"
-                  printf '\n%s\n\n' 'You are a mechanical inter-phase worker. Perform only the deterministic/repetitive work in the packet below. Do not make, promote, reject, grade, or remediate security findings; do not reinterpret audit methodology. Use the GitHub repository tools to write the required outputs and the completion receipt. The completion receipt must use schema curveyield-lite-interphase-completion-v1 and include exact SHA-256 values for every required output.'
+                  printf '%s\n' 'do_not_repeat=Do not repeat the sealed reviewer milestone or change sealed reviewer outputs.'
+                  printf '%s\n' 'prohibited_semantic_work=No finding promotion or rejection, severity grading, exploit or economic judgment, remediation approval, or residual-risk conclusions.'
+                  printf '%s\n' 'required_outputs:'
+                  jq -r '.requiredOutputs[].path' /tmp/lite-interphase-work-packet.json
+                  printf '\n%s\n\n' 'You are a mechanical inter-phase worker. Perform only the deterministic/repetitive work in the packet below. Do not make, promote, reject, grade, or remediate security findings; do not reinterpret audit methodology. Use the GitHub repository tools to write the required outputs and the completion receipt. The completion receipt must use schema curveyield-lite-interphase-completion-v1 and include exact SHA-256 values for every required output. A PASS receipt certifies byte completeness only and never approves security conclusions.'
                   printf '%s\n' "$instructions"
                 } > /tmp/lite-interphase-wake.txt
                 mechanical_b64="$(base64 -w0 /tmp/lite-interphase-wake.txt)"
