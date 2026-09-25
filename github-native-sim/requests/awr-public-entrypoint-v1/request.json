@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "awr-public-entrypoint-v1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "dc642aa5e2c353e24d3f1a6ee5ef0484952c9b0f",
+    "requestPath": ".deep-assurance/operator/requests/awr-public-entrypoint-v1.json"
+  },
+  "verifyController": true
+}
