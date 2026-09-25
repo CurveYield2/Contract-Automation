@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "curveyield-browser-agent-watchdog-state-v1",
+  "wakeId": "watchdog-sweep-smoke-v3",
+  "campaignId": "watchdog-sweep-smoke-v3",
+  "phaseId": "smoke",
+  "workerRole": "reviewer",
+  "status": "ACTIVE",
+  "chatUrl": "",
+  "lastProvider": "",
+  "armedAt": "2026-09-25T02:23:46.722Z",
+  "intervalMinutes": 5,
+  "idleMessage": "SMOKE TEST ONLY",
+  "observation": {
+    "assistantCount": 0,
+    "lastAssistantHash": "",
+    "observedAt": "2026-09-25T02:23:46.722Z"
+  },
+  "gate": {
+    "mode": "FULL_V26",
+    "repository": "CurveYield2/Audit-Controller",
+    "ref": "main",
+    "statePath": "",
+    "expectedPhaseId": "",
+    "expectedMilestoneId": "",
+    "activePointerPath": "",
+    "interphase": {
+      "handoffPath": "",
+      "workPacketPath": "",
+      "completionPath": "",
+      "workPacketSha256": ""
+    },
+    "stopStates": [],
+    "stopCampaignStatuses": []
+  }
+}
