@@ -17,6 +17,10 @@ test('both canonical V7 workflows use one shared Medusa 1.5.1 setup and qualific
   assert.match(action, /go-version:\s*'1\.24\.6'/);
   assert.match(action, /go install github\.com\/crytic\/medusa@v1\.5\.1/);
   assert.match(action, /npm run v7:toolchain:verify/);
+  assert.match(action, /~\/\.cache\/pip/);
+  assert.match(action, /~\/\.cache\/curveyield-v7-tools\/medusa-1\.5\.1/);
+  assert.match(action, /if \[ -x "\$medusa_cache" \]/);
+  assert.match(action, /cp "\$install_dir\/medusa" "\$medusa_cache"/);
 
   const sharedAction = /uses:\s*\.\/\.github\/actions\/setup-v7-toolchain/g;
   assert.equal((execution.match(sharedAction) ?? []).length, 1);

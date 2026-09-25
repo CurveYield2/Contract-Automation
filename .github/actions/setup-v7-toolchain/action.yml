@@ -23,8 +23,10 @@ runs:
       uses: actions/cache@v4
       with:
         path: |
+          ~/.cache/pip
           ~/.cache/go-build
           ~/go/pkg/mod
+          ~/.cache/curveyield-v7-tools/medusa-1.5.1
         key: v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-1.5.1
         restore-keys: |
           v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-
@@ -35,7 +37,14 @@ runs:
         set -euo pipefail
         install_dir="$RUNNER_TEMP/v7-tools/bin"
         mkdir -p "$install_dir"
-        GOBIN="$install_dir" go install github.com/crytic/medusa@v1.5.1
+        medusa_cache="$HOME/.cache/curveyield-v7-tools/medusa-1.5.1"
+        mkdir -p "$(dirname "$medusa_cache")"
+        if [ -x "$medusa_cache" ]; then
+          cp "$medusa_cache" "$install_dir/medusa"
+        else
+          GOBIN="$install_dir" go install github.com/crytic/medusa@v1.5.1
+          cp "$install_dir/medusa" "$medusa_cache"
+        fi
 
         forge_entry="$GITHUB_WORKSPACE/node_modules/@foundry-rs/forge/bin.mjs"
         if [ ! -f "$forge_entry" ]; then
