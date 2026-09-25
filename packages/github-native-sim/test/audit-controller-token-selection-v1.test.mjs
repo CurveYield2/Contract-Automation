@@ -91,3 +91,28 @@ test('private workflows use runtime authentication probing rather than presence-
     assert.match(workflow, /scripts\/select-audit-controller-token\.sh/);
   }
 });
+
+test('every direct private controller checkout selects a probed credential first', () => {
+  const workflows = fs.readdirSync(path.join(repoRoot, '.github/workflows'))
+    .filter((name) => name.endsWith('.yml'));
+  let checked = 0;
+  for (const name of workflows) {
+    const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows', name), 'utf8');
+    const repositories = [...workflow.matchAll(/^          repository: (CurveYield2\/(?:Solo-)?Audit-Controller)$/gm)]
+      .map((match) => match[1]);
+    if (repositories.length === 0) continue;
+    checked += repositories.length;
+    const selected = workflow.indexOf('run: bash scripts/select-audit-controller-token.sh');
+    const firstCheckout = workflow.indexOf('          repository: ' + repositories[0]);
+    assert.ok(selected >= 0 && selected < firstCheckout, name);
+    assert.match(workflow, /AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'/);
+    assert.match(workflow, /PREFLIGHTSIM_FALLBACK_TOKEN: \$\{\{ secrets\.PREFLIGHTSIM_GITHUB_TOKEN \}\}/);
+    for (const repository of repositories) {
+      assert.ok(workflow.includes('AUDIT_CONTROLLER_PROBE_REPOSITORY: ' + repository), name);
+    }
+    const selectedTokens = [...workflow.matchAll(/^          token: \$\{\{ env\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}$/gm)];
+    assert.equal(selectedTokens.length, repositories.length, name);
+    assert.doesNotMatch(workflow, /^          token: \$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}$/m);
+  }
+  assert.ok(checked >= 24, 'private controller checkouts must remain covered');
+});
