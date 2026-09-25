@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "awr-stabilized-runner-rebind-v2",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "757699693033593e415e9667a909db567f1d85ae",
+    "requestPath": ".deep-assurance/operator/requests/awr-stabilized-runner-rebind-v2.json"
+  },
+  "verifyController": true
+}
