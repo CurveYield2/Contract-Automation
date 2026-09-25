@@ -113,7 +113,8 @@ and binds:
 - exact campaign ID;
 - exact completed milestone ID;
 - exact authoritative handoff path;
-- deterministic mechanical instructions;
+- explicit `taskClass: MECHANICAL_ONLY`;
+- deterministic mechanical instructions with no unresolved placeholders;
 - exact required output paths.
 
 Example:
@@ -124,6 +125,7 @@ Example:
   "campaignId": "example-campaign",
   "completedMilestoneId": "P2_5",
   "handoffPath": "campaigns/example/handoffs/P5_TO_P6/SUCCESSOR_HANDOFF.json",
+  "taskClass": "MECHANICAL_ONLY",
   "instructions": "Reconcile the filed evidence index and carried-forward obligation references. Do not make security findings or severity decisions.",
   "requiredOutputs": [
     {
