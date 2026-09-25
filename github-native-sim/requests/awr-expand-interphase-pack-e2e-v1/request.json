@@ -4,8 +4,8 @@
   "requestId": "awr-expand-interphase-pack-e2e-v1",
   "controller": {
     "repository": "CurveYield2/Audit-Controller",
-    "commit": "199e88fcba636e318bd870b77fe6e8513a3ba11b",
-    "requestPath": ".deep-assurance/operator/e2e/expand-interphase-work-packs-v1/request.json"
+    "commit": "e887fb1aa3c309e266dc7dcacca48ea813b9090a",
+    "requestPath": ".deep-assurance/operator/requests/awr-expand-interphase-pack-e2e-v1.json"
   },
   "verifyController": true
 }
