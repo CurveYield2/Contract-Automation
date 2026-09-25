@@ -75,6 +75,25 @@ jobs:
               -f content="$content" -f sha="$sha" -f branch=main >/dev/null
           }
 
+          retire_state() {
+            local reason="$1"
+            local active_sha completed_api completed_sha content
+            active_sha="$(gh api "$active_api?ref=main" --jq '.sha' 2>/dev/null || true)"
+            [ -n "$active_sha" ] || return 0
+            jq --arg reason "$reason" \
+              '.status="COMPLETED_CANONICAL_GATE" | .completionReason=$reason | .completedAt=(now|todate)' \
+              /tmp/watchdog-state.json > /tmp/watchdog-completed.json
+            completed_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/completed/$safe_id.json"
+            completed_sha="$(gh api "$completed_api?ref=main" --jq '.sha' 2>/dev/null || true)"
+            content="$(base64 -w0 /tmp/watchdog-completed.json)"
+            if [ -n "$completed_sha" ]; then
+              gh api --method PUT "$completed_api" -f message="chore(watchdog): retire $WAKE_ID" -f content="$content" -f sha="$completed_sha" -f branch=main >/dev/null
+            else
+              gh api --method PUT "$completed_api" -f message="chore(watchdog): retire $WAKE_ID" -f content="$content" -f branch=main >/dev/null
+            fi
+            gh api --method DELETE "$active_api" -f message="chore(watchdog): retire active $WAKE_ID" -f sha="$active_sha" -f branch=main >/dev/null
+          }
+
           if ! fetch_state; then
             echo 'Watchdog state already retired; nothing to supervise.'
             exit 0
@@ -95,18 +114,44 @@ jobs:
             campaign_id="$(jq -r '.campaignId' /tmp/watchdog-state.json)"
             phase_id="$(jq -r '.phaseId' /tmp/watchdog-state.json)"
             chat_url="$(jq -r '.chatUrl // empty' /tmp/watchdog-state.json)"
+
+            gate_repo="$(jq -r '.gate.repository // "CurveYield2/Audit-Controller"' /tmp/watchdog-state.json)"
+            gate_ref="$(jq -r '.gate.ref // "main"' /tmp/watchdog-state.json)"
+            gate_path="$(jq -r '.gate.statePath // empty' /tmp/watchdog-state.json)"
+            gate_expected_phase="$(jq -r '.gate.expectedPhaseId // empty' /tmp/watchdog-state.json)"
+
+            if [ -n "$gate_path" ] && [ -n "${AUDIT_CONTROLLER_GITHUB_TOKEN:-}" ]; then
+              encoded_state="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$gate_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+              if [ -n "$encoded_state" ]; then
+                printf '%s' "$encoded_state" | base64 -d > /tmp/canonical-campaign-state.json
+                canonical_state="$(jq -r '.state // empty' /tmp/canonical-campaign-state.json)"
+                canonical_campaign_status="$(jq -r '.campaignStatus // empty' /tmp/canonical-campaign-state.json)"
+                canonical_phase="$(jq -r '.currentPhase // empty' /tmp/canonical-campaign-state.json)"
+
+                if jq -e --arg s "$canonical_state" '.gate.stopStates | index($s) != null' /tmp/watchdog-state.json >/dev/null; then
+                  echo "Canonical V26 gate reached terminal agent state $canonical_state; retiring watchdog."
+                  retire_state "CANONICAL_GATE_STATE_$canonical_state"
+                  exit 0
+                fi
+                if jq -e --arg s "$canonical_campaign_status" '.gate.stopCampaignStatuses | index($s) != null' /tmp/watchdog-state.json >/dev/null; then
+                  echo "Canonical campaign status $canonical_campaign_status is terminal; retiring watchdog."
+                  retire_state "CANONICAL_CAMPAIGN_STATUS_$canonical_campaign_status"
+                  exit 0
+                fi
+                if [ -n "$gate_expected_phase" ] && [ -n "$canonical_phase" ] && [ "$canonical_phase" != "$gate_expected_phase" ]; then
+                  echo "Canonical V26 gate advanced from $gate_expected_phase to $canonical_phase; retiring watchdog."
+                  retire_state "CANONICAL_PHASE_ADVANCED_TO_$canonical_phase"
+                  exit 0
+                fi
+              else
+                echo "::warning::Canonical V26 campaign state could not be read; watchdog will continue and retry."
+              fi
+            fi
+
             if [ -z "$chat_url" ]; then
               echo "::warning::No chat URL for $WAKE_ID; retrying next cycle."
               sleep 300
               continue
-            fi
-
-            safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
-            safe_phase="$(printf '%s' "$phase_id" | tr -c 'A-Za-z0-9._-' '_')"
-            approved_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-phase-reports/approved/${safe_campaign}__${safe_phase}.json"
-            if gh api "$approved_api?ref=main" --silent >/dev/null 2>&1; then
-              echo "Approved phase report already exists for $campaign_id / $phase_id; exiting."
-              exit 0
             fi
 
             export WAKE_MODE='resume_existing'
