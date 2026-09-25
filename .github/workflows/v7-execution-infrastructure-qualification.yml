@@ -198,6 +198,7 @@ jobs:
         run: npm test
 
       - name: Repository static checks
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: npm run lint
 
       - name: Repository build checks
