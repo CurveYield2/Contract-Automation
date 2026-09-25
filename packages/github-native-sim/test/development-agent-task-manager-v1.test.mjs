@@ -13,6 +13,12 @@ const workflow = fs.readFileSync(workflowPath, 'utf8');
 const wake = fs.readFileSync(wakePath, 'utf8');
 const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
+test('missing state probes are not mistaken for existing managers', () => {
+  assert.match(workflow, /if \[\[ "\$active_probe" =~ \^\[0-9a-f\]\{40\}\$ \]\]; then/);
+  assert.doesNotMatch(workflow, /\[ -z "\$active_probe" \] \|\|/);
+  assert.match(workflow, /if \[\[ "\$existing" =~ \^\[0-9a-f\]\{40\}\$ \]\]; then/);
+});
+
 test('declarative request files can start the existing task-manager workflow without manual dispatch', () => {
   assert.match(workflow, /push:\s*\n\s+branches: \[main\][\s\S]*process\/development-agent-task-manager\/requests\/\*\.json/);
   assert.match(workflow, /github\.event_name == 'push'/);
