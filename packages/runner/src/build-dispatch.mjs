@@ -77,6 +77,7 @@ export async function buildProject({
       compilerVersion: compiler.version,
       compilerDiagnostics: compiled.diagnostics,
       compilerInput: compiled.input,
+      sourceAsts: compiled.sourceAsts ?? {},
       artifacts: compiled.artifacts.all,
       sourceInventory: Object.keys(sources).sort(),
       sourceInventoryFiles: Object.keys(sources).length
