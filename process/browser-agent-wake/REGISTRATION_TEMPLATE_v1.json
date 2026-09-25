@@ -13,7 +13,7 @@
       "ref": "main",
       "statePath": "campaigns/REPLACE_WITH_AUDIT_NAME/controller/CAMPAIGN_STATE_v1.json",
       "expectedPhaseId": "phase-0",
-      "expectedMilestoneId": "P0_1",
+      "expectedMilestoneId": "P0_BOOTSTRAP",
       "activePointerPath": "campaigns/REPLACE_WITH_AUDIT_NAME/controller/ACTIVE_PHASE_POINTER_v1.json",
       "stopStates": [
         "WAITING_FOR_HUMAN_RESPONSE",
