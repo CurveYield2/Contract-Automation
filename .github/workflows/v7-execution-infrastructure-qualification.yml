@@ -8,6 +8,12 @@ on:
         required: false
         default: ''
         type: string
+      qualification_lane:
+        description: FULL reruns runner/toolchain qualification; CONTROLLER_ONLY reuses the current qualified runner and verifies only the private controller plus lightweight control-plane checks
+        required: true
+        default: FULL
+        type: choice
+        options: [FULL, CONTROLLER_ONLY]
   push:
     branches: [main]
     paths:
@@ -83,12 +89,22 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BEFORE_SHA: ${{ github.event.before }}
+          REQUESTED_LANE: ${{ inputs.qualification_lane }}
+          CONTROLLER_REF: ${{ inputs.controller_ref }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .audit-evidence/v7-infrastructure-qualification
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            result='{"lane":"FULL","paths":[],"reason":"EXPLICIT_FULL"}'
+            if [ "$REQUESTED_LANE" = "CONTROLLER_ONLY" ]; then
+              if [ -z "$CONTROLLER_REF" ]; then
+                echo 'CONTROLLER_ONLY requires controller_ref' >&2
+                exit 1
+              fi
+              result='{"lane":"CONTROLLER_ONLY","paths":[],"reason":"EXPLICIT_CONTROLLER_ONLY"}'
+            else
+              result='{"lane":"FULL","paths":[],"reason":"EXPLICIT_FULL"}'
+            fi
           else
             base=''
             if [ "$EVENT_NAME" = "pull_request" ]; then
@@ -117,6 +133,44 @@ jobs:
             echo "qualification_reason=$reason"
             echo 'changed_paths:'
             printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{for(const p of JSON.parse(s).paths??[]) console.log('- '+p)})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate controller-only runner baseline
+        if: env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
+        shell: bash
+        run: |
+          set -euo pipefail
+          status_path='process/V7_QUALIFICATION_STATUS.json'
+          test -s "$status_path"
+          test "$(jq -r '.status // empty' "$status_path")" = 'PASS'
+          qualified_commit="$(jq -r '.qualifiedCommit // empty' "$status_path")"
+          qualified_run="$(jq -r '.workflowRunId // empty' "$status_path")"
+          [[ "$qualified_commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$qualified_run" =~ ^[0-9]+$ ]]
+
+          git fetch --no-tags --depth=1 origin "$qualified_commit" >/dev/null 2>&1
+          if git diff --quiet "$qualified_commit" HEAD; then
+            result='{"lane":"CONTROL_LIGHT","paths":[],"reason":"NO_RUNNER_DELTA"}'
+          else
+            git diff --name-only "$qualified_commit" HEAD > /tmp/controller-only-runner-delta.txt
+            result="$(node scripts/classify-v7-qualification-change.mjs < /tmp/controller-only-runner-delta.txt)"
+          fi
+          observed_lane="$(printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).lane))")"
+          if [ "$observed_lane" != 'CONTROL_LIGHT' ]; then
+            echo 'CONTROLLER_ONLY refused: current main contains runner/dependency/protocol/unknown changes since the last FULL-qualified runner.' >&2
+            printf '%s
+' "$result" >&2
+            exit 1
+          fi
+
+          echo "V7_BASELINE_QUALIFIED_COMMIT=$qualified_commit" >> "$GITHUB_ENV"
+          echo "V7_BASELINE_QUALIFICATION_RUN_ID=$qualified_run" >> "$GITHUB_ENV"
+          printf '%s
+' "$result" > .audit-evidence/v7-infrastructure-qualification/controller-only-baseline.json
+          {
+            echo "controller_only_runner_commit=$qualified_commit"
+            echo "controller_only_runner_run=$qualified_run"
+            echo "controller_only_delta_lane=$observed_lane"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cache npm download cache
@@ -162,7 +216,7 @@ jobs:
         run: node --test packages/runner/test/anvil-*.test.mjs packages/runner/test/full-simulation-anvil-only-v1.test.mjs
 
       - name: Control-plane lightweight qualification
-        if: env.V7_QUALIFICATION_LANE == 'CONTROL_LIGHT'
+        if: env.V7_QUALIFICATION_LANE == 'CONTROL_LIGHT' || env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
         shell: bash
         run: |
           set -euo pipefail
@@ -224,12 +278,17 @@ jobs:
         run: |
           set -euo pipefail
           controller_commit="$(git -C .controller-under-test rev-parse HEAD)"
+          qualified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           cat > .audit-evidence/v7-infrastructure-qualification/controller.json <<JSON
           {
             "schemaVersion": "v26-controller-qualification-v1",
             "controllerCommit": "$controller_commit",
             "controllerRef": "${{ inputs.controller_ref }}",
             "status": "PASS",
+            "qualificationRunId": "$GITHUB_RUN_ID",
+            "qualifiedAt": "$qualified_at",
+            "runnerQualifiedCommit": "${V7_BASELINE_QUALIFIED_COMMIT:-}",
+            "runnerQualificationRunId": "${V7_BASELINE_QUALIFICATION_RUN_ID:-}",
             "testedSchemas": [
               "audit-v7-sequential-review-state-v3",
               "v26-phase-contract-v1",
@@ -255,6 +314,34 @@ jobs:
             ]
           }
           JSON
+
+      - name: Publish controller-only qualification into canonical status
+        if: success() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          status_path='process/V7_QUALIFICATION_STATUS.json'
+          controller_path='.audit-evidence/v7-infrastructure-qualification/controller.json'
+          test -s "$status_path"
+          test -s "$controller_path"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const status=JSON.parse(fs.readFileSync('process/V7_QUALIFICATION_STATUS.json','utf8'));
+          const controller=JSON.parse(fs.readFileSync('.audit-evidence/v7-infrastructure-qualification/controller.json','utf8'));
+          if(status.status!=='PASS') throw new Error('canonical runner qualification is not PASS');
+          if(status.qualifiedCommit!==process.env.V7_BASELINE_QUALIFIED_COMMIT) throw new Error('canonical runner qualified commit changed during controller-only qualification');
+          if(String(status.workflowRunId)!==String(process.env.V7_BASELINE_QUALIFICATION_RUN_ID)) throw new Error('canonical runner qualification run changed during controller-only qualification');
+          if(controller.status!=='PASS') throw new Error('controller qualification is not PASS');
+          controller.runnerQualifiedCommit=status.qualifiedCommit;
+          controller.runnerQualificationRunId=String(status.workflowRunId);
+          status.controllerQualification=controller;
+          fs.writeFileSync('.audit-evidence/v7-infrastructure-qualification/current-status.json',JSON.stringify(status,null,2)+'\n');
+          NODE
+          content="$(base64 -w0 .audit-evidence/v7-infrastructure-qualification/current-status.json)"
+          existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.sha')"
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json"             -f message='chore(v7): refresh controller qualification status'             -f content="$content" -f sha="$existing_sha" -f branch='main' >/dev/null
 
       - name: Live trusted-main Phase 6 and Phase 7 mutable-Anvil qualification
         if: github.event_name != 'pull_request' && env.V7_QUALIFICATION_LANE == 'FULL'
