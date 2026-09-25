@@ -53,29 +53,25 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Select working Audit-Controller credential for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
       - name: Checkout private Audit Controller for manual dispatch
         if: github.event_name == 'workflow_dispatch'
         env:
-          AUDIT_CONTROLLER_TOKEN_PRIMARY: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_TOKEN_FALLBACK: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           CONTROLLER_REF: ${{ inputs.controller_ref }}
         shell: bash
         run: |
           set -euo pipefail
-          select_controller_token() {
-            if [ -n "${AUDIT_CONTROLLER_TOKEN_PRIMARY:-}" ] && GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_PRIMARY" gh api repos/CurveYield2/Audit-Controller --silent >/dev/null 2>&1; then
-              GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_PRIMARY"
-              return 0
-            fi
-            if [ -n "${AUDIT_CONTROLLER_TOKEN_FALLBACK:-}" ] && GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_FALLBACK" gh api repos/CurveYield2/Audit-Controller --silent >/dev/null 2>&1; then
-              GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_FALLBACK"
-              return 0
-            fi
-            echo 'No configured private-controller credential can authenticate to CurveYield2/Audit-Controller' >&2
-            return 1
-          }
-          select_controller_token
-          export GH_TOKEN
+          test -n "${GH_TOKEN:-}"
+          gh api repos/CurveYield2/Audit-Controller --silent
           rm -rf .controller-request
           gh auth setup-git
           gh repo clone CurveYield2/Audit-Controller .controller-request -- --filter=blob:none --no-checkout
@@ -90,6 +86,24 @@ jobs:
       - name: Resolve and validate dispatched request
         if: github.event_name == 'workflow_dispatch'
         run: npm run v7 -- resolve --mode dispatch --source .controller-request --request-path "${{ inputs.request_path }}" --output .v7-request/request.json
+
+      - name: Select working Audit-Controller credential for controller operation
+        if: github.event_name == 'pull_request' && env.V7_REQUEST_KIND == 'controller-operation'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Select optional Audit-Controller credential for V7 execution
+        if: github.event_name == 'pull_request' && env.V7_REQUEST_KIND == 'v7-execution'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'false'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
 
       # Existing V7 technical execution lane. Controller-operation requests skip this setup.
       - name: Cache npm download cache
@@ -125,32 +139,19 @@ jobs:
       - name: Execute V7 request
         if: env.V7_REQUEST_KIND == 'v7-execution'
         env:
-          AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN || secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
         run: npm run v7:execute -- --request .v7-request/request.json
 
       - name: Checkout exact private controller for controller operation
         if: env.V7_REQUEST_KIND == 'controller-operation'
         env:
-          AUDIT_CONTROLLER_TOKEN_PRIMARY: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_TOKEN_FALLBACK: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          select_controller_token() {
-            if [ -n "${AUDIT_CONTROLLER_TOKEN_PRIMARY:-}" ] && GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_PRIMARY" gh api repos/CurveYield2/Audit-Controller --silent >/dev/null 2>&1; then
-              GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_PRIMARY"
-              return 0
-            fi
-            if [ -n "${AUDIT_CONTROLLER_TOKEN_FALLBACK:-}" ] && GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_FALLBACK" gh api repos/CurveYield2/Audit-Controller --silent >/dev/null 2>&1; then
-              GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_FALLBACK"
-              return 0
-            fi
-            echo 'No configured private-controller credential can authenticate to CurveYield2/Audit-Controller' >&2
-            return 1
-          }
-          select_controller_token
-          export GH_TOKEN
+          test -n "${GH_TOKEN:-}"
+          gh api repos/CurveYield2/Audit-Controller --silent
           rm -rf .controller-operation
           gh auth setup-git
           gh repo clone CurveYield2/Audit-Controller .controller-operation -- --filter=blob:none --no-checkout
@@ -284,25 +285,11 @@ jobs:
       - name: Write controller-operation result back to exact private branch
         if: env.V7_REQUEST_KIND == 'controller-operation'
         env:
-          AUDIT_CONTROLLER_TOKEN_PRIMARY: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_TOKEN_FALLBACK: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          select_controller_token() {
-            if [ -n "${AUDIT_CONTROLLER_TOKEN_PRIMARY:-}" ] && GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_PRIMARY" gh api repos/CurveYield2/Audit-Controller --silent >/dev/null 2>&1; then
-              GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_PRIMARY"
-              return 0
-            fi
-            if [ -n "${AUDIT_CONTROLLER_TOKEN_FALLBACK:-}" ] && GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_FALLBACK" gh api repos/CurveYield2/Audit-Controller --silent >/dev/null 2>&1; then
-              GH_TOKEN="$AUDIT_CONTROLLER_TOKEN_FALLBACK"
-              return 0
-            fi
-            echo 'No configured private-controller credential can authenticate to CurveYield2/Audit-Controller' >&2
-            return 1
-          }
-          select_controller_token
-          export GH_TOKEN
+          test -n "${GH_TOKEN:-}"
           gh auth setup-git
           cd .controller-operation
           git fetch origin "$WRITEBACK_REF"
