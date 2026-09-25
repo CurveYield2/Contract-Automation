@@ -17,8 +17,8 @@ test('interphase mechanical work reuses the existing wake/watchdog workflows', (
   const watchdog = fs.readFileSync(watchdogPath, 'utf8');
   assert.match(wake, /worker_role:/);
   assert.match(wake, /options: \[reviewer, interphase_mechanical\]/);
-  assert.match(watchdog, /MECHANICAL_WORK_PACKET_v1\.json/);
-  assert.match(watchdog, /MECHANICAL_WORK_COMPLETION_v1\.json/);
+  assert.match(watchdog, /MECHANICAL_WORK_PACKET_v2\.json/);
+  assert.match(watchdog, /MECHANICAL_WORK_COMPLETION_v2\.json/);
 });
 
 test('grunt fresh chats do not replace the campaign reviewer chat registration', () => {
@@ -32,8 +32,8 @@ test('grunt fresh chats do not replace the campaign reviewer chat registration',
 
 test('mechanical completion is bound to exact work packet and required output bytes', () => {
   const watchdog = fs.readFileSync(watchdogPath, 'utf8');
-  assert.match(watchdog, /curveyield-lite-interphase-work-packet-v1/);
-  assert.match(watchdog, /curveyield-lite-interphase-completion-v1/);
+  assert.match(watchdog, /curveyield-lite-interphase-work-packet-v2/);
+  assert.match(watchdog, /curveyield-lite-interphase-completion-v2/);
   assert.match(watchdog, /\.taskClass=="MECHANICAL_ONLY"/);
   assert.match(watchdog, /\.workPacketSha256==\$packetSha/);
   assert.match(watchdog, /required_total/);
@@ -55,17 +55,17 @@ test('successor launch is gated behind optional mechanical completion', () => {
 
 test('interphase work packet and completion schemas are strict machine contracts', () => {
   const packet = JSON.parse(fs.readFileSync(
-    path.join(repoRoot, 'protocol/schemas/curveyield-lite-interphase-work-packet-v1.schema.json'),
+    path.join(repoRoot, 'protocol/schemas/curveyield-lite-interphase-work-packet-v2.schema.json'),
     'utf8'
   ));
   const completion = JSON.parse(fs.readFileSync(
-    path.join(repoRoot, 'protocol/schemas/curveyield-lite-interphase-completion-v1.schema.json'),
+    path.join(repoRoot, 'protocol/schemas/curveyield-lite-interphase-completion-v2.schema.json'),
     'utf8'
   ));
   assert.equal(packet.additionalProperties, false);
   assert.equal(completion.additionalProperties, false);
-  assert.equal(packet.properties.schemaVersion.const, 'curveyield-lite-interphase-work-packet-v1');
-  assert.equal(completion.properties.schemaVersion.const, 'curveyield-lite-interphase-completion-v1');
+  assert.equal(packet.properties.schemaVersion.const, 'curveyield-lite-interphase-work-packet-v2');
+  assert.equal(completion.properties.schemaVersion.const, 'curveyield-lite-interphase-completion-v2');
   assert.ok(packet.required.includes('taskClass'));
   assert.equal(packet.properties.taskClass.const, 'MECHANICAL_ONLY');
   assert.ok(packet.required.includes('requiredOutputs'));
@@ -98,7 +98,31 @@ test('mechanical watchdog rejects a changed packet, missing output, or mismatche
   const watchdog = fs.readFileSync(watchdogPath, 'utf8');
   assert.match(watchdog, /workPacketSha256 \/\/ empty/);
   assert.match(watchdog, /\[ "\$packet_sha" = "\$\(jq -r/);
-  assert.match(watchdog, /\.requiredOutputs\|type=="array" and length>0/);
+  assert.match(watchdog, /\.requiredOutputs\|type=="array" and length>=11/);
   assert.match(watchdog, /\[ "\$observed_total" = "\$\(jq/);
   assert.match(watchdog, /\[ "\$required" = "\$observed" \]/);
+});
+
+
+test('v2 requires a real extended mechanical batch rather than a trivial one-file task', () => {
+  const packet = JSON.parse(fs.readFileSync(
+    path.join(repoRoot, 'protocol/schemas/curveyield-lite-interphase-work-packet-v2.schema.json'),
+    'utf8'
+  ));
+  const completion = JSON.parse(fs.readFileSync(
+    path.join(repoRoot, 'protocol/schemas/curveyield-lite-interphase-completion-v2.schema.json'),
+    'utf8'
+  ));
+  assert.equal(packet.properties.workUnits.minItems, 10);
+  assert.equal(packet.properties.requiredOutputs.minItems, 11);
+  assert.equal(completion.properties.workUnitReceipts.minItems, 10);
+  assert.equal(completion.properties.outputs.minItems, 11);
+
+  const watchdog = fs.readFileSync(watchdogPath, 'utf8');
+  assert.match(watchdog, /unit_total/);
+  assert.match(watchdog, /\[ "\$unit_total" -ge 10 \]/);
+  assert.match(watchdog, /packet_units/);
+  assert.match(watchdog, /receipt_units/);
+  assert.match(watchdog, /reconciliationOutputPath/);
+  assert.match(watchdog, /Legacy inter-phase packet v1 is no longer admitted/);
 });

@@ -102,88 +102,96 @@ This is a Lite-only automatic alternative. The existing Full/V26 human-response 
 
 ## Optional Lite inter-phase mechanical worker
 
-Lite handoffs can now request a bounded mechanical web-agent pass **without adding another workflow or changing the normal successor path**.
+Lite handoffs can request a bounded **extended mechanical batch** without adding another workflow or changing the normal successor path.
 
-The feature is opt-in per handoff. If the handoff directory contains:
+Current admitted contract: **v2**.
 
-`MECHANICAL_WORK_PACKET_v1.json`
+The authoritative handoff directory may contain:
 
-the existing watchdog inserts a fresh `interphase_mechanical` ChatGPT worker before launching the next reviewer. If the file is absent, the existing direct successor launch remains unchanged.
+`MECHANICAL_WORK_PACKET_v2.json`
 
-The work packet uses schema:
+If it is absent, the existing direct successor launch remains unchanged. If a legacy `MECHANICAL_WORK_PACKET_v1.json` is present, the watchdog fails closed and requires migration to v2.
 
-`curveyield-lite-interphase-work-packet-v1`
+### v2 workload floor
 
-and binds:
-- exact campaign ID;
-- exact completed milestone ID;
-- exact authoritative handoff path;
-- explicit `taskClass: MECHANICAL_ONLY`;
-- deterministic mechanical instructions with no unresolved placeholders;
-- exact required output paths, all confined to the handoff's `MECHANICAL/` subdirectory.
+A v2 packet is intentionally substantial. It must contain:
 
-Example:
+- `taskClass: MECHANICAL_ONLY`;
+- at least **10 independent work units**;
+- a unique ID for every work unit;
+- distinct output path for every work unit;
+- explicit mechanical instructions for every unit;
+- an explicit verification rule for every unit;
+- one additional final reconciliation output;
+- an exact required-output set equal to all unit outputs plus the reconciliation output.
+
+This is a **useful-work floor**, not a timer. The agent must never sleep, loop, or perform fake activity merely to consume time.
+
+All outputs remain confined to the authoritative handoff's `MECHANICAL/` subdirectory.
+
+Example skeleton:
 
 ```json
 {
-  "schemaVersion": "curveyield-lite-interphase-work-packet-v1",
+  "schemaVersion": "curveyield-lite-interphase-work-packet-v2",
   "campaignId": "example-campaign",
   "completedMilestoneId": "P2_5",
   "handoffPath": "campaigns/example/handoffs/P5_TO_P6/SUCCESSOR_HANDOFF.json",
   "taskClass": "MECHANICAL_ONLY",
-  "instructions": "Reconcile the filed evidence index and carried-forward obligation references. Do not make security findings or severity decisions.",
+  "instructions": "Complete every unit and reconcile the complete mechanical handoff dataset. Do not perform security judgment.",
+  "workUnits": [
+    {
+      "id": "evidence-index-01",
+      "instructions": "Reconcile one defined evidence family against the filed evidence ledger.",
+      "outputPath": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL/evidence-index-01.json",
+      "verification": "Every listed evidence reference must resolve to a filed artifact and preserve the exact recorded digest."
+    }
+  ],
+  "reconciliationOutputPath": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL/FINAL_RECONCILIATION_v2.json",
   "requiredOutputs": [
     {
-      "path": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL/MECHANICAL_EVIDENCE_INDEX_v1.json",
-      "purpose": "Exact evidence-reference projection for the successor reviewer"
+      "path": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL/evidence-index-01.json"
+    },
+    {
+      "path": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL/FINAL_RECONCILIATION_v2.json"
     }
   ]
 }
 ```
 
-The mechanical worker is instructed to perform only deterministic/repetitive work and is explicitly prohibited from making, promoting, rejecting, grading, or remediating security findings.
+The actual packet must contain at least ten work units; the shortened example above only demonstrates field shape.
 
-When finished, it writes:
+The worker completion file is:
 
-`MECHANICAL_WORK_COMPLETION_v1.json`
+`MECHANICAL_WORK_COMPLETION_v2.json`
 
-in the same handoff directory using schema:
+using schema `curveyield-lite-interphase-completion-v2`.
 
-`curveyield-lite-interphase-completion-v1`
+It must contain:
+- exact campaign/milestone/handoff identity;
+- exact work-packet path and SHA-256;
+- one `workUnitReceipt` for every work unit;
+- exact work-unit ID/output-path pairing;
+- each unit output SHA-256;
+- the complete required-output set and SHA-256 values;
+- completion timestamp.
 
-Example:
+Before the next reviewer launches, the **existing watchdog** verifies:
 
-```json
-{
-  "schemaVersion": "curveyield-lite-interphase-completion-v1",
-  "status": "PASS",
-  "campaignId": "example-campaign",
-  "completedMilestoneId": "P2_5",
-  "handoffPath": "campaigns/example/handoffs/P5_TO_P6/SUCCESSOR_HANDOFF.json",
-  "workPacketPath": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL_WORK_PACKET_v1.json",
-  "workPacketSha256": "<64 lowercase hex>",
-  "outputs": [
-    {
-      "path": "campaigns/example/handoffs/P5_TO_P6/MECHANICAL/MECHANICAL_EVIDENCE_INDEX_v1.json",
-      "sha256": "<64 lowercase hex>"
-    }
-  ],
-  "completedAt": "2026-09-25T00:00:00Z"
-}
-```
+1. packet is v2 and contains at least ten valid, unique work units;
+2. no unresolved placeholder material exists;
+3. every unit output and reconciliation output is under the handoff's `MECHANICAL/` directory;
+4. the required-output set is exactly the unit-output set plus reconciliation output;
+5. the completion receipt is bound to the exact packet bytes;
+6. every work unit has exactly one matching receipt;
+7. unit IDs/output paths exactly match the packet;
+8. every unit receipt hash matches its corresponding output hash;
+9. every required output currently exists in Audit-Controller;
+10. every required output's current SHA-256 matches the completion receipt.
 
-Before launching the normal successor reviewer, the existing watchdog verifies:
+The web agent is explicitly prohibited from finding promotion/rejection, severity grading, exploit/economic judgment, remediation approval, or residual-risk conclusions.
 
-1. the completion receipt is bound to the exact campaign, milestone, handoff, and work-packet path;
-2. the work-packet SHA-256 matches the exact filed packet bytes;
-3. the completion output set exactly matches the work packet's required-output set;
-4. every required output is confined to the authoritative handoff's `MECHANICAL/` subdirectory;
-5. every required output still exists in Audit-Controller;
-6. every required output's current SHA-256 matches the completion receipt.
-
-A fresh mechanical chat does **not** replace the campaign's registered reviewer chat URL. Only reviewer-role fresh chats update the campaign registration.
-
-The mechanical worker is supervised by the same five-minute productivity-aware watchdog. Once its completion receipt is machine-valid, the watchdog reuses the existing Lite successor-launch path and retires the mechanical worker.
+A fresh mechanical chat does not replace the campaign reviewer-chat registration. When v2 completion is machine-valid, the same watchdog invokes the existing Lite successor-launch path and retires the mechanical worker.
 
 ## Qualification efficiency
 
