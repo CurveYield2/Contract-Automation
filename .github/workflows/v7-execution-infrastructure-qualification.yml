@@ -142,23 +142,29 @@ jobs:
             echo "V7_DEPENDENCY_LOCKED=false" >> "$GITHUB_ENV"
           fi
 
-      - name: Bootstrap package-lock into trusted main
-        if: env.V7_QUALIFICATION_LANE == 'FULL' && github.event_name != 'pull_request' && env.V7_DEPENDENCY_LOCKED != 'true'
+      - name: Bootstrap package-lock into candidate branch
+        if: env.V7_QUALIFICATION_LANE == 'FULL' && env.V7_DEPENDENCY_LOCKED != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
         shell: bash
         run: |
           set -euo pipefail
-          existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/package-lock.json?ref=main" --jq '.sha' 2>/dev/null || true)"
+          target_branch='main'
+          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then
+            target_branch="$PR_HEAD_REF"
+          fi
+          test -n "$target_branch"
+          existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/package-lock.json?ref=$target_branch" --jq '.sha' 2>/dev/null || true)"
           if [ -z "$existing_sha" ]; then
             content="$(base64 -w0 package-lock.json)"
             gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/package-lock.json" \
               -f message='chore(v7): generate canonical dependency lock' \
               -f content="$content" \
-              -f branch='main' >/dev/null
-            echo "package_lock_published=true" >> "$GITHUB_STEP_SUMMARY"
+              -f branch="$target_branch" >/dev/null
+            echo "package_lock_published_to=$target_branch" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "package_lock_already_present=true" >> "$GITHUB_STEP_SUMMARY"
+            echo "package_lock_already_present_on=$target_branch" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Install and verify canonical V7 toolchain
