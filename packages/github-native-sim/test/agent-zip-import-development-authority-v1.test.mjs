@@ -53,6 +53,9 @@ test('ZIP magic is enforced only for zip-formatted authority objects', () => {
 
 test('development authority import uses the existing workflow and safe git rebase retry', () => {
   assert.match(workflow, /Import verified development authority into Contract-Automation/);
+  const authSetup = workflow.indexOf('gh auth setup-git');
+  const clone = workflow.indexOf('gh repo clone "$GITHUB_REPOSITORY"');
+  assert.ok(authSetup >= 0 && clone > authSetup);
   assert.match(workflow, /gh repo clone "\$GITHUB_REPOSITORY"/);
   assert.match(workflow, /git fetch origin main/);
   assert.match(workflow, /git rebase origin\/main/);
