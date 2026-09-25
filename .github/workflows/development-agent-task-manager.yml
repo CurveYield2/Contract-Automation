@@ -1,0 +1,496 @@
+name: Development Agent Task Manager
+
+on:
+  schedule:
+    - cron: '4-59/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Start a managed development task or sweep existing tasks
+        required: true
+        default: start
+        type: choice
+        options: [start, sweep]
+      manager_id:
+        description: Stable task-manager identifier
+        required: true
+        type: string
+      specification_path:
+        description: Development specification path in Contract-Automation
+        required: false
+        type: string
+      skill_path:
+        description: Supporting skill/authority path in Contract-Automation
+        required: false
+        type: string
+      authority_ref:
+        description: Exact ref containing specification and skill
+        required: false
+        default: main
+        type: string
+      target_repository:
+        description: Repository the development agents must modify
+        required: false
+        default: CurveYield2/Contract-Automation
+        type: string
+      target_branch:
+        description: Durable development branch
+        required: false
+        type: string
+      base_ref:
+        description: Base ref used only when the target branch does not exist
+        required: false
+        default: main
+        type: string
+      initial_assignment:
+        description: Optional extra instruction appended to the authoritative specification
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+  pull-requests: write
+
+concurrency:
+  group: development-agent-task-manager-${{ inputs.manager_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  start:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'start'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MANAGER_ID: ${{ inputs.manager_id }}
+      SPEC_PATH: ${{ inputs.specification_path }}
+      SKILL_PATH: ${{ inputs.skill_path }}
+      AUTHORITY_REF: ${{ inputs.authority_ref }}
+      TARGET_REPOSITORY: ${{ inputs.target_repository }}
+      TARGET_BRANCH: ${{ inputs.target_branch }}
+      BASE_REF: ${{ inputs.base_ref }}
+      INITIAL_ASSIGNMENT: ${{ inputs.initial_assignment }}
+      CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+      BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
+      BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
+      BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
+      BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
+    steps:
+      - name: Checkout trusted Contract-Automation control plane
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate specification and durable branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$MANAGER_ID"
+          test -n "$SPEC_PATH"
+          test -n "$SKILL_PATH"
+          test -n "$TARGET_REPOSITORY"
+          test -n "$TARGET_BRANCH"
+          safe_id="$(printf '%s' "$MANAGER_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          [[ "$safe_id" =~ ^[A-Za-z0-9._-]+$ ]]
+          spec_b64="$(gh api "repos/$GITHUB_REPOSITORY/contents/$SPEC_PATH?ref=$AUTHORITY_REF" --jq '.content')"
+          skill_b64="$(gh api "repos/$GITHUB_REPOSITORY/contents/$SKILL_PATH?ref=$AUTHORITY_REF" --jq '.content')"
+          printf '%s' "$spec_b64" | base64 -d > /tmp/task-manager-spec.md
+          printf '%s' "$skill_b64" | base64 -d > /tmp/task-manager-skill.md
+          test -s /tmp/task-manager-spec.md
+          test -s /tmp/task-manager-skill.md
+          spec_sha="$(sha256sum /tmp/task-manager-spec.md | awk '{print $1}')"
+          skill_sha="$(sha256sum /tmp/task-manager-skill.md | awk '{print $1}')"
+
+          target_head="$(gh api "repos/$TARGET_REPOSITORY/git/ref/heads/$TARGET_BRANCH" --jq '.object.sha' 2>/dev/null || true)"
+          if [ -z "$target_head" ]; then
+            base_sha="$(gh api "repos/$TARGET_REPOSITORY/commits/$BASE_REF" --jq '.sha')"
+            gh api --method POST "repos/$TARGET_REPOSITORY/git/refs"               -f ref="refs/heads/$TARGET_BRANCH" -f sha="$base_sha" >/dev/null
+            target_head="$base_sha"
+          fi
+          [[ "$target_head" =~ ^[0-9a-f]{40}$ ]]
+
+          {
+            echo "TASK_MANAGER_SAFE_ID=$safe_id"
+            echo "TASK_MANAGER_SPEC_SHA=$spec_sha"
+            echo "TASK_MANAGER_SKILL_SHA=$skill_sha"
+            echo "TASK_MANAGER_TARGET_HEAD=$target_head"
+          } >> "$GITHUB_ENV"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up isolated browser-agent runtime
+        uses: ./.github/actions/setup-browser-agent-runtime
+
+      - name: Create initial fresh development agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/task-manager-assignment.txt <<EOF
+          [DEVELOPMENT_AGENT_TASK_MANAGER_V1]
+          manager_id=$MANAGER_ID
+          specification_repository=$GITHUB_REPOSITORY
+          specification_ref=$AUTHORITY_REF
+          specification_path=$SPEC_PATH
+          specification_sha256=$TASK_MANAGER_SPEC_SHA
+          skill_repository=$GITHUB_REPOSITORY
+          skill_ref=$AUTHORITY_REF
+          skill_path=$SKILL_PATH
+          skill_sha256=$TASK_MANAGER_SKILL_SHA
+          target_repository=$TARGET_REPOSITORY
+          target_branch=$TARGET_BRANCH
+          exact_resume_head=$TASK_MANAGER_TARGET_HEAD
+
+          You are the active implementation agent for this development specification. Read the exact specification and supporting skill before changing code. Continue implementation on the exact target branch above. Commit durable progress frequently so a replacement agent can resume from repository state without chat memory.
+
+          Governing implementation rules:
+          - Reuse and integrate existing workflows, scripts, schemas, queues, bridges, and tests whenever a similar admitted primitive already exists.
+          - Create a new workflow only when no existing workflow can correctly own the responsibility.
+          - Audit-Controller must contain no GitHub Actions workflows; workflows belong in Contract-Automation.
+          - Do not restart completed work. Inspect the branch and current authoritative state first.
+          - Keep testing as part of implementation. Do not declare completion merely because code was written.
+          - When the specification is fully implemented and verified, write process/development-agent-task-manager/completions/$TASK_MANAGER_SAFE_ID.json on the target branch using schema curveyield-development-task-completion-v1. It must include managerId, status COMPLETE, specificationSha256, skillSha256, implementationHeadSha equal to the commit immediately before the completion-receipt commit, and tests with every entry status PASS.
+          - Continue until that machine-readable completion condition is genuinely satisfied.
+
+          $INITIAL_ASSIGNMENT
+          EOF
+          export WAKE_ACTION='wake'
+          export WAKE_MODE='create_fresh'
+          export WAKE_ID="$MANAGER_ID-generation-1"
+          export WAKE_MESSAGE="$(cat /tmp/task-manager-assignment.txt)"
+          export WAKE_RESULT_PATH='/tmp/task-manager-start.json'
+          node scripts/browser-agent-wake.mjs
+          jq -e '.ok==true and (.chatUrl|type=="string" and test("^https://chatgpt.com/c/"))' /tmp/task-manager-start.json >/dev/null
+
+      - name: Persist active task-manager state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chat_url="$(jq -r '.chatUrl' /tmp/task-manager-start.json)"
+          assistant_count="$(jq -r '.after.assistantCount // .assistantCount // 0' /tmp/task-manager-start.json)"
+          assistant_hash="$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' /tmp/task-manager-start.json)"
+          idle_message='[DEVELOPMENT_AGENT_WATCHDOG_V1] Continue implementing the assigned development specification now. Resume from the current durable target-branch state, do not restart completed work, commit progress, run the required tests, and continue until the machine completion receipt is valid.'
+          jq -n             --arg managerId "$MANAGER_ID"             --arg safeId "$TASK_MANAGER_SAFE_ID"             --arg specPath "$SPEC_PATH"             --arg specRef "$AUTHORITY_REF"             --arg specSha "$TASK_MANAGER_SPEC_SHA"             --arg skillPath "$SKILL_PATH"             --arg skillRef "$AUTHORITY_REF"             --arg skillSha "$TASK_MANAGER_SKILL_SHA"             --arg targetRepo "$TARGET_REPOSITORY"             --arg targetBranch "$TARGET_BRANCH"             --arg targetHead "$TASK_MANAGER_TARGET_HEAD"             --arg chatUrl "$chat_url"             --arg idleMessage "$idle_message"             --argjson assistantCount "$assistant_count"             --arg assistantHash "$assistant_hash"             '{
+              schemaVersion:"curveyield-development-agent-task-manager-state-v1",
+              managerId:$managerId,safeId:$safeId,status:"ACTIVE",generation:1,
+              specification:{path:$specPath,ref:$specRef,sha256:$specSha},
+              skill:{path:$skillPath,ref:$skillRef,sha256:$skillSha},
+              target:{repository:$targetRepo,branch:$targetBranch,lastCheckpointSha:$targetHead},
+              chat:{url:$chatUrl,assistantCount:$assistantCount,lastAssistantHash:$assistantHash},
+              idleMessage:$idleMessage,replacementCount:0,
+              responsePolicy:{attempts:3,minimumWaitMsPerAttempt:120000,refreshBetweenAttempts:true},
+              createdAt:(now|todate),updatedAt:(now|todate)
+            }' > /tmp/task-manager-state.json
+          api="repos/$GITHUB_REPOSITORY/contents/process/development-agent-task-manager/active/$TASK_MANAGER_SAFE_ID.json"
+          content="$(base64 -w0 /tmp/task-manager-state.json)"
+          existing="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            gh api --method PUT "$api" -f message="chore(task-manager): restart $MANAGER_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$api" -f message="chore(task-manager): start $MANAGER_ID" -f content="$content" -f branch=main >/dev/null
+          fi
+
+  discover:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'sweep')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+      has_targets: ${{ steps.targets.outputs.has_targets }}
+    steps:
+      - name: Discover active development agents
+        id: targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_MANAGER_ID: ${{ inputs.manager_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = workflow_dispatch ] && [ -n "${REQUESTED_MANAGER_ID:-}" ]; then
+            safe_id="$(printf '%s' "$REQUESTED_MANAGER_ID" | tr -c 'A-Za-z0-9._-' '_')"
+            jq -cn --arg id "$safe_id" '[$id]' > /tmp/task-manager-targets.json
+          else
+            api="repos/$GITHUB_REPOSITORY/contents/process/development-agent-task-manager/active?ref=main"
+            if gh api "$api" --jq '.[]? | select(.type=="file") | .name' > /tmp/task-manager-files.txt 2>/dev/null; then
+              sed -n 's/\.json$//p' /tmp/task-manager-files.txt | LC_ALL=C sort -u | jq -R -s 'split("\n") | map(select(length>0))' > /tmp/task-manager-targets.json
+            else
+              printf '[]\n' > /tmp/task-manager-targets.json
+            fi
+          fi
+          count="$(jq 'length' /tmp/task-manager-targets.json)"
+          if [ "$count" -eq 0 ]; then
+            echo 'targets=["__NO_ACTIVE_MANAGER__"]' >> "$GITHUB_OUTPUT"
+            echo 'has_targets=false' >> "$GITHUB_OUTPUT"
+          else
+            echo "targets=$(jq -c . /tmp/task-manager-targets.json)" >> "$GITHUB_OUTPUT"
+            echo 'has_targets=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  supervise:
+    needs: discover
+    if: needs.discover.outputs.has_targets == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        manager_id: ${{ fromJSON(needs.discover.outputs.targets) }}
+    concurrency:
+      group: development-agent-task-manager-supervise-${{ matrix.manager_id }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      SAFE_ID: ${{ matrix.manager_id }}
+      CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+      BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
+      BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
+      BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
+      BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
+    steps:
+      - name: Checkout trusted Contract-Automation control plane
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Load and validate active manager state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="repos/$GITHUB_REPOSITORY/contents/process/development-agent-task-manager/active/$SAFE_ID.json"
+          encoded="$(gh api "$api?ref=main" --jq '.content' 2>/dev/null || true)"
+          [ -n "$encoded" ] || exit 0
+          printf '%s' "$encoded" | base64 -d > /tmp/task-manager-state.json
+          jq -e --arg safe "$SAFE_ID" '
+            .schemaVersion=="curveyield-development-agent-task-manager-state-v1"
+            and .safeId==$safe and .status=="ACTIVE"
+            and (.managerId|type=="string" and length>0)
+            and (.generation|type=="number" and .>=1)
+            and (.specification.sha256|test("^[0-9a-f]{64}$"))
+            and (.skill.sha256|test("^[0-9a-f]{64}$"))
+            and (.target.repository|type=="string" and length>0)
+            and (.target.branch|type=="string" and length>0)
+            and (.chat.url|type=="string")
+            and .responsePolicy.attempts==3
+            and .responsePolicy.minimumWaitMsPerAttempt>=120000
+            and .responsePolicy.refreshBetweenAttempts==true
+          ' /tmp/task-manager-state.json >/dev/null
+          echo "STATE_API=$api" >> "$GITHUB_ENV"
+
+      - name: Check machine completion gate
+        id: completion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager_id="$(jq -r '.managerId' /tmp/task-manager-state.json)"
+          target_repo="$(jq -r '.target.repository' /tmp/task-manager-state.json)"
+          target_branch="$(jq -r '.target.branch' /tmp/task-manager-state.json)"
+          spec_sha="$(jq -r '.specification.sha256' /tmp/task-manager-state.json)"
+          skill_sha="$(jq -r '.skill.sha256' /tmp/task-manager-state.json)"
+          receipt_path="process/development-agent-task-manager/completions/$SAFE_ID.json"
+          encoded="$(gh api "repos/$target_repo/contents/$receipt_path?ref=$target_branch" --jq '.content' 2>/dev/null || true)"
+          if [ -z "$encoded" ]; then
+            echo 'complete=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s' "$encoded" | base64 -d > /tmp/task-manager-completion.json
+          if ! jq -e --arg manager "$manager_id" --arg spec "$spec_sha" --arg skill "$skill_sha" '
+            .schemaVersion=="curveyield-development-task-completion-v1"
+            and .managerId==$manager and .status=="COMPLETE"
+            and .specificationSha256==$spec and .skillSha256==$skill
+            and (.implementationHeadSha|test("^[0-9a-f]{40}$"))
+            and (.tests|type=="array" and length>0)
+            and all(.tests[]; .status=="PASS")
+          ' /tmp/task-manager-completion.json >/dev/null; then
+            echo 'complete=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          implementation_head="$(jq -r '.implementationHeadSha' /tmp/task-manager-completion.json)"
+          current_head="$(gh api "repos/$target_repo/commits/$target_branch" --jq '.sha')"
+          compare_status="$(gh api "repos/$target_repo/compare/$implementation_head...$current_head" --jq '.status' 2>/dev/null || true)"
+          case "$compare_status" in identical|ahead) ;; *) echo 'complete=false' >> "$GITHUB_OUTPUT"; exit 0;; esac
+          echo 'complete=true' >> "$GITHUB_OUTPUT"
+          echo "completion_head=$current_head" >> "$GITHUB_OUTPUT"
+
+      - name: Retire completed manager
+        if: steps.completion.outputs.complete == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq --arg head "${{ steps.completion.outputs.completion_head }}"             '.status="COMPLETE" | .target.lastCheckpointSha=$head | .completedAt=(now|todate) | .updatedAt=(now|todate)'             /tmp/task-manager-state.json > /tmp/task-manager-completed.json
+          active_sha="$(gh api "$STATE_API?ref=main" --jq '.sha')"
+          completed_api="repos/$GITHUB_REPOSITORY/contents/process/development-agent-task-manager/completed/$SAFE_ID.json"
+          content="$(base64 -w0 /tmp/task-manager-completed.json)"
+          existing="$(gh api "$completed_api?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            gh api --method PUT "$completed_api" -f message="chore(task-manager): complete $SAFE_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$completed_api" -f message="chore(task-manager): complete $SAFE_ID" -f content="$content" -f branch=main >/dev/null
+          fi
+          gh api --method DELETE "$STATE_API" -f message="chore(task-manager): retire $SAFE_ID" -f sha="$active_sha" -f branch=main >/dev/null
+
+      - name: Stop after completion
+        if: steps.completion.outputs.complete == 'true'
+        shell: bash
+        run: exit 0
+
+      - name: Set up Node.js
+        if: steps.completion.outputs.complete != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up isolated browser-agent runtime
+        if: steps.completion.outputs.complete != 'true'
+        uses: ./.github/actions/setup-browser-agent-runtime
+
+      - name: Observe worker and execute bounded recovery policy
+        if: steps.completion.outputs.complete != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager_id="$(jq -r '.managerId' /tmp/task-manager-state.json)"
+          chat_url="$(jq -r '.chat.url' /tmp/task-manager-state.json)"
+          idle_message="$(jq -r '.idleMessage' /tmp/task-manager-state.json)"
+          previous_count="$(jq -r '.chat.assistantCount // 0' /tmp/task-manager-state.json)"
+          previous_hash="$(jq -r '.chat.lastAssistantHash // empty' /tmp/task-manager-state.json)"
+          target_repo="$(jq -r '.target.repository' /tmp/task-manager-state.json)"
+          target_branch="$(jq -r '.target.branch' /tmp/task-manager-state.json)"
+
+          export WAKE_MODE='resume_existing'
+          export CHAT_URL="$chat_url"
+          export WAKE_ID="$manager_id"
+          export WAKE_ACTION='observe'
+          export WAKE_RESULT_PATH='/tmp/task-manager-observe.json'
+
+          if ! node scripts/browser-agent-wake.mjs; then
+            echo "::warning::Browser providers could not observe the chat; preserving the current worker for the next sweep rather than guessing that the agent died."
+            jq '.lastDecision="OBSERVATION_PROVIDER_FAILURE" | .updatedAt=(now|todate)' /tmp/task-manager-state.json > /tmp/task-manager-next.json
+            mv /tmp/task-manager-next.json /tmp/task-manager-state.json
+          else
+            composer_visible="$(jq -r '.composerVisible // false' /tmp/task-manager-observe.json)"
+            generating="$(jq -r '.generating // false' /tmp/task-manager-observe.json)"
+            current_count="$(jq -r '.assistantCount // 0' /tmp/task-manager-observe.json)"
+            current_hash="$(jq -r '.lastAssistantHash // empty' /tmp/task-manager-observe.json)"
+            dead=false
+
+            if [ "$composer_visible" != true ]; then
+              dead=true
+              failure_reason='CHAT_UNVIEWABLE'
+            elif [ "$generating" = true ] || [ "$current_count" -gt "$previous_count" ] || { [ -n "$current_hash" ] && [ "$current_hash" != "$previous_hash" ]; }; then
+              jq --argjson count "$current_count" --arg hash "$current_hash"                 '.chat.assistantCount=$count | .chat.lastAssistantHash=$hash | .lastDecision="PRODUCTIVE" | .lastProductiveAt=(now|todate) | .updatedAt=(now|todate)'                 /tmp/task-manager-state.json > /tmp/task-manager-next.json
+              mv /tmp/task-manager-next.json /tmp/task-manager-state.json
+            else
+              for attempt in 1 2 3; do
+                export WAKE_ACTION='wake_and_wait'
+                export WAKE_MESSAGE="$idle_message"
+                export RESPONSE_WAIT_MS='120000'
+                export REFRESH_BEFORE_WAKE='false'
+                if [ "$attempt" -gt 1 ]; then export REFRESH_BEFORE_WAKE='true'; fi
+                export WAKE_RESULT_PATH="/tmp/task-manager-attempt-$attempt.json"
+                if ! node scripts/browser-agent-wake.mjs; then
+                  echo "::warning::Prompt attempt $attempt hit a browser-provider failure; preserving the worker instead of declaring it dead."
+                  dead=false
+                  failure_reason='PROMPT_PROVIDER_FAILURE'
+                  break
+                fi
+                if [ "$(jq -r '.responded // false' "$WAKE_RESULT_PATH")" = true ]; then
+                  next_count="$(jq -r '.after.assistantCount // 0' "$WAKE_RESULT_PATH")"
+                  next_hash="$(jq -r '.after.lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
+                  jq --argjson count "$next_count" --arg hash "$next_hash" --argjson attempt "$attempt"                     '.chat.assistantCount=$count | .chat.lastAssistantHash=$hash | .lastDecision=("RESPONDED_AFTER_PROMPT_"+($attempt|tostring)) | .lastProductiveAt=(now|todate) | .updatedAt=(now|todate)'                     /tmp/task-manager-state.json > /tmp/task-manager-next.json
+                  mv /tmp/task-manager-next.json /tmp/task-manager-state.json
+                  dead=false
+                  failure_reason=''
+                  break
+                fi
+                if [ "$attempt" -eq 3 ]; then
+                  dead=true
+                  failure_reason='THREE_CONSECUTIVE_UNANSWERED_PROMPTS'
+                fi
+              done
+            fi
+
+            if [ "$dead" = true ]; then
+              checkpoint_sha="$(gh api "repos/$target_repo/commits/$target_branch" --jq '.sha')"
+              [[ "$checkpoint_sha" =~ ^[0-9a-f]{40}$ ]]
+              generation="$(jq -r '.generation' /tmp/task-manager-state.json)"
+              next_generation=$((generation + 1))
+              spec_path="$(jq -r '.specification.path' /tmp/task-manager-state.json)"
+              spec_ref="$(jq -r '.specification.ref' /tmp/task-manager-state.json)"
+              spec_sha="$(jq -r '.specification.sha256' /tmp/task-manager-state.json)"
+              skill_path="$(jq -r '.skill.path' /tmp/task-manager-state.json)"
+              skill_ref="$(jq -r '.skill.ref' /tmp/task-manager-state.json)"
+              skill_sha="$(jq -r '.skill.sha256' /tmp/task-manager-state.json)"
+              predecessor="$chat_url"
+
+              cat > /tmp/task-manager-recovery.txt <<EOF
+              [DEVELOPMENT_AGENT_RECOVERY_V1]
+              manager_id=$manager_id
+              replacement_generation=$next_generation
+              predecessor_chat=$predecessor
+              replacement_reason=$failure_reason
+              specification_repository=$GITHUB_REPOSITORY
+              specification_ref=$spec_ref
+              specification_path=$spec_path
+              specification_sha256=$spec_sha
+              skill_repository=$GITHUB_REPOSITORY
+              skill_ref=$skill_ref
+              skill_path=$skill_path
+              skill_sha256=$skill_sha
+              target_repository=$target_repo
+              target_branch=$target_branch
+              exact_resume_head=$checkpoint_sha
+
+              The previous implementation chat is no longer functioning. Repository state is authoritative. Resume from the exact target-branch head above and continue the same development specification without repeating completed work. Inspect commits, tests, open PR/state, and current files before changing anything. Reuse existing workflows and primitives whenever possible. Never add a GitHub Actions workflow to Audit-Controller. Commit durable progress frequently.
+
+              Completion remains machine-gated by process/development-agent-task-manager/completions/$SAFE_ID.json using schema curveyield-development-task-completion-v1 with exact specification/skill digests and passing tests. Continue until that condition is genuinely satisfied.
+              EOF
+
+              export WAKE_MODE='create_fresh'
+              export CHAT_URL=''
+              export WAKE_ACTION='wake'
+              export WAKE_ID="$manager_id-generation-$next_generation"
+              export WAKE_MESSAGE="$(cat /tmp/task-manager-recovery.txt)"
+              export WAKE_RESULT_PATH='/tmp/task-manager-replacement.json'
+              unset REFRESH_BEFORE_WAKE RESPONSE_WAIT_MS
+              if node scripts/browser-agent-wake.mjs && jq -e '.ok==true and (.chatUrl|test("^https://chatgpt.com/c/"))' /tmp/task-manager-replacement.json >/dev/null; then
+                new_url="$(jq -r '.chatUrl' /tmp/task-manager-replacement.json)"
+                new_count="$(jq -r '.after.assistantCount // 0' /tmp/task-manager-replacement.json)"
+                new_hash="$(jq -r '.after.lastAssistantHash // empty' /tmp/task-manager-replacement.json)"
+                jq --argjson generation "$next_generation" --arg predecessor "$predecessor" --arg reason "$failure_reason"                   --arg head "$checkpoint_sha" --arg url "$new_url" --argjson count "$new_count" --arg hash "$new_hash"                   '.generation=$generation | .replacementCount=((.replacementCount // 0)+1)
+                   | .predecessorChatUrl=$predecessor | .lastReplacementReason=$reason
+                   | .target.lastCheckpointSha=$head | .chat.url=$url
+                   | .chat.assistantCount=$count | .chat.lastAssistantHash=$hash
+                   | .lastDecision="REPLACED_DEAD_AGENT" | .replacedAt=(now|todate) | .updatedAt=(now|todate)'                    /tmp/task-manager-state.json > /tmp/task-manager-next.json
+                mv /tmp/task-manager-next.json /tmp/task-manager-state.json
+              else
+                jq --arg reason "$failure_reason" --arg head "$checkpoint_sha"                   '.target.lastCheckpointSha=$head | .lastDecision="REPLACEMENT_CREATION_FAILED" | .lastReplacementReason=$reason | .updatedAt=(now|todate)'                   /tmp/task-manager-state.json > /tmp/task-manager-next.json
+                mv /tmp/task-manager-next.json /tmp/task-manager-state.json
+              fi
+            fi
+          fi
+
+          current_sha="$(gh api "$STATE_API?ref=main" --jq '.sha' 2>/dev/null || true)"
+          [ -n "$current_sha" ] || exit 0
+          content="$(base64 -w0 /tmp/task-manager-state.json)"
+          gh api --method PUT "$STATE_API" -f message="chore(task-manager): supervise $SAFE_ID" -f content="$content" -f sha="$current_sha" -f branch=main >/dev/null
