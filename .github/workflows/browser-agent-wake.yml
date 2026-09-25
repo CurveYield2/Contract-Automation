@@ -120,11 +120,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install ephemeral wake dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm install --no-save --ignore-scripts playwright-core @browserbasehq/sdk
+      - name: Set up isolated browser-agent runtime
+        uses: ./.github/actions/setup-browser-agent-runtime
 
       - name: Decode wake messages
         env:
