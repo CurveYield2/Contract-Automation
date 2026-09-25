@@ -27,7 +27,9 @@ async function findPrRequests(sourceRoot) {
 
 function validateDispatchPath(requestPath) {
   const normalized = String(requestPath ?? '').replaceAll('\\', '/');
-  if (!/^campaigns\/[^/]+\/requests\/[^/]+\.json$/.test(normalized)) {
+  const legacyRequestPath = /^campaigns\/[^/]+\/requests\/[^/]+\.json$/;
+  const generatedExecutionPath = /^campaigns\/[^/]+\/controller\/automation\/[^/]+\/EXECUTION_REQUEST_v1\.json$/;
+  if (!legacyRequestPath.test(normalized) && !generatedExecutionPath.test(normalized)) {
     throw new Error(`Invalid controller request path: ${requestPath ?? ''}`);
   }
   return normalized;
