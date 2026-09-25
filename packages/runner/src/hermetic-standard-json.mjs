@@ -233,6 +233,12 @@ export async function compileRepoHermeticStandardJson({
   };
   const sbom = await dependencySbom(projectRoot, fsApi);
   const artifacts = contractArtifactMap(output).all;
+  const sourceAsts = Object.fromEntries(
+    Object.entries(output.sources ?? {})
+      .filter(([, value]) => value?.ast)
+      .map(([sourceName, value]) => [sourceName, value.ast])
+      .sort(([left], [right]) => left.localeCompare(right))
+  );
 
   return {
     status: 'completed',
@@ -254,6 +260,7 @@ export async function compileRepoHermeticStandardJson({
     sourceInventoryFiles: collected.manifest.length,
     artifacts,
     artifactCount: artifacts.length,
+    sourceAsts,
     slitherStandardJsonPath: posixName(path.relative(projectRoot, standardJsonPath)),
     vendorRootAdapter,
     sbom
