@@ -12,5 +12,6 @@
     "repository": "CurveYield2/Audit-Controller",
     "ref": "audit/curveyield-dex-v15-audit-optimized-v2",
     "campaignPath": "campaigns/CurveYield DEX V15 Audit - Optimized"
-  }
+  },
+  "attempt": 2
 }
