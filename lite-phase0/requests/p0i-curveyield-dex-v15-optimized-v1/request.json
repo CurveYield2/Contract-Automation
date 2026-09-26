@@ -1,6 +1,6 @@
 {
   "schemaVersion": "curveyield-lite-phase0-intelligence-request-v1",
-  "requestId": "p0i-curveyield-dex-v15-optimized-v1",
+  "requestId": "p0i-curveyield-dex-v15-optimized-v2",
   "campaignId": "curveyield-dex-v15-audit-optimized-r1",
   "source": {
     "repository": "CurveYield2/Audits",
