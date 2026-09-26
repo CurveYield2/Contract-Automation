@@ -289,6 +289,118 @@ async function slitherRepair({projectRoot,build,sourceCommit}){
   error.attempts=attempts;
   throw error;
 }
+
+async function readSmallText(file,maxBytes=1024*1024){
+  try{
+    const stat=await fs.stat(file);
+    if(!stat.isFile()||stat.size>maxBytes)return null;
+    return await fs.readFile(file,'utf8');
+  }catch{return null;}
+}
+function lineNumberAt(text,index){return text.slice(0,index).split('\n').length;}
+function relativePosix(root,abs){return path.relative(root,abs).split(path.sep).join('/');}
+async function scanProjectReadiness({projectRoot,build,cfg}){
+  const all=await walk(projectRoot);
+  const interesting=all.filter(p=>/deploy|deployment|script|config|hardhat|foundry|medusa|test|spec|harness|simulation|simulate|oracle|network|chain|address|proxy|admin|timelock|role|keeper/i.test(p));
+  const deploymentFiles=interesting.filter(p=>/deploy|deployment|simulate|network|address|proxy|admin|timelock|oracle|chain/i.test(p));
+  const testFiles=all.filter(p=>/(^|\/)(test|tests|spec|specs)(\/|$)|\.t\.sol$|\.spec\.[cm]?[jt]s$|\.test\.[cm]?[jt]s$/i.test(p));
+  const harnessFiles=all.filter(p=>/harness|mock/i.test(p));
+  const configFiles=all.filter(p=>/(hardhat\.config|foundry\.toml|medusa|package\.json|package-lock\.json|\.env\.example|config)/i.test(p));
+  const scriptFiles=all.filter(p=>/(^|\/)(scripts?|tooling\/scripts)\//i.test(p));
+  const addresses=[],chainIds=[],roleMentions=[],oracleMentions=[],proxyMentions=[];
+  const addrSeen=new Set(), chainSeen=new Set();
+  for(const rel of deploymentFiles.concat(configFiles).slice(0,300)){
+    const text=await readSmallText(path.join(projectRoot,...rel.split('/')));
+    if(text==null)continue;
+    for(const m of text.matchAll(/0x[a-fA-F0-9]{40}/g)){
+      const key=`${m[0].toLowerCase()}|${rel}`; if(addrSeen.has(key))continue; addrSeen.add(key);
+      addresses.push({address:m[0],path:rel,line:lineNumberAt(text,m.index??0)});
+    }
+    for(const m of text.matchAll(/(?:chainId|chain_id|CHAIN_ID)\s*[:=]\s*['"]?(\d{1,12})/gi)){
+      const key=`${m[1]}|${rel}`; if(chainSeen.has(key))continue; chainSeen.add(key);
+      chainIds.push({chainId:Number(m[1]),path:rel,line:lineNumberAt(text,m.index??0)});
+    }
+    for(const m of text.matchAll(/\b(owner|admin|governance|governor|timelock|authorizer|keeper|registrar|operator|controller)\b/gi)){
+      if(roleMentions.length<500)roleMentions.push({term:m[1],path:rel,line:lineNumberAt(text,m.index??0)});
+    }
+    for(const m of text.matchAll(/\b(oracle|twap|price feed|pricefeed)\b/gi)){
+      if(oracleMentions.length<250)oracleMentions.push({term:m[1],path:rel,line:lineNumberAt(text,m.index??0)});
+    }
+    for(const m of text.matchAll(/\b(proxy|implementation|delegatecall|upgrade|upgradeable)\b/gi)){
+      if(proxyMentions.length<250)proxyMentions.push({term:m[1],path:rel,line:lineNumberAt(text,m.index??0)});
+    }
+  }
+  let packageJson=null;
+  const packageText=await readSmallText(path.join(projectRoot,'package.json'));
+  if(packageText){try{packageJson=JSON.parse(packageText);}catch{}}
+  const artifactSizes=(build.artifacts??[]).map(a=>({
+    qualifiedName:`${a.sourceName}:${a.contractName}`,
+    creationBytecodeBytes:Math.floor(String(a.bytecode??'0x').replace(/^0x/,'').length/2),
+    deployedBytecodeBytes:Math.floor(String(a.deployedBytecode??'0x').replace(/^0x/,'').length/2),
+    preliminaryDeploymentGasEstimate:a.gasEstimates?.creation?.totalCost??null
+  })).sort((a,b)=>b.deployedBytecodeBytes-a.deployedBytecodeBytes||a.qualifiedName.localeCompare(b.qualifiedName));
+  const deployabilityRisks=artifactSizes.filter(x=>x.deployedBytecodeBytes>24576).map(x=>({...x,limitBytes:24576,status:'EIP170_RUNTIME_LIMIT_EXCEEDED'}));
+  return{
+    schemaVersion:'curveyield-lite-phase0-project-readiness-v1',
+    deploymentAndConfiguration:{
+      deploymentFiles,configFiles,scriptFiles,
+      discoveredAddresses:addresses,
+      discoveredChainIds:chainIds,
+      roleMentions,
+      oracleMentions,
+      proxyAndUpgradeabilityMentions:proxyMentions,
+      status:'MECHANICAL_INVENTORY_REQUIRES_AGENT_CONTEXT'
+    },
+    testingAndToolingReadiness:{
+      testFiles,harnessFiles,scriptFiles,configFiles,
+      packageScripts:packageJson?.scripts??{},
+      detectedTooling:{
+        hardhat:configFiles.some(x=>/^hardhat\.config\./i.test(path.basename(x))),
+        foundry:configFiles.some(x=>path.basename(x)==='foundry.toml'),
+        medusa:configFiles.some(x=>/medusa/i.test(path.basename(x))),
+        slitherVersion:'0.11.6',
+        compilerVersion:cfg.compilerVersion
+      },
+      status:'MECHANICAL_INVENTORY_REQUIRES_AGENT_ADEQUACY_REVIEW'
+    },
+    bytecodeAndGasEvidence:{
+      artifactCount:artifactSizes.length,
+      artifacts:artifactSizes,
+      deployabilityRisks,
+      eip170RuntimeLimitBytes:24576
+    }
+  };
+}
+async function buildContextReviewPacket({projectRoot,sourceIntelligence,projectReadiness,slither}){
+  const sourceEntries=[];
+  for(const item of sourceIntelligence.sourceFiles??[]){
+    const rel=item.path;
+    const abs=path.join(projectRoot,...rel.split('/'));
+    const text=await readSmallText(abs,2*1024*1024);
+    if(text==null)continue;
+    sourceEntries.push({path:rel,sha256:item.sha256,content:text});
+  }
+  return{
+    schemaVersion:'curveyield-lite-phase0-context-review-input-v1',
+    purpose:'TEMPORARY_AGENT_REVIEW_INPUT_NOT_A_PHASE0_DELIVERABLE',
+    sourceEntries,
+    mechanicalIndexes:{
+      contracts:sourceIntelligence.contracts??[],
+      functions:sourceIntelligence.functions??[],
+      storageLayout:sourceIntelligence.storageLayout??[],
+      inheritanceGraph:sourceIntelligence.inheritanceGraph??[],
+      callGraph:sourceIntelligence.callGraph??[],
+      privilegeCandidates:sourceIntelligence.privilegeCandidates??[],
+      externalInterfaces:sourceIntelligence.externalInterfaces??[],
+      valueFlowCandidates:sourceIntelligence.valueFlowCandidates??[],
+      securitySurfaces:sourceIntelligence.securitySurfaces??[],
+      protocolTopology:sourceIntelligence.protocolTopology??{}
+    },
+    projectReadiness,
+    slitherSummary:{status:slither.status,findingCount:slither.findingCount??0,detectors:slither.detectors??[]}
+  };
+}
+
 async function main(){
   const args=parseArgs(process.argv.slice(2));
   if(!args.request||!args.output)throw new Error('usage: --request <request.json> --output <dir>');
@@ -319,6 +431,8 @@ async function main(){
   const slither=await slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit});
   const sbom=await generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build});
   const sourceIntelligence=await generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}});
+  const projectReadiness=await scanProjectReadiness({projectRoot:detected.absolute,build,cfg});
+  const contextReviewPacket=await buildContextReviewPacket({projectRoot:detected.absolute,sourceIntelligence,projectReadiness,slither});
 
   if(!slitherSucceeded(slither))throw new Error('Slither terminal result is not successful');
   if(sourceIntelligence?.completion?.semanticReviewRequired!==true)throw new Error('Source Intelligence completion contract mismatch');
@@ -337,10 +451,12 @@ async function main(){
     ['BUILD_AND_SOURCE_IDENTITY_v1.json',buildIdentity],
     ['SBOM_v1.json',sbom],
     ['SLITHER_v1.json',slither],
-    ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence]
+    ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence],
+    ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness],
+    ['CONTEXT_REVIEW_PACKET_v1.json',contextReviewPacket]
   ];
   for(const [name,obj] of files)await fs.writeFile(path.join(out,name),JSON.stringify(obj,null,2)+'\n');
-  process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0},outputs:files.map(([name])=>name)},null,2)+'\n');
+  process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},outputs:files.map(([name])=>name)},null,2)+'\n');
 }
 
 main().catch(error=>{console.error(JSON.stringify({status:'FAIL',message:error?.message??String(error),code:error?.code??null,attempts:error?.attempts??null},null,2));process.exitCode=1;});

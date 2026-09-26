@@ -94,7 +94,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
   const artifacts=[...(build.artifacts??[])].sort((a,b)=>`${a.sourceName}:${a.contractName}`.localeCompare(`${b.sourceName}:${b.contractName}`));
 
   const compilerArtifacts=[],contracts=[],functions=[],storageLayout=[],inheritanceGraph=[],privilegeCandidates=[],eventsAndErrors=[],sourceAnchors=[];
-  const contractByAstId=new Map(), contractByQualified=new Map();
+  const contractByAstId=new Map(), contractByQualified=new Map(), functionByAstId=new Map(), functionMetaById=new Map();
 
   for (const [i,a] of artifacts.entries()) {
     const qualifiedName=`${a.sourceName}:${a.contractName}`, artifactId=`ART-${pad(i+1)}`;
@@ -103,6 +103,8 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
       artifactId,qualifiedName,sourceId,language:lang,abiDigestSha256:digestCanonicalV1(a.abi??[]),
       creationBytecodeDigestSha256:bytecodeDigest(a.bytecode),deployedBytecodeDigestSha256:bytecodeDigest(a.deployedBytecode),
       storageLayoutAvailable:a.storageLayout?'YES':'NO',metadataAvailable:a.metadata!=null,methodIdentifiers:clone(a.methodIdentifiers??{}),
+      creationBytecodeBytes:Math.floor(String(a.bytecode??'0x').replace(/^0x/,'').length/2),
+      deployedBytecodeBytes:Math.floor(String(a.deployedBytecode??'0x').replace(/^0x/,'').length/2),
       preliminaryDeploymentGasEstimate:{acceptanceClass:'PRELIMINARY_NOT_PHASE7_ACCEPTED',estimate:a.gasEstimates?.creation?.totalCost??null},
       basis:'ADMITTED_COMPILER_OUTPUT'
     });
@@ -125,6 +127,8 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
         functions.push({functionId:id,contractId,signature:sig,selector:selector?`0x${selector.replace(/^0x/,'')}`:null,visibility:fn?.node?.visibility??'PUBLIC_OR_EXTERNAL_ABI',
           stateMutability:abi.stateMutability??fn?.node?.stateMutability??null,payable:(abi.stateMutability??fn?.node?.stateMutability)==='payable',modifiers,
           sourceLocation:fLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',confidenceClass:'COMPILER_FACT',basis:fLoc?'ABI_METHOD_IDENTIFIERS_AND_SOLIDITY_AST':'ABI_AND_METHOD_IDENTIFIERS'});
+        functionMetaById.set(id,{functionId:id,contractId,signature:sig,qualifiedContract:qualifiedName,sourceName:a.sourceName,contractName:a.contractName});
+        if(Number.isInteger(fn?.node?.id)) functionByAstId.set(fn.node.id,{functionId:id,contractId,signature:sig,qualifiedContract:qualifiedName,sourceName:a.sourceName,contractName:a.contractName});
         if (fLoc) sourceAnchors.push({anchorId:`ANCHOR-${pad(sourceAnchors.length+1,4)}`,sourceId,symbolId:id,startLine:fLoc.startLine,endLine:fLoc.endLine,sourceDigestSha256:source.sha256,basis:'SOLIDITY_AST_SRC'});
         for (const m of fn?.node?.modifiers??[]) privilegeCandidates.push({candidateId:`PRIV-${pad(privilegeCandidates.length+1,4)}`,contractId,functionId:id,candidateKind:'MODIFIER_INVOCATION',
           modifierOrGuard:modifierName(m),authorityExpression:modifierName(m),sourceLocation:loc(source,m.src)?.label??fLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',
@@ -151,6 +155,106 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
     }
   }
 
+
+  const callGraph=[],externalInterfaces=[],valueFlowCandidates=[];
+  const callDedup=new Set(), externalDedup=new Set(), valueDedup=new Set();
+  function unwrapExpression(expr){
+    let cur=expr;
+    while(cur?.nodeType==='FunctionCallOptions') cur=cur.expression;
+    return cur;
+  }
+  function expressionRef(expr){
+    const cur=unwrapExpression(expr);
+    return Number.isInteger(cur?.referencedDeclaration)?cur.referencedDeclaration:null;
+  }
+  function expressionMember(expr){
+    const cur=unwrapExpression(expr);
+    return cur?.memberName??cur?.name??cur?.nodeType??'UNKNOWN_CALL';
+  }
+  function expressionType(expr){
+    const cur=unwrapExpression(expr);
+    return cur?.expression?.typeDescriptions?.typeString??cur?.typeDescriptions?.typeString??null;
+  }
+  function pushCall(edge){
+    const key=[edge.callerFunctionId,edge.targetFunctionId??'',edge.memberOrName??'',edge.sourceLocation??''].join('|');
+    if(callDedup.has(key))return; callDedup.add(key); callGraph.push({...edge,callEdgeId:`CALL-${pad(callGraph.length+1,4)}`});
+  }
+  function pushExternal(item){
+    const key=[item.callerFunctionId,item.interfaceOrType??'',item.memberOrName??''].join('|');
+    if(externalDedup.has(key))return; externalDedup.add(key); externalInterfaces.push({...item,externalInterfaceId:`EXT-${pad(externalInterfaces.length+1,4)}`});
+  }
+  function pushValue(item){
+    const key=[item.callerFunctionId,item.flowKind,item.memberOrName??'',item.sourceLocation??''].join('|');
+    if(valueDedup.has(key))return; valueDedup.add(key); valueFlowCandidates.push({...item,valueFlowCandidateId:`VALUE-${pad(valueFlowCandidates.length+1,4)}`});
+  }
+
+  for (const [sourceName,rootAst] of Object.entries(build.sourceAsts??{}).sort(([a],[b])=>a.localeCompare(b))) {
+    const source=byPath.get(sourceName);
+    walk(rootAst,(node,ctx)=>{
+      if(!ctx?.fn||!ctx?.contract)return;
+      const callerContractId=contractByAstId.get(ctx.contract.id)??contractByQualified.get(`${sourceName}:${ctx.contract.name}`)??null;
+      const caller=functionByAstId.get(ctx.fn.id)??null;
+      if(!callerContractId||!caller)return;
+      const callLoc=loc(source,node.src)?.label??'UNSUPPORTED_AST_SOURCE_LOCATION';
+
+      if(node.nodeType==='FunctionCall'){
+        const expr=unwrapExpression(node.expression);
+        const ref=expressionRef(node.expression);
+        const target=functionByAstId.get(ref)??null;
+        const member=expressionMember(node.expression);
+        const interfaceType=expressionType(node.expression);
+        const isMember=expr?.nodeType==='MemberAccess';
+        const sameContract=target?.contractId===callerContractId;
+        const callClass=target ? (sameContract?'INTERNAL_OR_SELF':'CROSS_CONTRACT_OR_INHERITED') : (isMember?'UNRESOLVED_MEMBER_CALL':'UNRESOLVED_CALL');
+        pushCall({
+          callerContractId,callerFunctionId:caller.functionId,targetContractId:target?.contractId??null,targetFunctionId:target?.functionId??null,
+          memberOrName:member,callClass,interfaceOrType:interfaceType,sourceLocation:callLoc,confidenceClass:target?'SOLIDITY_AST_REFERENCED_DECLARATION':'SOLIDITY_AST_CALL_SYNTAX',
+          basis:target?'FUNCTION_CALL_REFERENCED_DECLARATION':'FUNCTION_CALL_EXPRESSION'
+        });
+        if(isMember && (!target || !sameContract)){
+          pushExternal({callerContractId,callerFunctionId:caller.functionId,targetContractId:target?.contractId??null,targetFunctionId:target?.functionId??null,
+            interfaceOrType:interfaceType,memberOrName:member,sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',
+            basis:'MEMBER_ACCESS_FUNCTION_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+        }
+        if(['transfer','transferFrom','safeTransfer','safeTransferFrom','send'].includes(member)){
+          pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'TOKEN_OR_NATIVE_TRANSFER_CALL',memberOrName:member,interfaceOrType:interfaceType,
+            sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'TRANSFER_LIKE_MEMBER_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+        }
+        if(member==='approve'||member==='safeApprove'||member==='forceApprove'){
+          pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'TOKEN_APPROVAL_CALL',memberOrName:member,interfaceOrType:interfaceType,
+            sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'APPROVAL_LIKE_MEMBER_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+        }
+        if(member==='call'||member==='delegatecall'||member==='staticcall'){
+          pushExternal({callerContractId,callerFunctionId:caller.functionId,targetContractId:null,targetFunctionId:null,interfaceOrType,
+            memberOrName:member,sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'LOW_LEVEL_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+          if(member==='call'){
+            pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'LOW_LEVEL_CALL_POTENTIAL_VALUE_TRANSFER',memberOrName:member,interfaceOrType,
+              sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'LOW_LEVEL_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+          }
+        }
+      } else if(node.nodeType==='NewExpression'){
+        const ref=Number.isInteger(node?.typeName?.referencedDeclaration)?node.typeName.referencedDeclaration:null;
+        const targetContractId=contractByAstId.get(ref)??null;
+        pushCall({callerContractId,callerFunctionId:caller.functionId,targetContractId,targetFunctionId:null,memberOrName:'new',
+          callClass:'CONTRACT_CREATION',interfaceOrType:node?.typeDescriptions?.typeString??null,sourceLocation:callLoc,confidenceClass:'SOLIDITY_AST_CREATION_SYNTAX',basis:'NEW_EXPRESSION'});
+      }
+    });
+  }
+
+  const dependencyEdges=[];
+  const depSeen=new Set();
+  for(const edge of callGraph){
+    if(!edge.targetContractId||edge.targetContractId===edge.callerContractId)continue;
+    const key=`${edge.callerContractId}->${edge.targetContractId}`; if(depSeen.has(key))continue; depSeen.add(key);
+    dependencyEdges.push({edgeId:`DEP-${pad(dependencyEdges.length+1,4)}`,fromContractId:edge.callerContractId,toContractId:edge.targetContractId,
+      relationship:'AST_RESOLVED_CALL_DEPENDENCY',status:'STRUCTURAL',basis:'NORMALIZED_CALL_GRAPH'});
+  }
+  const upgradeabilityEdges=[];
+  for(const edge of callGraph.filter(x=>x.memberOrName==='delegatecall')){
+    upgradeabilityEdges.push({edgeId:`UPGRADE-${pad(upgradeabilityEdges.length+1,4)}`,fromContractId:edge.callerContractId,toContractId:edge.targetContractId??null,
+      relationship:'DELEGATECALL_CANDIDATE',status:'CANDIDATE',sourceLocation:edge.sourceLocation,basis:'LOW_LEVEL_DELEGATECALL_SYNTAX'});
+  }
+
   const sourceIdentity={repository:request.source.repository,commit:request.source.commit,projectPath:request.source.projectPath,archivePath:request.source.archivePath??null,archiveSha256:request.source.archiveSha256??null,
     sourceTreeDigestSha256:digestCanonicalV1(sourceFiles.map(({path,language,sha256})=>({path,language,sha256})))};
   const buildCore={system:build.system??null,compilers:clone(request.configuration.compilers??[]),optimizer:clone(request.configuration.optimizer??null),evmVersion:request.configuration.evmVersion??null,
@@ -164,9 +268,9 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
   if (sourceFiles.some(x=>x.language==='VYPER')) limitations.push({limitationId:`SI-TECH-LIM-${pad(limitations.length+1)}`,category:'VYPER_AST_STRUCTURAL_LIMITATION',
     affectedSections:['inheritanceGraph','callGraph','privilegeCandidates','externalInterfaces','valueFlowCandidates','sourceAnchors','storageLayout'],reason:'Pinned Vyper build exposes ABI/bytecode but not equivalent AST/storage layout.',
     downstreamRequiredAction:'Preserve Vyper compiler facts and require semantic raw-source review.'});
-  limitations.push({limitationId:`SI-TECH-LIM-${pad(limitations.length+1)}`,category:'SEMANTIC_CALL_AND_VALUE_FLOW_DEFERRED',
-    affectedSections:['callGraph','externalInterfaces','valueFlowCandidates','protocolTopology'],reason:'Stage C.4 emits build/ABI/AST structural facts; semantic call/value-flow/topology classification remains reviewer-owned.',
-    downstreamRequiredAction:'Later Lite reviewers reuse this bundle and extend semantically without rebuilding the structural inventory.'});
+  limitations.push({limitationId:`SI-TECH-LIM-${pad(limitations.length+1)}`,category:'SEMANTIC_CALL_AND_VALUE_FLOW_REVIEW_REQUIRED',
+    affectedSections:['callGraph','externalInterfaces','valueFlowCandidates','protocolTopology'],reason:'AST-derived structural call/interface/value-flow candidates are generated, but business meaning, dynamic-dispatch resolution, trust implications and economic interpretation remain reviewer-owned.',
+    downstreamRequiredAction:'Reviewer must verify and contextualize the generated structural edges without rebuilding the mechanical inventory.'});
   if (!slither || !['completed','completed_with_findings'].includes(slither.status)) limitations.push({limitationId:`SI-TECH-LIM-${pad(limitations.length+1)}`,category:'STATIC_RECON_LIMITATION',
     affectedSections:['staticRecon.slither'],reason:`Slither terminal status was ${slither?.status??'UNAVAILABLE'}.`,downstreamRequiredAction:'Carry exact analyzer limitation and raw evidence.'});
 
@@ -175,11 +279,17 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
     neutrality:{securityDisposition:'REVIEWER_REQUIRED',findingPromotion:'FORBIDDEN_BY_GENERATOR',statement:'Compiler/source/static facts and neutral candidates only; no finding, severity, exploitability, or trust conclusion.'},
     requestIdentity:{requestId:request.requestId,requestDigest:request.requestDigest,campaignId:request.campaignId,assignmentId:request.assignmentId,phaseId:request.phaseId,profileId:request.profileId},
     sourceIdentity,buildIdentity:{...buildCore,digestSha256:digestCanonicalV1(buildCore)},sourceFiles,compilerArtifacts,contracts,functions,storageLayout,inheritanceGraph,
-    callGraph:[],privilegeCandidates,externalInterfaces:[],valueFlowCandidates:[],eventsAndErrors,sourceAnchors,
-    securitySurfaces:[{surfaceId:'SURFACE-CALLABLE',surfaceClass:'CALLABLE_SURFACE',sourceIds:sourceFiles.map(x=>x.sourceId),contractIds:contracts.map(x=>x.contractId),functionIds:functions.map(x=>x.functionId),
-      storageIds:storageLayout.map(x=>x.storageId),externalInterfaceIds:[],privilegeCandidateIds:privilegeCandidates.map(x=>x.candidateId),valueFlowCandidateIds:[],sourceAnchorIds:sourceAnchors.map(x=>x.anchorId),
-      phase1Ownership:'STRUCTURAL_INVENTORY',laterPhaseTreatment:'REUSE_VERIFY_EXTEND_SEMANTICALLY',status:'CURRENT',basis:'ADMITTED_COMPILER_AND_AST_FACTS'}],
-    protocolTopology:{upgradeabilityEdges:[],dependencyEdges:[],crossChainEdges:[],offchainAutomationEdges:[],topologyLimitations:['SEMANTIC_PROTOCOL_TOPOLOGY_REMAINS_REVIEWER_OWNED']},
+    callGraph,privilegeCandidates,externalInterfaces,valueFlowCandidates,eventsAndErrors,sourceAnchors,
+    securitySurfaces:[
+      {surfaceId:'SURFACE-CALLABLE',surfaceClass:'CALLABLE_SURFACE',sourceIds:sourceFiles.map(x=>x.sourceId),contractIds:contracts.map(x=>x.contractId),functionIds:functions.map(x=>x.functionId),
+        storageIds:storageLayout.map(x=>x.storageId),externalInterfaceIds:externalInterfaces.map(x=>x.externalInterfaceId),privilegeCandidateIds:privilegeCandidates.map(x=>x.candidateId),valueFlowCandidateIds:valueFlowCandidates.map(x=>x.valueFlowCandidateId),sourceAnchorIds:sourceAnchors.map(x=>x.anchorId),
+        phase1Ownership:'STRUCTURAL_INVENTORY',laterPhaseTreatment:'REUSE_VERIFY_EXTEND_SEMANTICALLY',status:'CURRENT',basis:'ADMITTED_COMPILER_AND_AST_FACTS'},
+      {surfaceId:'SURFACE-PRIVILEGE',surfaceClass:'PRIVILEGE_AND_ACCESS_CANDIDATES',sourceIds:sourceFiles.map(x=>x.sourceId),contractIds:[...new Set(privilegeCandidates.map(x=>x.contractId))],functionIds:[...new Set(privilegeCandidates.map(x=>x.functionId).filter(Boolean))],
+        storageIds:[],externalInterfaceIds:[],privilegeCandidateIds:privilegeCandidates.map(x=>x.candidateId),valueFlowCandidateIds:[],sourceAnchorIds:[],phase1Ownership:'STRUCTURAL_INVENTORY',laterPhaseTreatment:'REVIEW_AUTHORITY_SEMANTICS',status:'CURRENT',basis:'AST_MODIFIER_CANDIDATES'},
+      {surfaceId:'SURFACE-VALUE',surfaceClass:'VALUE_FLOW_CANDIDATES',sourceIds:sourceFiles.map(x=>x.sourceId),contractIds:[...new Set(valueFlowCandidates.map(x=>x.callerContractId))],functionIds:[...new Set(valueFlowCandidates.map(x=>x.callerFunctionId))],
+        storageIds:[],externalInterfaceIds:externalInterfaces.map(x=>x.externalInterfaceId),privilegeCandidateIds:[],valueFlowCandidateIds:valueFlowCandidates.map(x=>x.valueFlowCandidateId),sourceAnchorIds:[],phase1Ownership:'STRUCTURAL_INVENTORY',laterPhaseTreatment:'REVIEW_VALUE_SEMANTICS',status:'CURRENT',basis:'AST_TRANSFER_APPROVAL_LOW_LEVEL_CALL_CANDIDATES'}
+    ],
+    protocolTopology:{upgradeabilityEdges,dependencyEdges,crossChainEdges:[],offchainAutomationEdges:[],topologyLimitations:['OFFCHAIN_AUTOMATION_AND_CROSS_CHAIN_RELATIONSHIPS_REQUIRE_PROJECT_FILE_REVIEW','DYNAMIC_DISPATCH_AND_BUSINESS_RELATIONSHIPS_REQUIRE_REVIEWER_CONTEXT']},
     staticRecon:{slither:{status:slither?.status??'UNAVAILABLE',version:slither?.version??null,rawEvidenceRef:slither?.rawArtifactRef??null,candidateCount:detectors.length,
       candidateIndex:detectors.map((d,i)=>({candidateId:`SLITHER-${pad(i+1,4)}`,check:d?.check??d?.description??d?.impact??'UNNAMED_DETECTOR',confidence:d?.confidence??null,impact:d?.impact??null,status:'NEUTRAL_ANALYZER_CANDIDATE'})),
       limitation:slither&&['completed','completed_with_findings'].includes(slither.status)?null:`SLITHER_${String(slither?.status??'UNAVAILABLE').toUpperCase()}`},
