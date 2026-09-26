@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "curveyield-lite-phase0-intelligence-request-v1",
+  "requestId": "p0i-curveyield-dex-v15-optimized-v3",
+  "campaignId": "curveyield-dex-v15-audit-optimized-r1",
+  "source": {
+    "repository": "CurveYield2/Audits",
+    "commit": "57b45192c8c48a9571bf6cfd689294cff885e9c5",
+    "archivePath": "CurveYield DEX V15 Audit - Optimized/source/CurveYield_DEX_Fresh_Audit_Package_2026-08-16.zip",
+    "archiveSha256": "526a729ce73d493f2ccbb568378a18dd1eec0788d0165e02dc5ceb773b9953ed"
+  },
+  "destination": {
+    "repository": "CurveYield2/Audit-Controller",
+    "ref": "audit/curveyield-dex-v15-audit-optimized-v2",
+    "campaignPath": "campaigns/CurveYield DEX V15 Audit - Optimized"
+  }
+}
