@@ -185,9 +185,13 @@ export async function collectNativeContractArtifacts(projectRoot, fsApi = fs) {
           abi: raw?.abi ?? [],
           metadata: raw?.metadata ?? null,
           storageLayout: raw?.storageLayout ?? null,
+          devdoc: raw?.devdoc ?? {},
+          userdoc: raw?.userdoc ?? {},
           methodIdentifiers: raw?.evm?.methodIdentifiers ?? {},
           bytecode: bytecodeObject ? `0x${String(bytecodeObject).replace(/^0x/, '')}` : '0x',
           deployedBytecode: deployedObject ? `0x${String(deployedObject).replace(/^0x/, '')}` : '0x',
+          bytecodeSourceMap: raw?.evm?.bytecode?.sourceMap ?? '',
+          deployedBytecodeSourceMap: raw?.evm?.deployedBytecode?.sourceMap ?? '',
           gasEstimates: raw?.evm?.gasEstimates ?? null,
         };
         const existing = byQualifiedName.get(key);
