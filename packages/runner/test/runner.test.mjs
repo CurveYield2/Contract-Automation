@@ -39,8 +39,12 @@ test('buildCompilerInput requests deployment, inspection, and gas evidence artif
     'abi',
     'metadata',
     'storageLayout',
+    'devdoc',
+    'userdoc',
     'evm.bytecode.object',
+    'evm.bytecode.sourceMap',
     'evm.deployedBytecode.object',
+    'evm.deployedBytecode.sourceMap',
     'evm.methodIdentifiers',
     'evm.gasEstimates'
   ]);
