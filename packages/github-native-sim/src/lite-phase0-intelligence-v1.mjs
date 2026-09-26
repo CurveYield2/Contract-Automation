@@ -205,7 +205,7 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
     exportInfo,
     raw,
     parsed,
-    success:raw.exitCode===0&&parsed?.success===true
+    success:parsed?.success===true
   };
 }
 
@@ -256,7 +256,7 @@ async function slitherRepair({projectRoot,build,sourceCommit}){
   for(const item of commands){
     const raw=await runProcess({command:'slither',args:item.args,cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
-    const success=raw.exitCode===0&&parsed?.success===true;
+    const success=parsed?.success===true;
     const result={
       strategy:item.strategy,
       exitCode:raw.exitCode,
