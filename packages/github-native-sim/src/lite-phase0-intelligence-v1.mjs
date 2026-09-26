@@ -127,30 +127,161 @@ async function detectBuildConfig(projectRoot){
   return{compilerVersion:compiler.version,compilerCandidates:candidates,optimizer:{enabled,runs},viaIR:via?via[1]==='true':false,evmVersion:evm?.[1]??null,evidence};
 }
 
+
+async function resolveCompiledSourceFile(projectRoot, sourceName){
+  const candidates=[
+    path.resolve(projectRoot, sourceName),
+    path.resolve(projectRoot, 'node_modules', sourceName)
+  ];
+  for(const candidate of candidates){
+    if(await exists(candidate))return candidate;
+  }
+  throw new Error(`compiled source is missing from staged project: ${sourceName}`);
+}
+function sourceIsDependency(sourceName){
+  return !String(sourceName).replaceAll('\\\\','/').startsWith('contracts/');
+}
+async function writeCryticCompileExport({projectRoot,build,outDir}){
+  const asts=build?.sourceAsts??{};
+  if(!asts||Object.keys(asts).length===0)throw new Error('Slither exact-build export requires compiler ASTs');
+  const artifacts=Array.isArray(build?.artifacts)?build.artifacts:[];
+  if(artifacts.length===0)throw new Error('Slither exact-build export requires compiler artifacts');
+  const bySource=new Map();
+  for(const sourceName of Object.keys(asts).sort()){
+    const absolute=await resolveCompiledSourceFile(projectRoot,sourceName);
+    const filename={absolute,relative:sourceName,short:sourceName,used:sourceName};
+    bySource.set(sourceName,{ast:asts[sourceName],contracts:{},filename});
+  }
+  for(const artifact of artifacts){
+    const sourceName=artifact.sourceName;
+    if(!bySource.has(sourceName)){
+      const absolute=await resolveCompiledSourceFile(projectRoot,sourceName);
+      bySource.set(sourceName,{ast:null,contracts:{},filename:{absolute,relative:sourceName,short:sourceName,used:sourceName}});
+    }
+    const unit=bySource.get(sourceName);
+    unit.contracts[artifact.contractName]={
+      abi:artifact.abi??[],
+      bin:String(artifact.bytecode??'0x').replace(/^0x/,''),
+      'bin-runtime':String(artifact.deployedBytecode??'0x').replace(/^0x/,''),
+      srcmap:artifact.bytecodeSourceMap??'',
+      'srcmap-runtime':artifact.deployedBytecodeSourceMap??'',
+      filenames:unit.filename,
+      libraries:{},
+      is_dependency:sourceIsDependency(sourceName),
+      userdoc:artifact.userdoc??{},
+      devdoc:artifact.devdoc??{}
+    };
+  }
+  const source_units={};
+  const filenames=[];
+  for(const [sourceName,unit] of [...bySource.entries()].sort(([a],[b])=>a.localeCompare(b))){
+    source_units[sourceName]={ast:unit.ast,contracts:unit.contracts};
+    filenames.push(unit.filename);
+  }
+  const payload={
+    compilation_units:{
+      phase0:{
+        compiler:{compiler:'solc',version:String(build.compilerVersion??''),optimized:true},
+        source_units,
+        filenames
+      }
+    },
+    package:null,
+    working_dir:projectRoot,
+    type:10,
+    unit_tests:[],
+    crytic_version:'0.0.2'
+  };
+  await fs.mkdir(outDir,{recursive:true});
+  const exportPath=path.join(outDir,'phase0_export.json');
+  await fs.writeFile(exportPath,JSON.stringify(payload));
+  return{exportPath,sourceUnitCount:Object.keys(source_units).length,contractCount:artifacts.length};
+}
+async function runSlitherExport({projectRoot,build,sourceCommit}){
+  const exportInfo=await writeCryticCompileExport({projectRoot,build,outDir:path.join(projectRoot,'.audit-slither-export')});
+  const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies'],cwd:projectRoot});
+  const parsed=parseSlitherJson(raw.stdout);
+  return{
+    exportInfo,
+    raw,
+    parsed,
+    success:raw.exitCode===0&&parsed?.success===true
+  };
+}
+
 function slitherSucceeded(r){return r&&['completed','completed_with_findings'].includes(r.status)&&r.componentStatus==='COMPLETED';}
 function parseSlitherJson(text){
   try{const p=JSON.parse(String(text??''));const d=Array.isArray(p?.results?.detectors)?p.results.detectors:[];return{success:p?.success===true,detectors:d};}catch{return null;}
 }
 async function slitherRepair({projectRoot,build,sourceCommit}){
   const attempts=[];
-  const primary=await runSlitherAnalysis({projectRoot,version:'0.11.6',sourceCommit,rawArtifactRef:'github-actions://lite-phase0/slither',standardJsonPath:build?.slitherStandardJsonPath??null});
-  attempts.push({strategy:'runner-standard-json',result:primary});
-  if(slitherSucceeded(primary))return{...primary,repairAttempts:attempts};
 
-  const commands=[];
-  if(build?.slitherStandardJsonPath)commands.push({strategy:'standard-json-direct',args:[build.slitherStandardJsonPath,'--solc-standard-json','--json','-']});
+  try{
+    const exact=await runSlitherExport({projectRoot,build,sourceCommit});
+    attempts.push({
+      strategy:'exact-build-crytic-export',
+      exportInfo:exact.exportInfo,
+      exitCode:exact.raw.exitCode,
+      stdout:cleanText(exact.raw.stdout),
+      stderr:cleanText(exact.raw.stderr),
+      parsedSuccess:exact.parsed?.success??false,
+      findingCount:exact.parsed?.detectors?.length??0
+    });
+    if(exact.success){
+      return{
+        backend:'slither',
+        version:'0.11.6',
+        sourceCommit,
+        rawArtifactRef:'github-actions://lite-phase0/slither',
+        status:(exact.parsed.detectors.length?'completed_with_findings':'completed'),
+        terminal:true,
+        componentStatus:'COMPLETED',
+        continuationDisposition:'COMPLETE_EVIDENCE',
+        authoritativeFinding:false,
+        findingCount:exact.parsed.detectors.length,
+        detectors:exact.parsed.detectors,
+        repairAttempts:attempts,
+        inputMode:'EXACT_BUILD_CRYTIC_COMPILE_EXPORT'
+      };
+    }
+  }catch(error){
+    attempts.push({strategy:'exact-build-crytic-export',error:{message:error?.message??String(error)}});
+  }
+
   const hardhat=await isDir(path.join(projectRoot,'node_modules'))&&((await fs.readdir(projectRoot)).some(n=>/^hardhat\.config\./.test(n)));
-  if(hardhat)commands.push({strategy:'hardhat-project',args:['.','--compile-force-framework','hardhat','--json','-']});
-  commands.push({strategy:'project-auto',args:['.','--json','-']});
+  const commands=[];
+  if(hardhat)commands.push({strategy:'hardhat-project',args:['.','--compile-force-framework','hardhat','--json','-','--exclude-dependencies']});
+  commands.push({strategy:'project-auto',args:['.','--json','-','--exclude-dependencies']});
 
-  for(const c of commands){
-    const raw=await runProcess({command:'slither',args:c.args,cwd:projectRoot});
+  for(const item of commands){
+    const raw=await runProcess({command:'slither',args:item.args,cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
     const success=raw.exitCode===0&&parsed?.success===true;
-    const result={strategy:c.strategy,exitCode:raw.exitCode,stdout:cleanText(raw.stdout),stderr:cleanText(raw.stderr),parsedSuccess:parsed?.success??false,findingCount:parsed?.detectors?.length??0};
+    const result={
+      strategy:item.strategy,
+      exitCode:raw.exitCode,
+      stdout:cleanText(raw.stdout),
+      stderr:cleanText(raw.stderr),
+      parsedSuccess:parsed?.success??false,
+      findingCount:parsed?.detectors?.length??0
+    };
     attempts.push(result);
     if(success){
-      return{backend:'slither',version:'0.11.6',sourceCommit,rawArtifactRef:'github-actions://lite-phase0/slither',status:(parsed.detectors.length?'completed_with_findings':'completed'),terminal:true,componentStatus:'COMPLETED',continuationDisposition:'COMPLETE_EVIDENCE',authoritativeFinding:false,findingCount:parsed.detectors.length,detectors:parsed.detectors,repairAttempts:attempts};
+      return{
+        backend:'slither',
+        version:'0.11.6',
+        sourceCommit,
+        rawArtifactRef:'github-actions://lite-phase0/slither',
+        status:(parsed.detectors.length?'completed_with_findings':'completed'),
+        terminal:true,
+        componentStatus:'COMPLETED',
+        continuationDisposition:'COMPLETE_EVIDENCE',
+        authoritativeFinding:false,
+        findingCount:parsed.detectors.length,
+        detectors:parsed.detectors,
+        repairAttempts:attempts,
+        inputMode:item.strategy
+      };
     }
   }
   const error=new Error('Slither failed after all admitted repair strategies');
@@ -158,7 +289,6 @@ async function slitherRepair({projectRoot,build,sourceCommit}){
   error.attempts=attempts;
   throw error;
 }
-
 async function main(){
   const args=parseArgs(process.argv.slice(2));
   if(!args.request||!args.output)throw new Error('usage: --request <request.json> --output <dir>');
