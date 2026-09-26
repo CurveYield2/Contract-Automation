@@ -100,16 +100,25 @@ async function detectBuildConfig(projectRoot){
     const abs=path.join(projectRoot,...rel.split('/')); if(await exists(abs)){texts.push({path:rel,text:await readMaybe(abs)});evidence.push(rel);}
   }
   const candidates=[];
-  const lockSolc=lock?.packages?.['node_modules/solc']?.version; if(exactSemver(lockSolc))candidates.push({version:exactSemver(lockSolc),basis:'package-lock node_modules/solc'});
   for(const t of texts){
-    for(const re of [/solidity\s*:\s*['"](\d+\.\d+\.\d+)['"]/g,/version\s*:\s*['"](\d+\.\d+\.\d+)['"]/g,/SOLC_VERSION\s*=\s*['"](\d+\.\d+\.\d+)['"]/g]){
-      for(const m of t.text.matchAll(re))candidates.push({version:m[1],basis:t.path});
+    for(const [re,priority,label] of [
+      [/solidity\s*:\s*['"](\d+\.\d+\.\d+)['"]/g,120,'explicit solidity version'],
+      [/SOLC_VERSION\s*=\s*['"](\d+\.\d+\.\d+)['"]/g,120,'explicit SOLC_VERSION'],
+      [/version\s*:\s*['"](\d+\.\d+\.\d+)['"]/g,100,'version field']
+    ]){
+      for(const m of t.text.matchAll(re))candidates.push({version:m[1],basis:t.path,label,priority});
     }
   }
-  const pkgSolc=pkg?.devDependencies?.solc??pkg?.dependencies?.solc;if(exactSemver(pkgSolc))candidates.push({version:exactSemver(pkgSolc),basis:'package.json solc'});
-  const unique=[...new Map(candidates.map(x=>[x.version,x])).values()];
-  if(!unique.length)throw new Error('unable to detect exact Solidity compiler version from source package');
-  const compiler=unique[0];
+  const pkgSolc=pkg?.devDependencies?.solc??pkg?.dependencies?.solc;
+  if(exactSemver(pkgSolc))candidates.push({version:exactSemver(pkgSolc),basis:'package.json solc',label:'declared solc dependency',priority:80});
+  const lockSolc=lock?.packages?.['node_modules/solc']?.version;
+  if(exactSemver(lockSolc))candidates.push({version:exactSemver(lockSolc),basis:'package-lock node_modules/solc',label:'locked solc package',priority:60});
+  candidates.sort((a,b)=>b.priority-a.priority||a.basis.localeCompare(b.basis));
+  if(!candidates.length)throw new Error('unable to detect exact Solidity compiler version from source package');
+  const topPriority=candidates[0].priority;
+  const topVersions=[...new Set(candidates.filter(x=>x.priority===topPriority).map(x=>x.version))];
+  if(topVersions.length>1)throw new Error(`conflicting explicit Solidity compiler versions: ${topVersions.join(', ')}`);
+  const compiler=candidates[0];
   const allText=texts.map(x=>x.text).join('\n');
   const opt=allText.match(/optimizer\s*:\s*\{[\s\S]{0,240}?enabled\s*:\s*(true|false)[\s\S]{0,240}?runs\s*:\s*(\d+)/);
   const runs=opt?Number(opt[2]):200; const enabled=opt?opt[1]==='true':true;
