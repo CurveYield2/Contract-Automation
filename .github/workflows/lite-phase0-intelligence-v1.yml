@@ -84,10 +84,10 @@ jobs:
         run: |
           set -euo pipefail
           gh auth setup-git
-          destination_repo="$(node -e "const r=require('./'$REQUEST_PATH);process.stdout.write(r.destination.repository)")"
-          destination_ref="$(node -e "const r=require('./'$REQUEST_PATH);process.stdout.write(r.destination.ref)")"
-          campaign_path="$(node -e "const r=require('./'$REQUEST_PATH);process.stdout.write(r.destination.campaignPath)")"
-          request_id="$(node -e "const r=require('./'$REQUEST_PATH);process.stdout.write(r.requestId)")"
+          destination_repo="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.repository)")"
+          destination_ref="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.ref)")"
+          campaign_path="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.campaignPath)")"
+          request_id="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.requestId)")"
 
           rm -rf .audit-controller-output
           gh repo clone "$destination_repo" .audit-controller-output -- --filter=blob:none --no-checkout
