@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
+  "campaignId": "curveyield-dex-v15-audit-optimized-strict-r1",
+  "mode": "create_fresh",
+  "chatUrl": "",
+  "wakeMessage": "[AUDIT_AUTOMATION_WAKE_V1]\nResume the admitted audit from the latest durable completion evidence. Do not restart completed work. Continue the current assignment until its required terminal state.",
+  "watchdog": {
+    "enabled": true,
+    "idleMessage": "[AUDIT_AGENT_WATCHDOG_V1]\nGET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.",
+    "gate": {
+      "mode": "LITE",
+      "repository": "CurveYield2/Audit-Controller",
+      "ref": "audit/curveyield-dex-v15-audit-optimized-strict-r1",
+      "statePath": "campaigns/CurveYield DEX V15 Audit - Optimized/controller/CAMPAIGN_STATE_v1.json",
+      "expectedPhaseId": "phase-0",
+      "expectedMilestoneId": "P0_BOOTSTRAP",
+      "activePointerPath": "campaigns/CurveYield DEX V15 Audit - Optimized/controller/ACTIVE_PHASE_POINTER_v1.json",
+      "stopStates": [
+        "WAITING_FOR_HUMAN_RESPONSE",
+        "WAITING_FOR_SUCCESSOR_AGENT",
+        "CLOSED",
+        "STOPPED_BY_HUMAN"
+      ],
+      "stopCampaignStatuses": [
+        "COMPLETE",
+        "STOPPED_BY_HUMAN"
+      ]
+    }
+  }
+}
