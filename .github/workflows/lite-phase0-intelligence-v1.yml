@@ -99,13 +99,17 @@ jobs:
           mkdir -p "$campaign_path/evidence/dependencies"
           mkdir -p "$campaign_path/evidence/static-analysis"
           mkdir -p "$campaign_path/evidence/source-intelligence"
+          mkdir -p "$campaign_path/evidence/readiness"
+          mkdir -p "$campaign_path/scratch/phase0-context-review"
 
           cp ../.phase0-intelligence-output/BUILD_AND_SOURCE_IDENTITY_v1.json "$campaign_path/evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json"
           cp ../.phase0-intelligence-output/SBOM_v1.json "$campaign_path/evidence/dependencies/SBOM_v1.json"
           cp ../.phase0-intelligence-output/SLITHER_v1.json "$campaign_path/evidence/static-analysis/SLITHER_v1.json"
           cp ../.phase0-intelligence-output/SOURCE_INTELLIGENCE_AUTOMATED_v1.json "$campaign_path/evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json"
+          cp ../.phase0-intelligence-output/PROJECT_READINESS_AUTOMATED_v1.json "$campaign_path/evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json"
+          cp ../.phase0-intelligence-output/CONTEXT_REVIEW_PACKET_v1.json "$campaign_path/scratch/phase0-context-review/CONTEXT_REVIEW_PACKET_v1.json"
 
-          git add "$campaign_path/evidence"
+          git add "$campaign_path/evidence" "$campaign_path/scratch/phase0-context-review/CONTEXT_REVIEW_PACKET_v1.json"
           git config user.name 'CurveYield Lite Phase0 Automation'
           git config user.email 'lite-phase0-automation@users.noreply.github.com'
           if ! git diff --cached --quiet; then
@@ -124,5 +128,7 @@ jobs:
             echo "- SBOM: generated"
             echo "- Slither: successful terminal evidence required"
             echo "- Automated Source Intelligence: generated"
+            echo "- Deployment/config + testing/tooling readiness inventory: generated"
+            echo "- Temporary context-review packet: generated for the agent's fresh context pass"
             echo "- No observer/ingestion/retirement/handoff receipts generated"
           } >> "$GITHUB_STEP_SUMMARY"
