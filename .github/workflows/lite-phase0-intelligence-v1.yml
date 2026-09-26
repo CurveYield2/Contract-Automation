@@ -1,0 +1,128 @@
+name: Lite Phase 0 Intelligence v1
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'lite-phase0/requests/**/request.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lite-phase0-intelligence-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  phase0-intelligence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout trusted Contract-Automation base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout atomic request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .request-source
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install trusted runner dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --force
+
+      - name: Install and verify retained audit toolchain
+        uses: ./.github/actions/setup-v7-toolchain
+
+      - name: Select cross-repository credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Resolve exactly one lean Phase-0 request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t requests < <(find .request-source/lite-phase0/requests -type f -name request.json | sort)
+          test "${#requests[@]}" -eq 1
+          echo "path=${requests[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate useful Phase-0 machine intelligence
+        env:
+          AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .phase0-intelligence-output
+          node packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs \
+            --request "${{ steps.request.outputs.path }}" \
+            --output .phase0-intelligence-output
+
+      - name: Write only useful outputs to Audit-Controller campaign
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          REQUEST_PATH: ${{ steps.request.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          destination_repo="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.repository)")"
+          destination_ref="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.ref)")"
+          campaign_path="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.campaignPath)")"
+          request_id="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.requestId)")"
+
+          rm -rf .audit-controller-output
+          gh repo clone "$destination_repo" .audit-controller-output -- --filter=blob:none --no-checkout
+          cd .audit-controller-output
+          git fetch origin "$destination_ref"
+          git checkout -B "$destination_ref" "origin/$destination_ref"
+
+          mkdir -p "$campaign_path/evidence/build"
+          mkdir -p "$campaign_path/evidence/dependencies"
+          mkdir -p "$campaign_path/evidence/static-analysis"
+          mkdir -p "$campaign_path/evidence/source-intelligence"
+
+          cp ../.phase0-intelligence-output/BUILD_AND_SOURCE_IDENTITY_v1.json "$campaign_path/evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json"
+          cp ../.phase0-intelligence-output/SBOM_v1.json "$campaign_path/evidence/dependencies/SBOM_v1.json"
+          cp ../.phase0-intelligence-output/SLITHER_v1.json "$campaign_path/evidence/static-analysis/SLITHER_v1.json"
+          cp ../.phase0-intelligence-output/SOURCE_INTELLIGENCE_AUTOMATED_v1.json "$campaign_path/evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json"
+
+          git add "$campaign_path/evidence"
+          git config user.name 'CurveYield Lite Phase0 Automation'
+          git config user.email 'lite-phase0-automation@users.noreply.github.com'
+          if ! git diff --cached --quiet; then
+            git commit -m "audit(phase0): write useful machine intelligence $request_id"
+            git push origin "HEAD:$destination_ref"
+          fi
+
+      - name: Summarize useful outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Lite Phase 0 Intelligence"
+            echo
+            echo "- Build/source identity: generated"
+            echo "- SBOM: generated"
+            echo "- Slither: successful terminal evidence required"
+            echo "- Automated Source Intelligence: generated"
+            echo "- No observer/ingestion/retirement/handoff receipts generated"
+          } >> "$GITHUB_STEP_SUMMARY"
