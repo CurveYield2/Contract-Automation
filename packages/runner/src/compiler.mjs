@@ -6,8 +6,12 @@ const OUTPUT_SELECTION = [
   'abi',
   'metadata',
   'storageLayout',
+  'devdoc',
+  'userdoc',
   'evm.bytecode.object',
+  'evm.bytecode.sourceMap',
   'evm.deployedBytecode.object',
+  'evm.deployedBytecode.sourceMap',
   'evm.methodIdentifiers',
   'evm.gasEstimates'
 ];
@@ -77,10 +81,14 @@ function normalizeArtifact(sourceName, contractName, artifact) {
     abi: artifact.abi ?? [],
     metadata: artifact.metadata ?? null,
     storageLayout: artifact.storageLayout ?? null,
+    devdoc: artifact.devdoc ?? {},
+    userdoc: artifact.userdoc ?? {},
     methodIdentifiers: artifact?.evm?.methodIdentifiers ?? {},
     gasEstimates: artifact?.evm?.gasEstimates ?? null,
     bytecode: bytecodeObject ? `0x${bytecodeObject.replace(/^0x/, '')}` : '0x',
-    deployedBytecode: deployedObject ? `0x${deployedObject.replace(/^0x/, '')}` : '0x'
+    deployedBytecode: deployedObject ? `0x${deployedObject.replace(/^0x/, '')}` : '0x',
+    bytecodeSourceMap: artifact?.evm?.bytecode?.sourceMap ?? '',
+    deployedBytecodeSourceMap: artifact?.evm?.deployedBytecode?.sourceMap ?? ''
   };
 }
 
