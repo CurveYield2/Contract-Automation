@@ -85,7 +85,6 @@ else
     created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     compact="$(date -u +%Y%m%dT%H%M%SZ)"
     generation_id="$campaign_id-g1-$compact"
-    session="web-bootstrap-agent-phase0-$compact"
 
     [ ! -e "$campaign_root" ] || { echo "::error::Campaign path collision: $campaign_root"; exit 1; }
 
@@ -102,7 +101,7 @@ else
     CAMPAIGN_ROOT="$campaign_root" SOURCE_PROVIDER="$provider" SOURCE_URL_CANONICAL="$canonical_url" \
     SOURCE_FILENAME="$filename" SOURCE_SHA="$source_sha" SOURCE_SIZE="$source_size" SOURCE_PATH="$source_path" \
     SOURCE_DIR="$source_dir" ADMISSION_COMMIT="$admission_commit" SOURCE_BLOB="$source_blob" TREE_SHA="$tree_sha" \
-    CREATED_AT="$created_at" SESSION="$session" SKILL_RELEASE="$skill_release" SKILL_REVISION="$skill_revision" \
+    CREATED_AT="$created_at" SKILL_RELEASE="$skill_release" SKILL_REVISION="$skill_revision" SKILL_HOME="$skill_home" \
     SKILL_SHA="$skill_sha" SKILL_BLOB="$skill_blob" SKILL_REPO_PATH="$skill_repo_path" \
     CONTROLLER_DIR="$controller_dir" ACTIVE_PATH="$active_path" \
       python3 "$ROOT/scripts/audit-source-initialization/write-state-v1.py"
@@ -158,9 +157,8 @@ else
 fi
 
 export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
-gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+gh workflow run lite-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
   -f campaign_id="$campaign_id" \
-  -f campaign_name="$campaign_name" \
   -f campaign_path="$campaign_root" \
   -f audit_controller_ref=main
 
@@ -173,5 +171,6 @@ gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITOR
   echo "- Workspace: $campaign_root"
   echo '- Source ZIP and unpacked source are both under campaign source/.'
   echo '- Audit-Controller ref: main'
-  echo '- Phase-0 Lite monitor: dispatched'
+  echo '- Fully automated Phase 0: dispatched'
+  echo '- First browser agent is created only after validated P0_TO_P1 completion.'
 } >> "$GITHUB_STEP_SUMMARY"
