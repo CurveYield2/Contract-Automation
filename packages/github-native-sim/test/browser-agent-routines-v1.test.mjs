@@ -114,8 +114,8 @@ test('failed non-infrastructure idle pokes consume the escalation budget and can
   assert.match(workflow, /IDLE_POKE_INFRA_RETRY_LATER/);
 });
 
-test('source fanout contains no reviewer wake envelope', () => {
-  const workflow = read('.github/workflows/agent-zip-import-v1.yml');
+test('Audit Source Initialization contains no reviewer wake envelope', () => {
+  const workflow = read('.github/workflows/audit-source-initialization-v1.yml');
   assert.doesNotMatch(workflow, /ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1/);
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
@@ -178,19 +178,17 @@ test('Lite entry workflow monitors the existing Phase-0 bootstrap and never crea
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
-test('source fanout self-arms the state-only Lite orchestrator without a pre-existing registration', () => {
-  const workflow = read('.github/workflows/agent-zip-import-v1.yml');
-  assert.match(workflow, /Arm canonical Lite campaign monitor after source fan-out/);
-  assert.match(workflow, /\.deep-assurance\/active/);
-  assert.match(workflow, /campaignId \/\/ empty/);
-  assert.match(workflow, /controllerBranch \/\/ empty/);
-  assert.match(workflow, /workspacePath \/\/ empty/);
-  assert.match(workflow, /gh workflow run lite-audit-browser-orchestrator-v1\.yml/);
-  assert.match(workflow, /Registration prerequisite: none/);
-  assert.match(workflow, /Reviewer\/chat launch: NOT performed by source fan-out/);
-  assert.match(workflow, /Phase-0 behavior: state-only monitoring; no second bootstrap chat/);
-  assert.doesNotMatch(workflow, /Source fan-out completed but no canonical browser registration exists/);
-  assert.doesNotMatch(workflow, /gh workflow run browser-agent-wake\.yml/);
+test('Audit Source Initialization creates durable campaign state then arms the state-only Lite orchestrator', () => {
+  const workflow = read('.github/workflows/audit-source-initialization-v1.yml');
+  const run = read('scripts/audit-source-initialization/run-v1.sh');
+  const state = read('scripts/audit-source-initialization/write-state-v1.py');
+  assert.match(state, /\.deep-assurance\/active|ACTIVE_PATH/);
+  assert.match(state, /CAMPAIGN_STATE_v1\.json/);
+  assert.match(state, /ACTIVE_PHASE_POINTER_v1\.json/);
+  assert.match(run, /gh workflow run lite-audit-browser-orchestrator-v1\.yml/);
+  assert.match(run, /audit_controller_ref=main/);
+  assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
+  assert.doesNotMatch(run, /browser-agent-wake\.yml/);
 });
 
 test('Phase-0 repair remains a special bootstrap replacement without a predecessor handoff', () => {

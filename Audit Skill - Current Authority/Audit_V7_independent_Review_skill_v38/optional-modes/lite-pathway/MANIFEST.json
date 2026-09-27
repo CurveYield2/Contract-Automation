@@ -40,8 +40,8 @@
     },
     {
       "path": "optional-modes/lite-pathway/phases/phase-0/PHASE_CONTRACT.json",
-      "bytes": 17044,
-      "sha256": "fef71a9a7968323cce2674d297ae7d57ff5ff73a35ec276ce9df452bfa9a4f03"
+      "bytes": 17932,
+      "sha256": "9a623dcaee2df637e2189b75605e81b5ed6059cd6850ef6291bec2bd2757f547"
     },
     {
       "path": "optional-modes/lite-pathway/phases/phase-0/resources/INSTRUCTION_READ_PROOF.json",
@@ -65,8 +65,8 @@
     },
     {
       "path": "optional-modes/lite-pathway/phases/phase-0/START_HERE.md",
-      "bytes": 11780,
-      "sha256": "8f61a1ce0d8528817eafa37b3db7ad6e47eb4f533aed7fe44228529d34d7bc73"
+      "bytes": 12517,
+      "sha256": "b156a7cbae384e8501b3660e9541d489f06e9868cca8f6b20a37c281414a06f7"
     },
     {
       "path": "optional-modes/lite-pathway/phases/phase-1/PHASE_CONTRACT.json",
@@ -255,8 +255,8 @@
     },
     {
       "path": "optional-modes/lite-pathway/shared/controller/AUDIT_CONTROLLER_AND_GITHUB_PROTOCOL.md",
-      "bytes": 934,
-      "sha256": "395bd6feb60505e828729e55d7ac5a2cb9846fda2a1156347bfa759da321ff1b"
+      "bytes": 2058,
+      "sha256": "0efab200eedc732962cafbe9094a7065d5e7cfbec3456b10ca646eb32d0df6f6"
     },
     {
       "path": "optional-modes/lite-pathway/shared/controller/AUTOMATIC_PHASE_ADVANCEMENT_PROTOCOL.md",
@@ -510,8 +510,8 @@
     },
     {
       "path": "optional-modes/lite-pathway/SKILL.md",
-      "bytes": 20974,
-      "sha256": "163a2c11a6f2a74e3ae2da80f383450b1b5e1e66fb4dbabb6d4e6f40be6db209"
+      "bytes": 21275,
+      "sha256": "89b5fe9fd73a9d76afb726c50dfe14475a8b00015b1804dbb5ff1fafe339b6a5"
     }
   ]
 }
