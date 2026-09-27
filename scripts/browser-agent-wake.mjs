@@ -16,7 +16,7 @@ const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 const encryptedSessionPath = env.CHATGPT_SESSION_STATE_PATH || '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
 const sessionUpdatedMarker = env.CHATGPT_SESSION_STATE_UPDATED_MARKER || '/tmp/curveyield-browser-agent/session-state-updated';
 const sessionStateKeyB64 = deriveSessionStateKeyB64({
-  keyB64: sessionStateKeyB64,
+  keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
   bootstrapStateB64: env.CHATGPT_STORAGE_STATE_B64,
 });
 
