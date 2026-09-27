@@ -1,6 +1,18 @@
 name: Lite Phase 0 Intelligence v1
 
 on:
+  workflow_call:
+    inputs:
+      campaign_id:
+        required: true
+        type: string
+      campaign_path:
+        required: true
+        type: string
+      audit_controller_ref:
+        required: false
+        type: string
+        default: main
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened]
@@ -27,6 +39,7 @@ jobs:
           fetch-depth: 1
 
       - name: Checkout atomic request
+        if: github.event_name == 'pull_request'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
@@ -56,14 +69,43 @@ jobs:
         shell: bash
         run: bash scripts/select-audit-controller-token.sh
 
+      - name: Materialize workflow-call Phase-0 request
+        if: github.event_name == 'workflow_call'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$CAMPAIGN_PATH" in campaigns/*) ;; *) echo "::error::campaign_path must be under campaigns/"; exit 1;; esac
+          controller_api="repos/CurveYield2/Audit-Controller/contents/$CAMPAIGN_PATH/controller?ref=$AUDIT_CONTROLLER_REF"
+          state_name="$(gh api "$controller_api" --jq '.[].name' | sed -n 's/^\(CAMPAIGN_STATE_v[0-9][0-9]*\.json\)$/\1/p' | sort -V | tail -n1)"
+          test -n "$state_name"
+          gh api "repos/CurveYield2/Audit-Controller/contents/$CAMPAIGN_PATH/controller/$state_name?ref=$AUDIT_CONTROLLER_REF" --jq '.content' | base64 -d > /tmp/phase0-state.json
+          test "$(jq -r '.campaignId' /tmp/phase0-state.json)" = "$CAMPAIGN_ID"
+          jq -n             --arg requestId "phase0-$CAMPAIGN_ID-$GITHUB_RUN_ID"             --arg campaignId "$CAMPAIGN_ID"             --arg sourceCommit "$(jq -r '.source.archiveCommit' /tmp/phase0-state.json)"             --arg archivePath "$(jq -r '.source.archivePath' /tmp/phase0-state.json)"             --arg archiveSha "$(jq -r '.source.sha256' /tmp/phase0-state.json)"             --arg destRef "$AUDIT_CONTROLLER_REF"             --arg campaignPath "$CAMPAIGN_PATH"             '{
+              schemaVersion:"curveyield-lite-phase0-intelligence-request-v1",
+              requestId:$requestId,
+              campaignId:$campaignId,
+              source:{repository:"CurveYield2/Audit-Controller",commit:$sourceCommit,archivePath:$archivePath,archiveSha256:$archiveSha},
+              destination:{repository:"CurveYield2/Audit-Controller",ref:$destRef,campaignPath:$campaignPath}
+            }' > .phase0-request.json
+
       - name: Resolve exactly one lean Phase-0 request
         id: request
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t requests < <(find .request-source/lite-phase0/requests -type f -name request.json | sort)
-          test "${#requests[@]}" -eq 1
-          echo "path=${requests[0]}" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_call" ]; then
+            test -s .phase0-request.json
+            echo "path=.phase0-request.json" >> "$GITHUB_OUTPUT"
+          else
+            mapfile -t requests < <(find .request-source/lite-phase0/requests -type f -name request.json | sort)
+            test "${#requests[@]}" -eq 1
+            echo "path=${requests[0]}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Generate useful Phase-0 machine intelligence
         env:
@@ -105,7 +147,6 @@ jobs:
           mkdir -p "$campaign_path/evidence/static-analysis"
           mkdir -p "$campaign_path/evidence/source-intelligence"
           mkdir -p "$campaign_path/evidence/readiness"
-          mkdir -p "$campaign_path/scratch/phase0-context-review"
           mkdir -p "$campaign_path/shared/source-intelligence"
           mkdir -p "$campaign_path/shared/controller"
           mkdir -p "$campaign_path/controller"
@@ -115,7 +156,6 @@ jobs:
           cp ../.phase0-intelligence-output/SLITHER_v1.json "$campaign_path/evidence/static-analysis/SLITHER_v1.json"
           cp ../.phase0-intelligence-output/SOURCE_INTELLIGENCE_AUTOMATED_v1.json "$campaign_path/evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json"
           cp ../.phase0-intelligence-output/PROJECT_READINESS_AUTOMATED_v1.json "$campaign_path/evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json"
-          cp ../.phase0-intelligence-output/CONTEXT_REVIEW_PACKET_v1.json "$campaign_path/scratch/phase0-context-review/CONTEXT_REVIEW_PACKET_v1.json"
 
           # Project machine evidence into the exact canonical output paths already
           # required by the Lite Phase-0 skill. The automation adapts to the skill;
@@ -125,7 +165,7 @@ jobs:
             --skill-root "$skill_root" \
             --stage core
 
-          git add "$campaign_path/evidence" "$campaign_path/shared" "$campaign_path/controller" "$campaign_path/scratch/phase0-context-review/CONTEXT_REVIEW_PACKET_v1.json"
+          git add "$campaign_path/evidence" "$campaign_path/shared" "$campaign_path/controller"
           git config user.name 'CurveYield Lite Phase0 Automation'
           git config user.email 'lite-phase0-automation@users.noreply.github.com'
           if ! git diff --cached --quiet; then
@@ -160,7 +200,6 @@ jobs:
             echo "- Automated Source Intelligence: generated"
             echo "- Canonical skill-required Source Intelligence core/overlays/bundle: generated at the exact Phase-0 contract paths"
             echo "- Deployment/config + testing/tooling readiness inventory: generated"
-            echo "- Temporary context-review packet: generated for the agent's fresh context pass"
             echo "- Campaign-global graph/ledger canonical Phase-0 paths: initialized"
             echo "- No observer/ingestion/retirement/handoff receipts generated"
           } >> "$GITHUB_STEP_SUMMARY"
