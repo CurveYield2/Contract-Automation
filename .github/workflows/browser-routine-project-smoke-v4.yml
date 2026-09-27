@@ -1,0 +1,37 @@
+name: Browser Routine Project Smoke v4
+
+on:
+  push:
+    branches:
+      - test/browser-agent-live-smoke-v1
+    paths:
+      - .github/workflows/browser-routine-project-smoke-v4.yml
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Dispatch production project routine smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run browser-agent-wake.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f wake_id=browser-routine-project-smoke-v4 \
+            -f campaign_id=browser-routine-project-smoke \
+            -f phase_id=smoke-test \
+            -f mode=create_fresh \
+            -f chat_url= \
+            -f wake_message_b64=Q2FsY3VsYXRlIHRoaXMgYmFzaWMgZXF1YXRpb24gYW5kIHJlcGx5IHdpdGgganVzdCB0aGUgYW5zd2VyOiAoMzcgKiAxNCkgKyA5Mg== \
+            -f watchdog_enabled=false \
+            -f worker_role=interphase_mechanical \
+            -f gate_mode=FULL_V26 \
+            -f browser_context_b64=eyJyb3V0aW5lSWQiOiJhdWRpdC11bHRyYWxpdGUtcmV2aWV3ZXItdjEiLCJwcm9qZWN0TmFtZSI6IkN1cnZlWWllbGQgQnJvd3NlciBSb3V0aW5lIFNtb2tlIHYxIiwiY2hhdE5hbWUiOiJDdXJ2ZVlpZWxkIEJyb3dzZXIgUm91dGluZSBTbW9rZSByZXZpZXdlci10ZXN0IiwicmVwYWlyIjp7ImVuYWJsZWQiOmZhbHNlLCJpZGxlUG9rZVRocmVzaG9sZCI6MywidW52aWV3YWJsZVRocmVzaG9sZCI6Mn19
