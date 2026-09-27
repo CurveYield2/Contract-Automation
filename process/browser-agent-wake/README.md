@@ -10,7 +10,7 @@ Browser automation is no longer limited to one hard-coded wake path. Reusable op
 
 A routine is a declarative sequence of named browser operations. The first admitted routine is:
 
-`audit-ultralite-reviewer-v1`
+`audit-lite-reviewer-v1`
 
 It always targets **normal ChatGPT web Chat**, never Work. Before the first reviewer message it switches away from Work if necessary, creates or reuses the campaign ChatGPT Project, and opens a new normal chat inside that Project. After the first message creates the conversation URL, it attempts to rename the chat to the supplied campaign/reviewer name.
 
@@ -24,9 +24,9 @@ The browser operation registry currently includes:
 
 Additional routines can reuse those operations without creating a new GitHub Actions workflow.
 
-## Ultralite audit browser orchestration
+## Lite audit browser orchestration
 
-`.github/workflows/ultralite-audit-browser-orchestrator-v1.yml` is the first complete routine consumer.
+`.github/workflows/lite-audit-browser-orchestrator-v1.yml` is the first complete routine consumer.
 
 It starts with a dedicated **normal ChatGPT web** Phase-0 bootstrap chat. That bootstrap agent is instructed to:
 
@@ -36,7 +36,7 @@ It starts with a dedicated **normal ChatGPT web** Phase-0 bootstrap chat. That b
 4. write/seal the required Phase-0 packet/handoff;
 5. stop at the machine-readable successor boundary.
 
-The Phase-0 bootstrap is deliberately outside the campaign Project. When the canonical controller/pointer reaches the Phase-0 successor boundary, the existing Lite watchdog launches the first semantic reviewer through `audit-ultralite-reviewer-v1`. That launch creates/reuses a ChatGPT Project named from the campaign title and creates a normal reviewer chat inside it.
+The Phase-0 bootstrap may be the existing human-started chat; the Lite browser monitor supervises durable campaign state without requiring an Ultralite submode. When the canonical controller/pointer reaches the Phase-0 successor boundary, the existing Lite watchdog launches the first semantic reviewer through `audit-lite-reviewer-v1`. That launch creates/reuses a ChatGPT Project named from the campaign title and creates a normal reviewer chat inside it.
 
 Every reviewer wake enforces **High** ChatGPT reasoning effort before posting. The wake payload also carries an authoritative `current_phase` context line, and successful fresh-reviewer launches rebind the persistent registration's active phase/milestone so later execution/repair wakes cannot fall back to stale Phase-0 text.
 
@@ -89,7 +89,7 @@ Repair can also be explicitly dispatched with `repair_mode=reset_to_handoff`; ab
 
 ### Automatic breakdown escalation
 
-Reviewer watchdog states carry a repair policy. The default ultralite routine uses:
+Reviewer watchdog states carry a repair policy. The default Lite routine uses:
 
 - idle poke threshold: 3;
 - non-challenge unviewable threshold: 2.
@@ -134,10 +134,10 @@ Use:
       "mode": "LITE",
       "repository": "CurveYield2/Audit-Controller",
       "ref": "main",
-      "statePath": "campaigns/REPLACE_WITH_AUDIT_NAME/controller/CAMPAIGN_STATE_v1.json",
+      "statePath": "campaigns/REPLACE_WITH_AUDIT_NAME/controller/CAMPAIGN_STATE_vN.json",
       "expectedPhaseId": "phase-0",
       "expectedMilestoneId": "P0_BOOTSTRAP",
-      "activePointerPath": "campaigns/REPLACE_WITH_AUDIT_NAME/controller/ACTIVE_PHASE_POINTER_v1.json",
+      "activePointerPath": "campaigns/REPLACE_WITH_AUDIT_NAME/controller/ACTIVE_PHASE_POINTER_vN.json",
       "stopStates": [
         "WAITING_FOR_HUMAN_RESPONSE",
         "WAITING_FOR_SUCCESSOR_AGENT",
@@ -176,12 +176,12 @@ No watchdog job sleeps between observations and no watchdog self-chains into a f
 
 ## Lite automatic successor launch
 
-The watchdog reuses the campaign's existing Lite controller artifacts instead of introducing another phase gate.
+The watchdog reuses the campaign's existing Lite controller artifacts instead of introducing another phase gate. It resolves the highest versioned `CAMPAIGN_STATE_vN.json` and `ACTIVE_PHASE_POINTER_vN.json` on every sweep, so immutable state-version advancement cannot strand automation on v1.
 
 For a Lite registration it reads:
 
-- `controller/CAMPAIGN_STATE_v1.json`
-- `controller/ACTIVE_PHASE_POINTER_v1.json`
+- `controller/CAMPAIGN_STATE_vN.json`
+- `controller/ACTIVE_PHASE_POINTER_vN.json`
 - the handoff named by `authoritativeHandoff`
 - `WAKE_UP_MESSAGE.md` in that same handoff folder
 
