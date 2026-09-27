@@ -34,6 +34,11 @@
         "COMPLETE",
         "STOPPED_BY_HUMAN"
       ]
+    },
+    "repair": {
+      "enabled": true,
+      "idlePokeThreshold": 3,
+      "unviewableThreshold": 2
     }
   },
   "updatedAt": "2026-09-27T15:38:53Z"
