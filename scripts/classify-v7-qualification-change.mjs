@@ -5,7 +5,7 @@ const LIGHT_PATTERNS = [
   /^\.github\/workflows\/browser-agent-wake\.yml$/,
   /^\.github\/workflows\/browser-agent-watchdog\.yml$/,
   /^\.github\/workflows\/browser-agent-reviewer-repair-v1\.yml$/,
-  /^\.github\/workflows\/ultralite-audit-browser-orchestrator-v1\.yml$/,
+  /^\.github\/workflows\/(?:lite|ultralite)-audit-browser-orchestrator-v1\.yml$/,
   /^\.github\/workflows\/development-agent-task-manager\.yml$/,
   /^\.github\/workflows\/agent-zip-import-v1\.yml$/,
   /^scripts\/browser-agent-wake\.mjs$/,
