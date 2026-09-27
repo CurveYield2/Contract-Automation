@@ -72,6 +72,8 @@ and schema:
 
 The default repair disposition is **resume first**. A replacement normal ChatGPT reviewer chat is created in the same campaign Project and instructed to recover from current durable GitHub state without repeating sealed work.
 
+Replacement reviewers use the same Lite skill-authority precedence as ordinary successors: campaign-bound authority first, otherwise the active global Lite primary pointer with Git-blob verification, and legacy newest-ZIP discovery only as a final fallback.
+
 If safe continuation is impossible because the active reviewer's partial files are irreconcilably incomplete or misplaced, the replacement reviewer is prohibited from deleting data itself. It must file:
 
 `controller/REVIEWER_REPAIR_REQUEST_v1.json`
