@@ -93,7 +93,8 @@ test('successor and reviewer-repair wakes state the semantic phase explicitly', 
   const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
   assert.match(watchdog, /printf 'phase=%s\\n' "\$next_phase"/);
   assert.match(watchdog, /reasoning_effort=high/);
-  assert.match(repair, /phase_start=.*gate_expected_phase/);
+  assert.match(repair, /phase_start="\$\(jq -r '\.nextMilestone\.phaseRange\[0\] \/\/ empty'/);
+  assert.match(repair, /if \[ -z "\$phase_start" \] && \[\[ "\$gate_expected_phase" =~ \^phase-/);
   assert.match(repair, /printf 'phase=phase-%s\\n' "\$PHASE_START"/);
   assert.match(repair, /reasoning_effort=high/);
 });
