@@ -600,30 +600,61 @@ jobs:
 
             state_skill_rel="$(jq -r '.skillAuthority.current.campaignPath // empty' /tmp/canonical-campaign-state.json)"
             skill_path=""
+            skill_ref="$gate_ref"
+            skill_authority_source=""
             newest_skill=""
             newest_skill_date=""
-            authority_listing="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$campaign_root/authority?ref=$gate_ref" 2>/dev/null || true)"
-            if [ -n "$authority_listing" ]; then
-              while IFS= read -r candidate; do
-                [ -n "$candidate" ] || continue
-                candidate_date="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api --method GET "repos/$gate_repo/commits" -f path="$candidate" -f sha="$gate_ref" -f per_page=1 --jq '.[0].commit.committer.date // empty' 2>/dev/null || true)"
-                [ -n "$candidate_date" ] || continue
-                if [ -z "$newest_skill_date" ] || [[ "$candidate_date" > "$newest_skill_date" ]]; then
-                  newest_skill="$candidate"
-                  newest_skill_date="$candidate_date"
-                fi
-              done < <(printf '%s' "$authority_listing" | jq -r '.[]? | select(.type=="file" and (.name|test("skill.*\\.zip$";"i"))) | .path')
-            fi
-            if [ -n "$newest_skill" ]; then
-              skill_path="$newest_skill"
-            elif [ -n "$state_skill_rel" ]; then
+
+            # Authority precedence must match Audit-Controller:
+            # 1) campaign-bound authority; 2) global Lite primary pointer; 3) legacy newest-ZIP fallback.
+            if [ -n "$state_skill_rel" ]; then
               skill_path="$campaign_root/$state_skill_rel"
+              skill_authority_source="CAMPAIGN_BOUND"
+            else
+              primary_pointer_path='audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json'
+              primary_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/CurveYield2/Audit-Controller/contents/$primary_pointer_path?ref=main" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
+              if [ -n "$primary_pointer" ] && [ "$(printf '%s' "$primary_pointer" | jq -r '.schemaVersion // empty')" = 'audit-v7-lite-primary-skill-authority-v1' ] && [ "$(printf '%s' "$primary_pointer" | jq -r '.status // empty')" = 'ACTIVE' ]; then
+                primary_skill_path="$(printf '%s' "$primary_pointer" | jq -r '.packagePath // empty')"
+                primary_blob_sha="$(printf '%s' "$primary_pointer" | jq -r '.gitBlobSha // empty')"
+                if [ -n "$primary_skill_path" ] && [[ "$primary_blob_sha" =~ ^[0-9a-f]{40}$ ]]; then
+                  observed_blob_sha="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/CurveYield2/Audit-Controller/contents/$primary_skill_path?ref=main" --jq '.sha // empty' 2>/dev/null || true)"
+                  if [ "$observed_blob_sha" = "$primary_blob_sha" ]; then
+                    skill_path="$primary_skill_path"
+                    skill_ref="main"
+                    gate_repo="CurveYield2/Audit-Controller"
+                    skill_authority_source="LITE_PRIMARY_DEFAULT"
+                  else
+                    echo "::warning::Lite primary skill pointer blob identity does not match repository content."
+                    return 2
+                  fi
+                fi
+              fi
             fi
+
+            if [ -z "$skill_path" ]; then
+              authority_listing="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$campaign_root/authority?ref=$gate_ref" 2>/dev/null || true)"
+              if [ -n "$authority_listing" ]; then
+                while IFS= read -r candidate; do
+                  [ -n "$candidate" ] || continue
+                  candidate_date="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api --method GET "repos/$gate_repo/commits" -f path="$candidate" -f sha="$gate_ref" -f per_page=1 --jq '.[0].commit.committer.date // empty' 2>/dev/null || true)"
+                  [ -n "$candidate_date" ] || continue
+                  if [ -z "$newest_skill_date" ] || [[ "$candidate_date" > "$newest_skill_date" ]]; then
+                    newest_skill="$candidate"
+                    newest_skill_date="$candidate_date"
+                  fi
+                done < <(printf '%s' "$authority_listing" | jq -r '.[]? | select(.type=="file" and (.name|test("skill.*\\.zip$";"i"))) | .path')
+              fi
+              if [ -n "$newest_skill" ]; then
+                skill_path="$newest_skill"
+                skill_authority_source="LEGACY_NEWEST_ZIP_FALLBACK"
+              fi
+            fi
+
             [ -n "$skill_path" ] || {
               echo "::warning::No audit skill ZIP could be resolved for successor $next_reviewer."
               return 2
             }
-            skill_url="https://github.com/$gate_repo/blob/$gate_ref/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
+            skill_url="https://github.com/$gate_repo/blob/$skill_ref/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
 
             {
               printf '%s\n' '[AUDIT_REVIEWER_ROUTINE_V1]'
@@ -631,11 +662,12 @@ jobs:
               printf 'reviewer=%s\n' "$next_reviewer"
               printf 'milestone=%s\n' "$next_id"
               printf 'campaign_url=%s\n' "$campaign_url"
-              printf 'latest_audit_skill_url=%s\n' "$skill_url"
+              printf 'audit_skill_url=%s\n' "$skill_url"
+              printf 'audit_skill_authority_source=%s\n' "$skill_authority_source"
               printf 'authoritative_handoff=%s\n' "$handoff_path"
               printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT_IN_CAMPAIGN_PROJECT; do not use Work.'
               printf '%s\n' 'connector_requirement=Use the GitHub connector app for repository reads/writes and campaign work.'
-              printf '%s\n' 'authority_rule=The latest audit skill file URL above is the ultimate methodology authority. Read it before doing reviewer work and follow its instructions exactly unless a newer explicit human instruction in this chat overrides it.'
+              printf '%s\n' 'authority_rule=The audit skill URL above was resolved by authority precedence (campaign-bound first, otherwise the active global Lite primary authority; legacy newest-ZIP fallback only when neither exists). Read it before reviewer work and follow it exactly unless a newer explicit human instruction in this chat overrides it.'
               printf '%s\n' 'continuation_rule=Continue from the sealed handoff and latest durable campaign state. Do not restart sealed/completed work for convenience.'
               printf '%s\n' 'completion_rule=Run your assigned reviewer process through its required terminal handoff/final-report state so the automation can launch the next reviewer automatically.'
               printf '\n%s\n\n' '[SEALED_SUCCESSOR_WAKE_PACKET]'
