@@ -144,9 +144,7 @@ test('GitHub Playwright prefers encrypted rolling state, keeps bootstrap fallbac
   assert.match(source, /chatgpt\\\.com/);
   assert.match(source, /saveEncryptedSessionState\(/);
   assert.match(source, /deriveSessionStateKeyB64\(\{/);
-  assert.match(source, /keyB64:\s*env\.CHATGPT_SESSION_STATE_KEY_B64/);
-  assert.match(source, /bootstrapStateB64:\s*env\.CHATGPT_STORAGE_STATE_B64/);
-  assert.doesNotMatch(source, /const sessionStateKeyB64 = deriveSessionStateKeyB64\(\{[\s\S]*?keyB64:\s*sessionStateKeyB64/);
+  assert.match(source, /const sessionStateKeyB64 = deriveSessionStateKeyB64\(\{\s*keyB64:\s*env\.CHATGPT_SESSION_STATE_KEY_B64,\s*bootstrapStateB64:\s*env\.CHATGPT_STORAGE_STATE_B64,\s*\}\);/);
   assert.match(source, /context\.storageState\(\{ indexedDB: true, opfs: true \}\)/);
   assert.match(source, /CHATGPT_SESSION_STATE_UPDATED_MARKER/);
 });
