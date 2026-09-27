@@ -11,11 +11,11 @@ permissions:
   actions: write
 
 concurrency:
-  group: agent-audit-source-fanout-${{ github.sha }}
+  group: authority-file-import-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
-  fanout:
+  import:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
