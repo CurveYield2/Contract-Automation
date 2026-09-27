@@ -63,6 +63,84 @@ async function ensureChatMode(page) {
   return { mode: 'chat', changed: true };
 }
 
+async function ensureThinkingEffort(page, { level = 'high' } = {}) {
+  const normalized = String(level || '').trim().toLowerCase();
+  if (normalized !== 'high') {
+    throw new Error('chatgpt.ensure_thinking_effort currently requires level=high');
+  }
+
+  const exactHigh = async () => {
+    const candidate = page.getByText('High', { exact: true }).first();
+    return await candidate.isVisible().catch(() => false) ? candidate : null;
+  };
+  const selectedHigh = async () => {
+    const selectors = [
+      '[aria-checked="true"]:has-text("High")',
+      '[aria-selected="true"]:has-text("High")',
+      '[aria-pressed="true"]:has-text("High")',
+      '[data-state="checked"]:has-text("High")',
+      '[data-state="active"]:has-text("High")'
+    ];
+    const selected = await firstVisible(page, selectors, 500);
+    if (selected) return true;
+    const controls = page.locator('button, [role="button"]');
+    const count = Math.min(await controls.count().catch(() => 0), 80);
+    for (let i = 0; i < count; i += 1) {
+      const control = controls.nth(i);
+      if (!await control.isVisible().catch(() => false)) continue;
+      const text = (await control.innerText().catch(() => '')).trim();
+      const label = (await control.getAttribute('aria-label').catch(() => '') || '').trim();
+      if (/^High$/i.test(text) || /(?:thinking|reasoning)[^\n]*\bHigh\b/i.test(text + ' ' + label)) return true;
+    }
+    return false;
+  };
+
+  if (await selectedHigh()) return { level: 'high', changed: false, verified: true };
+
+  const openerSelectors = [
+    'button[aria-label*="thinking"]',
+    'button[aria-label*="Thinking"]',
+    'button[aria-label*="reasoning"]',
+    'button[aria-label*="Reasoning"]',
+    'button[data-testid*="thinking"]',
+    'button[data-testid*="model"]',
+    'button:has-text("Thinking")',
+    'button:has-text("Reasoning")',
+    'button:has-text("Instant")',
+    'button:has-text("Medium")',
+    'button[aria-label*="model"]',
+    'button[aria-label*="Model"]'
+  ];
+
+  const tryChooseHigh = async () => {
+    const high = await exactHigh();
+    if (!high) return false;
+    await high.click();
+    await page.waitForTimeout(600);
+    return await selectedHigh();
+  };
+
+  for (let depth = 0; depth < 2; depth += 1) {
+    if (await tryChooseHigh()) return { level: 'high', changed: true, verified: true };
+
+    const opener = await firstVisible(page, openerSelectors, 1000);
+    if (!opener) break;
+    await opener.click();
+    await page.waitForTimeout(450);
+
+    if (await tryChooseHigh()) return { level: 'high', changed: true, verified: true };
+
+    const thinking = page.getByText('Thinking', { exact: true }).first();
+    if (await thinking.isVisible().catch(() => false)) {
+      await thinking.click();
+      await page.waitForTimeout(450);
+      if (await tryChooseHigh()) return { level: 'high', changed: true, verified: true };
+    }
+  }
+
+  throw new Error('ChatGPT High thinking-effort control could not be selected and verified');
+}
+
 async function ensureSidebarOpen(page) {
   const open = await firstVisible(page, [
     'button[data-testid="open-sidebar-button"]',
@@ -335,6 +413,7 @@ async function renameCurrentChat(page, { chatName }) {
 
 export const browserOperations = {
   'chatgpt.ensure_chat_mode': async ({ page }) => ensureChatMode(page),
+  'chatgpt.ensure_thinking_effort': async ({ page, args }) => ensureThinkingEffort(page, args),
   'chatgpt.ensure_project': async ({ page, args }) => ensureProject(page, args),
   'chatgpt.start_project_chat': async ({ page, args }) => startProjectChat(page, args),
   'chatgpt.rename_current_chat': async ({ page, args }) => renameCurrentChat(page, args),
