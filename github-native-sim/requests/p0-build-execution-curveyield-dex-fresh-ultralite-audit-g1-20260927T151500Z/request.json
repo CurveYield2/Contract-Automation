@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "p0-build-execution-curveyield-dex-fresh-ultralite-audit-g1-20260927T151500Z",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "870ca40c302251d91e501c73d80f513da52cc49e",
+    "requestPath": ".deep-assurance/operator/requests/p0-build-execution-curveyield-dex-fresh-ultralite-audit-g1-20260927T151500Z.json"
+  },
+  "verifyController": true
+}
