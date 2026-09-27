@@ -138,6 +138,17 @@ test('successor routing is reviewer-count agnostic and injects live campaign/ski
   assert.doesNotMatch(workflow, /gate_expected_milestone" = "P8_10"/);
 });
 
+test('watchdog permits resume-first reviewer repair at the P0_BOOTSTRAP gate', () => {
+  const workflow = read('.github/workflows/browser-agent-watchdog.yml');
+  const repairBlock = workflow.slice(
+    workflow.indexOf('dispatch_reviewer_repair() {'),
+    workflow.indexOf('check_reviewer_repair_request() {')
+  );
+  assert.match(repairBlock, /browser-agent-reviewer-repair-v1\.yml/);
+  assert.doesNotMatch(repairBlock, /gate_expected_milestone.*!=.*P0_BOOTSTRAP/);
+  assert.match(repairBlock, /P0_BOOTSTRAP is repairable/);
+});
+
 test('watchdog distinguishes browser infrastructure failures from reviewer breakdown and escalates persistent idle reviewers', () => {
   const workflow = read('.github/workflows/browser-agent-watchdog.yml');
   assert.match(workflow, /BROWSER_CHALLENGE_RETRY_LATER/);
