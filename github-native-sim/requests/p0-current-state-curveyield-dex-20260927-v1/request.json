@@ -7,5 +7,5 @@
     "commit": "a74f9fe56f0bff0ccb600e7f52cb5d71d13bf865",
     "requestPath": ".deep-assurance/operator/requests/p0-current-state-curveyield-dex-20260927-v1.json"
   },
-  "verifyController": true
+  "verifyController": false
 }
