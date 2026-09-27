@@ -111,24 +111,41 @@ jobs:
             exit 1
           fi
 
+          arm_campaign_monitor=true
+          bootstrap_monitor=false
+          monitor_phase="$current_phase"
+          monitor_milestone="$current_milestone"
           if [ "$campaign_status" = "COMPLETE" ] || [ "$campaign_status" = "STOPPED_BY_HUMAN" ]; then
-            echo "arm_bootstrap_monitor=false" >> "$GITHUB_OUTPUT"
+            arm_campaign_monitor=false
           elif [ "$current_phase" = "phase-0" ] && [ "$current_reviewer" = "web-bootstrap-agent" ]; then
-            echo "arm_bootstrap_monitor=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "arm_bootstrap_monitor=false" >> "$GITHUB_OUTPUT"
+            monitor_phase="phase-0"
+            monitor_milestone="P0_BOOTSTRAP"
+            bootstrap_monitor=true
+          elif [ "$(jq -r '.phase.state // .phase.status // empty' /tmp/canonical-campaign-state.json)" = "WAITING_FOR_SUCCESSOR_AGENT" ]; then
+            history_phase="$(jq -r '.history[-1].phase // empty' /tmp/canonical-campaign-state.json)"
+            history_milestone="$(jq -r '.history[-1].milestone // empty' /tmp/canonical-campaign-state.json)"
+            if [ "$history_phase" = "0" ]; then monitor_milestone="P0_BOOTSTRAP"; else monitor_milestone="$history_milestone"; fi
+          elif [ -z "$monitor_milestone" ] && [ -n "$current_reviewer" ]; then
+            monitor_milestone="$(jq -r --arg reviewer "$current_reviewer" '[.routingPlan.workers[]? | select(.lineage==$reviewer) | .milestone][0] // empty' /tmp/canonical-campaign-state.json)"
           fi
+          [ "$arm_campaign_monitor" != "true" ] || [ -n "$monitor_phase" ] || { echo "::error::Unable to resolve Lite monitor phase"; exit 1; }
+          [ "$arm_campaign_monitor" != "true" ] || [ -n "$monitor_milestone" ] || { echo "::error::Unable to resolve Lite monitor milestone"; exit 1; }
+
+          echo "arm_campaign_monitor=$arm_campaign_monitor" >> "$GITHUB_OUTPUT"
+          echo "bootstrap_monitor=$bootstrap_monitor" >> "$GITHUB_OUTPUT"
           echo "canonical_name=$canonical_name" >> "$GITHUB_OUTPUT"
           echo "current_phase=$current_phase" >> "$GITHUB_OUTPUT"
           echo "current_reviewer=$current_reviewer" >> "$GITHUB_OUTPUT"
           echo "current_milestone=$current_milestone" >> "$GITHUB_OUTPUT"
+          echo "monitor_phase=$monitor_phase" >> "$GITHUB_OUTPUT"
+          echo "monitor_milestone=$monitor_milestone" >> "$GITHUB_OUTPUT"
           echo "campaign_status=$campaign_status" >> "$GITHUB_OUTPUT"
           echo "state_path=$state_path" >> "$GITHUB_OUTPUT"
           echo "pointer_path=$pointer_path" >> "$GITHUB_OUTPUT"
 
       - name: Create or refresh campaign-chain registration
         id: registration
-        if: steps.canonical.outputs.arm_bootstrap_monitor == 'true'
+        if: steps.canonical.outputs.arm_campaign_monitor == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -151,6 +168,10 @@ jobs:
             --arg ref "$AUDIT_CONTROLLER_REF" \
             --arg statePath "${{ steps.canonical.outputs.state_path }}" \
             --arg pointerPath "${{ steps.canonical.outputs.pointer_path }}" \
+            --arg phaseId "${{ steps.canonical.outputs.monitor_phase }}" \
+            --arg milestoneId "${{ steps.canonical.outputs.monitor_milestone }}" \
+            --arg reviewer "${{ steps.canonical.outputs.current_reviewer }}" \
+            --arg bootstrap "${{ steps.canonical.outputs.bootstrap_monitor }}" \
             --arg previousChat "$previous_chat" \
             '{
               schemaVersion:"curveyield-browser-agent-wake-registration-v1",
@@ -162,10 +183,10 @@ jobs:
               activeChat:{name:"",url:""},
               wakeMessage:"",
               thinkingEffort:"high",
-              activeAssignment:{phaseId:"phase-0",milestoneId:"P0_BOOTSTRAP",workerRole:"bootstrap_monitor",reviewer:"web-bootstrap-agent",thinkingEffort:"high"},
+              activeAssignment:{phaseId:$phaseId,milestoneId:$milestoneId,workerRole:"reviewer",reviewer:$reviewer,thinkingEffort:"high"},
               bootstrapMonitor:{
-                status:"ACTIVE",
-                note:"Phase 0 is the existing human-started bootstrap agent. Automation must not create a second Phase-0 chat.",
+                status:(if $bootstrap=="true" then "ACTIVE" else "NOT_APPLICABLE" end),
+                note:(if $bootstrap=="true" then "Phase 0 is the existing human-started bootstrap agent. Automation must not create a second Phase-0 chat." else "Campaign monitor is supervising the current Lite boundary/state." end),
                 previousAutomationChat:(if $previousChat=="" then null else $previousChat end)
               },
               watchdog:{
@@ -176,8 +197,8 @@ jobs:
                   repository:"CurveYield2/Audit-Controller",
                   ref:$ref,
                   statePath:$statePath,
-                  expectedPhaseId:"phase-0",
-                  expectedMilestoneId:"P0_BOOTSTRAP",
+                  expectedPhaseId:$phaseId,
+                  expectedMilestoneId:$milestoneId,
                   activePointerPath:$pointerPath,
                   stopStates:["STOPPED_BY_HUMAN"],
                   stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]
@@ -198,14 +219,14 @@ jobs:
           fi
           echo "registration=$registration" >> "$GITHUB_OUTPUT"
 
-      - name: Arm Phase-0 bootstrap boundary monitor
+      - name: Arm Lite campaign boundary monitor
         id: monitor
-        if: steps.canonical.outputs.arm_bootstrap_monitor == 'true'
+        if: steps.canonical.outputs.arm_campaign_monitor == 'true'
         shell: bash
         run: |
           set -euo pipefail
           safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
-          wake_id="$CAMPAIGN_ID-P0_BOOTSTRAP-bootstrap-monitor"
+          wake_id="$CAMPAIGN_ID-${{ steps.canonical.outputs.monitor_milestone }}-campaign-monitor"
           safe_id="$(printf '%s' "$wake_id" | tr -c 'A-Za-z0-9._-' '_')"
           state_path="process/browser-agent-watchdog/active/$safe_id.json"
           api="repos/$GITHUB_REPOSITORY/contents/$state_path"
@@ -216,11 +237,14 @@ jobs:
             --arg ref "$AUDIT_CONTROLLER_REF" \
             --arg statePath "${{ steps.canonical.outputs.state_path }}" \
             --arg pointerPath "${{ steps.canonical.outputs.pointer_path }}" \
+            --arg phaseId "${{ steps.canonical.outputs.monitor_phase }}" \
+            --arg milestoneId "${{ steps.canonical.outputs.monitor_milestone }}" \
+            --arg bootstrap "${{ steps.canonical.outputs.bootstrap_monitor }}" \
             '{
               schemaVersion:"curveyield-browser-agent-watchdog-state-v1",
               wakeId:$wakeId,
               campaignId:$campaignId,
-              phaseId:"phase-0",
+              phaseId:$phaseId,
               workerRole:"reviewer",
               status:"ACTIVE",
               chatUrl:"",
@@ -234,15 +258,15 @@ jobs:
                 repository:"CurveYield2/Audit-Controller",
                 ref:$ref,
                 statePath:$statePath,
-                expectedPhaseId:"phase-0",
-                expectedMilestoneId:"P0_BOOTSTRAP",
+                expectedPhaseId:$phaseId,
+                expectedMilestoneId:$milestoneId,
                 activePointerPath:$pointerPath,
                 interphase:{handoffPath:"",workPacketPath:"",completionPath:"",workPacketSha256:""},
                 stopStates:["STOPPED_BY_HUMAN"],
                 stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]
               },
               repair:{enabled:false,idlePokeThreshold:3,unviewableThreshold:2,consecutiveIdlePokes:0,consecutiveUnviewable:0},
-              bootstrapMonitor:true
+              bootstrapMonitor:($bootstrap=="true")
             }' > /tmp/bootstrap-monitor.json
 
           current_sha="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
