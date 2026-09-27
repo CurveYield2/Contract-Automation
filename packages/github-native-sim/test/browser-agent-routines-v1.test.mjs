@@ -171,17 +171,19 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.match(workflow, /activeChat=.*chatName/);
 });
 
-test('ultralite entry workflow binds the exact canonical campaign before the one Phase-0 launch', () => {
+test('ultralite entry workflow monitors the existing Phase-0 bootstrap and never creates a second Phase-0 chat', () => {
   const workflow = read('.github/workflows/ultralite-audit-browser-orchestrator-v1.yml');
   assert.match(workflow, /Bind exact canonical campaign/);
   assert.match(workflow, /campaign_id does not match canonical campaign state/);
   assert.match(workflow, /Campaign is not Ultralite/);
-  assert.match(workflow, /CURVEYIELD_ULTRALITE_REVIEWER_LAUNCH_V2/);
-  assert.match(workflow, /current_phase=phase-0/);
-  assert.match(workflow, /authoritative_skill_folder=/);
-  assert.match(workflow, /follow its Ultralite pathway precisely with no deviation/);
-  assert.match(workflow, /wake_id="\$CAMPAIGN_ID-P0_BOOTSTRAP-web-bootstrap-agent"/);
-  assert.match(workflow, /gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN/);
+  assert.match(workflow, /Arm Phase-0 bootstrap boundary monitor/);
+  assert.match(workflow, /Phase 0 is the existing human-started bootstrap agent/);
+  assert.match(workflow, /chatUrl:""/);
+  assert.match(workflow, /bootstrapMonitor:true/);
+  assert.match(workflow, /P0_BOOTSTRAP-bootstrap-monitor/);
+  assert.match(workflow, /gh workflow run browser-agent-watchdog\.yml/);
+  assert.doesNotMatch(workflow, /Dispatch normal-web Phase-0 bootstrap chat/);
+  assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
 test('source fanout is evidence-only and cannot race the campaign orchestrator', () => {
