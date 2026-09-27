@@ -427,6 +427,63 @@ jobs:
             return 0
           }
 
+          dispatch_reviewer_repair() {
+            local reason="$1"
+            [ "$(jq -r '.repair.enabled // false' /tmp/watchdog-state.json)" = "true" ] || return 1
+            [ "$worker_role" = "reviewer" ] || return 1
+            [ "$gate_mode" = "LITE" ] || return 1
+            [ -n "$gate_expected_milestone" ] || return 1
+            [ "$gate_expected_milestone" != "P0_BOOTSTRAP" ] || return 1
+
+            echo "Dispatching replacement reviewer for $campaign_id / $gate_expected_milestone: $reason"
+            gh workflow run browser-agent-reviewer-repair-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              -f campaign_id="$campaign_id" \
+              -f repair_mode=auto \
+              -f force_reset=false \
+              -f reason="$reason"
+            return 0
+          }
+
+          check_reviewer_repair_request() {
+            local campaign_root repair_path encoded_request encoded_pointer active_reviewer active_handoff active_baseline
+            [ "$worker_role" = "reviewer" ] || return 1
+            [ "$gate_mode" = "LITE" ] || return 1
+            [ -n "$gate_path" ] || return 1
+            [ -n "$gate_pointer_path" ] || return 1
+            campaign_root="${gate_path%/controller/*}"
+            repair_path="$campaign_root/controller/REVIEWER_REPAIR_REQUEST_v1.json"
+
+            encoded_request="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$repair_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+            [ -n "$encoded_request" ] || return 1
+            printf '%s' "$encoded_request" | base64 -d > /tmp/reviewer-repair-request.json
+
+            encoded_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$gate_pointer_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+            [ -n "$encoded_pointer" ] || return 1
+            printf '%s' "$encoded_pointer" | base64 -d > /tmp/reviewer-repair-pointer.json
+
+            active_reviewer="$(jq -r --arg m "$gate_expected_milestone" '.routingPlan.workers[]? | select(.milestone==$m) | .lineage // empty' /tmp/canonical-campaign-state.json | tail -n1)"
+            active_handoff="$(jq -r '.authoritativeHandoff // empty' /tmp/reviewer-repair-pointer.json)"
+            active_baseline="$(jq -r '.authoritativeHandoffIdentity.contentCommit // empty' /tmp/reviewer-repair-pointer.json)"
+            [ -n "$active_reviewer" ] || return 1
+
+            jq -e \
+              --arg campaign "$campaign_id" \
+              --arg reviewer "$active_reviewer" \
+              --arg milestone "$gate_expected_milestone" \
+              --arg handoff "$active_handoff" \
+              --arg baseline "$active_baseline" \
+              '.schemaVersion=="curveyield-reviewer-repair-request-v1"
+               and .campaignId==$campaign
+               and .reviewer==$reviewer
+               and .milestoneId==$milestone
+               and .action=="RESET_TO_HANDOFF"
+               and .handoffPath==$handoff
+               and .baselineCommit==$baseline
+               and (.reason|type=="string" and length>0)
+               and (.requestedAt|type=="string" and length>0)' \
+              /tmp/reviewer-repair-request.json >/dev/null
+          }
+
           launch_lite_successor() {
             local pointer_path="$1"
             local expected_milestone="$2"
@@ -662,6 +719,14 @@ jobs:
                 printf '%s' "$encoded_state" | base64 -d > /tmp/canonical-campaign-state.json
 
                 if [ "$gate_mode" = "LITE" ]; then
+                  if check_reviewer_repair_request; then
+                    reason="$(jq -r '.reason' /tmp/reviewer-repair-request.json)"
+                    if dispatch_reviewer_repair "FILED_RESET_REQUEST: $reason"; then
+                      retire_state "REVIEWER_REPAIR_RESET_DISPATCHED_$gate_expected_milestone"
+                      exit 0
+                    fi
+                  fi
+
                   if [ "$worker_role" = "interphase_mechanical" ]; then
                     if verify_lite_interphase_completion "$gate_interphase_work_packet_path" "$gate_interphase_completion_path" "$gate_interphase_handoff_path" "$gate_expected_milestone" "$gate_repo" "$gate_ref"; then
                       echo "Inter-phase mechanical completion is machine-valid; launching the existing Lite successor path."
