@@ -129,8 +129,27 @@ async function ensureComposer(page) {
     '[contenteditable="true"][data-lexical-editor="true"]',
     '[contenteditable="true"]'
   ]);
-  if (!composer) throw new Error('ChatGPT composer not found');
-  return composer;
+  if (composer) return composer;
+
+  const currentUrl = page.url();
+  const title = await page.title().catch(() => '');
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const loginPrompt = /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText);
+  const humanChallenge = /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText);
+  const conversationUnavailable = /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText);
+  const textareaCount = await page.locator('textarea').count().catch(() => 0);
+  const editableCount = await page.locator('[contenteditable="true"]').count().catch(() => 0);
+
+  throw new Error(
+    'ChatGPT composer not found' +
+    ' (url=' + currentUrl +
+    ', title=' + JSON.stringify(title) +
+    ', loginPrompt=' + loginPrompt +
+    ', humanChallenge=' + humanChallenge +
+    ', conversationUnavailable=' + conversationUnavailable +
+    ', textareaCount=' + textareaCount +
+    ', editableCount=' + editableCount + ')'
+  );
 }
 
 async function waitForAssistantResponse(page, before, timeoutMs) {
