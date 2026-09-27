@@ -116,16 +116,25 @@ async function snapshot(page) {
   if (aCount) last = await assistant.nth(aCount - 1).innerText().catch(() => '');
   const currentUrl = page.url();
   const bodyText = await page.locator('body').innerText().catch(() => '');
+  const title = await page.title().catch(() => '');
   const conversationUnavailable =
     /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText);
+  const loginPrompt = /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText);
+  const humanChallenge =
+    /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText) ||
+    /Just a moment|Cloudflare/i.test(title);
   const chatViewable =
     /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(currentUrl) &&
     !!composer &&
-    !conversationUnavailable;
+    !conversationUnavailable &&
+    !loginPrompt &&
+    !humanChallenge;
   return {
     generating: !!stop,
     composerVisible: !!composer,
     conversationUnavailable,
+    loginPrompt,
+    humanChallenge,
     chatViewable,
     assistantCount: aCount,
     userCount: uCount,
