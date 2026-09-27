@@ -449,6 +449,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CAMPAIGN_ID: ${{ steps.meta.outputs.campaign_id }}
+          AUDIT_NAME: ${{ steps.meta.outputs.audit_name }}
         shell: bash
         run: |
           set -euo pipefail
@@ -465,7 +466,6 @@ jobs:
           mode="$(jq -r '.mode // "create_fresh"' "$registration")"
           chat_url="$(jq -r '.chatUrl // empty' "$registration")"
           wake_message="$(jq -r '.wakeMessage // empty' "$registration")"
-          test -n "$wake_message"
 
           watchdog_enabled="$(jq -r '.watchdog.enabled // true' "$registration")"
           watchdog_message="$(jq -r '.watchdog.idleMessage // empty' "$registration")"
@@ -478,6 +478,35 @@ jobs:
           gate_pointer_path="$(jq -r '.watchdog.gate.activePointerPath // empty' "$registration")"
           gate_stop_states="$(jq -r '(.watchdog.gate.stopStates // ["WAITING_FOR_HUMAN_RESPONSE","WAITING_FOR_SUCCESSOR_AGENT","CLOSED","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
           gate_stop_campaign_statuses="$(jq -r '(.watchdog.gate.stopCampaignStatuses // ["COMPLETE","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
+
+          # Source fan-out is also the admitted Phase-0 handoff trigger. Build the
+          # same rich bootstrap envelope used by the canonical Ultralite browser
+          # orchestrator instead of relying on a generic registration wake string.
+          if [ "$gate_mode" = "LITE" ] \
+             && [ "$gate_expected_phase" = "phase-0" ] \
+             && [ "$gate_expected_milestone" = "P0_BOOTSTRAP" ]; then
+            campaign_path="${gate_state_path%/controller/*}"
+            campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(printf '%s' "$campaign_path" | sed 's/ /%20/g')"
+            cat > /tmp/source-fanout-phase0-wake.txt <<EOF
+[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1]
+campaign_name=$AUDIT_NAME
+campaign_id=$CAMPAIGN_ID
+campaign_url=$campaign_url
+chat_surface=NORMAL_CHATGPT_WEB_CHAT; do not use Work.
+connector_requirement=Use the GitHub connector app for all repository reads/writes.
+
+Resume the ultralite audit of the admitted package in the campaign above from the latest durable Phase-0 state. Do not restart completed source fanout or other completed bootstrap work.
+
+Your assignment is Phase 0 only. Resolve audit skill authority from GitHub using this precedence: campaign-bound skillAuthority.current when present; otherwise CurveYield2/Audit-Controller@main audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json. Legacy newest-ZIP discovery is fallback-only when neither authoritative source exists. Read the resolved skill before doing audit work and follow its active Lite/Ultralite Phase-0 instructions exactly. The resolved audit skill is the ultimate methodology authority unless a newer explicit human instruction in this chat overrides it.
+
+Execute every presently executable Phase-0 step to completion. Write required Phase-0 outputs into the canonical Audit-Controller campaign paths, run the required machine completion validation, create/seal the P0_TO_P1 successor packet/handoff required by the active skill, and leave the canonical controller/pointer in the exact terminal state required for successor launch.
+
+Do not continue into reviewer-1's assigned phases. Once Phase 0 is terminal and P0_TO_P1 is sealed, stop so the Ultralite browser/watchdog control plane can launch reviewer-1 automatically.
+EOF
+            wake_message="$(cat /tmp/source-fanout-phase0-wake.txt)"
+            watchdog_message="$wake_message"
+          fi
+          test -n "$wake_message"
 
           # Phase-0 Ultralite bootstrap intentionally stays outside the campaign Project,
           # but it must still inherit the Ultralite resume-first repair policy.
