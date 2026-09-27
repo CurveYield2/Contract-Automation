@@ -102,6 +102,7 @@ jobs:
       CHAT_URL: ${{ inputs.chat_url }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
       CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
+      BROWSER_HEADLESS: 'false'
       BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
       BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
       BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
@@ -155,7 +156,7 @@ jobs:
           export WAKE_ACTION='wake'
           export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
           export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
-          node scripts/browser-agent-wake.mjs
+          xvfb-run -a node scripts/browser-agent-wake.mjs
           echo "chat_url=$(jq -r '.chatUrl // .after.url // .url // empty' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
           echo "provider=$(jq -r '.provider // empty' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
           echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
