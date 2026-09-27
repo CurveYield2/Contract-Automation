@@ -53,6 +53,14 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
       - name: Validate campaign inputs
         shell: bash
         run: |
@@ -66,83 +74,175 @@ jobs:
             exit 1
           fi
 
+      - name: Bind exact canonical campaign
+        id: canonical
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="repos/CurveYield2/Audit-Controller/contents/$CAMPAIGN_PATH/controller/CAMPAIGN_STATE_v1.json?ref=$AUDIT_CONTROLLER_REF"
+          encoded="$(gh api "$api" --jq '.content')"
+          printf '%s' "$encoded" | base64 -d > /tmp/canonical-campaign-state.json
+
+          canonical_id="$(jq -r '.campaignId // empty' /tmp/canonical-campaign-state.json)"
+          canonical_name="$(jq -r '.auditName // .title // empty' /tmp/canonical-campaign-state.json)"
+          canonical_path="$(jq -r '.controller.workspacePath // empty' /tmp/canonical-campaign-state.json)"
+          canonical_ref="$(jq -r '.controller.branch // empty' /tmp/canonical-campaign-state.json)"
+          canonical_mode="$(jq -r '.mode // empty' /tmp/canonical-campaign-state.json)"
+          canonical_optional="$(jq -r '.optionalMode // empty' /tmp/canonical-campaign-state.json)"
+          current_phase="$(jq -r '.phase.id // empty' /tmp/canonical-campaign-state.json)"
+          current_reviewer="$(jq -r '.phase.reviewer // empty' /tmp/canonical-campaign-state.json)"
+          current_milestone="$(jq -r '.phase.milestoneId // empty' /tmp/canonical-campaign-state.json)"
+          campaign_status="$(jq -r '.campaignStatus // .status // empty' /tmp/canonical-campaign-state.json)"
+
+          [ "$canonical_id" = "$CAMPAIGN_ID" ] || { echo "::error::campaign_id does not match canonical campaign state"; exit 1; }
+          [ "$canonical_path" = "$CAMPAIGN_PATH" ] || { echo "::error::campaign_path does not match canonical workspacePath"; exit 1; }
+          [ "$canonical_ref" = "$AUDIT_CONTROLLER_REF" ] || { echo "::error::audit_controller_ref does not match canonical controller branch"; exit 1; }
+          [ "$canonical_mode" = "LITE" ] || { echo "::error::Campaign is not Lite mode"; exit 1; }
+          [ "$canonical_optional" = "ULTRALITE" ] || { echo "::error::Campaign is not Ultralite"; exit 1; }
+          if [ -n "$CAMPAIGN_NAME" ] && [ -n "$canonical_name" ] && [ "$CAMPAIGN_NAME" != "$canonical_name" ]; then
+            echo "::error::campaign_name does not match canonical auditName"
+            exit 1
+          fi
+
+          if [ "$campaign_status" = "COMPLETE" ] || [ "$campaign_status" = "STOPPED_BY_HUMAN" ]; then
+            echo "launch_phase0=false" >> "$GITHUB_OUTPUT"
+          elif [ "$current_phase" = "phase-0" ] && [ "$current_reviewer" = "web-bootstrap-agent" ] && [ "$current_milestone" = "P0_BOOTSTRAP" ]; then
+            echo "launch_phase0=true" >> "$GITHUB_OUTPUT"
+          else
+            # The end-to-end chain already progressed beyond bootstrap. Never invent
+            # a new Phase-0 chat on a later campaign state.
+            echo "launch_phase0=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "canonical_name=$canonical_name" >> "$GITHUB_OUTPUT"
+          echo "current_phase=$current_phase" >> "$GITHUB_OUTPUT"
+          echo "current_reviewer=$current_reviewer" >> "$GITHUB_OUTPUT"
+          echo "current_milestone=$current_milestone" >> "$GITHUB_OUTPUT"
+          echo "campaign_status=$campaign_status" >> "$GITHUB_OUTPUT"
+
       - name: Create or refresh browser-agent registration
+        id: registration
+        if: steps.canonical.outputs.launch_phase0 == 'true'
         shell: bash
         run: |
           set -euo pipefail
           safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
           registration="process/browser-agent-wake/registrations/$safe_campaign.json"
-          mkdir -p "$(dirname "$registration")"
-
-          jq -n \
-            --arg campaignId "$CAMPAIGN_ID" \
-            --arg projectName "$CAMPAIGN_NAME" \
-            --arg ref "$AUDIT_CONTROLLER_REF" \
-            --arg statePath "$CAMPAIGN_PATH/controller/CAMPAIGN_STATE_v1.json" \
-            --arg pointerPath "$CAMPAIGN_PATH/controller/ACTIVE_PHASE_POINTER_v1.json" \
-            '{
-              schemaVersion:"curveyield-browser-agent-wake-registration-v1",
-              campaignId:$campaignId,
-              mode:"create_fresh",
-              chatUrl:"",
-              browserRoutine:"audit-ultralite-reviewer-v1",
-              chatgptProject:{name:$projectName,url:""},
-              activeChat:{name:"",url:""},
-              wakeMessage:"",
-              watchdog:{
-                enabled:true,
-                idleMessage:"[AUDIT_AGENT_WATCHDOG_V1]\nGET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.",
-                gate:{
-                  mode:"LITE",
-                  repository:"CurveYield2/Audit-Controller",
-                  ref:$ref,
-                  statePath:$statePath,
-                  expectedPhaseId:"phase-0",
-                  expectedMilestoneId:"P0_BOOTSTRAP",
-                  activePointerPath:$pointerPath,
-                  stopStates:["WAITING_FOR_HUMAN_RESPONSE","WAITING_FOR_SUCCESSOR_AGENT","CLOSED","STOPPED_BY_HUMAN"],
-                  stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]
-                }
-              }
-            }' > /tmp/registration.json
-
-          content="$(base64 -w0 /tmp/registration.json)"
           api="repos/$GITHUB_REPOSITORY/contents/$registration"
-          existing="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
+          existing="$(gh api "$api?ref=main" --jq '.content' 2>/dev/null || true)"
+
           if [ -n "$existing" ]; then
-            gh api --method PUT "$api" \
-              -f message="chore(audit): refresh ultralite browser registration $CAMPAIGN_ID" \
-              -f content="$content" -f sha="$existing" -f branch=main >/dev/null
+            printf '%s' "$existing" | base64 -d > /tmp/registration-existing.json
+            test "$(jq -r '.schemaVersion // empty' /tmp/registration-existing.json)" = 'curveyield-browser-agent-wake-registration-v1'
+            test "$(jq -r '.campaignId // empty' /tmp/registration-existing.json)" = "$CAMPAIGN_ID"
+            active_url="$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/registration-existing.json)"
           else
-            gh api --method PUT "$api" \
-              -f message="chore(audit): register ultralite browser campaign $CAMPAIGN_ID" \
-              -f content="$content" -f branch=main >/dev/null
+            active_url=""
           fi
+
+          if [[ "$active_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+ ]]; then
+            mode="resume_existing"
+            chat_url="$active_url"
+            jq \
+              --arg ref "$AUDIT_CONTROLLER_REF" \
+              --arg statePath "$CAMPAIGN_PATH/controller/CAMPAIGN_STATE_v1.json" \
+              --arg pointerPath "$CAMPAIGN_PATH/controller/ACTIVE_PHASE_POINTER_v1.json" \
+              '.mode="resume_existing"
+               | .chatUrl=(.activeChat.url // .chatUrl)
+               | .watchdog.enabled=true
+               | .watchdog.idleMessage="GET BACK TO WORK"
+               | .watchdog.gate.ref=$ref
+               | .watchdog.gate.statePath=$statePath
+               | .watchdog.gate.activePointerPath=$pointerPath
+               | .watchdog.gate.expectedPhaseId="phase-0"
+               | .watchdog.gate.expectedMilestoneId="P0_BOOTSTRAP"
+               | .watchdog.gate.stopStates=["STOPPED_BY_HUMAN"]
+               | .watchdog.gate.stopCampaignStatuses=["COMPLETE","STOPPED_BY_HUMAN"]
+               | .thinkingEffort="high"
+               | .activeAssignment={phaseId:"phase-0",milestoneId:"P0_BOOTSTRAP",workerRole:"reviewer",reviewer:"web-bootstrap-agent",thinkingEffort:"high"}' \
+              /tmp/registration-existing.json > /tmp/registration.json
+          else
+            mode="create_fresh"
+            chat_url=""
+            jq -n \
+              --arg campaignId "$CAMPAIGN_ID" \
+              --arg projectName "$CAMPAIGN_NAME" \
+              --arg ref "$AUDIT_CONTROLLER_REF" \
+              --arg statePath "$CAMPAIGN_PATH/controller/CAMPAIGN_STATE_v1.json" \
+              --arg pointerPath "$CAMPAIGN_PATH/controller/ACTIVE_PHASE_POINTER_v1.json" \
+              '{
+                schemaVersion:"curveyield-browser-agent-wake-registration-v1",
+                campaignId:$campaignId,
+                mode:"create_fresh",
+                chatUrl:"",
+                browserRoutine:"audit-ultralite-reviewer-v1",
+                chatgptProject:{name:$projectName,url:""},
+                activeChat:{name:"",url:""},
+                wakeMessage:"",
+                thinkingEffort:"high",
+                activeAssignment:{phaseId:"phase-0",milestoneId:"P0_BOOTSTRAP",workerRole:"reviewer",reviewer:"web-bootstrap-agent",thinkingEffort:"high"},
+                watchdog:{
+                  enabled:true,
+                  idleMessage:"GET BACK TO WORK",
+                  gate:{
+                    mode:"LITE",
+                    repository:"CurveYield2/Audit-Controller",
+                    ref:$ref,
+                    statePath:$statePath,
+                    expectedPhaseId:"phase-0",
+                    expectedMilestoneId:"P0_BOOTSTRAP",
+                    activePointerPath:$pointerPath,
+                    stopStates:["STOPPED_BY_HUMAN"],
+                    stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]
+                  }
+                }
+              }' > /tmp/registration.json
+          fi
+
+          current_sha="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
+          content="$(base64 -w0 /tmp/registration.json)"
+          if [ -n "$current_sha" ]; then
+            gh api --method PUT "$api" -f message="chore(audit): refresh ultralite browser registration $CAMPAIGN_ID" -f content="$content" -f sha="$current_sha" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$api" -f message="chore(audit): register ultralite browser campaign $CAMPAIGN_ID" -f content="$content" -f branch=main >/dev/null
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "chat_url=$chat_url" >> "$GITHUB_OUTPUT"
 
       - name: Build Phase-0 ultralite bootstrap wake
         id: phase0
+        if: steps.canonical.outputs.launch_phase0 == 'true'
         shell: bash
         run: |
           set -euo pipefail
           campaign_url="https://github.com/CurveYield2/Audit-Controller/tree/$AUDIT_CONTROLLER_REF/$(printf '%s' "$CAMPAIGN_PATH" | sed 's/ /%20/g')"
+          authority_api="repos/$GITHUB_REPOSITORY/contents/Audit%20Skill%20-%20Current%20Authority?ref=main"
+          skill_path="$(gh api "$authority_api" --jq '[.[] | select(.type=="dir" and (.name|startswith("Audit_V7_independent_Review_skill_")))] | if length==1 then .[0].path else empty end')"
+          [ -n "$skill_path" ] || { echo "::error::Expected exactly one unpacked current Audit_V7 skill folder in Audit Skill - Current Authority"; exit 1; }
+          skill_url="https://github.com/$GITHUB_REPOSITORY/tree/main/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
+          ultralite_url="$skill_url/optional-modes/lite-pathway"
 
           cat > /tmp/phase0-wake.txt <<EOF
-          [ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1]
+          [CURVEYIELD_ULTRALITE_REVIEWER_LAUNCH_V2]
           campaign_name=$CAMPAIGN_NAME
           campaign_id=$CAMPAIGN_ID
+          reviewer=web-bootstrap-agent
+          current_phase=phase-0
+          assigned_phase_range=phase-0
+          milestone=P0_BOOTSTRAP
+          reasoning_effort=high
           campaign_url=$campaign_url
+          authoritative_skill_folder=$skill_url
+          ultralite_pathway_folder=$ultralite_url
           chat_surface=NORMAL_CHATGPT_WEB_CHAT; do not use Work.
-          connector_requirement=Use the GitHub connector app for all repository reads/writes.
-          
-          Begin an ultralite audit of the admitted package in the campaign above.
-          
-          Your assignment is Phase 0 only. Resolve audit skill authority from GitHub using this precedence: campaign-bound skillAuthority.current when present; otherwise CurveYield2/Audit-Controller@main audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json. Legacy newest-ZIP discovery is fallback-only when neither authoritative source exists. Read the resolved skill before doing audit work and follow its active Lite/ultralite Phase-0 instructions exactly. The resolved audit skill is the ultimate methodology authority unless a newer explicit human instruction in this chat overrides it.
-          
-          Execute Phase 0 to completion. Write the required Phase-0 outputs into the canonical Audit-Controller campaign paths, create/seal the Phase-0 successor packet/handoff required by the active skill, and leave the canonical controller/pointer state in the exact machine-readable terminal condition required for successor launch.
-          
-          Do not continue into the next reviewer's assigned phases. Once the Phase-0 packet is submitted and the controller reflects the terminal Phase-0 handoff state, stop. The browser orchestrator will create/reuse the campaign ChatGPT Project and launch the next reviewer automatically.
-          
-          Do not restart already-admitted source fanout or machine intelligence work unless the active skill explicitly requires a repair.
+          connector_requirement=Use the GitHub connector app for every repository read/write. If the connector is unavailable, follow the skill's connector recovery rules rather than substituting another repository-access method.
+
+          You are the Phase-0 web-bootstrap agent for the exact campaign linked above. Do not use or switch to any other campaign.
+
+          Open the authoritative skill folder linked above and follow its Ultralite pathway precisely with no deviation. The current phase is Phase 0. Execute the complete Phase-0 bootstrap assignment defined there, including every required completion artifact and the validated P0_TO_P1 boundary.
+
+          Do not redo durable work already completed for this exact campaign/source identity. Do not continue into reviewer-1's assignment. When your skill-defined reviewer boundary is complete and its required completion/handoff artifacts are durable and machine-valid, stop. The campaign automation remains active and will launch the next reviewer.
           EOF
 
           if [ -n "$EXTRA_INSTRUCTION" ]; then
@@ -155,31 +255,23 @@ jobs:
           echo "wake_b64=$(base64 -w0 /tmp/phase0-wake.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch normal-web Phase-0 bootstrap chat
+        if: steps.canonical.outputs.launch_phase0 == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
-          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
-
-          watchdog_message="$(jq -r '.watchdog.idleMessage' "$registration" 2>/dev/null || true)"
-          # The registration commit may not be in this checkout yet; use the canonical default if needed.
-          if [ -z "$watchdog_message" ]; then
-            watchdog_message='[AUDIT_AGENT_WATCHDOG_V1]
-          GET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.'
-          fi
-
           browser_context_b64="$(jq -nc '{routineId:"",projectName:"",chatName:"",repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
+          poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
 
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            -f wake_id="$CAMPAIGN_ID-phase0-bootstrap-$GITHUB_RUN_ID" \
+            -f wake_id="$CAMPAIGN_ID-P0_BOOTSTRAP-web-bootstrap-agent" \
             -f campaign_id="$CAMPAIGN_ID" \
             -f phase_id="phase-0" \
-            -f mode="create_fresh" \
-            -f chat_url="" \
+            -f mode="${{ steps.registration.outputs.mode }}" \
+            -f chat_url="${{ steps.registration.outputs.chat_url }}" \
             -f wake_message_b64="${{ steps.phase0.outputs.wake_b64 }}" \
             -f watchdog_enabled=true \
             -f worker_role=reviewer \
-            -f watchdog_message_b64="$(printf '%s' "$watchdog_message" | base64 -w0)" \
+            -f watchdog_message_b64="$poke_b64" \
             -f gate_mode=LITE \
             -f gate_repository=CurveYield2/Audit-Controller \
             -f gate_ref="$AUDIT_CONTROLLER_REF" \
@@ -187,6 +279,8 @@ jobs:
             -f gate_expected_phase_id=phase-0 \
             -f gate_expected_milestone_id=P0_BOOTSTRAP \
             -f gate_active_pointer_path="$CAMPAIGN_PATH/controller/ACTIVE_PHASE_POINTER_v1.json" \
+            -f gate_stop_states_csv=STOPPED_BY_HUMAN \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN \
             -f browser_context_b64="$browser_context_b64"
 
       - name: Summarize orchestration
