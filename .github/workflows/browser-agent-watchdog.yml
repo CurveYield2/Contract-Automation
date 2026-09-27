@@ -977,7 +977,35 @@ jobs:
                   '.observation.assistantCount=$count | .observation.lastAssistantHash=$hash | .observation.observedAt=(now|todate) | .lastPokedAt=(now|todate) | .pokeCount=((.pokeCount // 0)+1) | .repair.consecutiveIdlePokes=((.repair.consecutiveIdlePokes // 0)+1) | .lastDecision="IDLE_POKED"' \
                   /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
               else
-                jq '.lastDecision="IDLE_POKE_FAILED" | .lastPokeFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+                # A failed poke after a successful idle observation must not freeze
+                # the reviewer forever one count below the replacement threshold.
+                # Browser/auth challenges remain infrastructure noise; other failed
+                # delivery attempts consume an idle-poke attempt and can trigger
+                # resume-first reviewer repair.
+                poke_infra_only=false
+                if [ -s "$WAKE_RESULT_PATH" ]; then
+                  poke_infra_only="$(jq -r '
+                    ([.failures[]?.code] | length) > 0
+                    and ([.failures[]?.code] | any(. == "BROWSER_CHALLENGE" or . == "AUTH_REQUIRED"))
+                  ' "$WAKE_RESULT_PATH" 2>/dev/null || echo false)"
+                fi
+                if [ "$poke_infra_only" = true ]; then
+                  jq '.lastDecision="IDLE_POKE_INFRA_RETRY_LATER" | .lastPokeFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+                else
+                  failed_idle_pokes=$((prior_idle_pokes + 1))
+                  jq --argjson count "$failed_idle_pokes" \
+                    '.repair.consecutiveIdlePokes=$count | .pokeFailureCount=((.pokeFailureCount // 0)+1) | .lastDecision="IDLE_POKE_FAILED_COUNTED" | .lastPokeFailureAt=(now|todate)' \
+                    /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+                  mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+                  persist_state || true
+                  if [ "$failed_idle_pokes" -ge "$idle_threshold" ]; then
+                    if dispatch_reviewer_repair "IDLE_AFTER_${failed_idle_pokes}_WATCHDOG_ATTEMPTS_LAST_POKE_FAILED"; then
+                      retire_state "REVIEWER_REPAIR_DISPATCHED_PERSISTENT_IDLE"
+                      exit 0
+                    fi
+                  fi
+                  jq '.lastDecision="IDLE_POKE_FAILED_COUNTED"' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+                fi
               fi
             fi
 

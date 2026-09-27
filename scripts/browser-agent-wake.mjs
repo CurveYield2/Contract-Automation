@@ -212,6 +212,8 @@ async function waitForAssistantResponse(page, before, timeoutMs) {
 
 async function post(page, message) {
   if (!message) throw new Error('Wake message is empty');
+  const userMessages = page.locator('[data-message-author-role="user"]');
+  const beforeUserCount = await userMessages.count().catch(() => 0);
   const composer = await ensureComposer(page);
   await composer.click();
   const tag = await composer.evaluate(el => el.tagName.toLowerCase());
@@ -231,10 +233,22 @@ async function post(page, message) {
   ]);
   if (send) await send.click();
   else await composer.press('Enter');
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(1800);
+
+  // ChatGPT may split or virtualize long multi-line user messages, so a
+  // literal 80-character getByText witness is not sufficient by itself.
+  // Accept any independent UI proof that the submission took effect.
   const needle = message.slice(0, Math.min(80, message.length));
   const visible = await page.getByText(needle, { exact: false }).count().catch(() => 0);
-  if (!visible) throw new Error('Wake message submission could not be verified');
+  const afterUserCount = await userMessages.count().catch(() => beforeUserCount);
+  const generating = !!(await firstVisible(page, [
+    'button[data-testid="stop-button"]',
+    'button[aria-label*="Stop"]',
+    'button:has-text("Stop generating")'
+  ]));
+  if (!visible && afterUserCount <= beforeUserCount && !generating) {
+    throw new Error('Wake message submission could not be verified');
+  }
 }
 
 
