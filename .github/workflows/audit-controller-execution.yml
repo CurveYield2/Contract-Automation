@@ -703,10 +703,10 @@ jobs:
 
           if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ]; then
             campaign_id="$(jq -r '.campaignId // empty' ".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH")"
-            phase_id="$(jq -r '.phaseId // empty' ".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH")"
+            request_phase_id="$(jq -r '.phaseId // empty' ".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH")"
           else
             campaign_id="$(jq -r '.campaignId // empty' .v7-request/request.json)"
-            phase_id="$(jq -r '.phaseId // empty' .v7-request/request.json)"
+            request_phase_id="$(jq -r '.phaseId // empty' .v7-request/request.json)"
           fi
           if [ -z "$campaign_id" ]; then
             echo 'No campaignId on this request; browser-agent wake not applicable.'
@@ -724,7 +724,18 @@ jobs:
           test "$(jq -r '.campaignId // empty' "$registration")" = "$campaign_id"
           mode="$(jq -r '.mode // "resume_existing"' "$registration")"
           chat_url="$(jq -r '.chatUrl // empty' "$registration")"
+          registered_phase="$(jq -r '.activeAssignment.phaseId // .watchdog.gate.expectedPhaseId // empty' "$registration")"
+          registered_milestone="$(jq -r '.activeAssignment.milestoneId // .watchdog.gate.expectedMilestoneId // empty' "$registration")"
+          semantic_phase_id="$registered_phase"
+          if [[ ! "$semantic_phase_id" =~ ^phase-[0-9]+$ ]]; then
+            semantic_phase_id="$request_phase_id"
+          fi
+          phase_id="$semantic_phase_id"
           wake_message="$(jq -r '.wakeMessage // empty' "$registration")"
+          if [ -n "$wake_message" ] && [ -n "$registered_phase" ] && [ "$registered_phase" != "$semantic_phase_id" ]; then
+            echo "::warning::Ignoring stale registered wake message for phase $registered_phase; current semantic phase is $semantic_phase_id."
+            wake_message=""
+          fi
 
           if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "${OPERATOR_OPERATION:-}" = 'INGEST_EXECUTION_EVIDENCE' ]; then
             receipt='.operator-output/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json'
@@ -735,7 +746,8 @@ jobs:
             terminal_message="$(printf '%s\n' \
               '[AUDIT_AUTOMATION_WAKE_V1]' \
               "campaign=$campaign_id" \
-              "phase=$phase_id" \
+              "phase=$semantic_phase_id" \
+              "technical_phase=$request_phase_id" \
               "workflow_run=$GITHUB_RUN_ID" \
               'route=EVIDENCE_INGESTED' \
               "security_disposition=$security_disposition" \
@@ -765,7 +777,8 @@ jobs:
             terminal_message="$(printf '%s\n' \
               '[AUDIT_AUTOMATION_WAKE_V1]' \
               "campaign=$campaign_id" \
-              "phase=$phase_id" \
+              "phase=$semantic_phase_id" \
+              "technical_phase=$request_phase_id" \
               "workflow_run=$GITHUB_RUN_ID" \
               "route=$route" \
               "disposition=$disposition" \
@@ -784,7 +797,8 @@ jobs:
             wake_message="$(printf '%s\n' \
               '[AUDIT_AUTOMATION_WAKE_V1]' \
               "campaign=$campaign_id" \
-              "phase=$phase_id" \
+              "phase=$semantic_phase_id" \
+              "technical_phase=$request_phase_id" \
               "workflow_run=$GITHUB_RUN_ID" \
               'status=PASS' \
               '' \
@@ -792,18 +806,26 @@ jobs:
           fi
 
           watchdog_enabled="$(jq -r '.watchdog.enabled // true' "$registration")"
-          watchdog_message="$(jq -r '.watchdog.idleMessage // empty' "$registration")"
+          watchdog_message="$(printf '%s\n' \
+            '[AUDIT_AGENT_WATCHDOG_V2]' \
+            "campaign=$campaign_id" \
+            "current_phase=$semantic_phase_id" \
+            "technical_phase=$request_phase_id" \
+            "milestone=$registered_milestone" \
+            'reasoning_effort=high' \
+            '' \
+            'Resume the current semantic audit assignment from durable evidence. Do not regress to an older phase label and do not rerun completed technical work.')"
           gate_mode="$(jq -r '.watchdog.gate.mode // "FULL_V26"' "$registration")"
           gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' "$registration")"
           gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$registration")"
           gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' "$registration")"
-          gate_expected_phase="$(jq -r '.watchdog.gate.expectedPhaseId // empty' "$registration")"
-          gate_expected_milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' "$registration")"
+          gate_expected_phase="$semantic_phase_id"
+          gate_expected_milestone="$registered_milestone"
           gate_pointer_path="$(jq -r '.watchdog.gate.activePointerPath // empty' "$registration")"
           gate_stop_states="$(jq -r '(.watchdog.gate.stopStates // ["WAITING_FOR_HUMAN_RESPONSE","WAITING_FOR_SUCCESSOR_AGENT","CLOSED","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
           gate_stop_campaign_statuses="$(jq -r '(.watchdog.gate.stopCampaignStatuses // ["COMPLETE","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
 
-          wake_id="$campaign_id-$phase_id-$GITHUB_RUN_ID"
+          wake_id="$campaign_id-$request_phase_id-$GITHUB_RUN_ID"
           wake_b64="$(printf '%s' "$wake_message" | base64 -w0)"
           watchdog_b64="$(printf '%s' "$watchdog_message" | base64 -w0)"
 
