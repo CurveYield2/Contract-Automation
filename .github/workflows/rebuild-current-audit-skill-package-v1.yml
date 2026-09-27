@@ -1,0 +1,97 @@
+name: Rebuild Current Audit Skill Package v1
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/**'
+      - 'scripts/rebuild-current-audit-skill-manifests-v1.mjs'
+      - '.github/workflows/rebuild-current-audit-skill-package-v1.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/**'
+      - 'scripts/rebuild-current-audit-skill-manifests-v1.mjs'
+      - '.github/workflows/rebuild-current-audit-skill-package-v1.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rebuild-current-audit-skill-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact writable ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Rebuild manifests from exact unpacked authority
+        shell: bash
+        run: node scripts/rebuild-current-audit-skill-manifests-v1.mjs
+
+      - name: Rebuild deterministic authority ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
+          import os
+
+          root = Path('Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38')
+          output = Path('Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38.3.3_Web_Bootstrap_Optimized_v1.zip')
+          temp = output.with_suffix(output.suffix + '.tmp')
+          if temp.exists():
+              temp.unlink()
+          files = sorted(p for p in root.rglob('*') if p.is_file())
+          with ZipFile(temp, 'w', compression=ZIP_DEFLATED, compresslevel=9) as zf:
+              for file in files:
+                  rel = Path(root.name) / file.relative_to(root)
+                  info = ZipInfo(str(rel).replace(os.sep, '/'), date_time=(1980, 1, 1, 0, 0, 0))
+                  info.compress_type = ZIP_DEFLATED
+                  info.external_attr = (0o100644 & 0xFFFF) << 16
+                  info.create_system = 3
+                  zf.writestr(info, file.read_bytes(), compress_type=ZIP_DEFLATED, compresslevel=9)
+          temp.replace(output)
+          PY
+
+      - name: Verify manifest bytes and ZIP membership
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/rebuild-current-audit-skill-manifests-v1.mjs >/tmp/rebuild-verify.json
+          git diff --exit-code -- 'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/MANIFEST.json' 'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/MANIFEST.json'
+          python3 - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          root = Path('Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38')
+          output = Path('Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38.3.3_Web_Bootstrap_Optimized_v1.zip')
+          expected = sorted(str(Path(root.name) / p.relative_to(root)).replace('\\','/') for p in root.rglob('*') if p.is_file())
+          with ZipFile(output) as zf:
+              observed = sorted(n for n in zf.namelist() if not n.endswith('/'))
+          if expected != observed:
+              raise SystemExit('authority ZIP membership does not exactly match unpacked authority')
+          PY
+
+      - name: Commit synchronized manifests and ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'CurveYield Audit Skill Packaging'
+          git config user.email 'audit-skill-packaging@users.noreply.github.com'
+          git add --             'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/MANIFEST.json'             'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/MANIFEST.json'             'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38.3.3_Web_Bootstrap_Optimized_v1.zip'
+          if git diff --cached --quiet; then
+            echo 'Current-authority package already synchronized.'
+            exit 0
+          fi
+          git commit -m 'chore(skill): synchronize current authority package v38.3.3'
+          git push origin HEAD:${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
