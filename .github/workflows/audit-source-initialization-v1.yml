@@ -1,0 +1,77 @@
+name: Audit Source Initialization
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_url:
+        description: Direct URL to one ZIP file on Google Drive or GitHub
+        required: true
+        type: string
+  push:
+    branches: [main]
+    paths:
+      - '.agent-upload/audit-source-initialization/*.json'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: audit-source-initialization
+  cancel-in-progress: false
+
+jobs:
+  initialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Resolve URL-only request
+        id: request
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_URL: ${{ inputs.source_url }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = 'workflow_dispatch' ]; then
+            source_url="$DISPATCH_URL"
+            request_id="dispatch-$GITHUB_RUN_ID"
+          else
+            mapfile -t requests < <(
+              gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" \
+                --jq '.files[]? | select(.status!="removed") | .filename | select(startswith(".agent-upload/audit-source-initialization/") and endswith(".json"))'
+            )
+            [ "${#requests[@]}" -eq 1 ] || { echo "::error::Exactly one URL request file must change per trigger."; exit 1; }
+            source_url="$(jq -r '.source_url // empty' "${requests[0]}")"
+            request_id="push-$GITHUB_SHA"
+          fi
+          test -n "$source_url" || { echo "::error::source_url is required"; exit 1; }
+          case "$source_url" in *$'\n'*|*$'\r'*) echo "::error::source_url contains a line break"; exit 1;; esac
+          echo "source_url=$source_url" >> "$GITHUB_OUTPUT"
+          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+
+      - name: Select working Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Initialize audit source and Lite campaign
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          SOURCE_URL: ${{ steps.request.outputs.source_url }}
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
+        shell: bash
+        run: bash scripts/audit-source-initialization/run-v1.sh

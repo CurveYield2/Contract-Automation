@@ -18,12 +18,9 @@ test('trigger request discovery is commit-API based and shallow-checkout safe', 
   assert.doesNotMatch(workflow, /git diff-tree/);
 });
 
-test('existing audit source fanout schema remains admitted and unchanged in purpose', () => {
+test('legacy audit source fanout requests are rejected in favor of Audit Source Initialization', () => {
   assert.match(workflow, /curveyield-audit-source-fanout\/v2/);
-  assert.match(workflow, /Fan out identical ZIP to Audit-Controller and Audits/);
-  assert.match(workflow, /CurveYield2\/Audit-Controller/);
-  assert.match(workflow, /CurveYield2\/Audits/);
-  assert.match(workflow, /curveyield-audit-source-fanout-report-v2/);
+  assert.match(workflow, /is retired\. Use Audit Source Initialization with only source_url/);
 });
 
 test('same importer admits bounded development-authority requests', () => {
@@ -72,10 +69,10 @@ test('development authority copy is independently re-read and hash verified', ()
   assert.match(workflow, /authority-import\/reports/);
 });
 
-test('cross-repository credentials and Phase-0 wake remain audit-source-only', () => {
-  assert.match(workflow, /Select working Audit-Controller credential\n\s+if: steps\.meta\.outputs\.mode == 'audit_source_fanout'/);
-  assert.match(workflow, /Verify cross-repository credential\n\s+if: steps\.meta\.outputs\.mode == 'audit_source_fanout'/);
-  assert.match(workflow, /Arm canonical Lite campaign monitor after source fan-out\n\s+if: steps\.meta\.outputs\.mode == 'audit_source_fanout'/);
+test('legacy authority importer is no longer a source-initialization route', () => {
+  assert.match(workflow, /^name: Authority File Import v4/m);
+  assert.match(workflow, /curveyield-audit-source-fanout\/v2/);
+  assert.match(workflow, /is retired\. Use Audit Source Initialization/);
 });
 
 test('development authority schema is strict and Contract-Automation-only', () => {
@@ -91,6 +88,7 @@ test('development authority schema is strict and Contract-Automation-only', () =
 test('authority importer remains CONTROL_LIGHT', () => {
   const result = classifyV7QualificationChanges([
     '.github/workflows/agent-zip-import-v1.yml',
+    '.github/workflows/audit-source-initialization-v1.yml',
     'protocol/schemas/curveyield-development-authority-import-v1.schema.json',
     'packages/github-native-sim/test/agent-zip-import-development-authority-v1.test.mjs',
     'process/development-agent-task-manager/AUTHORITY_IMPORT_PROTOCOL_v1.md'

@@ -18,8 +18,8 @@
   },
   "inputs": {
     "required": [
-      "Exact controller-bound campaign generation or authority to create it",
-      "Exact source identity/fence",
+      "For a fresh campaign: one direct single-file ZIP URL on Google Drive or GitHub; no pre-created campaign identity or source digest is required",
+      "For an existing campaign: exact controller-bound campaign generation/source fence",
       "Exact skill package identity",
       "Current SECURITY_TRACEABILITY_GRAPH checkpoint or initialization authority",
       "Current CARRIED_FORWARD_OBLIGATION_LEDGER checkpoint or initialization authority",
@@ -35,18 +35,19 @@
   "steps": [
     {
       "step": 1,
-      "action": "Resolve or create the exact campaign",
-      "instruction": "Bind exact campaign generation/workspace/controller/skill/source identities through the GitHub connector.",
+      "action": "Initialize or bind the exact Lite campaign and source",
+      "instruction": "For a fresh campaign, provide only the direct single-file ZIP URL to Audit Source Initialization. The workflow MUST derive filename/hash/size/slug, allocate the next rN campaign and g1 generation, create the campaign/source folders, retain the ZIP, safely unpack it into the same source folder, bind Git blob/admission commit/source fence, create initial campaign state and active pointer, publish the active registry entry, and arm the Lite monitor. Repeated source submissions create a new rN; exact workflow retries are idempotent. Existing campaigns are bound from durable controller state.",
       "requirement": "MANDATORY",
       "condition": null,
       "resources": [
-        "../../shared/controller/AUDIT_CONTROLLER_AND_GITHUB_PROTOCOL.md"
+        "../../shared/controller/AUDIT_CONTROLLER_AND_GITHUB_PROTOCOL.md",
+        "../../shared/execution/GITHUB_ACTIONS_VIA_GITHUB_APP.md"
       ]
     },
     {
       "step": 2,
-      "action": "Admit, stage and inventory the exact source",
-      "instruction": "Mechanically preserve exact source/archive identity, extraction evidence and complete source/test/script inventory without semantic conclusions.",
+      "action": "Verify initialized source fence and extraction",
+      "instruction": "Verify the Audit Source Initialization outputs: exact URL-derived archive identity, SHA-256, byte length, Git blob, source-admission commit, canonical source path and unpacked-tree digest. Do not manually duplicate the mechanical source/test/script inventory; the retained Phase-0 intelligence automation performs that inventory.",
       "requirement": "MANDATORY",
       "condition": null,
       "resources": [
