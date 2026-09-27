@@ -587,9 +587,9 @@ jobs:
             wake_path="$handoff_dir/WAKE_UP_MESSAGE.md"
             encoded_wake="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$wake_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
             [ -n "$encoded_wake" ] || return 2
-            printf '%s' "$encoded_wake" | base64 -d > /tmp/lite-successor-wake.txt
-            test -s /tmp/lite-successor-wake.txt
-            if grep -Eiq '\b(TBD|TODO)\b|\{\{[^}]+\}\}|<[^>]*(placeholder|fill|insert)[^>]*>' /tmp/lite-successor-wake.txt; then
+            printf '%s' "$encoded_wake" | base64 -d > /tmp/sealed-successor-wake.txt
+            test -s /tmp/sealed-successor-wake.txt
+            if grep -Eiq '\b(TBD|TODO)\b|\{\{[^}]+\}\}|<[^>]*(placeholder|fill|insert)[^>]*>' /tmp/sealed-successor-wake.txt; then
               echo "::warning::Lite successor wake packet contains unresolved placeholder material."
               return 2
             fi
@@ -618,60 +618,22 @@ jobs:
             [ -n "$next_reviewer" ] || next_reviewer="$next_id"
             project_name="$campaign_title"
             chat_name="$campaign_title $next_reviewer"
-            campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(printf '%s' "$campaign_root" | sed 's/ /%20/g')"
-            phase_range="$(jq -r '.nextMilestone.phaseRange // [] | if length==0 then "" elif length==1 then "phase-"+(.[0]|tostring) else "phase-"+(.[0]|tostring)+" through phase-"+(.[-1]|tostring) end' /tmp/lite-active-pointer.json)"
-            [ -n "$phase_range" ] || phase_range="skill-defined reviewer range beginning at $next_phase"
 
-            # Human-requested authority: the unpacked current authority folder on
-            # Contract-Automation/main. Fail closed if it is ambiguous.
-            authority_api="repos/$GITHUB_REPOSITORY/contents/Audit%20Skill%20-%20Current%20Authority?ref=main"
-            skill_path="$(gh api "$authority_api" --jq '[.[] | select(.type=="dir" and (.name|startswith("Audit_V7_independent_Review_skill_")))] | if length==1 then .[0].path else empty end' 2>/dev/null || true)"
-            [ -n "$skill_path" ] || { echo "::warning::Expected exactly one unpacked current Audit_V7 skill folder"; return 2; }
-            skill_url="https://github.com/$GITHUB_REPOSITORY/tree/main/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
-            ultralite_url="$skill_url/optional-modes/lite-pathway"
-
-            {
-              printf '%s\n' '[CURVEYIELD_ULTRALITE_REVIEWER_LAUNCH_V2]'
-              printf 'campaign_name=%s\n' "$campaign_title"
-              printf 'campaign_id=%s\n' "$campaign_id"
-              printf 'reviewer=%s\n' "$next_reviewer"
-              printf 'current_phase=%s\n' "$next_phase"
-              printf 'assigned_phase_range=%s\n' "$phase_range"
-              printf 'milestone=%s\n' "$next_id"
-              printf '%s\n' 'reasoning_effort=high'
-              printf 'campaign_url=%s\n' "$campaign_url"
-              printf 'authoritative_skill_folder=%s\n' "$skill_url"
-              printf 'ultralite_pathway_folder=%s\n' "$ultralite_url"
-              printf 'authoritative_handoff=%s\n' "$handoff_path"
-              printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT_IN_CAMPAIGN_PROJECT; do not use Work.'
-              printf '%s\n' 'connector_requirement=Use the GitHub connector app for every repository read/write. If the connector is unavailable, follow the skill connector-recovery path; do not substitute another repository-access method.'
-              printf '\n%s\n' "You are $next_reviewer for the exact campaign linked above. Do not use or switch to any other campaign."
-              printf '%s\n' "Open the authoritative skill folder linked above and follow its Ultralite pathway precisely with no deviation. Your current phase is $next_phase and your skill-defined reviewer assignment is $phase_range."
-              printf '%s\n' 'If your reviewer assignment spans multiple phases, remain in this same chat and advance internally exactly as the Ultralite skill directs. A phase-number change inside your assigned reviewer range does NOT mean a new agent or new chat.'
-              printf '%s\n' 'Start by reading the authoritative handoff and its START_HERE_SUCCESSOR.md, verify exact campaign/source identity, consume sealed predecessor work, and continue from the durable boundary. Never restart sealed work for convenience.'
-              printf '%s\n' 'Continue until your skill-defined reviewer boundary is complete and every required report/completion/handoff artifact is durable and machine-valid. Then stop. The campaign automation remains active and will launch the next reviewer. Only final campaign COMPLETE terminates the end-to-end automation.'
-            } > /tmp/lite-successor-wake.txt
-
-            if [ -n "$encoded_packet" ] && [ -s /tmp/lite-interphase-completion.json ] && [ -s /tmp/lite-interphase-work-packet.json ]; then
-              reconciliation_output="$(jq -r '.reconciliationOutputPath // empty' /tmp/lite-interphase-work-packet.json)"
-              verified_output_count="$(jq '.outputs | length' /tmp/lite-interphase-completion.json)"
-              {
-                cat /tmp/lite-successor-wake.txt
-                printf '\n%s\n' '[VERIFIED_INTERPHASE_MECHANICAL_RESULTS_V2]'
-                printf 'work_packet=%s\n' "$packet_path"
-                printf 'completion_receipt=%s\n' "$completion_path"
-                printf 'reconciliation_output=%s\n' "$reconciliation_output"
-                printf 'verified_output_count=%s\n' "$verified_output_count"
-                printf '%s\n' 'security_meaning=MECHANICAL_ONLY; these artifacts are not findings, severity decisions, exploit validation, remediation approval, or residual-risk conclusions.'
-                printf '%s\n' 'read_order=Read the final reconciliation output first. Open individual unit outputs only when the active reviewer task needs the underlying mechanical detail.'
-                printf '%s\n' 'verified_unit_outputs:'
-                jq -r --arg reconciliation "$reconciliation_output" '.outputs[] | select(.path != $reconciliation) | "- " + .path' /tmp/lite-interphase-completion.json
-              } > /tmp/lite-successor-wake-with-mechanical.txt
-              mv /tmp/lite-successor-wake-with-mechanical.txt /tmp/lite-successor-wake.txt
+            # The sealed WAKE_UP_MESSAGE.md is the complete first-message contract.
+            # Do not prepend, append, summarize, or reinterpret it.
+            # Campaign identity and current phase are validated from canonical controller
+            # state/pointer before this file is admitted.
+            grep -Fq "$campaign_id" /tmp/sealed-successor-wake.txt || {
+              echo "::warning::Sealed successor wake does not contain the canonical campaign id $campaign_id."
+              return 2
+            }
+            if ! grep -Fq "$next_phase" /tmp/sealed-successor-wake.txt                && ! grep -Fqi "${next_phase#phase-}" /tmp/sealed-successor-wake.txt; then
+              echo "::warning::Sealed successor wake does not identify canonical successor phase $next_phase."
+              return 2
             fi
 
             successor_wake_id="${campaign_id}-${next_id}-${next_reviewer}"
-            wake_b64="$(base64 -w0 /tmp/lite-successor-wake.txt)"
+            wake_b64="$(base64 -w0 /tmp/sealed-successor-wake.txt)"
             browser_context_b64="$(jq -nc \
               --arg routine 'audit-ultralite-reviewer-v1' \
               --arg project "$project_name" \
