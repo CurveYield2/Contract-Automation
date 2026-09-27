@@ -28,6 +28,7 @@ test('browser operation registry exposes reusable normal-ChatGPT project operati
   const source = read('scripts/browser-operations-v1.mjs');
   for (const operation of [
     'chatgpt.ensure_chat_mode',
+    'chatgpt.ensure_thinking_effort',
     'chatgpt.ensure_project',
     'chatgpt.start_project_chat',
     'chatgpt.rename_current_chat',
@@ -57,6 +58,44 @@ test('browser routine engine is data-driven and the first routine is the ultrali
   assert.deepEqual(routine.stages.after_message.map((step) => step.operation), [
     'chatgpt.rename_current_chat',
   ]);
+});
+
+test('audit wakes enforce verified High reasoning effort and expose authoritative current phase', () => {
+  const operations = read('scripts/browser-operations-v1.mjs');
+  const runtime = read('scripts/browser-agent-wake.mjs');
+  const wake = read('.github/workflows/browser-agent-wake.yml');
+  assert.match(operations, /ensureThinkingEffort/);
+  assert.match(operations, /getByText\('High', \{ exact: true \}\)/);
+  assert.match(operations, /High thinking-effort control could not be selected and verified/);
+  assert.match(runtime, /CHATGPT_THINKING_EFFORT/);
+  assert.match(runtime, /chatgpt\.ensure_thinking_effort/);
+  assert.match(wake, /default: high/);
+  assert.match(wake, /current_phase=%s/);
+  assert.match(wake, /reasoning_effort=%s/);
+  assert.match(wake, /activeAssignment=\{phaseId:\$phaseId,milestoneId:\$milestoneId,workerRole:\$workerRole,thinkingEffort:\$thinkingEffort\}/);
+  assert.match(wake, /expectedPhaseId:\$phaseId,expectedMilestoneId:\$milestoneId/);
+});
+
+test('technical execution wakes preserve semantic phase and do not reuse stale bootstrap watchdog text', () => {
+  const workflow = read('.github/workflows/audit-controller-execution.yml');
+  assert.match(workflow, /request_phase_id=/);
+  assert.match(workflow, /registered_phase=/);
+  assert.match(workflow, /semantic_phase_id=/);
+  assert.match(workflow, /technical_phase=\$request_phase_id/);
+  assert.match(workflow, /\[AUDIT_AGENT_WATCHDOG_V2\]/);
+  assert.match(workflow, /current_phase=\$semantic_phase_id/);
+  assert.match(workflow, /gate_expected_phase="\$semantic_phase_id"/);
+  assert.doesNotMatch(workflow, /watchdog_message="\$\(jq -r '\.watchdog\.idleMessage/);
+});
+
+test('successor and reviewer-repair wakes state the semantic phase explicitly', () => {
+  const watchdog = read('.github/workflows/browser-agent-watchdog.yml');
+  const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
+  assert.match(watchdog, /printf 'phase=%s\\n' "\$next_phase"/);
+  assert.match(watchdog, /reasoning_effort=high/);
+  assert.match(repair, /phase_start=.*gate_expected_phase/);
+  assert.match(repair, /printf 'phase=phase-%s\\n' "\$PHASE_START"/);
+  assert.match(repair, /reasoning_effort=high/);
 });
 
 test('long Phase-0 wake submission accepts independent UI proof instead of one exact rendered text node', () => {
