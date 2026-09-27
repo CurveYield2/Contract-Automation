@@ -408,7 +408,10 @@ jobs:
             -f gate_active_pointer_path="$POINTER_PATH" \
             -f browser_routine_id=audit-ultralite-reviewer-v1 \
             -f project_name="$PROJECT_NAME" \
-            -f chat_name="$chat_name"
+            -f chat_name="$chat_name" \
+            -f repair_enabled=true \
+            -f repair_idle_poke_threshold=3 \
+            -f repair_unviewable_threshold=2
 
       - name: Summarize reviewer repair
         shell: bash
