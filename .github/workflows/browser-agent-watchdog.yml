@@ -90,6 +90,7 @@ jobs:
         id: target
         env:
           GH_TOKEN: ${{ github.token }}
+          CHATGPT_THINKING_EFFORT: high
         shell: bash
         run: |
           set -euo pipefail
