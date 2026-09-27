@@ -70,6 +70,7 @@ async function buildCore({campaignRoot,skillRoot}){
   const lockIdentity=asArray(sbom.dependencyFiles).map(x=>`${x.path}:${x.sha256}`).join('|')||'NO_LOCKFILE_IDENTITY_AVAILABLE';
 
   const core=await readJson(path.join(skillRoot,'shared/source-intelligence/SOURCE_INTELLIGENCE_TEMPLATE.json'));
+  core.templateInstructions=asArray(core.templateInstructions).map(text=>String(text).replaceAll('__FILL_REQUIRED__','required-fill sentinel'));
   core.identity={
     campaignId,
     campaignGenerationId:generation,
