@@ -779,7 +779,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -s "$CHATGPT_SESSION_STATE_UPDATED_MARKER" ] && [ -s "$CHATGPT_SESSION_STATE_PATH" ]; then
+          if [ -s /tmp/curveyield-browser-agent/session-state-updated ] && [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
             echo "updated=true" >> "$GITHUB_OUTPUT"
           else
             echo "updated=false" >> "$GITHUB_OUTPUT"
