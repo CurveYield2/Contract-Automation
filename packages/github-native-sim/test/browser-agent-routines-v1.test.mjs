@@ -59,6 +59,34 @@ test('browser routine engine is data-driven and the first routine is the ultrali
   ]);
 });
 
+test('long Phase-0 wake submission accepts independent UI proof instead of one exact rendered text node', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  const postStart = source.indexOf('async function post(page, message)');
+  const postEnd = source.indexOf('async function runWithPage', postStart);
+  const postBlock = source.slice(postStart, postEnd);
+  assert.match(postBlock, /beforeUserCount/);
+  assert.match(postBlock, /afterUserCount/);
+  assert.match(postBlock, /generating/);
+  assert.match(postBlock, /!visible && afterUserCount <= beforeUserCount && !generating/);
+});
+
+test('failed non-infrastructure idle pokes consume the escalation budget and can repair Phase-0', () => {
+  const workflow = read('.github/workflows/browser-agent-watchdog.yml');
+  assert.match(workflow, /IDLE_POKE_FAILED_COUNTED/);
+  assert.match(workflow, /failed_idle_pokes=\$\(\(prior_idle_pokes \+ 1\)\)/);
+  assert.match(workflow, /IDLE_AFTER_\$\{failed_idle_pokes\}_WATCHDOG_ATTEMPTS_LAST_POKE_FAILED/);
+  assert.match(workflow, /IDLE_POKE_INFRA_RETRY_LATER/);
+});
+
+test('source fanout launches Phase-0 with the canonical rich Ultralite bootstrap envelope', () => {
+  const workflow = read('.github/workflows/agent-zip-import-v1.yml');
+  assert.match(workflow, /\[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1\]/);
+  assert.match(workflow, /connector_requirement=Use the GitHub connector app for all repository reads\/writes\./);
+  assert.match(workflow, /audit-process\/v7\/LITE_PRIMARY_SKILL_AUTHORITY_v1\.json/);
+  assert.match(workflow, /create\/seal the P0_TO_P1 successor packet\/handoff/);
+  assert.match(workflow, /watchdog_message="\$wake_message"/);
+});
+
 test('watchdog observation fails over provider-specific challenge and auth walls before classifying infrastructure noise', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   const observeStart = source.indexOf("if (action === 'observe')");
