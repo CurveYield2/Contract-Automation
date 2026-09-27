@@ -494,7 +494,8 @@ jobs:
             local encoded_pointer completed_id completed_status next_id next_state next_reviewer handoff_path handoff_dir wake_path encoded_wake wake_b64 next_phase successor_wake_id
             local packet_path completion_path encoded_packet packet_sha instructions mechanical_message mechanical_b64 mechanical_wake_id
             local legacy_packet_path legacy_encoded reconciliation_output verified_output_count
-            local campaign_root campaign_title campaign_url project_name chat_name skill_path skill_url state_skill_rel newest_skill newest_skill_date candidate candidate_date
+            local campaign_root campaign_title campaign_url project_name chat_name skill_path skill_url ultralite_url phase_range
+            local canonical_id canonical_root canonical_mode canonical_optional
 
             [ -n "$pointer_path" ] || return 2
             encoded_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$pointer_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
@@ -544,7 +545,7 @@ jobs:
                 fi
                 packet_sha="$(cat /tmp/lite-interphase-work-packet.sha256)"
                 instructions="$(jq -r '.instructions' /tmp/lite-interphase-work-packet.json)"
-                mechanical_wake_id="${campaign_id}-${completed_id}-interphase-${GITHUB_RUN_ID}-${cycle}"
+                mechanical_wake_id="${campaign_id}-${completed_id}-interphase"
                 {
                   printf '%s\n' '[AUDIT_INTERPHASE_MECHANICAL_V1]'
                   printf 'repository=%s\n' "$gate_repo"
@@ -570,7 +571,8 @@ jobs:
                 mechanical_b64="$(base64 -w0 /tmp/lite-interphase-wake.txt)"
 
                 echo "Lite machine gate PASS: $expected_milestone requires an inter-phase mechanical pass before $next_id."
-                gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$mechanical_wake_id" -f campaign_id="$campaign_id" -f phase_id="interphase-$completed_id-to-$next_id" -f mode="create_fresh" -f chat_url="" -f wake_message_b64="$mechanical_b64" -f watchdog_enabled="true" -f worker_role="interphase_mechanical" -f watchdog_message_b64="" -f gate_mode="LITE" -f gate_repository="$gate_repo" -f gate_ref="$gate_ref" -f gate_state_path="$gate_path" -f gate_expected_phase_id="$gate_expected_phase" -f gate_expected_milestone_id="$expected_milestone" -f gate_active_pointer_path="$pointer_path" -f gate_interphase_handoff_path="$handoff_path" -f gate_interphase_work_packet_path="$packet_path" -f gate_interphase_completion_path="$completion_path" -f gate_interphase_work_packet_sha256="$packet_sha"
+                poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
+                gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$mechanical_wake_id" -f campaign_id="$campaign_id" -f phase_id="interphase-$completed_id-to-$next_id" -f mode="create_fresh" -f chat_url="" -f wake_message_b64="$mechanical_b64" -f watchdog_enabled="true" -f worker_role="interphase_mechanical" -f watchdog_message_b64="$poke_b64" -f gate_mode="LITE" -f gate_repository="$gate_repo" -f gate_ref="$gate_ref" -f gate_state_path="$gate_path" -f gate_expected_phase_id="$gate_expected_phase" -f gate_expected_milestone_id="$expected_milestone" -f gate_active_pointer_path="$pointer_path" -f gate_interphase_handoff_path="$handoff_path" -f gate_interphase_work_packet_path="$packet_path" -f gate_interphase_completion_path="$completion_path" -f gate_interphase_work_packet_sha256="$packet_sha"
                 return 4
               fi
             fi
@@ -595,92 +597,52 @@ jobs:
               echo "::warning::Unable to derive campaign root from pointer/handoff/gate paths."
               return 2
             fi
-            campaign_title="$(jq -r '.title // .projectSlug // .campaignId // empty' /tmp/canonical-campaign-state.json)"
+            canonical_id="$(jq -r '.campaignId // empty' /tmp/canonical-campaign-state.json)"
+            canonical_root="$(jq -r '.controller.workspacePath // empty' /tmp/canonical-campaign-state.json)"
+            canonical_mode="$(jq -r '.mode // empty' /tmp/canonical-campaign-state.json)"
+            canonical_optional="$(jq -r '.optionalMode // empty' /tmp/canonical-campaign-state.json)"
+            [ "$canonical_id" = "$campaign_id" ] || { echo "::warning::Successor campaignId mismatch"; return 2; }
+            [ "$canonical_root" = "$campaign_root" ] || { echo "::warning::Successor campaign root mismatch"; return 2; }
+            [ "$canonical_mode" = "LITE" ] || { echo "::warning::Successor campaign is not Lite"; return 2; }
+            [ "$canonical_optional" = "ULTRALITE" ] || { echo "::warning::Successor campaign is not Ultralite"; return 2; }
+
+            campaign_title="$(jq -r '.auditName // .title // .projectSlug // .campaignId // empty' /tmp/canonical-campaign-state.json)"
             [ -n "$campaign_title" ] || campaign_title="$campaign_id"
             [ -n "$next_reviewer" ] || next_reviewer="$next_id"
             project_name="$campaign_title"
             chat_name="$campaign_title $next_reviewer"
             campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(printf '%s' "$campaign_root" | sed 's/ /%20/g')"
+            phase_range="$(jq -r '.nextMilestone.phaseRange // [] | if length==0 then "" elif length==1 then "phase-"+(.[0]|tostring) else "phase-"+(.[0]|tostring)+" through phase-"+(.[-1]|tostring) end' /tmp/lite-active-pointer.json)"
 
-            state_skill_rel="$(jq -r '.skillAuthority.current.campaignPath // empty' /tmp/canonical-campaign-state.json)"
-            skill_path=""
-            skill_ref="$gate_ref"
-            skill_repo="$gate_repo"
-            skill_authority_source=""
-            newest_skill=""
-            newest_skill_date=""
-
-            # Authority precedence must match Audit-Controller:
-            # 1) campaign-bound authority; 2) global Lite primary pointer; 3) legacy newest-ZIP fallback.
-            if [ -n "$state_skill_rel" ]; then
-              skill_path="$campaign_root/$state_skill_rel"
-              skill_authority_source="CAMPAIGN_BOUND"
-            else
-              primary_pointer_path='audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json'
-              primary_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/CurveYield2/Audit-Controller/contents/$primary_pointer_path?ref=main" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
-              if [ -n "$primary_pointer" ] && [ "$(printf '%s' "$primary_pointer" | jq -r '.schemaVersion // empty')" = 'audit-v7-lite-primary-skill-authority-v1' ] && [ "$(printf '%s' "$primary_pointer" | jq -r '.status // empty')" = 'ACTIVE' ]; then
-                primary_skill_path="$(printf '%s' "$primary_pointer" | jq -r '.packagePath // empty')"
-                primary_blob_sha="$(printf '%s' "$primary_pointer" | jq -r '.gitBlobSha // empty')"
-                if [ -n "$primary_skill_path" ] && [[ "$primary_blob_sha" =~ ^[0-9a-f]{40}$ ]]; then
-                  observed_blob_sha="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/CurveYield2/Audit-Controller/contents/$primary_skill_path?ref=main" --jq '.sha // empty' 2>/dev/null || true)"
-                  if [ "$observed_blob_sha" = "$primary_blob_sha" ]; then
-                    skill_path="$primary_skill_path"
-                    skill_ref="main"
-                    skill_repo="CurveYield2/Audit-Controller"
-                    skill_authority_source="LITE_PRIMARY_DEFAULT"
-                  else
-                    echo "::warning::Lite primary skill pointer blob identity does not match repository content."
-                    return 2
-                  fi
-                fi
-              fi
-            fi
-
-            if [ -z "$skill_path" ]; then
-              authority_listing="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$campaign_root/authority?ref=$gate_ref" 2>/dev/null || true)"
-              if [ -n "$authority_listing" ]; then
-                while IFS= read -r candidate; do
-                  [ -n "$candidate" ] || continue
-                  candidate_date="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api --method GET "repos/$gate_repo/commits" -f path="$candidate" -f sha="$gate_ref" -f per_page=1 --jq '.[0].commit.committer.date // empty' 2>/dev/null || true)"
-                  [ -n "$candidate_date" ] || continue
-                  if [ -z "$newest_skill_date" ] || [[ "$candidate_date" > "$newest_skill_date" ]]; then
-                    newest_skill="$candidate"
-                    newest_skill_date="$candidate_date"
-                  fi
-                done < <(printf '%s' "$authority_listing" | jq -r '.[]? | select(.type=="file" and (.name|test("skill.*\\.zip$";"i"))) | .path')
-              fi
-              if [ -n "$newest_skill" ]; then
-                skill_path="$newest_skill"
-                skill_authority_source="LEGACY_NEWEST_ZIP_FALLBACK"
-              fi
-            fi
-
-            [ -n "$skill_path" ] || {
-              echo "::warning::No audit skill ZIP could be resolved for successor $next_reviewer."
-              return 2
-            }
-            skill_url="https://github.com/$skill_repo/blob/$skill_ref/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
+            # Human-requested authority: the unpacked current authority folder on
+            # Contract-Automation/main. Fail closed if it is ambiguous.
+            authority_api="repos/$GITHUB_REPOSITORY/contents/Audit%20Skill%20-%20Current%20Authority?ref=main"
+            skill_path="$(gh api "$authority_api" --jq '[.[] | select(.type=="dir" and (.name|startswith("Audit_V7_independent_Review_skill_")))] | if length==1 then .[0].path else empty end' 2>/dev/null || true)"
+            [ -n "$skill_path" ] || { echo "::warning::Expected exactly one unpacked current Audit_V7 skill folder"; return 2; }
+            skill_url="https://github.com/$GITHUB_REPOSITORY/tree/main/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
+            ultralite_url="$skill_url/optional-modes/lite-pathway"
 
             {
-              printf '%s\n' '[AUDIT_REVIEWER_ROUTINE_V1]'
+              printf '%s\n' '[CURVEYIELD_ULTRALITE_REVIEWER_LAUNCH_V2]'
               printf 'campaign_name=%s\n' "$campaign_title"
+              printf 'campaign_id=%s\n' "$campaign_id"
               printf 'reviewer=%s\n' "$next_reviewer"
-              printf 'phase=%s\n' "$next_phase"
+              printf 'current_phase=%s\n' "$next_phase"
+              printf 'assigned_phase_range=%s\n' "$phase_range"
               printf 'milestone=%s\n' "$next_id"
               printf '%s\n' 'reasoning_effort=high'
               printf 'campaign_url=%s\n' "$campaign_url"
-              printf 'audit_skill_url=%s\n' "$skill_url"
-              printf 'audit_skill_authority_source=%s\n' "$skill_authority_source"
+              printf 'authoritative_skill_folder=%s\n' "$skill_url"
+              printf 'ultralite_pathway_folder=%s\n' "$ultralite_url"
               printf 'authoritative_handoff=%s\n' "$handoff_path"
               printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT_IN_CAMPAIGN_PROJECT; do not use Work.'
-              printf '%s\n' 'connector_requirement=Use the GitHub connector app for repository reads/writes and campaign work.'
-              printf '%s\n' 'authority_rule=The audit skill URL above was resolved by authority precedence (campaign-bound first, otherwise the active global Lite primary authority; legacy newest-ZIP fallback only when neither exists). Read it before reviewer work and follow it exactly unless a newer explicit human instruction in this chat overrides it.'
-              printf '%s\n' 'continuation_rule=Continue from the sealed handoff and latest durable campaign state. Do not restart sealed/completed work for convenience.'
-              printf '%s\n' 'completion_rule=Run your assigned reviewer process through its required terminal handoff/final-report state so the automation can launch the next reviewer automatically.'
-              printf '\n%s\n\n' '[SEALED_SUCCESSOR_WAKE_PACKET]'
-              cat /tmp/lite-successor-wake.txt
-            } > /tmp/lite-successor-wake-enveloped.txt
-            mv /tmp/lite-successor-wake-enveloped.txt /tmp/lite-successor-wake.txt
+              printf '%s\n' 'connector_requirement=Use the GitHub connector app for every repository read/write. If the connector is unavailable, follow the skill connector-recovery path; do not substitute another repository-access method.'
+              printf '\n%s\n' "You are $next_reviewer for the exact campaign linked above. Do not use or switch to any other campaign."
+              printf '%s\n' "Open the authoritative skill folder linked above and follow its Ultralite pathway precisely with no deviation. Your current phase is $next_phase and your skill-defined reviewer assignment is $phase_range."
+              printf '%s\n' 'If your reviewer assignment spans multiple phases, remain in this same chat and advance internally exactly as the Ultralite skill directs. A phase-number change inside your assigned reviewer range does NOT mean a new agent or new chat.'
+              printf '%s\n' 'Start by reading the authoritative handoff and its START_HERE_SUCCESSOR.md, verify exact campaign/source identity, consume sealed predecessor work, and continue from the durable boundary. Never restart sealed work for convenience.'
+              printf '%s\n' 'Continue until your skill-defined reviewer boundary is complete and every required report/completion/handoff artifact is durable and machine-valid. Then stop. The campaign automation remains active and will launch the next reviewer. Only final campaign COMPLETE terminates the end-to-end automation.'
+            } > /tmp/lite-successor-wake.txt
 
             if [ -n "$encoded_packet" ] && [ -s /tmp/lite-interphase-completion.json ] && [ -s /tmp/lite-interphase-work-packet.json ]; then
               reconciliation_output="$(jq -r '.reconciliationOutputPath // empty' /tmp/lite-interphase-work-packet.json)"
@@ -700,7 +662,7 @@ jobs:
               mv /tmp/lite-successor-wake-with-mechanical.txt /tmp/lite-successor-wake.txt
             fi
 
-            successor_wake_id="${campaign_id}-${next_id}-${GITHUB_RUN_ID}-${cycle}"
+            successor_wake_id="${campaign_id}-${next_id}-${next_reviewer}"
             wake_b64="$(base64 -w0 /tmp/lite-successor-wake.txt)"
             browser_context_b64="$(jq -nc \
               --arg routine 'audit-ultralite-reviewer-v1' \
@@ -717,7 +679,7 @@ jobs:
               -f chat_url="" \
               -f wake_message_b64="$wake_b64" \
               -f watchdog_enabled="true" \
-              -f watchdog_message_b64="" \
+              -f watchdog_message_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)" \
               -f gate_mode="LITE" \
               -f gate_repository="$gate_repo" \
               -f gate_ref="$gate_ref" \
@@ -725,6 +687,8 @@ jobs:
               -f gate_expected_phase_id="$next_phase" \
               -f gate_expected_milestone_id="$next_id" \
               -f gate_active_pointer_path="$pointer_path" \
+              -f gate_stop_states_csv=STOPPED_BY_HUMAN \
+              -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN \
               -f browser_context_b64="$browser_context_b64"
             return 0
           }
@@ -792,20 +756,44 @@ jobs:
                       fi
                     fi
                     lite_campaign_status="$(jq -r '.campaignStatus // empty' /tmp/canonical-campaign-state.json)"
-                    if [ "$lite_campaign_status" = "COMPLETE" ]; then
-                      retire_state "LITE_CAMPAIGN_COMPLETE_DURING_INTERPHASE"
+                    if [ "$lite_campaign_status" = "COMPLETE" ] || [ "$lite_campaign_status" = "STOPPED_BY_HUMAN" ]; then
+                      retire_state "LITE_CAMPAIGN_TERMINAL_DURING_INTERPHASE_$lite_campaign_status"
                       exit 0
                     fi
                   else
                   lite_campaign_status="$(jq -r '.campaignStatus // empty' /tmp/canonical-campaign-state.json)"
                   lite_phase_id="$(jq -r '.phase.id // empty' /tmp/canonical-campaign-state.json)"
-                  lite_phase_state="$(jq -r '.phase.state // empty' /tmp/canonical-campaign-state.json)"
+                  lite_phase_state="$(jq -r '.phase.state // .phase.status // empty' /tmp/canonical-campaign-state.json)"
+                  lite_milestone="$(jq -r '.phase.milestoneId // empty' /tmp/canonical-campaign-state.json)"
                   lite_worker_status="$(jq -r --arg m "$gate_expected_milestone" '.routingPlan.workers[]? | select(.milestone==$m) | .status' /tmp/canonical-campaign-state.json | tail -n1)"
 
-                  if [ "$lite_campaign_status" = "COMPLETE" ] || [ "$lite_phase_state" = "CLOSED" ]; then
-                    echo "Lite campaign is complete; retiring watchdog."
-                    retire_state "LITE_CAMPAIGN_COMPLETE"
+                  # Overall automation terminates only at campaign-level terminal status.
+                  # A closed/sealed phase or internal phase-number change is not terminal.
+                  if [ "$lite_campaign_status" = "COMPLETE" ] || [ "$lite_campaign_status" = "STOPPED_BY_HUMAN" ]; then
+                    echo "Lite campaign reached terminal campaign status $lite_campaign_status; retiring watchdog."
+                    retire_state "LITE_CAMPAIGN_TERMINAL_$lite_campaign_status"
                     exit 0
+                  fi
+
+                  # Same reviewer milestone may span multiple phases (2-5, 6-7, 8-10).
+                  # Synchronize the existing chat/watchdog in place instead of spawning a new chat.
+                  if [ "$worker_role" = "reviewer" ]                      && [ -n "$lite_milestone" ]                      && [ "$lite_milestone" = "$gate_expected_milestone" ]                      && [ -n "$lite_phase_id" ]                      && [ "$lite_phase_id" != "$gate_expected_phase" ]; then
+                    echo "Internal phase advancement $gate_expected_phase -> $lite_phase_id within milestone $lite_milestone; keeping the same reviewer chat."
+                    jq --arg phase "$lite_phase_id"                       '.phaseId=$phase | .gate.expectedPhaseId=$phase | .idleMessage="GET BACK TO WORK" | .lastDecision=("INTERNAL_PHASE_SYNC_"+$phase)'                       /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+                    mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+                    persist_state || true
+                    gate_expected_phase="$lite_phase_id"
+
+                    safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
+                    reg_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
+                    reg_encoded="$(gh api "$reg_api?ref=main" --jq '.content' 2>/dev/null || true)"
+                    if [ -n "$reg_encoded" ]; then
+                      printf '%s' "$reg_encoded" | base64 -d > /tmp/phase-sync-registration.json
+                      reg_sha="$(gh api "$reg_api?ref=main" --jq '.sha' 2>/dev/null || true)"
+                      jq --arg phase "$lite_phase_id"                         '.activeAssignment.phaseId=$phase | .watchdog.gate.expectedPhaseId=$phase | .watchdog.idleMessage="GET BACK TO WORK" | .updatedAt=(now|todate)'                         /tmp/phase-sync-registration.json > /tmp/phase-sync-registration-next.json
+                      reg_content="$(base64 -w0 /tmp/phase-sync-registration-next.json)"
+                      [ -n "$reg_sha" ] && gh api --method PUT "$reg_api" -f message="chore(ultralite): sync $campaign_id to $lite_phase_id" -f content="$reg_content" -f sha="$reg_sha" -f branch=main >/dev/null || true
+                    fi
                   fi
 
                   if [ "$gate_expected_milestone" = "P0_BOOTSTRAP" ] && [ "$lite_phase_state" = "WAITING_FOR_SUCCESSOR_AGENT" ]; then
@@ -834,9 +822,7 @@ jobs:
                           exit 0
                         fi
                         if [ "$rc" -eq 3 ]; then
-                          echo "Lite milestone is terminal with no successor; retiring watchdog."
-                          retire_state "LITE_NO_SUCCESSOR_$gate_expected_milestone"
-                          exit 0
+                          echo "::warning::Milestone has no successor but campaignStatus is not COMPLETE; keeping automation active until final campaign completion is durable."
                         fi
                         echo "::warning::Lite milestone is sealed but successor packet is not machine-ready yet; current agent remains supervised."
                       fi
