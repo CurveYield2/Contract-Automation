@@ -101,6 +101,7 @@ export async function stagePhase6Snapshot(request, {
     ...(stagedArchive ? {
       archivePath: stagedArchive.archivePath,
       archiveSha256: stagedArchive.archiveSha256,
+      archiveExtractionRoot: stagedArchive.extractionRoot,
       archiveExtractedBytes: stagedArchive.extractedBytes,
       archiveEntryCount: stagedArchive.entryCount,
     } : {}),
@@ -111,7 +112,10 @@ export async function copyPhase6SnapshotForExecution(snapshot, { workspaceRoot }
   const executionRoot = path.join(workspaceRoot, 'phase6-execution-copy');
   await fs.rm(executionRoot, { recursive: true, force: true });
   await fs.mkdir(path.dirname(executionRoot), { recursive: true });
-  await fs.cp(snapshot.projectRoot, executionRoot, {
+
+  const archiveExtractionRoot = snapshot.archiveExtractionRoot ?? null;
+  const copyRoot = archiveExtractionRoot ?? snapshot.projectRoot;
+  await fs.cp(copyRoot, executionRoot, {
     recursive: true,
     preserveTimestamps: true,
     filter: (source) => {
@@ -119,7 +123,19 @@ export async function copyPhase6SnapshotForExecution(snapshot, { workspaceRoot }
       return base !== '.git' && base !== 'node_modules';
     },
   });
-  const copied = await digestDirectory(executionRoot);
+
+  let projectRoot = executionRoot;
+  if (archiveExtractionRoot) {
+    const projectRelative = path.relative(archiveExtractionRoot, snapshot.projectRoot);
+    if (path.isAbsolute(projectRelative) || projectRelative.split(path.sep).includes('..')) {
+      const error = new Error('Phase 6 archive project root escapes the staged archive extraction root');
+      error.kind = 'PHASE6_SNAPSHOT_INTEGRITY_FAILURE';
+      throw error;
+    }
+    projectRoot = projectRelative ? path.join(executionRoot, projectRelative) : executionRoot;
+  }
+
+  const copied = await digestDirectory(projectRoot);
   if (copied.digestSha256 !== snapshot.snapshotDigestSha256) {
     const error = new Error('Phase 6 execution copy digest does not match the preflight snapshot');
     error.kind = 'PHASE6_SNAPSHOT_INTEGRITY_FAILURE';
@@ -127,7 +143,7 @@ export async function copyPhase6SnapshotForExecution(snapshot, { workspaceRoot }
   }
   return {
     commit: snapshot.commit,
-    projectRoot: executionRoot,
+    projectRoot,
     snapshotDigestSha256: copied.digestSha256,
     snapshotFileCount: copied.fileCount,
     snapshotBytes: copied.totalBytes,
