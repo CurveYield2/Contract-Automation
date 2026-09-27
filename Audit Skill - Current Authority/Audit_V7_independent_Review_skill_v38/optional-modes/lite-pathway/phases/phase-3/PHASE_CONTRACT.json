@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "audit-v7-phase-contract-v1",
+  "phase": {"sequence": 3, "id": "lite-threat-domain-segment", "title": "Lite Combined Phases 2-5 - Threat and Domain Model", "reviewerLineage": "reviewer-2", "phaseCard": "phases/phase-3/START_HERE.md"},
+  "authorization": {"controllerBoundCurrentPhaseRequired": true, "exactSourceFenceRequired": true, "incomingSuccessorReceipt": null, "combinedMilestone": "P2_TO_P5", "automaticAdvanceAfterSegment": true, "humanApprovalRequired": false},
+  "inputs": {"required": ["Exact Phase-2 property registry", "Accepted Source Intelligence identity verified at segment entry", "Current graph and obligation ledger", "Current Domain Applicability Matrix and registry"], "conditional": ["Source Intelligence rebind after material identity change", "Evidence that changes an applicability trigger"]},
+  "steps": [
+    {"step": 1, "action": "Model architecture, trust and attacks", "instruction": "Map trust boundaries, authority transitions, upgrade paths, callbacks, dependencies and protected assets; create stable HYP records for material attack sequences.", "requirement": "MANDATORY", "condition": null, "resources": ["../../shared/lenses/architecture-threat-lens.md", "../../../../shared/domain-modules/threat-model-attack-trees.md", "resources/PHASE3_ATTACK_HYPOTHESIS_REGISTRY.md"]},
+    {"step": 2, "action": "Classify every specialist domain once", "instruction": "Evaluate all domain triggers. Treat UNCERTAIN_INCLUDE as triggered, bind activated domains to Phase-4 work, and reevaluate only when evidence changes a trigger fact.", "requirement": "MANDATORY", "condition": null, "resources": ["../../shared/controller/DOMAIN_APPLICABILITY_MATRIX.json", "../../shared/controller/DOMAIN_APPLICABILITY_REGISTRY.json"]},
+    {"step": 3, "action": "Record obligations and continue", "instruction": "Update the live graph and obligation ledger with material hypotheses and specialist obligations, then continue directly to Phase 4 without a separate report or duplicate seal.", "requirement": "MANDATORY", "condition": null, "resources": ["../../shared/controller/SECURITY_TRACEABILITY_GRAPH.json", "../../shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json"]}
+  ],
+  "requiredOutputs": [
+    {"artifact": "phases/phase-3/resources/PHASE3_ATTACK_HYPOTHESIS_REGISTRY.md", "role": "LIVE_COMBINED_MILESTONE_INPUT", "required": true},
+    {"artifact": "shared/controller/DOMAIN_APPLICABILITY_REGISTRY.json", "role": "ONE_TIME_DOMAIN_CLASSIFICATION", "required": true},
+    {"artifact": "shared/controller/SECURITY_TRACEABILITY_GRAPH.json", "role": "LIVE_GLOBAL_STATE", "required": true}
+  ],
+  "globalControlCheckpoints": {"securityTraceabilityGraph": "UPDATE_LIVE_NO_SEGMENT_SEAL", "carriedForwardObligationLedger": "UPDATE_LIVE_NO_SEGMENT_SEAL", "evidenceInvalidationMatrix": "CLASSIFY_ONLY_IF_CHANGE_OBSERVED", "sealAtCombinedPhase5": true},
+  "sealingCriteria": ["Every material threat has a stable hypothesis and route", "All specialist domains have evidence-bound classifications", "No separate Phase-3 report or duplicate global seal is filed"],
+  "recoveryRoutes": [{"condition": "Phase-2 input incomplete", "route": "Repair only the incomplete combined-segment record"}, {"condition": "Domain trigger ambiguous", "route": "Set UNCERTAIN_INCLUDE"}, {"condition": "Material identity change", "route": "Classify invalidation and rebind affected evidence"}],
+  "allowedNextStates": ["LITE_PHASE4_ACTIVE"],
+  "domainApplicability": {"classificationRequiredHere": true, "recheckPolicy": "ONLY_ON_TRIGGER_FACT_CHANGE", "uncertainPolicy": "UNCERTAIN_INCLUDE"},
+  "universalRuleIds": ["U-EXEC-001", "U-GITHUB-001", "U-STATE-001", "U-EVIDENCE-001", "U-REPAIR-001", "U-HUMAN-001", "U-DISCLOSURE-001", "U-SOURCEINTEL-001", "U-UPDATES-001", "U-HUMANCOMMS-001"]
+}

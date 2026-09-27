@@ -1,0 +1,154 @@
+{
+  "schemaVersion": "audit-v7-phase-contract-v1",
+  "phase": {
+    "sequence": 6,
+    "id": "lite-merged-execution",
+    "title": "Merged Lite Phases 6-7",
+    "reviewerLineage": "reviewer-3L",
+    "phaseCard": "phases/phase-6/START_HERE.md"
+  },
+  "authorization": {
+    "controllerBoundCurrentPhaseRequired": true,
+    "exactSourceFenceRequired": true,
+    "incomingSuccessorReceipt": "P5_TO_P6",
+    "mergedPhaseCompletion": [
+      6,
+      7
+    ],
+    "successorBoundary": "P67_TO_P8",
+    "automaticAdvanceAfterSeal": true,
+    "humanApprovalRequired": false
+  },
+  "inputs": {
+    "required": [
+      "Accepted P5_TO_P6 receipt",
+      "Exact source/build/toolchain identity",
+      "Sealed combined Phase-2-5 report",
+      "All material candidate and target obligations",
+      "Current graph, obligation ledger and invalidation matrix",
+      "Deployment and configuration material available in scope"
+    ],
+    "conditional": [
+      "Valid exact-identity Phase-1 build evidence",
+      "Fork or external dependency state required by the real deployment",
+      "Mutable local RPC endpoint under the copied mutable-RPC policy"
+    ]
+  },
+  "steps": [
+    {
+      "step": 1,
+      "action": "Accept the handoff and admit the exact build",
+      "instruction": "Verify P5_TO_P6 and reuse exact build evidence only when identity remains valid; otherwise compile/build once after repair.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/handoff/SUCCESSOR_HANDOFF_RECEPTION_CHECKLIST.md",
+        "resources/LITE_PHASE6_7_EXECUTION_PROTOCOL.md"
+      ]
+    },
+    {
+      "step": 2,
+      "action": "Simulate complete deploy/configuration",
+      "instruction": "Execute and record every constructor, initializer, dependency, address, role, ownership/governance transfer, approval, wiring action and post-deploy state assertion required by the release.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/LITE_DEPLOY_CONFIG_MATRIX.md",
+        "../../shared/lenses/build-simulation-evidence-lens.md"
+      ]
+    },
+    {
+      "step": 3,
+      "action": "Execute candidate-specific deterministic simulation and basic targeted fuzzing",
+      "instruction": "Map every material candidate to a bounded target/oracle. Group only candidates that share the exact source/fork/deploy/config identity into coherent execution batches and reuse a deterministic post-deploy snapshot when safe; preserve candidate-specific setup, oracle, traces and disposition. Run bounded targeted fuzzing with independent candidate evidence.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/LITE_TARGETED_TEST_MATRIX.md",
+        "resources/LITE_PHASE6_7_EXECUTION_PROTOCOL.md"
+      ]
+    },
+    {
+      "step": 4,
+      "action": "Disposition targets and seal merged evidence",
+      "instruction": "Record exact outcomes, limitations and Full-only omissions; reconcile global control state, create the Phase-7 completion marker and P67_TO_P8 handoff, and file one merged report.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/LITE_PHASE6_7_EVIDENCE.md",
+        "../phase-7/START_HERE.md",
+        "../../shared/reporting/PHASE_REPORT.md",
+        "../../shared/handoff/SUCCESSOR_HANDOFF_PROTOCOL.md"
+      ]
+    }
+  ],
+  "requiredOutputs": [
+    {
+      "artifact": "phases/phase-6/resources/LITE_DEPLOY_CONFIG_MATRIX.md",
+      "role": "COMPLETE_DEPLOY_CONFIG_EVIDENCE",
+      "required": true
+    },
+    {
+      "artifact": "phases/phase-6/resources/LITE_TARGETED_TEST_MATRIX.md",
+      "role": "CANDIDATE_TARGET_EVIDENCE",
+      "required": true
+    },
+    {
+      "artifact": "phases/phase-6/resources/LITE_PHASE6_7_EVIDENCE.md",
+      "role": "MERGED_MILESTONE_REPORT",
+      "required": true
+    },
+    {
+      "artifact": "handoffs/P67_TO_P8/SUCCESSOR_HANDOFF.json",
+      "role": "SUCCESSOR_BOUNDARY",
+      "required": true
+    }
+  ],
+  "globalControlCheckpoints": {
+    "securityTraceabilityGraph": "SEAL_MERGED_PHASE6_7",
+    "carriedForwardObligationLedger": "SEAL_MERGED_PHASE6_7",
+    "evidenceInvalidationMatrix": "RECONCILE_BEFORE_REUSE_AND_SEAL",
+    "sourceIntelligence": "REUSE_UNLESS_MATERIAL_IDENTITY_CHANGE"
+  },
+  "sealingCriteria": [
+    "Exact build is admitted or a typed blocker is proven after repair",
+    "Complete deploy/configuration path is simulated",
+    "Every material candidate has candidate-specific deterministic and targeted-fuzz evidence or a carried validation obligation; batching never substitutes one candidate's evidence for another",
+    "All Full-only omissions are explicitly disclosed",
+    "Merged evidence and P67_TO_P8 are sealed"
+  ],
+  "recoveryRoutes": [
+    {
+      "condition": "Build or runner failure",
+      "route": "Use execution repair and retry"
+    },
+    {
+      "condition": "Missing deployment configuration",
+      "route": "Recover from source/campaign evidence, then record exact limitation if irrecoverable"
+    },
+    {
+      "condition": "Material identity change",
+      "route": "Invalidate affected evidence and rerun only impacted retained work"
+    }
+  ],
+  "allowedNextStates": [
+    "WAITING_FOR_SUCCESSOR_AGENT"
+  ],
+  "domainApplicability": {
+    "classificationRequiredHere": false,
+    "recheckPolicy": "ONLY_ON_TRIGGER_FACT_CHANGE",
+    "activatedDomainTargetsRequired": true
+  },
+  "universalRuleIds": [
+    "U-EXEC-001",
+    "U-GITHUB-001",
+    "U-STATE-001",
+    "U-EVIDENCE-001",
+    "U-REPAIR-001",
+    "U-HUMAN-001",
+    "U-DISCLOSURE-001",
+    "U-SOURCEINTEL-001",
+    "U-UPDATES-001",
+    "U-HUMANCOMMS-001"
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "process-blocker-receipt-v1",
+  "receiptId": null,
+  "campaignId": null,
+  "campaignGenerationId": null,
+  "orchestratorEpoch": null,
+  "phaseId": null,
+  "assignmentId": null,
+  "actor": {
+    "type": null,
+    "id": null,
+    "sessionId": null,
+    "roleId": null
+  },
+  "failureClass": null,
+  "failureFingerprint": null,
+  "exactError": {
+    "message": null,
+    "timestamp": null,
+    "immutableEvidenceRef": null
+  },
+  "procedureReceipts": [],
+  "safePaths": {
+    "attempted": [],
+    "provenUnavailable": [],
+    "retryBudgetExhausted": false,
+    "alternateInterfacesExhausted": false
+  },
+  "unaffectedWork": {
+    "continued": false,
+    "checkpointRef": null
+  },
+  "terminalImpossibilityEvidence": [],
+  "disposition": {
+    "claimAdmissible": false,
+    "unsupportedBlockerAction": "RETURN_FOR_REWORK_OR_REPLACE",
+    "postPhase0OperatorActionAuthorized": false,
+    "allowedPostPhase0TerminalDisposition": "PROCESS_FAIL",
+    "phase0OperatorEscalationRequiresTerminalEvidence": true
+  }
+}

@@ -1,0 +1,245 @@
+{
+  "schemaVersion": "audit-v7-phase-contract-v1",
+  "phase": {
+    "sequence": 2,
+    "id": "risk-specification",
+    "title": "Executable Security Specification",
+    "reviewerLineage": "reviewer-2",
+    "phaseCard": "phases/phase-2/START_HERE.md"
+  },
+  "authorization": {
+    "controllerBoundCurrentPhaseRequired": true,
+    "exactSourceFenceRequired": true,
+    "incomingSuccessorReceipt": "handoffs/P1_TO_P2/SUCCESSOR_HANDOFF_RECEIPT.json",
+    "incomingSuccessorBoundaryProfile": "P1_TO_P2",
+    "automaticAdvanceAfterSeal": true,
+    "humanApprovalRequired": false
+  },
+  "inputs": {
+    "required": [
+      "Exact controller-bound campaign generation",
+      "Exact source identity/fence",
+      "Current phase/revision and authorized reviewer lineage",
+      "Sealed Phase 1 report and automatic advancement authorization",
+      "Accepted P1_TO_P2 successor handoff receipt bound to fresh reviewer-2",
+      "Sealed Phase 1 Security Risk Grade Manifest bound to the exact source and Source Intelligence Bundle",
+      "Current SECURITY_TRACEABILITY_GRAPH checkpoint",
+      "Current CARRIED_FORWARD_OBLIGATION_LEDGER checkpoint",
+      "Current EVIDENCE_INVALIDATION_MATRIX authority",
+      "Latest controller-accepted Source Intelligence Bundle Index revision/commit/digest and component accepted identities bound to the exact current source/build identity"
+    ],
+    "conditional": [
+      "Triggered domain ledgers/resources explicitly referenced by active steps",
+      "Live deployment/release/fork/remediation artifacts only when the phase card trigger applies"
+    ]
+  },
+  "steps": [
+    {
+      "step": 1,
+      "action": "Open the P1_TO_P2 successor bootstrap and verify the handoff",
+      "instruction": "Verify the exact campaign/source identity, accepted Source Intelligence Bundle, sealed Phase-1 risk-grade manifest and fresh reviewer-2 receipt before specification work.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/handoff/SUCCESSOR_HANDOFF_RECEPTION_CHECKLIST.md",
+        "../../shared/handoff/SUCCESSOR_HANDOFF_BOUNDARY_PROFILES.json",
+        "../../shared/handoff/SUCCESSOR_HANDOFF_RECEIPT_TEMPLATE.json",
+        "../../shared/handoff/SUCCESSOR_HANDOFF_PROTOCOL.md"
+      ]
+    },
+    {
+      "step": 2,
+      "action": "Enter the fresh isolated specification lens",
+      "instruction": "Bind the exact Phase 2 source/revision and preserve fresh-reviewer lens isolation. Accept the inherited Phase-1 risk grade as the starting control; promote it when new evidence increases risk and never silently reduce it.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/lenses/SOLO_LENS_ISOLATION_PROTOCOL.md",
+        "../../shared/lenses/scope-specification-lens.md"
+      ]
+    },
+    {
+      "step": 3,
+      "action": "Convert intent into auditable requirements",
+      "instruction": "Define actors, assets, units, transitions, negative requirements, trust assumptions and prohibited outcomes.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/domain-modules/specification-assurance.md"
+      ]
+    },
+    {
+      "step": 4,
+      "action": "Derive mathematical properties where applicable",
+      "instruction": "For formulas/rates/ratios/precision, derive dimensions, bounds, conservation relations and edge behavior.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/domain-modules/mathematical-verification.md"
+      ]
+    },
+    {
+      "step": 5,
+      "action": "Record canonical security properties",
+      "instruction": "Assign stable PROP-* IDs, violation impact, assumptions, boundaries, source basis and planned Phase 4/6/7/8 validation route.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/PHASE2_SECURITY_PROPERTY_REGISTRY.md"
+      ]
+    },
+    {
+      "step": 6,
+      "action": "Reconcile campaign-global security state",
+      "instruction": "Update the canonical Security Traceability Graph for this phase, enumerate and reconcile every obligation due now, add stable OBL-* records for new later-phase work, and freeze current graph/ledger digests for the Phase Report. An OPEN/IN_PROGRESS obligation due in this phase blocks sealing. Classify every material observed change under the Evidence Invalidation Matrix before reusing affected evidence.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+        "../../shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json",
+        "../../shared/controller/EVIDENCE_INVALIDATION_MATRIX.json"
+      ]
+    },
+    {
+      "step": 7,
+      "action": "File the phase report and auto-advance",
+      "instruction": "Seal the required structured artifact/global checkpoints, file the immutable Phase Report, enter AUTO_ADVANCE_READY, and immediately continue into the next same-reviewer phase under the Automatic Phase Advancement Protocol. Do not wait for human approval.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/reporting/PHASE_REPORT.md",
+        "../../shared/controller/AUTOMATIC_PHASE_ADVANCEMENT_PROTOCOL.md"
+      ]
+    }
+  ],
+  "requiredOutputs": [
+    {
+      "artifact": "phases/phase-2/resources/PHASE2_SECURITY_PROPERTY_REGISTRY.md",
+      "role": "PHASE_SPECIFIC_STRUCTURED_FILING",
+      "required": true
+    },
+    {
+      "artifact": "handoffs/P1_TO_P2/SUCCESSOR_HANDOFF_RECEIPT.json",
+      "role": "ACCEPTED_INCOMING_SUCCESSOR_HANDOFF_RECEIPT",
+      "required": true
+    },
+    {
+      "artifact": "phases/phase-1/resources/PHASE1_SECURITY_RISK_GRADE_MANIFEST.md",
+      "role": "INHERITED_SEALED_RISK_GRADE_STARTING_CONTROL",
+      "required": true
+    },
+    {
+      "artifact": "shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+      "role": "CAMPAIGN_GLOBAL_CHECKPOINT_TEMPLATE; campaign-local graph digest required",
+      "required": true
+    },
+    {
+      "artifact": "shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json",
+      "role": "CAMPAIGN_GLOBAL_CHECKPOINT_TEMPLATE; campaign-local ledger digest required",
+      "required": true
+    },
+    {
+      "artifact": "shared/reporting/PHASE_REPORT.md",
+      "role": "PHASE_REPORT_TEMPLATE",
+      "required": true
+    }
+  ],
+  "globalControlCheckpoints": {
+    "securityTraceabilityGraph": {
+      "template": "shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+      "requiredBeforeEvidenceSealed": true,
+      "phaseRequirement": [
+        "Add every material PROP-* from the Phase-2 registry and connect each to source/spec/scope basis."
+      ],
+      "phaseReportDigestReferenceRequired": true
+    },
+    "carriedForwardObligationLedger": {
+      "template": "shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json",
+      "requiredBeforeEvidenceSealed": true,
+      "phaseStartDueObligationEnumerationRequired": true,
+      "phaseEndDueObligationReconciliationRequired": true,
+      "openOrInProgressDueObligationBlocksSeal": true,
+      "phaseReportDigestReferenceRequired": true
+    },
+    "evidenceInvalidationMatrix": {
+      "authority": "shared/controller/EVIDENCE_INVALIDATION_MATRIX.json",
+      "requiredBeforeEvidenceSealed": true,
+      "materialChangeClassificationRequired": true,
+      "noChangeDisposition": "NO_MATERIAL_CHANGE_EVENT",
+      "invalidatesOrRebindCreatesTraceabilityInvNode": true,
+      "unresolvedRetestCreatesObligation": true
+    },
+    "sourceIntelligence": {
+      "template": "shared/source-intelligence/SOURCE_INTELLIGENCE_TEMPLATE.json",
+      "protocol": "shared/source-intelligence/SOURCE_INTELLIGENCE_REUSE_PROTOCOL.md",
+      "bundleSchema": "shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_SCHEMA.json",
+      "bundleTemplate": "shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_TEMPLATE.json",
+      "runtimeOverlaySchema": "shared/source-intelligence/RUNTIME_DEPLOYMENT_OVERLAY_SCHEMA.json",
+      "readinessOverlaySchema": "shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_SCHEMA.json",
+      "requiredBeforeEvidenceSealed": true,
+      "bundleIndexRequiredBeforeReuse": true,
+      "acceptedRevisionAndDigestRequired": true,
+      "mutablePathsNavigationalOnly": true,
+      "mode": "REUSE_LATEST_ACCEPTED_MATCHING_SOURCE_BUILD",
+      "sourceBuildDigestMatchRequiredBeforeReuse": true,
+      "recreateExistingStructuralInventoriesForbidden": true,
+      "rawSourceSemanticReviewStillRequiredWhenPhaseMethodNeedsIt": true,
+      "phaseReportRelevantSectionsReviewedRequired": true
+    }
+  },
+  "sealingCriteria": [
+    "All mandatory phase-card steps completed or have a permitted typed terminal limitation/failure disposition.",
+    "Phase-specific structured filing is complete, exact-source-bound, durable, and digest-referenced.",
+    "Source Intelligence Bundle checkpoint records the accepted index revision/commit/digest plus materially used component accepted identities, matching source/build identity, reuse/regeneration status, relevant sections reviewed, and any discrepancy/invalidation/limitation; mutable-path authority and redundant structural rediscovery are forbidden.",
+    "The P1_TO_P2 handoff receipt is accepted by fresh reviewer-2 and binds the exact sealed Phase-1 risk-grade manifest and Source Intelligence Bundle.",
+    "The inherited risk grade remains the starting control and is promoted when new evidence increases risk; silent reduction or replacement is forbidden.",
+    "Security Traceability Graph is updated for this phase and its current campaign-local digest/reference is recorded.",
+    "All obligations due in this phase are reconciled in the canonical obligation ledger; no due OPEN/IN_PROGRESS obligation remains.",
+    "Every new later-phase obligation has a stable OBL-* ID and objective completion condition.",
+    "Phase Report references phase-specific artifact, traceability graph checkpoint, obligation ledger checkpoint, evidence, limitations, and invalidation triggers.",
+    "Required process failures have exhausted repair/retry/recovery or are repaired and verified; silent omission is forbidden.",
+    "Every material observed change event is classified under EVIDENCE_INVALIDATION_MATRIX; INVALIDATES/REQUIRES_REBIND work is replaced, reconciled, or carried as a typed OBL-* before sealing."
+  ],
+  "recoveryRoutes": [
+    {
+      "condition": "GitHub connector unavailable",
+      "resource": "SKILL.md#something-broke--recovery-router"
+    },
+    {
+      "condition": "Controller/campaign/evidence/reporting failure",
+      "resource": "shared/lenses/operations-recovery-lens.md"
+    },
+    {
+      "condition": "Technical execution/tool/RPC failure",
+      "resource": "shared/execution/EXECUTION_PREFLIGHT_AND_REPAIR_PROTOCOL.md"
+    },
+    {
+      "condition": "Source/release identity change",
+      "resource": "shared/policy/PROCESS_INTEGRITY_LEDGER.md"
+    }
+  ],
+  "allowedNextStates": [
+    "EVIDENCE_SEALED",
+    "PHASE_REPORT_SUBMITTED",
+    "AUTO_ADVANCE_READY"
+  ],
+  "domainApplicability": {
+    "matrix": "shared/controller/DOMAIN_APPLICABILITY_MATRIX.json",
+    "campaignRegistryTemplate": "shared/controller/DOMAIN_APPLICABILITY_REGISTRY.json",
+    "mode": "REFERENCE_ONLY_UNTIL_PHASE3",
+    "uncertainPolicy": "UNCERTAIN_INCLUDE_IS_TREATED_AS_TRIGGERED",
+    "phaseReportDigestReferenceRequired": false
+  },
+  "universalRuleIds": [
+    "U-EXEC-001",
+    "U-GITHUB-001",
+    "U-STATE-001",
+    "U-EVIDENCE-001",
+    "U-REPAIR-001",
+    "U-HUMAN-001",
+    "U-DISCLOSURE-001",
+    "U-SOURCEINTEL-001",
+    "U-UPDATES-001",
+    "U-HUMANCOMMS-001"
+  ]
+}
