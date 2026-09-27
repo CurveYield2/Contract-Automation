@@ -131,8 +131,12 @@ test('wake and watchdog restore rolling encrypted state and save only refreshed 
 
 test('GitHub Playwright prefers encrypted rolling state, keeps bootstrap fallback, and persists only healthy authenticated state', async () => {
   const source = await fs.readFile(path.join(root, 'scripts/browser-agent-wake.mjs'), 'utf8');
-  const cacheLoad = source.indexOf('loadEncryptedSessionState({');
-  const bootstrapLoad = source.indexOf('CHATGPT_STORAGE_STATE_B64');
+  const localStart = source.indexOf('async function localProvider');
+  const localEnd = source.indexOf('async function browserlessProvider');
+  assert.ok(localStart >= 0 && localEnd > localStart);
+  const localSource = source.slice(localStart, localEnd);
+  const cacheLoad = localSource.indexOf('loadEncryptedSessionState({');
+  const bootstrapLoad = localSource.indexOf('CHATGPT_STORAGE_STATE_B64');
   assert.ok(cacheLoad >= 0);
   assert.ok(bootstrapLoad > cacheLoad);
   assert.match(source, /providerName !== 'github-playwright'/);
