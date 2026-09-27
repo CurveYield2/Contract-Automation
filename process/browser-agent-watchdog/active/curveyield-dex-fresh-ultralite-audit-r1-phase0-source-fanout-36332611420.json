@@ -13,7 +13,7 @@
   "observation": {
     "assistantCount": 0,
     "lastAssistantHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "observedAt": "2026-09-27T16:18:18Z"
+    "observedAt": "2026-09-27T16:19:30Z"
   },
   "gate": {
     "mode": "LITE",
@@ -44,12 +44,12 @@
     "enabled": true,
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2,
-    "consecutiveIdlePokes": 1,
+    "consecutiveIdlePokes": 2,
     "consecutiveUnviewable": 0
   },
   "watchdogRunId": "36332693161",
   "watchdogSweepStartedAt": "2026-09-27T16:19:04Z",
-  "lastPokedAt": "2026-09-27T16:18:18Z",
-  "pokeCount": 1,
+  "lastPokedAt": "2026-09-27T16:19:30Z",
+  "pokeCount": 2,
   "lastDecision": "IDLE_POKED"
 }
