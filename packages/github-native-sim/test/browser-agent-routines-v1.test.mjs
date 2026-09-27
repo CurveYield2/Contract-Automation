@@ -60,7 +60,7 @@ test('browser routine engine is data-driven and the first routine is the ultrali
   ]);
 });
 
-test('audit wakes enforce verified High reasoning effort and expose authoritative current phase', () => {
+test('audit wakes enforce verified High reasoning effort and keep follow-up messages minimal', () => {
   const operations = read('scripts/browser-operations-v1.mjs');
   const runtime = read('scripts/browser-agent-wake.mjs');
   const wake = read('.github/workflows/browser-agent-wake.yml');
@@ -70,22 +70,19 @@ test('audit wakes enforce verified High reasoning effort and expose authoritativ
   assert.match(runtime, /CHATGPT_THINKING_EFFORT/);
   assert.match(runtime, /chatgpt\.ensure_thinking_effort/);
   assert.match(wake, /default: high/);
-  assert.match(wake, /current_phase=%s/);
-  assert.match(wake, /reasoning_effort=%s/);
+  assert.match(wake, /if \[ "\$WAKE_MODE" = "create_fresh" \]/);
+  assert.match(wake, /printf '%s\\n' 'GET BACK TO WORK' > \/tmp\/wake-message\.txt/);
+  assert.match(wake, /printf '%s\\n' 'GET BACK TO WORK' > \/tmp\/watchdog-message\.txt/);
   assert.match(wake, /activeAssignment=\{phaseId:\$phaseId,milestoneId:\$milestoneId,workerRole:\$workerRole,thinkingEffort:\$thinkingEffort\}/);
-  assert.match(wake, /expectedPhaseId:\$phaseId,expectedMilestoneId:\$milestoneId/);
 });
 
-test('technical execution wakes preserve semantic phase and do not reuse stale bootstrap watchdog text', () => {
+test('technical execution callbacks never create a reviewer and only poke the existing chat', () => {
   const workflow = read('.github/workflows/audit-controller-execution.yml');
-  assert.match(workflow, /request_phase_id=/);
-  assert.match(workflow, /registered_phase=/);
-  assert.match(workflow, /semantic_phase_id=/);
-  assert.match(workflow, /technical_phase=\$request_phase_id/);
-  assert.match(workflow, /\[AUDIT_AGENT_WATCHDOG_V2\]/);
-  assert.match(workflow, /current_phase=\$semantic_phase_id/);
-  assert.match(workflow, /gate_expected_phase="\$semantic_phase_id"/);
-  assert.doesNotMatch(workflow, /watchdog_message="\$\(jq -r '\.watchdog\.idleMessage/);
+  assert.match(workflow, /mode="resume_existing"/);
+  assert.match(workflow, /wake_message='GET BACK TO WORK'/);
+  assert.match(workflow, /watchdog_enabled=false/);
+  assert.match(workflow, /No active reviewer chat URL/);
+  assert.doesNotMatch(workflow, /\[AUDIT_AUTOMATION_WAKE_V1\]/);
 });
 
 test('successor and reviewer-repair wakes state the semantic phase explicitly', () => {
@@ -118,19 +115,18 @@ test('failed non-infrastructure idle pokes consume the escalation budget and can
   assert.match(workflow, /IDLE_POKE_INFRA_RETRY_LATER/);
 });
 
-test('source-fanout rich Phase-0 envelope remains inside the YAML run block', () => {
+test('source fanout contains no reviewer wake envelope', () => {
   const workflow = read('.github/workflows/agent-zip-import-v1.yml');
-  assert.doesNotMatch(workflow, /^\[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1\]/m);
-  assert.match(workflow, /printf '%s\\n' '\[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1\]'/);
+  assert.doesNotMatch(workflow, /ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1/);
+  assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
-test('source fanout launches Phase-0 with the canonical rich Ultralite bootstrap envelope', () => {
+test('source fanout never launches a reviewer chat; the campaign orchestrator is sole launch owner', () => {
   const workflow = read('.github/workflows/agent-zip-import-v1.yml');
-  assert.match(workflow, /\[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1\]/);
-  assert.match(workflow, /connector_requirement=Use the GitHub connector app for all repository reads\/writes\./);
-  assert.match(workflow, /audit-process\/v7\/LITE_PRIMARY_SKILL_AUTHORITY_v1\.json/);
-  assert.match(workflow, /create\/seal the P0_TO_P1 successor packet\/handoff/);
-  assert.match(workflow, /watchdog_message="\$wake_message"/);
+  assert.match(workflow, /Signal Phase-0 source fan-out readiness/);
+  assert.match(workflow, /Reviewer\/chat launch: NOT performed by source fan-out/);
+  assert.match(workflow, /Launch authority: Ultralite campaign orchestrator only/);
+  assert.doesNotMatch(workflow, /Launch registered Phase-0 browser agent/);
 });
 
 test('watchdog observation fails over provider-specific challenge and auth walls before classifying infrastructure noise', () => {
@@ -187,13 +183,11 @@ test('ultralite entry workflow starts Phase 0 in normal web chat and defers proj
   assert.match(workflow, /-f gate_expected_milestone_id=P0_BOOTSTRAP/);
 });
 
-test('source-fanout Phase-0 wake carries Ultralite repair policy while remaining outside the campaign Project', () => {
+test('source fanout is evidence-only and cannot race the campaign orchestrator', () => {
   const workflow = read('.github/workflows/agent-zip-import-v1.yml');
-  assert.match(workflow, /browserRoutine.*audit-ultralite-reviewer-v1/);
-  assert.match(workflow, /repair_enabled=.*audit-ultralite-reviewer-v1/);
-  assert.match(workflow, /repair:\{enabled:\$repairEnabled,idlePokeThreshold:\$idlePokeThreshold,unviewableThreshold:\$unviewableThreshold\}/);
-  assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
-  assert.doesNotMatch(workflow, /Phase-0 Ultralite bootstrap[^\n]*campaign Project[^\n]*audit-ultralite-reviewer-v1/);
+  assert.match(workflow, /source fan-out prepares durable source evidence only/);
+  assert.match(workflow, /must never create a second Phase-0 chat/);
+  assert.doesNotMatch(workflow, /wake_id=.*phase0-source-fanout/);
 });
 
 test('Phase-0 reviewer repair resumes from durable bootstrap state without requiring a predecessor handoff', () => {
@@ -209,21 +203,17 @@ test('Phase-0 reviewer repair resumes from durable bootstrap state without requi
   assert.match(workflow, /routineId:"",projectName:""/);
 });
 
-test('successor routing is reviewer-count agnostic and injects live campaign/skill authority into normal project chats', () => {
+test('successor routing uses canonical nextPhaseId and sealed WAKE_UP_MESSAGE verbatim', () => {
   const workflow = read('.github/workflows/browser-agent-watchdog.yml');
   assert.match(workflow, /next_reviewer="\$\(jq -r '\.nextMilestone\.reviewer/);
-  assert.match(workflow, /campaign_title="\$\(jq -r '\.title/);
-  assert.match(workflow, /commits.*-f path="\$candidate"/);
-  assert.match(workflow, /audit_skill_url=%s/);
-  assert.match(workflow, /audit_skill_authority_source=%s/);
-  assert.match(workflow, /connector_requirement=Use the GitHub connector app/);
-  assert.match(workflow, /authority_rule=The audit skill URL above was resolved by authority precedence/);
-  assert.match(workflow, /browser_context_b64="\$\(jq -nc/);
-  assert.match(workflow, /routineId:\$routine/);
-  assert.match(workflow, /projectName:\$project/);
-  assert.match(workflow, /chatName:\$chat/);
-  assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
-  assert.doesNotMatch(workflow, /gate_expected_milestone" = "P8_10"/);
+  assert.match(workflow, /next_phase="\$\(jq -r '\.nextPhaseId \/\/ empty'/);
+  assert.match(workflow, /wake_path="\$handoff_dir\/WAKE_UP_MESSAGE\.md"/);
+  assert.match(workflow, /base64 -d > \/tmp\/sealed-successor-wake\.txt/);
+  assert.match(workflow, /wake_b64="\$\(base64 -w0 \/tmp\/sealed-successor-wake\.txt\)"/);
+  assert.match(workflow, /successor_wake_id="\$\{campaign_id\}-\$\{next_id\}-\$\{next_reviewer\}"/);
+  assert.match(workflow, /GET BACK TO WORK/);
+  assert.doesNotMatch(workflow, /AUDIT_REVIEWER_ROUTINE_V1/);
+  assert.doesNotMatch(workflow, /CURVEYIELD_ULTRALITE_REVIEWER_LAUNCH_V2/);
 });
 
 test('watchdog permits resume-first reviewer repair at the P0_BOOTSTRAP gate', () => {
@@ -247,6 +237,34 @@ test('watchdog distinguishes browser infrastructure failures from reviewer break
   assert.match(workflow, /IDLE_AFTER_\$\{prior_idle_pokes\}_WATCHDOG_POKES/);
   assert.match(workflow, /browser-agent-reviewer-repair-v1\.yml/);
   assert.match(workflow, /check_reviewer_repair_request/);
+});
+
+test('Ultralite monitor persists across internal phase changes and terminates only at campaign terminal status', () => {
+  const watchdog = read('.github/workflows/browser-agent-watchdog.yml');
+  assert.match(watchdog, /Internal phase advancement .* keeping the same reviewer chat/);
+  assert.match(watchdog, /INTERNAL_PHASE_SYNC_/);
+  assert.match(watchdog, /LITE_CAMPAIGN_TERMINAL_/);
+  assert.doesNotMatch(watchdog, /\[ "\$lite_campaign_status" = "COMPLETE" \] \|\| \[ "\$lite_phase_state" = "CLOSED" \]/);
+});
+
+test('fresh reviewer launch is idempotent per campaign milestone and post-delivery errors cannot create provider duplicates', () => {
+  const wake = read('.github/workflows/browser-agent-wake.yml');
+  const runtime = read('scripts/browser-agent-wake.mjs');
+  assert.match(wake, /Resolve idempotent reviewer launch/);
+  assert.match(wake, /Fresh launch deduplicated/);
+  assert.match(wake, /browser-agent-wake-\$\{\{ inputs\.campaign_id \}\}-\$\{\{ inputs\.worker_role \}\}-/);
+  assert.match(runtime, /POST_DELIVERY_BOOKKEEPING_FAILED/);
+  assert.match(runtime, /never fail over to another browser provider for/);
+});
+
+test('repair targets current reviewer and reuses its sealed wake instead of next reviewer', () => {
+  const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
+  assert.match(repair, /Repair the CURRENT reviewer, never the next reviewer/);
+  assert.match(repair, /\.phase\.reviewer/);
+  assert.match(repair, /WAKE_UP_MESSAGE\.md/);
+  assert.match(repair, /base64 -d > \/tmp\/replacement-wake\.txt/);
+  assert.match(repair, /Clear confirmed dead reviewer chat binding/);
+  assert.doesNotMatch(repair, /reviewer="\$\(jq -r '\.nextMilestone\.reviewer/);
 });
 
 test('reviewer repair workflow resumes first and only resets to an exact handoff baseline under admitted conditions', () => {
