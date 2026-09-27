@@ -197,7 +197,7 @@ jobs:
         if: steps.deliver.outputs.ok != 'true' && steps.deliver.outputs.retryable == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          RETRY_INPUTS_JSON: ${{ toJSON(github.event.inputs) }}
+          RETRY_INPUTS_JSON: ${{ toJSON(inputs) }}
         shell: bash
         run: |
           set -euo pipefail
@@ -329,7 +329,7 @@ jobs:
           echo "WATCHDOG_SAFE_ID=$safe_id" >> "$GITHUB_ENV"
 
       - name: Persist watchdog state
-        if: ${{ inputs.watchdog_enabled }}
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -362,7 +362,7 @@ jobs:
           gh api --method PUT "$api" -f message="chore(wake): bind fresh chat for $CAMPAIGN_ID" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
 
       - name: Arm immediate watchdog observation
-        if: ${{ inputs.watchdog_enabled }}
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
