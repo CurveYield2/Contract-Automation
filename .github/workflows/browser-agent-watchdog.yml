@@ -719,8 +719,7 @@ jobs:
                       else
                         rc=$?
                         if [ "$rc" -eq 3 ]; then
-                          retire_state "LITE_INTERPHASE_COMPLETE_NO_SUCCESSOR_$gate_expected_milestone"
-                          exit 0
+                          echo "::warning::Mechanical completion has no successor pointer yet, but campaignStatus is not terminal; keeping campaign automation active."
                         fi
                         echo "::warning::Mechanical completion is valid, but successor packet is not machine-ready yet; keeping mechanical worker supervised."
                       fi
