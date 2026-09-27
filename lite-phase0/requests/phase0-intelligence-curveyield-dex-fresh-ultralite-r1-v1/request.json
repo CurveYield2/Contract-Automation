@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "curveyield-lite-phase0-intelligence-request-v1",
+  "requestId": "phase0-intelligence-curveyield-dex-fresh-ultralite-r1-v1",
+  "campaignId": "curveyield-dex-fresh-ultralite-audit-r1",
+  "source": {
+    "repository": "CurveYield2/Audits",
+    "commit": "9615a6339b22c27d63d49762b2088967f368b904",
+    "archivePath": "CurveYield DEX Fresh Ultralite Audit/source/CurveYield_DEX_Fresh_Audit_Package_2026-08-16(2).zip",
+    "archiveSha256": "526a729ce73d493f2ccbb568378a18dd1eec0788d0165e02dc5ceb773b9953ed"
+  },
+  "destination": {
+    "repository": "CurveYield2/Audit-Controller",
+    "ref": "audit/curveyield-dex-fresh-ultralite-audit-r1",
+    "campaignPath": "campaigns/CurveYield DEX Fresh Ultralite Audit"
+  }
+}
