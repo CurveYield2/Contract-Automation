@@ -63,6 +63,41 @@ async function ensureChatMode(page) {
   return { mode: 'chat', changed: true };
 }
 
+async function ensureSidebarOpen(page) {
+  const open = await firstVisible(page, [
+    'button[data-testid="open-sidebar-button"]',
+    'button[aria-label="Open sidebar"]',
+    'button[aria-label*="Open sidebar"]',
+    'button[aria-label*="Show sidebar"]',
+    'button[title*="sidebar"]'
+  ], 500);
+  if (open) {
+    await open.click().catch(() => {});
+    await page.waitForTimeout(700);
+    return { opened: true };
+  }
+  return { opened: false };
+}
+
+async function findNewProjectControl(page) {
+  const direct = await firstVisible(page, [
+    'button[aria-label*="New project"]',
+    'a[aria-label*="New project"]',
+    '[role="button"][aria-label*="New project"]',
+    'button[title*="New project"]',
+    'a[title*="New project"]',
+    'button:has-text("New project")',
+    'a:has-text("New project")',
+    '[role="button"]:has-text("New project")',
+    'button:has-text("Create project")'
+  ], 700);
+  if (direct) return direct;
+
+  const text = page.getByText('New project', { exact: true }).first();
+  if (await text.isVisible().catch(() => false)) return text;
+  return null;
+}
+
 async function findProjectEntry(page, projectName) {
   const escaped = String(projectName).replace(/"/g, '\\"');
   const direct = await firstVisible(page, [
@@ -76,14 +111,36 @@ async function findProjectEntry(page, projectName) {
 }
 
 async function createProject(page, projectName) {
-  const trigger = await firstVisible(page, [
-    'button[aria-label*="New project"]',
-    'button:has-text("New project")',
-    'button:has-text("Create project")',
-    '[role="button"]:has-text("New project")'
-  ], 1200);
-  if (!trigger) throw new Error('ChatGPT project creation control not found');
+  await ensureSidebarOpen(page);
+
+  let trigger = await findNewProjectControl(page);
+  if (!trigger) {
+    const projects = page.getByText('Projects', { exact: true }).first();
+    if (await projects.isVisible().catch(() => false)) {
+      await projects.click().catch(() => {});
+      await page.waitForTimeout(600);
+      trigger = await findNewProjectControl(page);
+    }
+  }
+
+  if (!trigger) {
+    const sidebarToggleVisible = !!await firstVisible(page, [
+      'button[data-testid="open-sidebar-button"]',
+      'button[aria-label*="Open sidebar"]',
+      'button[aria-label*="Show sidebar"]'
+    ], 250);
+    const projectsVisible = await page.getByText('Projects', { exact: true }).first().isVisible().catch(() => false);
+    const newProjectTextVisible = await page.getByText('New project', { exact: true }).first().isVisible().catch(() => false);
+    throw new Error(
+      'ChatGPT project creation control not found' +
+      ' (sidebarToggleVisible=' + sidebarToggleVisible +
+      ', projectsVisible=' + projectsVisible +
+      ', newProjectTextVisible=' + newProjectTextVisible + ')'
+    );
+  }
+
   await trigger.click();
+  await page.waitForTimeout(500);
 
   const input = await firstVisible(page, [
     'input[placeholder*="Project name"]',

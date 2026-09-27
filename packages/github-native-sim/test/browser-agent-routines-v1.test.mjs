@@ -9,6 +9,21 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../../..');
 const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
+
+
+test('project creation opens the sidebar and resolves semantic New project controls', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  assert.match(source, /async function ensureSidebarOpen\(page\)/);
+  assert.match(source, /open-sidebar-button/);
+  assert.match(source, /aria-label="Open sidebar"/);
+  assert.match(source, /async function findNewProjectControl\(page\)/);
+  assert.match(source, /getByText\('New project', \{ exact: true \}\)/);
+  assert.match(source, /getByText\('Projects', \{ exact: true \}\)/);
+  assert.match(source, /sidebarToggleVisible=/);
+  assert.match(source, /projectsVisible=/);
+  assert.match(source, /newProjectTextVisible=/);
+});
+
 test('browser operation registry exposes reusable normal-ChatGPT project operations', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   for (const operation of [
