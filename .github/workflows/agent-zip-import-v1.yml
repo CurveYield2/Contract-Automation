@@ -479,6 +479,17 @@ jobs:
           gate_stop_states="$(jq -r '(.watchdog.gate.stopStates // ["WAITING_FOR_HUMAN_RESPONSE","WAITING_FOR_SUCCESSOR_AGENT","CLOSED","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
           gate_stop_campaign_statuses="$(jq -r '(.watchdog.gate.stopCampaignStatuses // ["COMPLETE","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
 
+          # Phase-0 Ultralite bootstrap intentionally stays outside the campaign Project,
+          # but it must still inherit the Ultralite resume-first repair policy.
+          repair_enabled="$(jq -r 'if (.browserRoutine // "")=="audit-ultralite-reviewer-v1" then true else (.watchdog.repair.enabled // false) end' "$registration")"
+          repair_idle_poke_threshold="$(jq -r '.watchdog.repair.idlePokeThreshold // 3' "$registration")"
+          repair_unviewable_threshold="$(jq -r '.watchdog.repair.unviewableThreshold // 2' "$registration")"
+          browser_context_b64="$(jq -nc \
+            --argjson repairEnabled "$repair_enabled" \
+            --argjson idlePokeThreshold "$repair_idle_poke_threshold" \
+            --argjson unviewableThreshold "$repair_unviewable_threshold" \
+            '{repair:{enabled:$repairEnabled,idlePokeThreshold:$idlePokeThreshold,unviewableThreshold:$unviewableThreshold}}' | base64 -w0)"
+
           wake_id="$CAMPAIGN_ID-phase0-source-fanout-$GITHUB_RUN_ID"
           wake_b64="$(printf '%s' "$wake_message" | base64 -w0)"
           watchdog_b64="$(printf '%s' "$watchdog_message" | base64 -w0)"
@@ -500,7 +511,8 @@ jobs:
             -f gate_expected_milestone_id="$gate_expected_milestone" \
             -f gate_active_pointer_path="$gate_pointer_path" \
             -f gate_stop_states_csv="$gate_stop_states" \
-            -f gate_stop_campaign_statuses_csv="$gate_stop_campaign_statuses"
+            -f gate_stop_campaign_statuses_csv="$gate_stop_campaign_statuses" \
+            -f browser_context_b64="$browser_context_b64"
 
       - name: Record import failure run
         if: failure()
