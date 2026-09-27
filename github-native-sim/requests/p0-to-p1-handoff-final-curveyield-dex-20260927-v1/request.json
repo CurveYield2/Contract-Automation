@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "p0-to-p1-handoff-final-curveyield-dex-20260927-v1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "45490b2d50fce9d0b5cff50958c333696a89f055",
+    "requestPath": ".deep-assurance/operator/requests/p0-to-p1-handoff-final-curveyield-dex-20260927-v1.json"
+  },
+  "verifyController": false
+}
