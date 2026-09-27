@@ -511,12 +511,13 @@ jobs:
           Resume this exact reviewer assignment from the latest durable campaign state at $phase_id. Do not restart or overwrite completed work. Recover the exact point reached by the previous agent, complete all remaining work required by the original WAKE_UP_MESSAGE.md, and carry this reviewer assignment to its required terminal boundary.
           EOF
 
+          repair_context_b64="$(jq -nc '{messagePurpose:"repair_notice"}' | base64 -w0)"
+
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="$CAMPAIGN_ID-$MILESTONE-$REVIEWER-repair-context" \
             -f campaign_id="$CAMPAIGN_ID" \
             -f phase_id="$phase_id" \
             -f mode=resume_existing \
-            -f message_purpose=repair_notice \
             -f chat_url="$chat_url" \
             -f wake_message_b64="$(base64 -w0 /tmp/repair-notice.txt)" \
             -f watchdog_enabled=false \
@@ -529,6 +530,7 @@ jobs:
             -f gate_expected_phase_id="$phase_id" \
             -f gate_expected_milestone_id="$MILESTONE" \
             -f gate_active_pointer_path="$POINTER_PATH" \
+            -f browser_context_b64="$repair_context_b64" \
             -f gate_stop_states_csv=STOPPED_BY_HUMAN \
             -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
 
