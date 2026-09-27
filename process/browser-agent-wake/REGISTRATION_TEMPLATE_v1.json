@@ -6,7 +6,7 @@
   "wakeMessage": "[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1]\nYou are the dedicated normal ChatGPT web Phase-0 bootstrap agent for this ultralite audit. Use the GitHub connector app for repository work. Resolve the active audit skill authority from GitHub using this precedence: campaign-bound skillAuthority.current when present; otherwise CurveYield2/Audit-Controller@main audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json. Legacy newest-ZIP discovery is fallback-only when neither authority exists. Read the resolved skill and follow its Lite/ultralite Phase-0 instructions exactly. Execute Phase 0 only, write/seal the required Phase-0 packet/handoff, and leave controller/pointer state machine-ready for successor launch. Do not continue into reviewer-1; the browser orchestrator will create/reuse the campaign ChatGPT Project and launch the next reviewer automatically.",
   "watchdog": {
     "enabled": true,
-    "idleMessage": "[AUDIT_AGENT_WATCHDOG_V1]\nGET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.",
+    "idleMessage": "GET BACK TO WORK",
     "gate": {
       "mode": "LITE",
       "repository": "CurveYield2/Audit-Controller",
@@ -16,9 +16,6 @@
       "expectedMilestoneId": "P0_BOOTSTRAP",
       "activePointerPath": "campaigns/REPLACE_WITH_AUDIT_NAME/controller/ACTIVE_PHASE_POINTER_v1.json",
       "stopStates": [
-        "WAITING_FOR_HUMAN_RESPONSE",
-        "WAITING_FOR_SUCCESSOR_AGENT",
-        "CLOSED",
         "STOPPED_BY_HUMAN"
       ],
       "stopCampaignStatuses": [

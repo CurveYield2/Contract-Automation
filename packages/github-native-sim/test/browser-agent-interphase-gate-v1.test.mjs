@@ -59,17 +59,20 @@ function exercise(mutate = () => {}, launch = false) {
       output: files.output ?? output,
       pointer: JSON.stringify({
         completedMilestone: { id: 'P0_BOOTSTRAP', status: 'SEALED' },
+        nextPhaseId: 'phase-1',
         nextMilestone: { id: 'P1', state: 'READY', phaseRange: ['1'], reviewer: 'reviewer-1' },
         authoritativeHandoff: handoff,
         authoritativeHandoffIdentity: { contentCommit: '1111111111111111111111111111111111111111' }
       }),
       campaignState: JSON.stringify({
         campaignId: 'synthetic',
-        title: 'Synthetic Audit',
-        skillAuthority: { current: { campaignPath: 'authority/Synthetic_Audit_skill_v1.zip' } },
+        auditName: 'Synthetic Audit',
+        mode: 'LITE',
+        optionalMode: 'ULTRALITE',
+        controller: { workspacePath: 'campaigns/synthetic' },
         routingPlan: { workers: [{ lineage: 'reviewer-1', milestone: 'P1', status: 'NOT_STARTED' }] }
       }),
-      wake: 'Synthetic successor instructions\n' };
+      wake: 'Synthetic successor instructions for campaign synthetic. reviewer-1 must resume phase-1.\n' };
     for (const [name, value] of Object.entries(named)) fs.writeFileSync(path.join(temp, name), value);
     fs.writeFileSync(path.join(temp, 'state'), JSON.stringify({
       gate: { interphase: { workPacketSha256: files.pinnedSha ?? sha(packetBytes) } }
@@ -143,11 +146,7 @@ test('sealed P0 synthetic packet validates and dispatches one successor with ver
   const encoded = dispatched.match(/wake_message_b64=([A-Za-z0-9+/=]+)/)?.[1];
   assert.ok(encoded, dispatched);
   const message = Buffer.from(encoded, 'base64').toString('utf8');
-  assert.match(message, /Synthetic successor instructions/);
-  assert.match(message, /\[AUDIT_REVIEWER_ROUTINE_V1\]/);
-  assert.match(message, /reviewer=reviewer-1/);
-  assert.match(message, /audit_skill_url=https:\/\/github\.com\/CurveYield2\/Audit-Controller\/blob\/main\/campaigns\/synthetic\/authority\/Synthetic_Audit_skill_v1\.zip/);
-  assert.match(message, /audit_skill_authority_source=CAMPAIGN_BOUND/);
+  assert.equal(message, 'Synthetic successor instructions for campaign synthetic. reviewer-1 must resume phase-1.\n');
   const browserContextEncoded = dispatched.match(/browser_context_b64=([A-Za-z0-9+/=]+)/)?.[1];
   assert.ok(browserContextEncoded, dispatched);
   const browserContext = JSON.parse(Buffer.from(browserContextEncoded, 'base64').toString('utf8'));
@@ -155,15 +154,8 @@ test('sealed P0 synthetic packet validates and dispatches one successor with ver
   assert.equal(browserContext.projectName, 'Synthetic Audit');
   assert.equal(browserContext.chatName, 'Synthetic Audit reviewer-1');
   assert.equal(browserContext.repair.enabled, true);
-  assert.match(message, /\[VERIFIED_INTERPHASE_MECHANICAL_RESULTS_V2\]/);
-  assert.match(message, /work_packet=.*MECHANICAL_WORK_PACKET_v2\.json/);
-  assert.match(message, /completion_receipt=.*MECHANICAL_WORK_COMPLETION_v2\.json/);
-  assert.match(message, /reconciliation_output=.*FINAL_RECONCILIATION_v2\.json/);
-  assert.match(message, /verified_output_count=11/);
-  assert.match(message, /security_meaning=MECHANICAL_ONLY/);
-  assert.match(message, /read_order=Read the final reconciliation output first/);
-  assert.match(message, /verified_unit_outputs:[\s\S]*UNIT_01_v2\.json[\s\S]*UNIT_10_v2\.json/);
-  assert.doesNotMatch(message, /verified_unit_outputs:[\s\S]*FINAL_RECONCILIATION_v2\.json/);
+  assert.doesNotMatch(message, /AUDIT_REVIEWER_ROUTINE/);
+  assert.doesNotMatch(message, /VERIFIED_INTERPHASE_MECHANICAL_RESULTS/);
 });
 
 test('interphase gate fails closed across packet and receipt mutations', () => {

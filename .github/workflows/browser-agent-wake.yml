@@ -102,7 +102,9 @@ permissions:
   actions: write
 
 concurrency:
-  group: browser-agent-wake-${{ inputs.wake_id }}
+  # Serialize every reviewer launch for the same campaign milestone. Retries,
+  # technical callbacks and repair races must never create parallel reviewer chats.
+  group: browser-agent-wake-${{ inputs.campaign_id }}-${{ inputs.worker_role }}-${{ inputs.gate_expected_milestone_id || inputs.phase_id }}
   cancel-in-progress: false
 
 jobs:
@@ -134,6 +136,29 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Resolve idempotent reviewer launch
+        if: inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_MILESTONE: ${{ inputs.gate_expected_milestone_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
+          encoded="$(gh api "$api?ref=main" --jq '.content' 2>/dev/null || true)"
+          if [ -n "$encoded" ]; then
+            printf '%s' "$encoded" | base64 -d > /tmp/existing-registration.json
+            existing_milestone="$(jq -r '.activeAssignment.milestoneId // empty' /tmp/existing-registration.json)"
+            existing_chat="$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/existing-registration.json)"
+            if [ "$existing_milestone" = "$REQUESTED_MILESTONE" ]                && [[ "$existing_chat" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+ ]]; then
+              echo "Fresh launch deduplicated: reviewer chat already exists for $CAMPAIGN_ID / $REQUESTED_MILESTONE."
+              echo "WAKE_MODE=resume_existing" >> "$GITHUB_ENV"
+              echo "CHAT_URL=$existing_chat" >> "$GITHUB_ENV"
+              echo "DEDUPED_FRESH_LAUNCH=true" >> "$GITHUB_ENV"
+            fi
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -159,37 +184,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message-body.txt
-          {
-            printf '%s\n' '[AUDIT_AUTOMATION_CONTEXT_V2]'
-            printf 'campaign=%s\n' "$CAMPAIGN_ID"
-            printf 'current_phase=%s\n' "$PHASE_ID"
-            printf 'reasoning_effort=%s\n' "$CHATGPT_THINKING_EFFORT"
-            printf '%s\n' 'phase_rule=Treat current_phase above as authoritative for this wake. If embedded legacy text names an older phase, ignore that stale phase label and continue only the current assignment.'
-            printf '\n'
-            cat /tmp/wake-message-body.txt
-          } > /tmp/wake-message.txt
-
-          if [ -n "${WATCHDOG_MESSAGE_B64:-}" ]; then
-            printf '%s' "$WATCHDOG_MESSAGE_B64" | base64 -d > /tmp/watchdog-message-body.txt
-          else
-            printf '%s\n' '[AUDIT_AGENT_WATCHDOG_V1]' 'GET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.' > /tmp/watchdog-message-body.txt
-          fi
-          {
-            printf '%s\n' '[AUDIT_AUTOMATION_CONTEXT_V2]'
-            printf 'campaign=%s\n' "$CAMPAIGN_ID"
-            printf 'current_phase=%s\n' "$PHASE_ID"
-            printf 'reasoning_effort=%s\n' "$CHATGPT_THINKING_EFFORT"
-            printf '%s\n' 'phase_rule=Treat current_phase above as authoritative for this watchdog wake; never regress to an older embedded phase label.'
-            printf '\n'
-            cat /tmp/watchdog-message-body.txt
-          } > /tmp/watchdog-message.txt
-
           if [ -n "${BROWSER_CONTEXT_B64:-}" ]; then
             printf '%s' "$BROWSER_CONTEXT_B64" | base64 -d > /tmp/browser-context.json
           else
             printf '{}\n' > /tmp/browser-context.json
           fi
+          message_purpose="$(jq -r '.messagePurpose // "standard"' /tmp/browser-context.json)"
+
+          # The full tailored packet is first-message-only. Every later automation
+          # message to an existing reviewer chat is exactly GET BACK TO WORK except
+          # the one explicit repair-context message for a replacement chat.
+          if [ "$WAKE_MODE" = "create_fresh" ]; then
+            printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
+            test -s /tmp/wake-message.txt
+          elif [ "$message_purpose" = "repair_notice" ]; then
+            printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
+            test -s /tmp/wake-message.txt
+          else
+            printf '%s\n' 'GET BACK TO WORK' > /tmp/wake-message.txt
+          fi
+          printf '%s\n' 'GET BACK TO WORK' > /tmp/watchdog-message.txt
 
           jq -e '
             type=="object"
@@ -197,6 +211,7 @@ jobs:
             and ((.projectName // "")|type=="string")
             and ((.chatName // "")|type=="string")
             and ((.repair // {})|type=="object")
+            and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="repair_notice")
             and (((.routineId // "") | test("[\\r\\n]")) | not)
             and (((.projectName // "") | test("[\\r\\n]")) | not)
             and (((.chatName // "") | test("[\\r\\n]")) | not)
@@ -411,7 +426,7 @@ jobs:
           fi
 
       - name: Persist fresh-chat URL into campaign registration
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer' }}
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer' && env.DEDUPED_FRESH_LAUNCH != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           NEW_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}

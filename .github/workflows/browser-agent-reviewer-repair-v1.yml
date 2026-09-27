@@ -61,6 +61,7 @@ jobs:
         id: context
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -105,16 +106,16 @@ jobs:
             handoff_path=""
             baseline_commit=""
           else
-            reviewer="$(jq -r '.nextMilestone.reviewer // empty' /tmp/current-active-pointer.json)"
-            milestone="$(jq -r '.nextMilestone.id // empty' /tmp/current-active-pointer.json)"
-            phase_start="$(jq -r '.nextMilestone.phaseRange[0] // empty' /tmp/current-active-pointer.json)"
-            if [ -z "$phase_start" ] && [[ "$gate_expected_phase" =~ ^phase-([0-9]+)$ ]]; then
-              phase_start="${BASH_REMATCH[1]}"
-            fi
-            if [ -z "$reviewer" ]; then reviewer="$(jq -r '.activeReviewer.lineage // empty' /tmp/current-campaign-state.json)"; fi
-            if [ -z "$milestone" ]; then
-              milestone="$(jq -r --arg r "$reviewer" '.routingPlan.workers[]? | select(.lineage==$r and (.status=="ACTIVE" or .status=="WAITING_FOR_SUCCESSOR_AGENT")) | .milestone // empty' /tmp/current-campaign-state.json | tail -n1)"
-            fi
+            # Repair the CURRENT reviewer, never the next reviewer. Multi-phase
+            # reviewers remain the same agent across their assigned phase range.
+            reviewer="$(jq -r '.phase.reviewer // .reviewer // empty' /tmp/current-campaign-state.json)"
+            [ -n "$reviewer" ] || reviewer="$(jq -r '.reviewer // empty' /tmp/current-active-pointer.json)"
+            milestone="$(jq -r '.phase.milestoneId // empty' /tmp/current-campaign-state.json)"
+            [ -n "$milestone" ] || milestone="$(jq -r '.milestoneId // empty' /tmp/current-active-pointer.json)"
+            current_phase_id="$(jq -r '.phase.id // empty' /tmp/current-campaign-state.json)"
+            [ -n "$current_phase_id" ] || current_phase_id="$(jq -r '.phaseId // empty' /tmp/current-active-pointer.json)"
+            [[ "$current_phase_id" =~ ^phase-([0-9]+)$ ]] || { echo "::error::Canonical current phase is invalid"; exit 1; }
+            phase_start="${BASH_REMATCH[1]}"
             test -n "$reviewer"
             test -n "$milestone"
 
@@ -172,61 +173,13 @@ jobs:
             *) echo "::error::Unsupported repair mode"; exit 1 ;;
           esac
 
-          state_skill_rel="$(jq -r '.skillAuthority.current.campaignPath // empty' /tmp/current-campaign-state.json)"
-          skill_path=""
-          skill_ref="$gate_ref"
-          skill_repo="$gate_repo"
-          skill_authority_source=""
-          newest_skill=""
-          newest_date=""
-
-          # Keep reviewer repair on the same authority precedence as normal Lite successor launch.
-          if [ -n "$state_skill_rel" ]; then
-            skill_path="$campaign_root/$state_skill_rel"
-            skill_authority_source="CAMPAIGN_BOUND"
-          else
-            primary_pointer_path='audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json'
-            primary_pointer="$(gh api "repos/CurveYield2/Audit-Controller/contents/$primary_pointer_path?ref=main" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
-            if [ -n "$primary_pointer" ] && [ "$(printf '%s' "$primary_pointer" | jq -r '.schemaVersion // empty')" = 'audit-v7-lite-primary-skill-authority-v1' ] && [ "$(printf '%s' "$primary_pointer" | jq -r '.status // empty')" = 'ACTIVE' ]; then
-              primary_skill_path="$(printf '%s' "$primary_pointer" | jq -r '.packagePath // empty')"
-              primary_blob_sha="$(printf '%s' "$primary_pointer" | jq -r '.gitBlobSha // empty')"
-              if [ -n "$primary_skill_path" ] && [[ "$primary_blob_sha" =~ ^[0-9a-f]{40}$ ]]; then
-                observed_blob_sha="$(gh api "repos/CurveYield2/Audit-Controller/contents/$primary_skill_path?ref=main" --jq '.sha // empty' 2>/dev/null || true)"
-                if [ "$observed_blob_sha" = "$primary_blob_sha" ]; then
-                  skill_path="$primary_skill_path"
-                  skill_ref="main"
-                  skill_repo="CurveYield2/Audit-Controller"
-                  skill_authority_source="LITE_PRIMARY_DEFAULT"
-                else
-                  echo "::error::Lite primary skill pointer blob identity does not match repository content."
-                  exit 1
-                fi
-              fi
-            fi
-          fi
-
-          if [ -z "$skill_path" ]; then
-            listing="$(gh api "repos/$gate_repo/contents/$campaign_root/authority?ref=$gate_ref" 2>/dev/null || true)"
-            if [ -n "$listing" ]; then
-              while IFS= read -r candidate; do
-                [ -n "$candidate" ] || continue
-                candidate_date="$(gh api --method GET "repos/$gate_repo/commits" -f path="$candidate" -f sha="$gate_ref" -f per_page=1 --jq '.[0].commit.committer.date // empty' 2>/dev/null || true)"
-                [ -n "$candidate_date" ] || continue
-                if [ -z "$newest_date" ] || [[ "$candidate_date" > "$newest_date" ]]; then
-                  newest_skill="$candidate"
-                  newest_date="$candidate_date"
-                fi
-              done < <(printf '%s' "$listing" | jq -r '.[]? | select(.type=="file" and (.name|test("skill.*\\.zip$";"i"))) | .path')
-            fi
-            if [ -n "$newest_skill" ]; then
-              skill_path="$newest_skill"
-              skill_authority_source="LEGACY_NEWEST_ZIP_FALLBACK"
-            fi
-          fi
+          authority_api="repos/$GITHUB_REPOSITORY/contents/Audit%20Skill%20-%20Current%20Authority?ref=main"
+          skill_path="$(GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN" gh api "$authority_api" --jq '[.[] | select(.type=="dir" and (.name|startswith("Audit_V7_independent_Review_skill_")))] | if length==1 then .[0].path else empty end' 2>/dev/null || true)"
           test -n "$skill_path"
+          skill_url="https://github.com/$GITHUB_REPOSITORY/tree/main/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
+          skill_authority_source="CONTRACT_AUTOMATION_CURRENT_AUTHORITY_FOLDER"
 
           campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(printf '%s' "$campaign_root" | sed 's/ /%20/g')"
-          skill_url="https://github.com/$skill_repo/blob/$skill_ref/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
 
           {
             echo "registration=$registration"
@@ -249,6 +202,12 @@ jobs:
             echo "campaign_url=$campaign_url"
             echo "skill_url=$skill_url"
             echo "skill_authority_source=$skill_authority_source"
+            if [ "$phase0_bootstrap" != true ]; then
+              wake_path="$(dirname "$handoff_path")/WAKE_UP_MESSAGE.md"
+              echo "wake_path=$wake_path"
+            else
+              echo "wake_path="
+            fi
           } >> "$GITHUB_OUTPUT"
 
       - name: Reset campaign to active reviewer handoff baseline
@@ -393,77 +352,72 @@ jobs:
       - name: Build replacement reviewer wake
         id: wake
         env:
-          DISPOSITION: ${{ steps.context.outputs.disposition }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           CAMPAIGN_TITLE: ${{ steps.context.outputs.campaign_title }}
           CAMPAIGN_URL: ${{ steps.context.outputs.campaign_url }}
           SKILL_URL: ${{ steps.context.outputs.skill_url }}
-          SKILL_AUTHORITY_SOURCE: ${{ steps.context.outputs.skill_authority_source }}
           REVIEWER: ${{ steps.context.outputs.reviewer }}
           MILESTONE: ${{ steps.context.outputs.milestone }}
           HANDOFF_PATH: ${{ steps.context.outputs.handoff_path }}
-          BASELINE_COMMIT: ${{ steps.context.outputs.baseline_commit }}
-          REPAIR_REQUEST: ${{ steps.context.outputs.repair_request }}
+          WAKE_PATH: ${{ steps.context.outputs.wake_path }}
+          GATE_REPO: ${{ steps.context.outputs.gate_repo }}
+          GATE_REF: ${{ steps.context.outputs.gate_ref }}
           PHASE0_BOOTSTRAP: ${{ steps.context.outputs.phase0_bootstrap }}
         shell: bash
         run: |
           set -euo pipefail
           if [ "$PHASE0_BOOTSTRAP" = true ]; then
             {
-              printf '%s\n' '[AUDIT_PHASE0_BOOTSTRAP_REPLACEMENT_V1]'
+              printf '%s\n' '[CURVEYIELD_ULTRALITE_PHASE0_REPLACEMENT_V2]'
               printf 'campaign_name=%s\n' "$CAMPAIGN_TITLE"
               printf 'campaign_id=%s\n' "$CAMPAIGN_ID"
               printf '%s\n' 'reviewer=web-bootstrap-agent'
-              printf '%s\n' 'phase=phase-0'
+              printf '%s\n' 'current_phase=phase-0'
               printf '%s\n' 'milestone=P0_BOOTSTRAP'
-              printf 'campaign_url=%s\n' "$CAMPAIGN_URL"
-              printf 'audit_skill_url=%s\n' "$SKILL_URL"
-              printf 'audit_skill_authority_source=%s\n' "$SKILL_AUTHORITY_SOURCE"
-              printf '%s\n' 'repair_disposition=resume'
-              printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT_OUTSIDE_CAMPAIGN_PROJECT; do not use Work.'
-              printf '%s\n' 'connector_requirement=Use the GitHub connector app for all repository reads/writes.'
-              printf '%s\n' 'authority_rule=Read the resolved audit skill authority before Phase-0 work and follow its Ultralite/Lite Phase-0 instructions exactly.'
-              printf '%s\n' 'recovery_rule=Resume Phase 0 from the latest durable campaign state and admitted source identity. Do not repeat completed source fan-out or overwrite durable completed bootstrap work.'
-              printf '%s\n' 'recovery_validation=Inspect the active pointer, controller state, existing Phase-0 outputs, automation receipts, ledgers, and current source/skill identities before changing anything.'
-              printf '%s\n' 'completion_rule=Execute Phase 0 only through its required machine completion validation and sealed P0_TO_P1 successor boundary, then stop so the Ultralite successor automation can launch reviewer-1.'
-              if [ -n "$REPAIR_REASON" ]; then
-                printf 'repair_trigger=%s\n' "$REPAIR_REASON"
-              fi
-            } > /tmp/replacement-wake.txt
-          else
-            {
-              printf '%s\n' '[AUDIT_REVIEWER_REPLACEMENT_V1]'
-              printf 'campaign_name=%s\n' "$CAMPAIGN_TITLE"
-              printf 'campaign_id=%s\n' "$CAMPAIGN_ID"
-              printf 'reviewer=%s\n' "$REVIEWER"
-              printf 'phase=phase-%s\n' "$PHASE_START"
-              printf 'milestone=%s\n' "$MILESTONE"
               printf '%s\n' 'reasoning_effort=high'
               printf 'campaign_url=%s\n' "$CAMPAIGN_URL"
-              printf 'audit_skill_url=%s\n' "$SKILL_URL"
-              printf 'audit_skill_authority_source=%s\n' "$SKILL_AUTHORITY_SOURCE"
-              printf 'authoritative_handoff=%s\n' "$HANDOFF_PATH"
-              printf 'handoff_baseline_commit=%s\n' "$BASELINE_COMMIT"
-              printf 'repair_disposition=%s\n' "$DISPOSITION"
-              printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT_IN_CAMPAIGN_PROJECT; do not use Work.'
-              printf '%s\n' 'connector_requirement=Use the GitHub connector app for all repository reads/writes.'
-              printf '%s\n' 'authority_rule=The audit skill URL above was resolved by authority precedence (campaign-bound first, otherwise the active global Lite primary authority; legacy newest-ZIP fallback only when neither exists). Read it before reviewer work and follow it exactly unless a newer explicit human instruction in this chat overrides it.'
-              printf '%s\n' 'sealed_work_rule=Never restart or overwrite sealed predecessor work for convenience.'
-              if [ "$DISPOSITION" = reset ]; then
-                printf '%s\n' 'recovery_rule=The campaign has already been machine-reset to the active reviewer handoff baseline. Start this reviewer cleanly from that handoff and current preserved source/skill authority.'
-                printf '%s\n' 'reset_receipt=controller/REVIEWER_REPAIR_RESET_v1.json'
-              else
-                printf '%s\n' 'recovery_rule=First attempt to resume from the latest durable campaign state and continue from the exact point reached by the prior reviewer.'
-                printf '%s\n' 'recovery_validation=Inspect the active pointer, authoritative handoff, controller state, current reviewer outputs, ledgers, and receipts before changing anything.'
-                printf '%s\n' "reset_request_path=$REPAIR_REQUEST"
-                printf '%s\n' 'reset_request_rule=If and only if the existing active-reviewer files are irreconcilably partial/misplaced such that safe continuation is impossible, do not delete or reset them yourself. File REVIEWER_REPAIR_REQUEST_v1.json at reset_request_path with schema curveyield-reviewer-repair-request-v1, action RESET_TO_HANDOFF, the exact campaign/reviewer/milestone/handoff/baseline identity above, a concrete reason, and requestedAt. Then stop so automation can perform the clean reset.'
-              fi
-              printf '%s\n' 'completion_rule=Otherwise continue this reviewer through its required final report/handoff terminal state so the normal successor automation can continue.'
-              if [ -n "$REPAIR_REASON" ]; then
-                printf 'repair_trigger=%s\n' "$REPAIR_REASON"
-              fi
+              printf 'authoritative_skill_folder=%s\n' "$SKILL_URL"
+              printf '%s\n' 'connector_requirement=Use the GitHub connector app for every repository read/write.'
+              printf '%s\n' 'instruction=Resume this exact campaign Phase 0 from durable state. Follow the Ultralite pathway in the authoritative skill precisely with no deviation. Do not repeat completed bootstrap work. Complete and validate every required Phase-0 artifact and P0_TO_P1 boundary, then stop so automation can launch reviewer-1.'
             } > /tmp/replacement-wake.txt
+          else
+            [ -n "$WAKE_PATH" ] || { echo "::error::Replacement reviewer has no sealed wake path"; exit 1; }
+            encoded="$(gh api "repos/$GATE_REPO/contents/$WAKE_PATH?ref=$GATE_REF" --jq '.content')"
+            printf '%s' "$encoded" | base64 -d > /tmp/replacement-wake.txt
+            test -s /tmp/replacement-wake.txt
+            if grep -Eiq '\b(TBD|TODO)\b|\{\{[^}]+\}\}|<[^>]*(placeholder|fill|insert)[^>]*>' /tmp/replacement-wake.txt; then
+              echo "::error::Sealed replacement wake contains unresolved placeholder material."
+              exit 1
+            fi
+            grep -Fq "$CAMPAIGN_ID" /tmp/replacement-wake.txt || { echo "::error::Sealed replacement wake campaign mismatch"; exit 1; }
           fi
           echo "wake_b64=$(base64 -w0 /tmp/replacement-wake.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Clear confirmed dead reviewer chat binding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRATION: ${{ steps.context.outputs.registration }}
+          MILESTONE: ${{ steps.context.outputs.milestone }}
+          REVIEWER: ${{ steps.context.outputs.reviewer }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="repos/$GITHUB_REPOSITORY/contents/$REGISTRATION"
+          encoded="$(gh api "$api?ref=main" --jq '.content')"
+          printf '%s' "$encoded" | base64 -d > /tmp/repair-registration.json
+          sha="$(gh api "$api?ref=main" --jq '.sha')"
+          jq --arg milestone "$MILESTONE" --arg reviewer "$REVIEWER" '
+            .repairPreviousChat=((.activeChat // {}) + {retiredAt:(now|todate),reason:"CONFIRMED_REVIEWER_REPAIR"})
+            | .mode="create_fresh"
+            | .chatUrl=""
+            | .activeChat=((.activeChat // {}) + {url:""})
+            | .activeAssignment.milestoneId=$milestone
+            | .activeAssignment.reviewer=$reviewer
+            | .watchdog.idleMessage="GET BACK TO WORK"
+            | .updatedAt=(now|todate)
+          ' /tmp/repair-registration.json > /tmp/repair-registration-next.json
+          content="$(base64 -w0 /tmp/repair-registration-next.json)"
+          gh api --method PUT "$api" -f message="chore(repair): retire dead reviewer chat $CAMPAIGN_ID $MILESTONE" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
 
       - name: Launch replacement reviewer normal web chat
         env:
@@ -484,7 +438,7 @@ jobs:
           phase_id="$MILESTONE"
           if [ -n "$PHASE_START" ]; then phase_id="phase-$PHASE_START"; fi
           chat_name="$PROJECT_NAME $REVIEWER replacement"
-          wake_id="$CAMPAIGN_ID-$MILESTONE-repair-$GITHUB_RUN_ID"
+          wake_id="$CAMPAIGN_ID-$MILESTONE-$REVIEWER-replacement"
           if [ "$PHASE0_BOOTSTRAP" = true ]; then
             phase_id="phase-0"
             browser_context_b64="$(jq -nc \
@@ -507,7 +461,7 @@ jobs:
             -f wake_message_b64="${{ steps.wake.outputs.wake_b64 }}" \
             -f watchdog_enabled=true \
             -f worker_role=reviewer \
-            -f watchdog_message_b64="" \
+            -f watchdog_message_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)" \
             -f gate_mode=LITE \
             -f gate_repository="$GATE_REPO" \
             -f gate_ref="$GATE_REF" \
@@ -515,7 +469,70 @@ jobs:
             -f gate_expected_phase_id="$phase_id" \
             -f gate_expected_milestone_id="$MILESTONE" \
             -f gate_active_pointer_path="$POINTER_PATH" \
+            -f gate_stop_states_csv=STOPPED_BY_HUMAN \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN \
             -f browser_context_b64="$browser_context_b64"
+
+      - name: Send one-time repair context after sealed wake
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRATION: ${{ steps.context.outputs.registration }}
+          REVIEWER: ${{ steps.context.outputs.reviewer }}
+          MILESTONE: ${{ steps.context.outputs.milestone }}
+          PHASE_START: ${{ steps.context.outputs.phase_start }}
+          GATE_REPO: ${{ steps.context.outputs.gate_repo }}
+          GATE_REF: ${{ steps.context.outputs.gate_ref }}
+          STATE_PATH: ${{ steps.context.outputs.state_path }}
+          POINTER_PATH: ${{ steps.context.outputs.pointer_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="repos/$GITHUB_REPOSITORY/contents/$REGISTRATION"
+          chat_url=""
+          for attempt in $(seq 1 24); do
+            encoded="$(gh api "$api?ref=main" --jq '.content' 2>/dev/null || true)"
+            if [ -n "$encoded" ]; then
+              printf '%s' "$encoded" | base64 -d > /tmp/repaired-registration.json
+              bound_milestone="$(jq -r '.activeAssignment.milestoneId // empty' /tmp/repaired-registration.json)"
+              candidate="$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/repaired-registration.json)"
+              if [ "$bound_milestone" = "$MILESTONE" ] && [[ "$candidate" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+ ]]; then
+                chat_url="$candidate"
+                break
+              fi
+            fi
+            sleep 5
+          done
+          [ -n "$chat_url" ] || { echo "::error::Replacement reviewer chat was not durably bound; repair notice not sent."; exit 1; }
+
+          phase_id="phase-$PHASE_START"
+          cat > /tmp/repair-notice.txt <<EOF
+          [CURVEYIELD_REPAIR_WORKER_CONTEXT_V1]
+          You are a repair/replacement worker taking over for the previous $REVIEWER agent, which terminated in the middle of this same assigned task.
+          Resume this exact reviewer assignment from the latest durable campaign state at $phase_id. Do not restart or overwrite completed work. Recover the exact point reached by the previous agent, complete all remaining work required by the original WAKE_UP_MESSAGE.md, and carry this reviewer assignment to its required terminal boundary.
+          EOF
+
+          repair_context_b64="$(jq -nc '{messagePurpose:"repair_notice"}' | base64 -w0)"
+
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$CAMPAIGN_ID-$MILESTONE-$REVIEWER-repair-context" \
+            -f campaign_id="$CAMPAIGN_ID" \
+            -f phase_id="$phase_id" \
+            -f mode=resume_existing \
+            -f chat_url="$chat_url" \
+            -f wake_message_b64="$(base64 -w0 /tmp/repair-notice.txt)" \
+            -f watchdog_enabled=false \
+            -f worker_role=reviewer \
+            -f watchdog_message_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)" \
+            -f gate_mode=LITE \
+            -f gate_repository="$GATE_REPO" \
+            -f gate_ref="$GATE_REF" \
+            -f gate_state_path="$STATE_PATH" \
+            -f gate_expected_phase_id="$phase_id" \
+            -f gate_expected_milestone_id="$MILESTONE" \
+            -f gate_active_pointer_path="$POINTER_PATH" \
+            -f browser_context_b64="$repair_context_b64" \
+            -f gate_stop_states_csv=STOPPED_BY_HUMAN \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
 
       - name: Summarize reviewer repair
         shell: bash

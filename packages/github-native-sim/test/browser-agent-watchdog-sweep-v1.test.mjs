@@ -40,16 +40,19 @@ test('scheduled sweep preserves canonical gate and successor behavior', () => {
   assert.match(watchdog, /Set up isolated browser-agent runtime/);
 });
 
-test('Lite successor skill resolution follows authority precedence and verifies the global pointer blob', () => {
-  assert.match(watchdog, /skillAuthority\.current\.campaignPath/);
-  assert.match(watchdog, /audit-process\/v7\/LITE_PRIMARY_SKILL_AUTHORITY_v1\.json/);
-  assert.match(watchdog, /gitBlobSha/);
-  assert.match(watchdog, /observed_blob_sha/);
-  assert.match(watchdog, /CAMPAIGN_BOUND/);
-  assert.match(watchdog, /LITE_PRIMARY_DEFAULT/);
-  assert.match(watchdog, /LEGACY_NEWEST_ZIP_FALLBACK/);
-  assert.match(watchdog, /audit_skill_authority_source=/);
-  assert.doesNotMatch(watchdog, /latest_audit_skill_url=/);
+test('Lite successor launch consumes the sealed reviewer-authored wake message verbatim', () => {
+  assert.match(watchdog, /wake_path="\$handoff_dir\/WAKE_UP_MESSAGE\.md"/);
+  assert.match(watchdog, /base64 -d > \/tmp\/sealed-successor-wake\.txt/);
+  assert.match(watchdog, /wake_b64="\$\(base64 -w0 \/tmp\/sealed-successor-wake\.txt\)"/);
+  assert.match(watchdog, /next_phase="\$\(jq -r '\.nextPhaseId \/\/ empty'/);
+  assert.doesNotMatch(watchdog, /AUDIT_REVIEWER_ROUTINE_V1/);
+  assert.doesNotMatch(watchdog, /audit_skill_authority_source=/);
+});
+
+test('Lite watchdog does not equate phase closure with campaign completion', () => {
+  assert.match(watchdog, /LITE_CAMPAIGN_TERMINAL_/);
+  assert.match(watchdog, /Internal phase advancement/);
+  assert.doesNotMatch(watchdog, /\[ "\$lite_campaign_status" = "COMPLETE" \] \|\| \[ "\$lite_phase_state" = "CLOSED" \]/);
 });
 
 test('no parallel watchdog workflow is introduced', () => {
