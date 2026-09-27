@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { loadEncryptedSessionState, saveEncryptedSessionState, validateStorageState } from './browser-session-state-v1.mjs';
 
 const env = process.env;
 const action = env.WAKE_ACTION || 'wake';
@@ -12,11 +13,34 @@ const wakeId = env.WAKE_ID || crypto.randomUUID();
 const wakeMessage = env.WAKE_MESSAGE || '';
 const requestedUrl = env.CHAT_URL || '';
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
+const encryptedSessionPath = env.CHATGPT_SESSION_STATE_PATH || '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
+const sessionUpdatedMarker = env.CHATGPT_SESSION_STATE_UPDATED_MARKER || '/tmp/curveyield-browser-agent/session-state-updated';
 
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
 function bool(v) { return String(v || '').toLowerCase() === 'true'; }
+
+async function persistHealthySession(providerName, context, state) {
+  if (providerName !== 'github-playwright') return false;
+  if (!state?.composerVisible || !/^https:\/\/chatgpt\.com\//.test(state.url || '')) return false;
+  try {
+    const storage = await context.storageState();
+    const persisted = await saveEncryptedSessionState({
+      encryptedSessionPath,
+      keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
+      storage,
+    });
+    if (persisted) {
+      await fs.mkdir(path.dirname(sessionUpdatedMarker), { recursive: true });
+      await fs.writeFile(sessionUpdatedMarker, new Date().toISOString() + '\n', { mode: 0o600 });
+    }
+    return persisted;
+  } catch (error) {
+    console.warn('[github-playwright] Refreshed session state could not be persisted: ' + error.message);
+    return false;
+  }
+}
 
 async function importBrowserRuntimeModule(specifier) {
   const runtimeRoot = env.BROWSER_AGENT_RUNTIME_ROOT || '';
@@ -158,12 +182,14 @@ async function runWithPage(providerName, connect) {
     const before = await snapshot(page);
 
     if (action === 'observe') {
-      const result = { ok: true, provider: providerName, action, wakeId, ...before };
+      const sessionStatePersisted = await persistHealthySession(providerName, context, before);
+      const result = { ok: true, provider: providerName, action, wakeId, sessionStatePersisted, ...before };
       await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
       return result;
     }
     if (before.generating && !bool(env.FORCE_WAKE)) {
-      const result = { ok: true, provider: providerName, action, wakeId, skipped: 'PRODUCTIVE_GENERATING', ...before };
+      const sessionStatePersisted = await persistHealthySession(providerName, context, before);
+      const result = { ok: true, provider: providerName, action, wakeId, skipped: 'PRODUCTIVE_GENERATING', sessionStatePersisted, ...before };
       await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
       return result;
     }
@@ -197,8 +223,9 @@ async function runWithPage(providerName, connect) {
       after.url = page.url();
     }
 
+    const sessionStatePersisted = await persistHealthySession(providerName, context, after);
     const result = {
-      ok: true, provider: providerName, action, wakeId, posted: true, before, after,
+      ok: true, provider: providerName, action, wakeId, posted: true, before, after, sessionStatePersisted,
       chatUrl: after.url,
       ...(response ? { responded: response.responded, waitedMs: response.waitedMs } : {})
     };
@@ -210,10 +237,23 @@ async function runWithPage(providerName, connect) {
 }
 
 async function localProvider(chromium) {
-  const storage = env.CHATGPT_STORAGE_STATE_B64
-    ? JSON.parse(Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'))
-    : undefined;
-  if (!storage) throw new Error('CHATGPT_STORAGE_STATE_B64 missing');
+  let storage = await loadEncryptedSessionState({
+    encryptedSessionPath,
+    keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
+  });
+  let source = storage ? 'encrypted-cache' : '';
+  if (!storage && env.CHATGPT_STORAGE_STATE_B64) {
+    try {
+      const bootstrap = JSON.parse(Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'));
+      if (!validateStorageState(bootstrap)) throw new Error('invalid storage state');
+      storage = bootstrap;
+      source = 'bootstrap-secret';
+    } catch {
+      throw new Error('CHATGPT_STORAGE_STATE_B64 is invalid');
+    }
+  }
+  if (!storage) throw new Error('No usable ChatGPT storage state is available');
+  console.log('[github-playwright] Using ' + source + ' session state');
   const browser = await chromium.launch({ headless: true, channel: 'chrome' });
   const context = await browser.newContext({ storageState: storage });
   const page = await context.newPage();

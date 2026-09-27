@@ -70,6 +70,9 @@ jobs:
     env:
       WAKE_ID: ${{ matrix.wake_id }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
+      CHATGPT_SESSION_STATE_PATH: ${{ runner.temp }}/curveyield-browser-agent/session-state-v1.enc.json
+      CHATGPT_SESSION_STATE_UPDATED_MARKER: ${{ runner.temp }}/curveyield-browser-agent/session-state-updated
       BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
       BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
       BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
@@ -136,6 +139,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Restore encrypted ChatGPT session state
+        if: steps.target.outputs.valid == 'true'
+        id: restore-chatgpt-session
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}
+          restore-keys: |
+            chatgpt-session-state-v1-
 
       - name: Set up isolated browser-agent runtime
         if: steps.target.outputs.valid == 'true'
@@ -761,3 +774,22 @@ jobs:
           else
             echo 'Watchdog was retired during this sweep.'
           fi
+
+      - name: Detect refreshed encrypted ChatGPT session state
+        if: steps.target.outputs.valid == 'true'
+        id: refreshed-chatgpt-session
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -s "$CHATGPT_SESSION_STATE_UPDATED_MARKER" ] && [ -s "$CHATGPT_SESSION_STATE_PATH" ]; then
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save refreshed encrypted ChatGPT session state
+        if: steps.target.outputs.valid == 'true' && steps.refreshed-chatgpt-session.outputs.updated == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ strategy.job-index }}
