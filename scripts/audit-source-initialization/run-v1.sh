@@ -108,15 +108,31 @@ else
     git commit -m "audit(controller): initialize $campaign_id"
     init_commit="$(git rev-parse HEAD)"
 
-    if git push origin HEAD:main; then
-      success=true
-      break
+    # Publish through a short-lived Audit-Controller branch and merge it into main.
+    # This makes campaign initialization an actual merge operation rather than a direct main push.
+    init_branch="audit-source-init/$campaign_id-$GITHUB_RUN_ID-$attempt"
+    if git push origin HEAD:"$init_branch"; then
+      pr_url="$(gh pr create --repo CurveYield2/Audit-Controller         --base main --head "$init_branch"         --title "Initialize Lite audit campaign $campaign_id"         --body "Automated Audit Source Initialization for request $REQUEST_ID.")"
+      pr_number="$(gh pr view "$pr_url" --repo CurveYield2/Audit-Controller --json number --jq '.number')"
+
+      merge_json=''
+      if merge_json="$(gh api --method PUT         "repos/CurveYield2/Audit-Controller/pulls/$pr_number/merge"         -f merge_method=merge         -f sha="$init_commit" 2>/tmp/audit-source-init-merge-error)"; then
+        if [ "$(jq -r '.merged // false' <<<"$merge_json")" = "true" ]; then
+          merge_commit="$(jq -r '.sha' <<<"$merge_json")"
+          git push origin --delete "$init_branch" >/dev/null 2>&1 || true
+          success=true
+          break
+        fi
+      fi
+
+      echo "::warning::Audit-Controller merge did not complete; closing temporary PR and retrying on current main (attempt $attempt/5)."
+      gh pr close "$pr_number" --repo CurveYield2/Audit-Controller >/dev/null 2>&1 || true
+      git push origin --delete "$init_branch" >/dev/null 2>&1 || true
     fi
 
-    echo "::warning::Audit-Controller main moved; rebuilding the initialization on latest main (attempt $attempt/5)."
     sleep $((attempt * 2))
   done
-  [ "$success" = true ] || { echo "::error::Failed to publish Audit Source Initialization to Audit-Controller main."; exit 1; }
+  [ "$success" = true ] || { echo "::error::Failed to merge Audit Source Initialization into Audit-Controller main."; exit 1; }
 
   export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
   jq -n \
@@ -125,7 +141,7 @@ else
     --argjson size "$source_size" --arg campaignId "$campaign_id" --arg generation "$generation_id" \
     --arg campaignName "$campaign_name" --arg workspace "$campaign_root" --arg sourcePath "$source_path" \
     --arg admission "$admission_commit" --arg blob "$source_blob" --arg tree "$tree_sha" \
-    --arg init "$init_commit" --arg run "$GITHUB_RUN_ID" \
+    --arg init "$merge_commit" --arg run "$GITHUB_RUN_ID" \
     '{
       schemaVersion:"curveyield-audit-source-initialization-report-v1",
       request:{requestId:$requestId,sourceUrl:$sourceUrl},
