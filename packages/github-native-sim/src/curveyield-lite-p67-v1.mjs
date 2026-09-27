@@ -66,6 +66,21 @@ async function rpcRequest(url, method, params = []) {
   return payload.result;
 }
 
+export async function waitForTransactionReceipt(
+  upstreamUrl,
+  hash,
+  { request = rpcRequest, maxAttempts = 100, delayMs = 100 } = {},
+) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const receipt = await request(upstreamUrl, 'eth_getTransactionReceipt', [hash]);
+    if (receipt && receipt.blockNumber != null) return receipt;
+    if (attempt + 1 < maxAttempts && delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw new Error(`Timed out waiting for local Anvil transaction receipt: ${hash}`);
+}
+
 async function executeSequentialSimulation(upstreamUrl, params) {
   const blockStateCalls = params?.[0]?.blockStateCalls ?? [];
   const blocks = [];
@@ -74,7 +89,7 @@ async function executeSequentialSimulation(upstreamUrl, params) {
     if (!sourceCall) throw new Error('Sequential simulation received an empty blockStateCall');
     const transaction = { ...sourceCall, gas: '0x1dcd6500' };
     const hash = await rpcRequest(upstreamUrl, 'eth_sendTransaction', [transaction]);
-    const receipt = await rpcRequest(upstreamUrl, 'eth_getTransactionReceipt', [hash]);
+    const receipt = await waitForTransactionReceipt(upstreamUrl, hash);
     const block = await rpcRequest(upstreamUrl, 'eth_getBlockByNumber', [receipt.blockNumber, false]);
     blocks.push({
       baseFeePerGas: block?.baseFeePerGas ?? '0x0',
