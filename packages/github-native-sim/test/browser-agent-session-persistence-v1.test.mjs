@@ -104,9 +104,10 @@ test('wake and watchdog restore rolling encrypted state and save only refreshed 
     assert.match(workflow, /actions\/cache\/save@v4/);
     assert.match(workflow, /chatgpt-session-state-v1-/);
     assert.match(workflow, /restore-keys:[\s\S]*chatgpt-session-state-v1-/);
-    assert.match(workflow, /session-state-v1\.enc\.json/);
+    assert.match(workflow, /path: \/tmp\/curveyield-browser-agent\/session-state-v1\.enc\.json/);
     assert.match(workflow, /session-state-updated/);
     assert.match(workflow, /outputs\.updated == 'true'/);
+    assert.doesNotMatch(workflow, /CHATGPT_SESSION_STATE_(?:PATH|UPDATED_MARKER):\s*\$\{\{\s*runner\./);
   }
 });
 
