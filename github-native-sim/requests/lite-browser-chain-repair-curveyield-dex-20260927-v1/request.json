@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "lite-browser-chain-repair-curveyield-dex-20260927-v1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "cb79d24de1aef2d8e93410dca7bea9aec44c8e6e",
+    "requestPath": ".deep-assurance/operator/requests/lite-browser-chain-repair-curveyield-dex-20260927-v1.json"
+  },
+  "verifyController": false
+}
