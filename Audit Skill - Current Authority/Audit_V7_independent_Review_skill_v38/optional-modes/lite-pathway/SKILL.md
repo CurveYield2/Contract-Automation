@@ -96,6 +96,19 @@ Exactly one authorized actor is active at a time. The Phase-0 `web-bootstrap-age
 
 Fresh-session handoffs are mandatory after **Phase 0, Phase 1, Phase 5, and merged Lite Phase 6–7**. Phase 0 uses `P0_TO_P1` to transfer the sealed mechanical/bootstrap baseline to fresh high-reasoning reviewer-1. All boundaries use the copied Lite [`SUCCESSOR_HANDOFF_PROTOCOL`](shared/handoff/SUCCESSOR_HANDOFF_PROTOCOL.md) and Lite boundary profiles. A successor consumes sealed evidence and does not redo prior work for convenience. The short Phase-5 contradiction/candidate reconciliation is not clean-room independence.
 
+### Mandatory standardized successor wake message
+
+Every fresh-reviewer boundary MUST create a campaign-local `WAKE_UP_MESSAGE.md` using [`shared/handoff/WAKE_UP_MESSAGE_TEMPLATE.md`](shared/handoff/WAKE_UP_MESSAGE_TEMPLATE.md). Generic wake prompts are forbidden. The message must explicitly identify:
+
+- campaign type: **LITE**;
+- exact campaign folder name;
+- exact campaign-folder GitHub URL and controller `workspacePath`;
+- current authority Lite skill location: `CurveYield2/Contract-Automation/Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md`;
+- boundary and incoming reviewer; and
+- exact assigned work: Phase 1, Combined Lite Phases 2–5, Merged Lite Phases 6–7, or Combined Lite Phases 8–10.
+
+For `P0_TO_P1`, Phase 0 must create and validate this Phase-1 wake message **before** controller completion validation is requested.
+
 ### Handoff discovery — conditional
 
 Only when entering a fresh-reviewer boundary or recovering from context loss, open [`HANDOFF_DISCOVERY_AND_CONTEXT_RECOVERY.md`](shared/handoff/HANDOFF_DISCOVERY_AND_CONTEXT_RECOVERY.md). Normal same-reviewer work does not preload handoff-discovery instructions.
