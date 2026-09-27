@@ -56,20 +56,19 @@ test('wake runtime executes browser routines around the first message and return
   assert.match(source, /chatRenamed:/);
 });
 
-test('wake workflow carries routine/project/chat and repair policy through fresh-runner redispatch', () => {
+test('wake workflow carries packed routine/project/chat and repair policy through fresh-runner redispatch', () => {
   const workflow = read('.github/workflows/browser-agent-wake.yml');
-  for (const input of [
-    'browser_routine_id:',
-    'project_name:',
-    'chat_name:',
-    'repair_enabled:',
-    'repair_idle_poke_threshold:',
-    'repair_unviewable_threshold:',
-  ]) assert.match(workflow, new RegExp(input));
+  assert.match(workflow, /browser_context_b64:/);
+  assert.doesNotMatch(workflow, /\n      browser_routine_id:/);
+  assert.doesNotMatch(workflow, /\n      project_name:/);
+  assert.doesNotMatch(workflow, /\n      chat_name:/);
+  assert.match(workflow, /BROWSER_CONTEXT_B64:\s*\$\{\{ inputs\.browser_context_b64 \}\}/);
+  assert.match(workflow, /base64 -d > \/tmp\/browser-context\.json/);
+  assert.match(workflow, /BROWSER_ROUTINE_ID=\$routine_id/);
+  assert.match(workflow, /CHATGPT_PROJECT_NAME=\$project_name/);
+  assert.match(workflow, /CHATGPT_CHAT_NAME=\$chat_name/);
+  assert.match(workflow, /REPAIR_ENABLED=\$repair_enabled/);
   assert.match(workflow, /RETRY_INPUTS_JSON:\s*\$\{\{ toJSON\(inputs\) \}\}/);
-  assert.match(workflow, /BROWSER_ROUTINE_ID:\s*\$\{\{ inputs\.browser_routine_id \}\}/);
-  assert.match(workflow, /CHATGPT_PROJECT_NAME:\s*\$\{\{ inputs\.project_name \}\}/);
-  assert.match(workflow, /CHATGPT_CHAT_NAME:\s*\$\{\{ inputs\.chat_name \}\}/);
   assert.match(workflow, /chatgptProject=.*projectName/);
   assert.match(workflow, /activeChat=.*chatName/);
 });
@@ -81,7 +80,7 @@ test('ultralite entry workflow starts Phase 0 in normal web chat and defers proj
   assert.match(workflow, /Use the GitHub connector app/);
   assert.match(workflow, /Execute Phase 0 to completion/);
   assert.match(workflow, /create\/reuse the campaign ChatGPT Project and launch the next reviewer automatically/);
-  assert.match(workflow, /-f browser_routine_id=""/);
+  assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
   assert.match(workflow, /-f gate_expected_milestone_id=P0_BOOTSTRAP/);
 });
 
@@ -93,9 +92,11 @@ test('successor routing is reviewer-count agnostic and injects live campaign/ski
   assert.match(workflow, /latest_audit_skill_url=%s/);
   assert.match(workflow, /connector_requirement=Use the GitHub connector app/);
   assert.match(workflow, /authority_rule=The latest audit skill file URL above is the ultimate methodology authority/);
-  assert.match(workflow, /browser_routine_id="audit-ultralite-reviewer-v1"/);
-  assert.match(workflow, /project_name="\$project_name"/);
-  assert.match(workflow, /chat_name="\$chat_name"/);
+  assert.match(workflow, /browser_context_b64="\$\(jq -nc/);
+  assert.match(workflow, /routineId:\$routine/);
+  assert.match(workflow, /projectName:\$project/);
+  assert.match(workflow, /chatName:\$chat/);
+  assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
   assert.doesNotMatch(workflow, /gate_expected_milestone" = "P8_10"/);
 });
 
@@ -123,7 +124,8 @@ test('reviewer repair workflow resumes first and only resets to an exact handoff
   assert.match(workflow, /SKILL_AUTHORITY/);
   assert.match(workflow, /REVIEWER_REPAIR_RESET_v1\.json/);
   assert.match(workflow, /do not delete or reset them yourself/);
-  assert.match(workflow, /browser_routine_id=audit-ultralite-reviewer-v1/);
+  assert.match(workflow, /browser_context_b64="\$\(jq -nc/);
+  assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
 });
 
 test('reviewer repair request schema is exact and reset-only', () => {
