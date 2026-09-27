@@ -92,6 +92,12 @@ jobs:
           printf '%s' "$encoded" | base64 -d > /tmp/canonical-campaign-state.json
 
           canonical_id="$(jq -r '.campaignId // empty' /tmp/canonical-campaign-state.json)"
+          canonical_generation="$(jq -r '.campaignGenerationId // empty' /tmp/canonical-campaign-state.json)"
+          pointer_encoded="$(gh api "repos/CurveYield2/Audit-Controller/contents/$pointer_path?ref=$AUDIT_CONTROLLER_REF" --jq '.content')"
+          printf '%s' "$pointer_encoded" | base64 -d > /tmp/canonical-active-pointer.json
+          test "$(jq -r '.campaignId // empty' /tmp/canonical-active-pointer.json)" = "$canonical_id"
+          test "$(jq -r '.campaignGenerationId // empty' /tmp/canonical-active-pointer.json)" = "$canonical_generation"
+          [ -n "$canonical_generation" ] || { echo "::error::Campaign generation is missing"; exit 1; }
           canonical_name="$(jq -r '.auditName // .title // .projectSlug // empty' /tmp/canonical-campaign-state.json)"
           canonical_path="$(jq -r '.controller.workspacePath // empty' /tmp/canonical-campaign-state.json)"
           canonical_ref="$(jq -r '.controller.branch // empty' /tmp/canonical-campaign-state.json)"
@@ -131,6 +137,7 @@ jobs:
           [ "$arm_campaign_monitor" != "true" ] || [ -n "$monitor_phase" ] || { echo "::error::Unable to resolve Lite monitor phase"; exit 1; }
           [ "$arm_campaign_monitor" != "true" ] || [ -n "$monitor_milestone" ] || { echo "::error::Unable to resolve Lite monitor milestone"; exit 1; }
 
+          echo "campaign_generation=$canonical_generation" >> "$GITHUB_OUTPUT"
           echo "arm_campaign_monitor=$arm_campaign_monitor" >> "$GITHUB_OUTPUT"
           echo "bootstrap_monitor=$bootstrap_monitor" >> "$GITHUB_OUTPUT"
           echo "canonical_name=$canonical_name" >> "$GITHUB_OUTPUT"
@@ -160,10 +167,22 @@ jobs:
             test "$(jq -r '.schemaVersion // empty' /tmp/registration-existing.json)" = 'curveyield-browser-agent-wake-registration-v1'
             test "$(jq -r '.campaignId // empty' /tmp/registration-existing.json)" = "$CAMPAIGN_ID"
             previous_chat="$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/registration-existing.json)"
+            registered_generation="$(jq -r '.campaignGenerationId // empty' /tmp/registration-existing.json)"
+            if [ -n "$registered_generation" ] && [ "$registered_generation" != "${{ steps.canonical.outputs.campaign_generation }}" ]; then
+              echo "::error::Existing registration belongs to another campaign generation"
+              exit 1
+            fi
+            if [[ "$previous_chat" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+ ]]; then
+              echo "Bound reviewer chat already exists; preserving its registration and watchdog."
+              echo "arm_monitor=false" >> "$GITHUB_OUTPUT"
+              echo "registration=$registration" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
 
           jq -n \
             --arg campaignId "$CAMPAIGN_ID" \
+            --arg generation "${{ steps.canonical.outputs.campaign_generation }}" \
             --arg projectName "$CAMPAIGN_NAME" \
             --arg ref "$AUDIT_CONTROLLER_REF" \
             --arg statePath "${{ steps.canonical.outputs.state_path }}" \
@@ -176,6 +195,7 @@ jobs:
             '{
               schemaVersion:"curveyield-browser-agent-wake-registration-v1",
               campaignId:$campaignId,
+              campaignGenerationId:$generation,
               mode:"create_fresh",
               chatUrl:"",
               browserRoutine:"audit-lite-reviewer-v1",
@@ -218,10 +238,11 @@ jobs:
               -f content="$content" -f branch=main >/dev/null
           fi
           echo "registration=$registration" >> "$GITHUB_OUTPUT"
+          echo "arm_monitor=true" >> "$GITHUB_OUTPUT"
 
       - name: Arm Lite campaign boundary monitor
         id: monitor
-        if: steps.canonical.outputs.arm_campaign_monitor == 'true'
+        if: steps.registration.outputs.arm_monitor == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -270,11 +291,11 @@ jobs:
             }' > /tmp/bootstrap-monitor.json
 
           current_sha="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
-          content="$(base64 -w0 /tmp/bootstrap-monitor.json)"
-          if [ -n "$current_sha" ]; then
-            gh api --method PUT "$api" -f message="chore(watchdog): refresh $wake_id" -f content="$content" -f sha="$current_sha" -f branch=main >/dev/null
-          else
+          if [ -z "$current_sha" ]; then
+            content="$(base64 -w0 /tmp/bootstrap-monitor.json)"
             gh api --method PUT "$api" -f message="chore(watchdog): arm $wake_id" -f content="$content" -f branch=main >/dev/null
+          else
+            echo "Existing campaign monitor remains active; dispatching a sweep without resetting its observations."
           fi
 
           gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$wake_id"
@@ -289,7 +310,7 @@ jobs:
             echo "- Campaign: $CAMPAIGN_NAME"
             echo "- Campaign ID: $CAMPAIGN_ID"
             echo "- Phase-0 bootstrap chat: NOT created by automation; this is the existing human-started bootstrap agent"
-            echo "- Phase-0 boundary monitor: ${{ steps.canonical.outputs.arm_bootstrap_monitor }}"
+            echo "- Phase-0 boundary monitor: ${{ steps.canonical.outputs.bootstrap_monitor }}"
             echo "- First automated fresh reviewer: reviewer-1 after machine-valid P0_TO_P1"
             echo "- Successor first message: predecessor-created WAKE_UP_MESSAGE.md verbatim"
             echo "- Later messages: GET BACK TO WORK"
