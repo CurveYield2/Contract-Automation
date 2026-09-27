@@ -68,8 +68,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cp 'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/MANIFEST.json' /tmp/root-manifest-first.json
+          cp 'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/MANIFEST.json' /tmp/lite-manifest-first.json
           node scripts/rebuild-current-audit-skill-manifests-v1.mjs >/tmp/rebuild-verify.json
-          git diff --exit-code -- 'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/MANIFEST.json' 'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/MANIFEST.json'
+          cmp /tmp/root-manifest-first.json 'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/MANIFEST.json'
+          cmp /tmp/lite-manifest-first.json 'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/MANIFEST.json'
           python3 - <<'PY'
           from pathlib import Path
           from zipfile import ZipFile
