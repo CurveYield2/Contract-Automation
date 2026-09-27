@@ -1,0 +1,136 @@
+{
+  "schemaVersion": "audit-v7-phase-contract-v1",
+  "phase": {
+    "sequence": 10,
+    "id": "lite-concise-finalization",
+    "title": "Lite Combined Phases 8-10 - Concise Finalization",
+    "reviewerLineage": "reviewer-4",
+    "phaseCard": "phases/phase-10/START_HERE.md"
+  },
+  "authorization": {
+    "controllerBoundCurrentPhaseRequired": true,
+    "exactSourceFenceRequired": true,
+    "incomingSuccessorReceipt": null,
+    "combinedMilestone": "P8_TO_P10",
+    "terminalPhase": true,
+    "humanApprovalRequired": false
+  },
+  "inputs": {
+    "required": [
+      "Exact campaign/source/build identity",
+      "All Lite milestone reports",
+      "Phase-8 validation packet",
+      "Phase-9 remediation or skip record",
+      "Current graph, obligation ledger and invalidation state"
+    ],
+    "conditional": [
+      "Exact remediation identity",
+      "New candidate validation evidence generated during Phase 9"
+    ]
+  },
+  "steps": [
+    {
+      "step": 1,
+      "action": "Mechanically prefill and verify the concise evidence index",
+      "instruction": "Prefill exact identities, milestone references/digests, candidate/finding IDs, obligation statuses, remediation state and Full-only omission rows from canonical controller/evidence state wherever available. reviewer-4 verifies the machine-known facts and adds only decision-relevant context; do not retype/reconstruct known identifiers.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/LITE_FINAL_EVIDENCE_INDEX.md"
+      ]
+    },
+    {
+      "step": 2,
+      "action": "Reconcile findings, obligations and limitations",
+      "instruction": "Using the mechanically populated index and canonical ledgers, verify that every material candidate, finding and due retained obligation has a final disposition; author the residual-risk/limitation conclusions and explicitly enumerate all Full-only omissions.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+        "../../shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json"
+      ]
+    },
+    {
+      "step": 3,
+      "action": "Issue and seal the Lite final report",
+      "instruction": "State scope, methods, evidence, findings, remediation status, limitations, Lite verdict and no-repeat Full upgrade route; seal the combined Phase 8-10 milestone.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/LITE_FINAL_REPORT.md",
+        "../../LITE_TO_FULL_UPGRADE.md",
+        "../../shared/reporting/PHASE_REPORT.md"
+      ]
+    }
+  ],
+  "requiredOutputs": [
+    {
+      "artifact": "phases/phase-10/resources/LITE_FINAL_EVIDENCE_INDEX.md",
+      "role": "CONCISE_EVIDENCE_INDEX",
+      "required": true
+    },
+    {
+      "artifact": "phases/phase-10/resources/LITE_FINAL_REPORT.md",
+      "role": "LITE_FINAL_REPORT",
+      "required": true
+    },
+    {
+      "artifact": "shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+      "role": "FINAL_LITE_CHECKPOINT",
+      "required": true
+    },
+    {
+      "artifact": "shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json",
+      "role": "FINAL_LITE_CHECKPOINT",
+      "required": true
+    }
+  ],
+  "globalControlCheckpoints": {
+    "securityTraceabilityGraph": "SEAL_FINAL_LITE",
+    "carriedForwardObligationLedger": "SEAL_FINAL_LITE",
+    "evidenceInvalidationMatrix": "RECONCILE_FINAL_LITE",
+    "assuranceClaim": "LITE_ONLY_NOT_FULL"
+  },
+  "sealingCriteria": [
+    "Every material candidate/finding has a final disposition",
+    "Every due retained Lite obligation is closed or disclosed",
+    "All Full-only omissions and residual risks are explicit",
+    "Evidence index and Lite final report are sealed",
+    "No claim of Full assurance is made"
+  ],
+  "recoveryRoutes": [
+    {
+      "condition": "Missing decisive evidence",
+      "route": "Return only to the affected Lite segment or record the exact limitation"
+    },
+    {
+      "condition": "New material candidate",
+      "route": "Reopen affected Phase-8 validation and Phase 9 only if remediation follows"
+    },
+    {
+      "condition": "Full assurance requested",
+      "route": "Use LITE_TO_FULL_UPGRADE.md and the standard Full Phase 6/7 path"
+    }
+  ],
+  "allowedNextStates": [
+    "LITE_AUDIT_COMPLETE",
+    "LITE_AUDIT_COMPLETE_WITH_LIMITATIONS",
+    "LITE_TO_FULL_UPGRADE_REQUESTED"
+  ],
+  "domainApplicability": {
+    "classificationRequiredHere": false,
+    "finalReconciliationRequired": true
+  },
+  "universalRuleIds": [
+    "U-EXEC-001",
+    "U-GITHUB-001",
+    "U-STATE-001",
+    "U-EVIDENCE-001",
+    "U-REPAIR-001",
+    "U-HUMAN-001",
+    "U-DISCLOSURE-001",
+    "U-SOURCEINTEL-001",
+    "U-UPDATES-001",
+    "U-HUMANCOMMS-001"
+  ]
+}

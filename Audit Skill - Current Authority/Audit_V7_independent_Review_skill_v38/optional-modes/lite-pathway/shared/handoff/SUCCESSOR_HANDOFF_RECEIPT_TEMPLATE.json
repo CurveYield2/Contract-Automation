@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "audit-v7-lite-successor-handoff-receipt-v38",
+  "boundaryProfileId": "<P0_TO_P1 | P1_TO_P2 | P5_TO_P6 | P67_TO_P8>",
+  "campaignId": "<required>",
+  "campaignGenerationId": "<required>",
+  "incomingReviewer": "<reviewer-1 | reviewer-2 | reviewer-3L | reviewer-4>",
+  "handoffReference": "<required>",
+  "handoffDigest": "<required>",
+  "checks": [],
+  "status": "<ACCEPTED | REJECTED_REPAIR_REQUIRED | BLOCKED>",
+  "receivedAt": "<ISO-8601>"
+}

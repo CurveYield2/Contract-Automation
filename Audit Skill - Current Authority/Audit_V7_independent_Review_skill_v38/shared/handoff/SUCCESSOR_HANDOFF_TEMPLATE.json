@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "audit-v7-successor-handoff-v1",
+  "boundaryProfileId": "<P1_TO_P2 | P5_TO_P6 | P6A_TO_P6B | P6B_TO_P6C | P6_TO_P7 | P8_TO_P9>",
+  "payload": {
+    "campaignIdentity": {
+      "campaignId": "<exact>",
+      "generationId": "<exact>",
+      "outgoingPhase": "<exact integer>",
+      "outgoingPhaseRevision": "<exact>",
+      "controllerState": "WAITING_FOR_SUCCESSOR_AGENT",
+      "outgoingReviewer": "<from profile>",
+      "requiredSuccessorReviewer": "<from profile>",
+      "outgoingSubphase": "<6A | 6B | null>",
+      "incomingSubphase": "<6B | 6C | null>"
+    },
+    "sourceFence": {
+      "status": "PRESENT_NONEMPTY",
+      "primarySource": {
+        "repository": "<exact>",
+        "commitOrDigest": "<exact>",
+        "projectPath": "<exact>",
+        "archiveDigest": null
+      },
+      "changedFamilyFences": [],
+      "releaseIdentities": []
+    },
+    "phaseEvidenceIndex": [],
+    "sections": {},
+    "successorSeedPacket": {
+      "profileSeedId": "<from boundary profile>",
+      "data": {}
+    },
+    "completeness": {
+      "producerVerdict": "HANDOFF_COMPLETE",
+      "missingRequiredFields": [],
+      "carriedUnresolvedItems": [],
+      "carriedBlockedItems": [],
+      "notApplicableSections": [],
+      "knownContradictions": []
+    },
+    "globalAuditState": {
+      "securityTraceabilityGraph": {
+        "status": "PRESENT_NONEMPTY",
+        "reference": "<exact>",
+        "digest": "<exact>",
+        "revision": "<exact>",
+        "unresolvedTraceabilityGapIds": []
+      },
+      "carriedForwardObligationLedger": {
+        "status": "PRESENT_NONEMPTY",
+        "reference": "<exact>",
+        "digest": "<exact>",
+        "revision": "<exact>",
+        "obligationsDueInReceivingPhase": [],
+        "carriedBlockedObligationIds": []
+      },
+      "domainApplicabilityRegistry": {
+        "status": "<PRESENT_NONEMPTY when profile-required; NOT_APPLICABLE otherwise>",
+        "reference": "<exact or N/A>",
+        "digest": "<exact or N/A>",
+        "revision": "<exact or N/A>",
+        "triggeredOrUncertainDomains": [],
+        "obligationsDueInReceivingPhase": []
+      },
+      "sourceIntelligenceBundle": {
+        "bundleIndexReference": "<exact>",
+        "bundleIndexRevision": "<exact>",
+        "bundleIndexCommitSha": "<exact 40-char SHA>",
+        "bundleIndexSha256": "<exact 64-char SHA-256>",
+        "boundSourceDigestSha256": "<exact>",
+        "boundBuildDigestSha256": "<exact>",
+        "components": {
+          "core": {"logicalArtifactId": "SI-CORE", "acceptedRevision": "<exact>", "acceptedCommitSha": "<exact>", "acceptedSha256": "<exact>", "status": "<exact>", "invalidationStatus": "<exact>", "preservedSnapshotRef": "<exact>"},
+          "runtimeDeployment": {"logicalArtifactId": "SI-RUNTIME-OVERLAY", "acceptedRevision": "<exact>", "acceptedCommitSha": "<exact>", "acceptedSha256": "<exact>", "status": "<exact>", "invalidationStatus": "<exact>", "preservedSnapshotRef": "<exact>"},
+          "assuranceReadiness": {"logicalArtifactId": "SI-READINESS-OVERLAY", "acceptedRevision": "<exact>", "acceptedCommitSha": "<exact>", "acceptedSha256": "<exact>", "status": "<exact>", "invalidationStatus": "<exact>", "preservedSnapshotRef": "<exact>"}
+        },
+        "limitationsOrDiscrepancies": []
+      },
+      "phase6SubgateState": {
+        "status": "<PRESENT_NONEMPTY for P6_TO_P7; NOT_APPLICABLE otherwise>",
+        "reference": "<exact or N/A>",
+        "digest": "<exact or N/A>",
+        "terminalGateStates": {}
+      }
+    },
+    "boundaryAuthorization": {
+      "mode": "AUTO_AFTER_SEAL",
+      "outgoingSealReference": "<exact>",
+      "outgoingSealDigest": "<exact>",
+      "timestamp": "<exact>"
+    }
+  },
+  "integrity": {
+    "digestAlgorithm": "sha256",
+    "digestScope": "canonical payload JSON",
+    "canonicalization": "RFC8785-JCS",
+    "payloadSha256": "<computed after final payload>"
+  }
+}

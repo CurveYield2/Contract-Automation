@@ -1,0 +1,136 @@
+{
+  "schemaVersion": "audit-v7-phase-contract-v1",
+  "phase": {
+    "sequence": 5,
+    "id": "lite-economic-combined-seal",
+    "title": "Lite Combined Phases 2-5 - Economic Review and Seal",
+    "reviewerLineage": "reviewer-2",
+    "phaseCard": "phases/phase-5/START_HERE.md"
+  },
+  "authorization": {
+    "controllerBoundCurrentPhaseRequired": true,
+    "exactSourceFenceRequired": true,
+    "incomingSuccessorReceipt": null,
+    "combinedMilestone": "P2_TO_P5",
+    "successorBoundary": "P5_TO_P6",
+    "automaticAdvanceAfterSeal": true,
+    "humanApprovalRequired": false
+  },
+  "inputs": {
+    "required": [
+      "Complete Phase-2 property registry",
+      "Complete Phase-3 threat and domain registries",
+      "Complete Phase-4 manual/specialist coverage and candidates",
+      "Accepted Source Intelligence identity",
+      "Live global control state"
+    ],
+    "conditional": [
+      "Activated economic specialist modules",
+      "Rebound evidence after a material identity change"
+    ]
+  },
+  "steps": [
+    {
+      "step": 1,
+      "action": "Complete economic and mathematical review",
+      "instruction": "Consume the sealed Phase-4 coverage/candidate registry and accepted Source Intelligence, then reopen only economic/math-relevant source anchors needed to review value flows, incentives, extraction, conservation, insolvency, allocation, units, bounds, ratios, precision, rounding, time/rate behavior and numerical edge cases. Do not restart broad manual review.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/lenses/economic-accounting-lens.md",
+        "../../../../shared/domain-modules/economic-correctness.md",
+        "../../../../shared/domain-modules/mathematical-verification.md"
+      ]
+    },
+    {
+      "step": 2,
+      "action": "Perform bounded contradiction and candidate reconciliation",
+      "instruction": "Compare Phase-5 conclusions against sealed properties, hypotheses and Phase-4 candidates; reopen only contradiction-specific anchors and record CONFIRMED, CONTRADICTED, NEW or UNRESOLVED. Do not repeat a clean-room or whole-source retrace.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/PHASE5_RETRACE_RECONCILIATION_MATRIX.md"
+      ]
+    },
+    {
+      "step": 3,
+      "action": "Seal one combined milestone and hand off",
+      "instruction": "Reconcile and seal the combined report and global control checkpoints once; create P5_TO_P6 for reviewer-3L and enter WAITING_FOR_SUCCESSOR_AGENT.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/LITE_PHASE2_5_COMBINED_REPORT.md",
+        "../../shared/reporting/PHASE_REPORT.md",
+        "../../shared/handoff/SUCCESSOR_HANDOFF_PROTOCOL.md"
+      ]
+    }
+  ],
+  "requiredOutputs": [
+    {
+      "artifact": "phases/phase-5/resources/LITE_PHASE2_5_COMBINED_REPORT.md",
+      "role": "COMBINED_MILESTONE_REPORT",
+      "required": true
+    },
+    {
+      "artifact": "shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+      "role": "SEALED_MILESTONE_CHECKPOINT",
+      "required": true
+    },
+    {
+      "artifact": "shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json",
+      "role": "SEALED_MILESTONE_CHECKPOINT",
+      "required": true
+    },
+    {
+      "artifact": "handoffs/P5_TO_P6/SUCCESSOR_HANDOFF.json",
+      "role": "SUCCESSOR_BOUNDARY",
+      "required": true
+    }
+  ],
+  "globalControlCheckpoints": {
+    "securityTraceabilityGraph": "SEAL_COMBINED_PHASE2_5",
+    "carriedForwardObligationLedger": "SEAL_COMBINED_PHASE2_5",
+    "evidenceInvalidationMatrix": "RECONCILE_BEFORE_SEAL",
+    "sourceIntelligence": "REUSE_UNLESS_CHANGE_TRIGGERED"
+  },
+  "sealingCriteria": [
+    "Every contract has complete manual coverage",
+    "Every activated material domain has evidence or a typed blocker",
+    "Every material candidate has a Lite validation obligation or disposition",
+    "Combined artifacts and P5_TO_P6 handoff are sealed"
+  ],
+  "recoveryRoutes": [
+    {
+      "condition": "Milestone gap",
+      "route": "Repair only the incomplete segment or record"
+    },
+    {
+      "condition": "Material identity change",
+      "route": "Invalidate or rebind and rerun only impacted work"
+    },
+    {
+      "condition": "Handoff cannot seal",
+      "route": "Use successor handoff recovery"
+    }
+  ],
+  "allowedNextStates": [
+    "WAITING_FOR_SUCCESSOR_AGENT"
+  ],
+  "domainApplicability": {
+    "classificationRequiredHere": false,
+    "executionRequiredForActivatedEconomicDomains": true,
+    "recheckPolicy": "ONLY_ON_TRIGGER_FACT_CHANGE"
+  },
+  "universalRuleIds": [
+    "U-EXEC-001",
+    "U-GITHUB-001",
+    "U-STATE-001",
+    "U-EVIDENCE-001",
+    "U-REPAIR-001",
+    "U-HUMAN-001",
+    "U-DISCLOSURE-001",
+    "U-SOURCEINTEL-001",
+    "U-UPDATES-001",
+    "U-HUMANCOMMS-001"
+  ]
+}

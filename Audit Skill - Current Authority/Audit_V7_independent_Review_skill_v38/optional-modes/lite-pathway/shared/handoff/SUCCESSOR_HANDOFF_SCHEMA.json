@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audit-v7-lite-successor-handoff-v38",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "boundaryProfileId",
+    "campaign",
+    "source",
+    "reviewers",
+    "milestone",
+    "globalControls",
+    "requiredEvidence",
+    "dueObligations",
+    "limitations",
+    "integrity"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "audit-v7-lite-successor-handoff-v38"
+    },
+    "boundaryProfileId": {
+      "enum": [
+        "P0_TO_P1",
+        "P1_TO_P2",
+        "P5_TO_P6",
+        "P67_TO_P8"
+      ]
+    },
+    "campaign": {
+      "type": "object",
+      "required": [
+        "campaignId",
+        "campaignGenerationId",
+        "workspacePath",
+        "campaignLink"
+      ]
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "sourceIdentity",
+        "buildIdentity",
+        "skillZipIdentity",
+        "sourceZipIdentity"
+      ]
+    },
+    "reviewers": {
+      "type": "object",
+      "required": [
+        "outgoing",
+        "incoming"
+      ]
+    },
+    "milestone": {
+      "type": "object",
+      "required": [
+        "id",
+        "status",
+        "reportReference",
+        "reportDigest"
+      ]
+    },
+    "globalControls": {
+      "type": "object",
+      "required": [
+        "securityTraceabilityGraph",
+        "carriedForwardObligationLedger",
+        "evidenceInvalidationMatrix",
+        "sourceIntelligenceBundle"
+      ]
+    },
+    "requiredEvidence": {
+      "type": "array"
+    },
+    "dueObligations": {
+      "type": "array"
+    },
+    "limitations": {
+      "type": "array"
+    },
+    "integrity": {
+      "type": "object",
+      "required": [
+        "sealedAt",
+        "digest"
+      ]
+    }
+  }
+}

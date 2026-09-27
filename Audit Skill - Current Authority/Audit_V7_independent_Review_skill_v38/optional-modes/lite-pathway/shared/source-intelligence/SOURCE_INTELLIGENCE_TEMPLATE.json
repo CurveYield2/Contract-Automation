@@ -1,0 +1,283 @@
+{
+  "schemaVersion": "audit-v7-source-intelligence-v1",
+  "artifactType": "CANONICAL_SOURCE_INTELLIGENCE",
+  "templatePath": "shared/source-intelligence/SOURCE_INTELLIGENCE_TEMPLATE.json",
+  "templateInstructions": [
+    "COPY this file into the exact campaign evidence area and fill it; do not redesign the structure.",
+    "Replace every __FILL_REQUIRED__ value before Phase 0 seals.",
+    "Use NOT_APPLICABLE or UNSUPPORTED only with an explicit reason/evidence basis.",
+    "Do not convert Slither or heuristic/static candidates into findings here.",
+    "Once sealed, do not mutate this artifact; create a new version/revision after invalidation or remediation source change.",
+    "Array rows are scaffolding: duplicate for real records or remove when legitimately empty; never preserve fake rows merely to satisfy the template."
+  ],
+  "identity": {
+    "campaignId": "__FILL_REQUIRED__",
+    "campaignGenerationId": "__FILL_REQUIRED__",
+    "phaseId": "scope-and-provenance",
+    "phaseRevision": "__FILL_REQUIRED__",
+    "sourceIdentity": "__FILL_REQUIRED__",
+    "sourceDigestSha256": "__FILL_REQUIRED__",
+    "sourceCommitOrArchiveIdentity": "__FILL_REQUIRED__",
+    "buildIdentity": "__FILL_REQUIRED__",
+    "buildDigestSha256": "__FILL_REQUIRED__",
+    "createdAt": "__FILL_REQUIRED__",
+    "createdByReviewerLineage": "web-bootstrap-agent"
+  },
+  "build": {
+    "status": "__FILL_REQUIRED__",
+    "buildSystem": "__FILL_REQUIRED__",
+    "compilerIdentities": [],
+    "optimizer": "__FILL_REQUIRED__",
+    "evmVersion": "__FILL_REQUIRED__",
+    "viaIR": "__FILL_REQUIRED__",
+    "lockfileOrDependencyIdentity": "__FILL_REQUIRED__",
+    "rawBuildEvidenceRef": "__FILL_REQUIRED__",
+    "buildLimitations": []
+  },
+  "sourceFiles": [
+    {
+      "sourceId": "SRC-001",
+      "path": "__FILL_REQUIRED__",
+      "language": "__FILL_REQUIRED__",
+      "sha256": "__FILL_REQUIRED__",
+      "scopeStatus": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__"
+    }
+  ],
+  "compilerArtifacts": [
+    {
+      "artifactId": "ART-001",
+      "qualifiedName": "__FILL_REQUIRED__",
+      "sourceId": "SRC-001",
+      "language": "__FILL_REQUIRED__",
+      "abiDigestSha256": "__FILL_REQUIRED__",
+      "creationBytecodeDigestSha256": "__FILL_REQUIRED__",
+      "deployedBytecodeDigestSha256": "__FILL_REQUIRED__",
+      "storageLayoutAvailable": "__FILL_REQUIRED__",
+      "metadataRef": "__FILL_REQUIRED__",
+      "methodIdentifierRef": "__FILL_REQUIRED__",
+      "preliminaryDeploymentGasEstimate": {
+        "acceptanceClass": "PRELIMINARY_NOT_PHASE7_ACCEPTED",
+        "estimate": "__FILL_REQUIRED__",
+        "compilerEvidenceRef": "__FILL_REQUIRED__",
+        "buildIdentity": "__FILL_REQUIRED__",
+        "limitations": []
+      },
+      "basis": "__FILL_REQUIRED__"
+    }
+  ],
+  "contracts": [
+    {
+      "contractId": "CONTRACT-001",
+      "qualifiedName": "__FILL_REQUIRED__",
+      "sourceId": "SRC-001",
+      "language": "__FILL_REQUIRED__",
+      "contractKind": "__FILL_REQUIRED__",
+      "deployability": "__FILL_REQUIRED__",
+      "artifactId": "ART-001",
+      "sourceLocation": "__FILL_REQUIRED__",
+      "confidenceClass": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__"
+    }
+  ],
+  "functions": [
+    {
+      "functionId": "FUNC-001",
+      "contractId": "CONTRACT-001",
+      "signature": "__FILL_REQUIRED__",
+      "selector": "__FILL_REQUIRED__",
+      "visibility": "__FILL_REQUIRED__",
+      "stateMutability": "__FILL_REQUIRED__",
+      "payable": "__FILL_REQUIRED__",
+      "modifiers": [],
+      "sourceLocation": "__FILL_REQUIRED__",
+      "confidenceClass": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__"
+    }
+  ],
+  "storageLayout": [
+    {
+      "storageId": "STORE-001",
+      "contractId": "CONTRACT-001",
+      "label": "__FILL_REQUIRED__",
+      "slot": "__FILL_REQUIRED__",
+      "offset": "__FILL_REQUIRED__",
+      "type": "__FILL_REQUIRED__",
+      "sourceLocation": "__FILL_REQUIRED__",
+      "status": "__FILL_REQUIRED__",
+      "confidenceClass": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__"
+    }
+  ],
+  "inheritanceGraph": [
+    {
+      "edgeId": "INHERIT-001",
+      "derivedContractId": "CONTRACT-001",
+      "baseContractId": "__FILL_REQUIRED__",
+      "linearizedOrder": "__FILL_REQUIRED__",
+      "sourceLocation": "__FILL_REQUIRED__",
+      "confidenceClass": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__"
+    }
+  ],
+  "callGraph": [
+    {
+      "edgeId": "CALL-001",
+      "callerFunctionId": "FUNC-001",
+      "callKind": "__FILL_REQUIRED__",
+      "target": "__FILL_REQUIRED__",
+      "targetFunctionOrSelector": "__FILL_REQUIRED__",
+      "valueMayBeSent": "__FILL_REQUIRED__",
+      "sourceLocation": "__FILL_REQUIRED__",
+      "status": "__FILL_REQUIRED__",
+      "confidenceClass": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__"
+    }
+  ],
+  "privilegeCandidates": [
+    {
+      "candidateId": "PRIV-001",
+      "contractId": "CONTRACT-001",
+      "functionId": "FUNC-001",
+      "candidateKind": "__FILL_REQUIRED__",
+      "modifierOrGuard": "__FILL_REQUIRED__",
+      "authorityExpression": "__FILL_REQUIRED__",
+      "sourceLocation": "__FILL_REQUIRED__",
+      "status": "CANDIDATE",
+      "confidenceClass": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__",
+      "securityInterpretation": "DEFER_TO_PHASE_3_AND_4"
+    }
+  ],
+  "externalInterfaces": [
+    {
+      "interfaceId": "EXTIF-001",
+      "sourceContractId": "CONTRACT-001",
+      "sourceFunctionId": "FUNC-001",
+      "dependencyOrInterface": "__FILL_REQUIRED__",
+      "selectorOrSignature": "__FILL_REQUIRED__",
+      "interactionKind": "__FILL_REQUIRED__",
+      "sourceLocation": "__FILL_REQUIRED__",
+      "status": "__FILL_REQUIRED__",
+      "confidenceClass": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__"
+    }
+  ],
+  "valueFlowCandidates": [
+    {
+      "flowId": "FLOW-001",
+      "sourceContractId": "CONTRACT-001",
+      "sourceFunctionId": "FUNC-001",
+      "assetOrValueExpression": "__FILL_REQUIRED__",
+      "direction": "__FILL_REQUIRED__",
+      "mechanism": "__FILL_REQUIRED__",
+      "counterpartyExpression": "__FILL_REQUIRED__",
+      "sourceLocation": "__FILL_REQUIRED__",
+      "status": "CANDIDATE",
+      "confidenceClass": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__",
+      "economicInterpretation": "DEFER_TO_PHASE_5"
+    }
+  ],
+  "eventsAndErrors": [
+    {
+      "itemId": "EVERR-001",
+      "contractId": "CONTRACT-001",
+      "kind": "__FILL_REQUIRED__",
+      "signatureOrName": "__FILL_REQUIRED__",
+      "sourceLocation": "__FILL_REQUIRED__",
+      "confidenceClass": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__"
+    }
+  ],
+  "sourceAnchors": [
+    {
+      "anchorId": "ANCHOR-001",
+      "sourceId": "SRC-001",
+      "symbolId": "__FILL_REQUIRED__",
+      "startLine": "__FILL_REQUIRED__",
+      "endLine": "__FILL_REQUIRED__",
+      "sourceDigestSha256": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__"
+    }
+  ],
+  "securitySurfaces": [
+    {
+      "surfaceId": "SURFACE-001",
+      "surfaceClass": "__FILL_REQUIRED__",
+      "sourceIds": [],
+      "contractIds": [],
+      "functionIds": [],
+      "storageIds": [],
+      "externalInterfaceIds": [],
+      "privilegeCandidateIds": [],
+      "valueFlowCandidateIds": [],
+      "sourceAnchorIds": [],
+      "phase1Ownership": "STRUCTURAL_INVENTORY",
+      "laterPhaseTreatment": "REUSE_VERIFY_EXTEND_SEMANTICALLY",
+      "status": "__FILL_REQUIRED__",
+      "basis": "__FILL_REQUIRED__"
+    }
+  ],
+  "protocolTopology": {
+    "upgradeabilityEdges": [],
+    "dependencyEdges": [],
+    "crossChainEdges": [],
+    "offchainAutomationEdges": [],
+    "topologyLimitations": []
+  },
+  "mutableArtifactRoutes": {
+    "runtimeDeploymentOverlay": {
+      "logicalArtifactId": "SI-RUNTIME-OVERLAY",
+      "canonicalMutablePath": "evidence/source-intelligence/runtime-deployment-overlay.json",
+      "pathSemantics": "NAVIGATIONAL_ONLY",
+      "schema": "shared/source-intelligence/RUNTIME_DEPLOYMENT_OVERLAY_SCHEMA.json",
+      "template": "shared/source-intelligence/RUNTIME_DEPLOYMENT_OVERLAY_TEMPLATE.json",
+      "acceptedIdentityAuthority": "SOURCE_INTELLIGENCE_BUNDLE_INDEX"
+    },
+    "assuranceReadinessOverlay": {
+      "logicalArtifactId": "SI-READINESS-OVERLAY",
+      "canonicalMutablePath": "evidence/source-intelligence/assurance-readiness-overlay.json",
+      "pathSemantics": "NAVIGATIONAL_ONLY",
+      "schema": "shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_SCHEMA.json",
+      "template": "shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_TEMPLATE.json",
+      "acceptedIdentityAuthority": "SOURCE_INTELLIGENCE_BUNDLE_INDEX"
+    }
+  },
+  "staticRecon": {
+    "slither": {
+      "status": "__FILL_REQUIRED__",
+      "version": "__FILL_REQUIRED__",
+      "rawEvidenceRef": "__FILL_REQUIRED__",
+      "candidateCount": "__FILL_REQUIRED__",
+      "candidateIndex": [],
+      "limitation": "__FILL_REQUIRED__"
+    },
+    "sbom": {
+      "status": "__FILL_REQUIRED__",
+      "evidenceRef": "__FILL_REQUIRED__",
+      "dependencyCount": "__FILL_REQUIRED__",
+      "limitation": "__FILL_REQUIRED__"
+    },
+    "neutralityStatement": "Slither/static-recon observations in this artifact are neutral candidates only and are not validated findings."
+  },
+  "limitations": [
+    {
+      "limitationId": "SI-LIM-001",
+      "category": "__FILL_REQUIRED__",
+      "affectedSections": [],
+      "reason": "__FILL_REQUIRED__",
+      "downstreamRequiredAction": "__FILL_REQUIRED__",
+      "obligationId": "__FILL_REQUIRED__"
+    }
+  ],
+  "completion": {
+    "status": "__FILL_REQUIRED__",
+    "noFillSentinelsRemaining": "__FILL_REQUIRED__",
+    "exactSourceBound": "__FILL_REQUIRED__",
+    "exactBuildBound": "__FILL_REQUIRED__",
+    "staticReconAttached": "__FILL_REQUIRED__",
+    "campaignArtifactReference": "__FILL_REQUIRED__",
+    "artifactDigestRecordLocation": "PHASE_REPORT_AND_CONTROLLER_EVIDENCE_AFTER_ARTIFACT_SEAL"
+  }
+}

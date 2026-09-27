@@ -1,0 +1,406 @@
+{
+  "schemaVersion": "audit-v7-evidence-invalidation-matrix-v1",
+  "artifactId": "EVIDENCE_INVALIDATION_MATRIX",
+  "purpose": "Deterministic authority for deciding whether a change invalidates, rebinds, merely reconciles, or preserves previously sealed audit evidence.",
+  "effectClasses": {
+    "INVALIDATES": "Evidence remains historical but MUST NOT support the changed target until replacement/retest evidence is accepted.",
+    "REQUIRES_REBIND": "Prior evidence remains valid only for its original execution/release identity; new execution claims require exact rebind and new evidence.",
+    "RECONCILE_ONLY": "Raw evidence is not automatically stale, but affected traceability/property/finding relationships must be reassessed before reuse.",
+    "PRESERVES": "No technical evidence invalidation when the stated no-semantic-change condition is proven; record the classification and proof."
+  },
+  "universalProcedure": [
+    "Detect and classify every material change event before EVIDENCE_SEALED.",
+    "Apply every matching rule; if multiple rules apply, the strictest applicable effect controls the affected evidence set.",
+    "Create a stable INV-* node in SECURITY_TRACEABILITY_GRAPH for every nontrivial change event and connect INVALIDATES/DEPENDS_ON/REMEDIATES/REGRESSION_TESTS relationships as applicable.",
+    "Never delete stale evidence; mark it HISTORICAL_STALE_FOR_CURRENT_TARGET and preserve its immutable identity.",
+    "Create OBL-* records for required retest/rebind/reconciliation work that is due in a later phase.",
+    "If applicability is uncertain, classify conservatively as RECONCILE_ONLY or INVALIDATES rather than silently preserving evidence.",
+    "Phase 9 remediation must explicitly reconcile this matrix against the remediation delta ledger.",
+    "Phase 10 cannot rely on evidence with unresolved invalidation/rebind obligations."
+  ],
+  "rules": [
+    {
+      "id": "EIM-001",
+      "event": "PRODUCTION_SOURCE_IDENTITY_CHANGED",
+      "detectWhen": [
+        "production source commit/digest changes",
+        "any in-scope production source byte changes",
+        "source family fence changes for an affected contract"
+      ],
+      "effect": "INVALIDATES",
+      "evidenceAffected": [
+        "source-dependent semantic review",
+        "static/build evidence for affected source",
+        "fuzz/property evidence for affected source",
+        "fork/deployment evidence executing affected source",
+        "finding reproduction and assurance claims relying on affected source",
+        "Canonical Source Intelligence facts bound to affected production source"
+      ],
+      "evidencePreserved": [
+        "prior immutable evidence as historical provenance",
+        "unaffected independently fenced source-family evidence after explicit reconciliation"
+      ],
+      "requiredActions": [
+        "rebind exact source fence",
+        "mark affected traceability evidence stale",
+        "reopen/re-execute only affected required work according to controller invalidation",
+        "create replacement evidence and regression obligations",
+        "generate and accept a new Source Intelligence version from the exact template for the changed source/build"
+      ]
+    },
+    {
+      "id": "EIM-002",
+      "event": "COMPILER_OR_BUILD_PROFILE_CHANGED",
+      "detectWhen": [
+        "compiler version changes",
+        "optimizer/optimizer runs changes",
+        "EVM target changes",
+        "viaIR or equivalent compilation-mode changes",
+        "link/library/build flags materially change"
+      ],
+      "effect": "INVALIDATES",
+      "evidenceAffected": [
+        "exact-build admission",
+        "compiler-dependent static analysis",
+        "bytecode/deployment gas evidence",
+        "fuzz/simulation evidence whose compiled artifact changed",
+        "compiler/build-derived Canonical Source Intelligence sections"
+      ],
+      "evidencePreserved": [
+        "source-only manual reasoning not dependent on compiled semantics, after explicit reconciliation"
+      ],
+      "requiredActions": [
+        "rebuild using exact new profile",
+        "rerun affected analyzer/execution evidence",
+        "reconcile bytecode and deployment identities",
+        "regenerate affected Source Intelligence sections/version for the new build identity"
+      ]
+    },
+    {
+      "id": "EIM-003",
+      "event": "TRUSTED_RUNNER_OR_TOOLCHAIN_CHANGED",
+      "detectWhen": [
+        "Contract-Automation runner release changes",
+        "retained build/simulation/targeted-fuzz tool version changes",
+        "execution implementation changes after repair"
+      ],
+      "effect": "REQUIRES_REBIND",
+      "evidenceAffected": [
+        "claims about the new runner/toolchain",
+        "failed execution that required runner repair",
+        "Phase-1 static-recon Source Intelligence layer when the relevant analyzer/tool changed"
+      ],
+      "evidencePreserved": [
+        "accepted prior evidence bound to its original exact runner/tool identity unless another rule invalidates it"
+      ],
+      "requiredActions": [
+        "preserve failed/prior attempt",
+        "qualify/rebind new runner release",
+        "rerun the operation that depends on the repaired/new implementation",
+        "record old/new execution identities"
+      ]
+    },
+    {
+      "id": "EIM-004",
+      "event": "AUDIT_ONLY_HARNESS_OR_MODEL_CHANGED",
+      "detectWhen": [
+        "candidate-targeted harness semantics change",
+        "handler/precondition/candidate-oracle logic changes",
+        "target input bounds or deploy/config fixtures materially change"
+      ],
+      "effect": "INVALIDATES",
+      "evidenceAffected": [
+        "campaign results produced by the materially changed harness/model"
+      ],
+      "evidencePreserved": [
+        "unaffected campaigns using unchanged immutable harnesses",
+        "production source evidence"
+      ],
+      "requiredActions": [
+        "bind new harness digest",
+        "rerun affected campaigns",
+        "retain prior campaign as historical comparison",
+        "reconcile counterexamples/coverage deltas"
+      ]
+    },
+    {
+      "id": "EIM-005",
+      "event": "LIVE_DEPLOYMENT_OR_PROTOCOL_CONFIGURATION_CHANGED",
+      "detectWhen": [
+        "deployment address changes",
+        "proxy implementation/admin changes",
+        "role/permission assignment changes",
+        "material protocol parameter changes",
+        "oracle/pool/market/integration address or configuration changes"
+      ],
+      "effect": "INVALIDATES",
+      "evidenceAffected": [
+        "live deployment verification",
+        "fork/lifecycle simulations tied to old configuration",
+        "integration/reachability assumptions tied to old configuration"
+      ],
+      "evidencePreserved": [
+        "source-only evidence not dependent on changed deployment/config after explicit reconciliation"
+      ],
+      "requiredActions": [
+        "freeze new deployment/config identity",
+        "rerun affected lifecycle/integration/reachability evidence",
+        "update traceability and finding impact where applicable"
+      ]
+    },
+    {
+      "id": "EIM-006",
+      "event": "FORK_CHAIN_BLOCK_RPC_OR_HARDFORK_IDENTITY_CHANGED",
+      "detectWhen": [
+        "chain changes",
+        "fork block number/hash changes",
+        "admitted archive RPC profile changes",
+        "local hardfork/EVM fork configuration changes"
+      ],
+      "effect": "INVALIDATES",
+      "evidenceAffected": [
+        "fork simulation and repeated-lifecycle evidence",
+        "state/balance/storage assumptions at the old fork identity"
+      ],
+      "evidencePreserved": [
+        "non-fork evidence that does not depend on the changed state identity"
+      ],
+      "requiredActions": [
+        "freeze new fork identity",
+        "rerun affected simulations",
+        "do not compare results as equivalent without explicit differential analysis"
+      ]
+    },
+    {
+      "id": "EIM-007",
+      "event": "EXTERNAL_DEPENDENCY_IDENTITY_OR_BEHAVIOR_CHANGED",
+      "detectWhen": [
+        "dependency source/version changes",
+        "dependency deployment/config changes",
+        "external interface semantics materially change"
+      ],
+      "effect": "RECONCILE_ONLY",
+      "evidenceAffected": [
+        "dependency assumptions",
+        "integration hypotheses",
+        "reachability/impact claims using old dependency behavior"
+      ],
+      "evidencePreserved": [
+        "unrelated source and execution evidence"
+      ],
+      "requiredActions": [
+        "re-evaluate DOMAIN-DEPENDENCY applicability and assumptions",
+        "invalidate/rerun any evidence that actually relied on changed behavior",
+        "create downstream obligations where execution is required"
+      ]
+    },
+    {
+      "id": "EIM-008",
+      "event": "REMEDIATION_SOURCE_DELTA",
+      "detectWhen": [
+        "fixes or remediation patches modify production source/config"
+      ],
+      "effect": "INVALIDATES",
+      "evidenceAffected": [
+        "validated finding reproduction on modified surfaces",
+        "affected invariants/properties",
+        "affected integration/economic/regression surfaces",
+        "Canonical Source Intelligence for modified source/build surfaces"
+      ],
+      "evidencePreserved": [
+        "unaffected findings/evidence after explicit diff-based reconciliation"
+      ],
+      "requiredActions": [
+        "bind old/new source identity",
+        "record exact changed files/symbols",
+        "retest finding/root cause",
+        "retest affected properties/integrations",
+        "record replacement evidence in Phase 9 remediation ledger",
+        "generate a new Source Intelligence version for the remediated source/build before structural reuse"
+      ]
+    },
+    {
+      "id": "EIM-009",
+      "event": "SECURITY_PROPERTY_HYPOTHESIS_OR_ASSUMPTION_CHANGED",
+      "detectWhen": [
+        "PROP-* semantics change",
+        "HYP-* prerequisites/success condition change",
+        "material ASSUMP-* is disproved or replaced"
+      ],
+      "effect": "RECONCILE_ONLY",
+      "evidenceAffected": [
+        "traceability edges and downstream evidence disposition for the changed model item"
+      ],
+      "evidencePreserved": [
+        "raw immutable evidence whose observed behavior remains accurate"
+      ],
+      "requiredActions": [
+        "version/update canonical node",
+        "reassess whether existing evidence still tests the changed property/hypothesis",
+        "create new test/simulation obligation when coverage no longer matches"
+      ]
+    },
+    {
+      "id": "EIM-010",
+      "event": "DOCUMENTATION_ONLY_CHANGE",
+      "detectWhen": [
+        "only comments/docs/readmes/non-executable prose changed and exact diff proves no runtime/config/interface semantic change"
+      ],
+      "effect": "PRESERVES",
+      "evidenceAffected": [],
+      "evidencePreserved": [
+        "all technical evidence"
+      ],
+      "requiredActions": [
+        "record proof of documentation-only classification",
+        "do not rerun technical phases solely due to prose changes"
+      ]
+    },
+    {
+      "id": "EIM-011",
+      "event": "REPORT_PRESENTATION_ONLY_CHANGE",
+      "detectWhen": [
+        "report wording/layout/formatting changes without changing finding facts, source identity, evidence identity, severity rationale, or assurance claim semantics"
+      ],
+      "effect": "PRESERVES",
+      "evidenceAffected": [],
+      "evidencePreserved": [
+        "all underlying audit evidence"
+      ],
+      "requiredActions": [
+        "regenerate/revalidate reporting artifacts only"
+      ]
+    },
+    {
+      "id": "EIM-012",
+      "event": "CONTROLLER_SKILL_ROUTING_ONLY_CHANGE",
+      "detectWhen": [
+        "audit orchestration/report routing changes without changing target source or trusted technical execution semantics"
+      ],
+      "effect": "REQUIRES_REBIND",
+      "evidenceAffected": [
+        "controller/report/state identities for future progression"
+      ],
+      "evidencePreserved": [
+        "accepted immutable technical evidence bound to unchanged source/execution identities"
+      ],
+      "requiredActions": [
+        "bind new controller/skill identity before new progression",
+        "do not rerun technical evidence solely because orchestration prose changed"
+      ]
+    },
+    {
+      "id": "EIM-013",
+      "event": "HUMAN_RETURN_FOR_REWORK_OR_REPORT_SUPERSESSION",
+      "detectWhen": [
+        "human returns a phase for rework",
+        "a newer phase revision supersedes an older report"
+      ],
+      "effect": "RECONCILE_ONLY",
+      "evidenceAffected": [
+        "superseded phase-report authority",
+        "conclusions explicitly changed by rework"
+      ],
+      "evidencePreserved": [
+        "immutable underlying evidence unless another rule invalidates it"
+      ],
+      "requiredActions": [
+        "increment phase revision",
+        "mark stale report as superseded",
+        "reconcile accepted underlying evidence into new report without silently deleting history"
+      ]
+    },
+    {
+      "id": "EIM-014",
+      "event": "SOURCE_INTELLIGENCE_RUNTIME_OVERLAY_OR_LIVE_IDENTITY_CHANGED",
+      "detectWhen": [
+        "runtime/deployment overlay bytes differ from the bundle-index accepted SHA-256",
+        "deployment address, implementation, admin, role, oracle, cross-chain endpoint, chain/fork, or block identity changes",
+        "canonical mutable path resolves to a revision other than latestAcceptedRevision"
+      ],
+      "effect": "REQUIRES_REBIND",
+      "evidenceAffected": [
+        "runtime/deployment overlay current-target authority",
+        "Phase-7 lifecycle, configuration, deployment-gas, and runtime claims using the changed identity",
+        "Phase-8/9/10 conclusions relying on those runtime facts"
+      ],
+      "evidencePreserved": [
+        "prior accepted overlay revision and sealed phase citations as immutable historical evidence",
+        "unchanged immutable Source Intelligence core after exact source/build reconciliation"
+      ],
+      "requiredActions": [
+        "reject unaccepted current-path bytes",
+        "preserve/retrieve the prior accepted revision by commit and digest",
+        "validate and commit any replacement overlay revision",
+        "update the bundle index only after revision/digest acceptance",
+        "create INV-* and OBL-* records for affected downstream rebind or retest"
+      ]
+    },
+    {
+      "id": "EIM-015",
+      "event": "SOURCE_INTELLIGENCE_ASSURANCE_READINESS_INPUT_CHANGED",
+      "detectWhen": [
+        "harness, test, invariant, tool, configuration, dictionary, corpus, skeleton, or model identity/bytes change",
+        "assurance-readiness overlay bytes differ from the bundle-index accepted SHA-256",
+        "a Phase-1 discovered artifact is repaired or replaced before Phase-6 execution"
+      ],
+      "effect": "INVALIDATES",
+      "evidenceAffected": [
+        "Phase-6A adequacy admission for the changed artifact",
+        "Phase-6B/6C campaign claims that depend on the changed readiness input"
+      ],
+      "evidencePreserved": [
+        "prior accepted readiness overlay and campaign evidence as historical provenance",
+        "unaffected independently hashed harness/configuration components after explicit reconciliation"
+      ],
+      "requiredActions": [
+        "preserve the prior accepted revision",
+        "rerun Phase-6A validation/adequacy assessment for affected components",
+        "accept and commit a new readiness overlay revision",
+        "update the bundle index and downstream Phase-6 handoff obligations"
+      ]
+    },
+    {
+      "id": "EIM-016",
+      "event": "PRELIMINARY_OR_ACCEPTED_DEPLOYMENT_GAS_IDENTITY_MISMATCH",
+      "detectWhen": [
+        "preliminary compiler-gas estimate does not match the exact Phase-7 accepted build identity",
+        "compiler version/settings, constructor inputs, libraries, linked bytecode, deployment recipe, or lifecycle evidence changes",
+        "runtime overlay references a gas report from a different accepted lifecycle identity"
+      ],
+      "effect": "INVALIDATES",
+      "evidenceAffected": [
+        "deployment-gas acceptance for affected deployables",
+        "deployability conclusions relying on the mismatched estimate or lifecycle"
+      ],
+      "evidencePreserved": [
+        "Phase-1 preliminary estimate as historical compiler output",
+        "unaffected deployable estimates with independently matching identities"
+      ],
+      "requiredActions": [
+        "mark stale estimate REJECTED_STALE_IDENTITY",
+        "rerun the exact Phase-7 accepted compile/deploy lifecycle",
+        "regenerate the deployment gas report",
+        "accept a new runtime overlay revision and update the bundle index"
+      ]
+    }
+  ],
+  "strictnessOrder": [
+    "INVALIDATES",
+    "REQUIRES_REBIND",
+    "RECONCILE_ONLY",
+    "PRESERVES"
+  ],
+  "integration": {
+    "traceabilityGraph": "shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+    "obligationLedger": "shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json",
+    "phaseReport": "shared/reporting/PHASE_REPORT.md",
+    "phase9RemediationLedger": "phases/phase-9/resources/PHASE9_REMEDIATION_DELTA_LEDGER.md",
+    "sourceIntelligenceProtocol": "shared/source-intelligence/SOURCE_INTELLIGENCE_REUSE_PROTOCOL.md",
+    "sourceIntelligenceTemplate": "shared/source-intelligence/SOURCE_INTELLIGENCE_TEMPLATE.json",
+    "sourceIntelligenceBundleSchema": "shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_SCHEMA.json",
+    "sourceIntelligenceBundleTemplate": "shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_TEMPLATE.json",
+    "runtimeDeploymentOverlaySchema": "shared/source-intelligence/RUNTIME_DEPLOYMENT_OVERLAY_SCHEMA.json",
+    "assuranceReadinessOverlaySchema": "shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_SCHEMA.json"
+  }
+}

@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audit-v7-successor-handoff-receipt-schema-v1",
+  "title": "Audit V7 Generic Successor Handoff Receipt",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "boundaryProfileId",
+    "handoffIdentity",
+    "receiver",
+    "checks",
+    "recoveryAttempts",
+    "defects",
+    "disposition",
+    "receivingPhaseAuthorized",
+    "acceptedGlobalAuditState",
+    "sourceIntelligenceVerification",
+    "receiptDigest"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "audit-v7-successor-handoff-receipt-v1"
+    },
+    "boundaryProfileId": {
+      "enum": [
+        "P1_TO_P2",
+        "P5_TO_P6",
+        "P6A_TO_P6B",
+        "P6B_TO_P6C",
+        "P6_TO_P7",
+        "P8_TO_P9"
+      ]
+    },
+    "handoffIdentity": {
+      "type": "object"
+    },
+    "receiver": {
+      "type": "object"
+    },
+    "checks": {
+      "type": "object"
+    },
+    "recoveryAttempts": {
+      "type": "array"
+    },
+    "defects": {
+      "type": "array"
+    },
+    "carriedUnresolvedItems": {
+      "type": "array"
+    },
+    "carriedBlockedItems": {
+      "type": "array"
+    },
+    "disposition": {
+      "enum": [
+        "HANDOFF_ACCEPTED",
+        "HANDOFF_ACCEPTED_WITH_CARRIED_LIMITATIONS",
+        "HANDOFF_REPAIR_REQUIRED",
+        "HANDOFF_INFRASTRUCTURE_ACCESS_FAILURE"
+      ]
+    },
+    "receivingPhaseAuthorized": {
+      "type": "boolean"
+    },
+    "acceptedGlobalAuditState": {
+      "type": "object"
+    },
+    "sourceIntelligenceVerification": {
+      "type": "object",
+      "required": [
+        "status",
+        "bundleIndexCommitMatches",
+        "bundleIndexDigestMatches",
+        "sourceDigestMatches",
+        "buildDigestMatches",
+        "componentAcceptedIdentitiesMatch",
+        "mutablePathBytesMatchAcceptedIdentities",
+        "unresolvedInvalidationOrRebind"
+      ]
+    },
+    "receiptDigest": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

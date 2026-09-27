@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "audit-v7-successor-handoff-schema-v1",
+  "title": "Audit V7 Generic Successor Handoff",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "boundaryProfileId",
+    "payload",
+    "integrity"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "audit-v7-successor-handoff-v1"
+    },
+    "boundaryProfileId": {
+      "enum": [
+        "P1_TO_P2",
+        "P5_TO_P6",
+        "P6A_TO_P6B",
+        "P6B_TO_P6C",
+        "P6_TO_P7",
+        "P8_TO_P9"
+      ]
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "campaignIdentity",
+        "sourceFence",
+        "phaseEvidenceIndex",
+        "sections",
+        "successorSeedPacket",
+        "boundaryAuthorization",
+        "completeness",
+        "globalAuditState"
+      ],
+      "properties": {
+        "campaignIdentity": {
+          "type": "object",
+          "required": [
+            "campaignId",
+            "generationId",
+            "outgoingPhase",
+            "outgoingPhaseRevision",
+            "controllerState",
+            "outgoingReviewer",
+            "requiredSuccessorReviewer"
+          ],
+          "properties": {
+            "campaignId": {
+              "type": "string"
+            },
+            "generationId": {
+              "type": "string"
+            },
+            "outgoingPhase": {
+              "type": "integer"
+            },
+            "outgoingPhaseRevision": {
+              "type": [
+                "string",
+                "integer"
+              ]
+            },
+            "controllerState": {
+              "const": "WAITING_FOR_SUCCESSOR_AGENT"
+            },
+            "outgoingReviewer": {
+              "type": "string"
+            },
+            "requiredSuccessorReviewer": {
+              "type": "string"
+            },
+            "outgoingSubphase": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "incomingSubphase": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        "sourceFence": {
+          "type": "object"
+        },
+        "phaseEvidenceIndex": {
+          "type": "array"
+        },
+        "sections": {
+          "type": "object"
+        },
+        "successorSeedPacket": {
+          "type": "object",
+          "required": [
+            "profileSeedId",
+            "data"
+          ],
+          "properties": {
+            "profileSeedId": {
+              "type": "string"
+            },
+            "data": {
+              "type": "object"
+            }
+          }
+        },
+        "completeness": {
+          "type": "object",
+          "required": [
+            "producerVerdict",
+            "missingRequiredFields",
+            "carriedUnresolvedItems",
+            "carriedBlockedItems",
+            "knownContradictions"
+          ]
+        },
+        "globalAuditState": {
+          "type": "object",
+          "required": [
+            "securityTraceabilityGraph",
+            "carriedForwardObligationLedger",
+            "sourceIntelligenceBundle"
+          ],
+          "properties": {
+            "securityTraceabilityGraph": {
+              "type": "object"
+            },
+            "carriedForwardObligationLedger": {
+              "type": "object"
+            },
+            "domainApplicabilityRegistry": {
+              "type": "object"
+            },
+            "sourceIntelligenceBundle": {
+              "type": "object",
+              "required": [
+                "bundleIndexReference",
+                "bundleIndexRevision",
+                "bundleIndexCommitSha",
+                "bundleIndexSha256",
+                "boundSourceDigestSha256",
+                "boundBuildDigestSha256",
+                "components"
+              ],
+              "properties": {
+                "bundleIndexReference": {"type": "string"},
+                "bundleIndexRevision": {"type": ["string", "integer"]},
+                "bundleIndexCommitSha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                "bundleIndexSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "boundSourceDigestSha256": {"type": "string"},
+                "boundBuildDigestSha256": {"type": "string"},
+                "components": {
+                  "type": "object",
+                  "required": ["core", "runtimeDeployment", "assuranceReadiness"]
+                }
+              }
+            },
+            "phase6SubgateState": {
+              "type": "object"
+            }
+          },
+          "additionalProperties": true
+        },
+        "boundaryAuthorization": {
+          "type": "object",
+          "required": [
+            "mode",
+            "outgoingSealReference",
+            "outgoingSealDigest"
+          ],
+          "properties": {
+            "mode": {
+              "const": "AUTO_AFTER_SEAL"
+            },
+            "outgoingSealReference": {
+              "type": "string"
+            },
+            "outgoingSealDigest": {
+              "type": "string"
+            },
+            "timestamp": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "integrity": {
+      "type": "object",
+      "required": [
+        "digestAlgorithm",
+        "digestScope",
+        "canonicalization",
+        "payloadSha256"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

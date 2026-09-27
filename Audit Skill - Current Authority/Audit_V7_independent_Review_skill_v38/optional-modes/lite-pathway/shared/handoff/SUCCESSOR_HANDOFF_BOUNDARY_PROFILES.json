@@ -1,0 +1,115 @@
+{
+  "schemaVersion": "audit-v7-lite-successor-boundary-profiles-v36",
+  "campaignArtifactLayout": "<workspacePath>/handoffs/<PROFILE_ID>/",
+  "profiles": {
+    "P0_TO_P1": {
+      "from": {
+        "phase": 0,
+        "reviewer": "web-bootstrap-agent"
+      },
+      "to": {
+        "phase": 1,
+        "reviewer": "reviewer-1",
+        "state": "READY"
+      },
+      "requiredEvidence": [
+        "PHASE0_WEB_BOOTSTRAP_COMPLETION_REPORT",
+        "PHASE0_CAPABILITY_PREFLIGHT",
+        "PHASE0_BOOTSTRAP_AUDIT_SURFACE_MANIFEST",
+        "SOURCE_INTELLIGENCE_BUNDLE_INDEX",
+        "BOOTSTRAP_AUTOMATION_EVIDENCE",
+        "GLOBAL_CONTROL_CHECKPOINTS"
+      ],
+      "requiredSeed": [
+        "sourceBuildSkillIdentities",
+        "sourceIntelligenceIdentities",
+        "auditSurface",
+        "documentedScopeInputs",
+        "dependencyAndClaimedStandardIdentities",
+        "automationRunArtifactIdentities",
+        "openLimitations",
+        "obligationsDueInPhase1"
+      ]
+    },
+    "P1_TO_P2": {
+      "from": {
+        "phase": 1,
+        "reviewer": "reviewer-1"
+      },
+      "to": {
+        "phase": 2,
+        "reviewer": "reviewer-2",
+        "state": "READY"
+      },
+      "requiredEvidence": [
+        "PHASE_0_1_MILESTONE_REPORT",
+        "PHASE0_BOOTSTRAP_AUDIT_SURFACE_MANIFEST",
+        "PHASE1_SECURITY_RISK_GRADE_MANIFEST",
+        "SOURCE_INTELLIGENCE_BUNDLE_INDEX",
+        "GLOBAL_CONTROL_CHECKPOINTS"
+      ],
+      "requiredSeed": [
+        "riskGrade",
+        "auditSurface",
+        "sourceIntelligenceIdentities",
+        "actorsAssetsDependencies",
+        "openLimitations",
+        "obligationsDueInPhase2"
+      ]
+    },
+    "P5_TO_P6": {
+      "from": {
+        "phase": 5,
+        "reviewer": "reviewer-2"
+      },
+      "to": {
+        "phase": 6,
+        "reviewer": "reviewer-3L",
+        "state": "READY"
+      },
+      "requiredEvidence": [
+        "PHASE_2_5_COMBINED_REPORT",
+        "PROPERTY_REGISTRY",
+        "ATTACK_HYPOTHESIS_REGISTRY",
+        "DOMAIN_APPLICABILITY_REGISTRY",
+        "MANUAL_COVERAGE_CANDIDATE_REGISTRY",
+        "GLOBAL_CONTROL_CHECKPOINTS"
+      ],
+      "requiredSeed": [
+        "priorityCandidateIds",
+        "propertyIds",
+        "hypothesisIds",
+        "deploymentConfigInputs",
+        "candidateSpecificTestTargets",
+        "openLimitations",
+        "obligationsDueInMergedPhase6_7"
+      ]
+    },
+    "P67_TO_P8": {
+      "from": {
+        "phase": 7,
+        "reviewer": "reviewer-3L"
+      },
+      "to": {
+        "phase": 8,
+        "reviewer": "reviewer-4",
+        "state": "READY"
+      },
+      "requiredEvidence": [
+        "LITE_PHASE6_7_EVIDENCE",
+        "LITE_DEPLOY_CONFIG_MATRIX",
+        "LITE_TARGETED_TEST_MATRIX",
+        "PHASE7_COMPLETION_MARKER",
+        "GLOBAL_CONTROL_CHECKPOINTS"
+      ],
+      "requiredSeed": [
+        "candidateDispositionIds",
+        "decisiveEvidenceRefs",
+        "inconclusiveOrBlockedTargets",
+        "fullOnlyOmissions",
+        "openLimitations",
+        "obligationsDueInPhase8"
+      ]
+    }
+  }
+}
