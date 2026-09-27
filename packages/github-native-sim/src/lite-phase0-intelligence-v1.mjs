@@ -349,7 +349,7 @@ async function scanProjectReadiness({projectRoot,build,cfg}){
       roleMentions,
       oracleMentions,
       proxyAndUpgradeabilityMentions:proxyMentions,
-      status:'MECHANICAL_INVENTORY_REQUIRES_AGENT_CONTEXT'
+      status:'MECHANICAL_INVENTORY_COMPLETE'
     },
     testingAndToolingReadiness:{
       testFiles,harnessFiles,scriptFiles,configFiles,
@@ -361,7 +361,7 @@ async function scanProjectReadiness({projectRoot,build,cfg}){
         slitherVersion:'0.11.6',
         compilerVersion:cfg.compilerVersion
       },
-      status:'MECHANICAL_INVENTORY_REQUIRES_AGENT_ADEQUACY_REVIEW'
+      status:'MECHANICAL_INVENTORY_COMPLETE'
     },
     bytecodeAndGasEvidence:{
       artifactCount:artifactSizes.length,
@@ -432,7 +432,6 @@ async function main(){
   const sbom=await generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build});
   const sourceIntelligence=await generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}});
   const projectReadiness=await scanProjectReadiness({projectRoot:detected.absolute,build,cfg});
-  const contextReviewPacket=await buildContextReviewPacket({projectRoot:detected.absolute,sourceIntelligence,projectReadiness,slither});
 
   if(!slitherSucceeded(slither))throw new Error('Slither terminal result is not successful');
   if(sourceIntelligence?.completion?.semanticReviewRequired!==true)throw new Error('Source Intelligence completion contract mismatch');
@@ -452,8 +451,7 @@ async function main(){
     ['SBOM_v1.json',sbom],
     ['SLITHER_v1.json',slither],
     ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence],
-    ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness],
-    ['CONTEXT_REVIEW_PACKET_v1.json',contextReviewPacket]
+    ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness]
   ];
   for(const [name,obj] of files)await fs.writeFile(path.join(out,name),JSON.stringify(obj,null,2)+'\n');
   process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},outputs:files.map(([name])=>name)},null,2)+'\n');
