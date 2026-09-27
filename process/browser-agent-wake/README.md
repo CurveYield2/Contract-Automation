@@ -240,6 +240,35 @@ On a cache hit, no npm install runs. On a cache miss, npm is scoped with `--pref
 
 The wake script resolves `playwright-core` and `@browserbasehq/sdk` from `BROWSER_AGENT_RUNTIME_ROOT`. The root package remains free of those browser-only dependencies.
 
+## Rolling GitHub-Playwright session persistence
+
+GitHub-hosted runners are ephemeral, so the local Playwright provider maintains a rolling encrypted browser-state cache instead of relying forever on the original bootstrap snapshot.
+
+Required secret:
+
+`CHATGPT_SESSION_STATE_KEY_B64`
+
+The value must be exactly 32 random bytes encoded as Base64. Generate it once outside the repository, for example with Node.js:
+
+```bash
+node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64'))"
+```
+
+Store that value only as a GitHub Actions secret. Do not commit it.
+
+Runtime behavior:
+
+1. each wake/watchdog job restores the newest cache matching `chatgpt-session-state-v1-`;
+2. the browser runtime authenticates the AES-256-GCM envelope with `CHATGPT_SESSION_STATE_KEY_B64` and loads it when valid;
+3. if no valid encrypted generation exists, `CHATGPT_STORAGE_STATE_B64` remains the cold-start/bootstrap fallback;
+4. after a successful GitHub-hosted Playwright interaction, state is refreshed only when the ChatGPT composer is visibly present on `chatgpt.com`;
+5. the refreshed Playwright state is encrypted in memory and only the authenticated ciphertext envelope is written to the Actions cache;
+6. logged-out, malformed, tampered, or otherwise unhealthy states are never promoted as the next generation.
+
+The Actions cache contains ciphertext only. Plain Playwright storage state is not written into the repository or cache. A cache miss or normal GitHub cache eviction is non-fatal because the original `CHATGPT_STORAGE_STATE_B64` secret remains the bootstrap source.
+
+This rolling cache improves session longevity but is not a credential-login mechanism. If both the rolling session and bootstrap state are no longer accepted by ChatGPT, the existing Browserless/Browserbase fallbacks remain available.
+
 ## Browser-provider redundancy
 
 Wake delivery tries independent providers in this order and stops at the first verified success:
