@@ -100,3 +100,10 @@ Cold-start walkthrough repaired interrupted path/rename migration damage and pre
 ## v38.3.3 Lite Phase-0 web-bootstrap specialization
 
 Replaced Lite Phase 0 with a dedicated `web-bootstrap-agent` executed as a ChatGPT web-chat agent using the GitHub connector. Phase 0 now front-loads all safely neutral/mechanical work supported by existing infrastructure: campaign/source admission, existing Contract-Automation qualification and bootstrap-run supervision, exact build admission, neutral static/SBOM evidence, canonical Source Intelligence and overlays, neutral dependency/standards/documented-intent indexing, reusable structural indexes, and global mechanical checkpoints. It may not make security/risk/threat/severity/remediation judgments. Phase 1 is now a fresh high-reasoning `reviewer-1` segment focused on semantic scope/dependency/standards analysis and risk grading. Added `P0_TO_P1`; the web-bootstrap agent may retire only after Phase-0 controller/Phase-Contract completion validation and handoff validation both report PASS. No new repository automation capability is assumed; this revision uses only existing bridge/workflow/execution infrastructure and leaves future repo-automation integration for later skill updates.
+
+## v38.3.3 current-authority in-place Phase-0 / successor-wake repair
+
+Applied an in-place authority repair without changing the package revision or authority filenames. Lite Phase 0 now completes and validates the full `P0_TO_P1` successor package, including the Phase-1 wake message, **before** submitting the phase-completion companion for controller validation. Controller `PASS` is therefore an output of validation rather than a self-referential input.
+
+All Lite fresh-reviewer wake messages now use one mandatory standard that identifies the campaign as `LITE`, the exact campaign folder name and URL, controller `workspacePath`, the current authority Lite `SKILL.md` location in `CurveYield2/Contract-Automation/Audit Skill - Current Authority`, the incoming reviewer, and the exact phase/milestone the waking reviewer owns.
+

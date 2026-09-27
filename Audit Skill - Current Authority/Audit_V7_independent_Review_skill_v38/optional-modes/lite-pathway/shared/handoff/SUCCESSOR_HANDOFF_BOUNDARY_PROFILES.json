@@ -29,7 +29,14 @@
         "automationRunArtifactIdentities",
         "openLimitations",
         "obligationsDueInPhase1"
-      ]
+      ],
+      "wakeAssignment": {
+        "campaignType": "LITE",
+        "incomingReviewer": "reviewer-1",
+        "assignedLitePhaseOrMilestone": "Phase 1",
+        "requireCurrentAuthoritySkillLocation": true,
+        "requireCampaignNameAndFolderUrl": true
+      }
     },
     "P1_TO_P2": {
       "from": {
@@ -55,7 +62,14 @@
         "actorsAssetsDependencies",
         "openLimitations",
         "obligationsDueInPhase2"
-      ]
+      ],
+      "wakeAssignment": {
+        "campaignType": "LITE",
+        "incomingReviewer": "reviewer-2",
+        "assignedLitePhaseOrMilestone": "Combined Lite Phases 2–5",
+        "requireCurrentAuthoritySkillLocation": true,
+        "requireCampaignNameAndFolderUrl": true
+      }
     },
     "P5_TO_P6": {
       "from": {
@@ -83,7 +97,14 @@
         "candidateSpecificTestTargets",
         "openLimitations",
         "obligationsDueInMergedPhase6_7"
-      ]
+      ],
+      "wakeAssignment": {
+        "campaignType": "LITE",
+        "incomingReviewer": "reviewer-3L",
+        "assignedLitePhaseOrMilestone": "Merged Lite Phases 6–7",
+        "requireCurrentAuthoritySkillLocation": true,
+        "requireCampaignNameAndFolderUrl": true
+      }
     },
     "P67_TO_P8": {
       "from": {
@@ -109,7 +130,31 @@
         "fullOnlyOmissions",
         "openLimitations",
         "obligationsDueInPhase8"
-      ]
+      ],
+      "wakeAssignment": {
+        "campaignType": "LITE",
+        "incomingReviewer": "reviewer-4",
+        "assignedLitePhaseOrMilestone": "Combined Lite Phases 8–10",
+        "requireCurrentAuthoritySkillLocation": true,
+        "requireCampaignNameAndFolderUrl": true
+      }
     }
+  },
+  "wakeMessageStandard": {
+    "campaignType": "LITE",
+    "authoritySkillRepositoryPath": "CurveYield2/Contract-Automation/Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md",
+    "authoritySkillUrl": "https://github.com/CurveYield2/Contract-Automation/blob/main/Audit%20Skill%20-%20Current%20Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md",
+    "requiredFields": [
+      "campaignName",
+      "campaignFolderUrl",
+      "workspacePath",
+      "campaignId",
+      "campaignGenerationId",
+      "boundaryProfileId",
+      "incomingReviewer",
+      "assignedLitePhaseOrMilestone",
+      "sourceIdentity",
+      "handoffReferenceAndDigest"
+    ]
   }
 }

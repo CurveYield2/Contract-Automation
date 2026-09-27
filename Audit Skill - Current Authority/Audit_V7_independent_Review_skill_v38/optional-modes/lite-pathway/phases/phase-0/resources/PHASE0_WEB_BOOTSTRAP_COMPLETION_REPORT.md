@@ -1,6 +1,6 @@
 # Phase 0 Web Bootstrap Completion Report
 
-This is a concise machine-checkable retirement report, not a duplicate client/audit milestone report. Phase-0 evidence is still incorporated into the combined P0_1 milestone report at the end of Phase 1.
+This is the immutable **pre-validation** Phase-0 retirement-control report, not a duplicate client/audit milestone report. Phase-0 evidence is still incorporated into the combined P0_1 milestone report at the end of Phase 1. This report is frozen before controller completion validation; therefore it must never self-certify or embed the controller validation result that is produced from it.
 
 ## Exact identity
 - Campaign / generation:
@@ -38,13 +38,20 @@ This is a concise machine-checkable retirement report, not a duplicate client/au
 ## Semantic authority exclusions
 Phase 0 did **not** assign or decide: protected-asset priority, trust assumptions, threat hypotheses, standards conformance, exploitability, candidate validity, finding severity, remediation correctness, or security verdict.
 
-## Completion gate
+## Pre-validation completion gate
 - Unresolved mechanical blockers: `0 | <count>`
 - Due Phase-0 OPEN/IN_PROGRESS obligations: `0 | <count>`
-- Phase Contract/controller completion validation: `PASS | FAIL | BLOCKED`
-- Validation evidence/reference:
 - P0_TO_P1 handoff validation: `PASS | FAIL | BLOCKED`
-- Retirement allowed: `YES` only when both validations are `PASS`
+- P0_TO_P1 handoff validation evidence/reference:
+- Phase-1 `WAKE_UP_MESSAGE.md` reference / SHA-256:
+- Wake message confirms campaign type `LITE`: `YES | NO`
+- Wake message includes exact campaign name and campaign-folder URL: `YES | NO`
+- Wake message points to the current authority Lite `SKILL.md`: `YES | NO`
+- Wake message assigns `reviewer-1` to Phase 1: `YES | NO`
+- Ready to submit `audit-phase-completion-report-v1` companion: `YES | NO`
+
+## Post-report machine validation
+Controller completion validation is produced **after this report is frozen**. Record the generated `PHASE_COMPLETION_VALIDATION_v1.json` and retirement-gate receipts separately; do not modify this report afterward or its bound digest becomes stale.
 
 ## Status
-`WEB_BOOTSTRAP_COMPLETE | BLOCKED`
+`READY_FOR_CONTROLLER_VALIDATION | BLOCKED`

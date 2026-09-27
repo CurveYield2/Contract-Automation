@@ -6,7 +6,7 @@
 
 > **CURRENT-PHASE READ BOUNDARY:** Read this card first. Do **not** open another phase folder. Open only the resource linked by the active step below; conditional resources are opened only when their trigger applies.
 
-> **PHASE CONTRACT HARD GATE:** Before executing Step 1, open [`PHASE_CONTRACT.json`](PHASE_CONTRACT.json). It is the machine-readable contract for this phase. The web-bootstrap agent may not retire until the current controller/Phase-Contract completion validation reports `PASS` and the `P0_TO_P1` handoff is valid.
+> **PHASE CONTRACT HARD GATE:** Before executing Step 1, open [`PHASE_CONTRACT.json`](PHASE_CONTRACT.json). It is the machine-readable contract for this phase. Complete every Phase-0 contract step and sealing criterion, including the fully validated `P0_TO_P1` successor package and Phase-1 wake message, **before** submitting the completion companion for controller validation. Controller `PASS` is produced after those inputs are complete and is never an input to its own validation.
 
 > **UNIVERSAL RULE IDS:** `U-EXEC-001`, `U-GITHUB-001`, `U-STATE-001`, `U-EVIDENCE-001`, `U-REPAIR-001`, `U-HUMAN-001`, `U-DISCLOSURE-001`, `U-SOURCEINTEL-001`, `U-UPDATES-001`, and `U-HUMANCOMMS-001` remain binding.
 
@@ -26,9 +26,20 @@
 | 10 | **Precompute reusable later-phase structural indexes** | Ensure Phase 0 leaves reusable ABI/function/event/error/selector, storage, inheritance/interface, call/create/delegate, raw privilege, deployment-script/config-field, test/script/harness availability and bytecode/runtime-size references wherever the current source/tooling supports them. Reuse Source Intelligence rather than creating parallel inventories. | [SOURCE_INTELLIGENCE_REUSE_PROTOCOL.md](../../shared/source-intelligence/SOURCE_INTELLIGENCE_REUSE_PROTOCOL.md) |
 | 11 | **Complete the frozen Bootstrap Audit Surface Manifest** | Reconcile exact source/build/dependency/deployable/neutral-recon/Source-Intelligence identities and the neutral documented-input indexes into the Phase-0 manifest. | [PHASE0_BOOTSTRAP_AUDIT_SURFACE_MANIFEST.md](resources/PHASE0_BOOTSTRAP_AUDIT_SURFACE_MANIFEST.md) |
 | 12 | **Reconcile campaign-global mechanical state** | Update the Security Traceability Graph with source/structural roots, reconcile obligations due in Phase 0, create stable later-phase obligations for unresolved required work, and classify every material observed change under the Evidence Invalidation Matrix. Do not create semantic security conclusions. | [SECURITY_TRACEABILITY_GRAPH.json](../../shared/controller/SECURITY_TRACEABILITY_GRAPH.json) · [CARRIED_FORWARD_OBLIGATION_LEDGER.json](../../shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json) · [EVIDENCE_INVALIDATION_MATRIX.json](../../shared/controller/EVIDENCE_INVALIDATION_MATRIX.json) |
-| 13 | **File the Web Bootstrap Completion Report** | File the concise completion report with every automation/request/run/artifact identity and every required output/status. This is a retirement-control artifact, not a duplicate milestone report. | [PHASE0_WEB_BOOTSTRAP_COMPLETION_REPORT.md](resources/PHASE0_WEB_BOOTSTRAP_COMPLETION_REPORT.md) |
-| 14 | **Obtain controller/Phase-Contract PASS** | Submit/check the Phase-0 completion state through the current existing controller/Phase-Contract validation path. If it does not return `PASS`, remain active, execute the exact repair/missing work and rerun validation. The agent may not self-certify completion. | [AUTOMATIC_PHASE_ADVANCEMENT_PROTOCOL.md](../../shared/controller/AUTOMATIC_PHASE_ADVANCEMENT_PROTOCOL.md) |
-| 15 | **Create and validate P0_TO_P1 successor package; retire** | Create `handoffs/P0_TO_P1/SUCCESSOR_HANDOFF.json`, `START_HERE_SUCCESSOR.md`, and `WAKE_UP_MESSAGE.md` for fresh high-reasoning `reviewer-1`. Validate the package, enter `WAITING_FOR_SUCCESSOR_AGENT`, and stop only after both Phase-0 completion validation and handoff validation are `PASS`. | [SUCCESSOR_HANDOFF_PROTOCOL.md](../../shared/handoff/SUCCESSOR_HANDOFF_PROTOCOL.md) · [SUCCESSOR_HANDOFF_BOUNDARY_PROFILES.json](../../shared/handoff/SUCCESSOR_HANDOFF_BOUNDARY_PROFILES.json) |
+| 13 | **File the pre-validation Web Bootstrap Completion Report** | File the concise immutable completion report with every automation/request/run/artifact identity and every required output/status. Mark it `READY_FOR_CONTROLLER_VALIDATION`; do not write or assume controller `PASS` inside the report that will be validated. | [PHASE0_WEB_BOOTSTRAP_COMPLETION_REPORT.md](resources/PHASE0_WEB_BOOTSTRAP_COMPLETION_REPORT.md) |
+| 14 | **Create and validate P0_TO_P1 successor package and Phase-1 wake message** | Before controller completion validation, create and validate `handoffs/P0_TO_P1/SUCCESSOR_HANDOFF.json`, `START_HERE_SUCCESSOR.md`, and the standardized `WAKE_UP_MESSAGE.md` for fresh high-reasoning `reviewer-1`. The wake message must identify the current Lite authority, exact Lite campaign name/folder URL, controller workspace, source identity, reviewer-1, and Phase 1 responsibility. | [SUCCESSOR_HANDOFF_PROTOCOL.md](../../shared/handoff/SUCCESSOR_HANDOFF_PROTOCOL.md) · [SUCCESSOR_HANDOFF_BOUNDARY_PROFILES.json](../../shared/handoff/SUCCESSOR_HANDOFF_BOUNDARY_PROFILES.json) · [WAKE_UP_MESSAGE_TEMPLATE.md](../../shared/handoff/WAKE_UP_MESSAGE_TEMPLATE.md) |
+
+## Post-contract controller validation and retirement
+
+After Steps 1–14 and all Phase-0 sealing criteria are complete:
+
+1. Submit the `audit-phase-completion-report-v1` companion bound to the frozen Phase-0 report, output digests, terminal step dispositions, sealing-criterion evidence, campaign generation, actor lineage and exact source identity.
+2. The controller runs the completion validator and must generate `PHASE_COMPLETION_VALIDATION_v1.json` with `status: PASS`. The auditor cannot self-certify this result.
+3. The retirement gate must then verify the bound completion-validation `PASS`, the required automation-completion `PASS`, and the already-created `P0_TO_P1` handoff-validation `PASS`.
+4. If any controller check fails, remain active, repair only the failed prerequisite, regenerate/rebind stale evidence as required, and resubmit validation.
+5. Only after the retirement gate reports `PASS` may controller state enter `WAITING_FOR_SUCCESSOR_AGENT`; the web-bootstrap agent then retires.
+
+This order is mandatory: **finish Phase 0 → create/validate P0_TO_P1 + Phase-1 wake message → request machine completion validation → retirement-gate PASS → `WAITING_FOR_SUCCESSOR_AGENT` → retire.**
 
 ## Phase-0 semantic prohibition
 
@@ -50,4 +61,4 @@ Those begin with reviewer-1 in Phase 1 or later authorized reviewers.
 - Trigger **and verify** required existing GitHub/Contract-Automation automation; never leave a merely-started run for reviewer-1.
 - Generate the accepted Source Intelligence system in Phase 0 so later reviewers consume rather than reconstruct structural facts.
 - Leave exact durable evidence identities for every build/static/automation result.
-- File the concise Phase-0 completion report, obtain controller validation `PASS`, seal/validate `P0_TO_P1`, and only then retire.
+- File the concise Phase-0 completion report, create and validate `P0_TO_P1` including the standardized Phase-1 wake message, then obtain controller validation `PASS` and retirement-gate `PASS`; only then enter `WAITING_FOR_SUCCESSOR_AGENT` and retire.
