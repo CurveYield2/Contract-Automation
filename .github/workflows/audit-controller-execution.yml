@@ -722,8 +722,15 @@ jobs:
 
           test "$(jq -r '.schemaVersion // empty' "$registration")" = 'curveyield-browser-agent-wake-registration-v1'
           test "$(jq -r '.campaignId // empty' "$registration")" = "$campaign_id"
-          mode="$(jq -r '.mode // "resume_existing"' "$registration")"
-          chat_url="$(jq -r '.chatUrl // empty' "$registration")"
+          # Technical callbacks never create reviewers and never send another
+          # tailored instruction packet. The reviewer already has its first-message
+          # packet; every subsequent callback is exactly GET BACK TO WORK.
+          mode="resume_existing"
+          chat_url="$(jq -r '.activeChat.url // .chatUrl // empty' "$registration")"
+          if [[ ! "$chat_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+ ]]; then
+            echo "::warning::No active reviewer chat URL for $campaign_id; technical callback will not create a replacement chat."
+            exit 0
+          fi
           registered_phase="$(jq -r '.activeAssignment.phaseId // .watchdog.gate.expectedPhaseId // empty' "$registration")"
           registered_milestone="$(jq -r '.activeAssignment.milestoneId // .watchdog.gate.expectedMilestoneId // empty' "$registration")"
           semantic_phase_id="$registered_phase"
@@ -731,90 +738,9 @@ jobs:
             semantic_phase_id="$request_phase_id"
           fi
           phase_id="$semantic_phase_id"
-          wake_message="$(jq -r '.wakeMessage // empty' "$registration")"
-          if [ -n "$wake_message" ] && [ -n "$registered_phase" ] && [ "$registered_phase" != "$semantic_phase_id" ]; then
-            echo "::warning::Ignoring stale registered wake message for phase $registered_phase; current semantic phase is $semantic_phase_id."
-            wake_message=""
-          fi
-
-          if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "${OPERATOR_OPERATION:-}" = 'INGEST_EXECUTION_EVIDENCE' ]; then
-            receipt='.operator-output/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json'
-            test -s "$receipt"
-            security_disposition="$(jq -r '.securityDisposition' "$receipt")"
-            finding_promotion="$(jq -r '.findingPromotion' "$receipt")"
-            ingestion_digest="$(jq -r '.ingestionDigest' "$receipt")"
-            terminal_message="$(printf '%s\n' \
-              '[AUDIT_AUTOMATION_WAKE_V1]' \
-              "campaign=$campaign_id" \
-              "phase=$semantic_phase_id" \
-              "technical_phase=$request_phase_id" \
-              "workflow_run=$GITHUB_RUN_ID" \
-              'route=EVIDENCE_INGESTED' \
-              "security_disposition=$security_disposition" \
-              "finding_promotion=$finding_promotion" \
-              "ingestion_digest=$ingestion_digest" \
-              '' \
-              'Technical evidence has been ingested and the receipt is durable on the private campaign branch. Resume semantic review from the admitted evidence; do not rerun completed technical work.')"
-            if [ -n "$wake_message" ]; then
-              wake_message="$terminal_message"$'\n\n'"$wake_message"
-            else
-              wake_message="$terminal_message"
-            fi
-          elif [ "${V7_REQUEST_KIND:-}" = 'v7-execution' ]; then
-            observer="${EXECUTION_OBSERVER_RECEIPT:-.audit-evidence/v7-execution/${V7_REQUEST_ID}/EXECUTION_OBSERVER_RECEIPT_v1.json}"
-            test -s "$observer"
-            route="$(jq -r '.route' "$observer")"
-            disposition="$(jq -r '.terminal.disposition' "$observer")"
-            owner="$(jq -r '.terminal.owner' "$observer")"
-            next_action="$(jq -r '.terminal.nextAction' "$observer")"
-            retry_from="$(jq -r '.terminal.retryFrom // empty' "$observer")"
-            recovery_command="$(jq -r '.terminal.recoveryCommand // empty' "$observer")"
-            if [ "$route" = 'EVIDENCE_INGESTION' ] && [ -n "${{ inputs.controller_writeback_ref }}" ] && [ "${AUTO_INGESTION_DISPATCHED:-}" != 'true' ]; then
-              route='EVIDENCE_INGESTION_DISPATCH_FAILED'
-              owner='RUNNER_MAINTAINER'
-              next_action='RECOVER_AUTOMATIC_EVIDENCE_INGESTION'
-            fi
-            terminal_message="$(printf '%s\n' \
-              '[AUDIT_AUTOMATION_WAKE_V1]' \
-              "campaign=$campaign_id" \
-              "phase=$semantic_phase_id" \
-              "technical_phase=$request_phase_id" \
-              "workflow_run=$GITHUB_RUN_ID" \
-              "route=$route" \
-              "disposition=$disposition" \
-              "owner=$owner" \
-              "next_action=$next_action" \
-              "retry_from=$retry_from" \
-              "recovery_command=$recovery_command" \
-              '' \
-              'Technical execution is terminal and its observer receipt is durable. Follow the typed route; do not poll or rerun completed work.')"
-            if [ -n "$wake_message" ]; then
-              wake_message="$terminal_message"$'\n\n'"$wake_message"
-            else
-              wake_message="$terminal_message"
-            fi
-          elif [ -z "$wake_message" ]; then
-            wake_message="$(printf '%s\n' \
-              '[AUDIT_AUTOMATION_WAKE_V1]' \
-              "campaign=$campaign_id" \
-              "phase=$semantic_phase_id" \
-              "technical_phase=$request_phase_id" \
-              "workflow_run=$GITHUB_RUN_ID" \
-              'status=PASS' \
-              '' \
-              'Resume the admitted audit from the latest durable completion evidence. Do not restart completed work.')"
-          fi
-
-          watchdog_enabled="$(jq -r '.watchdog.enabled // true' "$registration")"
-          watchdog_message="$(printf '%s\n' \
-            '[AUDIT_AGENT_WATCHDOG_V2]' \
-            "campaign=$campaign_id" \
-            "current_phase=$semantic_phase_id" \
-            "technical_phase=$request_phase_id" \
-            "milestone=$registered_milestone" \
-            'reasoning_effort=high' \
-            '' \
-            'Resume the current semantic audit assignment from durable evidence. Do not regress to an older phase label and do not rerun completed technical work.')"
+          wake_message='GET BACK TO WORK'
+          watchdog_enabled=false
+          watchdog_message='GET BACK TO WORK'
           gate_mode="$(jq -r '.watchdog.gate.mode // "FULL_V26"' "$registration")"
           gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' "$registration")"
           gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$registration")"
@@ -825,7 +751,7 @@ jobs:
           gate_stop_states="$(jq -r '(.watchdog.gate.stopStates // ["WAITING_FOR_HUMAN_RESPONSE","WAITING_FOR_SUCCESSOR_AGENT","CLOSED","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
           gate_stop_campaign_statuses="$(jq -r '(.watchdog.gate.stopCampaignStatuses // ["COMPLETE","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
 
-          wake_id="$campaign_id-$request_phase_id-$GITHUB_RUN_ID"
+          wake_id="$campaign_id-$registered_milestone-technical-callback"
           wake_b64="$(printf '%s' "$wake_message" | base64 -w0)"
           watchdog_b64="$(printf '%s' "$watchdog_message" | base64 -w0)"
 
