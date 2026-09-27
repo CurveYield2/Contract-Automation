@@ -127,17 +127,19 @@ test('terminal V7 execution writes a durable typed observer receipt before revie
   assert.match(workflow, /artifactName:\$artifact_name/);
 });
 
-test('semantic reviewer wake consumes the terminal observer route instead of polling execution', () => {
+test('semantic reviewer callback verifies terminal observer state before a minimal poke', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   const wakeStart = workflow.indexOf('- name: Dispatch registered browser-agent wake');
   assert.ok(wakeStart >= 0);
   const wakeBlock = workflow.slice(wakeStart);
   assert.match(wakeBlock, /if:\s*always\(\) && \(env\.V7_REQUEST_KIND == 'v7-execution' \|\| success\(\)\)/);
   assert.match(wakeBlock, /EXECUTION_OBSERVER_RECEIPT/);
-  assert.match(wakeBlock, /route=\$route/);
-  assert.match(wakeBlock, /disposition=\$disposition/);
-  assert.match(wakeBlock, /next_action=\$next_action/);
-  assert.match(wakeBlock, /Technical execution is terminal and its observer receipt is durable/);
+  assert.match(wakeBlock, /route="\$\(jq -r '\.route'/);
+  assert.match(wakeBlock, /disposition="\$\(jq -r '\.terminal\.disposition'/);
+  assert.match(wakeBlock, /next_action="\$\(jq -r '\.terminal\.nextAction'/);
+  assert.match(wakeBlock, /Terminal execution observer verified/);
+  assert.match(wakeBlock, /wake_message='GET BACK TO WORK'/);
+  assert.match(wakeBlock, /watchdog_enabled=false/);
 });
 
 
@@ -174,7 +176,7 @@ test('Lite C7 stages terminal evidence and dispatches the existing INGEST_EXECUT
   assert.match(workflow, /AUTO_INGESTION_DISPATCHED=true/);
 });
 
-test('semantic reviewer wake waits for durable ingestion receipt on successful technical execution', () => {
+test('semantic reviewer callback waits for and verifies durable ingestion receipt before the minimal poke', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   const wakeStart = workflow.indexOf('- name: Dispatch registered browser-agent wake');
   assert.ok(wakeStart >= 0);
@@ -182,10 +184,11 @@ test('semantic reviewer wake waits for durable ingestion receipt on successful t
   assert.match(wakeBlock, /Terminal evidence ingestion was dispatched automatically; semantic reviewer wake waits for the durable ingestion receipt/);
   assert.match(wakeBlock, /OPERATOR_OPERATION:-.*INGEST_EXECUTION_EVIDENCE|OPERATOR_OPERATION:-\}" = 'INGEST_EXECUTION_EVIDENCE'/s);
   assert.match(wakeBlock, /EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1\.json/);
-  assert.match(wakeBlock, /route=EVIDENCE_INGESTED/);
-  assert.match(wakeBlock, /security_disposition=\$security_disposition/);
-  assert.match(wakeBlock, /finding_promotion=\$finding_promotion/);
-  assert.match(wakeBlock, /do not rerun completed technical work/);
+  assert.match(wakeBlock, /security_disposition="\$\(jq -r '\.securityDisposition'/);
+  assert.match(wakeBlock, /finding_promotion="\$\(jq -r '\.findingPromotion'/);
+  assert.match(wakeBlock, /ingestion_digest="\$\(jq -r '\.ingestionDigest'/);
+  assert.match(wakeBlock, /EVIDENCE_INGESTED: durable ingestion receipt verified/);
+  assert.match(wakeBlock, /wake_message='GET BACK TO WORK'/);
 });
 
 test('canonical execution workflow tail is singular and free of the prior duplicated corruption', () => {
