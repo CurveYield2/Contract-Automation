@@ -444,100 +444,26 @@ jobs:
             gh api --method PUT "$api" -f message="$report_message $REQUEST_ID" -f content="$content" -f branch=main >/dev/null
           fi
 
-      - name: Launch registered Phase-0 browser agent
+      - name: Signal Phase-0 source fan-out readiness
         if: steps.meta.outputs.mode == 'audit_source_fanout'
         env:
-          GH_TOKEN: ${{ github.token }}
           CAMPAIGN_ID: ${{ steps.meta.outputs.campaign_id }}
           AUDIT_NAME: ${{ steps.meta.outputs.audit_name }}
         shell: bash
         run: |
           set -euo pipefail
-          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
-          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
-          if [ ! -f "$registration" ]; then
-            echo "No browser-agent registration for $CAMPAIGN_ID; source fan-out is complete and no browser wake was requested."
-            exit 0
-          fi
+          {
+            echo "## Source fan-out complete"
+            echo
+            echo "- Campaign: $AUDIT_NAME"
+            echo "- Campaign ID: $CAMPAIGN_ID"
+            echo "- Reviewer/chat launch: NOT performed by source fan-out"
+            echo "- Launch authority: Ultralite campaign orchestrator only"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          test "$(jq -r '.schemaVersion // empty' "$registration")" = 'curveyield-browser-agent-wake-registration-v1'
-          test "$(jq -r '.campaignId // empty' "$registration")" = "$CAMPAIGN_ID"
-
-          mode="$(jq -r '.mode // "create_fresh"' "$registration")"
-          chat_url="$(jq -r '.chatUrl // empty' "$registration")"
-          wake_message="$(jq -r '.wakeMessage // empty' "$registration")"
-
-          watchdog_enabled="$(jq -r '.watchdog.enabled // true' "$registration")"
-          watchdog_message="$(jq -r '.watchdog.idleMessage // empty' "$registration")"
-          gate_mode="$(jq -r '.watchdog.gate.mode // "LITE"' "$registration")"
-          gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' "$registration")"
-          gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$registration")"
-          gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' "$registration")"
-          gate_expected_phase="$(jq -r '.watchdog.gate.expectedPhaseId // "phase-0"' "$registration")"
-          gate_expected_milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // "P0_BOOTSTRAP"' "$registration")"
-          gate_pointer_path="$(jq -r '.watchdog.gate.activePointerPath // empty' "$registration")"
-          gate_stop_states="$(jq -r '(.watchdog.gate.stopStates // ["WAITING_FOR_HUMAN_RESPONSE","WAITING_FOR_SUCCESSOR_AGENT","CLOSED","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
-          gate_stop_campaign_statuses="$(jq -r '(.watchdog.gate.stopCampaignStatuses // ["COMPLETE","STOPPED_BY_HUMAN"]) | join(",")' "$registration")"
-
-          # Source fan-out is also the admitted Phase-0 handoff trigger. Build the
-          # same rich bootstrap envelope used by the canonical Ultralite browser
-          # orchestrator instead of relying on a generic registration wake string.
-          if [ "$gate_mode" = "LITE" ] \
-             && [ "$gate_expected_phase" = "phase-0" ] \
-             && [ "$gate_expected_milestone" = "P0_BOOTSTRAP" ]; then
-            campaign_path="${gate_state_path%/controller/*}"
-            campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(printf '%s' "$campaign_path" | sed 's/ /%20/g')"
-            {
-              printf '%s\n' '[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1]'
-              printf 'campaign_name=%s\n' "$AUDIT_NAME"
-              printf 'campaign_id=%s\n' "$CAMPAIGN_ID"
-              printf 'campaign_url=%s\n' "$campaign_url"
-              printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT; do not use Work.'
-              printf '%s\n' 'connector_requirement=Use the GitHub connector app for all repository reads/writes.'
-              printf '\n%s\n' 'Resume the ultralite audit of the admitted package in the campaign above from the latest durable Phase-0 state. Do not restart completed source fanout or other completed bootstrap work.'
-              printf '\n%s\n' 'Your assignment is Phase 0 only. Resolve audit skill authority from GitHub using this precedence: campaign-bound skillAuthority.current when present; otherwise CurveYield2/Audit-Controller@main audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json. Legacy newest-ZIP discovery is fallback-only when neither authoritative source exists. Read the resolved skill before doing audit work and follow its active Lite/Ultralite Phase-0 instructions exactly. The resolved audit skill is the ultimate methodology authority unless a newer explicit human instruction in this chat overrides it.'
-              printf '\n%s\n' 'Execute every presently executable Phase-0 step to completion. Write required Phase-0 outputs into the canonical Audit-Controller campaign paths, run the required machine completion validation, create/seal the P0_TO_P1 successor packet/handoff required by the active skill, and leave the canonical controller/pointer in the exact terminal state required for successor launch.'
-              printf '\n%s\n' "Do not continue into reviewer-1's assigned phases. Once Phase 0 is terminal and P0_TO_P1 is sealed, stop so the Ultralite browser/watchdog control plane can launch reviewer-1 automatically."
-            } > /tmp/source-fanout-phase0-wake.txt
-            wake_message="$(cat /tmp/source-fanout-phase0-wake.txt)"
-            watchdog_message="$wake_message"
-          fi
-          test -n "$wake_message"
-
-          # Phase-0 Ultralite bootstrap intentionally stays outside the campaign Project,
-          # but it must still inherit the Ultralite resume-first repair policy.
-          repair_enabled="$(jq -r 'if (.browserRoutine // "")=="audit-ultralite-reviewer-v1" then true else (.watchdog.repair.enabled // false) end' "$registration")"
-          repair_idle_poke_threshold="$(jq -r '.watchdog.repair.idlePokeThreshold // 3' "$registration")"
-          repair_unviewable_threshold="$(jq -r '.watchdog.repair.unviewableThreshold // 2' "$registration")"
-          browser_context_b64="$(jq -nc \
-            --argjson repairEnabled "$repair_enabled" \
-            --argjson idlePokeThreshold "$repair_idle_poke_threshold" \
-            --argjson unviewableThreshold "$repair_unviewable_threshold" \
-            '{repair:{enabled:$repairEnabled,idlePokeThreshold:$idlePokeThreshold,unviewableThreshold:$unviewableThreshold}}' | base64 -w0)"
-
-          wake_id="$CAMPAIGN_ID-phase0-source-fanout-$GITHUB_RUN_ID"
-          wake_b64="$(printf '%s' "$wake_message" | base64 -w0)"
-          watchdog_b64="$(printf '%s' "$watchdog_message" | base64 -w0)"
-
-          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            -f wake_id="$wake_id" \
-            -f campaign_id="$CAMPAIGN_ID" \
-            -f phase_id="phase-0" \
-            -f mode="$mode" \
-            -f chat_url="$chat_url" \
-            -f wake_message_b64="$wake_b64" \
-            -f watchdog_enabled="$watchdog_enabled" \
-            -f watchdog_message_b64="$watchdog_b64" \
-            -f gate_mode="$gate_mode" \
-            -f gate_repository="$gate_repo" \
-            -f gate_ref="$gate_ref" \
-            -f gate_state_path="$gate_state_path" \
-            -f gate_expected_phase_id="$gate_expected_phase" \
-            -f gate_expected_milestone_id="$gate_expected_milestone" \
-            -f gate_active_pointer_path="$gate_pointer_path" \
-            -f gate_stop_states_csv="$gate_stop_states" \
-            -f gate_stop_campaign_statuses_csv="$gate_stop_campaign_statuses" \
-            -f browser_context_b64="$browser_context_b64"
+          # Critical invariant: source fan-out prepares durable source evidence only.
+          # It must never create a second Phase-0 chat. The campaign orchestrator owns
+          # all reviewer-chat creation and monitoring from audit start to completion.
 
       - name: Record import failure run
         if: failure()
