@@ -847,6 +847,51 @@ jobs:
             current_hash="$(jq -r '.lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
             previous_count="$(jq -r '.observation.assistantCount // 0' /tmp/watchdog-state.json)"
             previous_hash="$(jq -r '.observation.lastAssistantHash // empty' /tmp/watchdog-state.json)"
+            chat_viewable="$(jq -r '.chatViewable // false' "$WAKE_RESULT_PATH")"
+            conversation_unavailable="$(jq -r '.conversationUnavailable // false' "$WAKE_RESULT_PATH")"
+            human_challenge="$(jq -r '.humanChallenge // false' "$WAKE_RESULT_PATH")"
+            login_prompt="$(jq -r '.loginPrompt // false' "$WAKE_RESULT_PATH")"
+
+            if [ "$human_challenge" = true ]; then
+              echo "::warning::Watchdog runner hit a browser challenge; treating as infrastructure noise, not reviewer failure."
+              jq '.lastDecision="BROWSER_CHALLENGE_RETRY_LATER" | .lastObservationFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+              mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+              persist_state || true
+              continue
+            fi
+
+            if [ "$login_prompt" = true ]; then
+              echo "::warning::ChatGPT authentication is required; not replacing the reviewer because this is a shared session problem."
+              jq '.lastDecision="AUTH_REQUIRED" | .lastObservationFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+              mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+              persist_state || true
+              continue
+            fi
+
+            if [ "$conversation_unavailable" = true ]; then
+              if dispatch_reviewer_repair "CONVERSATION_UNAVAILABLE"; then
+                retire_state "REVIEWER_REPAIR_DISPATCHED_CONVERSATION_UNAVAILABLE"
+                exit 0
+              fi
+            fi
+
+            if [ "$chat_viewable" != true ]; then
+              unviewable_count="$(jq -r '(.repair.consecutiveUnviewable // 0) + 1' /tmp/watchdog-state.json)"
+              unviewable_threshold="$(jq -r '.repair.unviewableThreshold // 2' /tmp/watchdog-state.json)"
+              jq --argjson count "$unviewable_count" '.repair.consecutiveUnviewable=$count | .lastDecision="CHAT_UNVIEWABLE"' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+              mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+              persist_state || true
+              if [ "$unviewable_count" -ge "$unviewable_threshold" ]; then
+                if dispatch_reviewer_repair "CHAT_UNVIEWABLE_${unviewable_count}_OBSERVATIONS"; then
+                  retire_state "REVIEWER_REPAIR_DISPATCHED_CHAT_UNVIEWABLE"
+                  exit 0
+                fi
+              fi
+              continue
+            fi
+
+            jq '.repair.consecutiveUnviewable=0' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+            mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
 
             productive=false
             reason=''
