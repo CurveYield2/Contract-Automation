@@ -1,5 +1,89 @@
 # Browser-Agent Wake Registration
 
+## Normal ChatGPT browser routines
+
+Browser automation is no longer limited to one hard-coded wake path. Reusable operations live in:
+
+- `scripts/browser-operations-v1.mjs`
+- `scripts/browser-routine-engine-v1.mjs`
+- `process/browser-routines/*.json`
+
+A routine is a declarative sequence of named browser operations. The first admitted routine is:
+
+`audit-ultralite-reviewer-v1`
+
+It always targets **normal ChatGPT web Chat**, never Work. Before the first reviewer message it switches away from Work if necessary, creates or reuses the campaign ChatGPT Project, and opens a new normal chat inside that Project. After the first message creates the conversation URL, it attempts to rename the chat to the supplied campaign/reviewer name.
+
+The browser operation registry currently includes:
+
+- `chatgpt.ensure_chat_mode`
+- `chatgpt.ensure_project`
+- `chatgpt.start_project_chat`
+- `chatgpt.rename_current_chat`
+
+Additional routines can reuse those operations without creating a new GitHub Actions workflow.
+
+## Ultralite audit browser orchestration
+
+`.github/workflows/ultralite-audit-browser-orchestrator-v1.yml` is the first complete routine consumer.
+
+It starts with a dedicated **normal ChatGPT web** Phase-0 bootstrap chat. That bootstrap agent is instructed to:
+
+1. use the GitHub connector app;
+2. read and obey the active audit skill authority;
+3. execute Phase 0 only;
+4. write/seal the required Phase-0 packet/handoff;
+5. stop at the machine-readable successor boundary.
+
+The Phase-0 bootstrap is deliberately outside the campaign Project. When the canonical controller/pointer reaches the Phase-0 successor boundary, the existing Lite watchdog launches the first semantic reviewer through `audit-ultralite-reviewer-v1`. That launch creates/reuses a ChatGPT Project named from the campaign title and creates a normal reviewer chat inside it.
+
+Every later successor is derived from the live Audit-Controller pointer, not from a hard-coded reviewer count. The successor launch reads `.nextMilestone.reviewer`, `.nextMilestone.id`, the sealed handoff, campaign title/path, and the newest audit-skill ZIP in the campaign authority directory. The wake envelope contains:
+
+- campaign URL;
+- reviewer identity;
+- milestone identity;
+- latest audit skill URL;
+- sealed handoff path;
+- explicit GitHub connector requirement;
+- explicit rule that the latest skill is the audit methodology authority;
+- instruction to continue from sealed durable state and run the assigned reviewer through its terminal handoff/final-report state.
+
+There is no `reviewer-5`, `P8_10`, or other reviewer-count assumption in successor termination. A campaign ends when canonical campaign state is terminal or the active pointer has no successor.
+
+## Reviewer repair
+
+Reviewer repair is handled by:
+
+`.github/workflows/browser-agent-reviewer-repair-v1.yml`
+
+and schema:
+
+`protocol/schemas/curveyield-reviewer-repair-request-v1.schema.json`
+
+The default repair disposition is **resume first**. A replacement normal ChatGPT reviewer chat is created in the same campaign Project and instructed to recover from current durable GitHub state without repeating sealed work.
+
+If safe continuation is impossible because the active reviewer's partial files are irreconcilably incomplete or misplaced, the replacement reviewer is prohibited from deleting data itself. It must file:
+
+`controller/REVIEWER_REPAIR_REQUEST_v1.json`
+
+with exact campaign, reviewer, milestone, handoff, and baseline-commit identity. The watchdog validates that request against the live pointer before dispatching the reset path.
+
+The reset path restores the campaign to the exact handoff baseline commit, while preserving the current source directory, authority directory, skill-authority receipts, and current skill binding. It writes `controller/REVIEWER_REPAIR_RESET_v1.json`, removes the consumed reset request, then launches a fresh replacement reviewer in the campaign Project.
+
+Repair can also be explicitly dispatched with `repair_mode=reset_to_handoff`; absent a valid filed repair request, this requires `force_reset=true`.
+
+### Automatic breakdown escalation
+
+Reviewer watchdog states carry a repair policy. The default ultralite routine uses:
+
+- idle poke threshold: 3;
+- non-challenge unviewable threshold: 2.
+
+A normal browser/security challenge is treated as infrastructure noise and never as reviewer failure. A shared authentication prompt is also not grounds for replacing a reviewer.
+
+The watchdog continues the normal **GET BACK TO WORK** process for temporary inactivity. Persistent inactivity beyond the configured poke threshold, a truly unavailable conversation, or repeated non-challenge unviewable observations can dispatch reviewer repair automatically. Productive activity resets the inactivity counters.
+
+
 This directory is the durable control surface for ordinary ChatGPT web-agent wake/resume behavior. All browser wake automation remains in `CurveYield2/Contract-Automation`; no workflow is required in Audit-Controller or Audits.
 
 One registration file is used per active audit campaign:

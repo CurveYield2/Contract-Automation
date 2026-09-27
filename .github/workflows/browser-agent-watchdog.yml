@@ -427,14 +427,72 @@ jobs:
             return 0
           }
 
+          dispatch_reviewer_repair() {
+            local reason="$1"
+            [ "$(jq -r '.repair.enabled // false' /tmp/watchdog-state.json)" = "true" ] || return 1
+            [ "$worker_role" = "reviewer" ] || return 1
+            [ "$gate_mode" = "LITE" ] || return 1
+            [ -n "$gate_expected_milestone" ] || return 1
+            [ "$gate_expected_milestone" != "P0_BOOTSTRAP" ] || return 1
+
+            echo "Dispatching replacement reviewer for $campaign_id / $gate_expected_milestone: $reason"
+            gh workflow run browser-agent-reviewer-repair-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              -f campaign_id="$campaign_id" \
+              -f repair_mode=auto \
+              -f force_reset=false \
+              -f reason="$reason"
+            return 0
+          }
+
+          check_reviewer_repair_request() {
+            local campaign_root repair_path encoded_request encoded_pointer active_reviewer active_handoff active_baseline
+            [ "$worker_role" = "reviewer" ] || return 1
+            [ "$gate_mode" = "LITE" ] || return 1
+            [ -n "$gate_path" ] || return 1
+            [ -n "$gate_pointer_path" ] || return 1
+            campaign_root="${gate_path%/controller/*}"
+            repair_path="$campaign_root/controller/REVIEWER_REPAIR_REQUEST_v1.json"
+
+            encoded_request="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$repair_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+            [ -n "$encoded_request" ] || return 1
+            printf '%s' "$encoded_request" | base64 -d > /tmp/reviewer-repair-request.json
+
+            encoded_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$gate_pointer_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+            [ -n "$encoded_pointer" ] || return 1
+            printf '%s' "$encoded_pointer" | base64 -d > /tmp/reviewer-repair-pointer.json
+
+            active_reviewer="$(jq -r --arg m "$gate_expected_milestone" '.routingPlan.workers[]? | select(.milestone==$m) | .lineage // empty' /tmp/canonical-campaign-state.json | tail -n1)"
+            active_handoff="$(jq -r '.authoritativeHandoff // empty' /tmp/reviewer-repair-pointer.json)"
+            active_baseline="$(jq -r '.authoritativeHandoffIdentity.contentCommit // empty' /tmp/reviewer-repair-pointer.json)"
+            [ -n "$active_reviewer" ] || return 1
+
+            jq -e \
+              --arg campaign "$campaign_id" \
+              --arg reviewer "$active_reviewer" \
+              --arg milestone "$gate_expected_milestone" \
+              --arg handoff "$active_handoff" \
+              --arg baseline "$active_baseline" \
+              '.schemaVersion=="curveyield-reviewer-repair-request-v1"
+               and .campaignId==$campaign
+               and .reviewer==$reviewer
+               and .milestoneId==$milestone
+               and .action=="RESET_TO_HANDOFF"
+               and .handoffPath==$handoff
+               and .baselineCommit==$baseline
+               and (.reason|type=="string" and length>0)
+               and (.requestedAt|type=="string" and length>0)' \
+              /tmp/reviewer-repair-request.json >/dev/null
+          }
+
           launch_lite_successor() {
             local pointer_path="$1"
             local expected_milestone="$2"
             local gate_repo="$3"
             local gate_ref="$4"
-            local encoded_pointer completed_id completed_status next_id next_state handoff_path handoff_dir wake_path encoded_wake wake_b64 next_phase successor_wake_id
+            local encoded_pointer completed_id completed_status next_id next_state next_reviewer handoff_path handoff_dir wake_path encoded_wake wake_b64 next_phase successor_wake_id
             local packet_path completion_path encoded_packet packet_sha instructions mechanical_message mechanical_b64 mechanical_wake_id
             local legacy_packet_path legacy_encoded reconciliation_output verified_output_count
+            local campaign_root campaign_title campaign_url project_name chat_name skill_path skill_url state_skill_rel newest_skill newest_skill_date candidate candidate_date
 
             [ -n "$pointer_path" ] || return 2
             encoded_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$pointer_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
@@ -445,6 +503,7 @@ jobs:
             completed_status="$(jq -r '.completedMilestone.status // empty' /tmp/lite-active-pointer.json)"
             next_id="$(jq -r '.nextMilestone.id // empty' /tmp/lite-active-pointer.json)"
             next_state="$(jq -r '.nextMilestone.state // empty' /tmp/lite-active-pointer.json)"
+            next_reviewer="$(jq -r '.nextMilestone.reviewer // empty' /tmp/lite-active-pointer.json)"
 
             [ "$completed_id" = "$expected_milestone" ] || return 2
             case "$completed_status" in
@@ -522,6 +581,68 @@ jobs:
               return 2
             fi
 
+            if [[ "$pointer_path" == */controller/* ]]; then
+              campaign_root="${pointer_path%/controller/*}"
+            elif [[ "$handoff_path" == */handoffs/* ]]; then
+              campaign_root="${handoff_path%/handoffs/*}"
+            elif [[ "$gate_path" == */controller/* ]]; then
+              campaign_root="${gate_path%/controller/*}"
+            else
+              echo "::warning::Unable to derive campaign root from pointer/handoff/gate paths."
+              return 2
+            fi
+            campaign_title="$(jq -r '.title // .projectSlug // .campaignId // empty' /tmp/canonical-campaign-state.json)"
+            [ -n "$campaign_title" ] || campaign_title="$campaign_id"
+            [ -n "$next_reviewer" ] || next_reviewer="$next_id"
+            project_name="$campaign_title"
+            chat_name="$campaign_title $next_reviewer"
+            campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(printf '%s' "$campaign_root" | sed 's/ /%20/g')"
+
+            state_skill_rel="$(jq -r '.skillAuthority.current.campaignPath // empty' /tmp/canonical-campaign-state.json)"
+            skill_path=""
+            newest_skill=""
+            newest_skill_date=""
+            authority_listing="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$campaign_root/authority?ref=$gate_ref" 2>/dev/null || true)"
+            if [ -n "$authority_listing" ]; then
+              while IFS= read -r candidate; do
+                [ -n "$candidate" ] || continue
+                candidate_date="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api --method GET "repos/$gate_repo/commits" -f path="$candidate" -f sha="$gate_ref" -f per_page=1 --jq '.[0].commit.committer.date // empty' 2>/dev/null || true)"
+                [ -n "$candidate_date" ] || continue
+                if [ -z "$newest_skill_date" ] || [[ "$candidate_date" > "$newest_skill_date" ]]; then
+                  newest_skill="$candidate"
+                  newest_skill_date="$candidate_date"
+                fi
+              done < <(printf '%s' "$authority_listing" | jq -r '.[]? | select(.type=="file" and (.name|test("skill.*\\.zip$";"i"))) | .path')
+            fi
+            if [ -n "$newest_skill" ]; then
+              skill_path="$newest_skill"
+            elif [ -n "$state_skill_rel" ]; then
+              skill_path="$campaign_root/$state_skill_rel"
+            fi
+            [ -n "$skill_path" ] || {
+              echo "::warning::No audit skill ZIP could be resolved for successor $next_reviewer."
+              return 2
+            }
+            skill_url="https://github.com/$gate_repo/blob/$gate_ref/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
+
+            {
+              printf '%s\n' '[AUDIT_REVIEWER_ROUTINE_V1]'
+              printf 'campaign_name=%s\n' "$campaign_title"
+              printf 'reviewer=%s\n' "$next_reviewer"
+              printf 'milestone=%s\n' "$next_id"
+              printf 'campaign_url=%s\n' "$campaign_url"
+              printf 'latest_audit_skill_url=%s\n' "$skill_url"
+              printf 'authoritative_handoff=%s\n' "$handoff_path"
+              printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT_IN_CAMPAIGN_PROJECT; do not use Work.'
+              printf '%s\n' 'connector_requirement=Use the GitHub connector app for repository reads/writes and campaign work.'
+              printf '%s\n' 'authority_rule=The latest audit skill file URL above is the ultimate methodology authority. Read it before doing reviewer work and follow its instructions exactly unless a newer explicit human instruction in this chat overrides it.'
+              printf '%s\n' 'continuation_rule=Continue from the sealed handoff and latest durable campaign state. Do not restart sealed/completed work for convenience.'
+              printf '%s\n' 'completion_rule=Run your assigned reviewer process through its required terminal handoff/final-report state so the automation can launch the next reviewer automatically.'
+              printf '\n%s\n\n' '[SEALED_SUCCESSOR_WAKE_PACKET]'
+              cat /tmp/lite-successor-wake.txt
+            } > /tmp/lite-successor-wake-enveloped.txt
+            mv /tmp/lite-successor-wake-enveloped.txt /tmp/lite-successor-wake.txt
+
             if [ -n "$encoded_packet" ] && [ -s /tmp/lite-interphase-completion.json ] && [ -s /tmp/lite-interphase-work-packet.json ]; then
               reconciliation_output="$(jq -r '.reconciliationOutputPath // empty' /tmp/lite-interphase-work-packet.json)"
               verified_output_count="$(jq '.outputs | length' /tmp/lite-interphase-completion.json)"
@@ -544,6 +665,11 @@ jobs:
             if [ -n "$next_phase" ]; then next_phase="phase-$next_phase"; else next_phase="$next_id"; fi
             successor_wake_id="${campaign_id}-${next_id}-${GITHUB_RUN_ID}-${cycle}"
             wake_b64="$(base64 -w0 /tmp/lite-successor-wake.txt)"
+            browser_context_b64="$(jq -nc \
+              --arg routine 'audit-ultralite-reviewer-v1' \
+              --arg project "$project_name" \
+              --arg chat "$chat_name" \
+              '{routineId:$routine,projectName:$project,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
 
             echo "Lite machine gate PASS: $expected_milestone -> $next_id. Creating fresh normal ChatGPT web successor."
             gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
@@ -561,7 +687,8 @@ jobs:
               -f gate_state_path="$gate_path" \
               -f gate_expected_phase_id="$next_phase" \
               -f gate_expected_milestone_id="$next_id" \
-              -f gate_active_pointer_path="$pointer_path"
+              -f gate_active_pointer_path="$pointer_path" \
+              -f browser_context_b64="$browser_context_b64"
             return 0
           }
 
@@ -604,6 +731,14 @@ jobs:
                 printf '%s' "$encoded_state" | base64 -d > /tmp/canonical-campaign-state.json
 
                 if [ "$gate_mode" = "LITE" ]; then
+                  if check_reviewer_repair_request; then
+                    reason="$(jq -r '.reason' /tmp/reviewer-repair-request.json)"
+                    if dispatch_reviewer_repair "FILED_RESET_REQUEST: $reason"; then
+                      retire_state "REVIEWER_REPAIR_RESET_DISPATCHED_$gate_expected_milestone"
+                      exit 0
+                    fi
+                  fi
+
                   if [ "$worker_role" = "interphase_mechanical" ]; then
                     if verify_lite_interphase_completion "$gate_interphase_work_packet_path" "$gate_interphase_completion_path" "$gate_interphase_handoff_path" "$gate_expected_milestone" "$gate_repo" "$gate_ref"; then
                       echo "Inter-phase mechanical completion is machine-valid; launching the existing Lite successor path."
@@ -652,11 +787,6 @@ jobs:
 
                   case "$lite_worker_status" in
                     COMPLETE|COMPLETED|SEALED|PASS)
-                      if [ "$gate_expected_milestone" = "P8_10" ]; then
-                        echo "Final Lite milestone is sealed; retiring watchdog."
-                        retire_state "LITE_FINAL_MILESTONE_$lite_worker_status"
-                        exit 0
-                      fi
                       if launch_lite_successor "$gate_pointer_path" "$gate_expected_milestone" "$gate_repo" "$gate_ref"; then
                         retire_state "LITE_SUCCESSOR_DISPATCHED_$gate_expected_milestone"
                         exit 0
@@ -729,6 +859,51 @@ jobs:
             current_hash="$(jq -r '.lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
             previous_count="$(jq -r '.observation.assistantCount // 0' /tmp/watchdog-state.json)"
             previous_hash="$(jq -r '.observation.lastAssistantHash // empty' /tmp/watchdog-state.json)"
+            chat_viewable="$(jq -r '.chatViewable // false' "$WAKE_RESULT_PATH")"
+            conversation_unavailable="$(jq -r '.conversationUnavailable // false' "$WAKE_RESULT_PATH")"
+            human_challenge="$(jq -r '.humanChallenge // false' "$WAKE_RESULT_PATH")"
+            login_prompt="$(jq -r '.loginPrompt // false' "$WAKE_RESULT_PATH")"
+
+            if [ "$human_challenge" = true ]; then
+              echo "::warning::Watchdog runner hit a browser challenge; treating as infrastructure noise, not reviewer failure."
+              jq '.lastDecision="BROWSER_CHALLENGE_RETRY_LATER" | .lastObservationFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+              mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+              persist_state || true
+              continue
+            fi
+
+            if [ "$login_prompt" = true ]; then
+              echo "::warning::ChatGPT authentication is required; not replacing the reviewer because this is a shared session problem."
+              jq '.lastDecision="AUTH_REQUIRED" | .lastObservationFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+              mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+              persist_state || true
+              continue
+            fi
+
+            if [ "$conversation_unavailable" = true ]; then
+              if dispatch_reviewer_repair "CONVERSATION_UNAVAILABLE"; then
+                retire_state "REVIEWER_REPAIR_DISPATCHED_CONVERSATION_UNAVAILABLE"
+                exit 0
+              fi
+            fi
+
+            if [ "$chat_viewable" != true ]; then
+              unviewable_count="$(jq -r '(.repair.consecutiveUnviewable // 0) + 1' /tmp/watchdog-state.json)"
+              unviewable_threshold="$(jq -r '.repair.unviewableThreshold // 2' /tmp/watchdog-state.json)"
+              jq --argjson count "$unviewable_count" '.repair.consecutiveUnviewable=$count | .lastDecision="CHAT_UNVIEWABLE"' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+              mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+              persist_state || true
+              if [ "$unviewable_count" -ge "$unviewable_threshold" ]; then
+                if dispatch_reviewer_repair "CHAT_UNVIEWABLE_${unviewable_count}_OBSERVATIONS"; then
+                  retire_state "REVIEWER_REPAIR_DISPATCHED_CHAT_UNVIEWABLE"
+                  exit 0
+                fi
+              fi
+              continue
+            fi
+
+            jq '.repair.consecutiveUnviewable=0' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+            mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
 
             productive=false
             reason=''
@@ -746,9 +921,17 @@ jobs:
             if [ "$productive" = true ]; then
               echo "Watchdog $WAKE_ID: PRODUCTIVE ($reason); no interruption."
               jq --argjson count "$current_count" --arg hash "$current_hash" --arg reason "$reason" \
-                '.observation.assistantCount=$count | .observation.lastAssistantHash=$hash | .observation.observedAt=(now|todate) | .lastProductiveAt=(now|todate) | .lastDecision=("PRODUCTIVE_"+$reason)' \
+                '.observation.assistantCount=$count | .observation.lastAssistantHash=$hash | .observation.observedAt=(now|todate) | .lastProductiveAt=(now|todate) | .lastDecision=("PRODUCTIVE_"+$reason) | .repair.consecutiveIdlePokes=0' \
                 /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
             else
+              prior_idle_pokes="$(jq -r '.repair.consecutiveIdlePokes // 0' /tmp/watchdog-state.json)"
+              idle_threshold="$(jq -r '.repair.idlePokeThreshold // 3' /tmp/watchdog-state.json)"
+              if [ "$prior_idle_pokes" -ge "$idle_threshold" ]; then
+                if dispatch_reviewer_repair "IDLE_AFTER_${prior_idle_pokes}_WATCHDOG_POKES"; then
+                  retire_state "REVIEWER_REPAIR_DISPATCHED_PERSISTENT_IDLE"
+                  exit 0
+                fi
+              fi
               echo "Watchdog $WAKE_ID: IDLE; sending configured GET BACK TO WORK message."
               export WAKE_ACTION='wake'
               export WAKE_MESSAGE="$(jq -r '.idleMessage' /tmp/watchdog-state.json)"
@@ -757,7 +940,7 @@ jobs:
                 next_count="$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")"
                 next_hash="$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
                 jq --argjson count "$next_count" --arg hash "$next_hash" \
-                  '.observation.assistantCount=$count | .observation.lastAssistantHash=$hash | .observation.observedAt=(now|todate) | .lastPokedAt=(now|todate) | .pokeCount=((.pokeCount // 0)+1) | .lastDecision="IDLE_POKED"' \
+                  '.observation.assistantCount=$count | .observation.lastAssistantHash=$hash | .observation.observedAt=(now|todate) | .lastPokedAt=(now|todate) | .pokeCount=((.pokeCount // 0)+1) | .repair.consecutiveIdlePokes=((.repair.consecutiveIdlePokes // 0)+1) | .lastDecision="IDLE_POKED"' \
                   /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
               else
                 jq '.lastDecision="IDLE_POKE_FAILED" | .lastPokeFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json

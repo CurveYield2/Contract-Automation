@@ -59,9 +59,17 @@ function exercise(mutate = () => {}, launch = false) {
       output: files.output ?? output,
       pointer: JSON.stringify({
         completedMilestone: { id: 'P0_BOOTSTRAP', status: 'SEALED' },
-        nextMilestone: { id: 'P1', state: 'READY', phaseRange: ['1'] },
-        authoritativeHandoff: handoff
-      }), wake: 'Synthetic successor instructions\n' };
+        nextMilestone: { id: 'P1', state: 'READY', phaseRange: ['1'], reviewer: 'reviewer-1' },
+        authoritativeHandoff: handoff,
+        authoritativeHandoffIdentity: { contentCommit: '1111111111111111111111111111111111111111' }
+      }),
+      campaignState: JSON.stringify({
+        campaignId: 'synthetic',
+        title: 'Synthetic Audit',
+        skillAuthority: { current: { campaignPath: 'authority/Synthetic_Audit_skill_v1.zip' } },
+        routingPlan: { workers: [{ lineage: 'reviewer-1', milestone: 'P1', status: 'NOT_STARTED' }] }
+      }),
+      wake: 'Synthetic successor instructions\n' };
     for (const [name, value] of Object.entries(named)) fs.writeFileSync(path.join(temp, name), value);
     fs.writeFileSync(path.join(temp, 'state'), JSON.stringify({
       gate: { interphase: { workPacketSha256: files.pinnedSha ?? sha(packetBytes) } }
@@ -95,6 +103,7 @@ cycle=1
 gate_path=campaigns/synthetic/state.json
 gate_expected_phase=phase-0
 cp "$FIXTURE_DIR/state" /tmp/watchdog-state.json
+cp "$FIXTURE_DIR/campaignState" /tmp/canonical-campaign-state.json
 `;
     const command = script + functions + (launch === 'mechanical'
       ? String.raw`
@@ -135,6 +144,16 @@ test('sealed P0 synthetic packet validates and dispatches one successor with ver
   assert.ok(encoded, dispatched);
   const message = Buffer.from(encoded, 'base64').toString('utf8');
   assert.match(message, /Synthetic successor instructions/);
+  assert.match(message, /\[AUDIT_REVIEWER_ROUTINE_V1\]/);
+  assert.match(message, /reviewer=reviewer-1/);
+  assert.match(message, /latest_audit_skill_url=https:\/\/github\.com\/CurveYield2\/Audit-Controller\/blob\/main\/campaigns\/synthetic\/authority\/Synthetic_Audit_skill_v1\.zip/);
+  const browserContextEncoded = dispatched.match(/browser_context_b64=([A-Za-z0-9+/=]+)/)?.[1];
+  assert.ok(browserContextEncoded, dispatched);
+  const browserContext = JSON.parse(Buffer.from(browserContextEncoded, 'base64').toString('utf8'));
+  assert.equal(browserContext.routineId, 'audit-ultralite-reviewer-v1');
+  assert.equal(browserContext.projectName, 'Synthetic Audit');
+  assert.equal(browserContext.chatName, 'Synthetic Audit reviewer-1');
+  assert.equal(browserContext.repair.enabled, true);
   assert.match(message, /\[VERIFIED_INTERPHASE_MECHANICAL_RESULTS_V2\]/);
   assert.match(message, /work_packet=.*MECHANICAL_WORK_PACKET_v2\.json/);
   assert.match(message, /completion_receipt=.*MECHANICAL_WORK_COMPLETION_v2\.json/);
