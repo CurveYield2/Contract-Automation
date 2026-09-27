@@ -473,6 +473,65 @@ jobs:
             -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN \
             -f browser_context_b64="$browser_context_b64"
 
+      - name: Send one-time repair context after sealed wake
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRATION: ${{ steps.context.outputs.registration }}
+          REVIEWER: ${{ steps.context.outputs.reviewer }}
+          MILESTONE: ${{ steps.context.outputs.milestone }}
+          PHASE_START: ${{ steps.context.outputs.phase_start }}
+          GATE_REPO: ${{ steps.context.outputs.gate_repo }}
+          GATE_REF: ${{ steps.context.outputs.gate_ref }}
+          STATE_PATH: ${{ steps.context.outputs.state_path }}
+          POINTER_PATH: ${{ steps.context.outputs.pointer_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="repos/$GITHUB_REPOSITORY/contents/$REGISTRATION"
+          chat_url=""
+          for attempt in $(seq 1 24); do
+            encoded="$(gh api "$api?ref=main" --jq '.content' 2>/dev/null || true)"
+            if [ -n "$encoded" ]; then
+              printf '%s' "$encoded" | base64 -d > /tmp/repaired-registration.json
+              bound_milestone="$(jq -r '.activeAssignment.milestoneId // empty' /tmp/repaired-registration.json)"
+              candidate="$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/repaired-registration.json)"
+              if [ "$bound_milestone" = "$MILESTONE" ] && [[ "$candidate" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+ ]]; then
+                chat_url="$candidate"
+                break
+              fi
+            fi
+            sleep 5
+          done
+          [ -n "$chat_url" ] || { echo "::error::Replacement reviewer chat was not durably bound; repair notice not sent."; exit 1; }
+
+          phase_id="phase-$PHASE_START"
+          cat > /tmp/repair-notice.txt <<EOF
+          [CURVEYIELD_REPAIR_WORKER_CONTEXT_V1]
+          You are a repair/replacement worker taking over for the previous $REVIEWER agent, which terminated in the middle of this same assigned task.
+          Resume this exact reviewer assignment from the latest durable campaign state at $phase_id. Do not restart or overwrite completed work. Recover the exact point reached by the previous agent, complete all remaining work required by the original WAKE_UP_MESSAGE.md, and carry this reviewer assignment to its required terminal boundary.
+          EOF
+
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$CAMPAIGN_ID-$MILESTONE-$REVIEWER-repair-context" \
+            -f campaign_id="$CAMPAIGN_ID" \
+            -f phase_id="$phase_id" \
+            -f mode=resume_existing \
+            -f message_purpose=repair_notice \
+            -f chat_url="$chat_url" \
+            -f wake_message_b64="$(base64 -w0 /tmp/repair-notice.txt)" \
+            -f watchdog_enabled=false \
+            -f worker_role=reviewer \
+            -f watchdog_message_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)" \
+            -f gate_mode=LITE \
+            -f gate_repository="$GATE_REPO" \
+            -f gate_ref="$GATE_REF" \
+            -f gate_state_path="$STATE_PATH" \
+            -f gate_expected_phase_id="$phase_id" \
+            -f gate_expected_milestone_id="$MILESTONE" \
+            -f gate_active_pointer_path="$POINTER_PATH" \
+            -f gate_stop_states_csv=STOPPED_BY_HUMAN \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
+
       - name: Summarize reviewer repair
         shell: bash
         run: |
