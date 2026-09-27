@@ -124,8 +124,8 @@ test('browser runtime classifies only pre-post UI failures as fresh-runner retry
 test('wake workflow retries retryable browser failures on a bounded fresh runner and gates all durable follow-ons', () => {
   const workflow = read('.github/workflows/browser-agent-wake.yml');
   assert.match(workflow, /runner_retry_attempt:[\s\S]*default:\s*'0'/);
-  assert.match(workflow, /runner_retry_max:[\s\S]*default:\s*'3'/);
-  assert.match(workflow, /if \[ "\$max" -gt 5 \]; then max=5; fi/);
+  assert.doesNotMatch(workflow, /runner_retry_max:/);
+  assert.match(workflow, /max=3/);
   assert.match(workflow, /select\(\.provider=="github-playwright" and \.retryable==true\)/);
   assert.match(workflow, /gh workflow run browser-agent-wake\.yml/);
   assert.match(workflow, /--json/);
