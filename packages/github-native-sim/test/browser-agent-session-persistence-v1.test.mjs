@@ -78,6 +78,21 @@ test('session-state encryption requires an exact 32-byte key', async () => {
   });
 });
 
+
+test('invalid rolling-cache key cannot suppress the bootstrap fallback path', async () => {
+  await withTempFile(async (encryptedSessionPath) => {
+    const warnings = [];
+    const restored = await loadEncryptedSessionState({
+      encryptedSessionPath,
+      keyB64: Buffer.alloc(16).toString('base64'),
+      logger: { warn: (message) => warnings.push(message) },
+    });
+    assert.equal(restored, null);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /falling back to bootstrap state/);
+  });
+});
+
 test('wake and watchdog restore rolling encrypted state and save only refreshed generations', async () => {
   for (const relative of [
     '.github/workflows/browser-agent-wake.yml',
