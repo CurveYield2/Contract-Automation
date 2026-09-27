@@ -101,6 +101,7 @@ jobs:
       WAKE_MODE: ${{ inputs.mode }}
       CHAT_URL: ${{ inputs.chat_url }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      CHATGPT_LOGIN_EMAIL: ${{ secrets.CHATGPT_LOGIN_EMAIL }}
       BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
       BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
       BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
