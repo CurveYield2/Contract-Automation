@@ -433,8 +433,9 @@ jobs:
             [ "$worker_role" = "reviewer" ] || return 1
             [ "$gate_mode" = "LITE" ] || return 1
             [ -n "$gate_expected_milestone" ] || return 1
-            [ "$gate_expected_milestone" != "P0_BOOTSTRAP" ] || return 1
 
+            # P0_BOOTSTRAP is repairable: the repair workflow has a dedicated
+            # resume-from-durable-state path that does not require a predecessor handoff.
             echo "Dispatching replacement reviewer for $campaign_id / $gate_expected_milestone: $reason"
             gh workflow run browser-agent-reviewer-repair-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
               -f campaign_id="$campaign_id" \
