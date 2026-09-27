@@ -101,6 +101,9 @@ jobs:
       WAKE_MODE: ${{ inputs.mode }}
       CHAT_URL: ${{ inputs.chat_url }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
+      CHATGPT_SESSION_STATE_PATH: ${{ runner.temp }}/curveyield-browser-agent/session-state-v1.enc.json
+      CHATGPT_SESSION_STATE_UPDATED_MARKER: ${{ runner.temp }}/curveyield-browser-agent/session-state-updated
       BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
       BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
       BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
@@ -119,6 +122,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Restore encrypted ChatGPT session state
+        id: restore-chatgpt-session
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.wake_id }}
+          restore-keys: |
+            chatgpt-session-state-v1-
 
       - name: Set up isolated browser-agent runtime
         uses: ./.github/actions/setup-browser-agent-runtime
@@ -150,6 +162,24 @@ jobs:
           echo "provider=$(jq -r '.provider // empty' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
           echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
           echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Detect refreshed encrypted ChatGPT session state
+        id: refreshed-chatgpt-session
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -s "$CHATGPT_SESSION_STATE_UPDATED_MARKER" ] && [ -s "$CHATGPT_SESSION_STATE_PATH" ]; then
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save refreshed encrypted ChatGPT session state
+        if: steps.refreshed-chatgpt-session.outputs.updated == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.wake_id }}
 
       - name: Create watchdog state
         if: ${{ inputs.watchdog_enabled }}
