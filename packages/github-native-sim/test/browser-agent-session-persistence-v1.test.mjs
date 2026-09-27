@@ -1,0 +1,108 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  loadEncryptedSessionState,
+  saveEncryptedSessionState,
+} from '../../../scripts/browser-session-state-v1.mjs';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, '../../..');
+
+async function withTempFile(fn) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'browser-session-state-'));
+  try {
+    await fn(path.join(dir, 'session-state-v1.enc.json'));
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('encrypted ChatGPT session state round-trips without plaintext browser state', async () => {
+  await withTempFile(async (encryptedSessionPath) => {
+    const keyB64 = crypto.randomBytes(32).toString('base64');
+    const storage = {
+      cookies: [{ name: 'session-cookie', value: 'sensitive-cookie-value', domain: '.chatgpt.com', path: '/' }],
+      origins: [{ origin: 'https://chatgpt.com', localStorage: [{ name: 'session', value: 'sensitive-local-state' }] }],
+    };
+
+    assert.equal(await saveEncryptedSessionState({ encryptedSessionPath, keyB64, storage }), true);
+    const ciphertext = await fs.readFile(encryptedSessionPath, 'utf8');
+    assert.doesNotMatch(ciphertext, /sensitive-cookie-value/);
+    assert.doesNotMatch(ciphertext, /sensitive-local-state/);
+
+    const restored = await loadEncryptedSessionState({ encryptedSessionPath, keyB64 });
+    assert.deepEqual(restored, storage);
+  });
+});
+
+test('tampered encrypted ChatGPT session state fails authenticated decryption and is ignored', async () => {
+  await withTempFile(async (encryptedSessionPath) => {
+    const keyB64 = crypto.randomBytes(32).toString('base64');
+    const storage = { cookies: [], origins: [] };
+    await saveEncryptedSessionState({ encryptedSessionPath, keyB64, storage });
+
+    const envelope = JSON.parse(await fs.readFile(encryptedSessionPath, 'utf8'));
+    const bytes = Buffer.from(envelope.ciphertext, 'base64');
+    bytes[0] ^= 0x01;
+    envelope.ciphertext = bytes.toString('base64');
+    await fs.writeFile(encryptedSessionPath, JSON.stringify(envelope));
+
+    const warnings = [];
+    const restored = await loadEncryptedSessionState({
+      encryptedSessionPath,
+      keyB64,
+      logger: { warn: (message) => warnings.push(message) },
+    });
+    assert.equal(restored, null);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /authenticated decryption/);
+  });
+});
+
+test('session-state encryption requires an exact 32-byte key', async () => {
+  await withTempFile(async (encryptedSessionPath) => {
+    await assert.rejects(
+      saveEncryptedSessionState({
+        encryptedSessionPath,
+        keyB64: Buffer.alloc(16).toString('base64'),
+        storage: { cookies: [], origins: [] },
+      }),
+      /exactly 32 bytes/
+    );
+  });
+});
+
+test('wake and watchdog restore rolling encrypted state and save only refreshed generations', async () => {
+  for (const relative of [
+    '.github/workflows/browser-agent-wake.yml',
+    '.github/workflows/browser-agent-watchdog.yml',
+  ]) {
+    const workflow = await fs.readFile(path.join(root, relative), 'utf8');
+    assert.match(workflow, /CHATGPT_SESSION_STATE_KEY_B64/);
+    assert.match(workflow, /actions\/cache\/restore@v4/);
+    assert.match(workflow, /actions\/cache\/save@v4/);
+    assert.match(workflow, /chatgpt-session-state-v1-/);
+    assert.match(workflow, /restore-keys:[\s\S]*chatgpt-session-state-v1-/);
+    assert.match(workflow, /session-state-v1\.enc\.json/);
+    assert.match(workflow, /session-state-updated/);
+    assert.match(workflow, /outputs\.updated == 'true'/);
+  }
+});
+
+test('GitHub Playwright prefers encrypted rolling state, keeps bootstrap fallback, and persists only healthy authenticated state', async () => {
+  const source = await fs.readFile(path.join(root, 'scripts/browser-agent-wake.mjs'), 'utf8');
+  const cacheLoad = source.indexOf('loadEncryptedSessionState({');
+  const bootstrapLoad = source.indexOf('CHATGPT_STORAGE_STATE_B64');
+  assert.ok(cacheLoad >= 0);
+  assert.ok(bootstrapLoad > cacheLoad);
+  assert.match(source, /providerName !== 'github-playwright'/);
+  assert.match(source, /state\?\.composerVisible/);
+  assert.match(source, /chatgpt\\\.com/);
+  assert.match(source, /saveEncryptedSessionState\(/);
+  assert.match(source, /CHATGPT_SESSION_STATE_UPDATED_MARKER/);
+});
