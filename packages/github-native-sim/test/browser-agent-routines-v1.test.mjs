@@ -78,6 +78,12 @@ test('failed non-infrastructure idle pokes consume the escalation budget and can
   assert.match(workflow, /IDLE_POKE_INFRA_RETRY_LATER/);
 });
 
+test('source-fanout rich Phase-0 envelope remains inside the YAML run block', () => {
+  const workflow = read('.github/workflows/agent-zip-import-v1.yml');
+  assert.doesNotMatch(workflow, /^\[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1\]/m);
+  assert.match(workflow, /printf '%s\\n' '\[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1\]'/);
+});
+
 test('source fanout launches Phase-0 with the canonical rich Ultralite bootstrap envelope', () => {
   const workflow = read('.github/workflows/agent-zip-import-v1.yml');
   assert.match(workflow, /\[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1\]/);
