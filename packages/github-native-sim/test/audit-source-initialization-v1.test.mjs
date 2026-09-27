@@ -13,8 +13,7 @@ const state = fs.readFileSync(path.join(root, 'scripts/audit-source-initializati
 const request = JSON.parse(fs.readFileSync(path.join(root, 'process/audit-source-initialization/REQUEST_TEMPLATE_v1.json'), 'utf8'));
 
 test('Audit Source Initialization accepts only source_url as request payload', () => {
-  assert.equal(request.schema, 'curveyield-audit-source-initialization/v1');
-  assert.equal(Object.keys(request).length, 2);
+  assert.deepEqual(Object.keys(request), ['source_url']);
   assert.equal(typeof request.source_url, 'string');
   assert.match(workflow, /source_url:/);
   assert.doesNotMatch(workflow, /campaign_id:\n\s+description:/);
