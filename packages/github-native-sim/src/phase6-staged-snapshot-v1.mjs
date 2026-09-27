@@ -103,6 +103,8 @@ export async function stagePhase6Snapshot(request, {
       archiveSha256: stagedArchive.archiveSha256,
       archiveExtractedBytes: stagedArchive.extractedBytes,
       archiveEntryCount: stagedArchive.entryCount,
+      archiveExtractionRoot: stagedArchive.extractionRoot,
+      projectRelativeToArchive: path.relative(stagedArchive.extractionRoot, projectRoot).split(path.sep).join('/'),
     } : {}),
   };
 }
@@ -111,7 +113,8 @@ export async function copyPhase6SnapshotForExecution(snapshot, { workspaceRoot }
   const executionRoot = path.join(workspaceRoot, 'phase6-execution-copy');
   await fs.rm(executionRoot, { recursive: true, force: true });
   await fs.mkdir(path.dirname(executionRoot), { recursive: true });
-  await fs.cp(snapshot.projectRoot, executionRoot, {
+  const copyRoot = snapshot.archiveExtractionRoot ?? snapshot.projectRoot;
+  await fs.cp(copyRoot, executionRoot, {
     recursive: true,
     preserveTimestamps: true,
     filter: (source) => {
@@ -119,7 +122,10 @@ export async function copyPhase6SnapshotForExecution(snapshot, { workspaceRoot }
       return base !== '.git' && base !== 'node_modules';
     },
   });
-  const copied = await digestDirectory(executionRoot);
+  const executionProjectRoot = snapshot.archiveExtractionRoot
+    ? safeRepositoryProjectPath(executionRoot, snapshot.projectRelativeToArchive)
+    : executionRoot;
+  const copied = await digestDirectory(executionProjectRoot);
   if (copied.digestSha256 !== snapshot.snapshotDigestSha256) {
     const error = new Error('Phase 6 execution copy digest does not match the preflight snapshot');
     error.kind = 'PHASE6_SNAPSHOT_INTEGRITY_FAILURE';
@@ -127,7 +133,7 @@ export async function copyPhase6SnapshotForExecution(snapshot, { workspaceRoot }
   }
   return {
     commit: snapshot.commit,
-    projectRoot: executionRoot,
+    projectRoot: executionProjectRoot,
     snapshotDigestSha256: copied.digestSha256,
     snapshotFileCount: copied.fileCount,
     snapshotBytes: copied.totalBytes,
