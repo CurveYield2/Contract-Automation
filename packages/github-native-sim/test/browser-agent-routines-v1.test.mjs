@@ -85,15 +85,14 @@ test('technical execution callbacks never create a reviewer and only poke the ex
   assert.doesNotMatch(workflow, /\[AUDIT_AUTOMATION_WAKE_V1\]/);
 });
 
-test('successor and reviewer-repair wakes state the semantic phase explicitly', () => {
+test('successor phase comes from canonical pointer and repair phase comes from current campaign state', () => {
   const watchdog = read('.github/workflows/browser-agent-watchdog.yml');
   const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
-  assert.match(watchdog, /printf 'phase=%s\\n' "\$next_phase"/);
-  assert.match(watchdog, /reasoning_effort=high/);
-  assert.match(repair, /phase_start="\$\(jq -r '\.nextMilestone\.phaseRange\[0\] \/\/ empty'/);
-  assert.match(repair, /if \[ -z "\$phase_start" \] && \[\[ "\$gate_expected_phase" =~ \^phase-/);
-  assert.match(repair, /printf 'phase=phase-%s\\n' "\$PHASE_START"/);
-  assert.match(repair, /reasoning_effort=high/);
+  assert.match(watchdog, /next_phase="\$\(jq -r '\.nextPhaseId \/\/ empty'/);
+  assert.match(watchdog, /\[\[ "\$next_phase" =~ \^phase-\[0-9\]\+\$ \]\]/);
+  assert.match(repair, /current_phase_id="\$\(jq -r '\.phase\.id \/\/ empty'/);
+  assert.match(repair, /phase_start="\$\{BASH_REMATCH\[1\]\}"/);
+  assert.doesNotMatch(repair, /nextMilestone\.phaseRange/);
 });
 
 test('long Phase-0 wake submission accepts independent UI proof instead of one exact rendered text node', () => {
@@ -172,15 +171,17 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.match(workflow, /activeChat=.*chatName/);
 });
 
-test('ultralite entry workflow starts Phase 0 in normal web chat and defers project creation to the first successor', () => {
+test('ultralite entry workflow binds the exact canonical campaign before the one Phase-0 launch', () => {
   const workflow = read('.github/workflows/ultralite-audit-browser-orchestrator-v1.yml');
-  assert.match(workflow, /ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1/);
-  assert.match(workflow, /NORMAL_CHATGPT_WEB_CHAT; do not use Work/);
-  assert.match(workflow, /Use the GitHub connector app/);
-  assert.match(workflow, /Execute Phase 0 to completion/);
-  assert.match(workflow, /create\/reuse the campaign ChatGPT Project and launch the next reviewer automatically/);
-  assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
-  assert.match(workflow, /-f gate_expected_milestone_id=P0_BOOTSTRAP/);
+  assert.match(workflow, /Bind exact canonical campaign/);
+  assert.match(workflow, /campaign_id does not match canonical campaign state/);
+  assert.match(workflow, /Campaign is not Ultralite/);
+  assert.match(workflow, /CURVEYIELD_ULTRALITE_REVIEWER_LAUNCH_V2/);
+  assert.match(workflow, /current_phase=phase-0/);
+  assert.match(workflow, /authoritative_skill_folder=/);
+  assert.match(workflow, /follow its Ultralite pathway precisely with no deviation/);
+  assert.match(workflow, /wake_id="\$CAMPAIGN_ID-P0_BOOTSTRAP-web-bootstrap-agent"/);
+  assert.match(workflow, /gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN/);
 });
 
 test('source fanout is evidence-only and cannot race the campaign orchestrator', () => {
@@ -190,16 +191,14 @@ test('source fanout is evidence-only and cannot race the campaign orchestrator',
   assert.doesNotMatch(workflow, /wake_id=.*phase0-source-fanout/);
 });
 
-test('Phase-0 reviewer repair resumes from durable bootstrap state without requiring a predecessor handoff', () => {
+test('Phase-0 repair remains a special bootstrap replacement without a predecessor handoff', () => {
   const workflow = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
   assert.match(workflow, /phase0_bootstrap=false/);
   assert.match(workflow, /gate_expected_phase.*phase-0/);
   assert.match(workflow, /gate_expected_milestone.*P0_BOOTSTRAP/);
   assert.match(workflow, /reviewer=.*web-bootstrap-agent/);
   assert.match(workflow, /P0_BOOTSTRAP has no predecessor handoff baseline/);
-  assert.match(workflow, /AUDIT_PHASE0_BOOTSTRAP_REPLACEMENT_V1/);
-  assert.match(workflow, /NORMAL_CHATGPT_WEB_CHAT_OUTSIDE_CAMPAIGN_PROJECT/);
-  assert.match(workflow, /Do not repeat completed source fan-out/);
+  assert.match(workflow, /CURVEYIELD_ULTRALITE_PHASE0_REPLACEMENT_V2/);
   assert.match(workflow, /routineId:"",projectName:""/);
 });
 
@@ -264,10 +263,12 @@ test('repair targets current reviewer and reuses its sealed wake instead of next
   assert.match(repair, /WAKE_UP_MESSAGE\.md/);
   assert.match(repair, /base64 -d > \/tmp\/replacement-wake\.txt/);
   assert.match(repair, /Clear confirmed dead reviewer chat binding/);
+  assert.match(repair, /Send one-time repair context after sealed wake/);
+  assert.match(repair, /message_purpose=repair_notice/);
   assert.doesNotMatch(repair, /reviewer="\$\(jq -r '\.nextMilestone\.reviewer/);
 });
 
-test('reviewer repair workflow resumes first and only resets to an exact handoff baseline under admitted conditions', () => {
+test('reviewer repair resets only from an admitted exact handoff baseline and then reuses the sealed wake', () => {
   const workflow = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
   assert.match(workflow, /options: \[auto, resume_preferred, reset_to_handoff\]/);
   assert.match(workflow, /repair_request_valid=false/);
@@ -276,19 +277,13 @@ test('reviewer repair workflow resumes first and only resets to an exact handoff
   assert.match(workflow, /git rm -r --ignore-unmatch -- "\$CAMPAIGN_ROOT"/);
   assert.match(workflow, /git checkout "\$BASELINE_COMMIT" -- "\$CAMPAIGN_ROOT"/);
   assert.match(workflow, /for rel in source authority/);
-  assert.match(workflow, /SKILL_AUTHORITY/);
   assert.match(workflow, /REVIEWER_REPAIR_RESET_v1\.json/);
-  assert.match(workflow, /do not delete or reset them yourself/);
-  assert.match(workflow, /browser_context_b64="\$\(jq -nc/);
+  assert.match(workflow, /WAKE_UP_MESSAGE\.md/);
+  assert.match(workflow, /Clear confirmed dead reviewer chat binding/);
+  assert.match(workflow, /Send one-time repair context after sealed wake/);
+  assert.match(workflow, /message_purpose=repair_notice/);
+  assert.match(workflow, /terminated in the middle of this same assigned task/);
   assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
-  assert.ok(workflow.includes('audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json'));
-  assert.match(workflow, /skill_authority_source="CAMPAIGN_BOUND"/);
-  assert.match(workflow, /skill_authority_source="LITE_PRIMARY_DEFAULT"/);
-  assert.match(workflow, /skill_authority_source="LEGACY_NEWEST_ZIP_FALLBACK"/);
-  assert.match(workflow, /observed_blob_sha/);
-  assert.match(workflow, /audit_skill_url=%s/);
-  assert.match(workflow, /audit_skill_authority_source=%s/);
-  assert.doesNotMatch(workflow, /latest_audit_skill_url=/);
 });
 
 test('reviewer repair request schema is exact and reset-only', () => {
