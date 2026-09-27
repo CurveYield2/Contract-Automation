@@ -321,17 +321,67 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${SKILL_PACKAGE_PATH:-}" ]; then
+          resolved_skill_path="${SKILL_PACKAGE_PATH:-}"
+          resolved_skill_sha=""
+
+          if [ -z "$resolved_skill_path" ]; then
+            resolution="$(node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          const controllerRoot='.controller-operation';
+          const request=JSON.parse(fs.readFileSync(path.join(controllerRoot, process.env.AUDIT_CONTROLLER_REQUEST_PATH),'utf8'));
+          if(request.operation!=='PROJECT_CURRENT_STATE' || typeof request.campaignPath!=='string' || !request.campaignPath){
+            process.exit(0);
+          }
+          const controllerDir=path.join(controllerRoot,request.campaignPath,'controller');
+          const states=fs.existsSync(controllerDir)
+            ? fs.readdirSync(controllerDir).filter((n)=>/^CAMPAIGN_STATE_.*\.json$/i.test(n))
+            : [];
+          states.sort((a,b)=>Number(a.match(/_v(\d+)/i)?.[1]??-1)-Number(b.match(/_v(\d+)/i)?.[1]??-1)||a.localeCompare(b));
+          const state=states.length?JSON.parse(fs.readFileSync(path.join(controllerDir,states.at(-1)),'utf8')):{};
+          const bound=state?.skillAuthority?.current??null;
+          let skillPath='', expectedSha='';
+          if(bound?.campaignPath){
+            skillPath=bound.campaignPath.startsWith('campaigns/')
+              ? bound.campaignPath
+              : request.campaignPath.replace(/\/+$/,'')+'/'+bound.campaignPath;
+            expectedSha=bound.sha256??'';
+          } else {
+            const pointerPath=path.join(controllerRoot,'audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json');
+            if(fs.existsSync(pointerPath)){
+              const pointer=JSON.parse(fs.readFileSync(pointerPath,'utf8'));
+              if(pointer.schemaVersion==='audit-v7-lite-primary-skill-authority-v1' && pointer.status==='ACTIVE'){
+                skillPath=pointer.packagePath??'';
+                expectedSha=pointer.sha256??'';
+              }
+            }
+          }
+          if(skillPath) process.stdout.write(JSON.stringify({skillPath,expectedSha}));
+          NODE
+            )"
+            if [ -n "$resolution" ]; then
+              resolved_skill_path="$(printf '%s' "$resolution" | jq -r '.skillPath // empty')"
+              resolved_skill_sha="$(printf '%s' "$resolution" | jq -r '.expectedSha // empty')"
+            fi
+          fi
+
+          if [ -z "$resolved_skill_path" ]; then
             echo "SKILL_ROOT=.controller-operation" >> "$GITHUB_ENV"
             exit 0
           fi
-          skill_zip=".controller-operation/$SKILL_PACKAGE_PATH"
+
+          skill_zip=".controller-operation/$resolved_skill_path"
           test -f "$skill_zip"
-          expected_skill_sha="$(node -e "const r=require('./.controller-operation/' + process.env.AUDIT_CONTROLLER_REQUEST_PATH); process.stdout.write(r.expectedSkillSha256 || '')")"
+          request_expected_sha="$(node -e "const r=require('./.controller-operation/' + process.env.AUDIT_CONTROLLER_REQUEST_PATH); process.stdout.write(r.expectedSkillSha256 || '')")"
+          expected_skill_sha="$request_expected_sha"
+          if [ -z "$expected_skill_sha" ]; then expected_skill_sha="$resolved_skill_sha"; fi
           if [ -n "$expected_skill_sha" ]; then
+            [[ "$expected_skill_sha" =~ ^[0-9a-f]{64}$ ]]
             observed_skill_sha="$(sha256sum "$skill_zip" | awk '{print $1}')"
             test "$observed_skill_sha" = "$expected_skill_sha"
           fi
+          echo "SKILL_PACKAGE_PATH=$resolved_skill_path" >> "$GITHUB_ENV"
           rm -rf .audit-skill
           mkdir -p .audit-skill
           unzip -q "$skill_zip" -d .audit-skill

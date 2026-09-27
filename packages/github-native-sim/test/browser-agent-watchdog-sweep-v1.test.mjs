@@ -40,6 +40,18 @@ test('scheduled sweep preserves canonical gate and successor behavior', () => {
   assert.match(watchdog, /Set up isolated browser-agent runtime/);
 });
 
+test('Lite successor skill resolution follows authority precedence and verifies the global pointer blob', () => {
+  assert.match(watchdog, /skillAuthority\.current\.campaignPath/);
+  assert.match(watchdog, /audit-process\/v7\/LITE_PRIMARY_SKILL_AUTHORITY_v1\.json/);
+  assert.match(watchdog, /gitBlobSha/);
+  assert.match(watchdog, /observed_blob_sha/);
+  assert.match(watchdog, /CAMPAIGN_BOUND/);
+  assert.match(watchdog, /LITE_PRIMARY_DEFAULT/);
+  assert.match(watchdog, /LEGACY_NEWEST_ZIP_FALLBACK/);
+  assert.match(watchdog, /audit_skill_authority_source=/);
+  assert.doesNotMatch(watchdog, /latest_audit_skill_url=/);
+});
+
 test('no parallel watchdog workflow is introduced', () => {
   const workflows = fs.readdirSync(path.join(root, '.github/workflows'));
   assert.equal(
