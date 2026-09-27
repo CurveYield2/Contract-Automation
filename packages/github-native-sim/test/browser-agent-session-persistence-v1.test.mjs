@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  deriveSessionStateKeyB64,
   loadEncryptedSessionState,
   saveEncryptedSessionState,
 } from '../../../scripts/browser-session-state-v1.mjs';
@@ -39,6 +40,23 @@ test('encrypted ChatGPT session state round-trips without plaintext browser stat
     const restored = await loadEncryptedSessionState({ encryptedSessionPath, keyB64 });
     assert.deepEqual(restored, storage);
   });
+});
+
+test('session cache can derive a stable 32-byte encryption key from the existing bootstrap state', () => {
+  const bootstrapStateB64 = Buffer.from(JSON.stringify({ cookies: [{ value: 'high-entropy-session-token' }], origins: [] })).toString('base64');
+  const derivedA = deriveSessionStateKeyB64({ bootstrapStateB64 });
+  const derivedB = deriveSessionStateKeyB64({ bootstrapStateB64 });
+  assert.equal(derivedA, derivedB);
+  assert.equal(Buffer.from(derivedA, 'base64').length, 32);
+  assert.notEqual(derivedA, bootstrapStateB64);
+});
+
+test('an explicit session-cache key overrides bootstrap-derived keying', () => {
+  const explicit = crypto.randomBytes(32).toString('base64');
+  assert.equal(
+    deriveSessionStateKeyB64({ keyB64: explicit, bootstrapStateB64: 'bootstrap-value' }),
+    explicit
+  );
 });
 
 test('tampered encrypted ChatGPT session state fails authenticated decryption and is ignored', async () => {
@@ -121,6 +139,9 @@ test('GitHub Playwright prefers encrypted rolling state, keeps bootstrap fallbac
   assert.match(source, /state\?\.composerVisible/);
   assert.match(source, /chatgpt\\\.com/);
   assert.match(source, /saveEncryptedSessionState\(/);
+  assert.match(source, /deriveSessionStateKeyB64\(\{/);
+  assert.match(source, /bootstrapStateB64:\s*env\.CHATGPT_STORAGE_STATE_B64/);
+  assert.match(source, /context\.storageState\(\{ indexedDB: true, opfs: true \}\)/);
   assert.match(source, /CHATGPT_SESSION_STATE_UPDATED_MARKER/);
 });
 
