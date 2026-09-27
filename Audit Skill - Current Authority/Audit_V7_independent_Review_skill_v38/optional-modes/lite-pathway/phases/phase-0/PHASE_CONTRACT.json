@@ -36,7 +36,7 @@
     {
       "step": 1,
       "action": "Initialize or bind the exact Lite campaign and source",
-      "instruction": "For a fresh campaign, provide only the direct single-file ZIP URL to Audit Source Initialization. The workflow MUST derive filename/hash/size/slug, allocate the next rN campaign and g1 generation, create the campaign/source folders, retain the ZIP, safely unpack it into the same source folder, bind Git blob/admission commit/source fence, create initial campaign state and active pointer, publish the active registry entry, and arm the Lite monitor. Repeated source submissions create a new rN; exact workflow retries are idempotent. Existing campaigns are bound from durable controller state.",
+      "instruction": "For a fresh campaign, provide only the direct single-file ZIP URL to Audit Source Initialization. The workflow MUST derive filename/hash/size/slug, allocate the next rN campaign and g1 generation, create the campaign/source folders, retain the ZIP, safely unpack it into the same source folder, bind Git blob/admission commit/source fence, create initial campaign state and active pointer, publish the active registry entry, merge the initialized campaign into Audit-Controller main, and arm the Lite monitor. Repeated source submissions create a new rN; exact workflow retries are idempotent. Existing campaigns are bound from durable controller state.",
       "requirement": "MANDATORY",
       "condition": null,
       "resources": [

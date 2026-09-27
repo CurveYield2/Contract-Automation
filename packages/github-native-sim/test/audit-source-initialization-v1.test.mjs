@@ -53,14 +53,18 @@ test('campaign source folder contains retained ZIP plus safely unpacked source',
   assert.match(extract, /embedded \.git path forbidden/);
 });
 
-test('workflow writes initial controller state and active pointer on Audit-Controller main', () => {
+test('workflow writes initial controller state and merges the initialized campaign into Audit-Controller main', () => {
   assert.match(state, /CAMPAIGN_STATE_v1\.json/);
   assert.match(state, /ACTIVE_PHASE_POINTER_v1\.json/);
   assert.match(state, /SOLO_AUDIT_STATE_v1\.json/);
   assert.match(state, /sourceFenceStatus/);
   assert.match(state, /"BOUND"/);
   assert.match(state, /ACTIVE_PATH/);
-  assert.match(run, /git push origin HEAD:main/);
+  assert.match(run, /git push origin HEAD:"\$init_branch"/);
+  assert.match(run, /gh pr create --repo CurveYield2\/Audit-Controller/);
+  assert.match(run, /pulls\/\$pr_number\/merge/);
+  assert.match(run, /merge_method=merge/);
+  assert.doesNotMatch(run, /git push origin HEAD:main/);
 });
 
 test('workflow arms the existing Lite browser orchestrator after initialization', () => {
