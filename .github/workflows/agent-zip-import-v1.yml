@@ -444,7 +444,7 @@ jobs:
             gh api --method PUT "$api" -f message="$report_message $REQUEST_ID" -f content="$content" -f branch=main >/dev/null
           fi
 
-      - name: Arm canonical Ultralite campaign monitor after source fan-out
+      - name: Arm canonical Lite campaign monitor after source fan-out
         if: steps.meta.outputs.mode == 'audit_source_fanout'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -482,7 +482,7 @@ jobs:
           # Source fan-out does not create a ChatGPT reviewer. It activates the
           # one campaign-level orchestrator, whose Phase-0 behavior is state-only
           # monitoring until the existing bootstrap agent seals P0_TO_P1.
-          gh workflow run ultralite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+          gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f campaign_id="$CAMPAIGN_ID" \
             -f campaign_name="$AUDIT_NAME" \
             -f campaign_path="$campaign_path" \
