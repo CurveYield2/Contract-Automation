@@ -52,6 +52,12 @@ test('Lite successor skill resolution follows authority precedence and verifies 
   assert.doesNotMatch(watchdog, /latest_audit_skill_url=/);
 });
 
+test('Lite watchdog does not equate phase closure with campaign completion', () => {
+  assert.match(watchdog, /LITE_CAMPAIGN_TERMINAL_/);
+  assert.match(watchdog, /Internal phase advancement/);
+  assert.doesNotMatch(watchdog, /\[ "\$lite_campaign_status" = "COMPLETE" \] \|\| \[ "\$lite_phase_state" = "CLOSED" \]/);
+});
+
 test('no parallel watchdog workflow is introduced', () => {
   const workflows = fs.readdirSync(path.join(root, '.github/workflows'));
   assert.equal(
