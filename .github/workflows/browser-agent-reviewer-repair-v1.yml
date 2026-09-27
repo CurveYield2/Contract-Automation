@@ -108,6 +108,9 @@ jobs:
             reviewer="$(jq -r '.nextMilestone.reviewer // empty' /tmp/current-active-pointer.json)"
             milestone="$(jq -r '.nextMilestone.id // empty' /tmp/current-active-pointer.json)"
             phase_start="$(jq -r '.nextMilestone.phaseRange[0] // empty' /tmp/current-active-pointer.json)"
+            if [ -z "$phase_start" ] && [[ "$gate_expected_phase" =~ ^phase-([0-9]+)$ ]]; then
+              phase_start="${BASH_REMATCH[1]}"
+            fi
             if [ -z "$reviewer" ]; then reviewer="$(jq -r '.activeReviewer.lineage // empty' /tmp/current-campaign-state.json)"; fi
             if [ -z "$milestone" ]; then
               milestone="$(jq -r --arg r "$reviewer" '.routingPlan.workers[]? | select(.lineage==$r and (.status=="ACTIVE" or .status=="WAITING_FOR_SUCCESSOR_AGENT")) | .milestone // empty' /tmp/current-campaign-state.json | tail -n1)"
@@ -432,7 +435,9 @@ jobs:
               printf 'campaign_name=%s\n' "$CAMPAIGN_TITLE"
               printf 'campaign_id=%s\n' "$CAMPAIGN_ID"
               printf 'reviewer=%s\n' "$REVIEWER"
+              printf 'phase=phase-%s\n' "$PHASE_START"
               printf 'milestone=%s\n' "$MILESTONE"
+              printf '%s\n' 'reasoning_effort=high'
               printf 'campaign_url=%s\n' "$CAMPAIGN_URL"
               printf 'audit_skill_url=%s\n' "$SKILL_URL"
               printf 'audit_skill_authority_source=%s\n' "$SKILL_AUTHORITY_SOURCE"
