@@ -7,6 +7,7 @@ const LIGHT_PATTERNS = [
   /^\.github\/workflows\/development-agent-task-manager\.yml$/,
   /^\.github\/workflows\/agent-zip-import-v1\.yml$/,
   /^scripts\/browser-agent-wake\.mjs$/,
+  /^scripts\/browser-session-state-v1\.mjs$/,
   /^scripts\/select-audit-controller-token\.sh$/,
   /^scripts\/classify-v7-qualification-change\.mjs$/,
   /^docs\//,
