@@ -102,8 +102,6 @@ jobs:
       CHAT_URL: ${{ inputs.chat_url }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
       CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
-      CHATGPT_SESSION_STATE_PATH: ${{ runner.temp }}/curveyield-browser-agent/session-state-v1.enc.json
-      CHATGPT_SESSION_STATE_UPDATED_MARKER: ${{ runner.temp }}/curveyield-browser-agent/session-state-updated
       BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
       BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
       BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
@@ -127,7 +125,7 @@ jobs:
         id: restore-chatgpt-session
         uses: actions/cache/restore@v4
         with:
-          path: ${{ runner.temp }}/curveyield-browser-agent/session-state-v1.enc.json
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
           key: chatgpt-session-state-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.wake_id }}
           restore-keys: |
             chatgpt-session-state-v1-
@@ -178,7 +176,7 @@ jobs:
         if: steps.refreshed-chatgpt-session.outputs.updated == 'true'
         uses: actions/cache/save@v4
         with:
-          path: ${{ runner.temp }}/curveyield-browser-agent/session-state-v1.enc.json
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
           key: chatgpt-session-state-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.wake_id }}
 
       - name: Create watchdog state
