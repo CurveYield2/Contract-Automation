@@ -123,25 +123,34 @@ async function snapshot(page) {
 }
 
 async function ensureComposer(page) {
-  const composer = await firstVisible(page, [
+  const selectors = [
     '#prompt-textarea',
     'textarea[placeholder*="Message"]',
     '[contenteditable="true"][data-lexical-editor="true"]',
     '[contenteditable="true"]'
-  ]);
+  ];
+
+  const deadline = Date.now() + 30000;
+  let composer = await firstVisible(page, selectors);
+  while (!composer && Date.now() < deadline) {
+    await page.waitForTimeout(1000);
+    composer = await firstVisible(page, selectors);
+  }
   if (composer) return composer;
 
   const currentUrl = page.url();
   const title = await page.title().catch(() => '');
   const bodyText = await page.locator('body').innerText().catch(() => '');
   const loginPrompt = /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText);
-  const humanChallenge = /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText);
+  const humanChallenge =
+    /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText) ||
+    /Just a moment|Cloudflare/i.test(title);
   const conversationUnavailable = /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText);
   const textareaCount = await page.locator('textarea').count().catch(() => 0);
   const editableCount = await page.locator('[contenteditable="true"]').count().catch(() => 0);
 
   throw new Error(
-    'ChatGPT composer not found' +
+    'ChatGPT composer not found after 30s' +
     ' (url=' + currentUrl +
     ', title=' + JSON.stringify(title) +
     ', loginPrompt=' + loginPrompt +
