@@ -909,9 +909,17 @@ jobs:
             if [ "$productive" = true ]; then
               echo "Watchdog $WAKE_ID: PRODUCTIVE ($reason); no interruption."
               jq --argjson count "$current_count" --arg hash "$current_hash" --arg reason "$reason" \
-                '.observation.assistantCount=$count | .observation.lastAssistantHash=$hash | .observation.observedAt=(now|todate) | .lastProductiveAt=(now|todate) | .lastDecision=("PRODUCTIVE_"+$reason)' \
+                '.observation.assistantCount=$count | .observation.lastAssistantHash=$hash | .observation.observedAt=(now|todate) | .lastProductiveAt=(now|todate) | .lastDecision=("PRODUCTIVE_"+$reason) | .repair.consecutiveIdlePokes=0' \
                 /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
             else
+              prior_idle_pokes="$(jq -r '.repair.consecutiveIdlePokes // 0' /tmp/watchdog-state.json)"
+              idle_threshold="$(jq -r '.repair.idlePokeThreshold // 3' /tmp/watchdog-state.json)"
+              if [ "$prior_idle_pokes" -ge "$idle_threshold" ]; then
+                if dispatch_reviewer_repair "IDLE_AFTER_${prior_idle_pokes}_WATCHDOG_POKES"; then
+                  retire_state "REVIEWER_REPAIR_DISPATCHED_PERSISTENT_IDLE"
+                  exit 0
+                fi
+              fi
               echo "Watchdog $WAKE_ID: IDLE; sending configured GET BACK TO WORK message."
               export WAKE_ACTION='wake'
               export WAKE_MESSAGE="$(jq -r '.idleMessage' /tmp/watchdog-state.json)"
@@ -920,7 +928,7 @@ jobs:
                 next_count="$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")"
                 next_hash="$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
                 jq --argjson count "$next_count" --arg hash "$next_hash" \
-                  '.observation.assistantCount=$count | .observation.lastAssistantHash=$hash | .observation.observedAt=(now|todate) | .lastPokedAt=(now|todate) | .pokeCount=((.pokeCount // 0)+1) | .lastDecision="IDLE_POKED"' \
+                  '.observation.assistantCount=$count | .observation.lastAssistantHash=$hash | .observation.observedAt=(now|todate) | .lastPokedAt=(now|todate) | .pokeCount=((.pokeCount // 0)+1) | .repair.consecutiveIdlePokes=((.repair.consecutiveIdlePokes // 0)+1) | .lastDecision="IDLE_POKED"' \
                   /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
               else
                 jq '.lastDecision="IDLE_POKE_FAILED" | .lastPokeFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
