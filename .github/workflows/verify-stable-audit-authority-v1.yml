@@ -38,11 +38,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git grep -n -I 'CurveYield2/Contract-Automation/Audit Skill - Current Authority' -- .github scripts packages ':!*.zip'; then
+          if git grep -n -I 'CurveYield2/Contract-Automation/Audit Skill - Current Authority' -- .github scripts packages ':!*.zip' ':!.github/workflows/verify-stable-audit-authority-v1.yml'; then
             echo "::error::Old Contract-Automation authority location remains in active code."
             exit 1
           fi
-          if git grep -n -I 'Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway' -- .github scripts packages ':!*.zip'; then
+          if git grep -n -I 'Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway' -- .github scripts packages ':!*.zip' ':!.github/workflows/verify-stable-audit-authority-v1.yml'; then
             echo "::error::Version-specific legacy authority path remains in active code."
             exit 1
           fi
