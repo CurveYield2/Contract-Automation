@@ -34,6 +34,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          gh auth setup-git
           rm -rf /tmp/audit-controller
           gh repo clone CurveYield2/Audit-Controller /tmp/audit-controller -- --branch main
           cd /tmp/audit-controller
@@ -482,6 +483,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          gh auth setup-git
           rm -rf /tmp/audit-controller-clean
           gh repo clone CurveYield2/Audit-Controller /tmp/audit-controller-clean -- --branch main
           cd /tmp/audit-controller-clean
