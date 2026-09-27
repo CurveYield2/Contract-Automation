@@ -178,18 +178,19 @@ test('Lite entry workflow monitors the existing Phase-0 bootstrap and never crea
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
-test('source fanout arms the state-only campaign orchestrator without launching a reviewer chat', () => {
+test('source fanout self-arms the state-only Lite orchestrator without a pre-existing registration', () => {
   const workflow = read('.github/workflows/agent-zip-import-v1.yml');
   assert.match(workflow, /Arm canonical Lite campaign monitor after source fan-out/);
-  assert.match(workflow, /browser-agent-wake\/registrations\/\$safe_campaign\.json/);
-  assert.match(workflow, /test "\$gate_mode" = 'LITE'/);
-  assert.match(workflow, /test "\$gate_expected_phase" = 'phase-0'/);
-  assert.match(workflow, /test "\$gate_expected_milestone" = 'P0_BOOTSTRAP'/);
+  assert.match(workflow, /\.deep-assurance\/active/);
+  assert.match(workflow, /campaignId \/\/ empty/);
+  assert.match(workflow, /controllerBranch \/\/ empty/);
+  assert.match(workflow, /workspacePath \/\/ empty/);
   assert.match(workflow, /gh workflow run lite-audit-browser-orchestrator-v1\.yml/);
+  assert.match(workflow, /Registration prerequisite: none/);
   assert.match(workflow, /Reviewer\/chat launch: NOT performed by source fan-out/);
   assert.match(workflow, /Phase-0 behavior: state-only monitoring; no second bootstrap chat/);
+  assert.doesNotMatch(workflow, /Source fan-out completed but no canonical browser registration exists/);
   assert.doesNotMatch(workflow, /gh workflow run browser-agent-wake\.yml/);
-  assert.doesNotMatch(workflow, /wake_id=.*phase0-source-fanout/);
 });
 
 test('Phase-0 repair remains a special bootstrap replacement without a predecessor handoff', () => {
