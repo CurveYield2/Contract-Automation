@@ -85,11 +85,6 @@ on:
         required: false
         default: '0'
         type: string
-      runner_retry_max:
-        description: Maximum fresh-runner retries for retryable pre-post browser failures
-        required: false
-        default: '3'
-        type: string
       browser_context_b64:
         description: Optional Base64 JSON browser context {routineId,projectName,chatName,repair}
         required: false
@@ -233,10 +228,8 @@ jobs:
         run: |
           set -euo pipefail
           attempt='${{ inputs.runner_retry_attempt }}'
-          max='${{ inputs.runner_retry_max }}'
+          max=3
           [[ "$attempt" =~ ^[0-9]+$ ]] || attempt=0
-          [[ "$max" =~ ^[0-9]+$ ]] || max=3
-          if [ "$max" -gt 5 ]; then max=5; fi
 
           if [ "$attempt" -ge "$max" ]; then
             echo "dispatched=false" >> "$GITHUB_OUTPUT"
@@ -248,7 +241,6 @@ jobs:
           retry_inputs="$(printf '%s' "$RETRY_INPUTS_JSON" | jq -c --arg next "$next" --arg max "$max" '
             with_entries(.value |= tostring)
             | .runner_retry_attempt=$next
-            | .runner_retry_max=$max
           ')"
 
           printf '%s\n' "$retry_inputs" | gh workflow run browser-agent-wake.yml             --repo "$GITHUB_REPOSITORY"             --ref main             --json
