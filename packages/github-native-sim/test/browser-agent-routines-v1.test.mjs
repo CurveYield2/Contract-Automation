@@ -142,6 +142,14 @@ test('reviewer repair workflow resumes first and only resets to an exact handoff
   assert.match(workflow, /do not delete or reset them yourself/);
   assert.match(workflow, /browser_context_b64="\$\(jq -nc/);
   assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
+  assert.match(workflow, /audit-process\\/v7\\/LITE_PRIMARY_SKILL_AUTHORITY_v1\\.json/);
+  assert.match(workflow, /skill_authority_source="CAMPAIGN_BOUND"/);
+  assert.match(workflow, /skill_authority_source="LITE_PRIMARY_DEFAULT"/);
+  assert.match(workflow, /skill_authority_source="LEGACY_NEWEST_ZIP_FALLBACK"/);
+  assert.match(workflow, /observed_blob_sha/);
+  assert.match(workflow, /audit_skill_url=%s/);
+  assert.match(workflow, /audit_skill_authority_source=%s/);
+  assert.doesNotMatch(workflow, /latest_audit_skill_url=/);
 });
 
 test('reviewer repair request schema is exact and reset-only', () => {
