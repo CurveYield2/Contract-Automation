@@ -316,6 +316,62 @@ jobs:
           }
           NODE
 
+      - name: Resolve current default Lite authority
+        if: env.V7_REQUEST_KIND == 'controller-operation'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          request=".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH"
+          [ "$(jq -r '.operation // empty' "$request")" = PROJECT_CURRENT_STATE ] || exit 0
+          campaign="$(jq -r '.campaignPath // empty' "$request")"
+          [ -n "$campaign" ] || exit 0
+          state_name="$(find ".controller-operation/$campaign/controller" -maxdepth 1 -name 'CAMPAIGN_STATE_v*.json' -printf '%f\n' | sort -V | tail -n1)"
+          state=".controller-operation/$campaign/controller/$state_name"
+          [ "$(jq -r '.assuranceMode.mode // .mode // empty' "$state")" = LITE ] || exit 0
+          [ "$(jq -r '.skillAuthority.current.campaignPath // empty' "$state")" = '' ] || exit 0
+          directive=.controller-operation/audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json
+          [ "$(jq -r '.resolutionMode' "$directive")" = CURRENT_CONTRACT_AUTOMATION_AUTHORITY ]
+          folder="$(jq -r '.source.folderPath' "$directive")"
+          source_ref="$(jq -r '.source.ref' "$directive")"
+          [ "$(jq -r '.source.repository' "$directive")" = "$GITHUB_REPOSITORY" ]
+          source_commit="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$source_ref" --jq '.object.sha')"
+          listing="$(gh api "repos/$GITHUB_REPOSITORY/contents/$folder?ref=$source_commit")"
+          mapfile -t dirs < <(jq -r '.[] | select(.type=="dir" and (.name|startswith("Audit_V7_independent_Review_skill_v"))) | .path' <<<"$listing")
+          mapfile -t zips < <(jq -r '.[] | select(.type=="file" and (.name|endswith(".zip"))) | .path' <<<"$listing")
+          [ "${#dirs[@]}" -eq 1 ] && [ "${#zips[@]}" -eq 1 ] || { echo "::error::Current authority folder is ambiguous"; exit 1; }
+          root="${dirs[0]}"
+          root_skill="$root/SKILL.md"
+          lite_skill="$root/optional-modes/lite-pathway/SKILL.md"
+          gh api "repos/$GITHUB_REPOSITORY/contents/$root_skill?ref=$source_commit" --jq '.content' | base64 -d > /tmp/current-root-skill.md
+          gh api "repos/$GITHUB_REPOSITORY/contents/$lite_skill?ref=$source_commit" --jq '.content' | base64 -d > /tmp/current-lite-skill.md
+          root_release="$(sed -n 's/^Release identity: `\([^`]*\)`.*/\1/p' /tmp/current-root-skill.md | head -n1)"
+          lite_release="$(sed -n 's/^Release identity: `\([^`]*\)`.*/\1/p' /tmp/current-lite-skill.md | head -n1)"
+          revision="$(sed -n 's/^Package revision: `\([^`]*\)`.*/\1/p' /tmp/current-lite-skill.md | head -n1)"
+          [ -n "$root_release" ] && [ -n "$lite_release" ] && [[ "$revision" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [ "$(sed -n 's/^Package revision: `\([^`]*\)`.*/\1/p' /tmp/current-root-skill.md | head -n1)" = "$revision" ]
+          [[ "${zips[0]}" == *"${revision#v}"* ]] || exit 1
+          package_path=audit-process/v7/.resolved-current-lite-authority.zip
+          gh api "repos/$GITHUB_REPOSITORY/contents/${zips[0]}?ref=$source_commit" --jq '.content' | base64 -d > ".controller-operation/$package_path"
+          digest="$(sha256sum ".controller-operation/$package_path" | awk '{print $1}')"
+          mkdir -p /tmp/current-lite-authority
+          unzip -q ".controller-operation/$package_path" -d /tmp/current-lite-authority
+          mapfile -t lite_files < <(find /tmp/current-lite-authority -type f -path '*/optional-modes/lite-pathway/SKILL.md')
+          [ "${#lite_files[@]}" -eq 1 ]
+          package_root="$(dirname "$(dirname "$(dirname "${lite_files[0]}")")")"
+          cmp -s "$package_root/SKILL.md" /tmp/current-root-skill.md
+          cmp -s "${lite_files[0]}" /tmp/current-lite-skill.md
+          jq -n --arg repository "$GITHUB_REPOSITORY" --arg ref "$source_ref" --arg commit "$source_commit" \
+            --arg folderPath "$folder" --arg packageSourcePath "${zips[0]}" --arg packagePath "$package_path" \
+            --arg sha256 "$digest" --arg rootRelease "$root_release" --arg liteRelease "$lite_release" \
+            --arg packageRevision "$revision" --arg liteSkillPath "$lite_skill" \
+            '{schemaVersion:"audit-v7-lite-resolved-skill-authority-v1",
+              source:{repository:$repository,ref:$ref,commit:$commit,folderPath:$folderPath,packageSourcePath:$packageSourcePath},
+              packagePath:$packagePath,sha256:$sha256,rootRelease:$rootRelease,liteRelease:$liteRelease,
+              packageRevision:$packageRevision,liteSkillPath:$liteSkillPath}' \
+            > .controller-operation/audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_RESOLVED_v1.json
+
       - name: Resolve exact admitted skill for controller operation
         if: env.V7_REQUEST_KIND == 'controller-operation'
         shell: bash
@@ -352,8 +408,13 @@ jobs:
             if(fs.existsSync(pointerPath)){
               const pointer=JSON.parse(fs.readFileSync(pointerPath,'utf8'));
               if(pointer.schemaVersion==='audit-v7-lite-primary-skill-authority-v1' && pointer.status==='ACTIVE'){
-                skillPath=pointer.packagePath??'';
-                expectedSha=pointer.sha256??'';
+                const resolved=JSON.parse(fs.readFileSync(path.join(controllerRoot,'audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_RESOLVED_v1.json'),'utf8'));
+                if(resolved.schemaVersion!=='audit-v7-lite-resolved-skill-authority-v1'
+                   || resolved.source?.repository!==pointer.source?.repository
+                   || resolved.source?.folderPath!==pointer.source?.folderPath
+                   || resolved.source?.ref!==pointer.source?.ref) throw new Error('resolved Lite authority does not match default directive');
+                skillPath=resolved.packagePath;
+                expectedSha=resolved.sha256;
               }
             }
           }
