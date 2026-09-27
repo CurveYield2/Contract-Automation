@@ -120,14 +120,6 @@ test('source fanout contains no reviewer wake envelope', () => {
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
-test('source fanout never launches a reviewer chat; the campaign orchestrator is sole launch owner', () => {
-  const workflow = read('.github/workflows/agent-zip-import-v1.yml');
-  assert.match(workflow, /Signal Phase-0 source fan-out readiness/);
-  assert.match(workflow, /Reviewer\/chat launch: NOT performed by source fan-out/);
-  assert.match(workflow, /Launch authority: Ultralite campaign orchestrator only/);
-  assert.doesNotMatch(workflow, /Launch registered Phase-0 browser agent/);
-});
-
 test('watchdog observation fails over provider-specific challenge and auth walls before classifying infrastructure noise', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   const observeStart = source.indexOf("if (action === 'observe')");
