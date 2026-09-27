@@ -264,7 +264,7 @@ test('repair targets current reviewer and reuses its sealed wake instead of next
   assert.match(repair, /base64 -d > \/tmp\/replacement-wake\.txt/);
   assert.match(repair, /Clear confirmed dead reviewer chat binding/);
   assert.match(repair, /Send one-time repair context after sealed wake/);
-  assert.match(repair, /message_purpose=repair_notice/);
+  assert.match(repair, /messagePurpose:"repair_notice"/);
   assert.doesNotMatch(repair, /reviewer="\$\(jq -r '\.nextMilestone\.reviewer/);
 });
 
@@ -281,7 +281,7 @@ test('reviewer repair resets only from an admitted exact handoff baseline and th
   assert.match(workflow, /WAKE_UP_MESSAGE\.md/);
   assert.match(workflow, /Clear confirmed dead reviewer chat binding/);
   assert.match(workflow, /Send one-time repair context after sealed wake/);
-  assert.match(workflow, /message_purpose=repair_notice/);
+  assert.match(workflow, /messagePurpose:"repair_notice"/);
   assert.match(workflow, /terminated in the middle of this same assigned task/);
   assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
 });
