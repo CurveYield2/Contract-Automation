@@ -105,16 +105,16 @@ jobs:
             handoff_path=""
             baseline_commit=""
           else
-            reviewer="$(jq -r '.nextMilestone.reviewer // empty' /tmp/current-active-pointer.json)"
-            milestone="$(jq -r '.nextMilestone.id // empty' /tmp/current-active-pointer.json)"
-            phase_start="$(jq -r '.nextMilestone.phaseRange[0] // empty' /tmp/current-active-pointer.json)"
-            if [ -z "$phase_start" ] && [[ "$gate_expected_phase" =~ ^phase-([0-9]+)$ ]]; then
-              phase_start="${BASH_REMATCH[1]}"
-            fi
-            if [ -z "$reviewer" ]; then reviewer="$(jq -r '.activeReviewer.lineage // empty' /tmp/current-campaign-state.json)"; fi
-            if [ -z "$milestone" ]; then
-              milestone="$(jq -r --arg r "$reviewer" '.routingPlan.workers[]? | select(.lineage==$r and (.status=="ACTIVE" or .status=="WAITING_FOR_SUCCESSOR_AGENT")) | .milestone // empty' /tmp/current-campaign-state.json | tail -n1)"
-            fi
+            # Repair the CURRENT reviewer, never the next reviewer. Multi-phase
+            # reviewers remain the same agent across their assigned phase range.
+            reviewer="$(jq -r '.phase.reviewer // .reviewer // empty' /tmp/current-campaign-state.json)"
+            [ -n "$reviewer" ] || reviewer="$(jq -r '.reviewer // empty' /tmp/current-active-pointer.json)"
+            milestone="$(jq -r '.phase.milestoneId // empty' /tmp/current-campaign-state.json)"
+            [ -n "$milestone" ] || milestone="$(jq -r '.milestoneId // empty' /tmp/current-active-pointer.json)"
+            current_phase_id="$(jq -r '.phase.id // empty' /tmp/current-campaign-state.json)"
+            [ -n "$current_phase_id" ] || current_phase_id="$(jq -r '.phaseId // empty' /tmp/current-active-pointer.json)"
+            [[ "$current_phase_id" =~ ^phase-([0-9]+)$ ]] || { echo "::error::Canonical current phase is invalid"; exit 1; }
+            phase_start="${BASH_REMATCH[1]}"
             test -n "$reviewer"
             test -n "$milestone"
 
@@ -172,61 +172,13 @@ jobs:
             *) echo "::error::Unsupported repair mode"; exit 1 ;;
           esac
 
-          state_skill_rel="$(jq -r '.skillAuthority.current.campaignPath // empty' /tmp/current-campaign-state.json)"
-          skill_path=""
-          skill_ref="$gate_ref"
-          skill_repo="$gate_repo"
-          skill_authority_source=""
-          newest_skill=""
-          newest_date=""
-
-          # Keep reviewer repair on the same authority precedence as normal Lite successor launch.
-          if [ -n "$state_skill_rel" ]; then
-            skill_path="$campaign_root/$state_skill_rel"
-            skill_authority_source="CAMPAIGN_BOUND"
-          else
-            primary_pointer_path='audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json'
-            primary_pointer="$(gh api "repos/CurveYield2/Audit-Controller/contents/$primary_pointer_path?ref=main" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
-            if [ -n "$primary_pointer" ] && [ "$(printf '%s' "$primary_pointer" | jq -r '.schemaVersion // empty')" = 'audit-v7-lite-primary-skill-authority-v1' ] && [ "$(printf '%s' "$primary_pointer" | jq -r '.status // empty')" = 'ACTIVE' ]; then
-              primary_skill_path="$(printf '%s' "$primary_pointer" | jq -r '.packagePath // empty')"
-              primary_blob_sha="$(printf '%s' "$primary_pointer" | jq -r '.gitBlobSha // empty')"
-              if [ -n "$primary_skill_path" ] && [[ "$primary_blob_sha" =~ ^[0-9a-f]{40}$ ]]; then
-                observed_blob_sha="$(gh api "repos/CurveYield2/Audit-Controller/contents/$primary_skill_path?ref=main" --jq '.sha // empty' 2>/dev/null || true)"
-                if [ "$observed_blob_sha" = "$primary_blob_sha" ]; then
-                  skill_path="$primary_skill_path"
-                  skill_ref="main"
-                  skill_repo="CurveYield2/Audit-Controller"
-                  skill_authority_source="LITE_PRIMARY_DEFAULT"
-                else
-                  echo "::error::Lite primary skill pointer blob identity does not match repository content."
-                  exit 1
-                fi
-              fi
-            fi
-          fi
-
-          if [ -z "$skill_path" ]; then
-            listing="$(gh api "repos/$gate_repo/contents/$campaign_root/authority?ref=$gate_ref" 2>/dev/null || true)"
-            if [ -n "$listing" ]; then
-              while IFS= read -r candidate; do
-                [ -n "$candidate" ] || continue
-                candidate_date="$(gh api --method GET "repos/$gate_repo/commits" -f path="$candidate" -f sha="$gate_ref" -f per_page=1 --jq '.[0].commit.committer.date // empty' 2>/dev/null || true)"
-                [ -n "$candidate_date" ] || continue
-                if [ -z "$newest_date" ] || [[ "$candidate_date" > "$newest_date" ]]; then
-                  newest_skill="$candidate"
-                  newest_date="$candidate_date"
-                fi
-              done < <(printf '%s' "$listing" | jq -r '.[]? | select(.type=="file" and (.name|test("skill.*\\.zip$";"i"))) | .path')
-            fi
-            if [ -n "$newest_skill" ]; then
-              skill_path="$newest_skill"
-              skill_authority_source="LEGACY_NEWEST_ZIP_FALLBACK"
-            fi
-          fi
+          authority_api="repos/$GITHUB_REPOSITORY/contents/Audit%20Skill%20-%20Current%20Authority?ref=main"
+          skill_path="$(GH_TOKEN="$GITHUB_TOKEN" gh api "$authority_api" --jq '[.[] | select(.type=="dir" and (.name|startswith("Audit_V7_independent_Review_skill_")))] | if length==1 then .[0].path else empty end' 2>/dev/null || true)"
           test -n "$skill_path"
+          skill_url="https://github.com/$GITHUB_REPOSITORY/tree/main/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
+          skill_authority_source="CONTRACT_AUTOMATION_CURRENT_AUTHORITY_FOLDER"
 
           campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(printf '%s' "$campaign_root" | sed 's/ /%20/g')"
-          skill_url="https://github.com/$skill_repo/blob/$skill_ref/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
 
           {
             echo "registration=$registration"
@@ -249,6 +201,12 @@ jobs:
             echo "campaign_url=$campaign_url"
             echo "skill_url=$skill_url"
             echo "skill_authority_source=$skill_authority_source"
+            if [ "$phase0_bootstrap" != true ]; then
+              wake_path="$(dirname "$handoff_path")/WAKE_UP_MESSAGE.md"
+              echo "wake_path=$wake_path"
+            else
+              echo "wake_path="
+            fi
           } >> "$GITHUB_OUTPUT"
 
       - name: Reset campaign to active reviewer handoff baseline
