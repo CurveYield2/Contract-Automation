@@ -278,6 +278,24 @@ async function runWithPage(providerName, connect) {
     const before = await snapshot(page);
 
     if (action === 'observe') {
+      // A browser/security challenge or login wall is provider/session
+      // infrastructure, not an observation of the reviewer. Throw here so
+      // the provider loop can try Browserless/Browserbase before the watchdog
+      // classifies the sweep as infrastructure noise.
+      if (before.humanChallenge) {
+        throw new BrowserAgentError(
+          'BROWSER_CHALLENGE',
+          'Observation provider is blocked by a browser/security challenge at ' + before.url,
+          true,
+        );
+      }
+      if (before.loginPrompt) {
+        throw new BrowserAgentError(
+          'AUTH_REQUIRED',
+          'Observation provider is not authenticated at ' + before.url,
+          false,
+        );
+      }
       const sessionStatePersisted = await persistHealthySession(providerName, context, before);
       const result = { ok: true, provider: providerName, action, wakeId, sessionStatePersisted, ...before };
       await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
@@ -423,6 +441,35 @@ for (const [name, connect] of providers) {
     console.error('[' + name + '] ' + error.message);
   }
 }
+if (action === 'observe') {
+  const challengeFailure = failures.find((entry) => entry.code === 'BROWSER_CHALLENGE');
+  const authFailure = failures.find((entry) => entry.code === 'AUTH_REQUIRED');
+  if (challengeFailure || authFailure) {
+    const result = {
+      ok: true,
+      provider: null,
+      action,
+      wakeId,
+      sessionStatePersisted: false,
+      generating: false,
+      composerVisible: false,
+      conversationUnavailable: false,
+      loginPrompt: !!authFailure && !challengeFailure,
+      humanChallenge: !!challengeFailure,
+      chatViewable: false,
+      assistantCount: 0,
+      userCount: 0,
+      lastAssistantHash: '',
+      lastAssistantLength: 0,
+      url: requestedUrl,
+      providerFailures: failures,
+    };
+    await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
+    console.warn(JSON.stringify(result));
+    process.exit(0);
+  }
+}
+
 await fs.writeFile(statePath, JSON.stringify({ ok:false, wakeId, failures }, null, 2) + '\n');
 console.error(JSON.stringify({ ok:false, wakeId, failures }));
 process.exit(1);

@@ -59,6 +59,20 @@ test('browser routine engine is data-driven and the first routine is the ultrali
   ]);
 });
 
+test('watchdog observation fails over provider-specific challenge and auth walls before classifying infrastructure noise', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  const observeStart = source.indexOf("if (action === 'observe')");
+  const providerStart = source.indexOf('const providers = [');
+  const observeBlock = source.slice(observeStart, providerStart);
+  assert.match(observeBlock, /before\.humanChallenge/);
+  assert.match(observeBlock, /BROWSER_CHALLENGE/);
+  assert.match(observeBlock, /before\.loginPrompt/);
+  assert.match(observeBlock, /AUTH_REQUIRED/);
+  assert.match(source, /providerFailures:\s*failures/);
+  assert.match(source, /failures\.find\(\(entry\) => entry\.code === 'BROWSER_CHALLENGE'\)/);
+  assert.match(source, /failures\.find\(\(entry\) => entry\.code === 'AUTH_REQUIRED'\)/);
+});
+
 test('wake runtime executes browser routines around the first message and returns project/chat metadata', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /BROWSER_ROUTINE_ID/);
