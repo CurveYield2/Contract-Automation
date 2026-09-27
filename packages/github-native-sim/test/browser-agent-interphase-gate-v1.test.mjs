@@ -146,7 +146,7 @@ test('sealed P0 synthetic packet validates and dispatches one successor with ver
   assert.match(message, /Synthetic successor instructions/);
   assert.match(message, /\[AUDIT_REVIEWER_ROUTINE_V1\]/);
   assert.match(message, /reviewer=reviewer-1/);
-  assert.match(message, /latest_audit_skill_url=https:\/\/github\.com\/CurveYield2\/Audit-Controller\/blob\/main\/campaigns\/synthetic\/authority\/Synthetic_Audit_skill_v1\.zip/);
+  assert.match(message, /audit_skill_url=https:\/\/github\.com\/CurveYield2\/Audit-Controller\/blob\/main\/campaigns\/synthetic\/authority\/Synthetic_Audit_skill_v1\.zip/);\n  assert.match(message, /audit_skill_authority_source=CAMPAIGN_BOUND/);
   const browserContextEncoded = dispatched.match(/browser_context_b64=([A-Za-z0-9+/=]+)/)?.[1];
   assert.ok(browserContextEncoded, dispatched);
   const browserContext = JSON.parse(Buffer.from(browserContextEncoded, 'base64').toString('utf8'));
