@@ -346,32 +346,43 @@ async function runWithPage(providerName, connect) {
 
     await post(page, wakeMessage);
 
+    // Once submission is verified, never fail over to another browser provider for
+    // post-delivery UI bookkeeping. Doing so can create a second reviewer chat.
     let response = null;
-    let after;
-    if (action === 'wake_and_wait') {
-      const requestedWait = Number.parseInt(env.RESPONSE_WAIT_MS || '120000', 10);
-      const responseWaitMs = Number.isFinite(requestedWait) ? Math.max(120000, requestedWait) : 120000;
-      response = await waitForAssistantResponse(page, before, responseWaitMs);
-      after = response.snapshot;
-    } else {
-      await page.waitForTimeout(1500);
-      after = await snapshot(page);
-    }
-
-    if (mode === 'create_fresh' && !/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(after.url)) {
-      await page.waitForURL(/https:\/\/chatgpt\.com\/c\//, { timeout: 15000 }).catch(()=>{});
-      after.url = page.url();
-    }
-
+    let after = before;
     let routineAfter = [];
-    if (routine) {
-      routineAfter = await runBrowserRoutineStage({
-        page,
-        routine,
-        stage: 'after_message',
-        vars: { projectName, chatName: requestedChatName, campaignId: env.CAMPAIGN_ID || '', phaseId: env.PHASE_ID || '' },
+    const postDeliveryWarnings = [];
+    try {
+      if (action === 'wake_and_wait') {
+        const requestedWait = Number.parseInt(env.RESPONSE_WAIT_MS || '120000', 10);
+        const responseWaitMs = Number.isFinite(requestedWait) ? Math.max(120000, requestedWait) : 120000;
+        response = await waitForAssistantResponse(page, before, responseWaitMs);
+        after = response.snapshot;
+      } else {
+        await page.waitForTimeout(1500);
+        after = await snapshot(page);
+      }
+
+      if (mode === 'create_fresh' && !/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(after.url)) {
+        await page.waitForURL(/https:\/\/chatgpt\.com\/c\//, { timeout: 15000 }).catch(()=>{});
+        after.url = page.url();
+      }
+
+      if (routine) {
+        routineAfter = await runBrowserRoutineStage({
+          page,
+          routine,
+          stage: 'after_message',
+          vars: { projectName, chatName: requestedChatName, campaignId: env.CAMPAIGN_ID || '', phaseId: env.PHASE_ID || '' },
+        });
+        after = await snapshot(page);
+      }
+    } catch (error) {
+      postDeliveryWarnings.push({
+        code: 'POST_DELIVERY_BOOKKEEPING_FAILED',
+        error: error?.message || String(error),
       });
-      after = await snapshot(page);
+      after = await snapshot(page).catch(() => ({ ...before, url: page.url() }));
     }
 
     const renameResult = [...routineAfter].reverse().find((entry) => entry.operation === 'chatgpt.rename_current_chat')?.result || null;
@@ -385,6 +396,7 @@ async function runWithPage(providerName, connect) {
       requestedChatName: requestedChatName || null,
       chatRenamed: renameResult?.renamed ?? null,
       thinkingEffort: thinkingEffortResult,
+      postDeliveryWarnings,
       ...(response ? { responded: response.responded, waitedMs: response.waitedMs } : {})
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
