@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "verify-lite-primary-authority-v1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "52e4f89c1ea55930500d05d562dbf72ccdcf5b2f",
+    "requestPath": ".deep-assurance/operator/requests/verify-lite-primary-authority-v1.json"
+  },
+  "verifyController": true
+}
