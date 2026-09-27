@@ -1,6 +1,23 @@
 name: V7 Execution Infrastructure Qualification
 
 on:
+  workflow_call:
+    inputs:
+      controller_ref:
+        required: false
+        type: string
+        default: ''
+      qualification_lane:
+        required: false
+        type: string
+        default: FULL
+    secrets:
+      AUDIT_CONTROLLER_GITHUB_TOKEN:
+        required: false
+      PREFLIGHTSIM_GITHUB_TOKEN:
+        required: false
+      SIM_ARCHIVE_PRIMARY_ETHEREUM_01:
+        required: false
   workflow_dispatch:
     inputs:
       controller_ref:
@@ -97,7 +114,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .audit-evidence/v7-infrastructure-qualification
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "workflow_call" ]; then
             if [ "$REQUESTED_LANE" = "CONTROLLER_ONLY" ]; then
               if [ -z "$CONTROLLER_REF" ]; then
                 echo 'CONTROLLER_ONLY requires controller_ref' >&2
@@ -318,7 +335,7 @@ jobs:
           JSON
 
       - name: Publish controller-only qualification into canonical status
-        if: success() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
+        if: success() && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && github.ref == 'refs/heads/main' && env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
