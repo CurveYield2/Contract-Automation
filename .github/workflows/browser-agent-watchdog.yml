@@ -601,6 +601,7 @@ jobs:
             state_skill_rel="$(jq -r '.skillAuthority.current.campaignPath // empty' /tmp/canonical-campaign-state.json)"
             skill_path=""
             skill_ref="$gate_ref"
+            skill_repo="$gate_repo"
             skill_authority_source=""
             newest_skill=""
             newest_skill_date=""
@@ -621,7 +622,7 @@ jobs:
                   if [ "$observed_blob_sha" = "$primary_blob_sha" ]; then
                     skill_path="$primary_skill_path"
                     skill_ref="main"
-                    gate_repo="CurveYield2/Audit-Controller"
+                    skill_repo="CurveYield2/Audit-Controller"
                     skill_authority_source="LITE_PRIMARY_DEFAULT"
                   else
                     echo "::warning::Lite primary skill pointer blob identity does not match repository content."
@@ -654,7 +655,7 @@ jobs:
               echo "::warning::No audit skill ZIP could be resolved for successor $next_reviewer."
               return 2
             }
-            skill_url="https://github.com/$gate_repo/blob/$skill_ref/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
+            skill_url="https://github.com/$skill_repo/blob/$skill_ref/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
 
             {
               printf '%s\n' '[AUDIT_REVIEWER_ROUTINE_V1]'
