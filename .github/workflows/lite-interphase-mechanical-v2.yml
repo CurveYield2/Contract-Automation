@@ -1,0 +1,111 @@
+name: Lite Interphase Mechanical Materialization
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        description: Exact campaign identifier
+        required: true
+        type: string
+      controller_ref:
+        description: Exact Audit-Controller branch
+        required: true
+        type: string
+      packet_path:
+        description: Sealed mechanical packet path in Audit-Controller
+        required: true
+        type: string
+      state_path:
+        description: Latest canonical campaign state path
+        required: true
+        type: string
+      pointer_path:
+        description: Latest active phase pointer path
+        required: true
+        type: string
+      wake_id:
+        description: Existing campaign watchdog identifier
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: lite-interphase-${{ inputs.campaign_id }}-${{ inputs.controller_ref }}
+  cancel-in-progress: false
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CONTROLLER_REF: ${{ inputs.controller_ref }}
+      PACKET_PATH: ${{ inputs.packet_path }}
+      STATE_PATH: ${{ inputs.state_path }}
+      POINTER_PATH: ${{ inputs.pointer_path }}
+      CAMPAIGN_ID: ${{ inputs.campaign_id }}
+      WAKE_ID: ${{ inputs.wake_id }}
+    steps:
+      - name: Checkout trusted materializer
+        uses: actions/checkout$v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Checkout exact campaign branch
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CONTROLLER_REF" == audit/* ]]
+          [[ "$PACKET_PATH" == campaigns/*/handoffs/*/MECHANICAL_WORK_PACKET_v2.json ]]
+          [[ "$STATE_PATH" == campaigns/*/controller/CAMPAIGN_STATE_v*.json ]]
+          [[ "$POINTER_PATH" == campaigns/*/controller/ACTIVE_PHASE_POINTER_v*.json ]]
+          gh auth setup-git
+          gh repo clone CurveYield2/Audit-Controller .controller-mechanical -- --filter=blob:none --no-checkout
+          git -C .controller-mechanical fetch --depth=1 origin "$CONTROLLER_REF"
+          git -C .controller-mechanical checkout -B lite-mechanical FETCH_HEAD
+
+      - name: Generate and verify all sealed mechanical outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p "JSON.parse(require('fs').readFileSync('.controller-mechanical/' + process.env.STATE_PATH)).campaignId")" = "$CAMPAIGN_ID"
+          test "$(node -p "JSON.parse(require('fs').readFileSync('.controller-mechanical/' + process.env.STATE_PATH)).controller.branch")" = "$CONTROLLER_REF"
+          node scripts/lite-interphase-materialize-v2.mjs .controller-mechanical "$PACKET_PATH" "$STATE_PATH" "$POINTER_PATH"
+
+      - name: Commit exact generated outputs and receipt
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          handoff_dir="${PACKET_PATH%/MECHANICAL_WORK_PACKET_v2.json}"
+          git -C .controller-mechanical config user.name "CurveYield Lite Mechanical Automation"
+          git -C .controller-mechanical config user.email "actions$users.noreply.github.com"
+          git -C .controller-mechanical add -- "$handoff_dir/MECHANICAL" "$handoff_dir/MECHANICAL_WORK_COMPLETION_v2.json"
+          if git -C .controller-mechanical diff --cached --quiet; then
+            echo 'Generated receipt and outputs already match the sealed packet.'
+          else
+            git -C .controller-mechanical commit -m "chore(lite): materialize sealed interphase evidence for $CAMPAIGN_ID"
+            git -C .controller-mechanical push origin "HEAD:refs/heads/$CONTROLLER_REF"
+          fi
+
+      - name: Reconcile existing watchdog immediately
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$WAKE_ID"
