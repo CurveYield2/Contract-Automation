@@ -104,7 +104,8 @@ test('successor routing is reviewer-count agnostic and injects live campaign/ski
   assert.match(workflow, /next_reviewer="\$\(jq -r '\.nextMilestone\.reviewer/);
   assert.match(workflow, /campaign_title="\$\(jq -r '\.title/);
   assert.match(workflow, /commits.*-f path="\$candidate"/);
-  assert.match(workflow, /audit_skill_url=%s/);\n  assert.match(workflow, /audit_skill_authority_source=%s/);
+  assert.match(workflow, /audit_skill_url=%s/);
+  assert.match(workflow, /audit_skill_authority_source=%s/);
   assert.match(workflow, /connector_requirement=Use the GitHub connector app/);
   assert.match(workflow, /authority_rule=The audit skill URL above was resolved by authority precedence/);
   assert.match(workflow, /browser_context_b64="\$\(jq -nc/);
