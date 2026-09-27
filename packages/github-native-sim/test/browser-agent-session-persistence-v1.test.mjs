@@ -9,6 +9,7 @@ import {
   loadEncryptedSessionState,
   saveEncryptedSessionState,
 } from '../../../scripts/browser-session-state-v1.mjs';
+import { classifyV7QualificationChanges } from '../../../scripts/classify-v7-qualification-change.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../../..');
@@ -105,4 +106,17 @@ test('GitHub Playwright prefers encrypted rolling state, keeps bootstrap fallbac
   assert.match(source, /chatgpt\\\.com/);
   assert.match(source, /saveEncryptedSessionState\(/);
   assert.match(source, /CHATGPT_SESSION_STATE_UPDATED_MARKER/);
+});
+
+
+test('browser session persistence changes remain in the control-light qualification lane', () => {
+  const result = classifyV7QualificationChanges([
+    '.github/workflows/browser-agent-wake.yml',
+    '.github/workflows/browser-agent-watchdog.yml',
+    'scripts/browser-agent-wake.mjs',
+    'scripts/browser-session-state-v1.mjs',
+    'packages/github-native-sim/test/browser-agent-session-persistence-v1.test.mjs',
+    'process/browser-agent-wake/README.md',
+  ]);
+  assert.equal(result.lane, 'CONTROL_LIGHT');
 });
