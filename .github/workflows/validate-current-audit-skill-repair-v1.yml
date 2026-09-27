@@ -1,0 +1,24 @@
+name: Validate Current Audit Skill Repair v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/validate-current-audit-skill-repair-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/lite-phase0-handoff-order-v1
+      - name: Run authority package validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38"
+          bash tests/run_validation.sh
