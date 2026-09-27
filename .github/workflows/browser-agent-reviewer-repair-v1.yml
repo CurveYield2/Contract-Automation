@@ -400,39 +400,64 @@ jobs:
           HANDOFF_PATH: ${{ steps.context.outputs.handoff_path }}
           BASELINE_COMMIT: ${{ steps.context.outputs.baseline_commit }}
           REPAIR_REQUEST: ${{ steps.context.outputs.repair_request }}
+          PHASE0_BOOTSTRAP: ${{ steps.context.outputs.phase0_bootstrap }}
         shell: bash
         run: |
           set -euo pipefail
-          {
-            printf '%s\n' '[AUDIT_REVIEWER_REPLACEMENT_V1]'
-            printf 'campaign_name=%s\n' "$CAMPAIGN_TITLE"
-            printf 'campaign_id=%s\n' "$CAMPAIGN_ID"
-            printf 'reviewer=%s\n' "$REVIEWER"
-            printf 'milestone=%s\n' "$MILESTONE"
-            printf 'campaign_url=%s\n' "$CAMPAIGN_URL"
-            printf 'audit_skill_url=%s\n' "$SKILL_URL"
-            printf 'audit_skill_authority_source=%s\n' "$SKILL_AUTHORITY_SOURCE"
-            printf 'authoritative_handoff=%s\n' "$HANDOFF_PATH"
-            printf 'handoff_baseline_commit=%s\n' "$BASELINE_COMMIT"
-            printf 'repair_disposition=%s\n' "$DISPOSITION"
-            printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT_IN_CAMPAIGN_PROJECT; do not use Work.'
-            printf '%s\n' 'connector_requirement=Use the GitHub connector app for all repository reads/writes.'
-            printf '%s\n' 'authority_rule=The audit skill URL above was resolved by authority precedence (campaign-bound first, otherwise the active global Lite primary authority; legacy newest-ZIP fallback only when neither exists). Read it before reviewer work and follow it exactly unless a newer explicit human instruction in this chat overrides it.'
-            printf '%s\n' 'sealed_work_rule=Never restart or overwrite sealed predecessor work for convenience.'
-            if [ "$DISPOSITION" = reset ]; then
-              printf '%s\n' 'recovery_rule=The campaign has already been machine-reset to the active reviewer handoff baseline. Start this reviewer cleanly from that handoff and current preserved source/skill authority.'
-              printf '%s\n' 'reset_receipt=controller/REVIEWER_REPAIR_RESET_v1.json'
-            else
-              printf '%s\n' 'recovery_rule=First attempt to resume from the latest durable campaign state and continue from the exact point reached by the prior reviewer.'
-              printf '%s\n' 'recovery_validation=Inspect the active pointer, authoritative handoff, controller state, current reviewer outputs, ledgers, and receipts before changing anything.'
-              printf '%s\n' "reset_request_path=$REPAIR_REQUEST"
-              printf '%s\n' 'reset_request_rule=If and only if the existing active-reviewer files are irreconcilably partial/misplaced such that safe continuation is impossible, do not delete or reset them yourself. File REVIEWER_REPAIR_REQUEST_v1.json at reset_request_path with schema curveyield-reviewer-repair-request-v1, action RESET_TO_HANDOFF, the exact campaign/reviewer/milestone/handoff/baseline identity above, a concrete reason, and requestedAt. Then stop so automation can perform the clean reset.'
-            fi
-            printf '%s\n' 'completion_rule=Otherwise continue this reviewer through its required final report/handoff terminal state so the normal successor automation can continue.'
-            if [ -n "$REPAIR_REASON" ]; then
-              printf 'repair_trigger=%s\n' "$REPAIR_REASON"
-            fi
-          } > /tmp/replacement-wake.txt
+          if [ "$PHASE0_BOOTSTRAP" = true ]; then
+            {
+              printf '%s\n' '[AUDIT_PHASE0_BOOTSTRAP_REPLACEMENT_V1]'
+              printf 'campaign_name=%s\n' "$CAMPAIGN_TITLE"
+              printf 'campaign_id=%s\n' "$CAMPAIGN_ID"
+              printf '%s\n' 'reviewer=web-bootstrap-agent'
+              printf '%s\n' 'phase=phase-0'
+              printf '%s\n' 'milestone=P0_BOOTSTRAP'
+              printf 'campaign_url=%s\n' "$CAMPAIGN_URL"
+              printf 'audit_skill_url=%s\n' "$SKILL_URL"
+              printf 'audit_skill_authority_source=%s\n' "$SKILL_AUTHORITY_SOURCE"
+              printf '%s\n' 'repair_disposition=resume'
+              printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT_OUTSIDE_CAMPAIGN_PROJECT; do not use Work.'
+              printf '%s\n' 'connector_requirement=Use the GitHub connector app for all repository reads/writes.'
+              printf '%s\n' 'authority_rule=Read the resolved audit skill authority before Phase-0 work and follow its Ultralite/Lite Phase-0 instructions exactly.'
+              printf '%s\n' 'recovery_rule=Resume Phase 0 from the latest durable campaign state and admitted source identity. Do not repeat completed source fan-out or overwrite durable completed bootstrap work.'
+              printf '%s\n' 'recovery_validation=Inspect the active pointer, controller state, existing Phase-0 outputs, automation receipts, ledgers, and current source/skill identities before changing anything.'
+              printf '%s\n' 'completion_rule=Execute Phase 0 only through its required machine completion validation and sealed P0_TO_P1 successor boundary, then stop so the Ultralite successor automation can launch reviewer-1.'
+              if [ -n "$REPAIR_REASON" ]; then
+                printf 'repair_trigger=%s\n' "$REPAIR_REASON"
+              fi
+            } > /tmp/replacement-wake.txt
+          else
+            {
+              printf '%s\n' '[AUDIT_REVIEWER_REPLACEMENT_V1]'
+              printf 'campaign_name=%s\n' "$CAMPAIGN_TITLE"
+              printf 'campaign_id=%s\n' "$CAMPAIGN_ID"
+              printf 'reviewer=%s\n' "$REVIEWER"
+              printf 'milestone=%s\n' "$MILESTONE"
+              printf 'campaign_url=%s\n' "$CAMPAIGN_URL"
+              printf 'audit_skill_url=%s\n' "$SKILL_URL"
+              printf 'audit_skill_authority_source=%s\n' "$SKILL_AUTHORITY_SOURCE"
+              printf 'authoritative_handoff=%s\n' "$HANDOFF_PATH"
+              printf 'handoff_baseline_commit=%s\n' "$BASELINE_COMMIT"
+              printf 'repair_disposition=%s\n' "$DISPOSITION"
+              printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT_IN_CAMPAIGN_PROJECT; do not use Work.'
+              printf '%s\n' 'connector_requirement=Use the GitHub connector app for all repository reads/writes.'
+              printf '%s\n' 'authority_rule=The audit skill URL above was resolved by authority precedence (campaign-bound first, otherwise the active global Lite primary authority; legacy newest-ZIP fallback only when neither exists). Read it before reviewer work and follow it exactly unless a newer explicit human instruction in this chat overrides it.'
+              printf '%s\n' 'sealed_work_rule=Never restart or overwrite sealed predecessor work for convenience.'
+              if [ "$DISPOSITION" = reset ]; then
+                printf '%s\n' 'recovery_rule=The campaign has already been machine-reset to the active reviewer handoff baseline. Start this reviewer cleanly from that handoff and current preserved source/skill authority.'
+                printf '%s\n' 'reset_receipt=controller/REVIEWER_REPAIR_RESET_v1.json'
+              else
+                printf '%s\n' 'recovery_rule=First attempt to resume from the latest durable campaign state and continue from the exact point reached by the prior reviewer.'
+                printf '%s\n' 'recovery_validation=Inspect the active pointer, authoritative handoff, controller state, current reviewer outputs, ledgers, and receipts before changing anything.'
+                printf '%s\n' "reset_request_path=$REPAIR_REQUEST"
+                printf '%s\n' 'reset_request_rule=If and only if the existing active-reviewer files are irreconcilably partial/misplaced such that safe continuation is impossible, do not delete or reset them yourself. File REVIEWER_REPAIR_REQUEST_v1.json at reset_request_path with schema curveyield-reviewer-repair-request-v1, action RESET_TO_HANDOFF, the exact campaign/reviewer/milestone/handoff/baseline identity above, a concrete reason, and requestedAt. Then stop so automation can perform the clean reset.'
+              fi
+              printf '%s\n' 'completion_rule=Otherwise continue this reviewer through its required final report/handoff terminal state so the normal successor automation can continue.'
+              if [ -n "$REPAIR_REASON" ]; then
+                printf 'repair_trigger=%s\n' "$REPAIR_REASON"
+              fi
+            } > /tmp/replacement-wake.txt
+          fi
           echo "wake_b64=$(base64 -w0 /tmp/replacement-wake.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Launch replacement reviewer normal web chat
@@ -447,6 +472,7 @@ jobs:
           STATE_PATH: ${{ steps.context.outputs.state_path }}
           POINTER_PATH: ${{ steps.context.outputs.pointer_path }}
           DISPOSITION: ${{ steps.context.outputs.disposition }}
+          PHASE0_BOOTSTRAP: ${{ steps.context.outputs.phase0_bootstrap }}
         shell: bash
         run: |
           set -euo pipefail
@@ -454,11 +480,18 @@ jobs:
           if [ -n "$PHASE_START" ]; then phase_id="phase-$PHASE_START"; fi
           chat_name="$PROJECT_NAME $REVIEWER replacement"
           wake_id="$CAMPAIGN_ID-$MILESTONE-repair-$GITHUB_RUN_ID"
-          browser_context_b64="$(jq -nc \
-            --arg routine 'audit-ultralite-reviewer-v1' \
-            --arg project "$PROJECT_NAME" \
-            --arg chat "$chat_name" \
-            '{routineId:$routine,projectName:$project,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
+          if [ "$PHASE0_BOOTSTRAP" = true ]; then
+            phase_id="phase-0"
+            browser_context_b64="$(jq -nc \
+              --arg chat "$chat_name" \
+              '{routineId:"",projectName:"",chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
+          else
+            browser_context_b64="$(jq -nc \
+              --arg routine 'audit-ultralite-reviewer-v1' \
+              --arg project "$PROJECT_NAME" \
+              --arg chat "$chat_name" \
+              '{routineId:$routine,projectName:$project,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
+          fi
 
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="$wake_id" \
