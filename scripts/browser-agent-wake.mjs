@@ -25,6 +25,15 @@ function sha(text='') {
 }
 function bool(v) { return String(v || '').toLowerCase() === 'true'; }
 
+class BrowserAgentError extends Error {
+  constructor(code, message, retryable = false) {
+    super(message);
+    this.name = 'BrowserAgentError';
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
 async function persistHealthySession(providerName, context, state) {
   if (providerName !== 'github-playwright') return false;
   if (!state?.composerVisible || !/^https:\/\/chatgpt\.com\//.test(state.url || '')) return false;
@@ -149,7 +158,7 @@ async function ensureComposer(page) {
   const textareaCount = await page.locator('textarea').count().catch(() => 0);
   const editableCount = await page.locator('[contenteditable="true"]').count().catch(() => 0);
 
-  throw new Error(
+  const diagnostic =
     'ChatGPT composer not found after 30s' +
     ' (url=' + currentUrl +
     ', title=' + JSON.stringify(title) +
@@ -157,8 +166,18 @@ async function ensureComposer(page) {
     ', humanChallenge=' + humanChallenge +
     ', conversationUnavailable=' + conversationUnavailable +
     ', textareaCount=' + textareaCount +
-    ', editableCount=' + editableCount + ')'
-  );
+    ', editableCount=' + editableCount + ')';
+
+  if (humanChallenge) {
+    throw new BrowserAgentError('BROWSER_CHALLENGE', diagnostic, true);
+  }
+  if (loginPrompt) {
+    throw new BrowserAgentError('AUTH_REQUIRED', diagnostic, false);
+  }
+  if (conversationUnavailable) {
+    throw new BrowserAgentError('CHAT_UNAVAILABLE', diagnostic, false);
+  }
+  throw new BrowserAgentError('CHATGPT_UI_UNAVAILABLE', diagnostic, true);
 }
 
 async function waitForAssistantResponse(page, before, timeoutMs) {
@@ -346,7 +365,12 @@ for (const [name, connect] of providers) {
     console.log(JSON.stringify(result));
     process.exit(0);
   } catch (error) {
-    failures.push({ provider: name, error: error.message });
+    failures.push({
+      provider: name,
+      code: error?.code || 'PROVIDER_ERROR',
+      retryable: error?.retryable === true,
+      error: error.message,
+    });
     console.error('[' + name + '] ' + error.message);
   }
 }

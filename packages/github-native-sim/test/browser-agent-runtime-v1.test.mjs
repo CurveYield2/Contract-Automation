@@ -108,3 +108,40 @@ test('browser-agent workflows use Xvfb for local Chrome', () => {
     assert.equal(wrapped.length, calls.length);
   }
 });
+
+
+test('browser runtime classifies only pre-post UI failures as fresh-runner retryable', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /class BrowserAgentError extends Error/);
+  assert.match(source, /BrowserAgentError\('BROWSER_CHALLENGE', diagnostic, true\)/);
+  assert.match(source, /BrowserAgentError\('CHATGPT_UI_UNAVAILABLE', diagnostic, true\)/);
+  assert.match(source, /BrowserAgentError\('AUTH_REQUIRED', diagnostic, false\)/);
+  assert.match(source, /BrowserAgentError\('CHAT_UNAVAILABLE', diagnostic, false\)/);
+  assert.match(source, /retryable:\s*error\?\.retryable === true/);
+  assert.match(source, /code:\s*error\?\.code \|\| 'PROVIDER_ERROR'/);
+});
+
+test('wake workflow retries retryable browser failures on a bounded fresh runner and gates all durable follow-ons', () => {
+  const workflow = read('.github/workflows/browser-agent-wake.yml');
+  assert.match(workflow, /runner_retry_attempt:[\s\S]*default:\s*'0'/);
+  assert.match(workflow, /runner_retry_max:[\s\S]*default:\s*'3'/);
+  assert.match(workflow, /if \[ "\$max" -gt 5 \]; then max=5; fi/);
+  assert.match(workflow, /select\(\.provider=="github-playwright" and \.retryable==true\)/);
+  assert.match(workflow, /gh workflow run browser-agent-wake\.yml/);
+  assert.match(workflow, /--json/);
+  assert.match(workflow, /steps\.fresh-runner-retry\.outputs\.dispatched != 'true'/);
+
+  for (const stepName of [
+    'Detect refreshed encrypted ChatGPT session state',
+    'Create watchdog state',
+    'Persist watchdog state',
+    'Persist fresh-chat URL into campaign registration',
+    'Arm immediate watchdog observation',
+  ]) {
+    const start = workflow.indexOf('- name: ' + stepName);
+    assert.ok(start >= 0, stepName + ' missing');
+    const next = workflow.indexOf('\n      - name:', start + 1);
+    const block = workflow.slice(start, next >= 0 ? next : workflow.length);
+    assert.match(block, /steps\.deliver\.outputs\.ok == 'true'/, stepName + ' must require successful delivery');
+  }
+});

@@ -80,6 +80,16 @@ on:
         required: false
         default: COMPLETE,STOPPED_BY_HUMAN
         type: string
+      runner_retry_attempt:
+        description: Internal fresh-runner retry attempt counter
+        required: false
+        default: '0'
+        type: string
+      runner_retry_max:
+        description: Maximum fresh-runner retries for retryable pre-post browser failures
+        required: false
+        default: '3'
+        type: string
 
 permissions:
   contents: write
@@ -156,13 +166,76 @@ jobs:
           export WAKE_ACTION='wake'
           export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
           export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
+
+          set +e
           xvfb-run -a node scripts/browser-agent-wake.mjs
-          echo "chat_url=$(jq -r '.chatUrl // .after.url // .url // empty' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
-          echo "provider=$(jq -r '.provider // empty' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
-          echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
-          echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' /tmp/browser-agent-wake-result.json)" >> "$GITHUB_OUTPUT"
+          rc=$?
+          set -e
+
+          if [ ! -s "$WAKE_RESULT_PATH" ]; then
+            jq -n --argjson rc "$rc" '{ok:false,wakeId:"unknown",failures:[{provider:"github-playwright",code:"NO_RESULT",retryable:false,error:("browser runtime exited without a result; rc="+($rc|tostring))}]}' > "$WAKE_RESULT_PATH"
+          fi
+
+          ok="$(jq -r '.ok // false' "$WAKE_RESULT_PATH")"
+          retryable="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true)] | length > 0' "$WAKE_RESULT_PATH")"
+          retry_code="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true) | .code][0] // empty' "$WAKE_RESULT_PATH")"
+
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "retryable=$retryable" >> "$GITHUB_OUTPUT"
+          echo "retry_code=$retry_code" >> "$GITHUB_OUTPUT"
+          echo "chat_url=$(jq -r '.chatUrl // .after.url // .url // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "provider=$(jq -r '.provider // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+
+          if [ "$ok" != true ]; then
+            echo "::warning::Browser wake did not complete on this runner (retryable=$retryable code=$retry_code rc=$rc)."
+          fi
+
+      - name: Dispatch fresh-runner retry for retryable pre-post failure
+        id: fresh-runner-retry
+        if: steps.deliver.outputs.ok != 'true' && steps.deliver.outputs.retryable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RETRY_INPUTS_JSON: ${{ toJSON(inputs) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          attempt='${{ inputs.runner_retry_attempt }}'
+          max='${{ inputs.runner_retry_max }}'
+          [[ "$attempt" =~ ^[0-9]+$ ]] || attempt=0
+          [[ "$max" =~ ^[0-9]+$ ]] || max=3
+          if [ "$max" -gt 5 ]; then max=5; fi
+
+          if [ "$attempt" -ge "$max" ]; then
+            echo "dispatched=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Fresh-runner retry budget exhausted at attempt $attempt/$max."
+            exit 0
+          fi
+
+          next=$((attempt + 1))
+          retry_inputs="$(printf '%s' "$RETRY_INPUTS_JSON" | jq -c --arg next "$next" --arg max "$max" '
+            with_entries(.value |= tostring)
+            | .runner_retry_attempt=$next
+            | .runner_retry_max=$max
+          ')"
+
+          printf '%s\n' "$retry_inputs" | gh workflow run browser-agent-wake.yml             --repo "$GITHUB_REPOSITORY"             --ref main             --json
+
+          echo "dispatched=true" >> "$GITHUB_OUTPUT"
+          echo "next_attempt=$next" >> "$GITHUB_OUTPUT"
+          echo "Fresh-runner retry $next/$max dispatched for $WAKE_ID after ${{ steps.deliver.outputs.retry_code }}." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail terminal browser wake
+        if: steps.deliver.outputs.ok != 'true' && steps.fresh-runner-retry.outputs.dispatched != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{ok,wakeId,failures}' /tmp/browser-agent-wake-result.json
+          exit 1
 
       - name: Detect refreshed encrypted ChatGPT session state
+        if: steps.deliver.outputs.ok == 'true'
         id: refreshed-chatgpt-session
         shell: bash
         run: |
@@ -174,14 +247,14 @@ jobs:
           fi
 
       - name: Save refreshed encrypted ChatGPT session state
-        if: steps.refreshed-chatgpt-session.outputs.updated == 'true'
+        if: steps.deliver.outputs.ok == 'true' && steps.refreshed-chatgpt-session.outputs.updated == 'true'
         uses: actions/cache/save@v4
         with:
           path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
           key: chatgpt-session-state-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.wake_id }}
 
       - name: Create watchdog state
-        if: ${{ inputs.watchdog_enabled }}
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
         env:
           CHAT_URL_RESOLVED: ${{ steps.deliver.outputs.chat_url }}
           PROVIDER: ${{ steps.deliver.outputs.provider }}
@@ -256,7 +329,7 @@ jobs:
           echo "WATCHDOG_SAFE_ID=$safe_id" >> "$GITHUB_ENV"
 
       - name: Persist watchdog state
-        if: ${{ inputs.watchdog_enabled }}
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -272,7 +345,7 @@ jobs:
           fi
 
       - name: Persist fresh-chat URL into campaign registration
-        if: ${{ inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer' }}
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer' }}
         env:
           GH_TOKEN: ${{ github.token }}
           NEW_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}
@@ -289,7 +362,7 @@ jobs:
           gh api --method PUT "$api" -f message="chore(wake): bind fresh chat for $CAMPAIGN_ID" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
 
       - name: Arm immediate watchdog observation
-        if: ${{ inputs.watchdog_enabled }}
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
