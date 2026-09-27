@@ -458,24 +458,24 @@ jobs:
           registration_api="repos/$GITHUB_REPOSITORY/contents/$registration_path"
           encoded="$(gh api "$registration_api?ref=main" --jq '.content' 2>/dev/null || true)"
           [ -n "$encoded" ] || {
-            echo "::error::Source fan-out completed but no canonical browser registration exists for $CAMPAIGN_ID; refusing to leave the Ultralite campaign unmonitored."
+            echo "::error::Source fan-out completed but no canonical browser registration exists for $CAMPAIGN_ID; refusing to leave the Lite campaign unmonitored."
             exit 1
           }
-          printf '%s' "$encoded" | base64 -d > /tmp/ultralite-registration.json
-          test "$(jq -r '.schemaVersion // empty' /tmp/ultralite-registration.json)" = 'curveyield-browser-agent-wake-registration-v1'
-          test "$(jq -r '.campaignId // empty' /tmp/ultralite-registration.json)" = "$CAMPAIGN_ID"
+          printf '%s' "$encoded" | base64 -d > /tmp/lite-registration.json
+          test "$(jq -r '.schemaVersion // empty' /tmp/lite-registration.json)" = 'curveyield-browser-agent-wake-registration-v1'
+          test "$(jq -r '.campaignId // empty' /tmp/lite-registration.json)" = "$CAMPAIGN_ID"
 
-          gate_mode="$(jq -r '.watchdog.gate.mode // empty' /tmp/ultralite-registration.json)"
-          gate_ref="$(jq -r '.watchdog.gate.ref // empty' /tmp/ultralite-registration.json)"
-          gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' /tmp/ultralite-registration.json)"
-          gate_expected_phase="$(jq -r '.watchdog.gate.expectedPhaseId // empty' /tmp/ultralite-registration.json)"
-          gate_expected_milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' /tmp/ultralite-registration.json)"
+          gate_mode="$(jq -r '.watchdog.gate.mode // empty' /tmp/lite-registration.json)"
+          gate_ref="$(jq -r '.watchdog.gate.ref // empty' /tmp/lite-registration.json)"
+          gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' /tmp/lite-registration.json)"
+          gate_expected_phase="$(jq -r '.watchdog.gate.expectedPhaseId // empty' /tmp/lite-registration.json)"
+          gate_expected_milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' /tmp/lite-registration.json)"
 
           test "$gate_mode" = 'LITE'
           test "$gate_expected_phase" = 'phase-0'
           test "$gate_expected_milestone" = 'P0_BOOTSTRAP'
-          [[ "$gate_state_path" == campaigns/*/controller/CAMPAIGN_STATE_v1.json ]]
-          campaign_path="${gate_state_path%/controller/CAMPAIGN_STATE_v1.json}"
+          [[ "$gate_state_path" =~ ^campaigns/.+/controller/CAMPAIGN_STATE_v[0-9]+\.json$ ]]
+          campaign_path="${gate_state_path%/controller/*}"
           test "$campaign_path" = "campaigns/$AUDIT_NAME"
           test -n "$gate_ref"
 
@@ -494,7 +494,7 @@ jobs:
             echo "- Campaign: $AUDIT_NAME"
             echo "- Campaign ID: $CAMPAIGN_ID"
             echo "- Reviewer/chat launch: NOT performed by source fan-out"
-            echo "- Campaign monitor: canonical Ultralite orchestrator dispatched"
+            echo "- Campaign monitor: canonical Lite orchestrator dispatched"
             echo "- Phase-0 behavior: state-only monitoring; no second bootstrap chat"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Record import failure run
