@@ -45,10 +45,10 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2,
     "consecutiveIdlePokes": 0,
-    "consecutiveUnviewable": 0
+    "consecutiveUnviewable": 1
   },
   "watchdogRunId": "36332303055",
   "watchdogSweepStartedAt": "2026-09-27T16:12:43Z",
-  "lastDecision": "BROWSER_CHALLENGE_RETRY_LATER",
+  "lastDecision": "CHAT_UNVIEWABLE",
   "lastObservationFailureAt": "2026-09-27T16:12:00Z"
 }
