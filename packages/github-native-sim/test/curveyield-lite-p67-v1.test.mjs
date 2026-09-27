@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { validateDeepAssuranceRequestV2 } from '../src/schema.mjs';
 import fs from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
-import { isCurveYieldLiteP67Request, resolveCurveYieldLiteP67Anvil } from '../src/curveyield-lite-p67-v1.mjs';
+import { isCurveYieldLiteP67Request, resolveCurveYieldLiteP67Anvil, waitForTransactionReceipt } from '../src/curveyield-lite-p67-v1.mjs';
 
 function request() {
   return {
@@ -62,4 +62,34 @@ test('resolves and marks the pinned request-runtime Anvil wrapper executable', a
   const anvilPath = await resolveCurveYieldLiteP67Anvil();
   assert.match(anvilPath, /node_modules\/@foundry-rs\/anvil\/bin\.mjs$/);
   await fs.access(anvilPath, fsConstants.X_OK);
+});
+
+
+test('waits for a mined Anvil receipt before reading blockNumber', async () => {
+  const observed = [];
+  let attempt = 0;
+  const receipt = await waitForTransactionReceipt('http://127.0.0.1:8640', '0xabc', {
+    maxAttempts: 4,
+    delayMs: 0,
+    request: async (_url, method, params) => {
+      observed.push({ method, params });
+      attempt += 1;
+      if (attempt < 3) return null;
+      return { blockNumber: '0x2a', status: '0x1' };
+    },
+  });
+  assert.equal(receipt.blockNumber, '0x2a');
+  assert.equal(observed.length, 3);
+  assert.deepEqual(observed[0], { method: 'eth_getTransactionReceipt', params: ['0xabc'] });
+});
+
+test('fails with a bounded timeout if an Anvil receipt never appears', async () => {
+  await assert.rejects(
+    waitForTransactionReceipt('http://127.0.0.1:8640', '0xdef', {
+      maxAttempts: 2,
+      delayMs: 0,
+      request: async () => null,
+    }),
+    /Timed out waiting for local Anvil transaction receipt: 0xdef/,
+  );
 });
