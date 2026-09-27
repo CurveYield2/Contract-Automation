@@ -3,7 +3,7 @@
   "campaignId": "REPLACE_WITH_EXACT_CAMPAIGN_ID",
   "mode": "create_fresh",
   "chatUrl": "",
-  "wakeMessage": "[AUDIT_AUTOMATION_WAKE_V1]\nYou are the dedicated Lite Phase-0 web-bootstrap agent. Recover the admitted source-fanout report and campaign state, execute Phase 0 exactly as required by the active Lite skill, create and seal P0_TO_P1, then allow the machine wake chain to launch reviewer-1. Do not restart completed work.",
+  "wakeMessage": "[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1]\nYou are the dedicated normal ChatGPT web Phase-0 bootstrap agent for this ultralite audit. Use the GitHub connector app for repository work. Read the active audit skill authority from GitHub and follow its Lite/ultralite Phase-0 instructions exactly. Execute Phase 0 only, write the canonical Phase-0 outputs, create/seal the Phase-0 successor packet/handoff, and leave controller/pointer state machine-ready for successor launch. Do not continue into reviewer-1; the browser orchestrator will create/reuse the campaign ChatGPT Project and launch the next reviewer automatically.",
   "watchdog": {
     "enabled": true,
     "idleMessage": "[AUDIT_AGENT_WATCHDOG_V1]\nGET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.",
@@ -26,5 +26,19 @@
         "STOPPED_BY_HUMAN"
       ]
     }
+  },
+  "browserRoutine": "audit-ultralite-reviewer-v1",
+  "chatgptProject": {
+    "name": "REPLACE_WITH_CAMPAIGN_NAME",
+    "url": ""
+  },
+  "activeChat": {
+    "name": "",
+    "url": ""
+  },
+  "repair": {
+    "enabled": true,
+    "idlePokeThreshold": 3,
+    "unviewableThreshold": 2
   }
 }
