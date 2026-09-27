@@ -1,3 +1,0 @@
-# Independent Review Profile
-
-Exactly one reviewer is active at a time. `reviewer-1` executes Phases 0–5; fresh `reviewer-2A`, `reviewer-2B`, and `reviewer-2C` execute Phase 6A/6B/6C respectively; fresh `reviewer-3` executes Phases 7–8; fresh `reviewer-4` executes Phases 9–10. Mandatory sealed successor boundaries occur after Phase 5, Phase 6A, Phase 6B, Phase 6C, and Phase 8. Phase reports remain mandatory but routine progression is automatic after seal criteria pass; there is no per-phase human approval gate. Fresh-session boundaries are `SEQUENTIAL_AGENT_HANDOFF` and do not by themselves make inherited evidence independent. Phase-5 source-first retrace remains `PROCEDURAL_INDEPENDENCE_ONLY`.
