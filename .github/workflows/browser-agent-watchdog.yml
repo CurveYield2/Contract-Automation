@@ -507,8 +507,15 @@ jobs:
             next_id="$(jq -r '.nextMilestone.id // empty' /tmp/lite-active-pointer.json)"
             next_state="$(jq -r '.nextMilestone.state // empty' /tmp/lite-active-pointer.json)"
             next_reviewer="$(jq -r '.nextMilestone.reviewer // empty' /tmp/lite-active-pointer.json)"
-            next_phase="$(jq -r '.nextMilestone.phaseRange[0] // empty' /tmp/lite-active-pointer.json)"
-            if [ -n "$next_phase" ]; then next_phase="phase-$next_phase"; else next_phase="$next_id"; fi
+            next_phase="$(jq -r '.nextPhaseId // empty' /tmp/lite-active-pointer.json)"
+            if [ -z "$next_phase" ]; then
+              next_phase_start="$(jq -r '.nextMilestone.phaseRange[0] // empty' /tmp/lite-active-pointer.json)"
+              if [ -n "$next_phase_start" ]; then next_phase="phase-$next_phase_start"; fi
+            fi
+            [[ "$next_phase" =~ ^phase-[0-9]+$ ]] || {
+              echo "::warning::Successor pointer does not provide a valid next phase id."
+              return 2
+            }
 
             [ "$completed_id" = "$expected_milestone" ] || return 2
             case "$completed_status" in
@@ -613,6 +620,7 @@ jobs:
             chat_name="$campaign_title $next_reviewer"
             campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(printf '%s' "$campaign_root" | sed 's/ /%20/g')"
             phase_range="$(jq -r '.nextMilestone.phaseRange // [] | if length==0 then "" elif length==1 then "phase-"+(.[0]|tostring) else "phase-"+(.[0]|tostring)+" through phase-"+(.[-1]|tostring) end' /tmp/lite-active-pointer.json)"
+            [ -n "$phase_range" ] || phase_range="skill-defined reviewer range beginning at $next_phase"
 
             # Human-requested authority: the unpacked current authority folder on
             # Contract-Automation/main. Fail closed if it is ambiguous.
