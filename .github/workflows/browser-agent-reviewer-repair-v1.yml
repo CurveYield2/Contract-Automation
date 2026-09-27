@@ -368,7 +368,7 @@ jobs:
           set -euo pipefail
           if [ "$PHASE0_BOOTSTRAP" = true ]; then
             {
-              printf '%s\n' '[CURVEYIELD_ULTRALITE_PHASE0_REPLACEMENT_V2]'
+              printf '%s\n' '[CURVEYIELD_LITE_PHASE0_REPLACEMENT_V2]'
               printf 'campaign_name=%s\n' "$CAMPAIGN_TITLE"
               printf 'campaign_id=%s\n' "$CAMPAIGN_ID"
               printf '%s\n' 'reviewer=web-bootstrap-agent'
@@ -378,7 +378,7 @@ jobs:
               printf 'campaign_url=%s\n' "$CAMPAIGN_URL"
               printf 'authoritative_skill_folder=%s\n' "$SKILL_URL"
               printf '%s\n' 'connector_requirement=Use the GitHub connector app for every repository read/write.'
-              printf '%s\n' 'instruction=Resume this exact campaign Phase 0 from durable state. Follow the Ultralite pathway in the authoritative skill precisely with no deviation. Do not repeat completed bootstrap work. Complete and validate every required Phase-0 artifact and P0_TO_P1 boundary, then stop so automation can launch reviewer-1.'
+              printf '%s\n' 'instruction=Resume this exact campaign Phase 0 from durable state. Follow the Lite pathway in the authoritative skill precisely with no deviation. Do not repeat completed bootstrap work. Complete and validate every required Phase-0 artifact and P0_TO_P1 boundary, then stop so automation can launch reviewer-1.'
             } > /tmp/replacement-wake.txt
           else
             [ -n "$WAKE_PATH" ] || { echo "::error::Replacement reviewer has no sealed wake path"; exit 1; }
@@ -446,7 +446,7 @@ jobs:
               '{routineId:"",projectName:"",chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
           else
             browser_context_b64="$(jq -nc \
-              --arg routine 'audit-ultralite-reviewer-v1' \
+              --arg routine 'audit-lite-reviewer-v1' \
               --arg project "$PROJECT_NAME" \
               --arg chat "$chat_name" \
               '{routineId:$routine,projectName:$project,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
