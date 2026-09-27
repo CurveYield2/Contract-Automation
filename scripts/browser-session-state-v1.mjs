@@ -23,7 +23,13 @@ export function validateStorageState(storage) {
 }
 
 export async function loadEncryptedSessionState({ encryptedSessionPath, keyB64, logger = console }) {
-  const key = decodeKey(keyB64);
+  let key;
+  try {
+    key = decodeKey(keyB64);
+  } catch {
+    logger.warn?.('[github-playwright] Session-state encryption key is invalid; falling back to bootstrap state');
+    return null;
+  }
   if (!key) return null;
 
   let envelope;
