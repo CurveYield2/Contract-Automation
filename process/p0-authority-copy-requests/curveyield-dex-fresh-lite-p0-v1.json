@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "curveyield-phase0-authority-copy-trigger-v1",
+  "campaignId": "curveyield-dex-fresh-lite-audit-r1",
+  "sourcePath": "Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38.3.3_Web_Bootstrap_Optimized_v1.zip",
+  "sourceSha256": "f21cb928bc549286164e23ea30b7b6a2739712057e6005849f7ee50d4fd7ee60",
+  "destinationRepository": "CurveYield2/Audit-Controller",
+  "destinationBranch": "audit/curveyield-dex-fresh-lite-p0-20260927-v1",
+  "destinationPath": "campaigns/CurveYield DEX Fresh Lite Audit/authority/Audit_V7_independent_Review_skill_v38.3.3_Web_Bootstrap_Optimized_v1.zip"
+}
