@@ -619,18 +619,65 @@ jobs:
             project_name="$campaign_title"
             chat_name="$campaign_title $next_reviewer"
 
+            successor_handoff_path="$handoff_dir/SUCCESSOR_HANDOFF.json"
+            successor_handoff_encoded="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$successor_handoff_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+            [ -n "$successor_handoff_encoded" ] || {
+              echo "::warning::Mandatory successor handoff JSON is missing: $successor_handoff_path"
+              return 2
+            }
+            printf '%s' "$successor_handoff_encoded" | base64 -d > /tmp/sealed-successor-handoff.json
+
+            handoff_campaign_type="$(jq -r '.campaign.campaignType // empty' /tmp/sealed-successor-handoff.json)"
+            handoff_campaign_name="$(jq -r '.campaign.campaignName // empty' /tmp/sealed-successor-handoff.json)"
+            handoff_campaign_id="$(jq -r '.campaign.campaignId // empty' /tmp/sealed-successor-handoff.json)"
+            handoff_workspace="$(jq -r '.campaign.workspacePath // empty' /tmp/sealed-successor-handoff.json)"
+            handoff_incoming="$(jq -r '.assignment.incomingReviewer // .reviewers.incoming // empty' /tmp/sealed-successor-handoff.json)"
+            handoff_assignment="$(jq -r '.assignment.assignedLitePhaseOrMilestone // empty' /tmp/sealed-successor-handoff.json)"
+            handoff_authority="$(jq -r '.authority.liteSkillRepositoryPath // empty' /tmp/sealed-successor-handoff.json)"
+
+            [ "$handoff_campaign_type" = "LITE" ] || { echo "::warning::Successor handoff campaign type is not LITE"; return 2; }
+            [ "$handoff_campaign_name" = "$campaign_title" ] || { echo "::warning::Successor handoff campaign name mismatch"; return 2; }
+            [ "$handoff_campaign_id" = "$campaign_id" ] || { echo "::warning::Successor handoff campaign id mismatch"; return 2; }
+            [ "$handoff_workspace" = "$campaign_root" ] || { echo "::warning::Successor handoff workspace mismatch"; return 2; }
+            [ "$handoff_incoming" = "$next_reviewer" ] || { echo "::warning::Successor handoff reviewer mismatch"; return 2; }
+            [ -n "$handoff_assignment" ] || { echo "::warning::Successor handoff assignment is empty"; return 2; }
+            [ "$handoff_authority" = "CurveYield2/Contract-Automation/Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md" ] || {
+              echo "::warning::Successor handoff does not point to the current authority Lite skill"
+              return 2
+            }
+
             # The sealed WAKE_UP_MESSAGE.md is the complete first-message contract.
             # Do not prepend, append, summarize, or reinterpret it.
             # Campaign identity and current phase are validated from canonical controller
             # state/pointer before this file is admitted.
+            grep -Fq 'Campaign type: **LITE**' /tmp/sealed-successor-wake.txt || {
+              echo "::warning::Sealed successor wake does not identify the Lite campaign type."
+              return 2
+            }
+            grep -Fq "$campaign_title" /tmp/sealed-successor-wake.txt || {
+              echo "::warning::Sealed successor wake does not contain the canonical campaign name."
+              return 2
+            }
             grep -Fq "$campaign_id" /tmp/sealed-successor-wake.txt || {
               echo "::warning::Sealed successor wake does not contain the canonical campaign id $campaign_id."
               return 2
             }
-            if ! grep -Fq "$next_phase" /tmp/sealed-successor-wake.txt                && ! grep -Fqi "${next_phase#phase-}" /tmp/sealed-successor-wake.txt; then
-              echo "::warning::Sealed successor wake does not identify canonical successor phase $next_phase."
+            grep -Fq "$campaign_root" /tmp/sealed-successor-wake.txt || {
+              echo "::warning::Sealed successor wake does not contain the canonical workspacePath."
               return 2
-            fi
+            }
+            grep -Fq "$next_reviewer" /tmp/sealed-successor-wake.txt || {
+              echo "::warning::Sealed successor wake does not identify incoming reviewer $next_reviewer."
+              return 2
+            }
+            grep -Fq "$handoff_assignment" /tmp/sealed-successor-wake.txt || {
+              echo "::warning::Sealed successor wake does not contain the handoff's exact assigned Lite phase/milestone."
+              return 2
+            }
+            grep -Fq "$handoff_authority" /tmp/sealed-successor-wake.txt || {
+              echo "::warning::Sealed successor wake does not identify the current authority Lite skill."
+              return 2
+            }
 
             successor_wake_id="${campaign_id}-${next_id}-${next_reviewer}"
             wake_b64="$(base64 -w0 /tmp/sealed-successor-wake.txt)"
