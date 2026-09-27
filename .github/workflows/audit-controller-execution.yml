@@ -433,6 +433,49 @@ jobs:
           writeback_commit="$(git rev-parse HEAD)"
           echo "CONTROLLER_WRITEBACK_COMMIT=$writeback_commit" >> "$GITHUB_ENV"
 
+      - name: Arm Lite campaign monitor from accepted controller packet
+        if: env.V7_REQUEST_KIND == 'controller-operation' && success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CONTROLLER_WRITEBACK_COMMIT:-}"
+          request=".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH"
+          campaign_path="$(jq -r '.campaignPath // empty' "$request")"
+          if [ -z "$campaign_path" ]; then
+            handoff_input="$(jq -r '.handoffInputPath // empty' "$request")"
+            if [[ "$handoff_input" == campaigns/*/handoffs/* ]]; then
+              campaign_path="${handoff_input%/handoffs/*}"
+            fi
+          fi
+          [ -n "$campaign_path" ] || { echo 'Controller packet has no campaign path; no Lite monitor to arm.'; exit 0; }
+          [[ "$campaign_path" == campaigns/* && "$campaign_path" != *".."* ]] || exit 1
+
+          controller_api="repos/CurveYield2/Audit-Controller/contents/$campaign_path/controller?ref=$CONTROLLER_WRITEBACK_COMMIT"
+          state_name="$(GH_TOKEN="$AUDIT_CONTROLLER_TOKEN" gh api "$controller_api" --jq '.[].name' | sed -n 's/^\(CAMPAIGN_STATE_v[0-9][0-9]*\.json\)$/\1/p' | sort -V | tail -n1)"
+          [ -n "$state_name" ] || { echo "::error::Accepted controller packet has no canonical campaign state"; exit 1; }
+          state_encoded="$(GH_TOKEN="$AUDIT_CONTROLLER_TOKEN" gh api "repos/CurveYield2/Audit-Controller/contents/$campaign_path/controller/$state_name?ref=$CONTROLLER_WRITEBACK_COMMIT" --jq '.content')"
+          printf '%s' "$state_encoded" | base64 -d > /tmp/packet-campaign-state.json
+          mode="$(jq -r '.assuranceMode.mode // .mode // empty' /tmp/packet-campaign-state.json)"
+          [ "$mode" = 'LITE' ] || { echo 'Controller packet is not a Lite campaign'; exit 0; }
+          campaign_id="$(jq -r '.campaignId // empty' /tmp/packet-campaign-state.json)"
+          generation="$(jq -r '.campaignGenerationId // empty' /tmp/packet-campaign-state.json)"
+          campaign_name="$(jq -r '.auditName // .title // .projectSlug // empty' /tmp/packet-campaign-state.json)"
+          state_path="$(jq -r '.controller.workspacePath // empty' /tmp/packet-campaign-state.json)"
+          state_ref="$(jq -r '.controller.branch // empty' /tmp/packet-campaign-state.json)"
+          request_campaign="$(jq -r '.campaignId // empty' "$request")"
+          [ -n "$campaign_id" ] && [ -n "$generation" ] && [ -n "$campaign_name" ]
+          [ "$state_path" = "$campaign_path" ] && [ "$state_ref" = "$WRITEBACK_REF" ]
+          [ -z "$request_campaign" ] || [ "$request_campaign" = "$campaign_id" ]
+          gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f campaign_id="$campaign_id" \
+            -f campaign_name="$campaign_name" \
+            -f campaign_path="$campaign_path" \
+            -f audit_controller_ref="$WRITEBACK_REF"
+          echo "Lite monitor dispatch accepted for $campaign_id / $generation from $CONTROLLER_WRITEBACK_COMMIT."
+
       - name: Dispatch generated V7 execution request
         if: env.V7_REQUEST_KIND == 'controller-operation' && env.OPERATOR_OPERATION == 'BUILD_EXECUTION_REQUEST'
         env:
@@ -738,20 +781,13 @@ jobs:
 
           safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
           registration="process/browser-agent-wake/registrations/$safe_campaign.json"
-          if [ ! -f "$registration" ]; then
-            if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "$campaign_mode" = "LITE" ] && [ -n "$campaign_path" ] && [ -n "$campaign_controller_ref" ]; then
-              echo "Lite campaign $campaign_id has no browser registration; dispatching automatic registration/watchdog repair."
-              gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
-                -f campaign_id="$campaign_id" \
-                -f campaign_name="$campaign_name" \
-                -f campaign_path="$campaign_path" \
-                -f audit_controller_ref="$campaign_controller_ref"
-              echo "Browser automation registration repair dispatched for $campaign_id."
-              exit 0
-            fi
-            echo "::warning::No browser-agent wake registration for $campaign_id and no admitted Lite self-repair context was available."
+          registration_encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content' 2>/dev/null || true)"
+          if [ -z "$registration_encoded" ]; then
+            echo "No registered browser chat yet for $campaign_id; accepted Lite controller packet has dispatched the state monitor."
             exit 0
           fi
+          printf '%s' "$registration_encoded" | base64 -d > /tmp/browser-campaign-registration.json
+          registration=/tmp/browser-campaign-registration.json
 
           test "$(jq -r '.schemaVersion // empty' "$registration")" = 'curveyield-browser-agent-wake-registration-v1'
           test "$(jq -r '.campaignId // empty' "$registration")" = "$campaign_id"
