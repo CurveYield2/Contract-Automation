@@ -1,0 +1,21 @@
+name: Scan Current Audit Skill References v1
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/scan-audit-skill-refs-trigger-v1"
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Scan references
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=== ALL MATCHES ==="
+          git grep -n -I -E 'Audit Skill - Current Authority|Audit_Litemode_v9|Audit_V7_independent_Review_skill|optional-modes/lite-pathway/SKILL\.md|Contract-Automation.{0,160}SKILL\.md|Audit-Controller.{0,160}SKILL\.md|authority.{0,160}SKILL\.md|authoritative.{0,160}SKILL\.md' -- . ':!*.zip' || true
