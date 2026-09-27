@@ -299,7 +299,7 @@ async function localProvider(chromium) {
   }
   if (!storage) throw new Error('No usable ChatGPT storage state is available');
   console.log('[github-playwright] Using ' + source + ' session state');
-  const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+  const browser = await chromium.launch({ headless: env.BROWSER_HEADLESS !== 'false', channel: 'chrome' });
   const context = await browser.newContext({ storageState: storage });
   const page = await context.newPage();
   return { browser, context, page, close: () => browser.close() };
