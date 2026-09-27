@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "audit-v7-successor-handoff-receipt-v1",
+  "boundaryProfileId": "<P1_TO_P2 | P5_TO_P6 | P6_TO_P7 | P8_TO_P9>",
+  "handoffIdentity": {
+    "reference": "<exact campaign handoff>",
+    "payloadSha256": "<exact>",
+    "campaignId": "<exact>",
+    "generationId": "<exact>",
+    "outgoingPhase": "<exact>",
+    "outgoingPhaseRevision": "<exact>"
+  },
+  "receiver": {
+    "reviewerLineage": "<from profile>",
+    "reviewerIdentity": "<fresh exact session/agent identity>"
+  },
+  "checks": {
+    "schema": "PASS",
+    "boundaryProfile": "PASS",
+    "campaignGenerationIdentity": "PASS",
+    "outgoingPhaseRevision": "PASS",
+    "sourceFence": "PASS",
+    "requiredEvidenceIndex": "PASS",
+    "controllerState": "PASS",
+    "typedSectionSemantics": "PASS",
+    "successorSeedPacket": "PASS",
+    "artifactResolution": "PASS",
+    "contradictions": "PASS",
+    "globalAuditState": "PASS",
+    "successorStartPacket": "PASS",
+    "boundaryAuthorization": "PASS"
+  },
+  "recoveryAttempts": [],
+  "defects": [],
+  "carriedUnresolvedItems": [],
+  "carriedBlockedItems": [],
+  "disposition": "HANDOFF_ACCEPTED",
+  "receivingPhaseAuthorized": true,
+  "acceptedGlobalAuditState": {},
+  "receiptDigest": "<exact>",
+  "sourceIntelligenceVerification": {
+    "status": "__REQUIRED__",
+    "bundleIndexCommitMatches": "__REQUIRED__",
+    "bundleIndexDigestMatches": "__REQUIRED__",
+    "sourceDigestMatches": "__REQUIRED__",
+    "buildDigestMatches": "__REQUIRED__",
+    "componentAcceptedIdentitiesMatch": "__REQUIRED__",
+    "mutablePathBytesMatchAcceptedIdentities": "__REQUIRED__",
+    "unresolvedInvalidationOrRebind": [],
+    "limitationsOrDiscrepancies": []
+  }
+}

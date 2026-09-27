@@ -1,0 +1,359 @@
+{
+  "schemaVersion": "audit-v7-phase-contract-v1",
+  "phase": {
+    "sequence": 4,
+    "id": "manual-implementation-review",
+    "title": "Manual Contract and Integration Review",
+    "reviewerLineage": "reviewer-2",
+    "phaseCard": "phases/phase-4/START_HERE.md"
+  },
+  "authorization": {
+    "controllerBoundCurrentPhaseRequired": true,
+    "exactSourceFenceRequired": true,
+    "incomingSuccessorReceipt": null,
+    "automaticAdvanceAfterSeal": true,
+    "humanApprovalRequired": false
+  },
+  "inputs": {
+    "required": [
+      "Exact controller-bound campaign generation",
+      "Exact source identity/fence",
+      "Current phase/revision and authorized reviewer lineage",
+      "Sealed Phase 3 report and automatic advancement authorization",
+      "Current SECURITY_TRACEABILITY_GRAPH checkpoint",
+      "Current CARRIED_FORWARD_OBLIGATION_LEDGER checkpoint",
+      "Current DOMAIN_APPLICABILITY_REGISTRY checkpoint",
+      "Current EVIDENCE_INVALIDATION_MATRIX authority",
+      "Latest controller-accepted Source Intelligence Bundle Index revision/commit/digest and component accepted identities bound to the exact current source/build identity"
+    ],
+    "conditional": [
+      "Triggered domain ledgers/resources explicitly referenced by active steps",
+      "Live deployment/release/fork/remediation artifacts only when the phase card trigger applies"
+    ]
+  },
+  "steps": [
+    {
+      "step": 1,
+      "action": "Enter the isolated manual-implementation lens",
+      "instruction": "Bind exact source/revision and preserve source-first review isolation.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/lenses/SOLO_LENS_ISOLATION_PROTOCOL.md",
+        "../../shared/lenses/manual-implementation-lens.md"
+      ]
+    },
+    {
+      "step": 2,
+      "action": "Revalidate deterministic domain applicability",
+      "instruction": "Verify the Phase-3 registry against the exact current source and new evidence. Promote any ambiguity/new signal to UNCERTAIN_INCLUDE or TRIGGERED before specialist review.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/controller/DOMAIN_APPLICABILITY_MATRIX.json",
+        "../../shared/controller/DOMAIN_APPLICABILITY_REGISTRY.json"
+      ]
+    },
+    {
+      "step": 3,
+      "action": "Review EVM implementation and sensitive flows",
+      "instruction": "Use Source Intelligence as the contract/function/call/value-flow coverage baseline, then perform source-first line/flow/integration review across state transitions, external calls, accounting, access and failure behavior. Verify semantic correctness and record discrepancies; do not recreate accepted structural inventories.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/audit-modules/evm-contract-review.md"
+      ]
+    },
+    {
+      "step": 4,
+      "action": "Review governance and privilege paths",
+      "instruction": "Use accepted privilege/function/source-anchor candidates as the baseline and inspect the semantic correctness of every privileged entrypoint and authority transition; do not rebuild the raw privilege inventory.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/audit-modules/governance-privileges.md"
+      ]
+    },
+    {
+      "step": 5,
+      "action": "Review DOMAIN-UPGRADE when activated",
+      "instruction": "Execute the specialist method/ledger for TRIGGERED or UNCERTAIN_INCLUDE; skip only with a current evidence-bound NOT_TRIGGERED decision.",
+      "requirement": "CONDITIONAL",
+      "condition": "CONDITIONAL_AS_DESCRIBED_IN_STEP",
+      "resources": [
+        "../../shared/domain-modules/upgradeability.md",
+        "../../shared/domain-ledgers/UPGRADE_SAFETY_LEDGER.md"
+      ]
+    },
+    {
+      "step": 6,
+      "action": "Review DOMAIN-DEPENDENCY when activated",
+      "instruction": "Execute the specialist method/ledger for TRIGGERED or UNCERTAIN_INCLUDE; skip only with a current evidence-bound NOT_TRIGGERED decision.",
+      "requirement": "CONDITIONAL",
+      "condition": "CONDITIONAL_AS_DESCRIBED_IN_STEP",
+      "resources": [
+        "../../shared/domain-modules/external-dependencies.md",
+        "../../shared/domain-ledgers/EXTERNAL_DEPENDENCY_LEDGER.md"
+      ]
+    },
+    {
+      "step": 7,
+      "action": "Review DOMAIN-CROSSCHAIN when activated",
+      "instruction": "Execute the specialist method/ledger for TRIGGERED or UNCERTAIN_INCLUDE; skip only with a current evidence-bound NOT_TRIGGERED decision.",
+      "requirement": "CONDITIONAL",
+      "condition": "CONDITIONAL_AS_DESCRIBED_IN_STEP",
+      "resources": [
+        "../../shared/domain-modules/cross-chain.md",
+        "../../shared/domain-ledgers/CROSS_CHAIN_LEDGER.md"
+      ]
+    },
+    {
+      "step": 8,
+      "action": "Review DOMAIN-VAULT when activated",
+      "instruction": "Execute the vault/strategy specialist method and ledger for TRIGGERED or UNCERTAIN_INCLUDE.",
+      "requirement": "CONDITIONAL",
+      "condition": "CONDITIONAL_AS_DESCRIBED_IN_STEP",
+      "resources": [
+        "../../shared/domain-modules/domain-vaults-strategies.md",
+        "../../shared/domain-ledgers/VAULT_STRATEGY_LEDGER.md"
+      ]
+    },
+    {
+      "step": 9,
+      "action": "Review DOMAIN-ORACLE when activated",
+      "instruction": "Execute the oracle specialist method and ledger for TRIGGERED or UNCERTAIN_INCLUDE.",
+      "requirement": "CONDITIONAL",
+      "condition": "CONDITIONAL_AS_DESCRIBED_IN_STEP",
+      "resources": [
+        "../../shared/domain-modules/domain-oracles.md",
+        "../../shared/domain-ledgers/ORACLE_ASSURANCE_LEDGER.md"
+      ]
+    },
+    {
+      "step": 10,
+      "action": "Review DOMAIN-LENDING when activated",
+      "instruction": "Execute the lending/liquidation specialist method and ledger for TRIGGERED or UNCERTAIN_INCLUDE.",
+      "requirement": "CONDITIONAL",
+      "condition": "CONDITIONAL_AS_DESCRIBED_IN_STEP",
+      "resources": [
+        "../../shared/domain-modules/domain-lending-liquidation.md",
+        "../../shared/domain-ledgers/LENDING_LIQUIDATION_LEDGER.md"
+      ]
+    },
+    {
+      "step": 11,
+      "action": "Review DOMAIN-AMM when activated",
+      "instruction": "Execute the AMM/hooks specialist method and ledger for TRIGGERED or UNCERTAIN_INCLUDE.",
+      "requirement": "CONDITIONAL",
+      "condition": "CONDITIONAL_AS_DESCRIBED_IN_STEP",
+      "resources": [
+        "../../shared/domain-modules/domain-amm-hooks.md",
+        "../../shared/domain-ledgers/AMM_HOOK_LEDGER.md"
+      ]
+    },
+    {
+      "step": 12,
+      "action": "Review DOMAIN-SIGNATURE when activated",
+      "instruction": "Execute the signatures/AA specialist method and ledger for TRIGGERED or UNCERTAIN_INCLUDE.",
+      "requirement": "CONDITIONAL",
+      "condition": "CONDITIONAL_AS_DESCRIBED_IN_STEP",
+      "resources": [
+        "../../shared/domain-modules/domain-signatures-aa.md",
+        "../../shared/domain-ledgers/SIGNATURE_AA_LEDGER.md"
+      ]
+    },
+    {
+      "step": 13,
+      "action": "Review DOMAIN-STAKING when activated",
+      "instruction": "Execute the staking/rewards specialist method and ledger for TRIGGERED or UNCERTAIN_INCLUDE.",
+      "requirement": "CONDITIONAL",
+      "condition": "CONDITIONAL_AS_DESCRIBED_IN_STEP",
+      "resources": [
+        "../../shared/domain-modules/domain-staking-rewards.md",
+        "../../shared/domain-ledgers/STAKING_REWARD_LEDGER.md"
+      ]
+    },
+    {
+      "step": 14,
+      "action": "Review DOMAIN-OFFCHAIN when activated",
+      "instruction": "Execute the off-chain automation specialist method and ledger for TRIGGERED or UNCERTAIN_INCLUDE.",
+      "requirement": "CONDITIONAL",
+      "condition": "CONDITIONAL_AS_DESCRIBED_IN_STEP",
+      "resources": [
+        "../../shared/domain-modules/offchain-critical-automation.md",
+        "../../shared/domain-ledgers/OFFCHAIN_AUTOMATION_LEDGER.md"
+      ]
+    },
+    {
+      "step": 15,
+      "action": "Prove specialist-domain completeness",
+      "instruction": "Reconcile all ten registry decisions. Every TRIGGERED/UNCERTAIN_INCLUDE domain must point to completed specialist evidence or a typed blocking/limitation record; every skip must point to current NOT_TRIGGERED evidence.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/controller/DOMAIN_APPLICABILITY_REGISTRY.json",
+        "resources/PHASE4_MANUAL_COVERAGE_CANDIDATE_REGISTRY.md"
+      ]
+    },
+    {
+      "step": 16,
+      "action": "Record coverage, candidates and execution targets",
+      "instruction": "Reconcile manual contract/function/flow coverage, candidate issues, unresolved assumptions and explicit Phase-6/7 targets, including domain-specific targets.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/PHASE4_MANUAL_COVERAGE_CANDIDATE_REGISTRY.md"
+      ]
+    },
+    {
+      "step": 17,
+      "action": "Reconcile campaign-global security state",
+      "instruction": "Update the Security Traceability Graph and obligation ledger using specialist-domain evidence; freeze graph/domain/obligation digests for the Phase Report. OPEN/IN_PROGRESS obligations due now block sealing. Classify every material observed change under the Evidence Invalidation Matrix before reusing affected evidence.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+        "../../shared/controller/DOMAIN_APPLICABILITY_REGISTRY.json",
+        "../../shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json",
+        "../../shared/controller/EVIDENCE_INVALIDATION_MATRIX.json"
+      ]
+    },
+    {
+      "step": 18,
+      "action": "File the phase report and auto-advance",
+      "instruction": "Seal the required structured artifact/global checkpoints, file the immutable Phase Report, enter AUTO_ADVANCE_READY, and immediately continue into the next same-reviewer phase under the Automatic Phase Advancement Protocol. Do not wait for human approval.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/reporting/PHASE_REPORT.md",
+        "../../shared/controller/AUTOMATIC_PHASE_ADVANCEMENT_PROTOCOL.md"
+      ]
+    }
+  ],
+  "requiredOutputs": [
+    {
+      "artifact": "phases/phase-4/resources/PHASE4_MANUAL_COVERAGE_CANDIDATE_REGISTRY.md",
+      "role": "PHASE_SPECIFIC_STRUCTURED_FILING",
+      "required": true
+    },
+    {
+      "artifact": "shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+      "role": "CAMPAIGN_GLOBAL_CHECKPOINT_TEMPLATE; campaign-local graph digest required",
+      "required": true
+    },
+    {
+      "artifact": "shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json",
+      "role": "CAMPAIGN_GLOBAL_CHECKPOINT_TEMPLATE; campaign-local ledger digest required",
+      "required": true
+    },
+    {
+      "artifact": "shared/controller/DOMAIN_APPLICABILITY_REGISTRY.json",
+      "role": "CAMPAIGN_GLOBAL_DOMAIN_APPLICABILITY_CHECKPOINT_TEMPLATE; campaign-local digest required",
+      "required": true
+    },
+    {
+      "artifact": "shared/reporting/PHASE_REPORT.md",
+      "role": "PHASE_REPORT_TEMPLATE",
+      "required": true
+    }
+  ],
+  "globalControlCheckpoints": {
+    "securityTraceabilityGraph": {
+      "template": "shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+      "requiredBeforeEvidenceSealed": true,
+      "phaseRequirement": [
+        "Add MAN-* coverage nodes and CAND-* nodes; connect reviewed properties/hypotheses and candidate origins."
+      ],
+      "phaseReportDigestReferenceRequired": true
+    },
+    "carriedForwardObligationLedger": {
+      "template": "shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json",
+      "requiredBeforeEvidenceSealed": true,
+      "phaseStartDueObligationEnumerationRequired": true,
+      "phaseEndDueObligationReconciliationRequired": true,
+      "openOrInProgressDueObligationBlocksSeal": true,
+      "phaseReportDigestReferenceRequired": true
+    },
+    "evidenceInvalidationMatrix": {
+      "authority": "shared/controller/EVIDENCE_INVALIDATION_MATRIX.json",
+      "requiredBeforeEvidenceSealed": true,
+      "materialChangeClassificationRequired": true,
+      "noChangeDisposition": "NO_MATERIAL_CHANGE_EVENT",
+      "invalidatesOrRebindCreatesTraceabilityInvNode": true,
+      "unresolvedRetestCreatesObligation": true
+    },
+    "sourceIntelligence": {
+      "template": "shared/source-intelligence/SOURCE_INTELLIGENCE_TEMPLATE.json",
+      "protocol": "shared/source-intelligence/SOURCE_INTELLIGENCE_REUSE_PROTOCOL.md",
+      "bundleSchema": "shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_SCHEMA.json",
+      "bundleTemplate": "shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_TEMPLATE.json",
+      "runtimeOverlaySchema": "shared/source-intelligence/RUNTIME_DEPLOYMENT_OVERLAY_SCHEMA.json",
+      "readinessOverlaySchema": "shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_SCHEMA.json",
+      "requiredBeforeEvidenceSealed": true,
+      "bundleIndexRequiredBeforeReuse": true,
+      "acceptedRevisionAndDigestRequired": true,
+      "mutablePathsNavigationalOnly": true,
+      "mode": "REUSE_LATEST_ACCEPTED_MATCHING_SOURCE_BUILD",
+      "sourceBuildDigestMatchRequiredBeforeReuse": true,
+      "recreateExistingStructuralInventoriesForbidden": true,
+      "rawSourceSemanticReviewStillRequiredWhenPhaseMethodNeedsIt": true,
+      "phaseReportRelevantSectionsReviewedRequired": true,
+      "phase1SecuritySurfacesAreCoverageBaseline": true,
+      "phase4CoverageAndDiscrepanciesRemainPhaseOwned": true
+    }
+  },
+  "sealingCriteria": [
+    "All mandatory phase-card steps completed or have a permitted typed terminal limitation/failure disposition.",
+    "Phase-specific structured filing is complete, exact-source-bound, durable, and digest-referenced.",
+    "Source Intelligence Bundle checkpoint records the accepted index revision/commit/digest plus materially used component accepted identities, matching source/build identity, reuse/regeneration status, relevant sections reviewed, and any discrepancy/invalidation/limitation; mutable-path authority and redundant structural rediscovery are forbidden.",
+    "Security Traceability Graph is updated for this phase and its current campaign-local digest/reference is recorded.",
+    "All obligations due in this phase are reconciled in the canonical obligation ledger; no due OPEN/IN_PROGRESS obligation remains.",
+    "Every new later-phase obligation has a stable OBL-* ID and objective completion condition.",
+    "Phase Report references phase-specific artifact, traceability graph checkpoint, obligation ledger checkpoint, evidence, limitations, and invalidation triggers.",
+    "Required process failures have exhausted repair/retry/recovery or are repaired and verified; silent omission is forbidden.",
+    "Domain Applicability Registry is current for the exact source; every TRIGGERED/UNCERTAIN_INCLUDE domain obligation due in this phase is executed or has an explicit typed terminal disposition.",
+    "Every material observed change event is classified under EVIDENCE_INVALIDATION_MATRIX; INVALIDATES/REQUIRES_REBIND work is replaced, reconciled, or carried as a typed OBL-* before sealing."
+  ],
+  "recoveryRoutes": [
+    {
+      "condition": "GitHub connector unavailable",
+      "resource": "SKILL.md#something-broke--recovery-router"
+    },
+    {
+      "condition": "Controller/campaign/evidence/reporting failure",
+      "resource": "shared/lenses/operations-recovery-lens.md"
+    },
+    {
+      "condition": "Technical execution/tool/RPC failure",
+      "resource": "shared/execution/EXECUTION_PREFLIGHT_AND_REPAIR_PROTOCOL.md"
+    },
+    {
+      "condition": "Source/release identity change",
+      "resource": "shared/policy/PROCESS_INTEGRITY_LEDGER.md"
+    }
+  ],
+  "allowedNextStates": [
+    "EVIDENCE_SEALED",
+    "PHASE_REPORT_SUBMITTED",
+    "AUTO_ADVANCE_READY"
+  ],
+  "domainApplicability": {
+    "matrix": "shared/controller/DOMAIN_APPLICABILITY_MATRIX.json",
+    "campaignRegistryTemplate": "shared/controller/DOMAIN_APPLICABILITY_REGISTRY.json",
+    "mode": "MANDATORY_SPECIALIST_EXECUTION",
+    "uncertainPolicy": "UNCERTAIN_INCLUDE_IS_TREATED_AS_TRIGGERED",
+    "phaseReportDigestReferenceRequired": true
+  },
+  "universalRuleIds": [
+    "U-EXEC-001",
+    "U-GITHUB-001",
+    "U-STATE-001",
+    "U-EVIDENCE-001",
+    "U-REPAIR-001",
+    "U-HUMAN-001",
+    "U-DISCLOSURE-001",
+    "U-SOURCEINTEL-001",
+    "U-UPDATES-001",
+    "U-HUMANCOMMS-001"
+  ]
+}

@@ -1,0 +1,128 @@
+{
+  "schemaVersion": "audit-v7-phase-contract-v1",
+  "phase": {
+    "sequence": 2,
+    "id": "lite-specification-segment",
+    "title": "Lite Combined Phases 2-5 - Specification",
+    "reviewerLineage": "reviewer-2",
+    "phaseCard": "phases/phase-2/START_HERE.md"
+  },
+  "authorization": {
+    "controllerBoundCurrentPhaseRequired": true,
+    "exactSourceFenceRequired": true,
+    "incomingSuccessorReceipt": "P1_TO_P2",
+    "combinedMilestone": "P2_TO_P5",
+    "automaticAdvanceAfterSegment": true,
+    "humanApprovalRequired": false
+  },
+  "inputs": {
+    "required": [
+      "Accepted P1_TO_P2 receipt",
+      "Exact campaign/source/build/reviewer identity",
+      "Sealed Phase-0 Bootstrap Audit Surface and Phase-1 risk grade",
+      "Accepted Source Intelligence Bundle identities",
+      "Current graph, obligation ledger and invalidation matrix"
+    ],
+    "conditional": [
+      "Source Intelligence rebind after material identity change",
+      "Live deployment/dependency evidence directly relevant to a retained property"
+    ]
+  },
+  "steps": [
+    {
+      "step": 1,
+      "action": "Accept handoff and verify Source Intelligence once",
+      "instruction": "Verify exact campaign/source/build and accepted bundle identities. Reuse through Phase 5 unless a material identity change triggers rebind or invalidation.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../shared/handoff/SUCCESSOR_HANDOFF_RECEPTION_CHECKLIST.md",
+        "../../shared/source-intelligence/SOURCE_INTELLIGENCE_REUSE_PROTOCOL.md"
+      ]
+    },
+    {
+      "step": 2,
+      "action": "Specify retained security requirements",
+      "instruction": "Identify actors, assets, trust assumptions, transitions, prohibited outcomes, negative requirements, units, bounds, rounding and material edge behavior.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "../../../../shared/domain-modules/specification-assurance.md",
+        "../../../../shared/domain-modules/mathematical-verification.md"
+      ]
+    },
+    {
+      "step": 3,
+      "action": "Record properties and continue",
+      "instruction": "Create stable PROP records with manual, targeted-fuzz and simulation routes; maintain live global state and continue directly to Phase 3 without a separate report or checkpoint seal.",
+      "requirement": "MANDATORY",
+      "condition": null,
+      "resources": [
+        "resources/PHASE2_SECURITY_PROPERTY_REGISTRY.md",
+        "../../shared/controller/SECURITY_TRACEABILITY_GRAPH.json"
+      ]
+    }
+  ],
+  "requiredOutputs": [
+    {
+      "artifact": "phases/phase-2/resources/PHASE2_SECURITY_PROPERTY_REGISTRY.md",
+      "role": "LIVE_COMBINED_MILESTONE_INPUT",
+      "required": true
+    },
+    {
+      "artifact": "shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+      "role": "LIVE_GLOBAL_STATE",
+      "required": true
+    },
+    {
+      "artifact": "shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json",
+      "role": "LIVE_GLOBAL_STATE",
+      "required": true
+    }
+  ],
+  "globalControlCheckpoints": {
+    "securityTraceabilityGraph": "UPDATE_LIVE_NO_SEGMENT_SEAL",
+    "carriedForwardObligationLedger": "UPDATE_LIVE_NO_SEGMENT_SEAL",
+    "evidenceInvalidationMatrix": "CLASSIFY_ONLY_IF_CHANGE_OBSERVED",
+    "sealAtCombinedPhase5": true
+  },
+  "sealingCriteria": [
+    "Every material retained requirement has a stable property and route",
+    "Source Intelligence verification or required rebind is recorded",
+    "No separate Phase-2 report or duplicate global seal is filed"
+  ],
+  "recoveryRoutes": [
+    {
+      "condition": "P1 handoff invalid",
+      "route": "Use successor reception recovery"
+    },
+    {
+      "condition": "Source identity changed",
+      "route": "Invalidate or rebind affected evidence"
+    },
+    {
+      "condition": "Required process fails",
+      "route": "Use the Lite Recovery Router and continue unaffected work"
+    }
+  ],
+  "allowedNextStates": [
+    "LITE_PHASE3_ACTIVE"
+  ],
+  "domainApplicability": {
+    "classificationRequiredHere": false,
+    "classificationPhase": 3,
+    "uncertainPolicy": "UNCERTAIN_INCLUDE"
+  },
+  "universalRuleIds": [
+    "U-EXEC-001",
+    "U-GITHUB-001",
+    "U-STATE-001",
+    "U-EVIDENCE-001",
+    "U-REPAIR-001",
+    "U-HUMAN-001",
+    "U-DISCLOSURE-001",
+    "U-SOURCEINTEL-001",
+    "U-UPDATES-001",
+    "U-HUMANCOMMS-001"
+  ]
+}

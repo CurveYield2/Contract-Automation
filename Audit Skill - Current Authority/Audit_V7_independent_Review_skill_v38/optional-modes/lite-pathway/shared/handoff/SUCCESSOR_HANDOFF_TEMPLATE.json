@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "audit-v7-lite-successor-handoff-v38",
+  "boundaryProfileId": "<P0_TO_P1 | P1_TO_P2 | P5_TO_P6 | P67_TO_P8>",
+  "campaign": {"campaignId": "<required>", "campaignGenerationId": "<required>", "workspacePath": "<required>", "campaignLink": "<required>"},
+  "source": {
+    "sourceIdentity": "<repository/commit/digest>",
+    "buildIdentity": "<exact-or-typed-pending>",
+    "skillZipIdentity": {"fileName": "<required>", "sha256": "<required when available>"},
+    "sourceZipIdentity": {"fileName": "<required>", "sha256": "<required when available>"}
+  },
+  "reviewers": {"outgoing": "<required>", "incoming": "<required>"},
+  "milestone": {"id": "<P0_BOOTSTRAP | P0_1 | P2_5 | P6_7>", "status": "SEALED", "reportReference": "<required>", "reportDigest": "<required>"},
+  "globalControls": {"securityTraceabilityGraph": "<ref/digest>", "carriedForwardObligationLedger": "<ref/digest>", "evidenceInvalidationMatrix": "<ref/digest>", "sourceIntelligenceBundle": "<ref/digest>"},
+  "requiredEvidence": [],
+  "dueObligations": [],
+  "limitations": [],
+  "integrity": {"sealedAt": "<ISO-8601>", "digest": "<required>"}
+}

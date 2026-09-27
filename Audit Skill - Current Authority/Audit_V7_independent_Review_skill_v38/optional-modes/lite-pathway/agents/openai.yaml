@@ -1,0 +1,13 @@
+interface:
+  display_name: Audit V7 Independent Review — Lite
+  short_description: Web-bootstrap + four-reviewer lower-resource EVM audit with bounded targeted execution and no-repeat Full upgrade
+  default_prompt: Use $audit-v7-independent-review-lite only after the human says use lite mode. Start at SKILL.md, resolve the exact campaign and Lite milestone, follow only the active copied Lite instructions, preserve sealed work, and never import excluded Full Phase 6–7 campaigns into the initial Lite audit.
+  icon_small: assets/icon.svg
+  icon_large: assets/icon.svg
+policy:
+  products:
+  - chatgpt
+  - codex
+  - api
+  - atlas
+  allow_implicit_invocation: true

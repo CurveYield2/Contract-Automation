@@ -1,0 +1,517 @@
+{
+  "schemaVersion": "audit-v7-independent-review-lite-manifest-v38.3.3",
+  "release": "audit-v7-independent-review-lite@1.0.0",
+  "packageRevision": "v38.3.3",
+  "mode": "LITE",
+  "derivation": {
+    "method": "isolated-lite-copy-with-web-bootstrap-and-assurance-preserving-cold-walk-optimizations",
+    "standardPathModifiedByLiteEdits": false
+  },
+  "files": [
+    {
+      "path": "optional-modes/lite-pathway/LITE_ORCHESTRATOR_MODE.md",
+      "bytes": 5864,
+      "sha256": "6d3e31713968f3bf23dccb5ed0ba4d49235589d05ad2d3231b7a2c97acace746"
+    },
+    {
+      "path": "optional-modes/lite-pathway/LITE_TO_FULL_DELTA_RECONCILIATION.md",
+      "bytes": 1196,
+      "sha256": "810047087821b999c59e59a8a3965f5a1db73ce86cf163649cafccc2ca496989"
+    },
+    {
+      "path": "optional-modes/lite-pathway/LITE_TO_FULL_UPGRADE.md",
+      "bytes": 2610,
+      "sha256": "f37a292208c01d463ee7d0d2ebc335f98632e654cbe3c394568e7cd251c7b8ed"
+    },
+    {
+      "path": "optional-modes/lite-pathway/PACKAGE_PROVENANCE.md",
+      "bytes": 15384,
+      "sha256": "098ac57fde5de7415c6f384c8beeb95a223de35710ec3f4ea7c3b75a4259e4d5"
+    },
+    {
+      "path": "optional-modes/lite-pathway/SKILL.md",
+      "bytes": 20072,
+      "sha256": "83425edf1c04ddd9950f52fa10c225a98bffff1cc6c16b83d48638701175302e"
+    },
+    {
+      "path": "optional-modes/lite-pathway/agents/openai.yaml",
+      "bytes": 669,
+      "sha256": "f14b9d2886c60658b620ecfc621fc466933429afdfb73e4b7a2ca13d6397c900"
+    },
+    {
+      "path": "optional-modes/lite-pathway/docs/USER_GUIDE.md",
+      "bytes": 1638,
+      "sha256": "284fb8c32dbf4534c9761f77ec71d099bc7cb906433d08c245c68c8826d35ed0"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-0/PHASE_CONTRACT.json",
+      "bytes": 15853,
+      "sha256": "8747821da4c8f721d7db58dcb19d635dfa2df9017e73c7a2140e549233d8f9e9"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-0/START_HERE.md",
+      "bytes": 10156,
+      "sha256": "d1d7d7e3a9fecfb9143458d48f0adcd7d09a902fb81601ab63c916bc74adddd5"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-0/resources/INSTRUCTION_READ_PROOF.json",
+      "bytes": 933,
+      "sha256": "6fda45b4f776a15ad9df364c89986f6cccc3e2beb2773219700ad321a2f6a06a"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-0/resources/PHASE0_BOOTSTRAP_AUDIT_SURFACE_MANIFEST.md",
+      "bytes": 3825,
+      "sha256": "696149d5ef4367eff9e46242f4ac2b5fd56d685b7d8750c16049cf6f14eb316b"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-0/resources/PHASE0_CAPABILITY_PREFLIGHT.md",
+      "bytes": 2257,
+      "sha256": "baa67f631b05ce28e3d294097409af188c5408fdf1b21ab81abf5793ff6f2744"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-0/resources/PHASE0_WEB_BOOTSTRAP_COMPLETION_REPORT.md",
+      "bytes": 2263,
+      "sha256": "c9915427b030b7b0e98e1a8c9b501b8e74888531b602179c559ee5f87b22f0e9"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-1/PHASE_CONTRACT.json",
+      "bytes": 11586,
+      "sha256": "9e38519e1275e91f37c7fc0a0fc30bdb8ca88002ce4a33b1ac2e7ddb101a240b"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-1/START_HERE.md",
+      "bytes": 6251,
+      "sha256": "e3b6323d83b97e0346355fd3d16bc654401f80b1f476bf47a537690bad98bc18"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-1/resources/PHASE1_SECURITY_RISK_GRADE_MANIFEST.md",
+      "bytes": 1287,
+      "sha256": "da5733b51fad2b57241a1a27e88e98cf7ea40e7daa75e97967013130f454f7ec"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-10/PHASE_CONTRACT.json",
+      "bytes": 4794,
+      "sha256": "9639f4ba7d000a21942d4f3df2b3bb7d4fca7217e0c629b3360e1a889e8996a2"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-10/START_HERE.md",
+      "bytes": 2421,
+      "sha256": "0ab5a30b77e3012f8da6755cfbcc9d9c42c863d5018890087bc3e19b1115d107"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-10/resources/LITE_FINAL_EVIDENCE_INDEX.md",
+      "bytes": 1481,
+      "sha256": "19fcd54bbb52f7fba4d3a887db3db4f291b10db9486591b27b5ad7f823ba93dc"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-10/resources/LITE_FINAL_REPORT.md",
+      "bytes": 1652,
+      "sha256": "cc4d0d442d33f1cf7df94b8ad33bda188f8e3bea93edf4c101a50e2fd8d31f24"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-2/PHASE_CONTRACT.json",
+      "bytes": 4402,
+      "sha256": "be448733cf6080ae9751a9f1fef74b86c82fa49e982d0131d505fe11c9758490"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-2/START_HERE.md",
+      "bytes": 2282,
+      "sha256": "b77c5825c3937d3c534234f39f173f1e6b6181ff318d0cba3666525e463a52ed"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-2/resources/PHASE2_SECURITY_PROPERTY_REGISTRY.md",
+      "bytes": 1280,
+      "sha256": "9d1f4ee5b6f4f29a94b58c15a30b652d0b24d68b83d8425841d0a33498b4ea5a"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-3/PHASE_CONTRACT.json",
+      "bytes": 3806,
+      "sha256": "b96161d8929c49133cd7c6b74cb8ad7f897fb46b640665c47e9a399a2c52b367"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-3/START_HERE.md",
+      "bytes": 2044,
+      "sha256": "f9e9ae6fe09d6c67a8e4f1d4b2f690cfcfa9475e51c821b62e7c01389708ada9"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-3/resources/PHASE3_ATTACK_HYPOTHESIS_REGISTRY.md",
+      "bytes": 1197,
+      "sha256": "eead7e805cb04a4793d81d1041aea8ffc4ce16fd25a3867227613e2423bea783"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-4/PHASE_CONTRACT.json",
+      "bytes": 5008,
+      "sha256": "6d405c3e0f6e31a23ff4e6f742dc68f9ba3cec0e8f600ab9b5c6091745e586c7"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-4/START_HERE.md",
+      "bytes": 2931,
+      "sha256": "bb9fcaadd5b32922fb7af09e4b71007453e27f5779b9557df9692b50027869dd"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-4/resources/PHASE4_MANUAL_COVERAGE_CANDIDATE_REGISTRY.md",
+      "bytes": 1365,
+      "sha256": "246eef2d623dd52c585af7e87aa59b82003cc2ea0bf91326d938f25db5ead638"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-5/PHASE_CONTRACT.json",
+      "bytes": 4870,
+      "sha256": "1ae7b52bb33a4fa7806e9690aa9c98b575e31099cf7bfeed9656cc408e046b8e"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-5/START_HERE.md",
+      "bytes": 2883,
+      "sha256": "c9adda491745c666749c6991857e1a6f980dc662697b2a475d562694615dcc6e"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-5/resources/LITE_PHASE2_5_COMBINED_REPORT.md",
+      "bytes": 1680,
+      "sha256": "63ce01f8197f83be632457a6d2610007b4776993ccc3263326bc42ce397715ee"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-5/resources/PHASE5_RETRACE_RECONCILIATION_MATRIX.md",
+      "bytes": 1291,
+      "sha256": "332ed33f7f3868d0fb3c1ecc477ed39c3fc26a485ef3957ff0c24c983d23af0b"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-6/PHASE_CONTRACT.json",
+      "bytes": 5707,
+      "sha256": "24c8c492d7f71880e570b8ac6ee88fdaf5862ffaaf690f3479684b1dcf8b8fb5"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-6/START_HERE.md",
+      "bytes": 3948,
+      "sha256": "aeee0cd71d2d01ac138a5a0bd19a13e831477161e74cecad84eec509cb9393b9"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-6/resources/LITE_DEPLOY_CONFIG_MATRIX.md",
+      "bytes": 905,
+      "sha256": "3bd2d1a24ca4e57996e0f348143eb23140b91877bcc206fa387968a5fc87468f"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-6/resources/LITE_MUTABLE_RPC_POLICY.md",
+      "bytes": 771,
+      "sha256": "fcc07a7c36d756ed7ca01e22f2471e9797e485f570494320c299c6b5d750e806"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-6/resources/LITE_PHASE6_7_EVIDENCE.md",
+      "bytes": 1493,
+      "sha256": "30739620ad61fad8011bb93f579b1aaf1cd24c21e9136f62876a81f2a3928d37"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-6/resources/LITE_PHASE6_7_EXECUTION_PROTOCOL.md",
+      "bytes": 3521,
+      "sha256": "9e9691bc5fe1ec611873c2c4e48f0f541a7c732550110cf6c3e56dd623a72cb1"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-6/resources/LITE_TARGETED_TEST_MATRIX.md",
+      "bytes": 692,
+      "sha256": "05f98aae6af0157cde4afac9b4eef0af265a2d29909d4d79ce69db83ad0b9686"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-7/PHASE_CONTRACT.json",
+      "bytes": 2510,
+      "sha256": "1831e8dba5eefc99e2fcf871c923f22b2ae96f2ab2cfc3bfd1a6381dd3cf1452"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-7/START_HERE.md",
+      "bytes": 706,
+      "sha256": "9df0d126500f90b9bcf213e9d2f6a42d845ff7779b58a8bd29f123b272e2a339"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-8/PHASE_CONTRACT.json",
+      "bytes": 4511,
+      "sha256": "d08a0f144f88995caf3ae592b7015c240fd223b0e1c837da110b209c126038d0"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-8/START_HERE.md",
+      "bytes": 2282,
+      "sha256": "d538acef13bb9ca23daffd5b2eea6e376b4c9ae95fe0362684727d2f917d620c"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-8/resources/PHASE8_FINDING_VALIDATION_PACKET.md",
+      "bytes": 2263,
+      "sha256": "8e9a31d5c6cd435fe1c59eef5fb76314f606e358c7fb673b8fc2bfc5865c4db6"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-9/PHASE_CONTRACT.json",
+      "bytes": 3531,
+      "sha256": "d3a2e7ae104ae0b084e360f083a283ae7bd35ed6b2e501935a0614c72ff86b3d"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-9/START_HERE.md",
+      "bytes": 1949,
+      "sha256": "2ca515d5ae865ecd5481c3c8eb7d3ad28e245a0838c051747c97e05b38dc003a"
+    },
+    {
+      "path": "optional-modes/lite-pathway/phases/phase-9/resources/PHASE9_REMEDIATION_DELTA_LEDGER.md",
+      "bytes": 1142,
+      "sha256": "c921cf26291a58f1ab97ba7805b09088e029e007142e1f416962851ee6f763a8"
+    },
+    {
+      "path": "optional-modes/lite-pathway/profiles/AUDIT_INDEPENDENT_REVIEW.md",
+      "bytes": 848,
+      "sha256": "047be3db52bc0e5001f58c7da9338f973413da4916763f6e8438f4589f6034ff"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/controller/AI_Auditor_Controller.md",
+      "bytes": 4116,
+      "sha256": "c2dfbd87152b7d545c7f5af0907107a436da6a733ca938e9abdbdce87e43f41e"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/controller/AUDIT_CONTROLLER_AND_GITHUB_PROTOCOL.md",
+      "bytes": 934,
+      "sha256": "395bd6feb60505e828729e55d7ac5a2cb9846fda2a1156347bfa759da321ff1b"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/controller/AUTOMATIC_PHASE_ADVANCEMENT_PROTOCOL.md",
+      "bytes": 1819,
+      "sha256": "40247e3b32f0bc9a2d1874a2a04dbab841811a8584515dccdfc642f80eda6a37"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json",
+      "bytes": 2421,
+      "sha256": "90a1c314e18c21ee5581033f7c1200e9ba5ed1486633d51e9f2faf9149a106ec"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/controller/DOMAIN_APPLICABILITY_MATRIX.json",
+      "bytes": 11233,
+      "sha256": "66a1dfd6afe60a488c2d79dc8ba400af815f92c304bb512bcfe59421615d7159"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/controller/DOMAIN_APPLICABILITY_REGISTRY.json",
+      "bytes": 6416,
+      "sha256": "377ab84c4249ed3e577a55dfd0fcffc89813223a096527e977826cbca19cdafb"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/controller/EVIDENCE_INVALIDATION_MATRIX.json",
+      "bytes": 17845,
+      "sha256": "daeace6bc1ffaf8d185eaf3f2a4dc1adac47cd2c88bb29120baa7180a6012eca"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/controller/RECOVERY_ROUTER.md",
+      "bytes": 2034,
+      "sha256": "045e65454115a191b1a1789235aadfadc4933625c4ed2ac8f7811df7f6dc784f"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/controller/SECURITY_TRACEABILITY_GRAPH.json",
+      "bytes": 4907,
+      "sha256": "ad4f8f27da642b3ea7524de2636726d0cbdcc4c229d48c63216c15cf173c7a55"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/controller/SOLO_AUDIT_STATE.json",
+      "bytes": 2648,
+      "sha256": "aec0ed05b6a0c8d8f1df1e6519ae3a3f3b92ea016a433eb0f53ace1001d4fb5a"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/controller/SOLO_WORKFLOW_STATE_MACHINE.json",
+      "bytes": 4711,
+      "sha256": "822d610cd79ed98df17423e31cfb38a20813813c827ed8267c481278f0d67402"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/domain-ledgers/EXTERNAL_DEPENDENCY_LEDGER.md",
+      "bytes": 328,
+      "sha256": "18fbaf383b51e03ee0a6ad74a4ced5af0c2a13a7bc6cc81d5670bdbce4dd45f3"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/execution/CONTRACT_AUTOMATION_CAPABILITY_MAP.md",
+      "bytes": 1008,
+      "sha256": "140851d7ca5a98e24b0c7b12898ae838375544b0061b9087d62772f2df9238d6"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/execution/EXECUTION_PREFLIGHT_AND_REPAIR_PROTOCOL.md",
+      "bytes": 1228,
+      "sha256": "3bb71b66822c431c1e725b856994f08e25ad14efbbc96b573b53dbfc006bf080"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/execution/GITHUB_ACTIONS_VIA_GITHUB_APP.md",
+      "bytes": 7574,
+      "sha256": "4021767844663182d9ddf50de14d7604a1197668c840e44589c37712169bae81"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/execution/TECHNICAL_EXECUTION_REQUEST_PLAYBOOK.md",
+      "bytes": 911,
+      "sha256": "103fbbf42383d275507b1c87b55714b1911a50de4e5271be4f1f7b4127c9803d"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/handoff/HANDOFF_DISCOVERY_AND_CONTEXT_RECOVERY.md",
+      "bytes": 1556,
+      "sha256": "b268d9b57baf233a956e10def5ab4ef6c0e76b9af387ae247420d6c8c4df49fb"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/handoff/START_HERE_SUCCESSOR_TEMPLATE.md",
+      "bytes": 674,
+      "sha256": "dcd7ea5c2a0d9a3060787b64ca769339c293fb9e332295118e030bddb7993930"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/handoff/SUCCESSOR_HANDOFF_BOUNDARY_PROFILES.json",
+      "bytes": 3044,
+      "sha256": "491978358c02ec5f5cf9510177c96cf6f6cd7e303f74a70944fdd12f0180a17e"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/handoff/SUCCESSOR_HANDOFF_PROTOCOL.md",
+      "bytes": 2413,
+      "sha256": "df4b9c50477bb22259a4d80a4f6257ec13c220d31c7ccf81ec6057ceb5f00d19"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/handoff/SUCCESSOR_HANDOFF_RECEIPT_SCHEMA.json",
+      "bytes": 1362,
+      "sha256": "cf31f765cdc1db62ad104c0a28c8adddfa9efad73b53c334a5a2fc1f95335ae8"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/handoff/SUCCESSOR_HANDOFF_RECEIPT_TEMPLATE.json",
+      "bytes": 466,
+      "sha256": "c4429b411e2c3bfb4ff7de71126b5ab5259401f18704549e064ef43af4828e69"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/handoff/SUCCESSOR_HANDOFF_RECEPTION_CHECKLIST.md",
+      "bytes": 1650,
+      "sha256": "a87a007371441e59704aac3d259be81e27df20d7041f066b38a131e5c8804964"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/handoff/SUCCESSOR_HANDOFF_SCHEMA.json",
+      "bytes": 1788,
+      "sha256": "e263b1e2082e0658b74fb3fcea46d4215a76bc6782d1034ab4dc51483888b7d1"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/handoff/SUCCESSOR_HANDOFF_TEMPLATE.json",
+      "bytes": 1136,
+      "sha256": "3b47e26d3442712d1dd2953ad6313a259a43aaa192a339ec5e23be5fa00c7028"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/handoff/WAKE_UP_MESSAGE_TEMPLATE.md",
+      "bytes": 718,
+      "sha256": "d6ebb6c5de60e0a3261359b470b6083e08d85ba29c7602491c67767bbaaf6eb9"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/lenses/SOLO_LENS_ISOLATION_PROTOCOL.md",
+      "bytes": 1516,
+      "sha256": "43a04383a220df4b3b507f1249a3bffa12dec213abee4ed2adc0691615e3c742"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/lenses/architecture-threat-lens.md",
+      "bytes": 587,
+      "sha256": "846f03a4824e28df29ebc529470b19eed696a80dea49e057d327d286dff7190b"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/lenses/build-simulation-evidence-lens.md",
+      "bytes": 641,
+      "sha256": "c2addfd9b3c8890c2bb7141d0e4764ee22dbd4ea50d8f046b5c7673cccdccc22"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/lenses/economic-accounting-lens.md",
+      "bytes": 587,
+      "sha256": "a024c896d23635dc62a066d86b239654de2caf18dffc96b0dd08ee6b527d946d"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/lenses/final-report-coordination-lens.md",
+      "bytes": 388,
+      "sha256": "ab28038799d9157def6ee153d7d1e091f6345944e3983519dbccb78dcfe946e0"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/lenses/manual-implementation-lens.md",
+      "bytes": 589,
+      "sha256": "2589f8b991cdb9077b6e1e2e9c7ce0c716d6525ff3f346f4875f232ef19a5b1c"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/lenses/operations-recovery-lens.md",
+      "bytes": 675,
+      "sha256": "f788c02340abdff8c53ca95b1a8df386cbdd5c611ac9434c52f8b2b551cd69d2"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/lenses/scope-specification-lens.md",
+      "bytes": 681,
+      "sha256": "39a19fa83f9dcd8105c8074fb41bde10ef2def67774a0a1d93121bf00541eea9"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/policy/ASSURANCE_PRECISION_CONTROLS.md",
+      "bytes": 2358,
+      "sha256": "55fe84558cc70e8879ecab3cba091a303e8325767b61e6adea923b4ef7cb82bc"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/policy/PHASE_STATUS_AND_VERDICT_POLICY.md",
+      "bytes": 4851,
+      "sha256": "407514dc184b20e82d956747de04ab9ddd57104bfffcda555f050cde4451919a"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/policy/PROCESS_INTEGRITY_LEDGER.md",
+      "bytes": 564,
+      "sha256": "d1605ffc356d7d56842f5d5b821c2c39215ba187bf3854b1dc18295ae0327345"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/policy/SEVERITY_CALIBRATION.md",
+      "bytes": 9321,
+      "sha256": "5df7e7063c12ce31d2b5f41cdd14b375cd975fb91a852c24da5b869bf80d215b"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/policy/STANDARDS_CONFORMANCE.md",
+      "bytes": 310,
+      "sha256": "cd69febfbfd9878bc6a8f75bae9bb37d4abf80637968d96d7e99e5695a105cc4"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/policy/UNIVERSAL_RULE_REGISTRY.json",
+      "bytes": 2307,
+      "sha256": "24102a99035b5475f6adcaccf0af3e84ffe57c106c0e49179b683e0512626dc0"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/reporting/FINDING_TEMPLATE.md",
+      "bytes": 687,
+      "sha256": "c47231225dfd2c90e13cd5f104b00955469a9a586d1cf04e7cf9c150d9e2dfac"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/reporting/PHASE_REPORT.md",
+      "bytes": 1784,
+      "sha256": "f454cb9f7bb0dd884d47cfbb5d20036dbc2c5c4aac3bf54f66fae33ffa1e5bca"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/reporting/PROCESS_BLOCKER_RECEIPT.json",
+      "bytes": 1027,
+      "sha256": "79e8ca15ca79b05fe2673d606d7a823706b055e700b7904aa7a9864a755ac1d7"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_SCHEMA.json",
+      "bytes": 1281,
+      "sha256": "16dbc50311890d7fa99bc651eeedcb625f9abcb5e5895f0395b694678fef2e37"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_TEMPLATE.json",
+      "bytes": 1611,
+      "sha256": "d9574bba0afdb62372cdf8959979792e828d1ad688fa7815164c320a1bfec128"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/source-intelligence/RUNTIME_DEPLOYMENT_OVERLAY_SCHEMA.json",
+      "bytes": 1301,
+      "sha256": "94c0a65f925cabb4c24f4d718a645ae9f8edd77fb92a4f05bf9bbbf690bcf14f"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/source-intelligence/RUNTIME_DEPLOYMENT_OVERLAY_TEMPLATE.json",
+      "bytes": 1871,
+      "sha256": "efe088c893b78a865a4be748efabd52355185fa95cbc2a579215bede8fdb76b9"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_SCHEMA.json",
+      "bytes": 1596,
+      "sha256": "9de482e78dabdb77b164aa6142212815b487528d6426788c87141b6dddc18944"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_TEMPLATE.json",
+      "bytes": 3376,
+      "sha256": "bd0b8dbe1b4d38cbd73f7af7d0b6e285551040b8d0f7c90a9b231b6bc400fbb9"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/source-intelligence/SOURCE_INTELLIGENCE_REUSE_PROTOCOL.md",
+      "bytes": 1965,
+      "sha256": "6bebf16d298a9e75aa74ee4f34403fc005f2377fc7d4d4aace70c12bd103526b"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/source-intelligence/SOURCE_INTELLIGENCE_SCHEMA.json",
+      "bytes": 2478,
+      "sha256": "ea066ee7228751f9fd80280656235b0975322e5c11ab540c9aeade98c90cb42d"
+    },
+    {
+      "path": "optional-modes/lite-pathway/shared/source-intelligence/SOURCE_INTELLIGENCE_TEMPLATE.json",
+      "bytes": 9950,
+      "sha256": "a5de8d84310a31eda5177c2cb74d743641a3e1ec1d5459fd12251ea54f9abc79"
+    }
+  ]
+}

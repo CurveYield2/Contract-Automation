@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "audit-v7-carried-forward-obligation-ledger-v1",
+  "artifactId": "CARRIED_FORWARD_OBLIGATION_LEDGER",
+  "purpose": "Canonical campaign-global ledger for every unresolved, deferred, later-phase-required, or cross-reviewer audit obligation. Narrative phase-report reminders do not replace this ledger.",
+  "campaignBinding": {
+    "campaignId": "<exact>",
+    "campaignGenerationId": "<exact>",
+    "sourceIdentity": "<exact>",
+    "ledgerRevision": 1
+  },
+  "statusVocabulary": [
+    "OPEN",
+    "IN_PROGRESS",
+    "SATISFIED",
+    "NOT_APPLICABLE",
+    "SUPERSEDED",
+    "BLOCKED_CARRIED"
+  ],
+  "obligations": [
+    {
+      "obligationId": "OBL-<stable>",
+      "originPhase": "<0-10>",
+      "originatingFactIds": [],
+      "originatingEvidenceRefs": [],
+      "requiredPhase": "<0-10>",
+      "requiredReviewer": "<reviewer-1|reviewer-2|reviewer-3A|reviewer-3B|reviewer-3C|reviewer-4|reviewer-5>",
+      "requiredAction": "<exact>",
+      "completionCondition": "<objective evidence condition>",
+      "mandatory": true,
+      "status": "OPEN",
+      "statusReason": null,
+      "closureEvidenceRefs": [],
+      "supersedesOrReplaces": [],
+      "createdAt": "<exact>",
+      "updatedAt": "<exact>"
+    }
+  ],
+  "phaseCheckpoints": [],
+  "sealingRules": [
+    "At phase start, enumerate all obligations whose requiredPhase equals the active phase before substantive work proceeds.",
+    "Before EVIDENCE_SEALED, every obligation due in the active phase must be reconciled.",
+    "A due obligation may close only as SATISFIED, NOT_APPLICABLE with evidence-bound reason, or SUPERSEDED with an explicit replacement obligation/evidence relationship.",
+    "BLOCKED_CARRIED requires a typed limitation/process-blocker record and an explicit permitted later requiredPhase; mandatory work may not be deferred merely for cost, inconvenience, missing effort, or agent preference.",
+    "An OPEN or IN_PROGRESS obligation due in the active phase forbids EVIDENCE_SEALED.",
+    "New later-phase obligations discovered in the active phase must receive stable OBL-* IDs before the phase report is sealed.",
+    "The Phase Report carried-forward table is a human-readable projection of this ledger, not an independent obligation store."
+  ],
+  "checkpointIntegrity": {
+    "digestAlgorithm": "sha256",
+    "digestScope": "canonical campaign-local obligation ledger",
+    "phaseReportMustReferenceDigest": true
+  }
+}

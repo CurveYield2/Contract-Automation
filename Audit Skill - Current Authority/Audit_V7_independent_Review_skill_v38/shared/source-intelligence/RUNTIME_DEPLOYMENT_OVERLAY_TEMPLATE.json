@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "audit-v7-runtime-deployment-overlay-v1",
+  "artifactType": "RUNTIME_DEPLOYMENT_OVERLAY",
+  "templatePath": "shared/source-intelligence/RUNTIME_DEPLOYMENT_OVERLAY_TEMPLATE.json",
+  "identity": {
+    "logicalArtifactId": "SI-RUNTIME-OVERLAY",
+    "campaignId": "__FILL_REQUIRED__",
+    "campaignGenerationId": "__FILL_REQUIRED__",
+    "sourceIdentity": "__FILL_REQUIRED__",
+    "sourceDigestSha256": "__FILL_REQUIRED__",
+    "buildIdentity": "__FILL_REQUIRED__",
+    "buildDigestSha256": "__FILL_REQUIRED__"
+  },
+  "revision": {
+    "revisionNumber": "__FILL_REQUIRED__",
+    "parentAcceptedRevision": "__FILL_REQUIRED__",
+    "createdByPhase": "phase-1",
+    "acceptanceOwnerPhase": "phase-7",
+    "createdAt": "__FILL_REQUIRED__",
+    "changeSummary": "__FILL_REQUIRED__"
+  },
+  "deploymentIdentity": {
+    "status": "__FILL_REQUIRED__",
+    "chainId": "__FILL_REQUIRED__",
+    "networkOrForkIdentity": "__FILL_REQUIRED__",
+    "blockNumberOrTag": "__FILL_REQUIRED__",
+    "deployments": [],
+    "rawEvidenceRefs": []
+  },
+  "liveConfiguration": {
+    "status": "__FILL_REQUIRED__",
+    "proxyImplementationAdminBindings": [],
+    "roleAndAuthorityBindings": [],
+    "oracleDependencyEndpoints": [],
+    "crossChainEndpoints": [],
+    "otherCriticalConfiguration": [],
+    "rawEvidenceRefs": []
+  },
+  "gasAcceptance": {
+    "acceptanceOwnerPhase": "phase-7",
+    "status": "PENDING_PHASE7_ACCEPTANCE",
+    "preliminaryCoreEstimateRefs": [],
+    "acceptedLifecycleEvidenceRefs": [],
+    "acceptedGasReportRef": "__FILL_REQUIRED__",
+    "identityMatchVerified": "__FILL_REQUIRED__",
+    "limitations": []
+  },
+  "limitations": [],
+  "completion": {
+    "status": "__FILL_REQUIRED__",
+    "phase1InitializationOnly": true,
+    "runtimeAcceptanceByPhase7": "__FILL_REQUIRED__",
+    "acceptedRevisionDigestRecordedExternally": "__FILL_REQUIRED__"
+  }
+}

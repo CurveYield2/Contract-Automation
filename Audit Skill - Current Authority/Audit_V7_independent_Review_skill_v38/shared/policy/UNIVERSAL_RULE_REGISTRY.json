@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "audit-v7-universal-rule-registry-v1",
+  "authoritativeText": "SKILL.md",
+  "rulePolicy": "The exact normative rule text lives on the homepage. Supporting files reference rule IDs and may add narrower phase-specific requirements but MUST NOT restate, weaken, or redefine the universal rule.",
+  "rules": [
+    {
+      "id": "U-EXEC-001",
+      "title": "Execute first; do not bother the human",
+      "homepageSection": "Universal hard rules / item 1",
+      "scope": "ALL_PHASES"
+    },
+    {
+      "id": "U-GITHUB-001",
+      "title": "GitHub connector app only; mandatory outage escalation",
+      "homepageSection": "Universal hard rules / item 2",
+      "scope": "ALL_GITHUB_OPERATIONS"
+    },
+    {
+      "id": "U-STATE-001",
+      "title": "Exact campaign/source/phase authority",
+      "homepageSection": "Universal hard rules / item 3",
+      "scope": "ALL_PHASES"
+    },
+    {
+      "id": "U-EVIDENCE-001",
+      "title": "Evidence integrity is absolute",
+      "homepageSection": "Universal hard rules / item 4",
+      "scope": "ALL_PHASES"
+    },
+    {
+      "id": "U-REPAIR-001",
+      "title": "Required process failure triggers immediate repair",
+      "homepageSection": "Universal hard rules / item 5",
+      "scope": "ALL_PHASES"
+    },
+    {
+      "id": "U-HUMAN-001",
+      "title": "Automatic post-seal advancement; no per-phase human approval",
+      "homepageSection": "Universal hard rules / item 6",
+      "scope": "ALL_PHASES"
+    },
+    {
+      "id": "U-DISCLOSURE-001",
+      "title": "Progressive disclosure is mandatory",
+      "homepageSection": "Universal hard rules / item 7",
+      "scope": "ALL_PHASES"
+    },
+    {
+      "id": "U-SOURCEINTEL-001",
+      "title": "Reuse canonical Source Intelligence; do not rediscover sealed structural facts",
+      "homepageSection": "Universal hard rules / item 8",
+      "scope": "PHASES_1_THROUGH_10"
+    },
+    {
+      "id": "U-UPDATES-001",
+      "title": "Mandatory non-blocking work updates",
+      "homepageSection": "Mandatory non-blocking work updates",
+      "scope": "ALL_ACTIVE_PHASES"
+    },
+    {
+      "id": "U-HUMANCOMMS-001",
+      "title": "Allowed human communications only",
+      "homepageSection": "Human interaction — allowed communications only",
+      "scope": "ALL_PHASES"
+    }
+  ]
+}

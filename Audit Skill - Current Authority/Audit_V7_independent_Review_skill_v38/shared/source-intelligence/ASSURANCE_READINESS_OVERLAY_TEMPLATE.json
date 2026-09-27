@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "audit-v7-assurance-readiness-overlay-v1",
+  "artifactType": "ASSURANCE_READINESS_OVERLAY",
+  "templatePath": "shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_TEMPLATE.json",
+  "identity": {
+    "logicalArtifactId": "SI-READINESS-OVERLAY",
+    "campaignId": "__FILL_REQUIRED__",
+    "campaignGenerationId": "__FILL_REQUIRED__",
+    "sourceIdentity": "__FILL_REQUIRED__",
+    "sourceDigestSha256": "__FILL_REQUIRED__",
+    "buildIdentity": "__FILL_REQUIRED__",
+    "buildDigestSha256": "__FILL_REQUIRED__"
+  },
+  "revision": {
+    "revisionNumber": "__FILL_REQUIRED__",
+    "parentAcceptedRevision": "__FILL_REQUIRED__",
+    "createdByPhase": "phase-1",
+    "acceptanceOwnerPhase": "phase-6A",
+    "createdAt": "__FILL_REQUIRED__",
+    "changeSummary": "__FILL_REQUIRED__"
+  },
+  "toolchainReadiness": {
+    "phase1StructuralStatus": "__FILL_REQUIRED__",
+    "toolIdentities": [],
+    "installationOrInvocationEvidenceRefs": [],
+    "limitations": []
+  },
+  "harnessInventory": [],
+  "configurationInventory": [],
+  "skeletonInventory": [],
+  "adequacyAssessment": {
+    "acceptanceOwnerPhase": "phase-6A",
+    "phase1MayAcceptAdequacy": false,
+    "status": "PENDING_PHASE6A_ASSESSMENT",
+    "assessmentEvidenceRefs": [],
+    "requiredRepairs": [],
+    "acceptedForSubgates": []
+  },
+  "limitations": [],
+  "completion": {
+    "status": "__FILL_REQUIRED__",
+    "phase1StructuralInventoryComplete": "__FILL_REQUIRED__",
+    "phase6AAdequacyAccepted": "__FILL_REQUIRED__",
+    "acceptedRevisionDigestRecordedExternally": "__FILL_REQUIRED__"
+  }
+}

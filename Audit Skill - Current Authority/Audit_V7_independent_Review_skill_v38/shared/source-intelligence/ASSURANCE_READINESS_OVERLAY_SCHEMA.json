@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "audit-v7-assurance-readiness-overlay-schema-v1",
+  "artifactSchemaVersion": "audit-v7-assurance-readiness-overlay-v1",
+  "template": "shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_TEMPLATE.json",
+  "logicalArtifactId": "SI-READINESS-OVERLAY",
+  "requiredTopLevelKeys": [
+    "schemaVersion",
+    "artifactType",
+    "identity",
+    "revision",
+    "toolchainReadiness",
+    "harnessInventory",
+    "configurationInventory",
+    "skeletonInventory",
+    "adequacyAssessment",
+    "limitations",
+    "completion"
+  ],
+  "allowedPhase1StructuralStatus": [
+    "DISCOVERED",
+    "ABSENT",
+    "UNKNOWN_WITH_LIMITATION",
+    "NOT_APPLICABLE"
+  ],
+  "allowedAdequacyStatus": [
+    "PENDING_PHASE6A_ASSESSMENT",
+    "ADEQUATE",
+    "REQUIRES_REPAIR",
+    "NOT_APPLICABLE",
+    "INVALIDATED_PENDING_REASSESSMENT"
+  ],
+  "forbiddenSentinel": "__FILL_REQUIRED__",
+  "rules": [
+    "Phase 1 inventories existing tools, harnesses, configurations, and skeletons and records only structural availability/readiness facts.",
+    "Phase 1 cannot declare harness, model, configuration, or campaign adequacy.",
+    "Phase 6A owns adequacy admission and must accept a new revision after validation/repair; Phase 6B/6C consume that accepted revision."
+  ]
+}

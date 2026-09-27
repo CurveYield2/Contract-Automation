@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "audit-v7-runtime-deployment-overlay-schema-v1",
+  "artifactSchemaVersion": "audit-v7-runtime-deployment-overlay-v1",
+  "template": "shared/source-intelligence/RUNTIME_DEPLOYMENT_OVERLAY_TEMPLATE.json",
+  "logicalArtifactId": "SI-RUNTIME-OVERLAY",
+  "requiredTopLevelKeys": [
+    "schemaVersion",
+    "artifactType",
+    "identity",
+    "revision",
+    "deploymentIdentity",
+    "liveConfiguration",
+    "gasAcceptance",
+    "limitations",
+    "completion"
+  ],
+  "allowedDeploymentStatus": [
+    "DISCOVERED_UNVERIFIED",
+    "VERIFIED_ACTIVE",
+    "VERIFIED_INACTIVE",
+    "NOT_DEPLOYED",
+    "NOT_APPLICABLE",
+    "INVALIDATED_PENDING_REPLACEMENT"
+  ],
+  "allowedGasAcceptanceStatus": [
+    "PENDING_PHASE7_ACCEPTANCE",
+    "ACCEPTED_PHASE7",
+    "REJECTED_STALE_IDENTITY",
+    "NOT_APPLICABLE"
+  ],
+  "forbiddenSentinel": "__FILL_REQUIRED__",
+  "rules": [
+    "Phase 1 may initialize discovered live identities and preliminary compiler estimates, but it cannot accept runtime behavior or deployment gas.",
+    "Phase 7 owns runtime/configuration and deployment-gas acceptance; Phase 10 verifies the final accepted revision.",
+    "Every accepted revision must bind exact source, build, chain/fork, block, deployment/configuration, and evidence identities as applicable."
+  ]
+}

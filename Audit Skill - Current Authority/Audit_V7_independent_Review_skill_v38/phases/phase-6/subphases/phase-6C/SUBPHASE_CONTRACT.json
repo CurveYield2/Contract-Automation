@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "audit-v7-phase6-subphase-contract-v1",
+  "phase": 6,
+  "subphase": "6C",
+  "reviewer": "reviewer-3C",
+  "incomingBoundaryProfile": "P6B_TO_P6C",
+  "ownedSubgates": [
+    "P6.7",
+    "P6.8"
+  ],
+  "outgoingBoundaryProfile": "P6_TO_P7",
+  "freshReviewerRequired": true,
+  "humanApprovalRequired": false,
+  "autoHandoffAfterSeal": true,
+  "sourceBuildBindingRequired": true,
+  "sourceIntelligenceReuseRequired": true,
+  "compatibilityFallbackProtocol": "phases/phase-6/resources/PHASE6_V29_COMPATIBILITY_AND_FALLBACK.md",
+  "completionRule": "All owned gates and v29 obligations assigned to this subphase are terminal with accepted evidence/typed permitted limitation; successor handoff is then generated automatically."
+}
