@@ -105,6 +105,21 @@ on:
         required: false
         default: ''
         type: string
+      repair_enabled:
+        description: Enable reviewer replacement escalation after persistent chat-level failure
+        required: false
+        default: false
+        type: boolean
+      repair_idle_poke_threshold:
+        description: Consecutive idle watchdog pokes tolerated before reviewer replacement
+        required: false
+        default: '3'
+        type: string
+      repair_unviewable_threshold:
+        description: Consecutive non-challenge unviewable observations tolerated before reviewer replacement
+        required: false
+        default: '2'
+        type: string
 
 permissions:
   contents: write
@@ -294,6 +309,9 @@ jobs:
           GATE_INTERPHASE_WORK_PACKET_SHA256: ${{ inputs.gate_interphase_work_packet_sha256 }}
           GATE_STOP_STATES_CSV: ${{ inputs.gate_stop_states_csv }}
           GATE_STOP_CAMPAIGN_STATUSES_CSV: ${{ inputs.gate_stop_campaign_statuses_csv }}
+          REPAIR_ENABLED: ${{ inputs.repair_enabled }}
+          REPAIR_IDLE_POKE_THRESHOLD: ${{ inputs.repair_idle_poke_threshold }}
+          REPAIR_UNVIEWABLE_THRESHOLD: ${{ inputs.repair_unviewable_threshold }}
         shell: bash
         run: |
           set -euo pipefail
@@ -321,6 +339,9 @@ jobs:
             --arg gateInterphaseWorkPacketSha256 "$GATE_INTERPHASE_WORK_PACKET_SHA256" \
             --arg gateStopStatesCsv "$GATE_STOP_STATES_CSV" \
             --arg gateStopCampaignStatusesCsv "$GATE_STOP_CAMPAIGN_STATUSES_CSV" \
+            --arg repairEnabled "$REPAIR_ENABLED" \
+            --arg repairIdlePokeThreshold "$REPAIR_IDLE_POKE_THRESHOLD" \
+            --arg repairUnviewableThreshold "$REPAIR_UNVIEWABLE_THRESHOLD" \
             --arg lastHash "$LAST_HASH" \
             --argjson assistantCount "${ASSISTANT_COUNT:-0}" \
             '{
@@ -344,6 +365,13 @@ jobs:
                 },
                 stopStates:($gateStopStatesCsv|split(",")|map(gsub("^ +| +$";""))),
                 stopCampaignStatuses:($gateStopCampaignStatusesCsv|split(",")|map(gsub("^ +| +$";"")))
+              },
+              repair:{
+                enabled:($repairEnabled=="true"),
+                idlePokeThreshold:(($repairIdlePokeThreshold|tonumber?) // 3),
+                unviewableThreshold:(($repairUnviewableThreshold|tonumber?) // 2),
+                consecutiveIdlePokes:0,
+                consecutiveUnviewable:0
               }
             }' > "/tmp/$safe_id.json"
           echo "WATCHDOG_STATE=/tmp/$safe_id.json" >> "$GITHUB_ENV"
