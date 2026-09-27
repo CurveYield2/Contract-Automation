@@ -168,6 +168,8 @@ jobs:
           GET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.'
           fi
 
+          browser_context_b64="$(jq -nc '{routineId:"",projectName:"",chatName:"",repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
+
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="$CAMPAIGN_ID-phase0-bootstrap-$GITHUB_RUN_ID" \
             -f campaign_id="$CAMPAIGN_ID" \
@@ -185,12 +187,7 @@ jobs:
             -f gate_expected_phase_id=phase-0 \
             -f gate_expected_milestone_id=P0_BOOTSTRAP \
             -f gate_active_pointer_path="$CAMPAIGN_PATH/controller/ACTIVE_PHASE_POINTER_v1.json" \
-            -f browser_routine_id="" \
-            -f project_name="" \
-            -f chat_name="" \
-            -f repair_enabled=true \
-            -f repair_idle_poke_threshold=3 \
-            -f repair_unviewable_threshold=2
+            -f browser_context_b64="$browser_context_b64"
 
       - name: Summarize orchestration
         shell: bash
