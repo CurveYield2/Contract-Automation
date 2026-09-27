@@ -40,5 +40,12 @@
     "enabled": true,
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
+  },
+  "thinkingEffort": "high",
+  "activeAssignment": {
+    "phaseId": "phase-0",
+    "milestoneId": "P0_BOOTSTRAP",
+    "workerRole": "reviewer",
+    "thinkingEffort": "high"
   }
 }

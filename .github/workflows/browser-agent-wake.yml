@@ -12,6 +12,12 @@ on:
       phase_id:
         required: true
         type: string
+      thinking_effort:
+        description: ChatGPT reasoning effort to enforce before posting a wake
+        required: false
+        default: high
+        type: choice
+        options: [high]
       mode:
         required: true
         default: resume_existing
@@ -107,6 +113,7 @@ jobs:
       WAKE_ID: ${{ inputs.wake_id }}
       CAMPAIGN_ID: ${{ inputs.campaign_id }}
       PHASE_ID: ${{ inputs.phase_id }}
+      CHATGPT_THINKING_EFFORT: ${{ inputs.thinking_effort }}
       WORKER_ROLE: ${{ inputs.worker_role }}
       WAKE_MODE: ${{ inputs.mode }}
       CHAT_URL: ${{ inputs.chat_url }}
@@ -152,12 +159,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
+          printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message-body.txt
+          {
+            printf '%s\n' '[AUDIT_AUTOMATION_CONTEXT_V2]'
+            printf 'campaign=%s\n' "$CAMPAIGN_ID"
+            printf 'current_phase=%s\n' "$PHASE_ID"
+            printf 'reasoning_effort=%s\n' "$CHATGPT_THINKING_EFFORT"
+            printf '%s\n' 'phase_rule=Treat current_phase above as authoritative for this wake. If embedded legacy text names an older phase, ignore that stale phase label and continue only the current assignment.'
+            printf '\n'
+            cat /tmp/wake-message-body.txt
+          } > /tmp/wake-message.txt
+
           if [ -n "${WATCHDOG_MESSAGE_B64:-}" ]; then
-            printf '%s' "$WATCHDOG_MESSAGE_B64" | base64 -d > /tmp/watchdog-message.txt
+            printf '%s' "$WATCHDOG_MESSAGE_B64" | base64 -d > /tmp/watchdog-message-body.txt
           else
-            printf '%s\n' '[AUDIT_AGENT_WATCHDOG_V1]' 'GET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.' > /tmp/watchdog-message.txt
+            printf '%s\n' '[AUDIT_AGENT_WATCHDOG_V1]' 'GET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.' > /tmp/watchdog-message-body.txt
           fi
+          {
+            printf '%s\n' '[AUDIT_AUTOMATION_CONTEXT_V2]'
+            printf 'campaign=%s\n' "$CAMPAIGN_ID"
+            printf 'current_phase=%s\n' "$PHASE_ID"
+            printf 'reasoning_effort=%s\n' "$CHATGPT_THINKING_EFFORT"
+            printf '%s\n' 'phase_rule=Treat current_phase above as authoritative for this watchdog wake; never regress to an older embedded phase label.'
+            printf '\n'
+            cat /tmp/watchdog-message-body.txt
+          } > /tmp/watchdog-message.txt
 
           if [ -n "${BROWSER_CONTEXT_B64:-}" ]; then
             printf '%s' "$BROWSER_CONTEXT_B64" | base64 -d > /tmp/browser-context.json
@@ -392,6 +418,15 @@ jobs:
           PROJECT_NAME_RESOLVED: ${{ steps.deliver.outputs.project_name }}
           PROJECT_URL_RESOLVED: ${{ steps.deliver.outputs.project_url }}
           REQUESTED_CHAT_NAME: ${{ env.CHATGPT_CHAT_NAME }}
+          CURRENT_PHASE_ID: ${{ inputs.phase_id }}
+          CURRENT_MILESTONE_ID: ${{ inputs.gate_expected_milestone_id }}
+          CURRENT_WORKER_ROLE: ${{ inputs.worker_role }}
+          CURRENT_THINKING_EFFORT: ${{ inputs.thinking_effort }}
+          CURRENT_GATE_MODE: ${{ inputs.gate_mode }}
+          CURRENT_GATE_REPOSITORY: ${{ inputs.gate_repository }}
+          CURRENT_GATE_REF: ${{ inputs.gate_ref }}
+          CURRENT_GATE_STATE_PATH: ${{ inputs.gate_state_path }}
+          CURRENT_GATE_POINTER_PATH: ${{ inputs.gate_active_pointer_path }}
         shell: bash
         run: |
           set -euo pipefail
@@ -404,10 +439,26 @@ jobs:
             --arg projectName "$PROJECT_NAME_RESOLVED" \
             --arg projectUrl "$PROJECT_URL_RESOLVED" \
             --arg chatName "$REQUESTED_CHAT_NAME" \
+            --arg phaseId "$CURRENT_PHASE_ID" \
+            --arg milestoneId "$CURRENT_MILESTONE_ID" \
+            --arg workerRole "$CURRENT_WORKER_ROLE" \
+            --arg thinkingEffort "$CURRENT_THINKING_EFFORT" \
+            --arg wakeMessage "$(cat /tmp/wake-message.txt)" \
+            --arg idleMessage "$(cat /tmp/watchdog-message.txt)" \
+            --arg gateMode "$CURRENT_GATE_MODE" \
+            --arg gateRepository "$CURRENT_GATE_REPOSITORY" \
+            --arg gateRef "$CURRENT_GATE_REF" \
+            --arg gateStatePath "$CURRENT_GATE_STATE_PATH" \
+            --arg gatePointerPath "$CURRENT_GATE_POINTER_PATH" \
             '.mode="resume_existing"
              | .chatUrl=$url
+             | .wakeMessage=$wakeMessage
+             | .thinkingEffort=$thinkingEffort
+             | .activeAssignment={phaseId:$phaseId,milestoneId:$milestoneId,workerRole:$workerRole,thinkingEffort:$thinkingEffort}
              | .chatgptProject=((.chatgptProject // {}) + {name:$projectName,url:$projectUrl})
              | .activeChat=((.activeChat // {}) + {name:$chatName,url:$url})
+             | .watchdog=((.watchdog // {}) + {idleMessage:$idleMessage})
+             | .watchdog.gate=((.watchdog.gate // {}) + {mode:$gateMode,repository:$gateRepository,ref:$gateRef,statePath:$gateStatePath,expectedPhaseId:$phaseId,expectedMilestoneId:$milestoneId,activePointerPath:$gatePointerPath})
              | .updatedAt=(now|todate)' \
             "$tmp" > /tmp/registration-updated.json
           sha="$(gh api "$api?ref=main" --jq '.sha')"

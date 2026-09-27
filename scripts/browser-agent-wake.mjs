@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { deriveSessionStateKeyB64, loadEncryptedSessionState, saveEncryptedSessionState, validateStorageState } from './browser-session-state-v1.mjs';
 import { loadBrowserRoutine, runBrowserRoutineStage } from './browser-routine-engine-v1.mjs';
+import { executeBrowserOperation } from './browser-operations-v1.mjs';
 
 const env = process.env;
 const action = env.WAKE_ACTION || 'wake';
@@ -16,6 +17,7 @@ const requestedUrl = env.CHAT_URL || '';
 const browserRoutineId = env.BROWSER_ROUTINE_ID || '';
 const projectName = env.CHATGPT_PROJECT_NAME || '';
 const requestedChatName = env.CHATGPT_CHAT_NAME || '';
+const thinkingEffort = (env.CHATGPT_THINKING_EFFORT || '').trim();
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 const encryptedSessionPath = env.CHATGPT_SESSION_STATE_PATH || '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
 const sessionUpdatedMarker = env.CHATGPT_SESSION_STATE_UPDATED_MARKER || '/tmp/curveyield-browser-agent/session-state-updated';
@@ -332,6 +334,16 @@ async function runWithPage(providerName, connect) {
       return result;
     }
 
+    let thinkingEffortResult = null;
+    if (thinkingEffort) {
+      await ensureComposer(page);
+      thinkingEffortResult = await executeBrowserOperation({
+        page,
+        name: 'chatgpt.ensure_thinking_effort',
+        args: { level: thinkingEffort },
+      });
+    }
+
     await post(page, wakeMessage);
 
     let response = null;
@@ -372,6 +384,7 @@ async function runWithPage(providerName, connect) {
       projectUrl: projectUrl || null,
       requestedChatName: requestedChatName || null,
       chatRenamed: renameResult?.renamed ?? null,
+      thinkingEffort: thinkingEffortResult,
       ...(response ? { responded: response.responded, waitedMs: response.waitedMs } : {})
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');

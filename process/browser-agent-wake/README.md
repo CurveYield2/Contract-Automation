@@ -17,6 +17,7 @@ It always targets **normal ChatGPT web Chat**, never Work. Before the first revi
 The browser operation registry currently includes:
 
 - `chatgpt.ensure_chat_mode`
+- `chatgpt.ensure_thinking_effort`
 - `chatgpt.ensure_project`
 - `chatgpt.start_project_chat`
 - `chatgpt.rename_current_chat`
@@ -36,6 +37,8 @@ It starts with a dedicated **normal ChatGPT web** Phase-0 bootstrap chat. That b
 5. stop at the machine-readable successor boundary.
 
 The Phase-0 bootstrap is deliberately outside the campaign Project. When the canonical controller/pointer reaches the Phase-0 successor boundary, the existing Lite watchdog launches the first semantic reviewer through `audit-ultralite-reviewer-v1`. That launch creates/reuses a ChatGPT Project named from the campaign title and creates a normal reviewer chat inside it.
+
+Every reviewer wake enforces **High** ChatGPT reasoning effort before posting. The wake payload also carries an authoritative `current_phase` context line, and successful fresh-reviewer launches rebind the persistent registration's active phase/milestone so later execution/repair wakes cannot fall back to stale Phase-0 text.
 
 Every later successor is derived from the live Audit-Controller pointer, not from a hard-coded reviewer count. The successor launch reads `.nextMilestone.reviewer`, `.nextMilestone.id`, the sealed handoff, campaign title/path, and resolves audit-skill authority using this precedence: **campaign-bound `skillAuthority.current` first; otherwise `Audit-Controller/audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json`; legacy newest-ZIP discovery only if neither authoritative binding exists**. The wake envelope contains:
 
