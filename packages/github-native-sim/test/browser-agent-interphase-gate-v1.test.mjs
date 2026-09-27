@@ -72,7 +72,37 @@ function exercise(mutate = () => {}, launch = false) {
         controller: { workspacePath: 'campaigns/synthetic' },
         routingPlan: { workers: [{ lineage: 'reviewer-1', milestone: 'P1', status: 'NOT_STARTED' }] }
       }),
-      wake: 'Synthetic successor instructions for campaign synthetic. reviewer-1 must resume phase-1.\n' };
+      successorHandoff: JSON.stringify({
+        schemaVersion: 'audit-v7-lite-successor-handoff-v38',
+        boundaryProfileId: 'P0_TO_P1',
+        campaign: {
+          campaignType: 'LITE',
+          campaignName: 'Synthetic Audit',
+          campaignId: 'synthetic',
+          campaignGenerationId: 'synthetic-g1',
+          workspacePath: 'campaigns/synthetic',
+          campaignFolderUrl: 'https://github.com/CurveYield2/Audit-Controller/tree/main/campaigns/synthetic',
+          campaignLink: 'https://github.com/CurveYield2/Audit-Controller/tree/main/campaigns/synthetic'
+        },
+        reviewers: { outgoing: 'web-bootstrap-agent', incoming: 'reviewer-1' },
+        assignment: { incomingReviewer: 'reviewer-1', assignedLitePhaseOrMilestone: 'Phase 1' },
+        authority: {
+          liteSkillRepositoryPath: 'CurveYield2/Contract-Automation/Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md',
+          liteSkillUrl: 'https://github.com/CurveYield2/Contract-Automation/blob/main/Audit%20Skill%20-%20Current%20Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md'
+        }
+      }),
+      wake: [
+        '# Lite Successor Wake-Up Message',
+        '',
+        '- Campaign type: **LITE**',
+        '- Campaign name: Synthetic Audit',
+        '- Controller `workspacePath`: `campaigns/synthetic`',
+        '- Campaign ID / generation: `synthetic / synthetic-g1`',
+        '- Incoming reviewer: `reviewer-1`',
+        '- Assigned Lite phase/milestone: `Phase 1`',
+        '- Repository path: `CurveYield2/Contract-Automation/Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md`',
+        ''
+      ].join('\n') };
     for (const [name, value] of Object.entries(named)) fs.writeFileSync(path.join(temp, name), value);
     fs.writeFileSync(path.join(temp, 'state'), JSON.stringify({
       gate: { interphase: { workPacketSha256: files.pinnedSha ?? sha(packetBytes) } }
@@ -87,6 +117,7 @@ gh() {
       *MECHANICAL_WORK_COMPLETION_v2.json*) [ "$MISSING_RECEIPT" = no ] && base64 -w0 "$FIXTURE_DIR/receipt" || return 1;;
       *MECHANICAL/*.json*) [ "$MISSING_OUTPUT" = no ] && base64 -w0 "$FIXTURE_DIR/output" || return 1;;
       *pointer.json*) base64 -w0 "$FIXTURE_DIR/pointer";;
+      *SUCCESSOR_HANDOFF.json*) base64 -w0 "$FIXTURE_DIR/successorHandoff";;
       *WAKE_UP_MESSAGE.md*) base64 -w0 "$FIXTURE_DIR/wake";;
       *) return 1;;
     esac
@@ -146,7 +177,10 @@ test('sealed P0 synthetic packet validates and dispatches one successor with ver
   const encoded = dispatched.match(/wake_message_b64=([A-Za-z0-9+/=]+)/)?.[1];
   assert.ok(encoded, dispatched);
   const message = Buffer.from(encoded, 'base64').toString('utf8');
-  assert.equal(message, 'Synthetic successor instructions for campaign synthetic. reviewer-1 must resume phase-1.\n');
+  assert.match(message, /Campaign type: \*\*LITE\*\*/);
+  assert.match(message, /Campaign name: Synthetic Audit/);
+  assert.match(message, /Incoming reviewer: `reviewer-1`/);
+  assert.match(message, /Assigned Lite phase\/milestone: `Phase 1`/);
   const browserContextEncoded = dispatched.match(/browser_context_b64=([A-Za-z0-9+/=]+)/)?.[1];
   assert.ok(browserContextEncoded, dispatched);
   const browserContext = JSON.parse(Buffer.from(browserContextEncoded, 'base64').toString('utf8'));
