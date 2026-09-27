@@ -262,6 +262,21 @@ The Actions cache contains ciphertext only. Plain Playwright storage state is no
 
 This rolling cache improves session longevity but is not a credential-login mechanism. If both the rolling session and bootstrap state are no longer accepted by ChatGPT, the existing Browserless/Browserbase fallbacks remain available.
 
+## Fresh-runner retry hardening
+
+The GitHub-hosted Playwright provider treats only failures that occur **before any wake message is posted** as eligible for automatic fresh-runner retry. This keeps retries duplicate-safe.
+
+Retryable pre-post states currently include:
+
+- `BROWSER_CHALLENGE`: ChatGPT remains on a browser/security challenge after the bounded composer wait;
+- `CHATGPT_UI_UNAVAILABLE`: ChatGPT loads without a login prompt or unavailable-chat marker but the composer never hydrates.
+
+Non-retryable states include authentication-required and unavailable-chat conditions, plus any failure that occurs after message submission begins. The workflow therefore never guesses whether a possibly-posted wake should be sent again.
+
+For a retryable failure, `browser-agent-wake.yml` re-dispatches the exact original wake inputs onto a fresh GitHub-hosted runner. The default retry budget is three fresh-runner retries and is hard-capped at five. The same `wake_id` concurrency group serializes the chain, so only one attempt can execute at a time.
+
+Failed attempts do not create watchdog state, update campaign registrations, save refreshed session state, or arm follow-on observation. Those durable side effects are gated on a verified successful delivery. If the retry budget is exhausted, the final attempt fails with the structured provider failure record.
+
 ## Browser-provider redundancy
 
 Wake delivery tries independent providers in this order and stops at the first verified success:
