@@ -54,12 +54,25 @@ async function importBrowserRuntimeModule(specifier) {
   return import(pathToFileURL(resolved).href);
 }
 
+function unwrapRuntimeModule(mod) {
+  if (!mod) return {};
+  const first = mod.default && typeof mod.default === 'object' ? mod.default : mod;
+  const second = first.default && typeof first.default === 'object' ? first.default : first;
+  return { ...mod, ...first, ...second };
+}
+
 async function loadModules() {
-  const [{ chromium }, browserbaseMod] = await Promise.all([
+  const [playwrightMod, browserbaseMod] = await Promise.all([
     importBrowserRuntimeModule('playwright-core'),
     importBrowserRuntimeModule('@browserbasehq/sdk').catch(() => ({ default: null })),
   ]);
-  return { chromium, Browserbase: browserbaseMod.Browserbase || browserbaseMod.default || null };
+  const playwright = unwrapRuntimeModule(playwrightMod);
+  const browserbase = unwrapRuntimeModule(browserbaseMod);
+  const chromium = playwright.chromium;
+  if (!chromium || typeof chromium.launch !== 'function') {
+    throw new Error('playwright-core chromium launcher unavailable');
+  }
+  return { chromium, Browserbase: browserbase.Browserbase || browserbase.default || null };
 }
 
 async function firstVisible(page, selectors) {
