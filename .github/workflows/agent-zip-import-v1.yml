@@ -66,17 +66,8 @@ jobs:
 
           case "$schema" in
             curveyield-audit-source-fanout/v2)
-              mode='audit_source_fanout'
-              campaign_id="$(jq -r '.campaign_id // empty' "$REQUEST")"
-              audit_name="$(jq -r '.audit_name // empty' "$REQUEST")"
-              format='zip'
-              target_path=''
-              [[ "$campaign_id" =~ ^[A-Za-z0-9._-]{1,200}$ ]]
-              test -n "$audit_name"
-              [[ "$audit_name" != *"/"* ]]
-              [[ "$audit_name" != *"\\"* ]]
-              [ "$audit_name" != "." ] && [ "$audit_name" != ".." ]
-              [[ "$filename" == *.zip ]]
+              echo "::error::curveyield-audit-source-fanout/v2 is retired. Use Audit Source Initialization with only source_url."
+              exit 1
               ;;
             curveyield-audit-skill-authority-import/v1)
               mode='audit_skill_authority'
@@ -135,24 +126,13 @@ jobs:
           echo "target_path=$target_path" >> "$GITHUB_OUTPUT"
 
       - name: Select working Audit-Controller credential
-        if: steps.meta.outputs.mode == 'audit_source_fanout' || steps.meta.outputs.mode == 'audit_skill_authority' || steps.meta.outputs.mode == 'audit_skill_authority'
+        if: steps.meta.outputs.mode == 'audit_skill_authority'
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
         run: bash scripts/select-audit-controller-token.sh
-
-      - name: Verify cross-repository credential
-        if: steps.meta.outputs.mode == 'audit_source_fanout'
-        env:
-          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${GH_TOKEN:-}"
-          gh api repos/CurveYield2/Audit-Controller --silent
-          gh api repos/CurveYield2/Audits --silent
 
       - name: Download import object once
         env:
@@ -192,61 +172,6 @@ jobs:
           actual_size="$(stat -c '%s' "/tmp/$FILENAME")"
           test "$actual_sha" = "$EXPECTED_SHA256"
           test "$actual_size" = "$EXPECTED_SIZE"
-
-      - name: Fan out identical ZIP to Audit-Controller and Audits
-        if: steps.meta.outputs.mode == 'audit_source_fanout'
-        env:
-          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          FILENAME: ${{ steps.meta.outputs.filename }}
-          AUDIT_NAME: ${{ steps.meta.outputs.audit_name }}
-          EXPECTED_SHA256: ${{ steps.meta.outputs.sha256 }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh auth setup-git
-
-          import_one() {
-            repo="$1"
-            destination="$2"
-            work="/tmp/$(basename "$repo")-fanout"
-            rm -rf "$work"
-            gh repo clone "$repo" "$work" -- --depth=1 --branch main
-            cd "$work"
-            mkdir -p "$(dirname "$destination")"
-            cp "/tmp/$FILENAME" "$destination"
-
-            git config user.name 'CurveYield Audit Source Fanout'
-            git config user.email 'audit-source-fanout@users.noreply.github.com'
-            git add -- "$destination"
-            if ! git diff --cached --quiet; then
-              git commit -m "chore(audit): admit source for $AUDIT_NAME"
-              for attempt in 1 2 3 4 5; do
-                git fetch origin main
-                if ! git rebase origin/main; then
-                  git rebase --abort || true
-                  return 1
-                fi
-                if git push origin HEAD:main; then break; fi
-                if [ "$attempt" -eq 5 ]; then return 1; fi
-                sleep $((attempt * 2))
-              done
-            fi
-
-            git fetch origin main
-            git show "origin/main:$destination" > /tmp/remote-verify.zip
-            remote_sha="$(sha256sum /tmp/remote-verify.zip | awk '{print $1}')"
-            test "$remote_sha" = "$EXPECTED_SHA256"
-            cd - >/dev/null
-          }
-
-          controller_path="campaigns/$AUDIT_NAME/source/$FILENAME"
-          audits_path="$AUDIT_NAME/source/$FILENAME"
-
-          import_one 'CurveYield2/Audit-Controller' "$controller_path"
-          import_one 'CurveYield2/Audits' "$audits_path"
-
-          printf '%s\n' "$controller_path" > /tmp/controller-path.txt
-          printf '%s\n' "$audits_path" > /tmp/audits-path.txt
 
       - name: Import verified audit skill authority into Audit-Controller
         if: steps.meta.outputs.mode == 'audit_skill_authority'
@@ -361,31 +286,7 @@ jobs:
           set -euo pipefail
           safe_id="$(printf '%s' "$REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
 
-          if [ "$MODE" = 'audit_source_fanout' ]; then
-            jq -n \
-              --arg requestId "$REQUEST_ID" \
-              --arg campaignId "$CAMPAIGN_ID" \
-              --arg auditName "$AUDIT_NAME" \
-              --arg filename "$FILENAME" \
-              --arg sha256 "$SHA256" \
-              --argjson size "$SIZE" \
-              --arg controllerPath "$(cat /tmp/controller-path.txt)" \
-              --arg auditsPath "$(cat /tmp/audits-path.txt)" \
-              --arg runId "$GITHUB_RUN_ID" \
-              '{
-                schemaVersion:"curveyield-audit-source-fanout-report-v2",
-                requestId:$requestId,campaignId:$campaignId,auditName:$auditName,status:"PASS",
-                source:{filename:$filename,sha256:$sha256,size:$size},
-                destinations:[
-                  {repository:"CurveYield2/Audit-Controller",ref:"main",path:$controllerPath,verified:true},
-                  {repository:"CurveYield2/Audits",ref:"main",path:$auditsPath,verified:true}
-                ],
-                workflowRunId:$runId,
-                completedAt:(now|todate)
-              }' > /tmp/import-report.json
-            report_dir='process/source-fanout/reports'
-            report_message='chore(source): record fanout report'
-          elif [ "$MODE" = 'audit_skill_authority' ]; then
+          if [ "$MODE" = 'audit_skill_authority' ]; then
             jq -n \
               --arg requestId "$REQUEST_ID" \
               --arg campaignId "$CAMPAIGN_ID" \
@@ -444,58 +345,6 @@ jobs:
             gh api --method PUT "$api" -f message="$report_message $REQUEST_ID" -f content="$content" -f branch=main >/dev/null
           fi
 
-      - name: Arm canonical Lite campaign monitor after source fan-out
-        if: steps.meta.outputs.mode == 'audit_source_fanout'
-        env:
-          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
-          AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          CAMPAIGN_ID: ${{ steps.meta.outputs.campaign_id }}
-          AUDIT_NAME: ${{ steps.meta.outputs.audit_name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${AUDIT_CONTROLLER_TOKEN:-}"
-
-          # Registration is an OUTPUT of the Lite orchestrator, never a prerequisite
-          # for invoking it. Resolve the exact campaign branch/workspace from the
-          # Audit-Controller active registry created by Phase-0 campaign bootstrap.
-          listing="$(GH_TOKEN="$AUDIT_CONTROLLER_TOKEN" gh api "repos/CurveYield2/Audit-Controller/contents/.deep-assurance/active?ref=main")"
-          controller_ref=""
-          campaign_path=""
-          while IFS= read -r item; do
-            active_path="$(jq -r '.path' <<<"$item")"
-            encoded="$(GH_TOKEN="$AUDIT_CONTROLLER_TOKEN" gh api "repos/CurveYield2/Audit-Controller/contents/$active_path?ref=main" --jq '.content' 2>/dev/null || true)"
-            [ -n "$encoded" ] || continue
-            printf '%s' "$encoded" | base64 -d > /tmp/active-campaign.json
-            [ "$(jq -r '.campaignId // empty' /tmp/active-campaign.json)" = "$CAMPAIGN_ID" ] || continue
-            controller_ref="$(jq -r '.controllerBranch // empty' /tmp/active-campaign.json)"
-            campaign_path="$(jq -r '.workspacePath // empty' /tmp/active-campaign.json)"
-            break
-          done < <(jq -c '.[] | select(.type=="file")' <<<"$listing")
-
-          [ -n "$controller_ref" ] || { echo "::error::No active Audit-Controller branch registered for $CAMPAIGN_ID"; exit 1; }
-          [ -n "$campaign_path" ] || { echo "::error::No active Audit-Controller workspace registered for $CAMPAIGN_ID"; exit 1; }
-          campaign_path="${campaign_path%/}"
-          test "$campaign_path" = "campaigns/$AUDIT_NAME"
-
-          # The generic Lite orchestrator creates/refreshes registration and arms the
-          # state-only Phase-0 watchdog. It never creates a second Phase-0 reviewer.
-          GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN" gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            -f campaign_id="$CAMPAIGN_ID" \
-            -f campaign_name="$AUDIT_NAME" \
-            -f campaign_path="$campaign_path" \
-            -f audit_controller_ref="$controller_ref"
-
-          {
-            echo "## Source fan-out complete"
-            echo
-            echo "- Campaign: $AUDIT_NAME"
-            echo "- Campaign ID: $CAMPAIGN_ID"
-            echo "- Reviewer/chat launch: NOT performed by source fan-out"
-            echo "- Campaign monitor: canonical Lite orchestrator dispatched"
-            echo "- Registration prerequisite: none; orchestrator creates/refreshes it"
-            echo "- Phase-0 behavior: state-only monitoring; no second bootstrap chat"
-          } >> "$GITHUB_STEP_SUMMARY"
       - name: Record import failure run
         if: failure()
         env:
