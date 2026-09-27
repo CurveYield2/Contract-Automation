@@ -444,27 +444,59 @@ jobs:
             gh api --method PUT "$api" -f message="$report_message $REQUEST_ID" -f content="$content" -f branch=main >/dev/null
           fi
 
-      - name: Signal Phase-0 source fan-out readiness
+      - name: Arm canonical Ultralite campaign monitor after source fan-out
         if: steps.meta.outputs.mode == 'audit_source_fanout'
         env:
+          GH_TOKEN: ${{ github.token }}
           CAMPAIGN_ID: ${{ steps.meta.outputs.campaign_id }}
           AUDIT_NAME: ${{ steps.meta.outputs.audit_name }}
         shell: bash
         run: |
           set -euo pipefail
+          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          registration_path="process/browser-agent-wake/registrations/$safe_campaign.json"
+          registration_api="repos/$GITHUB_REPOSITORY/contents/$registration_path"
+          encoded="$(gh api "$registration_api?ref=main" --jq '.content' 2>/dev/null || true)"
+          [ -n "$encoded" ] || {
+            echo "::error::Source fan-out completed but no canonical browser registration exists for $CAMPAIGN_ID; refusing to leave the Ultralite campaign unmonitored."
+            exit 1
+          }
+          printf '%s' "$encoded" | base64 -d > /tmp/ultralite-registration.json
+          test "$(jq -r '.schemaVersion // empty' /tmp/ultralite-registration.json)" = 'curveyield-browser-agent-wake-registration-v1'
+          test "$(jq -r '.campaignId // empty' /tmp/ultralite-registration.json)" = "$CAMPAIGN_ID"
+
+          gate_mode="$(jq -r '.watchdog.gate.mode // empty' /tmp/ultralite-registration.json)"
+          gate_ref="$(jq -r '.watchdog.gate.ref // empty' /tmp/ultralite-registration.json)"
+          gate_state_path="$(jq -r '.watchdog.gate.statePath // empty' /tmp/ultralite-registration.json)"
+          gate_expected_phase="$(jq -r '.watchdog.gate.expectedPhaseId // empty' /tmp/ultralite-registration.json)"
+          gate_expected_milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' /tmp/ultralite-registration.json)"
+
+          test "$gate_mode" = 'LITE'
+          test "$gate_expected_phase" = 'phase-0'
+          test "$gate_expected_milestone" = 'P0_BOOTSTRAP'
+          [[ "$gate_state_path" == campaigns/*/controller/CAMPAIGN_STATE_v1.json ]]
+          campaign_path="${gate_state_path%/controller/CAMPAIGN_STATE_v1.json}"
+          test "$campaign_path" = "campaigns/$AUDIT_NAME"
+          test -n "$gate_ref"
+
+          # Source fan-out never launches a ChatGPT reviewer. It only activates the
+          # single campaign-level orchestrator, whose Phase-0 behavior is state-only
+          # monitoring until the bootstrap agent seals P0_TO_P1.
+          gh workflow run ultralite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f campaign_id="$CAMPAIGN_ID" \
+            -f campaign_name="$AUDIT_NAME" \
+            -f campaign_path="$campaign_path" \
+            -f audit_controller_ref="$gate_ref"
+
           {
             echo "## Source fan-out complete"
             echo
             echo "- Campaign: $AUDIT_NAME"
             echo "- Campaign ID: $CAMPAIGN_ID"
             echo "- Reviewer/chat launch: NOT performed by source fan-out"
-            echo "- Launch authority: Ultralite campaign orchestrator only"
+            echo "- Campaign monitor: canonical Ultralite orchestrator dispatched"
+            echo "- Phase-0 behavior: state-only monitoring; no second bootstrap chat"
           } >> "$GITHUB_STEP_SUMMARY"
-
-          # Critical invariant: source fan-out prepares durable source evidence only.
-          # It must never create a second Phase-0 chat. The campaign orchestrator owns
-          # all reviewer-chat creation and monitoring from audit start to completion.
-
       - name: Record import failure run
         if: failure()
         env:
