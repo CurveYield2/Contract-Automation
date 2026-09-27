@@ -147,6 +147,24 @@ jobs:
           safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
           api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
           encoded="$(gh api "$api?ref=main" --jq '.content' 2>/dev/null || true)"
+          if [ -z "$encoded" ]; then
+            safe_wake="$(printf '%s' "$WAKE_ID" | tr -c 'A-Za-z0-9._-' '_')"
+            watchdog_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active/$safe_wake.json"
+            watchdog_encoded="$(gh api "$watchdog_api?ref=main" --jq '.content' 2>/dev/null || true)"
+            if [ -n "$watchdog_encoded" ]; then
+              printf '%s' "$watchdog_encoded" | base64 -d > /tmp/existing-reviewer-watchdog.json
+              existing_chat="$(jq -r '.chatUrl // empty' /tmp/existing-reviewer-watchdog.json)"
+              if [ "$(jq -r '.campaignId // empty' /tmp/existing-reviewer-watchdog.json)" = "$CAMPAIGN_ID" ] \
+                 && [ "$(jq -r '.phaseId // empty' /tmp/existing-reviewer-watchdog.json)" = "$PHASE_ID" ] \
+                 && [[ "$existing_chat" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+ ]]; then
+                echo "Fresh launch recovered from its existing watchdog URL."
+                echo "WAKE_MODE=resume_existing" >> "$GITHUB_ENV"
+                echo "CHAT_URL=$existing_chat" >> "$GITHUB_ENV"
+                echo "DEDUPED_FRESH_LAUNCH=true" >> "$GITHUB_ENV"
+                echo "REGISTRATION_RECOVERY_REQUIRED=true" >> "$GITHUB_ENV"
+              fi
+            fi
+          fi
           if [ -n "$encoded" ]; then
             printf '%s' "$encoded" | base64 -d > /tmp/existing-registration.json
             existing_milestone="$(jq -r '.activeAssignment.milestoneId // empty' /tmp/existing-registration.json)"
@@ -322,7 +340,7 @@ jobs:
           key: chatgpt-session-state-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.wake_id }}
 
       - name: Create watchdog state
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled && env.DEDUPED_FRESH_LAUNCH != 'true' }}
         env:
           CHAT_URL_RESOLVED: ${{ steps.deliver.outputs.chat_url }}
           PROVIDER: ${{ steps.deliver.outputs.provider }}
@@ -410,7 +428,7 @@ jobs:
           echo "WATCHDOG_SAFE_ID=$safe_id" >> "$GITHUB_ENV"
 
       - name: Persist watchdog state
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled && env.DEDUPED_FRESH_LAUNCH != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -426,7 +444,7 @@ jobs:
           fi
 
       - name: Persist fresh-chat URL into campaign registration
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer' && env.DEDUPED_FRESH_LAUNCH != 'true' }}
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer' && (env.DEDUPED_FRESH_LAUNCH != 'true' || env.REGISTRATION_RECOVERY_REQUIRED == 'true') }}
         env:
           GH_TOKEN: ${{ github.token }}
           NEW_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}
@@ -442,13 +460,30 @@ jobs:
           CURRENT_GATE_REF: ${{ inputs.gate_ref }}
           CURRENT_GATE_STATE_PATH: ${{ inputs.gate_state_path }}
           CURRENT_GATE_POINTER_PATH: ${{ inputs.gate_active_pointer_path }}
+          ORIGINAL_WAKE_B64: ${{ inputs.wake_message_b64 }}
         shell: bash
         run: |
           set -euo pipefail
           safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
           api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
           tmp=/tmp/registration.json
-          gh api "$api?ref=main" --jq '.content' | base64 -d > "$tmp"
+          [[ "$NEW_CHAT_URL" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+ ]] || { echo "::error::Fresh reviewer did not return a valid chat URL"; exit 1; }
+          existing_encoded="$(gh api "$api?ref=main" --jq '.content' 2>/dev/null || true)"
+          if [ -n "$existing_encoded" ]; then
+            printf '%s' "$existing_encoded" | base64 -d > "$tmp"
+            test "$(jq -r '.campaignId // empty' "$tmp")" = "$CAMPAIGN_ID"
+          else
+            jq -n \
+              --arg campaignId "$CAMPAIGN_ID" \
+              --arg projectName "$PROJECT_NAME_RESOLVED" \
+              '{schemaVersion:"curveyield-browser-agent-wake-registration-v1",campaignId:$campaignId,mode:"create_fresh",chatUrl:"",activeChat:{name:"",url:""},chatgptProject:{name:$projectName,url:""},activeAssignment:{},watchdog:{gate:{}}}' > "$tmp"
+          fi
+          if [ "${REGISTRATION_RECOVERY_REQUIRED:-}" = 'true' ]; then
+            printf '%s' "$ORIGINAL_WAKE_B64" | base64 -d > /tmp/registration-wake-message.txt
+          else
+            cp /tmp/wake-message.txt /tmp/registration-wake-message.txt
+          fi
+          test -s /tmp/registration-wake-message.txt
           jq \
             --arg url "$NEW_CHAT_URL" \
             --arg projectName "$PROJECT_NAME_RESOLVED" \
@@ -458,7 +493,7 @@ jobs:
             --arg milestoneId "$CURRENT_MILESTONE_ID" \
             --arg workerRole "$CURRENT_WORKER_ROLE" \
             --arg thinkingEffort "$CURRENT_THINKING_EFFORT" \
-            --arg wakeMessage "$(cat /tmp/wake-message.txt)" \
+            --arg wakeMessage "$(cat /tmp/registration-wake-message.txt)" \
             --arg idleMessage "$(cat /tmp/watchdog-message.txt)" \
             --arg gateMode "$CURRENT_GATE_MODE" \
             --arg gateRepository "$CURRENT_GATE_REPOSITORY" \
@@ -476,12 +511,16 @@ jobs:
              | .watchdog.gate=((.watchdog.gate // {}) + {mode:$gateMode,repository:$gateRepository,ref:$gateRef,statePath:$gateStatePath,expectedPhaseId:$phaseId,expectedMilestoneId:$milestoneId,activePointerPath:$gatePointerPath})
              | .updatedAt=(now|todate)' \
             "$tmp" > /tmp/registration-updated.json
-          sha="$(gh api "$api?ref=main" --jq '.sha')"
+          sha="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
           content="$(base64 -w0 /tmp/registration-updated.json)"
-          gh api --method PUT "$api" -f message="chore(wake): bind fresh chat for $CAMPAIGN_ID" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+          if [ -n "$sha" ]; then
+            gh api --method PUT "$api" -f message="chore(wake): bind fresh chat for $CAMPAIGN_ID" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$api" -f message="chore(wake): create and bind fresh chat for $CAMPAIGN_ID" -f content="$content" -f branch=main >/dev/null
+          fi
 
       - name: Arm immediate watchdog observation
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled && env.DEDUPED_FRESH_LAUNCH != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

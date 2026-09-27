@@ -545,6 +545,20 @@ jobs:
               SEALED|COMPLETE|COMPLETED|PASS) ;;
               *) return 2 ;;
             esac
+            if [ -z "$next_id" ]; then
+              next_id="$(jq -r --arg reviewer "$next_reviewer" '
+                .routingPlan as $plan
+                | ($plan.workers | map(.lineage) | index($reviewer)) as $index
+                | if $index == null then empty
+                  else ($plan.workers[$index + 1].phases[0] // null) as $following
+                    | if $following == null then
+                        "P" + ($plan.workers[$index].phases[-1] | tostring)
+                      else
+                        ([ $plan.handoffs[]? | select(endswith("_TO_P" + ($following | tostring))) | split("_TO_")[0] ][0] // empty)
+                      end
+                  end
+              ' /tmp/canonical-campaign-state.json)"
+            fi
             [ -n "$next_id" ] || return 3
             case "$next_state" in
               WAITING_FOR_SUCCESSOR_AGENT|READY|NOT_STARTED|ACTIVE) ;;
@@ -558,55 +572,28 @@ jobs:
             safe_repo_path "$handoff_path" || return 2
             handoff_dir="$(dirname "$handoff_path")"
 
-            packet_path="$handoff_dir/MECHANICAL_WORK_PACKET_v2.json"
-            completion_path="$handoff_dir/MECHANICAL_WORK_COMPLETION_v2.json"
-            legacy_packet_path="$handoff_dir/MECHANICAL_WORK_PACKET_v1.json"
-            legacy_encoded="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$legacy_packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
-            if [ -n "$legacy_encoded" ]; then
-              echo "::warning::Legacy inter-phase packet v1 is no longer admitted. Replace it with MECHANICAL_WORK_PACKET_v2.json containing at least 10 work units."
-              return 2
-            fi
-            encoded_packet="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
-            if [ -n "$encoded_packet" ]; then
-              if verify_lite_interphase_completion "$packet_path" "$completion_path" "$handoff_path" "$expected_milestone" "$gate_repo" "$gate_ref"; then
-                echo "Validated inter-phase mechanical completion for $expected_milestone; successor launch may proceed."
-              else
-                if ! load_lite_interphase_packet "$packet_path" "$handoff_path" "$expected_milestone" "$gate_repo" "$gate_ref"; then
-                  echo "::warning::Inter-phase mechanical packet exists but is invalid; keeping current worker supervised."
-                  return 2
-                fi
-                packet_sha="$(cat /tmp/lite-interphase-work-packet.sha256)"
-                instructions="$(jq -r '.instructions' /tmp/lite-interphase-work-packet.json)"
-                mechanical_wake_id="${campaign_id}-${completed_id}-interphase"
-                {
-                  printf '%s\n' '[AUDIT_INTERPHASE_MECHANICAL_V1]'
-                  printf 'repository=%s\n' "$gate_repo"
-                  printf 'repository_ref=%s\n' "$gate_ref"
-                  printf 'campaign=%s\n' "$campaign_id"
-                  printf 'completed_milestone=%s\n' "$completed_id"
-                  printf 'next_milestone=%s\n' "$next_id"
-                  printf 'handoff=%s\n' "$handoff_path"
-                  printf 'work_packet=%s\n' "$packet_path"
-                  printf 'work_packet_sha256=%s\n' "$packet_sha"
-                  printf 'completion_receipt=%s\n' "$completion_path"
-                  printf '%s\n' 'do_not_repeat=Do not repeat the sealed reviewer milestone or change sealed reviewer outputs.'
-                  printf '%s\n' 'prohibited_semantic_work=No finding promotion or rejection, severity grading, exploit or economic judgment, remediation approval, or residual-risk conclusions.'
-                  printf '%s\n' 'work_units:'
-                  jq -r '.workUnits[] | "- [" + .id + "] " + .instructions + " -> " + .outputPath + " | verify: " + .verification' /tmp/lite-interphase-work-packet.json
-                  printf '%s\n' 'reconciliation_output:'
-                  jq -r '.reconciliationOutputPath' /tmp/lite-interphase-work-packet.json
-                  printf '%s\n' 'required_outputs:'
-                  jq -r '.requiredOutputs[].path' /tmp/lite-interphase-work-packet.json
-                  printf '\n%s\n\n' 'You are a mechanical inter-phase worker. Complete every work unit and the final reconciliation output before writing PASS. Perform only the deterministic/repetitive work in the packet below. Do not make, promote, reject, grade, or remediate security findings; do not reinterpret audit methodology. Use the GitHub repository tools to write the required outputs and the completion receipt. The completion receipt must use schema curveyield-lite-interphase-completion-v2, include one workUnitReceipt for every work unit, and include exact SHA-256 values for every required output. A PASS receipt certifies byte completeness only and never approves security conclusions.'
-                  printf '%s\n' "$instructions"
-                } > /tmp/lite-interphase-wake.txt
-                mechanical_b64="$(base64 -w0 /tmp/lite-interphase-wake.txt)"
-
-                echo "Lite machine gate PASS: $expected_milestone requires an inter-phase mechanical pass before $next_id."
-                poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
-                gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$mechanical_wake_id" -f campaign_id="$campaign_id" -f phase_id="interphase-$completed_id-to-$next_id" -f mode="create_fresh" -f chat_url="" -f wake_message_b64="$mechanical_b64" -f watchdog_enabled="true" -f worker_role="interphase_mechanical" -f watchdog_message_b64="$poke_b64" -f gate_mode="LITE" -f gate_repository="$gate_repo" -f gate_ref="$gate_ref" -f gate_state_path="$gate_path" -f gate_expected_phase_id="$gate_expected_phase" -f gate_expected_milestone_id="$expected_milestone" -f gate_active_pointer_path="$pointer_path" -f gate_interphase_handoff_path="$handoff_path" -f gate_interphase_work_packet_path="$packet_path" -f gate_interphase_completion_path="$completion_path" -f gate_interphase_work_packet_sha256="$packet_sha"
-                return 4
-              fi
+            # Mechanical identity checks belong to the accepted controller gates.
+            # A historical packet is not a reason to create another AI chat.
+            if [ "$expected_milestone" = "P0_BOOTSTRAP" ]; then
+              jq -e --arg campaign "$campaign_id" '
+                .campaignId==$campaign
+                and .phase.id=="phase-1"
+                and .phase.state=="WAITING_FOR_SUCCESSOR_AGENT"
+                and .history[-1].phase==0
+                and .history[-1].status=="SEALED"
+                and .phase0Retirement.status=="PASS"
+                and .successorHandoff.validationStatus=="PASS"
+              ' /tmp/canonical-campaign-state.json >/dev/null || return 2
+              jq -e --arg campaign "$campaign_id" --arg generation "$(jq -r '.campaignGenerationId' /tmp/canonical-campaign-state.json)" \
+                --arg source "$(jq -r '.source.sha256' /tmp/canonical-campaign-state.json)" '
+                .campaignId==$campaign and .campaignGenerationId==$generation
+                and .sourceArchiveSha256==$source
+                and .status=="WAITING_FOR_SUCCESSOR_AGENT"
+                and .phase0CompletionValidationStatus=="PASS"
+                and .phase0AutomationValidationStatus=="PASS"
+                and .successorHandoffValidationStatus=="PASS"
+                and .phase0RetirementGateStatus=="PASS"
+              ' /tmp/lite-active-pointer.json >/dev/null || return 2
             fi
 
             wake_path="$handoff_dir/WAKE_UP_MESSAGE.md"
@@ -664,7 +651,8 @@ jobs:
             [ "$handoff_workspace" = "$campaign_root" ] || { echo "::warning::Successor handoff workspace mismatch"; return 2; }
             [ "$handoff_incoming" = "$next_reviewer" ] || { echo "::warning::Successor handoff reviewer mismatch"; return 2; }
             [ -n "$handoff_assignment" ] || { echo "::warning::Successor handoff assignment is empty"; return 2; }
-            [ "$handoff_authority" = "CurveYield2/Contract-Automation/Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md" ] || {
+            expected_authority="$(jq -r '.assuranceMode.authority // (if .skillAuthority.current.liteSkillPath then "CurveYield2/Contract-Automation/" + .skillAuthority.current.liteSkillPath else empty end)' /tmp/canonical-campaign-state.json)"
+            [ -n "$expected_authority" ] && [ "$handoff_authority" = "$expected_authority" ] || {
               echo "::warning::Successor handoff does not point to the current authority Lite skill"
               return 2
             }
@@ -861,7 +849,8 @@ jobs:
                     fi
                   fi
 
-                  if [ "$gate_expected_milestone" = "P0_BOOTSTRAP" ] && [ "$lite_phase_state" = "WAITING_FOR_SUCCESSOR_AGENT" ]; then
+                  if [ "$lite_phase_state" = "WAITING_FOR_SUCCESSOR_AGENT" ] \
+                     && [ "$(jq -r '.history[-1].milestone // empty' /tmp/canonical-campaign-state.json)" = "${gate_expected_milestone/P0_BOOTSTRAP/P0}" ]; then
                     if launch_lite_successor "$gate_pointer_path" "$gate_expected_milestone" "$gate_repo" "$gate_ref"; then
                       retire_state "LITE_SUCCESSOR_DISPATCHED_P0_BOOTSTRAP"
                       exit 0
