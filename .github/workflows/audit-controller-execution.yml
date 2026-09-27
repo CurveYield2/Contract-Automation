@@ -741,7 +741,7 @@ jobs:
           if [ ! -f "$registration" ]; then
             if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "$campaign_mode" = "LITE" ] && [ -n "$campaign_path" ] && [ -n "$campaign_controller_ref" ]; then
               echo "Lite campaign $campaign_id has no browser registration; dispatching automatic registration/watchdog repair."
-              gh workflow run ultralite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
                 -f campaign_id="$campaign_id" \
                 -f campaign_name="$campaign_name" \
                 -f campaign_path="$campaign_path" \
