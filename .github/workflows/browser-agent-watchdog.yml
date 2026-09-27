@@ -581,7 +581,16 @@ jobs:
               return 2
             fi
 
-            campaign_root="${pointer_path%/controller/*}"
+            if [[ "$pointer_path" == */controller/* ]]; then
+              campaign_root="${pointer_path%/controller/*}"
+            elif [[ "$handoff_path" == */handoffs/* ]]; then
+              campaign_root="${handoff_path%/handoffs/*}"
+            elif [[ "$gate_path" == */controller/* ]]; then
+              campaign_root="${gate_path%/controller/*}"
+            else
+              echo "::warning::Unable to derive campaign root from pointer/handoff/gate paths."
+              return 2
+            fi
             campaign_title="$(jq -r '.title // .projectSlug // .campaignId // empty' /tmp/canonical-campaign-state.json)"
             [ -n "$campaign_title" ] || campaign_title="$campaign_id"
             [ -n "$next_reviewer" ] || next_reviewer="$next_id"
@@ -656,6 +665,11 @@ jobs:
             if [ -n "$next_phase" ]; then next_phase="phase-$next_phase"; else next_phase="$next_id"; fi
             successor_wake_id="${campaign_id}-${next_id}-${GITHUB_RUN_ID}-${cycle}"
             wake_b64="$(base64 -w0 /tmp/lite-successor-wake.txt)"
+            browser_context_b64="$(jq -nc \
+              --arg routine 'audit-ultralite-reviewer-v1' \
+              --arg project "$project_name" \
+              --arg chat "$chat_name" \
+              '{routineId:$routine,projectName:$project,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
 
             echo "Lite machine gate PASS: $expected_milestone -> $next_id. Creating fresh normal ChatGPT web successor."
             gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
@@ -674,12 +688,7 @@ jobs:
               -f gate_expected_phase_id="$next_phase" \
               -f gate_expected_milestone_id="$next_id" \
               -f gate_active_pointer_path="$pointer_path" \
-              -f browser_routine_id="audit-ultralite-reviewer-v1" \
-              -f project_name="$project_name" \
-              -f chat_name="$chat_name" \
-              -f repair_enabled=true \
-              -f repair_idle_poke_threshold=3 \
-              -f repair_unviewable_threshold=2
+              -f browser_context_b64="$browser_context_b64"
             return 0
           }
 
