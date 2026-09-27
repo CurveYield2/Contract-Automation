@@ -24,10 +24,12 @@ test('interphase mechanical work reuses the existing wake/watchdog workflows', (
 
 test('grunt fresh chats do not replace the campaign reviewer chat registration', () => {
   const wake = fs.readFileSync(wakePath, 'utf8');
-  assert.match(
-    wake,
-    /if:\s*\$\{\{ inputs\.mode == 'create_fresh' && inputs\.worker_role == 'reviewer' \}\}/
-  );
+  const registrationBlock = wake
+    .split('      - name: Persist fresh-chat URL into campaign registration')[1]
+    .split('      - name: Arm immediate watchdog observation')[0];
+  assert.match(registrationBlock, /steps\.deliver\.outputs\.ok == 'true'/);
+  assert.match(registrationBlock, /inputs\.mode == 'create_fresh'/);
+  assert.match(registrationBlock, /inputs\.worker_role == 'reviewer'/);
   assert.match(wake, /workerRole:\$workerRole/);
 });
 
