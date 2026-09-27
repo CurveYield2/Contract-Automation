@@ -1,16 +1,16 @@
 {
   "schemaVersion": "curveyield-v7-agent-qualification-last-run-v1",
-  "bridgeWorkflowRunId": "36184596751",
-  "triggerIssue": 356,
-  "recordedAt": "2026-09-25T20:15:58.416Z",
+  "bridgeWorkflowRunId": "36319381958",
+  "triggerIssue": 386,
+  "recordedAt": "2026-09-27T12:33:52.278Z",
   "canonicalRun": {
-    "conclusion": "success",
-    "createdAt": "2026-09-25T20:14:56Z",
-    "databaseId": 36184608855,
+    "conclusion": "failure",
+    "createdAt": "2026-09-27T12:33:35Z",
+    "databaseId": 36319389047,
     "event": "workflow_dispatch",
-    "headSha": "b368a5169d1da6f4a75da0c9e0a5b33f6aab11c2",
+    "headSha": "b8ddfaa9358e0224a34c856ef9588010fc11feab",
     "status": "completed",
-    "updatedAt": "2026-09-25T20:15:55Z",
-    "url": "https://github.com/CurveYield2/Contract-Automation/actions/runs/36184608855"
+    "updatedAt": "2026-09-27T12:33:47Z",
+    "url": "https://github.com/CurveYield2/Contract-Automation/actions/runs/36319389047"
   }
 }
