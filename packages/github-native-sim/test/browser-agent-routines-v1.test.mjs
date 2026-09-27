@@ -64,10 +64,10 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.doesNotMatch(workflow, /\n      chat_name:/);
   assert.match(workflow, /BROWSER_CONTEXT_B64:\s*\$\{\{ inputs\.browser_context_b64 \}\}/);
   assert.match(workflow, /base64 -d > \/tmp\/browser-context\.json/);
-  assert.match(workflow, /BROWSER_ROUTINE_ID=\$routine_id/);
-  assert.match(workflow, /CHATGPT_PROJECT_NAME=\$project_name/);
-  assert.match(workflow, /CHATGPT_CHAT_NAME=\$chat_name/);
-  assert.match(workflow, /REPAIR_ENABLED=\$repair_enabled/);
+  assert.match(workflow, /BROWSER_ROUTINE_ID=\$\(jq -r '\.routineId \/\/ empty'/);
+  assert.match(workflow, /CHATGPT_PROJECT_NAME=\$\(jq -r '\.projectName \/\/ empty'/);
+  assert.match(workflow, /CHATGPT_CHAT_NAME=\$\(jq -r '\.chatName \/\/ empty'/);
+  assert.match(workflow, /REPAIR_ENABLED=\$\(jq -r '\.repair\.enabled \/\/ false'/);
   assert.match(workflow, /RETRY_INPUTS_JSON:\s*\$\{\{ toJSON\(inputs\) \}\}/);
   assert.match(workflow, /chatgptProject=.*projectName/);
   assert.match(workflow, /activeChat=.*chatName/);
