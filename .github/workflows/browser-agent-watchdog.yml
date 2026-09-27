@@ -673,7 +673,7 @@ jobs:
             # Do not prepend, append, summarize, or reinterpret it.
             # Campaign identity and current phase are validated from canonical controller
             # state/pointer before this file is admitted.
-            grep -Fq 'Campaign type: **LITE**' /tmp/sealed-successor-wake.txt || {
+            grep -Eq 'Campaign type:[[:space:]]*(\*\*)?LITE(\*\*)?' /tmp/sealed-successor-wake.txt || {
               echo "::warning::Sealed successor wake does not identify the Lite campaign type."
               return 2
             }
@@ -765,6 +765,32 @@ jobs:
             gate_interphase_handoff_path="$(jq -r '.gate.interphase.handoffPath // empty' /tmp/watchdog-state.json)"
             gate_interphase_work_packet_path="$(jq -r '.gate.interphase.workPacketPath // empty' /tmp/watchdog-state.json)"
             gate_interphase_completion_path="$(jq -r '.gate.interphase.completionPath // empty' /tmp/watchdog-state.json)"
+
+            # Lite campaign state is versioned immutably (v1, v2, v3...). Always
+            # follow the newest canonical state/pointer in the same controller
+            # directory instead of pinning a watchdog forever to its launch-time v1.
+            if [ "$gate_mode" = "LITE" ] && [[ "$gate_path" == */controller/CAMPAIGN_STATE_v*.json ]] && [ -n "${AUDIT_CONTROLLER_GITHUB_TOKEN:-}" ]; then
+              campaign_root_from_gate="${gate_path%/controller/*}"
+              controller_api="repos/$gate_repo/contents/$campaign_root_from_gate/controller?ref=$gate_ref"
+              latest_state_name="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "$controller_api" --jq '.[].name' 2>/dev/null | sed -n 's/^\(CAMPAIGN_STATE_v[0-9][0-9]*\.json\)$/\1/p' | sort -V | tail -n1)"
+              latest_pointer_name="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "$controller_api" --jq '.[].name' 2>/dev/null | sed -n 's/^\(ACTIVE_PHASE_POINTER_v[0-9][0-9]*\.json\)$/\1/p' | sort -V | tail -n1)"
+              if [ -n "$latest_state_name" ]; then gate_path="$campaign_root_from_gate/controller/$latest_state_name"; fi
+              if [ -n "$latest_pointer_name" ]; then gate_pointer_path="$campaign_root_from_gate/controller/$latest_pointer_name"; fi
+              jq --arg state "$gate_path" --arg pointer "$gate_pointer_path"                 '.gate.statePath=$state | .gate.activePointerPath=$pointer | .lastDecision="FOLLOW_LATEST_LITE_CONTROLLER_VERSION"'                 /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+              mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+              persist_state || true
+
+              safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
+              reg_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
+              reg_encoded="$(gh api "$reg_api?ref=main" --jq '.content' 2>/dev/null || true)"
+              if [ -n "$reg_encoded" ]; then
+                printf '%s' "$reg_encoded" | base64 -d > /tmp/latest-state-registration.json
+                reg_sha="$(gh api "$reg_api?ref=main" --jq '.sha' 2>/dev/null || true)"
+                jq --arg state "$gate_path" --arg pointer "$gate_pointer_path"                   '.watchdog.gate.statePath=$state | .watchdog.gate.activePointerPath=$pointer | .updatedAt=(now|todate)'                   /tmp/latest-state-registration.json > /tmp/latest-state-registration-next.json
+                reg_content="$(base64 -w0 /tmp/latest-state-registration-next.json)"
+                [ -n "$reg_sha" ] && gh api --method PUT "$reg_api" -f message="chore(lite): follow latest controller state $campaign_id" -f content="$reg_content" -f sha="$reg_sha" -f branch=main >/dev/null || true
+              fi
+            fi
 
             if [ -n "$gate_path" ] && [ -n "${AUDIT_CONTROLLER_GITHUB_TOKEN:-}" ]; then
               encoded_state="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$gate_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
