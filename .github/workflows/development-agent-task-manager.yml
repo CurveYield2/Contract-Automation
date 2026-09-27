@@ -75,6 +75,7 @@ jobs:
       BASE_REF: ${{ inputs.base_ref }}
       INITIAL_ASSIGNMENT: ${{ inputs.initial_assignment }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      BROWSER_HEADLESS: 'false'
       BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
       BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
       BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
@@ -226,7 +227,7 @@ jobs:
           export WAKE_ID="$MANAGER_ID-generation-1"
           export WAKE_MESSAGE="$(cat /tmp/task-manager-assignment.txt)"
           export WAKE_RESULT_PATH='/tmp/task-manager-start.json'
-          node scripts/browser-agent-wake.mjs
+          xvfb-run -a node scripts/browser-agent-wake.mjs
           jq -e '.ok==true and (.chatUrl|type=="string" and test("^https://chatgpt.com/c/"))' /tmp/task-manager-start.json >/dev/null
 
       - name: Persist active task-manager state
@@ -312,6 +313,7 @@ jobs:
     env:
       SAFE_ID: ${{ matrix.manager_id }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      BROWSER_HEADLESS: 'false'
       BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
       BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
       BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
@@ -477,7 +479,7 @@ jobs:
           export WAKE_ACTION='observe'
           export WAKE_RESULT_PATH='/tmp/task-manager-observe.json'
 
-          if ! node scripts/browser-agent-wake.mjs; then
+          if ! xvfb-run -a node scripts/browser-agent-wake.mjs; then
             echo "::warning::Browser providers could not observe the chat; preserving the current worker for the next sweep rather than guessing that the agent died."
             jq '.lastDecision="OBSERVATION_PROVIDER_FAILURE" | .updatedAt=(now|todate)' /tmp/task-manager-state.json > /tmp/task-manager-next.json
             mv /tmp/task-manager-next.json /tmp/task-manager-state.json
@@ -502,7 +504,7 @@ jobs:
                 export REFRESH_BEFORE_WAKE='false'
                 if [ "$attempt" -gt 1 ]; then export REFRESH_BEFORE_WAKE='true'; fi
                 export WAKE_RESULT_PATH="/tmp/task-manager-attempt-$attempt.json"
-                if ! node scripts/browser-agent-wake.mjs; then
+                if ! xvfb-run -a node scripts/browser-agent-wake.mjs; then
                   echo "::warning::Prompt attempt $attempt hit a browser-provider failure; preserving the worker instead of declaring it dead."
                   dead=false
                   failure_reason='PROMPT_PROVIDER_FAILURE'
@@ -584,7 +586,7 @@ jobs:
               export WAKE_MESSAGE="$(cat /tmp/task-manager-recovery.txt)"
               export WAKE_RESULT_PATH='/tmp/task-manager-replacement.json'
               unset REFRESH_BEFORE_WAKE RESPONSE_WAIT_MS
-              if node scripts/browser-agent-wake.mjs && jq -e '.ok==true and (.chatUrl|test("^https://chatgpt.com/c/"))' /tmp/task-manager-replacement.json >/dev/null; then
+              if xvfb-run -a node scripts/browser-agent-wake.mjs && jq -e '.ok==true and (.chatUrl|test("^https://chatgpt.com/c/"))' /tmp/task-manager-replacement.json >/dev/null; then
                 new_url="$(jq -r '.chatUrl' /tmp/task-manager-replacement.json)"
                 new_count="$(jq -r '.after.assistantCount // 0' /tmp/task-manager-replacement.json)"
                 new_hash="$(jq -r '.after.lastAssistantHash // empty' /tmp/task-manager-replacement.json)"

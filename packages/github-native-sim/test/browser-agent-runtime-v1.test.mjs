@@ -89,3 +89,22 @@ test('browser wake allows bounded time for ChatGPT browser challenge to resolve'
   assert.match(source, /ChatGPT composer not found after 30s/);
   assert.match(source, /Just a moment\|Cloudflare\/i\.test\(title\)/);
 });
+
+
+test('browser-agent workflows use Xvfb for local Chrome', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /headless:\s*env\.BROWSER_HEADLESS !== 'false'/);
+
+  for (const relative of [
+    '.github/workflows/browser-agent-wake.yml',
+    '.github/workflows/browser-agent-watchdog.yml',
+    '.github/workflows/development-agent-task-manager.yml',
+  ]) {
+    const workflow = read(relative);
+    assert.match(workflow, /BROWSER_HEADLESS:\s*'false'/);
+    const calls = workflow.match(/node scripts\/browser-agent-wake\.mjs/g) ?? [];
+    const wrapped = workflow.match(/xvfb-run -a node scripts\/browser-agent-wake\.mjs/g) ?? [];
+    assert.ok(calls.length > 0);
+    assert.equal(wrapped.length, calls.length);
+  }
+});

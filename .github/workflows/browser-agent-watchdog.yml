@@ -71,6 +71,7 @@ jobs:
       WAKE_ID: ${{ matrix.wake_id }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
       CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
+      BROWSER_HEADLESS: 'false'
       BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
       BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
       BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
@@ -715,7 +716,7 @@ jobs:
             export WAKE_ACTION='observe'
             export WAKE_RESULT_PATH="/tmp/$safe_id-observe.json"
 
-            if ! node scripts/browser-agent-wake.mjs; then
+            if ! xvfb-run -a node scripts/browser-agent-wake.mjs; then
               echo "::warning::Observation failed for $WAKE_ID; the next scheduled sweep will retry."
               jq '.lastDecision="OBSERVATION_FAILED" | .lastObservationFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
               mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
@@ -752,7 +753,7 @@ jobs:
               export WAKE_ACTION='wake'
               export WAKE_MESSAGE="$(jq -r '.idleMessage' /tmp/watchdog-state.json)"
               export WAKE_RESULT_PATH="/tmp/$safe_id-poke.json"
-              if node scripts/browser-agent-wake.mjs; then
+              if xvfb-run -a node scripts/browser-agent-wake.mjs; then
                 next_count="$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")"
                 next_hash="$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
                 jq --argjson count "$next_count" --arg hash "$next_hash" \
