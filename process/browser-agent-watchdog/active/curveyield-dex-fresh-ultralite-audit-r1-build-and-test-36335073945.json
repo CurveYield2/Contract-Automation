@@ -44,9 +44,12 @@
     "enabled": false,
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2,
-    "consecutiveIdlePokes": 0,
+    "consecutiveIdlePokes": 1,
     "consecutiveUnviewable": 0
   },
   "watchdogRunId": "36335218452",
-  "watchdogSweepStartedAt": "2026-09-27T16:59:18Z"
+  "watchdogSweepStartedAt": "2026-09-27T16:59:18Z",
+  "pokeFailureCount": 1,
+  "lastDecision": "IDLE_POKE_FAILED_COUNTED",
+  "lastPokeFailureAt": "2026-09-27T17:00:05Z"
 }
