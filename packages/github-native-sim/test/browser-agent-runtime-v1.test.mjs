@@ -58,3 +58,13 @@ test('browser wake script resolves optional modules from the isolated runtime ro
   assert.match(source, /importBrowserRuntimeModule\('playwright-core'\)/);
   assert.match(source, /importBrowserRuntimeModule\('@browserbasehq\/sdk'\)/);
 });
+
+test('browser wake normalizes CommonJS and ESM runtime module shapes before using Chromium', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /function unwrapRuntimeModule\(mod\)/);
+  assert.match(source, /mod\.default && typeof mod\.default === 'object'/);
+  assert.match(source, /const playwright = unwrapRuntimeModule\(playwrightMod\)/);
+  assert.match(source, /const chromium = playwright\.chromium/);
+  assert.match(source, /typeof chromium\.launch !== 'function'/);
+  assert.doesNotMatch(source, /const \[\{ chromium \}, browserbaseMod\]/);
+});
