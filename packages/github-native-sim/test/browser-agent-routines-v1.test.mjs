@@ -169,3 +169,12 @@ test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualifi
   ];
   assert.equal(classifyV7QualificationChanges(paths).lane, 'CONTROL_LIGHT');
 });
+
+
+test('project creation can use the icon-only add control beside the Projects heading', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  assert.match(source, /findProjectsSectionAddControl/);
+  assert.match(source, /getByText\('Projects', \{ exact: true \}\)/);
+  assert.match(source, /text === '' && box && box\.width <= 56 && box\.height <= 56/);
+  assert.match(source, /count > 0 && count <= 3/);
+});

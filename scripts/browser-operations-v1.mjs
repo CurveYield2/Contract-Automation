@@ -110,6 +110,43 @@ async function findProjectEntry(page, projectName) {
   return firstVisibleText(page, [projectName], { exact: true, timeout: 700 });
 }
 
+async function findProjectsSectionAddControl(page) {
+  const projects = page.getByText('Projects', { exact: true }).first();
+  if (!await projects.isVisible().catch(() => false)) return null;
+
+  let region = projects;
+  for (let depth = 0; depth < 5; depth += 1) {
+    region = region.locator('xpath=..');
+    const candidates = region.locator('button, [role="button"], a');
+    const count = Math.min(await candidates.count().catch(() => 0), 8);
+
+    // Prefer a semantically labelled add/create-project control.
+    for (let i = 0; i < count; i += 1) {
+      const candidate = candidates.nth(i);
+      if (!await candidate.isVisible().catch(() => false)) continue;
+      const label = [
+        await candidate.getAttribute('aria-label').catch(() => ''),
+        await candidate.getAttribute('title').catch(() => ''),
+      ].filter(Boolean).join(' ');
+      if (/(new|add|create).*project|project.*(new|add|create)/i.test(label)) return candidate;
+    }
+
+    // Current ChatGPT may render the add control as an icon-only button next
+    // to the Projects heading. Only accept such a control in a very small
+    // nearest ancestor, never from the whole sidebar.
+    if (count > 0 && count <= 3) {
+      for (let i = 0; i < count; i += 1) {
+        const candidate = candidates.nth(i);
+        if (!await candidate.isVisible().catch(() => false)) continue;
+        const text = (await candidate.innerText().catch(() => '')).trim();
+        const box = await candidate.boundingBox().catch(() => null);
+        if (text === '' && box && box.width <= 56 && box.height <= 56) return candidate;
+      }
+    }
+  }
+  return null;
+}
+
 async function createProject(page, projectName) {
   await ensureSidebarOpen(page);
 
@@ -117,9 +154,14 @@ async function createProject(page, projectName) {
   if (!trigger) {
     const projects = page.getByText('Projects', { exact: true }).first();
     if (await projects.isVisible().catch(() => false)) {
-      await projects.click().catch(() => {});
-      await page.waitForTimeout(600);
-      trigger = await findNewProjectControl(page);
+      const sectionAdd = await findProjectsSectionAddControl(page);
+      if (sectionAdd) {
+        trigger = sectionAdd;
+      } else {
+        await projects.click().catch(() => {});
+        await page.waitForTimeout(600);
+        trigger = await findNewProjectControl(page);
+      }
     }
   }
 
