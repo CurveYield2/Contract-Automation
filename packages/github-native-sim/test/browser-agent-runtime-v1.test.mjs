@@ -68,3 +68,14 @@ test('browser wake normalizes CommonJS and ESM runtime module shapes before usin
   assert.match(source, /typeof chromium\.launch !== 'function'/);
   assert.doesNotMatch(source, /const \[\{ chromium \}, browserbaseMod\]/);
 });
+
+
+test('missing-composer diagnostics classify state without logging page body text or cookie values', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /loginPrompt=/);
+  assert.match(source, /humanChallenge=/);
+  assert.match(source, /conversationUnavailable=/);
+  assert.match(source, /textareaCount=/);
+  assert.match(source, /editableCount=/);
+  assert.doesNotMatch(source, /bodyText\s*\+|JSON\.stringify\(bodyText\)/);
+});
