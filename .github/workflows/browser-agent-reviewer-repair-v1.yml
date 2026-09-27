@@ -388,6 +388,11 @@ jobs:
           if [ -n "$PHASE_START" ]; then phase_id="phase-$PHASE_START"; fi
           chat_name="$PROJECT_NAME $REVIEWER replacement"
           wake_id="$CAMPAIGN_ID-$MILESTONE-repair-$GITHUB_RUN_ID"
+          browser_context_b64="$(jq -nc \
+            --arg routine 'audit-ultralite-reviewer-v1' \
+            --arg project "$PROJECT_NAME" \
+            --arg chat "$chat_name" \
+            '{routineId:$routine,projectName:$project,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
 
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="$wake_id" \
@@ -406,12 +411,7 @@ jobs:
             -f gate_expected_phase_id="$phase_id" \
             -f gate_expected_milestone_id="$MILESTONE" \
             -f gate_active_pointer_path="$POINTER_PATH" \
-            -f browser_routine_id=audit-ultralite-reviewer-v1 \
-            -f project_name="$PROJECT_NAME" \
-            -f chat_name="$chat_name" \
-            -f repair_enabled=true \
-            -f repair_idle_poke_threshold=3 \
-            -f repair_unviewable_threshold=2
+            -f browser_context_b64="$browser_context_b64"
 
       - name: Summarize reviewer repair
         shell: bash
