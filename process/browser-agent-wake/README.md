@@ -244,26 +244,19 @@ The wake script resolves `playwright-core` and `@browserbasehq/sdk` from `BROWSE
 
 GitHub-hosted runners are ephemeral, so the local Playwright provider maintains a rolling encrypted browser-state cache instead of relying forever on the original bootstrap snapshot.
 
-Required secret:
+No additional secret is required. By default the cache encryption key is deterministically derived inside the runner from the already-existing `CHATGPT_STORAGE_STATE_B64` bootstrap secret. The bootstrap value itself is never written to the cache or repository.
 
-`CHATGPT_SESSION_STATE_KEY_B64`
-
-The value must be exactly 32 random bytes encoded as Base64. Generate it once outside the repository, for example with Node.js:
-
-```bash
-node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64'))"
-```
-
-Store that value only as a GitHub Actions secret. Do not commit it.
+An optional independent 32-byte Base64 key may be supplied as `CHATGPT_SESSION_STATE_KEY_B64`. When present it overrides bootstrap-derived keying, which permits independent cache-key rotation.
 
 Runtime behavior:
 
 1. each wake/watchdog job restores the newest cache matching `chatgpt-session-state-v1-`;
-2. the browser runtime authenticates the AES-256-GCM envelope with `CHATGPT_SESSION_STATE_KEY_B64` and loads it when valid;
-3. if no valid encrypted generation exists, `CHATGPT_STORAGE_STATE_B64` remains the cold-start/bootstrap fallback;
+2. the browser runtime derives its AES-256-GCM cache key from `CHATGPT_STORAGE_STATE_B64`, unless the optional dedicated key override is present;
+3. the authenticated encrypted cache is loaded when valid; if it is absent, unreadable, tampered, or keyed differently, `CHATGPT_STORAGE_STATE_B64` remains the cold-start/bootstrap fallback;
 4. after a successful GitHub-hosted Playwright interaction, state is refreshed only when the ChatGPT composer is visibly present on `chatgpt.com`;
-5. the refreshed Playwright state is encrypted in memory and only the authenticated ciphertext envelope is written to the Actions cache;
-6. logged-out, malformed, tampered, or otherwise unhealthy states are never promoted as the next generation.
+5. the refreshed snapshot includes cookies, local storage, IndexedDB, and origin private file-system state supported by the pinned Playwright runtime;
+6. the refreshed Playwright state is encrypted in memory and only the authenticated ciphertext envelope is written to the Actions cache;
+7. logged-out, malformed, tampered, or otherwise unhealthy states are never promoted as the next generation.
 
 The Actions cache contains ciphertext only. Plain Playwright storage state is not written into the repository or cache. A cache miss or normal GitHub cache eviction is non-fatal because the original `CHATGPT_STORAGE_STATE_B64` secret remains the bootstrap source.
 
@@ -273,7 +266,7 @@ This rolling cache improves session longevity but is not a credential-login mech
 
 Wake delivery tries independent providers in this order and stops at the first verified success:
 
-1. GitHub-hosted Chrome + Playwright using `CHATGPT_STORAGE_STATE_B64`;
+1. GitHub-hosted Chrome + Playwright using the newest encrypted rolling session state, with `CHATGPT_STORAGE_STATE_B64` as cold-start fallback;
 2. Browserless using `BROWSERLESS_TOKEN` and persisted profile `BROWSERLESS_PROFILE` (default `chatgpt`);
 3. Browserbase using `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and `BROWSERBASE_CONTEXT_ID`.
 

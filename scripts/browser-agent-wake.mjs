@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { loadEncryptedSessionState, saveEncryptedSessionState, validateStorageState } from './browser-session-state-v1.mjs';
+import { deriveSessionStateKeyB64, loadEncryptedSessionState, saveEncryptedSessionState, validateStorageState } from './browser-session-state-v1.mjs';
 
 const env = process.env;
 const action = env.WAKE_ACTION || 'wake';
@@ -15,6 +15,10 @@ const requestedUrl = env.CHAT_URL || '';
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 const encryptedSessionPath = env.CHATGPT_SESSION_STATE_PATH || '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
 const sessionUpdatedMarker = env.CHATGPT_SESSION_STATE_UPDATED_MARKER || '/tmp/curveyield-browser-agent/session-state-updated';
+const sessionStateKeyB64 = deriveSessionStateKeyB64({
+  keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
+  bootstrapStateB64: env.CHATGPT_STORAGE_STATE_B64,
+});
 
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
@@ -25,10 +29,10 @@ async function persistHealthySession(providerName, context, state) {
   if (providerName !== 'github-playwright') return false;
   if (!state?.composerVisible || !/^https:\/\/chatgpt\.com\//.test(state.url || '')) return false;
   try {
-    const storage = await context.storageState();
+    const storage = await context.storageState({ indexedDB: true, opfs: true });
     const persisted = await saveEncryptedSessionState({
       encryptedSessionPath,
-      keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
+      keyB64: sessionStateKeyB64,
       storage,
     });
     if (persisted) {
@@ -239,7 +243,7 @@ async function runWithPage(providerName, connect) {
 async function localProvider(chromium) {
   let storage = await loadEncryptedSessionState({
     encryptedSessionPath,
-    keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
+    keyB64: sessionStateKeyB64,
   });
   let source = storage ? 'encrypted-cache' : '';
   if (!storage && env.CHATGPT_STORAGE_STATE_B64) {
