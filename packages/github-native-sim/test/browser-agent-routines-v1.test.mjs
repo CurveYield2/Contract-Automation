@@ -99,6 +99,28 @@ test('ultralite entry workflow starts Phase 0 in normal web chat and defers proj
   assert.match(workflow, /-f gate_expected_milestone_id=P0_BOOTSTRAP/);
 });
 
+test('source-fanout Phase-0 wake carries Ultralite repair policy while remaining outside the campaign Project', () => {
+  const workflow = read('.github/workflows/agent-zip-import-v1.yml');
+  assert.match(workflow, /browserRoutine.*audit-ultralite-reviewer-v1/);
+  assert.match(workflow, /repair_enabled=.*audit-ultralite-reviewer-v1/);
+  assert.match(workflow, /repair:\{enabled:\$repairEnabled,idlePokeThreshold:\$idlePokeThreshold,unviewableThreshold:\$unviewableThreshold\}/);
+  assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
+  assert.doesNotMatch(workflow, /Phase-0 Ultralite bootstrap[^\n]*campaign Project[^\n]*audit-ultralite-reviewer-v1/);
+});
+
+test('Phase-0 reviewer repair resumes from durable bootstrap state without requiring a predecessor handoff', () => {
+  const workflow = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
+  assert.match(workflow, /phase0_bootstrap=false/);
+  assert.match(workflow, /gate_expected_phase.*phase-0/);
+  assert.match(workflow, /gate_expected_milestone.*P0_BOOTSTRAP/);
+  assert.match(workflow, /reviewer=.*web-bootstrap-agent/);
+  assert.match(workflow, /P0_BOOTSTRAP has no predecessor handoff baseline/);
+  assert.match(workflow, /AUDIT_PHASE0_BOOTSTRAP_REPLACEMENT_V1/);
+  assert.match(workflow, /NORMAL_CHATGPT_WEB_CHAT_OUTSIDE_CAMPAIGN_PROJECT/);
+  assert.match(workflow, /Do not repeat completed source fan-out/);
+  assert.match(workflow, /routineId:"",projectName:""/);
+});
+
 test('successor routing is reviewer-count agnostic and injects live campaign/skill authority into normal project chats', () => {
   const workflow = read('.github/workflows/browser-agent-watchdog.yml');
   assert.match(workflow, /next_reviewer="\$\(jq -r '\.nextMilestone\.reviewer/);
