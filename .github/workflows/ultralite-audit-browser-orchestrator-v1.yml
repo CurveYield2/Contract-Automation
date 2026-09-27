@@ -136,7 +136,7 @@ jobs:
           
           Begin an ultralite audit of the admitted package in the campaign above.
           
-          Your assignment is Phase 0 only. Read the campaign's current audit skill authority from GitHub before doing audit work and follow the active Lite/ultralite Phase-0 instructions exactly. The audit skill is the ultimate methodology authority unless a newer explicit human instruction in this chat overrides it.
+          Your assignment is Phase 0 only. Resolve audit skill authority from GitHub using this precedence: campaign-bound skillAuthority.current when present; otherwise CurveYield2/Audit-Controller@main audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json. Legacy newest-ZIP discovery is fallback-only when neither authoritative source exists. Read the resolved skill before doing audit work and follow its active Lite/ultralite Phase-0 instructions exactly. The resolved audit skill is the ultimate methodology authority unless a newer explicit human instruction in this chat overrides it.
           
           Execute Phase 0 to completion. Write the required Phase-0 outputs into the canonical Audit-Controller campaign paths, create/seal the Phase-0 successor packet/handoff required by the active skill, and leave the canonical controller/pointer state in the exact machine-readable terminal condition required for successor launch.
           
