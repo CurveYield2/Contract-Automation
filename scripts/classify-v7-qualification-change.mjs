@@ -14,6 +14,8 @@ const LIGHT_PATTERNS = [
   /^scripts\/browser-session-state-v1\.mjs$/,
   /^scripts\/select-audit-controller-token\.sh$/,
   /^scripts\/classify-v7-qualification-change\.mjs$/,
+  /^scripts\/rebuild-current-audit-skill-manifests-v1\.mjs$/,
+  /^\.github\/workflows\/rebuild-current-audit-skill-package-v1\.yml$/,
   /^docs\//,
   /^process\/browser-agent-wake\//,
   /^process\/browser-routines\//,
