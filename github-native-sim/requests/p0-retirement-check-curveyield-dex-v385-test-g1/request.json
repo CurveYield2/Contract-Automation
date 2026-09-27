@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "audit-controller-operation-pointer-v1",
+  "processId": "audit-v7-independent-review",
+  "requestId": "p0-retirement-check-curveyield-dex-v385-test-g1",
+  "controller": {
+    "repository": "CurveYield2/Audit-Controller",
+    "commit": "a30f4bb0679e62810a1f7677e4e9719ece44cac5",
+    "requestPath": ".deep-assurance/operator/requests/p0-retirement-check-curveyield-dex-v385-test-g1.json"
+  },
+  "verifyController": true
+}
