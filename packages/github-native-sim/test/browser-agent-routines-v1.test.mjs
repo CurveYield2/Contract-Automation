@@ -120,12 +120,14 @@ test('source fanout contains no reviewer wake envelope', () => {
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
-test('source fanout never launches a reviewer chat; the campaign orchestrator is sole launch owner', () => {
+test('source fanout arms the single Ultralite campaign monitor but never launches a reviewer chat', () => {
   const workflow = read('.github/workflows/agent-zip-import-v1.yml');
-  assert.match(workflow, /Signal Phase-0 source fan-out readiness/);
+  assert.match(workflow, /Arm canonical Ultralite campaign monitor after source fan-out/);
   assert.match(workflow, /Reviewer\/chat launch: NOT performed by source fan-out/);
-  assert.match(workflow, /Launch authority: Ultralite campaign orchestrator only/);
+  assert.match(workflow, /ultralite-audit-browser-orchestrator-v1\.yml/);
+  assert.match(workflow, /Phase-0 behavior: state-only monitoring; no second bootstrap chat/);
   assert.doesNotMatch(workflow, /Launch registered Phase-0 browser agent/);
+  assert.doesNotMatch(workflow, /gh workflow run browser-agent-wake\.yml/);
 });
 
 test('watchdog observation fails over provider-specific challenge and auth walls before classifying infrastructure noise', () => {
@@ -186,10 +188,13 @@ test('ultralite entry workflow monitors the existing Phase-0 bootstrap and never
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
-test('source fanout is evidence-only and cannot race the campaign orchestrator', () => {
+test('source fanout derives the exact campaign monitor from the canonical registration', () => {
   const workflow = read('.github/workflows/agent-zip-import-v1.yml');
-  assert.match(workflow, /source fan-out prepares durable source evidence only/);
-  assert.match(workflow, /must never create a second Phase-0 chat/);
+  assert.match(workflow, /browser-agent-wake\/registrations\/\$safe_campaign\.json/);
+  assert.match(workflow, /test "\$gate_mode" = 'LITE'/);
+  assert.match(workflow, /test "\$gate_expected_phase" = 'phase-0'/);
+  assert.match(workflow, /test "\$gate_expected_milestone" = 'P0_BOOTSTRAP'/);
+  assert.match(workflow, /campaign_path="\$\{gate_state_path%\/controller\/CAMPAIGN_STATE_v1\.json\}"/);
   assert.doesNotMatch(workflow, /wake_id=.*phase0-source-fanout/);
 });
 
