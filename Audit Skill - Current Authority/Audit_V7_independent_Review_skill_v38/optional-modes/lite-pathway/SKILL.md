@@ -80,7 +80,7 @@ Use the GitHub connector app against `CurveYield2/Audit-Controller`:
 3. Bind the exact `campaignId`, `campaignGenerationId`, `phaseSequence`, `status`, `sourceRepository`, `sourceCommit`/source digest, `controllerBranch`, and `workspacePath` from controller state.
 4. Follow the exact controller-provided `workspacePath` under `campaigns/`; never invent, normalize, rename, or substitute a campaign folder.
 5. Confirm workspace generation/source identity before writing anything.
-6. If no valid matching campaign exists, campaign creation is a **Phase-0 controller action**. Enter [Phase 0](phases/phase-0/START_HERE.md); never create an arbitrary `campaigns/` folder and declare it valid.
+6. If no valid matching campaign exists and the human supplied a direct single-file ZIP URL, enter [Phase 0](phases/phase-0/START_HERE.md) and trigger the `Audit Source Initialization` workflow with that URL only. The workflow creates the next versioned Lite campaign, source folder, retained ZIP + unpacked source, source fence, initial controller state and active pointer. Never manually pre-create the campaign or require the human/agent to supply campaign ID, generation ID, filename, SHA-256 or byte size.
 
 ## Actor lineage & mandatory handoffs
 
