@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: lite-phase0-intelligence-${{ github.event.pull_request.head.sha }}
+  group: lite-phase0-intelligence-${{ inputs.campaign_id || github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
       - name: Checkout trusted Contract-Automation base
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
           fetch-depth: 1
 
