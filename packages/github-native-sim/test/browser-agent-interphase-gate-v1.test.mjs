@@ -147,9 +147,13 @@ test('sealed P0 synthetic packet validates and dispatches one successor with ver
   assert.match(message, /\[AUDIT_REVIEWER_ROUTINE_V1\]/);
   assert.match(message, /reviewer=reviewer-1/);
   assert.match(message, /latest_audit_skill_url=https:\/\/github\.com\/CurveYield2\/Audit-Controller\/blob\/main\/campaigns\/synthetic\/authority\/Synthetic_Audit_skill_v1\.zip/);
-  assert.match(dispatched, /browser_routine_id=audit-ultralite-reviewer-v1/);
-  assert.match(dispatched, /project_name=Synthetic Audit/);
-  assert.match(dispatched, /chat_name=Synthetic Audit reviewer-1/);
+  const browserContextEncoded = dispatched.match(/browser_context_b64=([A-Za-z0-9+/=]+)/)?.[1];
+  assert.ok(browserContextEncoded, dispatched);
+  const browserContext = JSON.parse(Buffer.from(browserContextEncoded, 'base64').toString('utf8'));
+  assert.equal(browserContext.routineId, 'audit-ultralite-reviewer-v1');
+  assert.equal(browserContext.projectName, 'Synthetic Audit');
+  assert.equal(browserContext.chatName, 'Synthetic Audit reviewer-1');
+  assert.equal(browserContext.repair.enabled, true);
   assert.match(message, /\[VERIFIED_INTERPHASE_MECHANICAL_RESULTS_V2\]/);
   assert.match(message, /work_packet=.*MECHANICAL_WORK_PACKET_v2\.json/);
   assert.match(message, /completion_receipt=.*MECHANICAL_WORK_COMPLETION_v2\.json/);
