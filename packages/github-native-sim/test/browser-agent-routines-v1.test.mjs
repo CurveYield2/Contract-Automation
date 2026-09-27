@@ -178,3 +178,15 @@ test('project creation can use the icon-only add control beside the Projects hea
   assert.match(source, /text === '' && box && box\.width <= 56 && box\.height <= 56/);
   assert.match(source, /count > 0 && count <= 3/);
 });
+
+
+test('fresh project routines wait for the normal ChatGPT composer before sidebar operations', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  const block = source.slice(
+    source.indexOf("if (mode === 'create_fresh' && browserRoutineId)"),
+    source.indexOf('const before = await snapshot(page)')
+  );
+  assert.match(block, /await ensureComposer\(page\)/);
+  assert.match(block, /loadBrowserRoutine\(browserRoutineId\)/);
+  assert.ok(block.indexOf('await ensureComposer(page)') < block.indexOf('loadBrowserRoutine(browserRoutineId)'));
+});

@@ -261,6 +261,9 @@ async function runWithPage(providerName, connect) {
     let routineBefore = [];
     let projectUrl = '';
     if (mode === 'create_fresh' && browserRoutineId) {
+      // Project/sidebar operations are only meaningful after the normal
+      // ChatGPT UI has cleared any browser challenge and exposed a composer.
+      await ensureComposer(page);
       routine = await loadBrowserRoutine(browserRoutineId);
       routineBefore = await runBrowserRoutineStage({
         page,
