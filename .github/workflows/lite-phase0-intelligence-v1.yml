@@ -95,6 +95,11 @@ jobs:
           git fetch origin "$destination_ref"
           git checkout -B "$destination_ref" "origin/$destination_ref"
 
+          authority_folder="Audit Skill - Current Authority"
+          mapfile -t authority_packages < <(find "$authority_folder" -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/SKILL.md' ';' -print | sort)
+          [ "${#authority_packages[@]}" -eq 1 ] || { echo "::error::Authority folder must contain exactly one unpacked package directory with root SKILL.md."; exit 1; }
+          skill_root="${authority_packages[0]}"
+
           mkdir -p "$campaign_path/evidence/build"
           mkdir -p "$campaign_path/evidence/dependencies"
           mkdir -p "$campaign_path/evidence/static-analysis"
@@ -117,7 +122,7 @@ jobs:
           # the skill contract is not weakened or renamed to match runner internals.
           node ../packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
             --campaign-root "$campaign_path" \
-            --skill-root "../Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway" \
+            --skill-root "$skill_root" \
             --stage core
 
           git add "$campaign_path/evidence" "$campaign_path/shared" "$campaign_path/controller" "$campaign_path/scratch/phase0-context-review/CONTEXT_REVIEW_PACKET_v1.json"
@@ -132,7 +137,7 @@ jobs:
           accepted_commit="$(git rev-parse HEAD)"
           node ../packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
             --campaign-root "$campaign_path" \
-            --skill-root "../Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway" \
+            --skill-root "$skill_root" \
             --stage bundle \
             --accepted-commit "$accepted_commit"
           git add "$campaign_path/shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_TEMPLATE.json" \

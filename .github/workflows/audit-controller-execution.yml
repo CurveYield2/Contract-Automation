@@ -371,23 +371,32 @@ jobs:
             exit 0
           fi
 
-          skill_zip=".controller-operation/$resolved_skill_path"
-          test -f "$skill_zip"
+          skill_target=".controller-operation/$resolved_skill_path"
+          test -e "$skill_target"
           request_expected_sha="$(node -e "const r=require('./.controller-operation/' + process.env.AUDIT_CONTROLLER_REQUEST_PATH); process.stdout.write(r.expectedSkillSha256 || '')")"
           expected_skill_sha="$request_expected_sha"
           if [ -z "$expected_skill_sha" ]; then expected_skill_sha="$resolved_skill_sha"; fi
-          if [ -n "$expected_skill_sha" ]; then
-            [[ "$expected_skill_sha" =~ ^[0-9a-f]{64}$ ]]
-            observed_skill_sha="$(sha256sum "$skill_zip" | awk '{print $1}')"
-            test "$observed_skill_sha" = "$expected_skill_sha"
-          fi
           echo "SKILL_PACKAGE_PATH=$resolved_skill_path" >> "$GITHUB_ENV"
-          rm -rf .audit-skill
-          mkdir -p .audit-skill
-          unzip -q "$skill_zip" -d .audit-skill
-          skill_home="$(find .audit-skill -type f -name SKILL.md -not -path '*/optional-modes/lite-pathway/SKILL.md' | head -n1)"
-          test -n "$skill_home"
-          echo "SKILL_ROOT=$(dirname "$skill_home")" >> "$GITHUB_ENV"
+
+          if [ -d "$skill_target" ]; then
+            [ -z "$expected_skill_sha" ] || { echo "::error::Stable authority-folder routing must not carry a package SHA expectation."; exit 1; }
+            mapfile -t skill_homes < <(find "$skill_target" -mindepth 2 -maxdepth 2 -type f -name SKILL.md | sort)
+            [ "${#skill_homes[@]}" -eq 1 ] || { echo "::error::Stable authority folder must contain exactly one unpacked package directory with root SKILL.md."; exit 1; }
+            skill_home="${skill_homes[0]}"
+            echo "SKILL_ROOT=$(dirname "$skill_home")" >> "$GITHUB_ENV"
+          else
+            if [ -n "$expected_skill_sha" ]; then
+              [[ "$expected_skill_sha" =~ ^[0-9a-f]{64}$ ]]
+              observed_skill_sha="$(sha256sum "$skill_target" | awk '{print $1}')"
+              test "$observed_skill_sha" = "$expected_skill_sha"
+            fi
+            rm -rf .audit-skill
+            mkdir -p .audit-skill
+            unzip -q "$skill_target" -d .audit-skill
+            skill_home="$(find .audit-skill -type f -name SKILL.md -not -path '*/optional-modes/lite-pathway/SKILL.md' | head -n1)"
+            test -n "$skill_home"
+            echo "SKILL_ROOT=$(dirname "$skill_home")" >> "$GITHUB_ENV"
+          fi
 
       - name: Execute deterministic controller operation
         if: env.V7_REQUEST_KIND == 'controller-operation'

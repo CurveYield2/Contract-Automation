@@ -173,11 +173,12 @@ jobs:
             *) echo "::error::Unsupported repair mode"; exit 1 ;;
           esac
 
-          authority_api="repos/$GITHUB_REPOSITORY/contents/Audit%20Skill%20-%20Current%20Authority?ref=main"
-          skill_path="$(GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN" gh api "$authority_api" --jq '[.[] | select(.type=="dir" and (.name|startswith("Audit_V7_independent_Review_skill_")))] | if length==1 then .[0].path else empty end' 2>/dev/null || true)"
-          test -n "$skill_path"
-          skill_url="https://github.com/$GITHUB_REPOSITORY/tree/main/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
-          skill_authority_source="CONTRACT_AUTOMATION_CURRENT_AUTHORITY_FOLDER"
+          authority_repo="CurveYield2/Audit-Controller"
+          authority_path="Audit Skill - Current Authority"
+          GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$authority_repo/contents/Audit%20Skill%20-%20Current%20Authority?ref=main" >/dev/null
+          skill_path="CurveYield2/Audit-Controller/Audit Skill - Current Authority"
+          skill_url="https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority"
+          skill_authority_source="AUDIT_CONTROLLER_CURRENT_AUTHORITY_FOLDER"
 
           campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(printf '%s' "$campaign_root" | sed 's/ /%20/g')"
 

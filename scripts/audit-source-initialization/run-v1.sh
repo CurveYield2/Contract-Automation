@@ -41,21 +41,24 @@ else
   display_base="$(cat "$work/display-base")"
   slug="$(cat "$work/slug")"
 
-  skill_path='Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md'
-  skill_repo_path="CurveYield2/Contract-Automation/$skill_path"
-  skill_release="$(sed -n 's/^Release identity: `\(.*\)`$/\1/p' "$ROOT/$skill_path" | head -n1)"
-  skill_revision="$(sed -n 's/^Package revision: `\(.*\)`$/\1/p' "$ROOT/$skill_path" | head -n1)"
-  skill_sha="$(sha256sum "$ROOT/$skill_path" | awk '{print $1}')"
-  skill_blob="$(git -C "$ROOT" rev-parse "HEAD:$skill_path")"
-  test -n "$skill_release"
-  test -n "$skill_revision"
-
   repo='/tmp/audit-controller-source-init'
   rm -rf "$repo"
   gh repo clone CurveYield2/Audit-Controller "$repo" -- --branch main
   cd "$repo"
   git config user.name 'CurveYield Audit Source Initialization'
   git config user.email 'audit-source-initialization@users.noreply.github.com'
+
+  authority_folder='Audit Skill - Current Authority'
+  mapfile -t authority_packages < <(find "$authority_folder" -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/SKILL.md' ';' -print | sort)
+  [ "${#authority_packages[@]}" -eq 1 ] || { echo "::error::Authority folder must contain exactly one unpacked package directory with root SKILL.md."; exit 1; }
+  skill_home="${authority_packages[0]}/SKILL.md"
+  skill_repo_path='CurveYield2/Audit-Controller/Audit Skill - Current Authority'
+  skill_release="$(sed -n 's/^Release identity: `\(.*\)`$/\1/p' "$skill_home" | head -n1)"
+  skill_revision="$(sed -n 's/^Package revision: `\(.*\)`$/\1/p' "$skill_home" | head -n1)"
+  skill_sha="$(sha256sum "$skill_home" | awk '{print $1}')"
+  skill_blob="$(git rev-parse "HEAD:$skill_home")"
+  test -n "$skill_release"
+  test -n "$skill_revision"
 
   success=false
   for attempt in 1 2 3 4 5; do

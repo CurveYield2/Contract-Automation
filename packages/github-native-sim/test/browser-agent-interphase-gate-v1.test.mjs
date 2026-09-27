@@ -87,8 +87,8 @@ function exercise(mutate = () => {}, launch = false) {
         reviewers: { outgoing: 'web-bootstrap-agent', incoming: 'reviewer-1' },
         assignment: { incomingReviewer: 'reviewer-1', assignedLitePhaseOrMilestone: 'Phase 1' },
         authority: {
-          liteSkillRepositoryPath: 'CurveYield2/Contract-Automation/Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md',
-          liteSkillUrl: 'https://github.com/CurveYield2/Contract-Automation/blob/main/Audit%20Skill%20-%20Current%20Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md'
+          liteSkillRepositoryPath: 'CurveYield2/Audit-Controller/Audit Skill - Current Authority',
+          liteSkillUrl: 'https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority'
         }
       }),
       wake: [
@@ -100,7 +100,7 @@ function exercise(mutate = () => {}, launch = false) {
         '- Campaign ID / generation: `synthetic / synthetic-g1`',
         '- Incoming reviewer: `reviewer-1`',
         '- Assigned Lite phase/milestone: `Phase 1`',
-        '- Repository path: `CurveYield2/Contract-Automation/Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md`',
+        '- Repository path: `CurveYield2/Audit-Controller/Audit Skill - Current Authority`',
         ''
       ].join('\n') };
     for (const [name, value] of Object.entries(named)) fs.writeFileSync(path.join(temp, name), value);

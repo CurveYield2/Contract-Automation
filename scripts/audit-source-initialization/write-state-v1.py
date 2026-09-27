@@ -28,7 +28,7 @@ state={"schemaVersion":"audit-v7-campaign-state-v1","campaignId":e["CAMPAIGN_ID"
  "history":[],"skillAuthority":{"status":"BOUND","current":{"repository":"CurveYield2/Contract-Automation","ref":"main",
   "homepagePath":"optional-modes/lite-pathway/SKILL.md","liteSkillPath":e["SKILL_REPO_PATH"].split("CurveYield2/Contract-Automation/",1)[-1],
   "liteSkillBlobSha":e["SKILL_BLOB"],"liteSkillSha256":e["SKILL_SHA"],"liteRelease":e["SKILL_RELEASE"],
-  "packageRevision":e["SKILL_REVISION"],"authorityBasis":"CURRENT_CONTRACT_AUTOMATION_LITE_AUTHORITY"},
+  "packageRevision":e["SKILL_REVISION"],"authorityBasis":"CURRENT_AUDIT_CONTROLLER_AUTHORITY_FOLDER"},
   "acceptedTechnicalEvidenceInvalidated":[],"phaseRestartRequired":False},
  "routingPlan":routing,"campaignCompletionStatus":"NOT_COMPLETE","createdAt":e["CREATED_AT"],"updatedAt":e["CREATED_AT"]}
 pointer={"schemaVersion":"audit-v7-active-pointer-v1","projectSlug":e["SLUG"],"campaignId":e["CAMPAIGN_ID"],

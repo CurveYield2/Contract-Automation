@@ -6,7 +6,20 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = path.resolve('.');
-const skillRoot = path.join(repoRoot, 'Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway');
+const auditControllerRoot = process.env.AUDIT_CONTROLLER_ROOT ? path.resolve(process.env.AUDIT_CONTROLLER_ROOT) : null;
+function resolveCurrentLiteSkillRoot() {
+  if (!auditControllerRoot) return null;
+  const authorityFolder = path.join(auditControllerRoot, 'Audit Skill - Current Authority');
+  if (!fs.existsSync(authorityFolder)) return null;
+  const candidates = fs.readdirSync(authorityFolder, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(authorityFolder, entry.name, 'SKILL.md')))
+    .map((entry) => path.join(authorityFolder, entry.name))
+    .sort();
+  assert.equal(candidates.length, 1, 'stable authority folder must contain exactly one unpacked package with root SKILL.md');
+  return candidates[0];
+}
+const skillRoot = resolveCurrentLiteSkillRoot();
+const authorityTest = skillRoot ? test : test.skip;
 const script = path.join(repoRoot, 'packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs');
 
 function writeJson(file, value) {
@@ -14,7 +27,7 @@ function writeJson(file, value) {
   fs.writeFileSync(file, JSON.stringify(value, null, 2) + '\n');
 }
 
-test('Lite Phase-0 automation emits the exact skill-required canonical outputs', () => {
+authorityTest('Lite Phase-0 automation emits the exact skill-required canonical outputs', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lite-p0-skill-outputs-'));
   const campaign = path.join(root, 'campaigns/Test Lite Audit');
   const sourceSha = '1'.repeat(64);

@@ -664,7 +664,7 @@ jobs:
             [ "$handoff_workspace" = "$campaign_root" ] || { echo "::warning::Successor handoff workspace mismatch"; return 2; }
             [ "$handoff_incoming" = "$next_reviewer" ] || { echo "::warning::Successor handoff reviewer mismatch"; return 2; }
             [ -n "$handoff_assignment" ] || { echo "::warning::Successor handoff assignment is empty"; return 2; }
-            [ "$handoff_authority" = "CurveYield2/Contract-Automation/Audit Skill - Current Authority/Audit_V7_independent_Review_skill_v38/optional-modes/lite-pathway/SKILL.md" ] || {
+            [ "$handoff_authority" = "CurveYield2/Audit-Controller/Audit Skill - Current Authority" ] || {
               echo "::warning::Successor handoff does not point to the current authority Lite skill"
               return 2
             }
