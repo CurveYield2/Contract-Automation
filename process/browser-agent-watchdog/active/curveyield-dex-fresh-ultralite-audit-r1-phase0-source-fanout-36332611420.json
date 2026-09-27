@@ -51,5 +51,6 @@
   "watchdogSweepStartedAt": "2026-09-27T16:21:56Z",
   "lastPokedAt": "2026-09-27T16:19:30Z",
   "pokeCount": 2,
-  "lastDecision": "IDLE_POKED"
+  "lastDecision": "IDLE_POKE_FAILED",
+  "lastPokeFailureAt": "2026-09-27T16:22:21Z"
 }
