@@ -120,7 +120,7 @@ async function buildCore({campaignRoot,skillRoot}){
   }));
   core.contracts=asArray(technical.contracts);
   core.functions=asArray(technical.functions);
-  core.storageLayout=asArray(technical.storageLayout);
+  core.storageLayout=asArray(technical.storageLayout).map(x=>({...x,status:x.status==='CURRENT'?'CONFIRMED':x.status}));
   core.inheritanceGraph=asArray(technical.inheritanceGraph);
   core.callGraph=asArray(technical.callGraph).map(e=>({
     edgeId:e.edgeId??e.callEdgeId,
@@ -163,7 +163,7 @@ async function buildCore({campaignRoot,skillRoot}){
   }));
   core.eventsAndErrors=asArray(technical.eventsAndErrors);
   core.sourceAnchors=asArray(technical.sourceAnchors);
-  core.securitySurfaces=asArray(technical.securitySurfaces);
+  core.securitySurfaces=asArray(technical.securitySurfaces).map(x=>({...x,status:x.status==='CURRENT'?'CONFIRMED':x.status}));
   core.protocolTopology=technical.protocolTopology??{upgradeabilityEdges:[],dependencyEdges:[],crossChainEdges:[],offchainAutomationEdges:[],topologyLimitations:[]};
   core.staticRecon={
     slither:{
@@ -191,7 +191,7 @@ async function buildCore({campaignRoot,skillRoot}){
     obligationId:`OBL-P1-SI-${String(i+1).padStart(3,'0')}`
   }));
   core.completion={
-    status:'PHASE0_CANONICAL_CORE_COMPLETE_WITH_TYPED_LIMITATIONS',
+    status:(core.limitations.length?'COMPLETE_WITH_LIMITATION':'COMPLETE'),
     noFillSentinelsRemaining:true,
     exactSourceBound:true,
     exactBuildBound:true,
@@ -206,7 +206,7 @@ async function buildCore({campaignRoot,skillRoot}){
   const dep=readiness.deploymentAndConfiguration??{};
   const chainIds=uniq(asArray(dep.discoveredChainIds).map(x=>String(x.chainId)));
   runtime.deploymentIdentity={
-    status:'STRUCTURAL_DISCOVERY_ONLY_PHASE7_ACCEPTANCE_PENDING',
+    status:'DISCOVERED_UNVERIFIED',
     chainId:chainIds.length===1?chainIds[0]:(chainIds.length?chainIds:'NOT_DISCOVERED'),
     networkOrForkIdentity:'NOT_ACCEPTED_IN_PHASE0',
     blockNumberOrTag:'NOT_PINNED_IN_PHASE0',
@@ -214,7 +214,7 @@ async function buildCore({campaignRoot,skillRoot}){
     rawEvidenceRefs:['evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json']
   };
   runtime.liveConfiguration={
-    status:'STRUCTURAL_DISCOVERY_ONLY_PHASE7_ACCEPTANCE_PENDING',
+    status:'DISCOVERED_UNVERIFIED',
     proxyImplementationAdminBindings:asArray(dep.proxyAndUpgradeabilityMentions),
     roleAndAuthorityBindings:asArray(dep.roleMentions),
     oracleDependencyEndpoints:asArray(dep.oracleMentions),
@@ -232,14 +232,14 @@ async function buildCore({campaignRoot,skillRoot}){
     limitations:['PHASE0_COMPILER_ESTIMATES_ARE_PRELIMINARY_ONLY']
   };
   runtime.limitations=['RUNTIME_CHAIN_FORK_DEPLOYMENT_AND_LIVE_CONFIGURATION_ACCEPTANCE_DEFERRED_TO_PHASE7'];
-  runtime.completion={status:'INITIALIZED_WITH_TYPED_LIMITATIONS',phase1InitializationOnly:true,runtimeAcceptanceByPhase7:false,acceptedRevisionDigestRecordedExternally:true};
+  runtime.completion={status:'COMPLETE_WITH_LIMITATION',phase1InitializationOnly:true,runtimeAcceptanceByPhase7:false,acceptedRevisionDigestRecordedExternally:true};
 
   const readinessOverlay=await readJson(path.join(skillRoot,'shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_TEMPLATE.json'));
   readinessOverlay.identity={logicalArtifactId:'SI-READINESS-OVERLAY',campaignId,campaignGenerationId:generation,sourceIdentity,sourceDigestSha256:sourceDigest,buildIdentity,buildDigestSha256:buildDigest};
   readinessOverlay.revision={revisionNumber:1,parentAcceptedRevision:'NONE_INITIAL_REVISION',createdByPhase:'phase-0',acceptanceOwnerPhase:'merged-lite-phase-6-7',createdAt,changeSummary:'Initial neutral Phase-0 tool/harness/configuration inventory.'};
   const rt=readiness.testingAndToolingReadiness??{};
   readinessOverlay.toolchainReadiness={
-    phase1StructuralStatus:'INVENTORIED_PHASE0_ACCEPTANCE_PENDING_LITE_PHASE6_7',
+    phase1StructuralStatus:'DISCOVERED',
     toolIdentities:Object.entries(rt.detectedTooling??{}).map(([tool,value])=>({tool,value})),
     installationOrInvocationEvidenceRefs:['evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json','evidence/static-analysis/SLITHER_v1.json'],
     limitations:[]
@@ -249,7 +249,7 @@ async function buildCore({campaignRoot,skillRoot}){
   readinessOverlay.skeletonInventory=asArray(rt.scriptFiles).map(p=>({path:p,status:'DISCOVERED'}));
   readinessOverlay.adequacyAssessment={acceptanceOwnerPhase:'merged-lite-phase-6-7',phase1MayAcceptAdequacy:false,status:'PENDING_LITE_PHASE6_7_ASSESSMENT',assessmentEvidenceRefs:[],requiredRepairs:[],acceptedForSubgates:[]};
   readinessOverlay.limitations=['HARNESS_AND_EXECUTION_ADEQUACY_REQUIRES_LITE_PHASE6_7_ASSESSMENT'];
-  readinessOverlay.completion={status:'INITIALIZED_STRUCTURAL_INVENTORY_COMPLETE',phase1StructuralInventoryComplete:true,litePhase6_7AdequacyAccepted:false,acceptedRevisionDigestRecordedExternally:true};
+  readinessOverlay.completion={status:'COMPLETE_WITH_LIMITATION',phase1StructuralInventoryComplete:true,litePhase6_7AdequacyAccepted:false,acceptedRevisionDigestRecordedExternally:true};
 
   const graph=await readJson(path.join(skillRoot,'shared/controller/SECURITY_TRACEABILITY_GRAPH.json'));
   graph.campaignBinding={campaignId,campaignGenerationId:generation,sourceIdentity,currentSourceRevision:sourceDigest,graphRevision:1};
@@ -304,7 +304,7 @@ async function buildBundle({campaignRoot,skillRoot,acceptedCommit}){
   bundle.core={logicalArtifactId:'SI-CORE',canonicalMutablePath:'evidence/source-intelligence/SOURCE_INTELLIGENCE_vN.json',pathSemantics:'IMMUTABLE_VERSIONED_ARTIFACT',latestAcceptedRevision:coreRel,acceptedCommitSha:acceptedCommit,acceptedSha256:coreSha,status:'ACCEPTED',lastVerifiedPhase:'phase-0',invalidationStatus:'CURRENT',preservedSnapshotRef:`${coreRel}@${acceptedCommit}`};
   bundle.overlays.runtimeDeployment={logicalArtifactId:'SI-RUNTIME-OVERLAY',canonicalMutablePath:'evidence/source-intelligence/runtime-deployment-overlay.json',pathSemantics:'NAVIGATIONAL_ONLY',latestAcceptedRevision:runtimeRel,acceptedCommitSha:acceptedCommit,acceptedSha256:runtimeSha,status:'ACCEPTED',lastVerifiedPhase:'phase-0',invalidationStatus:'CURRENT',preservedSnapshotRef:`${runtimeRel}@${acceptedCommit}`};
   bundle.overlays.assuranceReadiness={logicalArtifactId:'SI-READINESS-OVERLAY',canonicalMutablePath:'evidence/source-intelligence/assurance-readiness-overlay.json',pathSemantics:'NAVIGATIONAL_ONLY',latestAcceptedRevision:readyRel,acceptedCommitSha:acceptedCommit,acceptedSha256:readySha,status:'ACCEPTED',lastVerifiedPhase:'phase-0',invalidationStatus:'CURRENT',preservedSnapshotRef:`${readyRel}@${acceptedCommit}`};
-  bundle.completion={status:'ACCEPTED_PHASE0_BUNDLE_INDEX',allPointersAcceptedOrTypedNotApplicable:true,allAcceptedDigestsVerified:true,priorAcceptedRevisionsPreserved:true,bundleIndexDigestRecordLocation:'PHASE_REPORT_AND_CONTROLLER_EVIDENCE_AFTER_INDEX_COMMIT'};
+  bundle.completion={status:'COMPLETE',allPointersAcceptedOrTypedNotApplicable:true,allAcceptedDigestsVerified:true,priorAcceptedRevisionsPreserved:true,bundleIndexDigestRecordLocation:'PHASE_REPORT_AND_CONTROLLER_EVIDENCE_AFTER_INDEX_COMMIT'};
   await writeJson(path.join(campaignRoot,'shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_TEMPLATE.json'),bundle);
   await writeJson(path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json'),bundle);
   return {campaignId,acceptedCommit,outputs:['shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_TEMPLATE.json','evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json']};
