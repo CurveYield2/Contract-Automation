@@ -494,26 +494,49 @@ jobs:
             local encoded_pointer completed_id completed_status next_id next_state next_reviewer handoff_path handoff_dir wake_path encoded_wake wake_b64 next_phase successor_wake_id
             local packet_path completion_path encoded_packet packet_sha instructions mechanical_message mechanical_b64 mechanical_wake_id
             local legacy_packet_path legacy_encoded reconciliation_output verified_output_count
-            local campaign_root campaign_title campaign_url project_name chat_name skill_path skill_url ultralite_url phase_range
-            local canonical_id canonical_root canonical_mode canonical_optional
+            local campaign_root campaign_title campaign_url project_name chat_name skill_path skill_url phase_range
+            local canonical_id canonical_root canonical_mode pointer_schema current_history_phase current_history_milestone
 
             [ -n "$pointer_path" ] || return 2
             encoded_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$pointer_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
             [ -n "$encoded_pointer" ] || return 2
             printf '%s' "$encoded_pointer" | base64 -d > /tmp/lite-active-pointer.json
+            pointer_schema="$(jq -r '.schemaVersion // empty' /tmp/lite-active-pointer.json)"
 
+            # Prefer the legacy milestone pointer shape when present, but consume the
+            # current Lite controller state directly when the pointer only carries
+            # phase/successor identities. This keeps automation aligned to the skill's
+            # durable controller outputs instead of requiring a second pointer schema.
             completed_id="$(jq -r '.completedMilestone.id // empty' /tmp/lite-active-pointer.json)"
             completed_status="$(jq -r '.completedMilestone.status // empty' /tmp/lite-active-pointer.json)"
             next_id="$(jq -r '.nextMilestone.id // empty' /tmp/lite-active-pointer.json)"
             next_state="$(jq -r '.nextMilestone.state // empty' /tmp/lite-active-pointer.json)"
             next_reviewer="$(jq -r '.nextMilestone.reviewer // empty' /tmp/lite-active-pointer.json)"
             next_phase="$(jq -r '.nextPhaseId // empty' /tmp/lite-active-pointer.json)"
+            handoff_path="$(jq -r '.authoritativeHandoff // empty' /tmp/lite-active-pointer.json)"
+
+            if [ -z "$completed_id" ]; then
+              current_history_phase="$(jq -r '.history[-1].phase // empty' /tmp/canonical-campaign-state.json)"
+              current_history_milestone="$(jq -r '.history[-1].milestone // empty' /tmp/canonical-campaign-state.json)"
+              if [ "$expected_milestone" = "P0_BOOTSTRAP" ] && [ "$current_history_phase" = "0" ]; then
+                completed_id="P0_BOOTSTRAP"
+              else
+                completed_id="$current_history_milestone"
+              fi
+              completed_status="$(jq -r '.history[-1].status // empty' /tmp/canonical-campaign-state.json)"
+              next_reviewer="$(jq -r '.successorHandoff.incomingReviewer // .requiredSuccessorReviewerLineage // .activeReviewer.lineage // empty' /tmp/canonical-campaign-state.json)"
+              next_phase="$(jq -r '.phase.id // empty' /tmp/canonical-campaign-state.json)"
+              next_state="$(jq -r '.phase.state // .phase.status // empty' /tmp/canonical-campaign-state.json)"
+              handoff_path="$(jq -r '.successorHandoff.handoffReference // .history[-1].handoffPath // empty' /tmp/canonical-campaign-state.json)"
+              next_id="$(jq -r --arg reviewer "$next_reviewer" '[.routingPlan.workers[]? | select(.lineage==$reviewer) | .milestone][0] // empty' /tmp/canonical-campaign-state.json)"
+            fi
+
             if [ -z "$next_phase" ]; then
               next_phase_start="$(jq -r '.nextMilestone.phaseRange[0] // empty' /tmp/lite-active-pointer.json)"
               if [ -n "$next_phase_start" ]; then next_phase="phase-$next_phase_start"; fi
             fi
             [[ "$next_phase" =~ ^phase-[0-9]+$ ]] || {
-              echo "::warning::Successor pointer does not provide a valid next phase id."
+              echo "::warning::Successor state does not provide a valid next phase id."
               return 2
             }
 
@@ -528,7 +551,9 @@ jobs:
               *) return 2 ;;
             esac
 
-            handoff_path="$(jq -r '.authoritativeHandoff // empty' /tmp/lite-active-pointer.json)"
+            if [ -z "$handoff_path" ]; then
+              handoff_path="$(jq -r '.authoritativeHandoff // empty' /tmp/lite-active-pointer.json)"
+            fi
             [ -n "$handoff_path" ] || return 2
             safe_repo_path "$handoff_path" || return 2
             handoff_dir="$(dirname "$handoff_path")"
@@ -606,12 +631,10 @@ jobs:
             fi
             canonical_id="$(jq -r '.campaignId // empty' /tmp/canonical-campaign-state.json)"
             canonical_root="$(jq -r '.controller.workspacePath // empty' /tmp/canonical-campaign-state.json)"
-            canonical_mode="$(jq -r '.mode // empty' /tmp/canonical-campaign-state.json)"
-            canonical_optional="$(jq -r '.optionalMode // empty' /tmp/canonical-campaign-state.json)"
+            canonical_mode="$(jq -r '.assuranceMode.mode // .mode // empty' /tmp/canonical-campaign-state.json)"
             [ "$canonical_id" = "$campaign_id" ] || { echo "::warning::Successor campaignId mismatch"; return 2; }
             [ "$canonical_root" = "$campaign_root" ] || { echo "::warning::Successor campaign root mismatch"; return 2; }
             [ "$canonical_mode" = "LITE" ] || { echo "::warning::Successor campaign is not Lite"; return 2; }
-            [ "$canonical_optional" = "ULTRALITE" ] || { echo "::warning::Successor campaign is not Ultralite"; return 2; }
 
             campaign_title="$(jq -r '.auditName // .title // .projectSlug // .campaignId // empty' /tmp/canonical-campaign-state.json)"
             [ -n "$campaign_title" ] || campaign_title="$campaign_id"
@@ -682,7 +705,7 @@ jobs:
             successor_wake_id="${campaign_id}-${next_id}-${next_reviewer}"
             wake_b64="$(base64 -w0 /tmp/sealed-successor-wake.txt)"
             browser_context_b64="$(jq -nc \
-              --arg routine 'audit-ultralite-reviewer-v1' \
+              --arg routine 'audit-lite-reviewer-v1' \
               --arg project "$project_name" \
               --arg chat "$chat_name" \
               '{routineId:$routine,projectName:$project,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
@@ -771,16 +794,16 @@ jobs:
                         echo "::warning::Mechanical completion is valid, but successor packet is not machine-ready yet; keeping mechanical worker supervised."
                       fi
                     fi
-                    lite_campaign_status="$(jq -r '.campaignStatus // empty' /tmp/canonical-campaign-state.json)"
+                    lite_campaign_status="$(jq -r '.campaignCompletionStatus // .campaignStatus // empty' /tmp/canonical-campaign-state.json)"
                     if [ "$lite_campaign_status" = "COMPLETE" ] || [ "$lite_campaign_status" = "STOPPED_BY_HUMAN" ]; then
                       retire_state "LITE_CAMPAIGN_TERMINAL_DURING_INTERPHASE_$lite_campaign_status"
                       exit 0
                     fi
                   else
-                  lite_campaign_status="$(jq -r '.campaignStatus // empty' /tmp/canonical-campaign-state.json)"
+                  lite_campaign_status="$(jq -r '.campaignCompletionStatus // .campaignStatus // empty' /tmp/canonical-campaign-state.json)"
                   lite_phase_id="$(jq -r '.phase.id // empty' /tmp/canonical-campaign-state.json)"
                   lite_phase_state="$(jq -r '.phase.state // .phase.status // empty' /tmp/canonical-campaign-state.json)"
-                  lite_milestone="$(jq -r '.phase.milestoneId // empty' /tmp/canonical-campaign-state.json)"
+                  lite_milestone="$(jq -r '(.phase.milestoneId // empty) as $m | if $m != "" then $m else (.activeReviewer.lineage // empty) as $r | ([.routingPlan.workers[]? | select(.lineage==$r) | .milestone][0] // empty) end' /tmp/canonical-campaign-state.json)"
                   lite_worker_status="$(jq -r --arg m "$gate_expected_milestone" '.routingPlan.workers[]? | select(.milestone==$m) | .status' /tmp/canonical-campaign-state.json | tail -n1)"
 
                   # Overall automation terminates only at campaign-level terminal status.
@@ -808,7 +831,7 @@ jobs:
                       reg_sha="$(gh api "$reg_api?ref=main" --jq '.sha' 2>/dev/null || true)"
                       jq --arg phase "$lite_phase_id"                         '.activeAssignment.phaseId=$phase | .watchdog.gate.expectedPhaseId=$phase | .watchdog.idleMessage="GET BACK TO WORK" | .updatedAt=(now|todate)'                         /tmp/phase-sync-registration.json > /tmp/phase-sync-registration-next.json
                       reg_content="$(base64 -w0 /tmp/phase-sync-registration-next.json)"
-                      [ -n "$reg_sha" ] && gh api --method PUT "$reg_api" -f message="chore(ultralite): sync $campaign_id to $lite_phase_id" -f content="$reg_content" -f sha="$reg_sha" -f branch=main >/dev/null || true
+                      [ -n "$reg_sha" ] && gh api --method PUT "$reg_api" -f message="chore(lite): sync $campaign_id to $lite_phase_id" -f content="$reg_content" -f sha="$reg_sha" -f branch=main >/dev/null || true
                     fi
                   fi
 
