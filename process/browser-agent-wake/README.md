@@ -37,18 +37,28 @@ It starts with a dedicated **normal ChatGPT web** Phase-0 bootstrap chat. That b
 
 The Phase-0 bootstrap is deliberately outside the campaign Project. When the canonical controller/pointer reaches the Phase-0 successor boundary, the existing Lite watchdog launches the first semantic reviewer through `audit-ultralite-reviewer-v1`. That launch creates/reuses a ChatGPT Project named from the campaign title and creates a normal reviewer chat inside it.
 
-Every later successor is derived from the live Audit-Controller pointer, not from a hard-coded reviewer count. The successor launch reads `.nextMilestone.reviewer`, `.nextMilestone.id`, the sealed handoff, campaign title/path, and the newest audit-skill ZIP in the campaign authority directory. The wake envelope contains:
+Every later successor is derived from the live Audit-Controller pointer, not from a hard-coded reviewer count. The successor launch reads `.nextMilestone.reviewer`, `.nextMilestone.id`, the sealed handoff, campaign title/path, and resolves audit-skill authority using this precedence: **campaign-bound `skillAuthority.current` first; otherwise `Audit-Controller/audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json`; legacy newest-ZIP discovery only if neither authoritative binding exists**. The wake envelope contains:
 
 - campaign URL;
 - reviewer identity;
 - milestone identity;
-- latest audit skill URL;
+- exact resolved audit skill URL and authority source;
 - sealed handoff path;
 - explicit GitHub connector requirement;
-- explicit rule that the latest skill is the audit methodology authority;
+- explicit rule that the resolved authority source is the audit methodology authority;
 - instruction to continue from sealed durable state and run the assigned reviewer through its terminal handoff/final-report state.
 
 There is no `reviewer-5`, `P8_10`, or other reviewer-count assumption in successor termination. A campaign ends when canonical campaign state is terminal or the active pointer has no successor.
+
+### Lite skill-authority resolution
+
+The watchdog MUST use the same authority precedence as Audit-Controller:
+
+1. exact campaign-bound `skillAuthority.current` when present;
+2. active global pointer `audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json` on `CurveYield2/Audit-Controller@main`;
+3. legacy newest-ZIP discovery only when neither authoritative source exists.
+
+For the global pointer path, the watchdog verifies the pointer's recorded Git blob SHA against the package currently committed at `main` before waking a reviewer. A timestamp-newer ZIP must never override a campaign-bound authority. Existing campaigns remain frozen until an explicit rebind is authorized.
 
 ## Reviewer repair
 
@@ -99,8 +109,9 @@ Lite audits use the existing compressed milestone topology, with a separate mech
 - `P0_BOOTSTRAP` — gate identity for the dedicated web-bootstrap agent executing Phase 0; this is not a semantic-review milestone.
 - `P0_1` — reviewer-1 consumes the sealed Phase-0 bootstrap and completes Phase 1, sealing the combined Phase 0–1 milestone.
 - `P2_5` — reviewer-2, Phases 2–5.
-- `P6_7` — reviewer-3L, Phases 6–7.
+- `P6` — reviewer-3L, retained Lite Phase 6 execution. New/default Lite topology retires executable Phase 7 and transitions through the deterministic Phase-6 terminal gate.
 - `P8_10` — reviewer-4, Phases 8–10.
+- Historical compatibility only: campaigns already pinned to `P6_7` / `P67_TO_P8` remain readable and must not be silently rebound.
 
 Use:
 
