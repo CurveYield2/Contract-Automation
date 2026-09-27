@@ -178,23 +178,14 @@
     },
     {
       "step": 14,
-      "action": "Obtain controller Phase-Contract PASS",
-      "instruction": "Use the current existing controller/Phase-Contract completion validation path; remain active and repair/retry until PASS.",
-      "requirement": "MANDATORY",
-      "condition": null,
-      "resources": [
-        "../../shared/controller/AUTOMATIC_PHASE_ADVANCEMENT_PROTOCOL.md"
-      ]
-    },
-    {
-      "step": 15,
-      "action": "Create and validate P0_TO_P1 successor package and retire",
-      "instruction": "Create/validate the fresh reviewer-1 successor package and retire only after completion and handoff validation PASS.",
+      "action": "Create and validate P0_TO_P1 successor package and Phase-1 wake message",
+      "instruction": "Create and validate SUCCESSOR_HANDOFF.json, START_HERE_SUCCESSOR.md, and the standardized WAKE_UP_MESSAGE.md for fresh reviewer-1 before requesting controller completion validation. The wake message must identify this as a Lite campaign, name and link the exact campaign folder, point to the current authority Lite SKILL.md, identify reviewer-1, and state that reviewer-1 is responsible for Phase 1.",
       "requirement": "MANDATORY",
       "condition": null,
       "resources": [
         "../../shared/handoff/SUCCESSOR_HANDOFF_PROTOCOL.md",
-        "../../shared/handoff/SUCCESSOR_HANDOFF_BOUNDARY_PROFILES.json"
+        "../../shared/handoff/SUCCESSOR_HANDOFF_BOUNDARY_PROFILES.json",
+        "../../shared/handoff/WAKE_UP_MESSAGE_TEMPLATE.md"
       ]
     }
   ],
@@ -311,9 +302,8 @@
     "Bootstrap Audit Surface Manifest is complete and exact-source/build-bound, including neutral documented inputs, dependency/standards identities and reusable structural index references.",
     "Security Traceability Graph and obligation ledger are updated for Phase 0; no due OPEN/IN_PROGRESS Phase-0 obligation remains.",
     "Every material observed change is classified under EVIDENCE_INVALIDATION_MATRIX.",
-    "PHASE0_WEB_BOOTSTRAP_COMPLETION_REPORT is complete and the current controller/Phase-Contract completion validation reports PASS.",
-    "P0_TO_P1 successor handoff/start/wake-up package is complete, exact-identity-bound and valid.",
-    "Retirement is forbidden until both Phase-0 completion validation and P0_TO_P1 handoff validation report PASS."
+    "PHASE0_WEB_BOOTSTRAP_COMPLETION_REPORT is complete, frozen, digest-bound, and states READY_FOR_CONTROLLER_VALIDATION rather than self-certifying controller PASS.",
+    "P0_TO_P1 SUCCESSOR_HANDOFF.json, START_HERE_SUCCESSOR.md, and standardized Phase-1 WAKE_UP_MESSAGE.md are complete, exact-identity-bound and handoff-validation PASS before controller completion validation is requested."
   ],
   "recoveryRoutes": [
     {
@@ -356,5 +346,14 @@
     "U-SOURCEINTEL-001",
     "U-UPDATES-001",
     "U-HUMANCOMMS-001"
-  ]
+  ],
+  "postCompletionValidationProcedure": {
+    "order": "AFTER_ALL_PHASE_CONTRACT_STEPS_AND_SEALING_CRITERIA_PASS",
+    "steps": [
+      "Submit the audit-phase-completion-report-v1 companion bound to the frozen Phase-0 report, outputs, step dispositions, sealing-criterion evidence, campaign generation, reviewer lineage and source identity.",
+      "Obtain the machine-generated PHASE_COMPLETION_VALIDATION_v1.json receipt with status PASS. This PASS is an output of controller validation and MUST NOT be required as an input to the same validation.",
+      "Require the Phase-0 retirement gate to verify the bound Phase completion PASS, required automation-completion PASS, and P0_TO_P1 successor-handoff validation PASS.",
+      "Only after the retirement gate reports PASS may controller state enter WAITING_FOR_SUCCESSOR_AGENT and the web-bootstrap-agent retire."
+    ]
+  }
 }
