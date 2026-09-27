@@ -90,35 +90,10 @@ on:
         required: false
         default: '3'
         type: string
-      browser_routine_id:
-        description: Optional named browser routine from process/browser-routines
+      browser_context_b64:
+        description: Optional Base64 JSON browser context {routineId,projectName,chatName,repair}
         required: false
         default: ''
-        type: string
-      project_name:
-        description: Optional normal ChatGPT Project name for routine-backed fresh chats
-        required: false
-        default: ''
-        type: string
-      chat_name:
-        description: Optional desired normal ChatGPT chat title
-        required: false
-        default: ''
-        type: string
-      repair_enabled:
-        description: Enable reviewer replacement escalation after persistent chat-level failure
-        required: false
-        default: false
-        type: boolean
-      repair_idle_poke_threshold:
-        description: Consecutive idle watchdog pokes tolerated before reviewer replacement
-        required: false
-        default: '3'
-        type: string
-      repair_unviewable_threshold:
-        description: Consecutive non-challenge unviewable observations tolerated before reviewer replacement
-        required: false
-        default: '2'
         type: string
 
 permissions:
@@ -148,9 +123,6 @@ jobs:
       BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
       BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
       BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
-      BROWSER_ROUTINE_ID: ${{ inputs.browser_routine_id }}
-      CHATGPT_PROJECT_NAME: ${{ inputs.project_name }}
-      CHATGPT_CHAT_NAME: ${{ inputs.chat_name }}
 
     steps:
       - name: Checkout trusted Contract-Automation
@@ -181,6 +153,7 @@ jobs:
         env:
           WAKE_MESSAGE_B64: ${{ inputs.wake_message_b64 }}
           WATCHDOG_MESSAGE_B64: ${{ inputs.watchdog_message_b64 }}
+          BROWSER_CONTEXT_B64: ${{ inputs.browser_context_b64 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -190,6 +163,280 @@ jobs:
           else
             printf '%s\n' '[AUDIT_AGENT_WATCHDOG_V1]' 'GET BACK TO WORK. Resume the admitted audit from the latest durable campaign state and completion evidence. Do not restart completed work. Continue until the current assignment reaches its required terminal completion state.' > /tmp/watchdog-message.txt
           fi
+
+          if [ -n "${BROWSER_CONTEXT_B64:-}" ]; then
+            printf '%s' "$BROWSER_CONTEXT_B64" | base64 -d > /tmp/browser-context.json
+          else
+            printf '{}\n' > /tmp/browser-context.json
+          fi
+          jq -e '
+            type=="object"
+            and ((.routineId // "")|type=="string")
+            and ((.projectName // "")|type=="string")
+            and ((.chatName // "")|type=="string")
+            and ((.repair // {})|type=="object")
+          ' /tmp/browser-context.json >/dev/null
+
+          routine_id="$(jq -r '.routineId // empty' /tmp/browser-context.json)"
+          project_name="$(jq -r '.projectName // empty' /tmp/browser-context.json)"
+          chat_name="$(jq -r '.chatName // empty' /tmp/browser-context.json)"
+          repair_enabled="$(jq -r '.repair.enabled // false' /tmp/browser-context.json)"
+          repair_idle="$(jq -r '.repair.idlePokeThreshold // 3' /tmp/browser-context.json)"
+          repair_unviewable="$(jq -r '.repair.unviewableThreshold // 2' /tmp/browser-context.json)"
+
+          for value in "$routine_id" "$project_name" "$chat_name"; do
+            if printf '%s' "$value" | grep -q 
+      - name: Deliver wake with redundant providers
+        id: deliver
+        shell: bash
+        run: |
+          set -euo pipefail
+          export WAKE_ACTION='wake'
+          export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
+          export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
+
+          set +e
+          xvfb-run -a node scripts/browser-agent-wake.mjs
+          rc=$?
+          set -e
+
+          if [ ! -s "$WAKE_RESULT_PATH" ]; then
+            jq -n --argjson rc "$rc" '{ok:false,wakeId:"unknown",failures:[{provider:"github-playwright",code:"NO_RESULT",retryable:false,error:("browser runtime exited without a result; rc="+($rc|tostring))}]}' > "$WAKE_RESULT_PATH"
+          fi
+
+          ok="$(jq -r '.ok // false' "$WAKE_RESULT_PATH")"
+          retryable="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true)] | length > 0' "$WAKE_RESULT_PATH")"
+          retry_code="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true) | .code][0] // empty' "$WAKE_RESULT_PATH")"
+
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "retryable=$retryable" >> "$GITHUB_OUTPUT"
+          echo "retry_code=$retry_code" >> "$GITHUB_OUTPUT"
+          echo "chat_url=$(jq -r '.chatUrl // .after.url // .url // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "provider=$(jq -r '.provider // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "project_url=$(jq -r '.projectUrl // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "project_name=$(jq -r '.projectName // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "chat_renamed=$(jq -r '.chatRenamed // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+
+          if [ "$ok" != true ]; then
+            echo "::warning::Browser wake did not complete on this runner (retryable=$retryable code=$retry_code rc=$rc)."
+          fi
+
+      - name: Dispatch fresh-runner retry for retryable pre-post failure
+        id: fresh-runner-retry
+        if: steps.deliver.outputs.ok != 'true' && steps.deliver.outputs.retryable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RETRY_INPUTS_JSON: ${{ toJSON(inputs) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          attempt='${{ inputs.runner_retry_attempt }}'
+          max='${{ inputs.runner_retry_max }}'
+          [[ "$attempt" =~ ^[0-9]+$ ]] || attempt=0
+          [[ "$max" =~ ^[0-9]+$ ]] || max=3
+          if [ "$max" -gt 5 ]; then max=5; fi
+
+          if [ "$attempt" -ge "$max" ]; then
+            echo "dispatched=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Fresh-runner retry budget exhausted at attempt $attempt/$max."
+            exit 0
+          fi
+
+          next=$((attempt + 1))
+          retry_inputs="$(printf '%s' "$RETRY_INPUTS_JSON" | jq -c --arg next "$next" --arg max "$max" '
+            with_entries(.value |= tostring)
+            | .runner_retry_attempt=$next
+            | .runner_retry_max=$max
+          ')"
+
+          printf '%s\n' "$retry_inputs" | gh workflow run browser-agent-wake.yml             --repo "$GITHUB_REPOSITORY"             --ref main             --json
+
+          echo "dispatched=true" >> "$GITHUB_OUTPUT"
+          echo "next_attempt=$next" >> "$GITHUB_OUTPUT"
+          echo "Fresh-runner retry $next/$max dispatched for $WAKE_ID after ${{ steps.deliver.outputs.retry_code }}." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail terminal browser wake
+        if: steps.deliver.outputs.ok != 'true' && steps.fresh-runner-retry.outputs.dispatched != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{ok,wakeId,failures}' /tmp/browser-agent-wake-result.json
+          exit 1
+
+      - name: Detect refreshed encrypted ChatGPT session state
+        if: steps.deliver.outputs.ok == 'true'
+        id: refreshed-chatgpt-session
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -s /tmp/curveyield-browser-agent/session-state-updated ] && [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save refreshed encrypted ChatGPT session state
+        if: steps.deliver.outputs.ok == 'true' && steps.refreshed-chatgpt-session.outputs.updated == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.wake_id }}
+
+      - name: Create watchdog state
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        env:
+          CHAT_URL_RESOLVED: ${{ steps.deliver.outputs.chat_url }}
+          PROVIDER: ${{ steps.deliver.outputs.provider }}
+          ASSISTANT_COUNT: ${{ steps.deliver.outputs.assistant_count }}
+          LAST_HASH: ${{ steps.deliver.outputs.last_hash }}
+          GATE_MODE: ${{ inputs.gate_mode }}
+          GATE_REPOSITORY: ${{ inputs.gate_repository }}
+          GATE_REF: ${{ inputs.gate_ref }}
+          GATE_STATE_PATH: ${{ inputs.gate_state_path }}
+          GATE_EXPECTED_PHASE_ID: ${{ inputs.gate_expected_phase_id }}
+          GATE_EXPECTED_MILESTONE_ID: ${{ inputs.gate_expected_milestone_id }}
+          GATE_ACTIVE_POINTER_PATH: ${{ inputs.gate_active_pointer_path }}
+          GATE_INTERPHASE_HANDOFF_PATH: ${{ inputs.gate_interphase_handoff_path }}
+          GATE_INTERPHASE_WORK_PACKET_PATH: ${{ inputs.gate_interphase_work_packet_path }}
+          GATE_INTERPHASE_COMPLETION_PATH: ${{ inputs.gate_interphase_completion_path }}
+          GATE_INTERPHASE_WORK_PACKET_SHA256: ${{ inputs.gate_interphase_work_packet_sha256 }}
+          GATE_STOP_STATES_CSV: ${{ inputs.gate_stop_states_csv }}
+          GATE_STOP_CAMPAIGN_STATUSES_CSV: ${{ inputs.gate_stop_campaign_statuses_csv }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_id="$(printf '%s' "$WAKE_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          jq -n \
+            --arg schemaVersion 'curveyield-browser-agent-watchdog-state-v1' \
+            --arg wakeId "$WAKE_ID" \
+            --arg campaignId "$CAMPAIGN_ID" \
+            --arg phaseId "$PHASE_ID" \
+            --arg workerRole "$WORKER_ROLE" \
+            --arg chatUrl "$CHAT_URL_RESOLVED" \
+            --arg provider "$PROVIDER" \
+            --arg armedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg idleMessage "$(cat /tmp/watchdog-message.txt)" \
+            --arg gateMode "$GATE_MODE" \
+            --arg gateRepository "$GATE_REPOSITORY" \
+            --arg gateRef "$GATE_REF" \
+            --arg gateStatePath "$GATE_STATE_PATH" \
+            --arg gateExpectedPhaseId "$GATE_EXPECTED_PHASE_ID" \
+            --arg gateExpectedMilestoneId "$GATE_EXPECTED_MILESTONE_ID" \
+            --arg gateActivePointerPath "$GATE_ACTIVE_POINTER_PATH" \
+            --arg gateInterphaseHandoffPath "$GATE_INTERPHASE_HANDOFF_PATH" \
+            --arg gateInterphaseWorkPacketPath "$GATE_INTERPHASE_WORK_PACKET_PATH" \
+            --arg gateInterphaseCompletionPath "$GATE_INTERPHASE_COMPLETION_PATH" \
+            --arg gateInterphaseWorkPacketSha256 "$GATE_INTERPHASE_WORK_PACKET_SHA256" \
+            --arg gateStopStatesCsv "$GATE_STOP_STATES_CSV" \
+            --arg gateStopCampaignStatusesCsv "$GATE_STOP_CAMPAIGN_STATUSES_CSV" \
+            --arg repairEnabled "$REPAIR_ENABLED" \
+            --arg repairIdlePokeThreshold "$REPAIR_IDLE_POKE_THRESHOLD" \
+            --arg repairUnviewableThreshold "$REPAIR_UNVIEWABLE_THRESHOLD" \
+            --arg lastHash "$LAST_HASH" \
+            --argjson assistantCount "${ASSISTANT_COUNT:-0}" \
+            '{
+              schemaVersion:$schemaVersion,wakeId:$wakeId,campaignId:$campaignId,phaseId:$phaseId,workerRole:$workerRole,
+              status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,
+              idleMessage:$idleMessage,
+              observation:{assistantCount:$assistantCount,lastAssistantHash:$lastHash,observedAt:$armedAt},
+              gate:{
+                mode:$gateMode,
+                repository:$gateRepository,
+                ref:$gateRef,
+                statePath:$gateStatePath,
+                expectedPhaseId:$gateExpectedPhaseId,
+                expectedMilestoneId:$gateExpectedMilestoneId,
+                activePointerPath:$gateActivePointerPath,
+                interphase:{
+                  handoffPath:$gateInterphaseHandoffPath,
+                  workPacketPath:$gateInterphaseWorkPacketPath,
+                  completionPath:$gateInterphaseCompletionPath,
+                  workPacketSha256:$gateInterphaseWorkPacketSha256
+                },
+                stopStates:($gateStopStatesCsv|split(",")|map(gsub("^ +| +$";""))),
+                stopCampaignStatuses:($gateStopCampaignStatusesCsv|split(",")|map(gsub("^ +| +$";"")))
+              },
+              repair:{
+                enabled:($repairEnabled=="true"),
+                idlePokeThreshold:(($repairIdlePokeThreshold|tonumber?) // 3),
+                unviewableThreshold:(($repairUnviewableThreshold|tonumber?) // 2),
+                consecutiveIdlePokes:0,
+                consecutiveUnviewable:0
+              }
+            }' > "/tmp/$safe_id.json"
+          echo "WATCHDOG_STATE=/tmp/$safe_id.json" >> "$GITHUB_ENV"
+          echo "WATCHDOG_SAFE_ID=$safe_id" >> "$GITHUB_ENV"
+
+      - name: Persist watchdog state
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          content="$(base64 -w0 "$WATCHDOG_STATE")"
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active/$WATCHDOG_SAFE_ID.json"
+          existing="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$existing" ]; then
+            gh api --method PUT "$api" -f message="chore(watchdog): refresh $WAKE_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
+          else
+            gh api --method PUT "$api" -f message="chore(watchdog): arm $WAKE_ID" -f content="$content" -f branch=main >/dev/null
+          fi
+
+      - name: Persist fresh-chat URL into campaign registration
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}
+          PROJECT_NAME_RESOLVED: ${{ steps.deliver.outputs.project_name }}
+          PROJECT_URL_RESOLVED: ${{ steps.deliver.outputs.project_url }}
+          REQUESTED_CHAT_NAME: ${{ env.CHATGPT_CHAT_NAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
+          tmp=/tmp/registration.json
+          gh api "$api?ref=main" --jq '.content' | base64 -d > "$tmp"
+          jq \
+            --arg url "$NEW_CHAT_URL" \
+            --arg projectName "$PROJECT_NAME_RESOLVED" \
+            --arg projectUrl "$PROJECT_URL_RESOLVED" \
+            --arg chatName "$REQUESTED_CHAT_NAME" \
+            '.mode="resume_existing"
+             | .chatUrl=$url
+             | .chatgptProject=((.chatgptProject // {}) + {name:$projectName,url:$projectUrl})
+             | .activeChat=((.activeChat // {}) + {name:$chatName,url:$url})
+             | .updatedAt=(now|todate)' \
+            "$tmp" > /tmp/registration-updated.json
+          sha="$(gh api "$api?ref=main" --jq '.sha')"
+          content="$(base64 -w0 /tmp/registration-updated.json)"
+          gh api --method PUT "$api" -f message="chore(wake): bind fresh chat for $CAMPAIGN_ID" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+
+      - name: Arm immediate watchdog observation
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$WAKE_ID"
+[\r\n]'; then
+              echo "::error::Browser context text fields must not contain newlines."
+              exit 1
+            fi
+          done
+
+          {
+            echo "BROWSER_ROUTINE_ID=$routine_id"
+            echo "CHATGPT_PROJECT_NAME=$project_name"
+            echo "CHATGPT_CHAT_NAME=$chat_name"
+            echo "REPAIR_ENABLED=$repair_enabled"
+            echo "REPAIR_IDLE_POKE_THRESHOLD=$repair_idle"
+            echo "REPAIR_UNVIEWABLE_THRESHOLD=$repair_unviewable"
+          } >> "$GITHUB_ENV"
 
       - name: Deliver wake with redundant providers
         id: deliver
