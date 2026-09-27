@@ -90,6 +90,21 @@ on:
         required: false
         default: '3'
         type: string
+      browser_routine_id:
+        description: Optional named browser routine from process/browser-routines
+        required: false
+        default: ''
+        type: string
+      project_name:
+        description: Optional normal ChatGPT Project name for routine-backed fresh chats
+        required: false
+        default: ''
+        type: string
+      chat_name:
+        description: Optional desired normal ChatGPT chat title
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -118,6 +133,9 @@ jobs:
       BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
       BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
       BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
+      BROWSER_ROUTINE_ID: ${{ inputs.browser_routine_id }}
+      CHATGPT_PROJECT_NAME: ${{ inputs.project_name }}
+      CHATGPT_CHAT_NAME: ${{ inputs.chat_name }}
 
     steps:
       - name: Checkout trusted Contract-Automation
@@ -187,6 +205,9 @@ jobs:
           echo "provider=$(jq -r '.provider // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "project_url=$(jq -r '.projectUrl // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "project_name=$(jq -r '.projectName // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
+          echo "chat_renamed=$(jq -r '.chatRenamed // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
 
           if [ "$ok" != true ]; then
             echo "::warning::Browser wake did not complete on this runner (retryable=$retryable code=$retry_code rc=$rc)."
@@ -349,6 +370,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           NEW_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}
+          PROJECT_NAME_RESOLVED: ${{ steps.deliver.outputs.project_name }}
+          PROJECT_URL_RESOLVED: ${{ steps.deliver.outputs.project_url }}
+          REQUESTED_CHAT_NAME: ${{ inputs.chat_name }}
         shell: bash
         run: |
           set -euo pipefail
@@ -356,7 +380,17 @@ jobs:
           api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
           tmp=/tmp/registration.json
           gh api "$api?ref=main" --jq '.content' | base64 -d > "$tmp"
-          jq --arg url "$NEW_CHAT_URL" '.mode="resume_existing" | .chatUrl=$url | .updatedAt=(now|todate)' "$tmp" > /tmp/registration-updated.json
+          jq \
+            --arg url "$NEW_CHAT_URL" \
+            --arg projectName "$PROJECT_NAME_RESOLVED" \
+            --arg projectUrl "$PROJECT_URL_RESOLVED" \
+            --arg chatName "$REQUESTED_CHAT_NAME" \
+            '.mode="resume_existing"
+             | .chatUrl=$url
+             | .chatgptProject=((.chatgptProject // {}) + {name:$projectName,url:$projectUrl})
+             | .activeChat=((.activeChat // {}) + {name:$chatName,url:$url})
+             | .updatedAt=(now|todate)' \
+            "$tmp" > /tmp/registration-updated.json
           sha="$(gh api "$api?ref=main" --jq '.sha')"
           content="$(base64 -w0 /tmp/registration-updated.json)"
           gh api --method PUT "$api" -f message="chore(wake): bind fresh chat for $CAMPAIGN_ID" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
