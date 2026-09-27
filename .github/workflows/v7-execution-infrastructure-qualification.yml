@@ -277,8 +277,9 @@ jobs:
           gh repo clone CurveYield2/Audit-Controller .controller-under-test -- --filter=blob:none --no-checkout
           cd .controller-under-test
           git fetch --depth=1 origin "$CONTROLLER_REF"
-          git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = "$CONTROLLER_REF"
+          expected_controller_commit="$(git rev-parse FETCH_HEAD)"
+          git checkout --detach "$expected_controller_commit"
+          test "$(git rev-parse HEAD)" = "$expected_controller_commit"
 
       - name: Verify private Audit-Controller v26 suite
         if: inputs.controller_ref != ''
