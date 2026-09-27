@@ -84,6 +84,7 @@ test('private workflows use runtime authentication probing rather than presence-
     '.github/workflows/audit-controller-execution.yml',
     '.github/workflows/v7-execution-infrastructure-qualification.yml',
     '.github/workflows/agent-zip-import-v1.yml',
+    '.github/workflows/audit-source-initialization-v1.yml',
     '.github/workflows/browser-agent-watchdog.yml',
   ]) {
     const workflow = fs.readFileSync(path.join(repoRoot, relative), 'utf8');
@@ -118,15 +119,15 @@ test('every direct private controller checkout selects a probed credential first
 });
 
 
-test('source fanout preserves independent push requests instead of sharing one lossy pending queue', () => {
-  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/agent-zip-import-v1.yml'), 'utf8');
-  assert.match(workflow, /group:\s*agent-audit-source-fanout-\$\{\{\s*github\.sha\s*\}\}/);
-  assert.doesNotMatch(workflow, /group:\s*agent-audit-source-fanout\s*(?:\r?\n|$)/);
+test('Audit Source Initialization serializes revision allocation and never cancels an active initialization', () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/audit-source-initialization-v1.yml'), 'utf8');
+  assert.match(workflow, /group:\s*audit-source-initialization/);
+  assert.match(workflow, /cancel-in-progress:\s*false/);
 });
 
-test('source fanout never cancels an already-running independent request', () => {
-  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/agent-zip-import-v1.yml'), 'utf8');
-  assert.match(workflow, /cancel-in-progress:\s*false/);
+test('Audit Source Initialization resolves exactly one URL-only push request from the triggering commit', () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/audit-source-initialization-v1.yml'), 'utf8');
   assert.match(workflow, /gh api "repos\/\$GITHUB_REPOSITORY\/commits\/\$GITHUB_SHA"/);
+  assert.match(workflow, /Exactly one URL request file must change per trigger/);
   assert.doesNotMatch(workflow, /git diff-tree/);
 });
