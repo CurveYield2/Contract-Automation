@@ -9,14 +9,28 @@ The isolated Lite pathway has exactly four fresh-agent boundaries:
 
 There is no handoff inside combined Phases 2–5, merged Phases 6–7, or combined Phases 8–10.
 
+## Standard successor assignments
+
+| Boundary | Incoming reviewer | Assigned Lite work |
+|---|---|---|
+| `P0_TO_P1` | `reviewer-1` | **Phase 1** |
+| `P1_TO_P2` | `reviewer-2` | **Combined Lite Phases 2–5** |
+| `P5_TO_P6` | `reviewer-3L` | **Merged Lite Phases 6–7** |
+| `P67_TO_P8` | `reviewer-4` | **Combined Lite Phases 8–10** |
+
+The assigned work above must appear verbatim or equivalently unambiguously in each `WAKE_UP_MESSAGE.md`.
+
 ## Outgoing procedure
 
-1. Complete the active Phase Contract. For `P0_TO_P1`, seal the Phase-0 Web Bootstrap Completion Report and obtain controller validation `PASS`; for later boundaries, seal the applicable milestone report.
-2. Bind exact campaign/generation, source/build, skill package and accepted Source Intelligence identities.
+1. Complete the active Phase Contract work and freeze the applicable phase/milestone report. **For `P0_TO_P1`, the Phase-0 report is a pre-validation report and MUST be frozen before controller completion validation; do not self-certify controller `PASS` inside it.**
+2. Bind exact campaign/generation, exact campaign folder name and URL, controller `workspacePath`, source/build, skill package and accepted Source Intelligence identities.
 3. Attach immutable references/digests for every boundary-profile requirement.
 4. Transfer the current graph, obligation ledger, invalidation state, limitations, blockers and exact due obligations.
 5. Create `SUCCESSOR_HANDOFF.json`, `START_HERE_SUCCESSOR.md` and `WAKE_UP_MESSAGE.md` in `<workspacePath>/handoffs/<PROFILE_ID>/`.
-6. Seal the handoff, enter `WAITING_FOR_SUCCESSOR_AGENT`, and stop the outgoing reviewer.
+6. Generate `WAKE_UP_MESSAGE.md` from the standard template. Every wake message MUST state: campaign type `LITE`; exact campaign name; exact campaign-folder URL; exact controller `workspacePath`; current authority Lite `SKILL.md` repository path and URL; boundary; incoming reviewer; and the exact Lite phase/milestone assigned to that reviewer.
+7. Validate and seal the handoff package.
+8. **P0_TO_P1 special order:** only after the handoff package and Phase-1 wake message validate, submit the Phase-0 completion companion, obtain machine-generated completion-validation `PASS`, obtain the retirement-gate `PASS`, then enter `WAITING_FOR_SUCCESSOR_AGENT` and stop.
+9. **Later fresh-reviewer boundaries:** follow the active Phase Contract/controller retirement ordering, but retirement still requires a valid standardized wake message and handoff-validation `PASS` before `WAITING_FOR_SUCCESSOR_AGENT`.
 
 ## Orchestrated deployment packet
 
