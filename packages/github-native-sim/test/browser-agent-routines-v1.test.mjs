@@ -186,10 +186,17 @@ test('ultralite entry workflow monitors the existing Phase-0 bootstrap and never
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
-test('source fanout is evidence-only and cannot race the campaign orchestrator', () => {
+test('source fanout arms the state-only campaign orchestrator without launching a reviewer chat', () => {
   const workflow = read('.github/workflows/agent-zip-import-v1.yml');
-  assert.match(workflow, /source fan-out prepares durable source evidence only/);
-  assert.match(workflow, /must never create a second Phase-0 chat/);
+  assert.match(workflow, /Arm canonical Ultralite campaign monitor after source fan-out/);
+  assert.match(workflow, /browser-agent-wake\/registrations\/\$safe_campaign\.json/);
+  assert.match(workflow, /test "\$gate_mode" = 'LITE'/);
+  assert.match(workflow, /test "\$gate_expected_phase" = 'phase-0'/);
+  assert.match(workflow, /test "\$gate_expected_milestone" = 'P0_BOOTSTRAP'/);
+  assert.match(workflow, /gh workflow run ultralite-audit-browser-orchestrator-v1\.yml/);
+  assert.match(workflow, /Reviewer\/chat launch: NOT performed by source fan-out/);
+  assert.match(workflow, /Phase-0 behavior: state-only monitoring; no second bootstrap chat/);
+  assert.doesNotMatch(workflow, /gh workflow run browser-agent-wake\.yml/);
   assert.doesNotMatch(workflow, /wake_id=.*phase0-source-fanout/);
 });
 
@@ -211,6 +218,12 @@ test('successor routing uses canonical nextPhaseId and sealed WAKE_UP_MESSAGE ve
   assert.match(workflow, /wake_path="\$handoff_dir\/WAKE_UP_MESSAGE\.md"/);
   assert.match(workflow, /base64 -d > \/tmp\/sealed-successor-wake\.txt/);
   assert.match(workflow, /wake_b64="\$\(base64 -w0 \/tmp\/sealed-successor-wake\.txt\)"/);
+  assert.match(workflow, /SUCCESSOR_HANDOFF\.json/);
+  assert.match(workflow, /handoff_campaign_type/);
+  assert.match(workflow, /handoff_assignment/);
+  assert.match(workflow, /handoff_authority/);
+  assert.match(workflow, /Campaign type: \*\*LITE\*\*/);
+  assert.match(workflow, /current authority Lite skill/);
   assert.match(workflow, /successor_wake_id="\$\{campaign_id\}-\$\{next_id\}-\$\{next_reviewer\}"/);
   assert.match(workflow, /GET BACK TO WORK/);
   assert.doesNotMatch(workflow, /AUDIT_REVIEWER_ROUTINE_V1/);
