@@ -1,4 +1,4 @@
-name: Ultralite Audit Browser Orchestrator v1
+name: Lite Audit Browser Orchestrator v1
 
 on:
   workflow_dispatch:
@@ -80,26 +80,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          api="repos/CurveYield2/Audit-Controller/contents/$CAMPAIGN_PATH/controller/CAMPAIGN_STATE_v1.json?ref=$AUDIT_CONTROLLER_REF"
+          controller_api="repos/CurveYield2/Audit-Controller/contents/$CAMPAIGN_PATH/controller?ref=$AUDIT_CONTROLLER_REF"
+          state_name="$(gh api "$controller_api" --jq '.[].name' | sed -n 's/^\(CAMPAIGN_STATE_v[0-9][0-9]*\.json\)$/\1/p' | sort -V | tail -n1)"
+          pointer_name="$(gh api "$controller_api" --jq '.[].name' | sed -n 's/^\(ACTIVE_PHASE_POINTER_v[0-9][0-9]*\.json\)$/\1/p' | sort -V | tail -n1)"
+          [ -n "$state_name" ] || { echo "::error::No versioned canonical campaign state found"; exit 1; }
+          [ -n "$pointer_name" ] || { echo "::error::No versioned active phase pointer found"; exit 1; }
+          state_path="$CAMPAIGN_PATH/controller/$state_name"
+          pointer_path="$CAMPAIGN_PATH/controller/$pointer_name"
+          api="repos/CurveYield2/Audit-Controller/contents/$state_path?ref=$AUDIT_CONTROLLER_REF"
           encoded="$(gh api "$api" --jq '.content')"
           printf '%s' "$encoded" | base64 -d > /tmp/canonical-campaign-state.json
 
           canonical_id="$(jq -r '.campaignId // empty' /tmp/canonical-campaign-state.json)"
-          canonical_name="$(jq -r '.auditName // .title // empty' /tmp/canonical-campaign-state.json)"
+          canonical_name="$(jq -r '.auditName // .title // .projectSlug // empty' /tmp/canonical-campaign-state.json)"
           canonical_path="$(jq -r '.controller.workspacePath // empty' /tmp/canonical-campaign-state.json)"
           canonical_ref="$(jq -r '.controller.branch // empty' /tmp/canonical-campaign-state.json)"
-          canonical_mode="$(jq -r '.mode // empty' /tmp/canonical-campaign-state.json)"
-          canonical_optional="$(jq -r '.optionalMode // empty' /tmp/canonical-campaign-state.json)"
+          canonical_mode="$(jq -r '.assuranceMode.mode // .mode // empty' /tmp/canonical-campaign-state.json)"
           current_phase="$(jq -r '.phase.id // empty' /tmp/canonical-campaign-state.json)"
-          current_reviewer="$(jq -r '.phase.reviewer // empty' /tmp/canonical-campaign-state.json)"
+          current_reviewer="$(jq -r '.activeReviewer.lineage // .phase.reviewer // empty' /tmp/canonical-campaign-state.json)"
           current_milestone="$(jq -r '.phase.milestoneId // empty' /tmp/canonical-campaign-state.json)"
-          campaign_status="$(jq -r '.campaignStatus // .status // empty' /tmp/canonical-campaign-state.json)"
+          campaign_status="$(jq -r '.campaignCompletionStatus // .campaignStatus // .status // empty' /tmp/canonical-campaign-state.json)"
+          if [ -z "$current_milestone" ] && [ "$current_phase" = "phase-0" ]; then current_milestone="P0_BOOTSTRAP"; fi
 
           [ "$canonical_id" = "$CAMPAIGN_ID" ] || { echo "::error::campaign_id does not match canonical campaign state"; exit 1; }
           [ "$canonical_path" = "$CAMPAIGN_PATH" ] || { echo "::error::campaign_path does not match canonical workspacePath"; exit 1; }
           [ "$canonical_ref" = "$AUDIT_CONTROLLER_REF" ] || { echo "::error::audit_controller_ref does not match canonical controller branch"; exit 1; }
           [ "$canonical_mode" = "LITE" ] || { echo "::error::Campaign is not Lite mode"; exit 1; }
-          [ "$canonical_optional" = "ULTRALITE" ] || { echo "::error::Campaign is not Ultralite"; exit 1; }
           if [ -n "$CAMPAIGN_NAME" ] && [ -n "$canonical_name" ] && [ "$CAMPAIGN_NAME" != "$canonical_name" ]; then
             echo "::error::campaign_name does not match canonical auditName"
             exit 1
@@ -107,11 +113,9 @@ jobs:
 
           if [ "$campaign_status" = "COMPLETE" ] || [ "$campaign_status" = "STOPPED_BY_HUMAN" ]; then
             echo "arm_bootstrap_monitor=false" >> "$GITHUB_OUTPUT"
-          elif [ "$current_phase" = "phase-0" ] && [ "$current_reviewer" = "web-bootstrap-agent" ] && [ "$current_milestone" = "P0_BOOTSTRAP" ]; then
+          elif [ "$current_phase" = "phase-0" ] && [ "$current_reviewer" = "web-bootstrap-agent" ]; then
             echo "arm_bootstrap_monitor=true" >> "$GITHUB_OUTPUT"
           else
-            # The end-to-end chain already progressed beyond bootstrap. Never invent
-            # a new Phase-0 chat on a later campaign state.
             echo "arm_bootstrap_monitor=false" >> "$GITHUB_OUTPUT"
           fi
           echo "canonical_name=$canonical_name" >> "$GITHUB_OUTPUT"
@@ -119,6 +123,8 @@ jobs:
           echo "current_reviewer=$current_reviewer" >> "$GITHUB_OUTPUT"
           echo "current_milestone=$current_milestone" >> "$GITHUB_OUTPUT"
           echo "campaign_status=$campaign_status" >> "$GITHUB_OUTPUT"
+          echo "state_path=$state_path" >> "$GITHUB_OUTPUT"
+          echo "pointer_path=$pointer_path" >> "$GITHUB_OUTPUT"
 
       - name: Create or refresh campaign-chain registration
         id: registration
@@ -143,15 +149,15 @@ jobs:
             --arg campaignId "$CAMPAIGN_ID" \
             --arg projectName "$CAMPAIGN_NAME" \
             --arg ref "$AUDIT_CONTROLLER_REF" \
-            --arg statePath "$CAMPAIGN_PATH/controller/CAMPAIGN_STATE_v1.json" \
-            --arg pointerPath "$CAMPAIGN_PATH/controller/ACTIVE_PHASE_POINTER_v1.json" \
+            --arg statePath "${{ steps.canonical.outputs.state_path }}" \
+            --arg pointerPath "${{ steps.canonical.outputs.pointer_path }}" \
             --arg previousChat "$previous_chat" \
             '{
               schemaVersion:"curveyield-browser-agent-wake-registration-v1",
               campaignId:$campaignId,
               mode:"create_fresh",
               chatUrl:"",
-              browserRoutine:"audit-ultralite-reviewer-v1",
+              browserRoutine:"audit-lite-reviewer-v1",
               chatgptProject:{name:$projectName,url:""},
               activeChat:{name:"",url:""},
               wakeMessage:"",
@@ -183,11 +189,11 @@ jobs:
           content="$(base64 -w0 /tmp/registration.json)"
           if [ -n "$current_sha" ]; then
             gh api --method PUT "$api" \
-              -f message="chore(audit): bind ultralite bootstrap monitor $CAMPAIGN_ID" \
+              -f message="chore(audit): bind lite bootstrap monitor $CAMPAIGN_ID" \
               -f content="$content" -f sha="$current_sha" -f branch=main >/dev/null
           else
             gh api --method PUT "$api" \
-              -f message="chore(audit): register ultralite bootstrap monitor $CAMPAIGN_ID" \
+              -f message="chore(audit): register lite bootstrap monitor $CAMPAIGN_ID" \
               -f content="$content" -f branch=main >/dev/null
           fi
           echo "registration=$registration" >> "$GITHUB_OUTPUT"
@@ -254,7 +260,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "## Ultralite audit browser orchestration"
+            echo "## Lite audit browser orchestration"
             echo
             echo "- Campaign: $CAMPAIGN_NAME"
             echo "- Campaign ID: $CAMPAIGN_ID"
