@@ -15,6 +15,15 @@ function decodeKey(encoded) {
   return key;
 }
 
+export function deriveSessionStateKeyB64({ keyB64 = '', bootstrapStateB64 = '' } = {}) {
+  if (keyB64) return keyB64;
+  if (!bootstrapStateB64) return '';
+  return crypto.createHash('sha256')
+    .update('curveyield-chatgpt-session-cache-key-v1\0', 'utf8')
+    .update(String(bootstrapStateB64), 'utf8')
+    .digest('base64');
+}
+
 export function validateStorageState(storage) {
   return !!storage
     && typeof storage === 'object'
