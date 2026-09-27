@@ -23,12 +23,6 @@ on:
         default: resume_existing
         type: choice
         options: [resume_existing, create_fresh]
-      message_purpose:
-        description: First reviewer launch, ordinary poke, or one-time repair context message
-        required: false
-        default: standard
-        type: choice
-        options: [standard, repair_notice]
       chat_url:
         required: false
         type: string
@@ -124,7 +118,6 @@ jobs:
       CHATGPT_THINKING_EFFORT: ${{ inputs.thinking_effort }}
       WORKER_ROLE: ${{ inputs.worker_role }}
       WAKE_MODE: ${{ inputs.mode }}
-      MESSAGE_PURPOSE: ${{ inputs.message_purpose }}
       CHAT_URL: ${{ inputs.chat_url }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
       CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
@@ -191,12 +184,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ -n "${BROWSER_CONTEXT_B64:-}" ]; then
+            printf '%s' "$BROWSER_CONTEXT_B64" | base64 -d > /tmp/browser-context.json
+          else
+            printf '{}\n' > /tmp/browser-context.json
+          fi
+          message_purpose="$(jq -r '.messagePurpose // "standard"' /tmp/browser-context.json)"
+
           # The full tailored packet is first-message-only. Every later automation
-          # message to an existing reviewer chat is intentionally exactly this string.
+          # message to an existing reviewer chat is exactly GET BACK TO WORK except
+          # the one explicit repair-context message for a replacement chat.
           if [ "$WAKE_MODE" = "create_fresh" ]; then
             printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
             test -s /tmp/wake-message.txt
-          elif [ "$MESSAGE_PURPOSE" = "repair_notice" ]; then
+          elif [ "$message_purpose" = "repair_notice" ]; then
             printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
             test -s /tmp/wake-message.txt
           else
@@ -204,18 +205,13 @@ jobs:
           fi
           printf '%s\n' 'GET BACK TO WORK' > /tmp/watchdog-message.txt
 
-          if [ -n "${BROWSER_CONTEXT_B64:-}" ]; then
-            printf '%s' "$BROWSER_CONTEXT_B64" | base64 -d > /tmp/browser-context.json
-          else
-            printf '{}\n' > /tmp/browser-context.json
-          fi
-
           jq -e '
             type=="object"
             and ((.routineId // "")|type=="string")
             and ((.projectName // "")|type=="string")
             and ((.chatName // "")|type=="string")
             and ((.repair // {})|type=="object")
+            and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="repair_notice")
             and (((.routineId // "") | test("[\\r\\n]")) | not)
             and (((.projectName // "") | test("[\\r\\n]")) | not)
             and (((.chatName // "") | test("[\\r\\n]")) | not)
