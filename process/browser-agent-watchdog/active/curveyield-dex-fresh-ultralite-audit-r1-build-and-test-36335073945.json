@@ -9,7 +9,7 @@
   "lastProvider": "github-playwright",
   "armedAt": "2026-09-27T16:58:55Z",
   "intervalMinutes": 5,
-  "idleMessage": "[AUDIT_AGENT_WATCHDOG_V2]\ncampaign=curveyield-dex-fresh-ultralite-audit-r1\ncurrent_phase=phase-1\nmilestone=P0_1\nreviewer=reviewer-1\nreasoning_effort=high\n\nGET BACK TO WORK. Resume the current Phase-1 audit assignment from the latest durable evidence. Do not restart Phase 0 or completed bootstrap work. If a technical subtask has its own phase label, keep Phase 1 as the semantic audit phase. Continue until the Phase-1 assignment reaches its required terminal state.",
+  "idleMessage": "[AUDIT_AGENT_WATCHDOG_V2]\ncampaign=curveyield-dex-fresh-ultralite-audit-r1\ncurrent_phase=phase-1\nmilestone=P0_1\nreviewer=reviewer-1\nreasoning_effort=high\n\nGET BACK TO WORK. Resume the current Phase-1 audit assignment from the latest durable evidence. Do not restart predecessor or completed bootstrap work. If a technical subtask has its own phase label, keep Phase 1 as the semantic audit phase. Continue until the Phase-1 assignment reaches its required terminal state.",
   "observation": {
     "assistantCount": 0,
     "lastAssistantHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
