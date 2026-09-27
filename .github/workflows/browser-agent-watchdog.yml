@@ -505,6 +505,8 @@ jobs:
             next_id="$(jq -r '.nextMilestone.id // empty' /tmp/lite-active-pointer.json)"
             next_state="$(jq -r '.nextMilestone.state // empty' /tmp/lite-active-pointer.json)"
             next_reviewer="$(jq -r '.nextMilestone.reviewer // empty' /tmp/lite-active-pointer.json)"
+            next_phase="$(jq -r '.nextMilestone.phaseRange[0] // empty' /tmp/lite-active-pointer.json)"
+            if [ -n "$next_phase" ]; then next_phase="phase-$next_phase"; else next_phase="$next_id"; fi
 
             [ "$completed_id" = "$expected_milestone" ] || return 2
             case "$completed_status" in
@@ -662,7 +664,9 @@ jobs:
               printf '%s\n' '[AUDIT_REVIEWER_ROUTINE_V1]'
               printf 'campaign_name=%s\n' "$campaign_title"
               printf 'reviewer=%s\n' "$next_reviewer"
+              printf 'phase=%s\n' "$next_phase"
               printf 'milestone=%s\n' "$next_id"
+              printf '%s\n' 'reasoning_effort=high'
               printf 'campaign_url=%s\n' "$campaign_url"
               printf 'audit_skill_url=%s\n' "$skill_url"
               printf 'audit_skill_authority_source=%s\n' "$skill_authority_source"
@@ -695,8 +699,6 @@ jobs:
               mv /tmp/lite-successor-wake-with-mechanical.txt /tmp/lite-successor-wake.txt
             fi
 
-            next_phase="$(jq -r '.nextMilestone.phaseRange[0] // empty' /tmp/lite-active-pointer.json)"
-            if [ -n "$next_phase" ]; then next_phase="phase-$next_phase"; else next_phase="$next_id"; fi
             successor_wake_id="${campaign_id}-${next_id}-${GITHUB_RUN_ID}-${cycle}"
             wake_b64="$(base64 -w0 /tmp/lite-successor-wake.txt)"
             browser_context_b64="$(jq -nc \
