@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { deriveSessionStateKeyB64, loadEncryptedSessionState, saveEncryptedSessionState, validateStorageState } from './browser-session-state-v1.mjs';
+import { loadBrowserRoutine, runBrowserRoutineStage } from './browser-routine-engine-v1.mjs';
 
 const env = process.env;
 const action = env.WAKE_ACTION || 'wake';
@@ -12,6 +13,9 @@ const mode = env.WAKE_MODE || 'resume_existing';
 const wakeId = env.WAKE_ID || crypto.randomUUID();
 const wakeMessage = env.WAKE_MESSAGE || '';
 const requestedUrl = env.CHAT_URL || '';
+const browserRoutineId = env.BROWSER_ROUTINE_ID || '';
+const projectName = env.CHATGPT_PROJECT_NAME || '';
+const requestedChatName = env.CHATGPT_CHAT_NAME || '';
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 const encryptedSessionPath = env.CHATGPT_SESSION_STATE_PATH || '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
 const sessionUpdatedMarker = env.CHATGPT_SESSION_STATE_UPDATED_MARKER || '/tmp/curveyield-browser-agent/session-state-updated';
@@ -243,6 +247,22 @@ async function runWithPage(providerName, connect) {
       await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForTimeout(1500);
     }
+
+    let routine = null;
+    let routineBefore = [];
+    let projectUrl = '';
+    if (mode === 'create_fresh' && browserRoutineId) {
+      routine = await loadBrowserRoutine(browserRoutineId);
+      routineBefore = await runBrowserRoutineStage({
+        page,
+        routine,
+        stage: 'before_message',
+        vars: { projectName, chatName: requestedChatName, campaignId: env.CAMPAIGN_ID || '', phaseId: env.PHASE_ID || '' },
+      });
+      const projectResult = [...routineBefore].reverse().find((entry) => entry?.result?.projectUrl)?.result;
+      projectUrl = projectResult?.projectUrl || '';
+    }
+
     const before = await snapshot(page);
 
     if (action === 'observe') {
@@ -287,10 +307,27 @@ async function runWithPage(providerName, connect) {
       after.url = page.url();
     }
 
+    let routineAfter = [];
+    if (routine) {
+      routineAfter = await runBrowserRoutineStage({
+        page,
+        routine,
+        stage: 'after_message',
+        vars: { projectName, chatName: requestedChatName, campaignId: env.CAMPAIGN_ID || '', phaseId: env.PHASE_ID || '' },
+      });
+      after = await snapshot(page);
+    }
+
+    const renameResult = [...routineAfter].reverse().find((entry) => entry.operation === 'chatgpt.rename_current_chat')?.result || null;
     const sessionStatePersisted = await persistHealthySession(providerName, context, after);
     const result = {
       ok: true, provider: providerName, action, wakeId, posted: true, before, after, sessionStatePersisted,
       chatUrl: after.url,
+      browserRoutineId: browserRoutineId || null,
+      projectName: projectName || null,
+      projectUrl: projectUrl || null,
+      requestedChatName: requestedChatName || null,
+      chatRenamed: renameResult?.renamed ?? null,
       ...(response ? { responded: response.responded, waitedMs: response.waitedMs } : {})
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
