@@ -1,8 +1,8 @@
 {
   "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
   "campaignId": "curveyield-dex-fresh-ultralite-audit-r1",
-  "mode": "create_fresh",
-  "chatUrl": "",
+  "mode": "resume_existing",
+  "chatUrl": "https://chatgpt.com/c/6ab94022-0680-83e8-b38c-d6963829eeb4",
   "browserRoutine": "audit-ultralite-reviewer-v1",
   "chatgptProject": {
     "name": "",
@@ -10,7 +10,7 @@
   },
   "activeChat": {
     "name": "",
-    "url": ""
+    "url": "https://chatgpt.com/c/6ab94022-0680-83e8-b38c-d6963829eeb4"
   },
   "wakeMessage": "[AUDIT_AUTOMATION_WAKE_V1]\nResume the admitted audit from the latest durable completion evidence. Do not restart completed work. Continue the current assignment until its required terminal state.",
   "watchdog": {
@@ -41,5 +41,5 @@
       "unviewableThreshold": 2
     }
   },
-  "updatedAt": "2026-09-27T16:10:00Z"
+  "updatedAt": "2026-09-27T16:11:20Z"
 }
