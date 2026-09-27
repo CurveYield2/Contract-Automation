@@ -432,9 +432,10 @@ jobs:
             local expected_milestone="$2"
             local gate_repo="$3"
             local gate_ref="$4"
-            local encoded_pointer completed_id completed_status next_id next_state handoff_path handoff_dir wake_path encoded_wake wake_b64 next_phase successor_wake_id
+            local encoded_pointer completed_id completed_status next_id next_state next_reviewer handoff_path handoff_dir wake_path encoded_wake wake_b64 next_phase successor_wake_id
             local packet_path completion_path encoded_packet packet_sha instructions mechanical_message mechanical_b64 mechanical_wake_id
             local legacy_packet_path legacy_encoded reconciliation_output verified_output_count
+            local campaign_root campaign_title campaign_url project_name chat_name skill_path skill_url state_skill_rel newest_skill newest_skill_date candidate candidate_date
 
             [ -n "$pointer_path" ] || return 2
             encoded_pointer="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$pointer_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
@@ -445,6 +446,7 @@ jobs:
             completed_status="$(jq -r '.completedMilestone.status // empty' /tmp/lite-active-pointer.json)"
             next_id="$(jq -r '.nextMilestone.id // empty' /tmp/lite-active-pointer.json)"
             next_state="$(jq -r '.nextMilestone.state // empty' /tmp/lite-active-pointer.json)"
+            next_reviewer="$(jq -r '.nextMilestone.reviewer // empty' /tmp/lite-active-pointer.json)"
 
             [ "$completed_id" = "$expected_milestone" ] || return 2
             case "$completed_status" in
@@ -522,6 +524,59 @@ jobs:
               return 2
             fi
 
+            campaign_root="${pointer_path%/controller/*}"
+            campaign_title="$(jq -r '.title // .projectSlug // .campaignId // empty' /tmp/canonical-campaign-state.json)"
+            [ -n "$campaign_title" ] || campaign_title="$campaign_id"
+            [ -n "$next_reviewer" ] || next_reviewer="$next_id"
+            project_name="$campaign_title"
+            chat_name="$campaign_title $next_reviewer"
+            campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(printf '%s' "$campaign_root" | sed 's/ /%20/g')"
+
+            state_skill_rel="$(jq -r '.skillAuthority.current.campaignPath // empty' /tmp/canonical-campaign-state.json)"
+            skill_path=""
+            newest_skill=""
+            newest_skill_date=""
+            authority_listing="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$campaign_root/authority?ref=$gate_ref" 2>/dev/null || true)"
+            if [ -n "$authority_listing" ]; then
+              while IFS= read -r candidate; do
+                [ -n "$candidate" ] || continue
+                candidate_date="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api --method GET "repos/$gate_repo/commits" -f path="$candidate" -f sha="$gate_ref" -f per_page=1 --jq '.[0].commit.committer.date // empty' 2>/dev/null || true)"
+                [ -n "$candidate_date" ] || continue
+                if [ -z "$newest_skill_date" ] || [[ "$candidate_date" > "$newest_skill_date" ]]; then
+                  newest_skill="$candidate"
+                  newest_skill_date="$candidate_date"
+                fi
+              done < <(printf '%s' "$authority_listing" | jq -r '.[]? | select(.type=="file" and (.name|test("skill.*\\.zip$";"i"))) | .path')
+            fi
+            if [ -n "$newest_skill" ]; then
+              skill_path="$newest_skill"
+            elif [ -n "$state_skill_rel" ]; then
+              skill_path="$campaign_root/$state_skill_rel"
+            fi
+            [ -n "$skill_path" ] || {
+              echo "::warning::No audit skill ZIP could be resolved for successor $next_reviewer."
+              return 2
+            }
+            skill_url="https://github.com/$gate_repo/blob/$gate_ref/$(printf '%s' "$skill_path" | sed 's/ /%20/g')"
+
+            {
+              printf '%s\n' '[AUDIT_REVIEWER_ROUTINE_V1]'
+              printf 'campaign_name=%s\n' "$campaign_title"
+              printf 'reviewer=%s\n' "$next_reviewer"
+              printf 'milestone=%s\n' "$next_id"
+              printf 'campaign_url=%s\n' "$campaign_url"
+              printf 'latest_audit_skill_url=%s\n' "$skill_url"
+              printf 'authoritative_handoff=%s\n' "$handoff_path"
+              printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT_IN_CAMPAIGN_PROJECT; do not use Work.'
+              printf '%s\n' 'connector_requirement=Use the GitHub connector app for repository reads/writes and campaign work.'
+              printf '%s\n' 'authority_rule=The latest audit skill file URL above is the ultimate methodology authority. Read it before doing reviewer work and follow its instructions exactly unless a newer explicit human instruction in this chat overrides it.'
+              printf '%s\n' 'continuation_rule=Continue from the sealed handoff and latest durable campaign state. Do not restart sealed/completed work for convenience.'
+              printf '%s\n' 'completion_rule=Run your assigned reviewer process through its required terminal handoff/final-report state so the automation can launch the next reviewer automatically.'
+              printf '\n%s\n\n' '[SEALED_SUCCESSOR_WAKE_PACKET]'
+              cat /tmp/lite-successor-wake.txt
+            } > /tmp/lite-successor-wake-enveloped.txt
+            mv /tmp/lite-successor-wake-enveloped.txt /tmp/lite-successor-wake.txt
+
             if [ -n "$encoded_packet" ] && [ -s /tmp/lite-interphase-completion.json ] && [ -s /tmp/lite-interphase-work-packet.json ]; then
               reconciliation_output="$(jq -r '.reconciliationOutputPath // empty' /tmp/lite-interphase-work-packet.json)"
               verified_output_count="$(jq '.outputs | length' /tmp/lite-interphase-completion.json)"
@@ -561,7 +616,10 @@ jobs:
               -f gate_state_path="$gate_path" \
               -f gate_expected_phase_id="$next_phase" \
               -f gate_expected_milestone_id="$next_id" \
-              -f gate_active_pointer_path="$pointer_path"
+              -f gate_active_pointer_path="$pointer_path" \
+              -f browser_routine_id="audit-ultralite-reviewer-v1" \
+              -f project_name="$project_name" \
+              -f chat_name="$chat_name"
             return 0
           }
 
@@ -652,11 +710,6 @@ jobs:
 
                   case "$lite_worker_status" in
                     COMPLETE|COMPLETED|SEALED|PASS)
-                      if [ "$gate_expected_milestone" = "P8_10" ]; then
-                        echo "Final Lite milestone is sealed; retiring watchdog."
-                        retire_state "LITE_FINAL_MILESTONE_$lite_worker_status"
-                        exit 0
-                      fi
                       if launch_lite_successor "$gate_pointer_path" "$gate_expected_milestone" "$gate_repo" "$gate_ref"; then
                         retire_state "LITE_SUCCESSOR_DISPATCHED_$gate_expected_milestone"
                         exit 0
