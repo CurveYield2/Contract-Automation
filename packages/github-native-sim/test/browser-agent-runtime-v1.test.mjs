@@ -79,3 +79,13 @@ test('missing-composer diagnostics classify state without logging page body text
   assert.match(source, /editableCount=/);
   assert.doesNotMatch(source, /bodyText\s*\+|JSON\.stringify\(bodyText\)/);
 });
+
+
+test('browser wake allows bounded time for ChatGPT browser challenge to resolve', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /const deadline = Date\.now\(\) \+ 30000/);
+  assert.match(source, /while \(!composer && Date\.now\(\) < deadline\)/);
+  assert.match(source, /await page\.waitForTimeout\(1000\)/);
+  assert.match(source, /ChatGPT composer not found after 30s/);
+  assert.match(source, /Just a moment\|Cloudflare\/i\.test\(title\)/);
+});
