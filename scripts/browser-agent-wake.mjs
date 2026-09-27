@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { loadEncryptedSessionState, saveEncryptedSessionState, validateStorageState } from './browser-session-state-v1.mjs';
 
 const env = process.env;
 const action = env.WAKE_ACTION || 'wake';
@@ -14,87 +15,27 @@ const requestedUrl = env.CHAT_URL || '';
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 const encryptedSessionPath = env.CHATGPT_SESSION_STATE_PATH || '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
 const sessionUpdatedMarker = env.CHATGPT_SESSION_STATE_UPDATED_MARKER || '/tmp/curveyield-browser-agent/session-state-updated';
-const sessionStateAad = Buffer.from('curveyield-chatgpt-session-state-v1', 'utf8');
 
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
 function bool(v) { return String(v || '').toLowerCase() === 'true'; }
 
-function sessionStateKey() {
-  const encoded = env.CHATGPT_SESSION_STATE_KEY_B64 || '';
-  if (!encoded) return null;
-  const key = Buffer.from(encoded, 'base64');
-  if (key.length !== 32) throw new Error('CHATGPT_SESSION_STATE_KEY_B64 must decode to exactly 32 bytes');
-  return key;
-}
-
-function validateStorageState(storage) {
-  return !!storage && typeof storage === 'object' && Array.isArray(storage.cookies) && Array.isArray(storage.origins);
-}
-
-async function loadEncryptedSessionState() {
-  const key = sessionStateKey();
-  if (!key) return null;
-  let envelope;
-  try {
-    envelope = JSON.parse(await fs.readFile(encryptedSessionPath, 'utf8'));
-  } catch (error) {
-    if (error?.code === 'ENOENT') return null;
-    console.warn('[github-playwright] Cached session state is unreadable; falling back to bootstrap state');
-    return null;
-  }
-  try {
-    if (envelope?.schemaVersion !== 'curveyield-chatgpt-session-state-v1') throw new Error('unexpected schema');
-    if (envelope?.cipher !== 'aes-256-gcm') throw new Error('unexpected cipher');
-    const iv = Buffer.from(envelope.iv || '', 'base64');
-    const tag = Buffer.from(envelope.tag || '', 'base64');
-    const ciphertext = Buffer.from(envelope.ciphertext || '', 'base64');
-    if (iv.length !== 12 || tag.length !== 16 || ciphertext.length === 0) throw new Error('invalid envelope');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    decipher.setAAD(sessionStateAad);
-    decipher.setAuthTag(tag);
-    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    const storage = JSON.parse(plaintext.toString('utf8'));
-    if (!validateStorageState(storage)) throw new Error('invalid storage state');
-    return storage;
-  } catch {
-    console.warn('[github-playwright] Cached session state failed authenticated decryption; falling back to bootstrap state');
-    return null;
-  }
-}
-
-async function saveEncryptedSessionState(context) {
-  const key = sessionStateKey();
-  if (!key) return false;
-  const storage = await context.storageState();
-  if (!validateStorageState(storage)) throw new Error('Playwright returned invalid storage state');
-  const plaintext = Buffer.from(JSON.stringify(storage), 'utf8');
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  cipher.setAAD(sessionStateAad);
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const envelope = {
-    schemaVersion: 'curveyield-chatgpt-session-state-v1',
-    cipher: 'aes-256-gcm',
-    iv: iv.toString('base64'),
-    tag: cipher.getAuthTag().toString('base64'),
-    ciphertext: ciphertext.toString('base64'),
-  };
-  await fs.mkdir(path.dirname(encryptedSessionPath), { recursive: true });
-  const tmp = encryptedSessionPath + '.tmp-' + process.pid;
-  await fs.writeFile(tmp, JSON.stringify(envelope) + '\n', { mode: 0o600 });
-  await fs.rename(tmp, encryptedSessionPath);
-  await fs.mkdir(path.dirname(sessionUpdatedMarker), { recursive: true });
-  await fs.writeFile(sessionUpdatedMarker, new Date().toISOString() + '\n', { mode: 0o600 });
-  return true;
-}
-
 async function persistHealthySession(providerName, context, state) {
   if (providerName !== 'github-playwright') return false;
   if (!state?.composerVisible || !/^https:\/\/chatgpt\.com\//.test(state.url || '')) return false;
   try {
-    return await saveEncryptedSessionState(context);
+    const storage = await context.storageState();
+    const persisted = await saveEncryptedSessionState({
+      encryptedSessionPath,
+      keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
+      storage,
+    });
+    if (persisted) {
+      await fs.mkdir(path.dirname(sessionUpdatedMarker), { recursive: true });
+      await fs.writeFile(sessionUpdatedMarker, new Date().toISOString() + '\n', { mode: 0o600 });
+    }
+    return persisted;
   } catch (error) {
     console.warn('[github-playwright] Refreshed session state could not be persisted: ' + error.message);
     return false;
@@ -296,7 +237,10 @@ async function runWithPage(providerName, connect) {
 }
 
 async function localProvider(chromium) {
-  let storage = await loadEncryptedSessionState();
+  let storage = await loadEncryptedSessionState({
+    encryptedSessionPath,
+    keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
+  });
   let source = storage ? 'encrypted-cache' : '';
   if (!storage && env.CHATGPT_STORAGE_STATE_B64) {
     try {
