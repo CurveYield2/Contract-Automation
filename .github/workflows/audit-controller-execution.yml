@@ -701,22 +701,55 @@ jobs:
             fi
           fi
 
+          campaign_path=""
+          campaign_name=""
+          campaign_controller_ref=""
+          campaign_mode=""
           if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ]; then
-            campaign_id="$(jq -r '.campaignId // empty' ".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH")"
-            request_phase_id="$(jq -r '.phaseId // empty' ".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH")"
+            private_request=".controller-operation/$AUDIT_CONTROLLER_REQUEST_PATH"
+            campaign_id="$(jq -r '.campaignId // empty' "$private_request")"
+            request_phase_id="$(jq -r '.phaseId // empty' "$private_request")"
+            campaign_path="$(jq -r '.campaignPath // empty' "$private_request")"
+            handoff_input="$(jq -r '.handoffInputPath // empty' "$private_request")"
+            if [ -z "$campaign_path" ] && [[ "$handoff_input" == campaigns/*/handoffs/* ]]; then
+              campaign_path="${handoff_input%/handoffs/*}"
+            fi
+            if [ -n "$campaign_path" ] && [ -d ".controller-operation/$campaign_path/controller" ]; then
+              state_file="$(find ".controller-operation/$campaign_path/controller" -maxdepth 1 -type f -name 'CAMPAIGN_STATE_v*.json' -printf '%f\n' | sort -V | tail -n1)"
+              if [ -n "$state_file" ]; then
+                state_path=".controller-operation/$campaign_path/controller/$state_file"
+                [ -n "$campaign_id" ] || campaign_id="$(jq -r '.campaignId // empty' "$state_path")"
+                campaign_name="$(jq -r '.auditName // .title // .projectSlug // .campaignId // empty' "$state_path")"
+                campaign_controller_ref="$(jq -r '.controller.branch // empty' "$state_path")"
+                campaign_mode="$(jq -r '.assuranceMode.mode // .mode // empty' "$state_path")"
+              fi
+            fi
+            if [ -z "$campaign_id" ] && [ -n "$handoff_input" ] && [ -f ".controller-operation/$handoff_input" ]; then
+              campaign_id="$(jq -r '.campaign.campaignId // empty' ".controller-operation/$handoff_input")"
+            fi
           else
             campaign_id="$(jq -r '.campaignId // empty' .v7-request/request.json)"
             request_phase_id="$(jq -r '.phaseId // empty' .v7-request/request.json)"
           fi
           if [ -z "$campaign_id" ]; then
-            echo 'No campaignId on this request; browser-agent wake not applicable.'
+            echo 'No campaign identity can be resolved for this request; browser-agent wake is not applicable.'
             exit 0
           fi
 
           safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
           registration="process/browser-agent-wake/registrations/$safe_campaign.json"
           if [ ! -f "$registration" ]; then
-            echo "No browser-agent wake registration for $campaign_id; execution remains unchanged."
+            if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "$campaign_mode" = "LITE" ] && [ -n "$campaign_path" ] && [ -n "$campaign_controller_ref" ]; then
+              echo "Lite campaign $campaign_id has no browser registration; dispatching automatic registration/watchdog repair."
+              gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+                -f campaign_id="$campaign_id" \
+                -f campaign_name="$campaign_name" \
+                -f campaign_path="$campaign_path" \
+                -f audit_controller_ref="$campaign_controller_ref"
+              echo "Browser automation registration repair dispatched for $campaign_id."
+              exit 0
+            fi
+            echo "::warning::No browser-agent wake registration for $campaign_id and no admitted Lite self-repair context was available."
             exit 0
           fi
 
@@ -729,6 +762,12 @@ jobs:
           mode="resume_existing"
           chat_url="$(jq -r '.activeChat.url // .chatUrl // empty' "$registration")"
           if [[ ! "$chat_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+ ]]; then
+            gate_mode_probe="$(jq -r '.watchdog.gate.mode // empty' "$registration")"
+            bootstrap_status="$(jq -r '.bootstrapMonitor.status // empty' "$registration")"
+            if [ "$gate_mode_probe" = "LITE" ] && { [ "$bootstrap_status" = "ACTIVE" ] || [ "$bootstrap_status" = "NOT_APPLICABLE" ]; }; then
+              echo "Lite campaign monitor is registered without an active chat; its watchdog owns canonical-state transition/successor launch."
+              exit 0
+            fi
             echo "::warning::No active reviewer chat URL for $campaign_id; technical callback will not create a replacement chat."
             exit 0
           fi

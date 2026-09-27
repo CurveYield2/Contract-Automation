@@ -168,8 +168,8 @@
     },
     {
       "step": 13,
-      "action": "File the Web Bootstrap Completion Report",
-      "instruction": "File exact automation/request/run/job/artifact identities, output digests, blockers and validation state.",
+      "action": "Freeze the Web Bootstrap Completion Report",
+      "instruction": "File the immutable Phase-0 evidence report with automation/request/run/job/artifact identities and pre-handoff output digests. Mark it READY_FOR_HANDOFF_CONSTRUCTION. Do not include P0_TO_P1 validation/digests or wake-message hashes; Step 14 binds to this frozen report and must never require rewriting it.",
       "requirement": "MANDATORY",
       "condition": null,
       "resources": [
@@ -179,7 +179,7 @@
     {
       "step": 14,
       "action": "Create and validate P0_TO_P1 successor package and Phase-1 wake message",
-      "instruction": "Create and validate SUCCESSOR_HANDOFF.json, START_HERE_SUCCESSOR.md, and the standardized WAKE_UP_MESSAGE.md for fresh reviewer-1 before requesting controller completion validation. The wake message must identify this as a Lite campaign, name and link the exact campaign folder, point to the current authority Lite SKILL.md, identify reviewer-1, and state that reviewer-1 is responsible for Phase 1.",
+      "instruction": "Using the already-frozen Step-13 report digest, create and validate SUCCESSOR_HANDOFF.json, START_HERE_SUCCESSOR.md, and the standardized WAKE_UP_MESSAGE.md for fresh reviewer-1 before requesting controller completion validation. Never mutate the frozen Step-13 report after the handoff binds its digest.",
       "requirement": "MANDATORY",
       "condition": null,
       "resources": [
@@ -302,7 +302,7 @@
     "Bootstrap Audit Surface Manifest is complete and exact-source/build-bound, including neutral documented inputs, dependency/standards identities and reusable structural index references.",
     "Security Traceability Graph and obligation ledger are updated for Phase 0; no due OPEN/IN_PROGRESS Phase-0 obligation remains.",
     "Every material observed change is classified under EVIDENCE_INVALIDATION_MATRIX.",
-    "PHASE0_WEB_BOOTSTRAP_COMPLETION_REPORT is complete, frozen, digest-bound, and states READY_FOR_CONTROLLER_VALIDATION rather than self-certifying controller PASS.",
+    "PHASE0_WEB_BOOTSTRAP_COMPLETION_REPORT is complete, frozen exactly once before handoff construction, digest-bound, and states READY_FOR_HANDOFF_CONSTRUCTION; it contains no Step-14 handoff-validation result or wake-message digest that would create a rewrite/rebind cycle.",
     "P0_TO_P1 SUCCESSOR_HANDOFF.json, START_HERE_SUCCESSOR.md, and standardized Phase-1 WAKE_UP_MESSAGE.md are complete, exact-identity-bound and handoff-validation PASS before controller completion validation is requested."
   ],
   "recoveryRoutes": [
@@ -350,7 +350,7 @@
   "postCompletionValidationProcedure": {
     "order": "AFTER_ALL_PHASE_CONTRACT_STEPS_AND_SEALING_CRITERIA_PASS",
     "steps": [
-      "Submit the audit-phase-completion-report-v1 companion bound to the frozen Phase-0 report, outputs, step dispositions, sealing-criterion evidence, campaign generation, reviewer lineage and source identity.",
+      "Submit the audit-phase-completion-report-v1 companion bound to the frozen Step-13 Phase-0 report plus the separately validated Step-14 P0_TO_P1 package/wake-message evidence, output digests, step dispositions, sealing-criterion evidence, campaign generation, reviewer lineage and source identity.",
       "Obtain the machine-generated PHASE_COMPLETION_VALIDATION_v1.json receipt with status PASS. This PASS is an output of controller validation and MUST NOT be required as an input to the same validation.",
       "Require the Phase-0 retirement gate to verify the bound Phase completion PASS, required automation-completion PASS, and P0_TO_P1 successor-handoff validation PASS.",
       "Only after the retirement gate reports PASS may controller state enter WAITING_FOR_SUCCESSOR_AGENT and the web-bootstrap-agent retire."

@@ -38,20 +38,17 @@ This is the immutable **pre-validation** Phase-0 retirement-control report, not 
 ## Semantic authority exclusions
 Phase 0 did **not** assign or decide: protected-asset priority, trust assumptions, threat hypotheses, standards conformance, exploitability, candidate validity, finding severity, remediation correctness, or security verdict.
 
-## Pre-validation completion gate
+## Pre-handoff freeze gate
 - Unresolved mechanical blockers: `0 | <count>`
 - Due Phase-0 OPEN/IN_PROGRESS obligations: `0 | <count>`
-- P0_TO_P1 handoff validation: `PASS | FAIL | BLOCKED`
-- P0_TO_P1 handoff validation evidence/reference:
-- Phase-1 `WAKE_UP_MESSAGE.md` reference / SHA-256:
-- Wake message confirms campaign type `LITE`: `YES | NO`
-- Wake message includes exact campaign name and campaign-folder URL: `YES | NO`
-- Wake message points to the current authority Lite `SKILL.md`: `YES | NO`
-- Wake message assigns `reviewer-1` to Phase 1: `YES | NO`
-- Ready to submit `audit-phase-completion-report-v1` companion: `YES | NO`
+- Every Step-1–12 required output is filed at its Phase Contract path: `YES | NO`
+- Every required automation run is terminal with exact request/run/job/artifact identity recorded: `YES | NO`
+- Frozen report ready to bind into Step-14 P0_TO_P1 construction: `YES | NO`
+
+**Do not record P0_TO_P1 validation status, handoff digest, or WAKE_UP_MESSAGE digest in this report.** Those are later Step-14 artifacts. The handoff binds to this report's frozen digest; this report must not be rewritten after that binding.
 
 ## Post-report machine validation
 Controller completion validation is produced **after this report is frozen**. Record the generated `PHASE_COMPLETION_VALIDATION_v1.json` and retirement-gate receipts separately; do not modify this report afterward or its bound digest becomes stale.
 
 ## Status
-`READY_FOR_CONTROLLER_VALIDATION | BLOCKED`
+`READY_FOR_HANDOFF_CONSTRUCTION | BLOCKED`

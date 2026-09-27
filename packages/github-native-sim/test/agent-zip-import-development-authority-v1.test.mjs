@@ -75,7 +75,7 @@ test('development authority copy is independently re-read and hash verified', ()
 test('cross-repository credentials and Phase-0 wake remain audit-source-only', () => {
   assert.match(workflow, /Select working Audit-Controller credential\n\s+if: steps\.meta\.outputs\.mode == 'audit_source_fanout'/);
   assert.match(workflow, /Verify cross-repository credential\n\s+if: steps\.meta\.outputs\.mode == 'audit_source_fanout'/);
-  assert.match(workflow, /Launch registered Phase-0 browser agent\n\s+if: steps\.meta\.outputs\.mode == 'audit_source_fanout'/);
+  assert.match(workflow, /Arm canonical Lite campaign monitor after source fan-out\n\s+if: steps\.meta\.outputs\.mode == 'audit_source_fanout'/);
 });
 
 test('development authority schema is strict and Contract-Automation-only', () => {

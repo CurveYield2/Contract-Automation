@@ -107,3 +107,10 @@ Applied an in-place authority repair without changing the package revision or au
 
 All Lite fresh-reviewer wake messages now use one mandatory standard that identifies the campaign as `LITE`, the exact campaign folder name and URL, controller `workspacePath`, the current authority Lite `SKILL.md` location in `CurveYield2/Contract-Automation/Audit Skill - Current Authority`, the incoming reviewer, and the exact phase/milestone the waking reviewer owns.
 
+
+
+## v38.3.3 current-authority in-place Lite completion and browser-chain repair
+
+Repaired the Lite Phase-0 completion boundary without renaming the skill's required campaign outputs. Phase 0 now freezes its Web Bootstrap Completion Report exactly once before successor construction, and the P0_TO_P1 handoff binds to that frozen digest without requiring a report rewrite/rebind cycle. Contract-Automation now projects Phase-0 machine evidence into the exact existing canonical Lite Phase-Contract output paths rather than changing the skill contract to match runner-internal filenames.
+
+The browser automation is now Lite-native: Ultralite is not an admission requirement. Campaign monitoring follows the newest versioned campaign state/pointer, successor launch consumes the current Lite controller state schema, missing Lite registrations self-repair through the generic Lite browser orchestrator, and source fan-out no longer requires a registration before invoking the workflow that creates it. These are orchestration/reliability repairs; they do not reduce the retained Lite security-review methodology.

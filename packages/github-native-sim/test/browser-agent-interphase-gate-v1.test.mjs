@@ -68,7 +68,7 @@ function exercise(mutate = () => {}, launch = false) {
         campaignId: 'synthetic',
         auditName: 'Synthetic Audit',
         mode: 'LITE',
-        optionalMode: 'ULTRALITE',
+        
         controller: { workspacePath: 'campaigns/synthetic' },
         routingPlan: { workers: [{ lineage: 'reviewer-1', milestone: 'P1', status: 'NOT_STARTED' }] }
       }),
@@ -184,7 +184,7 @@ test('sealed P0 synthetic packet validates and dispatches one successor with ver
   const browserContextEncoded = dispatched.match(/browser_context_b64=([A-Za-z0-9+/=]+)/)?.[1];
   assert.ok(browserContextEncoded, dispatched);
   const browserContext = JSON.parse(Buffer.from(browserContextEncoded, 'base64').toString('utf8'));
-  assert.equal(browserContext.routineId, 'audit-ultralite-reviewer-v1');
+  assert.equal(browserContext.routineId, 'audit-lite-reviewer-v1');
   assert.equal(browserContext.projectName, 'Synthetic Audit');
   assert.equal(browserContext.chatName, 'Synthetic Audit reviewer-1');
   assert.equal(browserContext.repair.enabled, true);
