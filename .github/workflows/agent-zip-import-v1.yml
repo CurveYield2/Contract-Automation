@@ -487,22 +487,18 @@ jobs:
              && [ "$gate_expected_milestone" = "P0_BOOTSTRAP" ]; then
             campaign_path="${gate_state_path%/controller/*}"
             campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(printf '%s' "$campaign_path" | sed 's/ /%20/g')"
-            cat > /tmp/source-fanout-phase0-wake.txt <<EOF
-[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1]
-campaign_name=$AUDIT_NAME
-campaign_id=$CAMPAIGN_ID
-campaign_url=$campaign_url
-chat_surface=NORMAL_CHATGPT_WEB_CHAT; do not use Work.
-connector_requirement=Use the GitHub connector app for all repository reads/writes.
-
-Resume the ultralite audit of the admitted package in the campaign above from the latest durable Phase-0 state. Do not restart completed source fanout or other completed bootstrap work.
-
-Your assignment is Phase 0 only. Resolve audit skill authority from GitHub using this precedence: campaign-bound skillAuthority.current when present; otherwise CurveYield2/Audit-Controller@main audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json. Legacy newest-ZIP discovery is fallback-only when neither authoritative source exists. Read the resolved skill before doing audit work and follow its active Lite/Ultralite Phase-0 instructions exactly. The resolved audit skill is the ultimate methodology authority unless a newer explicit human instruction in this chat overrides it.
-
-Execute every presently executable Phase-0 step to completion. Write required Phase-0 outputs into the canonical Audit-Controller campaign paths, run the required machine completion validation, create/seal the P0_TO_P1 successor packet/handoff required by the active skill, and leave the canonical controller/pointer in the exact terminal state required for successor launch.
-
-Do not continue into reviewer-1's assigned phases. Once Phase 0 is terminal and P0_TO_P1 is sealed, stop so the Ultralite browser/watchdog control plane can launch reviewer-1 automatically.
-EOF
+            {
+              printf '%s\n' '[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1]'
+              printf 'campaign_name=%s\n' "$AUDIT_NAME"
+              printf 'campaign_id=%s\n' "$CAMPAIGN_ID"
+              printf 'campaign_url=%s\n' "$campaign_url"
+              printf '%s\n' 'chat_surface=NORMAL_CHATGPT_WEB_CHAT; do not use Work.'
+              printf '%s\n' 'connector_requirement=Use the GitHub connector app for all repository reads/writes.'
+              printf '\n%s\n' 'Resume the ultralite audit of the admitted package in the campaign above from the latest durable Phase-0 state. Do not restart completed source fanout or other completed bootstrap work.'
+              printf '\n%s\n' 'Your assignment is Phase 0 only. Resolve audit skill authority from GitHub using this precedence: campaign-bound skillAuthority.current when present; otherwise CurveYield2/Audit-Controller@main audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json. Legacy newest-ZIP discovery is fallback-only when neither authoritative source exists. Read the resolved skill before doing audit work and follow its active Lite/Ultralite Phase-0 instructions exactly. The resolved audit skill is the ultimate methodology authority unless a newer explicit human instruction in this chat overrides it.'
+              printf '\n%s\n' 'Execute every presently executable Phase-0 step to completion. Write required Phase-0 outputs into the canonical Audit-Controller campaign paths, run the required machine completion validation, create/seal the P0_TO_P1 successor packet/handoff required by the active skill, and leave the canonical controller/pointer in the exact terminal state required for successor launch.'
+              printf '\n%s\n' "Do not continue into reviewer-1's assigned phases. Once Phase 0 is terminal and P0_TO_P1 is sealed, stop so the Ultralite browser/watchdog control plane can launch reviewer-1 automatically."
+            } > /tmp/source-fanout-phase0-wake.txt
             wake_message="$(cat /tmp/source-fanout-phase0-wake.txt)"
             watchdog_message="$wake_message"
           fi
