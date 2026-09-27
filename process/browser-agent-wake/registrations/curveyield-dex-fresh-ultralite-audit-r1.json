@@ -1,8 +1,8 @@
 {
   "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
   "campaignId": "curveyield-dex-fresh-ultralite-audit-r1",
-  "mode": "create_fresh",
-  "chatUrl": "",
+  "mode": "resume_existing",
+  "chatUrl": "https://chatgpt.com/c/6ab944e3-f3c8-83e8-b8c9-8daa8a0b74f1",
   "browserRoutine": "audit-ultralite-reviewer-v1",
   "chatgptProject": {
     "name": "",
@@ -10,7 +10,7 @@
   },
   "activeChat": {
     "name": "",
-    "url": ""
+    "url": "https://chatgpt.com/c/6ab944e3-f3c8-83e8-b8c9-8daa8a0b74f1"
   },
   "wakeMessage": "[ULTRALITE_AUDIT_PHASE0_BOOTSTRAP_V1]\ncampaign_name=CurveYield DEX Fresh Ultralite Audit\ncampaign_id=curveyield-dex-fresh-ultralite-audit-r1\ncampaign_url=https://github.com/CurveYield2/Audit-Controller/tree/audit/curveyield-dex-fresh-ultralite-audit-r1/campaigns/CurveYield%20DEX%20Fresh%20Ultralite%20Audit\nchat_surface=NORMAL_CHATGPT_WEB_CHAT; do not use Work.\nconnector_requirement=Use the GitHub connector app for all repository reads/writes.\n\nResume the ultralite audit of the admitted package in the campaign above from the latest durable Phase-0 state. Do not restart completed source fanout or other completed bootstrap work.\n\nYour assignment is Phase 0 only. Resolve audit skill authority from GitHub using this precedence: campaign-bound skillAuthority.current when present; otherwise CurveYield2/Audit-Controller@main audit-process/v7/LITE_PRIMARY_SKILL_AUTHORITY_v1.json. Legacy newest-ZIP discovery is fallback-only when neither authoritative source exists. Read the resolved skill before doing audit work and follow its active Lite/Ultralite Phase-0 instructions exactly. The resolved audit skill is the ultimate methodology authority unless a newer explicit human instruction in this chat overrides it.\n\nExecute every presently executable Phase-0 step to completion. Write required Phase-0 outputs into the canonical Audit-Controller campaign paths, run the required machine completion validation, create/seal the P0_TO_P1 successor packet/handoff required by the active skill, and leave the canonical controller/pointer in the exact terminal state required for successor launch.\n\nDo not continue into reviewer-1's assigned phases. Once Phase 0 is terminal and P0_TO_P1 is sealed, stop so the Ultralite browser/watchdog control plane can launch reviewer-1 automatically.",
   "watchdog": {
@@ -41,5 +41,5 @@
       "unviewableThreshold": 2
     }
   },
-  "updatedAt": "2026-09-27T16:27:30Z"
+  "updatedAt": "2026-09-27T16:31:39Z"
 }
