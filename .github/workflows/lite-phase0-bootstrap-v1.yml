@@ -89,7 +89,7 @@ jobs:
           git fetch origin "$AUDIT_CONTROLLER_REF"
           git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
 
-      - name: Finalize machine Phase 0 and construct P0_TO_P1
+      - name: Finalize machine Phase 0 receipt
         id: finalize
         shell: bash
         run: |
@@ -98,7 +98,7 @@ jobs:
           test "$(jq -r '.status' /tmp/phase0-finalize.json)" = PASS
           echo "campaign_name=$(jq -r '.campaignName' /tmp/phase0-finalize.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Publish sealed Phase 0 and successor handoff
+      - name: Publish sealed Phase 0 receipt
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
@@ -107,7 +107,7 @@ jobs:
           cd .audit-controller
           git config user.name 'CurveYield Phase0 Automation'
           git config user.email 'phase0-automation@users.noreply.github.com'
-          git add -- "$CAMPAIGN_PATH" .deep-assurance/active
+          git add -- "$CAMPAIGN_PATH" "Audit Campaign Directory/campaigns"
           if git diff --cached --quiet; then
             echo "::error::Phase 0 finalizer produced no durable changes"
             exit 1
@@ -132,7 +132,7 @@ jobs:
             echo "- Campaign: $CAMPAIGN_ID"
             echo "- Source input surface: one ZIP URL through Audit Source Initialization"
             echo "- Phase 0 agent: none"
-            echo "- P0_TO_P1: sealed and validated"
-            echo "- Interphase mechanical packet: not created"
+            echo "- Phase-0 receipt: sealed and validated"
+            echo "- Separate completion/validation/handoff receipt files: not created"
             echo "- First audit agent: reviewer-1 activation dispatched through the existing orchestrator/watchdog system"
           } >> "$GITHUB_STEP_SUMMARY"

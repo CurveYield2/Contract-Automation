@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+import json, os
+from pathlib import Path
+
+e=os.environ
+workspace=e["CAMPAIGN_ROOT"]
+receipt_path=f"{workspace}/receipts/PHASE_00_RECEIPT_v1.json"
+directory_path=e["CAMPAIGN_DIRECTORY_PATH"]
+source={
+  "sha256":e["SOURCE_SHA"],
+  "kind":"URL_INITIALIZED_EXACT_ARCHIVE",
+  "originProvider":e["SOURCE_PROVIDER"],
+  "originUrl":e["SOURCE_URL_CANONICAL"],
+  "uploadedFilename":e["SOURCE_FILENAME"],
+  "byteLength":int(e["SOURCE_SIZE"]),
+  "archiveRepository":"CurveYield2/Audit-Controller",
+  "archiveCommit":e["ADMISSION_COMMIT"],
+  "archivePath":e["SOURCE_PATH"],
+  "archiveGitBlobSha":e["SOURCE_BLOB"],
+  "extractedContentPath":e["SOURCE_DIR"],
+  "extractedTreeSha256":e["TREE_SHA"]
+}
+authority={
+  "repository":"CurveYield2/Audit-Controller",
+  "ref":"main",
+  "authorityFolderPath":"Audit Skill - Current Authority",
+  "homepagePath":e["SKILL_HOME"],
+  "liteSkillPath":e["SKILL_REPO_PATH"],
+  "liteSkillBlobSha":e["SKILL_BLOB"],
+  "liteSkillSha256":e["SKILL_SHA"],
+  "liteRelease":e["SKILL_RELEASE"],
+  "packageRevision":e["SKILL_REVISION"]
+}
+receipt={
+  "schemaVersion":"curveyield-lite-phase-receipt-v1",
+  "campaign":{
+    "campaignId":e["CAMPAIGN_ID"],
+    "campaignGenerationId":e["GENERATION_ID"],
+    "campaignName":e["CAMPAIGN_NAME"],
+    "workspacePath":workspace,
+    "campaignDirectoryEntryPath":directory_path,
+    "mode":"LITE"
+  },
+  "phase":{"sequence":0,"id":"phase-0","revision":1,"status":"ACTIVE"},
+  "executor":{"type":"GITHUB_ACTIONS","lineage":"phase0-automation","workflow":"lite-phase0-bootstrap-v1.yml"},
+  "authority":authority,
+  "source":source,
+  "startedAt":e["CREATED_AT"],"updatedAt":e["CREATED_AT"],"sealedAt":None,
+  "inputs":[{"role":"SOURCE_ZIP","path":e["SOURCE_PATH"],"sha256":e["SOURCE_SHA"]}],
+  "evidence":[],"outputs":[],
+  "globalControls":{"securityTraceabilityGraph":None,"carriedForwardObligationLedger":None,"evidenceInvalidationMatrix":None,"sourceIntelligenceBundle":None},
+  "obligations":{"due":[],"created":[],"closed":[],"carriedForward":[]},
+  "invalidation":{"status":"NO_MATERIAL_CHANGE","events":[]},
+  "automation":[],
+  "validation":{"status":"PENDING","validatedAt":None,"failures":[]},
+  "handoff":{"required":True,"boundary":"P0_TO_P1","incomingReviewer":"reviewer-1","assignedWork":"Phase 1","nextPhaseSequence":1,"sameReviewer":False,"status":"NOT_READY"},
+  "errors":[]
+}
+directory={
+  "schemaVersion":"curveyield-audit-campaign-directory-entry-v1",
+  "campaignId":e["CAMPAIGN_ID"],"campaignGenerationId":e["GENERATION_ID"],"campaignName":e["CAMPAIGN_NAME"],
+  "workspacePath":workspace,"mode":"LITE","sourceSha256":e["SOURCE_SHA"],
+  "currentReceiptPath":receipt_path,"currentPhaseSequence":0,"currentReviewer":"phase0-automation",
+  "status":"ACTIVE","updatedAt":e["CREATED_AT"]
+}
+rp=Path(e["RECEIPTS_DIR"]); rp.mkdir(parents=True,exist_ok=True)
+(rp/"PHASE_00_RECEIPT_v1.json").write_text(json.dumps(receipt,indent=2)+"\n")
+dp=Path(directory_path); dp.parent.mkdir(parents=True,exist_ok=True); dp.write_text(json.dumps(directory,indent=2)+"\n")

@@ -136,6 +136,15 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Select Audit-Controller credential
+        if: inputs.gate_mode == 'LITE'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
       - name: Resolve idempotent reviewer launch
         if: inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer'
         env:
@@ -479,6 +488,68 @@ jobs:
           sha="$(gh api "$api?ref=main" --jq '.sha')"
           content="$(base64 -w0 /tmp/registration-updated.json)"
           gh api --method PUT "$api" -f message="chore(wake): bind fresh chat for $CAMPAIGN_ID" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+
+      - name: Activate prepared Lite receipt successor
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.worker_role == 'reviewer' && inputs.gate_mode == 'LITE' }}
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          DIRECTORY_PATH: ${{ inputs.gate_state_path }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.gate_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$DIRECTORY_PATH" in "Audit Campaign Directory/campaigns/"*.json) ;; *) exit 0;; esac
+          gh auth setup-git
+          rm -rf .audit-controller-wake
+          gh repo clone CurveYield2/Audit-Controller .audit-controller-wake -- --filter=blob:none --no-checkout
+          cd .audit-controller-wake
+          git fetch origin "$AUDIT_CONTROLLER_REF"
+          git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
+          directory_status="$(jq -r '.status // empty' "$DIRECTORY_PATH")"
+          if [ "$directory_status" = "ACTIVE" ] || [ "$directory_status" = "BLOCKED" ]; then
+            current_path="$(jq -r '.currentReceiptPath' "$DIRECTORY_PATH")"
+            test -f "$current_path"
+            if [ "$directory_status" = "BLOCKED" ]; then
+              now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              receipt_status="$(jq -r '.phase.status // empty' "$current_path")"
+              if [ "$receipt_status" = "BLOCKED" ]; then
+                jq --arg now "$now" '.phase.status="ACTIVE" | .updatedAt=$now' "$current_path" > /tmp/repaired-current-receipt.json
+                mv /tmp/repaired-current-receipt.json "$current_path"
+              fi
+              jq --arg now "$now" '.status="ACTIVE" | .updatedAt=$now' "$DIRECTORY_PATH" > /tmp/repaired-directory.json
+              mv /tmp/repaired-directory.json "$DIRECTORY_PATH"
+              git config user.name 'CurveYield Browser Wake'
+              git config user.email 'browser-wake@users.noreply.github.com'
+              git add -- "$current_path" "$DIRECTORY_PATH"
+              if ! git diff --cached --quiet; then
+                git commit -m "audit(receipt): resume blocked reviewer $CAMPAIGN_ID"
+                git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+              fi
+            fi
+            echo "Current Lite reviewer assignment is being resumed in a replacement chat; no successor transition is required."
+            exit 0
+          fi
+          test "$directory_status" = "WAITING_FOR_SUCCESSOR_AGENT"
+          outgoing_path="$(jq -r '.currentReceiptPath' "$DIRECTORY_PATH")"
+          incoming_path="$(jq -r '.handoff.incomingReceiptPath // empty' "$outgoing_path")"
+          test -n "$incoming_path"
+          test -f "$incoming_path"
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          jq --arg now "$now" '.handoff.status="SUCCESSOR_ACTIVATED" | .updatedAt=$now' "$outgoing_path" > /tmp/outgoing.json
+          mv /tmp/outgoing.json "$outgoing_path"
+          jq --arg now "$now" '.phase.status="ACTIVE" | .updatedAt=$now' "$incoming_path" > /tmp/incoming.json
+          mv /tmp/incoming.json "$incoming_path"
+          phase_seq="$(jq -r '.phase.sequence' "$incoming_path")"
+          reviewer="$(jq -r '.executor.lineage' "$incoming_path")"
+          jq --arg path "$incoming_path" --arg reviewer "$reviewer" --arg now "$now" --argjson seq "$phase_seq"             '.currentReceiptPath=$path | .currentPhaseSequence=$seq | .currentReviewer=$reviewer | .status="ACTIVE" | .updatedAt=$now'             "$DIRECTORY_PATH" > /tmp/directory.json
+          mv /tmp/directory.json "$DIRECTORY_PATH"
+          git config user.name 'CurveYield Browser Wake'
+          git config user.email 'browser-wake@users.noreply.github.com'
+          git add -- "$outgoing_path" "$incoming_path" "$DIRECTORY_PATH"
+          if ! git diff --cached --quiet; then
+            git commit -m "audit(receipt): activate $CAMPAIGN_ID $reviewer"
+            git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+          fi
 
       - name: Arm immediate watchdog observation
         if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}

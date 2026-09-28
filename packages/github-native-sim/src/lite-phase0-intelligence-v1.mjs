@@ -307,7 +307,9 @@ async function scanProjectReadiness({projectRoot,build,cfg}){
   const harnessFiles=all.filter(p=>/harness|mock/i.test(p));
   const configFiles=all.filter(p=>/(hardhat\.config|foundry\.toml|medusa|package\.json|package-lock\.json|\.env\.example|config)/i.test(p));
   const scriptFiles=all.filter(p=>/(^|\/)(scripts?|tooling\/scripts)\//i.test(p));
+  const documentationFiles=all.filter(p=>/(^|\/)(readme|docs?|specs?|documentation)(\/|\.|$)|\.md$/i.test(p));
   const addresses=[],chainIds=[],roleMentions=[],oracleMentions=[],proxyMentions=[];
+  const claimedStandards=[],explicitExclusions=[],declaredFacts=[];
   const addrSeen=new Set(), chainSeen=new Set();
   for(const rel of deploymentFiles.concat(configFiles).slice(0,300)){
     const text=await readSmallText(path.join(projectRoot,...rel.split('/')));
@@ -330,6 +332,24 @@ async function scanProjectReadiness({projectRoot,build,cfg}){
       if(proxyMentions.length<250)proxyMentions.push({term:m[1],path:rel,line:lineNumberAt(text,m.index??0)});
     }
   }
+  for(const rel of documentationFiles.slice(0,300)){
+    const text=await readSmallText(path.join(projectRoot,...rel.split('/')));
+    if(text==null) continue;
+    const lines=text.split(/\r?\n/);
+    for(let i=0;i<lines.length;i++){
+      const line=lines[i].trim();
+      if(!line) continue;
+      for(const m of line.matchAll(/\b(?:ERC[- ]?\d+|EIP[- ]?\d+|IERC\d+|ERC20|ERC4626|ERC721|ERC1155|EIP712)\b/gi)){
+        if(claimedStandards.length<500) claimedStandards.push({claim:m[0],path:rel,line:i+1,text:line.slice(0,500)});
+      }
+      if(/\b(out[- ]of[- ]scope|not in scope|excluded?|unsupported|does not support)\b/i.test(line) && explicitExclusions.length<300){
+        explicitExclusions.push({path:rel,line:i+1,text:line.slice(0,500)});
+      }
+      if(/\b(must|shall|intended|purpose|responsible|role|owner|admin|governance|governor|keeper|operator|controller|oracle|deposit|withdraw|redeem|mint|burn)\b/i.test(line) && declaredFacts.length<1000){
+        declaredFacts.push({path:rel,line:i+1,text:line.slice(0,500)});
+      }
+    }
+  }
   let packageJson=null;
   const packageText=await readSmallText(path.join(projectRoot,'package.json'));
   if(packageText){try{packageJson=JSON.parse(packageText);}catch{}}
@@ -350,6 +370,13 @@ async function scanProjectReadiness({projectRoot,build,cfg}){
       oracleMentions,
       proxyAndUpgradeabilityMentions:proxyMentions,
       status:'MECHANICAL_INVENTORY_COMPLETE'
+    },
+    documentationInventory:{
+      documentationFiles,
+      claimedStandards,
+      explicitExclusions,
+      declaredFacts,
+      status:'NEUTRAL_MECHANICAL_EXTRACTION'
     },
     testingAndToolingReadiness:{
       testFiles,harnessFiles,scriptFiles,configFiles,
