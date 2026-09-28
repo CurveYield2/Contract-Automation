@@ -3,6 +3,7 @@ import path from 'node:path';
 
 function repoFile(root,rel){return path.join(root,...String(rel).split('/'));}
 function readJsonIf(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
+function writeJson(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,JSON.stringify(value,null,2)+'\n');}
 function walk(dir,out=[]){if(!fs.existsSync(dir))return out;for(const ent of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,ent.name);if(ent.isDirectory())walk(p,out);else if(ent.isFile())out.push(p);}return out;}
 function explicit(value){return value===undefined||value===null||value===''?'<REQUIRED>':value;}
 function uniq(values){return [...new Set(values.filter(v=>v!==undefined&&v!==null&&String(v).length>0))];}
@@ -18,7 +19,7 @@ function findSourceIntelligence(root,campaignPath){
     if(j?.artifactType==='CANONICAL_SOURCE_INTELLIGENCE') parsed.push({file,j});
   }
   parsed.sort((a,b)=>a.file.localeCompare(b.file));
-  return parsed.at(-1)?.j??null;
+  return parsed.at(-1)??null;
 }
 
 function sourceAnchorFor(si,symbolId,fallback){
@@ -263,7 +264,8 @@ function machineLimitations(deployRows,targetRows){
 
 export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths=[],predecessorReceiptPath,prefillContext={}}){
   form.automationInputs={...(form.automationInputs??{}),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths]};
-  const si=findSourceIntelligence(root,campaignPath);
+  const siEntry=findSourceIntelligence(root,campaignPath);
+  const si=siEntry?.j??null;
   const derived=loadDerived(root,derivedInputPaths);
 
   if(sequence===1&&si){
@@ -305,15 +307,29 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
   }
 
   if(sequence===3){
-    const matrix=readJsonIf(repoFile(root,path.posix.join(authorityRoot,'shared/controller/DOMAIN_APPLICABILITY_MATRIX.json')))??{};
+    const matrixRel=path.posix.join(authorityRoot,'shared/controller/DOMAIN_APPLICABILITY_MATRIX.json');
+    const matrix=readJsonIf(repoFile(root,matrixRel))??{};
     const domains=classifyDomains(si??{},matrix);
-    form.automationInputs.structuralThreatInputs=structuralInputs(si??{});
-    form.automationInputs.domainAssessments=domains;
-    form.automationInputs.specialistObligations=domainObligations(matrix,domains);
+    const obligations=domainObligations(matrix,domains);
+    const registryRel=path.posix.join(campaignPath,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json');
+    writeJson(repoFile(root,registryRel),{
+      schemaVersion:'audit-v7-domain-applicability-registry-v2',
+      artifactId:'DOMAIN_APPLICABILITY_REGISTRY',
+      sourceIntelligencePath:siEntry?path.relative(repoFile(root,campaignPath),siEntry.file).split(path.sep).join('/'):'UNRESOLVED',
+      matrixPath:matrixRel,
+      sourceIdentity:si?.identity?.sourceIdentity??si?.identity?.sourceDigestSha256??'UNRESOLVED',
+      decisions:domains,
+      generatedObligations:obligations,
+      owner:'CONTROLLER_AUTOMATION_AT_PHASE_2_BOUNDARY'
+    });
+    form.automationInputs.sourceIntelligencePath=siEntry?path.relative(repoFile(root,campaignPath),siEntry.file).split(path.sep).join('/'):'UNRESOLVED';
+    form.automationInputs.domainRegistryPath=path.posix.relative(campaignPath,registryRel);
   }
 
   if(sequence===4){
-    const domains=findAutomationInput(derived,'domainAssessments')??[];
+    const registryRel=path.posix.join(campaignPath,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json');
+    const registry=readJsonIf(repoFile(root,registryRel))??{};
+    const domains=registry.decisions??[];
     form.actions['step-1'].outputs.sourceReviewRecords=sourceReviewScaffold(si??{});
     form.actions['step-2'].outputs.specialistReviewRecords=specialistScaffold(si??{},domains);
     form.automationInputs.expectedSourceReviewKeys=(form.actions['step-1'].outputs.sourceReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey);
