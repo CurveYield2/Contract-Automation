@@ -41,6 +41,9 @@ export function validateWorkForm(schema,form){
           const item=v[i];
           if(!item||typeof item!=='object'||Array.isArray(item)){deficiencies.push(p+'['+i+'] must be an object or explicit negative sentinel');continue;}
           for(const k of field.itemRequiredFields??[]) if(isPlaceholder(item[k])||item[k]===null||item[k]===undefined) deficiencies.push(p+'['+i+'].'+k+' is missing');
+          for(const [k,allowed] of Object.entries(field.itemFieldAllowedValues??{})){
+            if(item[k]!==undefined&&!allowed.includes(String(item[k]))) deficiencies.push(p+'['+i+'].'+k+' must be one of: '+allowed.join(', '));
+          }
         }
       }else deficiencies.push(...validateScalar(v,p,field));
     }
