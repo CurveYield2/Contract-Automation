@@ -99,14 +99,14 @@ export function renderTargetedTestMatrixV1({targetDesigns=[],executionResults={}
 
 > **CONTROLLER-POPULATED:** Seeded from accepted Phase-2–5 canonical data and finalized from Phase-5 boundary machine execution. The Phase-6 reviewer consumes the completed matrix and records only semantic interpretation/disposition in the Phase-6 work form. Do not duplicate campaign identity or controller bookkeeping here.
 
-| Target ID | Candidate / property / hypothesis | Exact setup and actor | Transaction sequence | Expected secure outcome | Exploit/failure oracle | Deterministic simulation | Targeted fuzz variables/bounds | Result | Evidence |
+| Target ID | Candidate / property / hypothesis | Exact setup and attacker/actor | AI-guided attacker/exploit sequence | Expected secure outcome | Exploit/failure oracle | Attacker/exploit simulation result | AI-guided targeted fuzz variables/bounds | Result | Evidence |
 |---|---|---|---|---|---|---|---|---|---|
 ${rows.join('\n')}
 
 Rules:
 
 - Include every material candidate and every due retained execution obligation from accepted Phase-2–5 canonical data.
-- Basic targeted fuzzing varies only candidate-relevant inputs and immediate boundaries.
+- AI-guided targeted fuzzing varies only reviewer-selected candidate-relevant inputs and boundaries.
 - A target cannot be closed merely because one happy-path case passed.
 `;
 }
