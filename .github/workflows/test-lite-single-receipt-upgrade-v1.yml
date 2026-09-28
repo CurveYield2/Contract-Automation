@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - upgrade/lite-single-receipt-v1
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -18,11 +21,13 @@ jobs:
   cross-repo:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      TEST_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
     steps:
       - name: Checkout tested Contract-Automation ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ env.TEST_REF }}
           persist-credentials: false
           fetch-depth: 1
 
@@ -60,7 +65,7 @@ jobs:
           rm -rf .audit-controller
           gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
           cd .audit-controller
-          git fetch origin upgrade/lite-single-receipt-v1
+          git fetch origin "$TEST_REF"
           git checkout --detach FETCH_HEAD
 
       - name: Validate matching Audit-Controller ref
@@ -69,6 +74,7 @@ jobs:
           set -euo pipefail
           npm test
           npm run check
+          python3 ../scripts/validate-lite-authority-v1.py "Audit Skill - Current Authority"
           test -d "Audit Campaign Directory"
           test ! -e ".deep-assurance"
           if git grep -FI -- '.deep-assurance'; then

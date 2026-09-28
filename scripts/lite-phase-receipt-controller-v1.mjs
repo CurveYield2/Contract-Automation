@@ -13,7 +13,6 @@ const transitions={
   3:{next:4,same:true,reviewer:'reviewer-2',assigned:'Phase 4'},
   4:{next:5,same:true,reviewer:'reviewer-2',assigned:'Phase 5'},
   5:{next:6,same:false,boundary:'P5_TO_P6',reviewer:'reviewer-3L',assigned:'Merged Lite Phases 6–7'},
-  6:{next:7,same:true,reviewer:'reviewer-3L',assigned:'Phase 7 completion marker'},
   7:{next:8,same:false,boundary:'P67_TO_P8',reviewer:'reviewer-4',assigned:'Combined Lite Phases 8–10'},
   8:{next:9,same:true,reviewer:'reviewer-4',assigned:'Phase 9'},
   9:{next:10,same:true,reviewer:'reviewer-4',assigned:'Phase 10'},
@@ -78,7 +77,35 @@ if(sequence===8){
 const directoryFile=requiredFile(root,receipt.campaign.campaignDirectoryEntryPath,'campaign directory entry');
 const directory=read(directoryFile);
 let freshSuccessorRequired=false,sameReviewerAdvanced=false,nextReceiptPath=null;
-if(sequence===10){
+if(sequence===6){
+  const markerPath=phaseReceiptPath(campaignPath,7,1);
+  const phase8Path=phaseReceiptPath(campaignPath,8,1);
+  receipt.handoff={required:false,boundary:null,incomingReviewer:'phase7-automation',assignedWork:'Automatic Phase 7 completion marker',nextPhaseSequence:7,sameReviewer:false,status:'NOT_APPLICABLE'};
+  const marker=createLitePhaseReceiptV1({
+    campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,campaignName:receipt.campaign.campaignName,
+    workspacePath:receipt.campaign.workspacePath,campaignDirectoryEntryPath:receipt.campaign.campaignDirectoryEntryPath,
+    sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',authority:receipt.authority,sourceSha256:receipt.source.sha256,source:receipt.source,
+    status:'SEALED',globalControls:receipt.globalControls,
+    obligations:{due:[],created:[],closed:[],carriedForward:receipt.obligations.carriedForward??[]},
+    invalidation:receipt.invalidation,
+    inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],
+    evidence:receipt.evidence??[],
+    outputs:[...(receipt.outputs??[]),{role:'AUTOMATIC_NON_EXECUTABLE_PHASE_MARKER',path:path.posix.relative(campaignPath,markerPath)}],
+    automation:[...(receipt.automation??[]),{workflow:'lite-phase-receipt-controller-v1.yml',status:'PASS',action:'AUTOMATIC_PHASE7_MARKER'}],
+    validation:{status:'PASS',validatedAt:now,failures:[]},
+    handoff:{required:true,boundary:'P67_TO_P8',incomingReviewer:'reviewer-4',assignedWork:'Combined Lite Phases 8–10',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING',incomingReceiptPath:phase8Path},
+    now
+  });
+  marker.sealedAt=now;
+  marker.updatedAt=now;
+  write(path.join(root,...markerPath.split('/')),marker);
+  directory.currentReceiptPath=markerPath;
+  directory.currentPhaseSequence=7;
+  directory.currentReviewer='phase7-automation';
+  directory.status='WAITING_FOR_SUCCESSOR_AGENT';
+  freshSuccessorRequired=true;
+  nextReceiptPath=phase8Path;
+}else if(sequence===10){
   receipt.handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:null,sameReviewer:false,status:'NOT_APPLICABLE'};
   directory.status='COMPLETE'; directory.currentPhaseSequence=10; directory.currentReviewer=receipt.executor.lineage;
 }else if(t.same){

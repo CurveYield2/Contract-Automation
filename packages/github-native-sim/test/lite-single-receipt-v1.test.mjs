@@ -87,3 +87,19 @@ test('replacement wake resumes blocked receipt state without pretending it is a 
   assert.match(w,/resume blocked reviewer/);
   assert.match(w,/no successor transition is required/);
 });
+
+
+test('Phase 6 validation creates and seals the non-executable Phase 7 marker automatically',()=>{
+  const f=read('scripts/lite-phase-receipt-controller-v1.mjs');
+  assert.match(f,/if\(sequence===6\)/);
+  assert.match(f,/sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation'/);
+  assert.match(f,/status:'SEALED'/);
+  assert.match(f,/boundary:'P67_TO_P8'/);
+  assert.match(f,/incomingReviewer:'reviewer-4'/);
+  assert.match(f,/nextPhaseSequence:8/);
+  assert.match(f,/directory\.currentPhaseSequence=7/);
+  assert.match(f,/evidence:receipt\.evidence\?\?\[\]/);
+  assert.match(f,/outputs:\[\.\.\.\(receipt\.outputs\?\?\[\]\)/);
+  assert.match(f,/freshSuccessorRequired=true/);
+  assert.doesNotMatch(f,/6:\{next:7,same:true,reviewer:'reviewer-3L',assigned:'Phase 7 completion marker'\}/);
+});
