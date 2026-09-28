@@ -58,17 +58,17 @@ jobs:
           python3 .sync-lite-authority-zip-v1.py
           rm .sync-lite-authority-zip-v1.py
 
-      - name: Publish ZIP only when bytes changed
+      - name: Publish synchronized authority package only when changed
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           cd .audit-controller-authority
-          if git diff --quiet -- 'Audit Skill - Current Authority/'*.zip; then
-            echo "Authority ZIP already matches unpacked authority."
+          if git diff --quiet -- 'Audit Skill - Current Authority'; then
+            echo "Current authority package and ZIP are already synchronized."
             exit 0
           fi
-          git add -- 'Audit Skill - Current Authority/'*.zip
-          git commit -m 'chore(authority): sync current Lite authority zip'
+          git add -A -- 'Audit Skill - Current Authority'
+          git commit -m 'chore(authority): sync current Lite authority package and zip'
           git push origin HEAD:main
