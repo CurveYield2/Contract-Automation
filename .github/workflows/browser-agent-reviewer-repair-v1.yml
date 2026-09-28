@@ -95,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$REPAIR_MODE" = "reset_to_handoff" ]; then
-            echo "::error::Current Lite campaigns have no reset-to-handoff control state. Repair resumes from the current phase receipt and Git history."
+            echo "::error::Current Lite campaigns have no reset-to-handoff control state. Repair resumes from the current assignment/work form and Git history."
             exit 1
           fi
           gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' "$REGISTRATION")"
@@ -130,25 +130,26 @@ jobs:
               fi
             fi
             [ -n "$project_name" ] || project_name="$campaign_name"
-            cat > /tmp/replacement-wake.txt <<EOF
-Campaign type: LITE
-Campaign name: $campaign_name
-Campaign ID: $CAMPAIGN_ID
-Incoming reviewer: $reviewer
-Current phase: $phase_id
-Phase schema: $schema_path
-Phase work form: $form_path
-Phase final report: $report_path
-Phase packet: $packet_path
-Last sealed predecessor receipt: $receipt_path
-Current authority: https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority
-
-You are a repair/replacement reviewer taking over because the prior reviewer stopped during this same assignment.
-Resume from the latest durable schema-governed work form and substantive evidence. Do not restart completed work and do not reconstruct controller bookkeeping.
-If packet validation previously failed, repair only the exact missing fields before resubmitting.
-Repair reason: $reason
-$feedback
-EOF
+            {
+              printf '%s\n' \
+                "Campaign type: LITE" \
+                "Campaign name: $campaign_name" \
+                "Campaign ID: $CAMPAIGN_ID" \
+                "Incoming reviewer: $reviewer" \
+                "Current phase: $phase_id" \
+                "Phase schema: $schema_path" \
+                "Phase work form: $form_path" \
+                "Phase final report: $report_path" \
+                "Phase packet: $packet_path" \
+                "Last sealed predecessor receipt: $receipt_path" \
+                "Current authority: https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority" \
+                "" \
+                "You are a repair/replacement reviewer taking over because the prior reviewer stopped during this same assignment." \
+                "Resume from the latest durable schema-governed work form and substantive evidence. Do not restart completed work and do not reconstruct controller bookkeeping." \
+                "If packet validation previously failed, repair only the exact missing fields before resubmitting." \
+                "Repair reason: $reason"
+              [ -z "$feedback" ] || printf '%s\n' "$feedback"
+            } > /tmp/replacement-wake.txt
           else
             directory_status="$(jq -r '.status' /tmp/campaign-directory.json)"
             case "$directory_status" in ACTIVE|BLOCKED) ;; *) echo "::error::Receipt reviewer repair requires ACTIVE/BLOCKED campaign state; observed $directory_status"; exit 1;; esac
@@ -161,19 +162,18 @@ EOF
             campaign_name="$(jq -r '.campaign.campaignName' /tmp/current-receipt.json)"
             workspace="$(jq -r '.campaign.workspacePath' /tmp/current-receipt.json)"
             [ -n "$project_name" ] || project_name="$campaign_name"
-            cat > /tmp/replacement-wake.txt <<EOF
-Campaign type: LITE
-Campaign name: $campaign_name
-Campaign ID: $CAMPAIGN_ID
-Incoming reviewer: $reviewer
-Current phase: $phase_id
-Current phase receipt: $receipt_path
-Current authority: https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority
-
-You are a repair/replacement reviewer taking over because the prior reviewer stopped during this same assignment.
-Resume from the latest durable evidence and the current phase receipt. Do not restart completed work.
-Repair reason: $reason
-EOF
+            printf '%s\n' \
+              "Campaign type: LITE" \
+              "Campaign name: $campaign_name" \
+              "Campaign ID: $CAMPAIGN_ID" \
+              "Incoming reviewer: $reviewer" \
+              "Current phase: $phase_id" \
+              "Current phase receipt: $receipt_path" \
+              "Current authority: https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority" \
+              "" \
+              "You are a repair/replacement reviewer taking over because the prior reviewer stopped during this same assignment." \
+              "Resume from the latest durable evidence and the current phase receipt. Do not restart completed work." \
+              "Repair reason: $reason" > /tmp/replacement-wake.txt
           fi
           jq -cn \
             --arg routine 'audit-lite-reviewer-v1' \
