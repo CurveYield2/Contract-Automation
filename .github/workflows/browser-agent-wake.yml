@@ -506,8 +506,27 @@ jobs:
           git fetch origin "$AUDIT_CONTROLLER_REF"
           git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
           directory_status="$(jq -r '.status // empty' "$DIRECTORY_PATH")"
-          if [ "$directory_status" = "ACTIVE" ]; then
-            echo "Current Lite reviewer is already active; this is a replacement-chat wake, not a successor transition."
+          if [ "$directory_status" = "ACTIVE" ] || [ "$directory_status" = "BLOCKED" ]; then
+            current_path="$(jq -r '.currentReceiptPath' "$DIRECTORY_PATH")"
+            test -f "$current_path"
+            if [ "$directory_status" = "BLOCKED" ]; then
+              now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              receipt_status="$(jq -r '.phase.status // empty' "$current_path")"
+              if [ "$receipt_status" = "BLOCKED" ]; then
+                jq --arg now "$now" '.phase.status="ACTIVE" | .updatedAt=$now' "$current_path" > /tmp/repaired-current-receipt.json
+                mv /tmp/repaired-current-receipt.json "$current_path"
+              fi
+              jq --arg now "$now" '.status="ACTIVE" | .updatedAt=$now' "$DIRECTORY_PATH" > /tmp/repaired-directory.json
+              mv /tmp/repaired-directory.json "$DIRECTORY_PATH"
+              git config user.name 'CurveYield Browser Wake'
+              git config user.email 'browser-wake@users.noreply.github.com'
+              git add -- "$current_path" "$DIRECTORY_PATH"
+              if ! git diff --cached --quiet; then
+                git commit -m "audit(receipt): resume blocked reviewer $CAMPAIGN_ID"
+                git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+              fi
+            fi
+            echo "Current Lite reviewer assignment is being resumed in a replacement chat; no successor transition is required."
             exit 0
           fi
           test "$directory_status" = "WAITING_FOR_SUCCESSOR_AGENT"
