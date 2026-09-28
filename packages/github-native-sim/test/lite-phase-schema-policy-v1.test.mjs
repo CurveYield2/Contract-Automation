@@ -76,7 +76,7 @@ test('controller architecture forbids active receipt bookkeeping before packet v
   assert.match(controller,/packet\.status='REWORK_REQUIRED'/);
   assert.match(controller,/syncControls/);
   assert.match(controller,/createLitePhaseReceiptV1/);
-  assert.ok(controller.indexOf("if(deficiencies.length)") < controller.indexOf("syncControls"));
+  assert.ok(controller.indexOf("if(deficiencies.length)") < controller.indexOf("const controls=syncControls"));
   assert.match(workflow,/bookkeeping before validation PASS: prohibited/);
   assert.match(phase0,/preparePhaseWork/);
   assert.match(phase0,/curveyield-audit-campaign-directory-entry-v2/);
