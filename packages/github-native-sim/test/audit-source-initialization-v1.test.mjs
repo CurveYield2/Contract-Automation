@@ -63,7 +63,10 @@ test('workflow writes initial controller state and active pointer on Audit-Contr
   assert.match(run, /git push origin HEAD:main/);
 });
 
-test('workflow arms the existing Lite browser orchestrator after initialization', () => {
-  assert.match(run, /lite-audit-browser-orchestrator-v1\.yml/);
+test('workflow dispatches fully automated Phase 0 after initialization', () => {
+  assert.match(run, /lite-phase0-bootstrap-v1\.yml/);
   assert.match(run, /audit_controller_ref=main/);
+  assert.doesNotMatch(run, /lite-audit-browser-orchestrator-v1\.yml/);
+  assert.match(state, /phase0-automation/);
+  assert.doesNotMatch(state, /web-bootstrap-agent/);
 });

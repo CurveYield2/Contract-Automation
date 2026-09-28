@@ -20,11 +20,6 @@ on:
         required: false
         default: main
         type: string
-      phase0_extra_instruction:
-        description: Optional additional Phase-0 instruction
-        required: false
-        default: ''
-        type: string
 
 permissions:
   contents: write
@@ -117,10 +112,6 @@ jobs:
           monitor_milestone="$current_milestone"
           if [ "$campaign_status" = "COMPLETE" ] || [ "$campaign_status" = "STOPPED_BY_HUMAN" ]; then
             arm_campaign_monitor=false
-          elif [ "$current_phase" = "phase-0" ] && [ "$current_reviewer" = "web-bootstrap-agent" ]; then
-            monitor_phase="phase-0"
-            monitor_milestone="P0_BOOTSTRAP"
-            bootstrap_monitor=true
           elif [ "$(jq -r '.phase.state // .phase.status // empty' /tmp/canonical-campaign-state.json)" = "WAITING_FOR_SUCCESSOR_AGENT" ]; then
             history_phase="$(jq -r '.history[-1].phase // empty' /tmp/canonical-campaign-state.json)"
             history_milestone="$(jq -r '.history[-1].milestone // empty' /tmp/canonical-campaign-state.json)"
@@ -186,7 +177,7 @@ jobs:
               activeAssignment:{phaseId:$phaseId,milestoneId:$milestoneId,workerRole:"reviewer",reviewer:$reviewer,thinkingEffort:"high"},
               bootstrapMonitor:{
                 status:(if $bootstrap=="true" then "ACTIVE" else "NOT_APPLICABLE" end),
-                note:(if $bootstrap=="true" then "Phase 0 is the existing human-started bootstrap agent. Automation must not create a second Phase-0 chat." else "Campaign monitor is supervising the current Lite boundary/state." end),
+                note:"Phase 0 is workflow-only. Browser supervision begins with reviewer-1 or later reviewers.",
                 previousAutomationChat:(if $previousChat=="" then null else $previousChat end)
               },
               watchdog:{
@@ -288,9 +279,9 @@ jobs:
             echo
             echo "- Campaign: $CAMPAIGN_NAME"
             echo "- Campaign ID: $CAMPAIGN_ID"
-            echo "- Phase-0 bootstrap chat: NOT created by automation; this is the existing human-started bootstrap agent"
-            echo "- Phase-0 boundary monitor: ${{ steps.canonical.outputs.arm_bootstrap_monitor }}"
-            echo "- First automated fresh reviewer: reviewer-1 after machine-valid P0_TO_P1"
+            echo "- Phase 0: workflow-only; no bootstrap chat exists"
+            echo "- First browser reviewer: reviewer-1 after machine-valid P0_TO_P1"
+            echo "- Boundary monitor: ${{ steps.canonical.outputs.arm_campaign_monitor }}"
             echo "- Successor first message: predecessor-created WAKE_UP_MESSAGE.md verbatim"
             echo "- Later messages: GET BACK TO WORK"
             echo "- Reviewer count and phase ranges: derived dynamically from canonical Audit-Controller state"

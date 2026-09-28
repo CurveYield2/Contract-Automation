@@ -1,0 +1,138 @@
+name: Lite Fully Automated Phase 0 v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        description: Exact campaign ID created by Audit Source Initialization
+        required: true
+        type: string
+      campaign_path:
+        description: Exact Audit-Controller campaign workspace path
+        required: true
+        type: string
+      audit_controller_ref:
+        description: Audit-Controller ref containing the campaign
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: lite-phase0-bootstrap-${{ inputs.campaign_id }}
+  cancel-in-progress: false
+
+jobs:
+  qualification:
+    uses: ./.github/workflows/v7-execution-infrastructure-qualification.yml
+    with:
+      controller_ref: ${{ inputs.audit_controller_ref }}
+      qualification_lane: FULL
+    secrets: inherit
+
+  intelligence:
+    needs: qualification
+    uses: ./.github/workflows/lite-phase0-intelligence-v1.yml
+    with:
+      campaign_id: ${{ inputs.campaign_id }}
+      campaign_path: ${{ inputs.campaign_path }}
+      audit_controller_ref: ${{ inputs.audit_controller_ref }}
+    secrets: inherit
+
+  finalize-and-launch-reviewer1:
+    needs: intelligence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CAMPAIGN_ID: ${{ inputs.campaign_id }}
+      CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+      AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Fetch exact canonical qualification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d > /tmp/v7-qualification.json
+          test "$(jq -r '.status' /tmp/v7-qualification.json)" = PASS
+          test "$(jq -r '.qualifiedCommit' /tmp/v7-qualification.json)" = "$GITHUB_SHA"
+
+      - name: Checkout exact Audit-Controller campaign
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          rm -rf .audit-controller
+          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
+          cd .audit-controller
+          git fetch origin "$AUDIT_CONTROLLER_REF"
+          git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
+
+      - name: Finalize machine Phase 0 and construct P0_TO_P1
+        id: finalize
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/lite-phase0-finalize-v1.mjs             --controller-root .audit-controller             --campaign-path "$CAMPAIGN_PATH"             --qualification-path /tmp/v7-qualification.json             --contract-automation-sha "$GITHUB_SHA"             --workflow-run-id "$GITHUB_RUN_ID" | tee /tmp/phase0-finalize.json
+          test "$(jq -r '.status' /tmp/phase0-finalize.json)" = PASS
+          echo "campaign_name=$(jq -r '.campaignName' /tmp/phase0-finalize.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish sealed Phase 0 and successor handoff
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git config user.name 'CurveYield Phase0 Automation'
+          git config user.email 'phase0-automation@users.noreply.github.com'
+          git add -- "$CAMPAIGN_PATH" .deep-assurance/active
+          if git diff --cached --quiet; then
+            echo "::error::Phase 0 finalizer produced no durable changes"
+            exit 1
+          fi
+          git commit -m "audit(phase0): seal automated bootstrap $CAMPAIGN_ID"
+          git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+
+      - name: Activate first audit agent through existing orchestrator/watchdog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main             -f campaign_id="$CAMPAIGN_ID"             -f campaign_name="${{ steps.finalize.outputs.campaign_name }}"             -f campaign_path="$CAMPAIGN_PATH"             -f audit_controller_ref="$AUDIT_CONTROLLER_REF"
+
+      - name: Summarize
+        shell: bash
+        run: |
+          {
+            echo "## Fully automated Lite Phase 0"
+            echo
+            echo "- Campaign: $CAMPAIGN_ID"
+            echo "- Source input surface: one ZIP URL through Audit Source Initialization"
+            echo "- Phase 0 agent: none"
+            echo "- P0_TO_P1: sealed and validated"
+            echo "- Interphase mechanical packet: not created"
+            echo "- First audit agent: reviewer-1 activation dispatched through the existing orchestrator/watchdog system"
+          } >> "$GITHUB_STEP_SUMMARY"

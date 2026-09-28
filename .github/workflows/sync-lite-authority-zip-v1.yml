@@ -1,0 +1,74 @@
+name: Sync Lite Authority ZIP v1
+
+on:
+  workflow_run:
+    workflows: ["V7 Execution Infrastructure Qualification"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-lite-authority-zip-v1
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Clone current Audit-Controller authority
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          rm -rf .audit-controller-authority
+          gh repo clone CurveYield2/Audit-Controller .audit-controller-authority -- --branch main
+          cd .audit-controller-authority
+          git config user.name 'CurveYield Authority ZIP Sync'
+          git config user.email 'authority-zip-sync@users.noreply.github.com'
+
+      - name: Rebuild deterministic authority ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scripts/sync-lite-authority-zip-v1.py .audit-controller-authority/.sync-lite-authority-zip-v1.py
+          cd .audit-controller-authority
+          python3 .sync-lite-authority-zip-v1.py
+          rm .sync-lite-authority-zip-v1.py
+
+      - name: Publish ZIP only when bytes changed
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller-authority
+          if git diff --quiet -- 'Audit Skill - Current Authority/'*.zip; then
+            echo "Authority ZIP already matches unpacked authority."
+            exit 0
+          fi
+          git add -- 'Audit Skill - Current Authority/'*.zip
+          git commit -m 'chore(authority): sync current Lite authority zip'
+          git push origin HEAD:main

@@ -84,7 +84,7 @@ async function buildCore({campaignRoot,skillRoot}){
     buildIdentity,
     buildDigestSha256:buildDigest,
     createdAt,
-    createdByReviewerLineage:'web-bootstrap-agent'
+    createdByReviewerLineage:'phase0-automation'
   };
   const cfg=build.configurationDetection??{};
   core.build={
@@ -261,7 +261,7 @@ async function buildCore({campaignRoot,skillRoot}){
   const ledger=await readJson(path.join(skillRoot,'shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json'));
   ledger.campaignBinding={campaignId,campaignGenerationId:generation,sourceIdentity,ledgerRevision:1};
   ledger.obligations=[
-    {obligationId:'OBL-P1-CONTEXT-001',originPhase:'0',originatingFactIds:['SOURCE-P0-001'],originatingEvidenceRefs:['evidence/source-intelligence/SOURCE_INTELLIGENCE_v1.json','scratch/phase0-context-review/CONTEXT_REVIEW_PACKET_v1.json'],requiredPhase:'1',requiredReviewer:'reviewer-1',requiredAction:'Perform semantic context interpretation of the sealed Phase-0 structural baseline without rebuilding its mechanical inventories.',completionCondition:'Phase 1 records semantic scope/spec/dependency interpretation and dispositions while preserving the accepted Phase-0 Source Intelligence identity.',mandatory:true,status:'OPEN',statusReason:null,closureEvidenceRefs:[],supersedesOrReplaces:[],createdAt,updatedAt:createdAt},
+    {obligationId:'OBL-P1-CONTEXT-001',originPhase:'0',originatingFactIds:['SOURCE-P0-001'],originatingEvidenceRefs:['evidence/source-intelligence/SOURCE_INTELLIGENCE_v1.json','evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'],requiredPhase:'1',requiredReviewer:'reviewer-1',requiredAction:'Perform semantic context interpretation of the sealed Phase-0 structural baseline without rebuilding its mechanical inventories.',completionCondition:'Phase 1 records semantic scope/spec/dependency interpretation and dispositions while preserving the accepted Phase-0 Source Intelligence identity.',mandatory:true,status:'OPEN',statusReason:null,closureEvidenceRefs:[],supersedesOrReplaces:[],createdAt,updatedAt:createdAt},
     ...core.limitations.map((l,i)=>({obligationId:l.obligationId,originPhase:'0',originatingFactIds:[l.limitationId],originatingEvidenceRefs:['evidence/source-intelligence/SOURCE_INTELLIGENCE_v1.json'],requiredPhase:'1',requiredReviewer:'reviewer-1',requiredAction:l.downstreamRequiredAction,completionCondition:'Reviewer-1 records an evidence-bound semantic disposition or explicitly carries the typed limitation to the correct later phase.',mandatory:true,status:'OPEN',statusReason:null,closureEvidenceRefs:[],supersedesOrReplaces:[],createdAt,updatedAt:createdAt}))
   ];
   ledger.phaseCheckpoints=[{phaseId:'phase-0',status:'INITIALIZED',dueOpenOrInProgress:0,recordedAt:createdAt}];

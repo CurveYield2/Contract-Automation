@@ -1,6 +1,23 @@
 name: V7 Execution Infrastructure Qualification
 
 on:
+  workflow_call:
+    inputs:
+      controller_ref:
+        required: false
+        type: string
+        default: ''
+      qualification_lane:
+        required: false
+        type: string
+        default: FULL
+    secrets:
+      AUDIT_CONTROLLER_GITHUB_TOKEN:
+        required: false
+      PREFLIGHTSIM_GITHUB_TOKEN:
+        required: false
+      SIM_ARCHIVE_PRIMARY_ETHEREUM_01:
+        required: false
   workflow_dispatch:
     inputs:
       controller_ref:
@@ -21,6 +38,12 @@ on:
     paths:
       - '.github/workflows/v7-execution-infrastructure-qualification.yml'
       - '.github/workflows/audit-controller-execution.yml'
+      - '.github/workflows/audit-source-initialization-v1.yml'
+      - '.github/workflows/lite-phase0-bootstrap-v1.yml'
+      - '.github/workflows/lite-phase0-intelligence-v1.yml'
+      - '.github/workflows/lite-audit-browser-orchestrator-v1.yml'
+      - 'scripts/audit-source-initialization/**'
+      - 'scripts/lite-phase0-finalize-v1.mjs'
       - '.github/workflows/browser-agent-wake.yml'
       - '.github/workflows/browser-agent-watchdog.yml'
       - '.github/workflows/agent-zip-import-v1.yml'
@@ -44,6 +67,12 @@ on:
     paths:
       - '.github/workflows/v7-execution-infrastructure-qualification.yml'
       - '.github/workflows/audit-controller-execution.yml'
+      - '.github/workflows/audit-source-initialization-v1.yml'
+      - '.github/workflows/lite-phase0-bootstrap-v1.yml'
+      - '.github/workflows/lite-phase0-intelligence-v1.yml'
+      - '.github/workflows/lite-audit-browser-orchestrator-v1.yml'
+      - 'scripts/audit-source-initialization/**'
+      - 'scripts/lite-phase0-finalize-v1.mjs'
       - '.github/workflows/browser-agent-wake.yml'
       - '.github/workflows/browser-agent-watchdog.yml'
       - '.github/workflows/agent-zip-import-v1.yml'
@@ -92,12 +121,12 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BEFORE_SHA: ${{ github.event.before }}
           REQUESTED_LANE: ${{ inputs.qualification_lane }}
-          CONTROLLER_REF: ${{ inputs.controller_ref }}
+          CONTROLLER_REF: ${{ inputs.controller_ref || 'main' }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p .audit-evidence/v7-infrastructure-qualification
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "workflow_call" ]; then
             if [ "$REQUESTED_LANE" = "CONTROLLER_ONLY" ]; then
               if [ -z "$CONTROLLER_REF" ]; then
                 echo 'CONTROLLER_ONLY requires controller_ref' >&2
@@ -237,7 +266,7 @@ jobs:
         run: npm run build
 
       - name: Select working Audit-Controller credential
-        if: inputs.controller_ref != ''
+        if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
@@ -246,10 +275,10 @@ jobs:
         run: bash scripts/select-audit-controller-token.sh
 
       - name: Checkout exact private Audit-Controller candidate
-        if: inputs.controller_ref != ''
+        if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          CONTROLLER_REF: ${{ inputs.controller_ref }}
+          CONTROLLER_REF: ${{ inputs.controller_ref || 'main' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -260,11 +289,12 @@ jobs:
           gh repo clone CurveYield2/Audit-Controller .controller-under-test -- --filter=blob:none --no-checkout
           cd .controller-under-test
           git fetch --depth=1 origin "$CONTROLLER_REF"
-          git checkout --detach FETCH_HEAD
-          test "$(git rev-parse HEAD)" = "$CONTROLLER_REF"
+          expected_controller_commit="$(git rev-parse FETCH_HEAD)"
+          git checkout --detach "$expected_controller_commit"
+          test "$(git rev-parse HEAD)" = "$expected_controller_commit"
 
       - name: Verify private Audit-Controller v26 suite
-        if: inputs.controller_ref != ''
+        if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
         working-directory: .controller-under-test
         shell: bash
         run: |
@@ -273,7 +303,7 @@ jobs:
           npm run check
 
       - name: Record private Audit-Controller qualification evidence
-        if: inputs.controller_ref != ''
+        if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
         shell: bash
         run: |
           set -euo pipefail
@@ -285,7 +315,7 @@ jobs:
           {
             "schemaVersion": "v26-controller-qualification-v1",
             "controllerCommit": "$controller_commit",
-            "controllerRef": "${{ inputs.controller_ref }}",
+            "controllerRef": "${{ inputs.controller_ref || 'main' }}",
             "status": "PASS",
             "qualificationRunId": "$GITHUB_RUN_ID",
             "qualifiedAt": "$qualified_at",
@@ -318,7 +348,7 @@ jobs:
           JSON
 
       - name: Publish controller-only qualification into canonical status
-        if: success() && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
+        if: success() && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && github.ref == 'refs/heads/main' && env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
