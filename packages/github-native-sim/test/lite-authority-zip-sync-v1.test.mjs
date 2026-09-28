@@ -12,4 +12,9 @@ test('authority zip sync remains a Contract-Automation workflow and is determini
   assert.match(script,/date_time=\(1980, 1, 1, 0, 0, 0\)/);
   assert.match(script,/sorted\(p for p in package\.rglob/);
   assert.match(script,/ZIP_DEFLATED/);
+  assert.match(script,/manifest\.get\("release"\)/);
+  assert.match(script,/package\.rename\(expected_package\)/);
+  assert.match(script,/hashlib\.sha256\(data\)\.hexdigest\(\)/);
+  assert.match(script,/stale\.unlink\(\)/);
+  assert.match(workflow,/git add -A -- 'Audit Skill - Current Authority'/);
 });
