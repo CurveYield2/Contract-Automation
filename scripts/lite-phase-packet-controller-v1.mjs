@@ -10,6 +10,10 @@ import {
 import {
   executePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
+import {
+  buildControllerPacket,renderControllerPhaseReport,validatePhaseScaffold,
+  phase4CoverageFromForm,materializeValidatedFindings,resolveTargetExecutionRequestRef
+} from './lib/lite-phase-prefill-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
@@ -205,36 +209,80 @@ const authorityRoot=authorityRootFromReceipt(predecessor);
 const loaded=loadPhaseSchema(root,authorityRoot,sequence); const schema=loaded.schema;
 if(assignment.workSchemaPath!==loaded.rel) throw new Error('assignment workSchemaPath mismatch');
 
-const packetFile=requiredFile(root,assignment.packetPath,'phase work packet');
-const packet=readJson(packetFile);
+const packetFile=repoFile(root,assignment.packetPath);
+const now=new Date().toISOString();
+const existingPacket=fs.existsSync(packetFile)?readJson(packetFile):null;
+const packet=buildControllerPacket({directory,assignment,existing:existingPacket,now});
 let deficiencies=ensurePacketShape({packet,directory,assignment});
 let form=null;
-try{form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));deficiencies.push(...validateWorkForm(schema,form));}catch(e){deficiencies.push(String(e.message||e));}
-let reportText='';
-if(schema.finalReport){
-  try{reportText=fs.readFileSync(requiredFile(root,assignment.finalReportPath,'phase final report'),'utf8');deficiencies.push(...validateFinalReport(schema,reportText));}catch(e){deficiencies.push(String(e.message||e));}
+try{
+  form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
+  deficiencies.push(...validateWorkForm(schema,form));
+  deficiencies.push(...validatePhaseScaffold(sequence,form));
+}catch(e){deficiencies.push(String(e.message||e));}
+
+if(sequence===5&&form){
+  const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
+  for(const target of targets){
+    if(!target||typeof target!=='object'||target.executionMethod==='NOT_APPLICABLE') continue;
+    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
+    if(resolved){
+      target.executionRequestRef=resolved;
+      target.automationResolvedExecutionRequest=true;
+    }else{
+      deficiencies.push('Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+' has no deterministically resolvable execution request. Provide executionRequestRef only for this target or materialize the conventional request path.');
+    }
+  }
+  if(!deficiencies.length) writeJson(repoFile(root,assignment.workFormPath),form);
 }
-const now=new Date().toISOString();
+
 if(deficiencies.length){
   packet.status='REWORK_REQUIRED';
   packet.controllerValidation={status:'FAIL',validatedAt:now,deficiencies};
   directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
   writeJson(packetFile,packet);writeJson(directoryFile,directory);
-  const feedback=feedbackText(sequence,deficiencies);
+  const feedback=feedbackText(sequence,deficiencies).replace('resubmit the same phase packet','repair the substantive fields and invoke controller validation again; the controller will rebuild the packet');
   process.stdout.write(JSON.stringify({status:'NEEDS_REWORK',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer:assignment.reviewer,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
   process.exit(0);
 }
 
-packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS'};
 const canonicalRel=path.posix.join(campaignPath,'derived/phase-'+sequence,'PHASE_'+phaseNum(sequence)+'_CANONICAL_DATA_v1.json');
-const canonical={schemaVersion:'curveyield-lite-phase-canonical-data-v1',phase:sequence,campaignId:directory.campaignId,workSchemaPath:assignment.workSchemaPath,workFormPath:assignment.workFormPath,finalReportPath:assignment.finalReportPath,actions:form.actions,generatedAt:now};
+const canonical={
+  schemaVersion:'curveyield-lite-phase-canonical-data-v1',
+  phase:sequence,
+  campaignId:directory.campaignId,
+  workSchemaPath:assignment.workSchemaPath,
+  workFormPath:assignment.workFormPath,
+  finalReportPath:assignment.finalReportPath,
+  actions:structuredClone(form.actions),
+  automationInputs:structuredClone(form.automationInputs??{}),
+  automationOutputs:{},
+  generatedAt:now
+};
+if(sequence===4) canonical.automationOutputs.phase4Coverage=phase4CoverageFromForm(form);
+if(sequence===8){
+  canonical.actions['step-2'].outputs.validatedFindings=materializeValidatedFindings(canonical.actions?.['step-2']?.outputs?.candidateValidations??[]);
+  canonical.automationOutputs.validatedFindingsMaterialized=true;
+}
+
+let reportText='';
+if(schema.finalReport){
+  reportText=renderControllerPhaseReport({schema,form,canonical});
+  writeText(repoFile(root,assignment.finalReportPath),reportText);
+  deficiencies.push(...validateFinalReport(schema,reportText));
+}
+if(deficiencies.length) throw new Error('controller-generated report validation failed: '+deficiencies.join('; '));
+
+packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS'};
 const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now});
 writeJson(repoFile(root,canonicalRel),canonical);
 const derivedRels=buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical,canonicalRel,now});
 const boundaryArtifactRels=[];
+let successorPrefillContext={};
 if(sequence===5){
   const targetDesigns=phaseOutput(canonical,'step-3','targetDesigns')??[];
   const executionResults=await executePhase5TargetsV1({controllerRoot:root,campaignPath,targetDesigns});
+  successorPrefillContext={targetDesigns,phase5ExecutionResults:executionResults};
   const targetMatrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
   fs.mkdirSync(path.dirname(repoFile(root,targetMatrixRel)),{recursive:true});
   fs.writeFileSync(repoFile(root,targetMatrixRel),renderTargetedTestMatrixV1({targetDesigns,executionResults}));
@@ -242,9 +290,11 @@ if(sequence===5){
 }
 if(sequence===8&&hasRemediation(campaignRoot)){
   const validatedFindings=phaseOutput(canonical,'step-2','validatedFindings')??[];
+  const deltaRows=remediationDeltaRows(campaignRoot,validatedFindings);
+  successorPrefillContext={...successorPrefillContext,remediationDeltaRows:deltaRows};
   const ledgerRel=path.posix.join(campaignPath,'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md');
   fs.mkdirSync(path.dirname(repoFile(root,ledgerRel)),{recursive:true});
-  fs.writeFileSync(repoFile(root,ledgerRel),renderRemediationDeltaLedgerV1({validatedFindings,deltaRows:remediationDeltaRows(campaignRoot,validatedFindings),noRemediation:false}));
+  fs.writeFileSync(repoFile(root,ledgerRel),renderRemediationDeltaLedgerV1({validatedFindings,deltaRows,noRemediation:false}));
   boundaryArtifactRels.push(ledgerRel);
 }
 if(sequence===8&&!hasRemediation(campaignRoot)){
@@ -329,7 +379,7 @@ if(sequence===10){
 }else{
   const nextReviewer=assignmentReviewer(nextSequence);
   const nextStatus=fresh||isFreshBoundary(nextSequence)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
-  nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus});
+  nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
   directory.currentAssignment=nextAssignment;directory.campaignStatus=nextStatus==='WAITING_FOR_SUCCESSOR_AGENT'?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';directory.updatedAt=now;
 }
 writeJson(directoryFile,directory);
