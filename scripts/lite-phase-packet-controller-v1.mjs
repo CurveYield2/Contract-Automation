@@ -101,7 +101,8 @@ function remediationDeltaRows(campaignRoot,validatedFindings){
     }else changed.add(rel.replace(/^remediation\//,''));
   }
   const deltaText='files='+([...changed].join(', ')||'UNRESOLVED')+'; symbols='+([...symbols].join(', ')||'NOT_MACHINE_DERIVABLE_FROM_AVAILABLE_REMEDIATION_ARTIFACTS');
-  return (validatedFindings?.length?validatedFindings:[{findingTempKey:'REMEDIATION-DELTA'}]).map(f=>({
+  const findingRows=(validatedFindings??[]).filter(f=>f&&typeof f==='object'&&!Array.isArray(f));
+  return (findingRows.length?findingRows:[{findingTempKey:'REMEDIATION-DELTA'}]).map(f=>({
     findingId:f.findingTempKey??f.canonicalId??f.candidateKey??'REMEDIATION-DELTA',
     oldIdentityRef:'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json',
     remediationIdentityRef:evidence.join(', ')||'NO_REMEDIATION_ARTIFACT',
@@ -149,7 +150,7 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
   const build=maybeJson(root,path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'))??{};
   const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
   const remediations=phaseOutput(p9,'step-2','remediationDispositions')??[];
-  const candidateRows=(phaseOutput(p8,'step-2','candidateValidations')??[]).map(v=>({
+  const candidateRows=(phaseOutput(p8,'step-2','candidateValidations')??[]).filter(v=>v&&typeof v==='object'&&!Array.isArray(v)).map(v=>({
     id:v.candidateKey,
     disposition:v.finalDisposition??v.outcome??'UNRESOLVED',
     severityOrStatus:v.severity??'UNRESOLVED',
@@ -157,7 +158,7 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
     remediationStatus:'NOT_APPLICABLE',
     residualLimitation:v.rationale??'SEE_ACCEPTED_PHASE8_DATA'
   }));
-  const findingRows=(phaseOutput(p8,'step-2','validatedFindings')??[]).map(f=>{
+  const findingRows=(phaseOutput(p8,'step-2','validatedFindings')??[]).filter(f=>f&&typeof f==='object'&&!Array.isArray(f)).map(f=>{
     const id=f.canonicalId??f.findingTempKey??f.candidateKey;
     const remediation=remediations.find(r=>r.findingKey===id||r.findingKey===f.findingTempKey||r.findingKey===f.candidateKey);
     return {
