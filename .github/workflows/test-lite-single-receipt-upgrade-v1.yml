@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - upgrade/lite-single-receipt-v1
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -18,11 +21,13 @@ jobs:
   cross-repo:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      TEST_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
     steps:
       - name: Checkout tested Contract-Automation ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ env.TEST_REF }}
           persist-credentials: false
           fetch-depth: 1
 
