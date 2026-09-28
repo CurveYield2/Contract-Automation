@@ -111,7 +111,7 @@ Rules:
 - Include every material candidate and every due retained execution obligation from accepted Phase-2–5 canonical data.
 - Basic targeted fuzzing varies only candidate-relevant inputs and immediate boundaries.
 - A target cannot be closed merely because one happy-path case passed.
-- `INCONCLUSIVE` or unresolved `BLOCKED` always carries forward to Phase 8.
+- \`INCONCLUSIVE\` or unresolved \`BLOCKED\` always carries forward to Phase 8.
 `;
 }
 
@@ -185,7 +185,7 @@ export function renderRemediationDeltaLedgerV1({validatedFindings=[],deltaRows=[
 ${rows.join('\n')}
 
 ## No-remediation path
-- `SKIPPED_NO_REMEDIATION`: ${noRemediation?'YES':'NO'}
+- \`SKIPPED_NO_REMEDIATION\`: ${noRemediation?'YES':'NO'}
 - Evidence-bound reason: ${noRemediation?'No remediation artifacts exist in canonical campaign state.':'Remediation artifacts detected; see rows above.'}
 - Findings still open and their dispositions: ${noRemediation?md(arr(validatedFindings).map(f=>f.findingTempKey??f.canonicalId??f.candidateKey)):'SEE_PHASE8_ACCEPTED_FINDINGS'}
 
@@ -219,7 +219,7 @@ export function renderFinalEvidenceIndexV1({identity={},milestones=[],findings=[
 - Source ZIP/repository/commit/digest: ${md(identity.source)}
 - Dependency lock/toolchain/build artifact identity: ${md(identity.build)}
 - Deployment/configuration simulation identity: ${md(identity.deployment)}
-- Remediation identity or `SKIPPED_NO_REMEDIATION`: ${md(identity.remediation??'SKIPPED_NO_REMEDIATION')}
+- Remediation identity or \`SKIPPED_NO_REMEDIATION\`: ${md(identity.remediation??'SKIPPED_NO_REMEDIATION')}
 
 ## Milestone evidence
 
