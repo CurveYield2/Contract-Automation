@@ -27,12 +27,13 @@ test('automated Phase 0 owns qualification intelligence finalization and only th
   assert.doesNotMatch(coordinator,/browser-agent-wake\.yml/);
 });
 
-test('Phase 0 finalizer creates no interphase mechanical packet',()=>{
+test('Phase 0 finalizer creates no interphase mechanical packet and prepares assignment-v2 Phase 1',()=>{
   const finalizer=read('scripts/lite-phase0-finalize-v1.mjs');
-  assert.match(finalizer,/phase0-automation/);
   assert.match(finalizer,/P0_TO_P1/);
   assert.match(finalizer,/WAITING_FOR_SUCCESSOR_AGENT/);
-  assert.doesNotMatch(finalizer,/MECHANICAL_WORK_PACKET_v2/);
+  assert.match(finalizer,/curveyield-audit-campaign-directory-entry-v2/);
+  assert.match(finalizer,/preparePhaseWork/);
+  assert.doesNotMatch(finalizer,/MECHANICAL_WORK_PACKET_v2|PHASE_01_RECEIPT_v1/);
   assert.match(finalizer,/reviewer-1/);
 });
 
@@ -46,10 +47,11 @@ test('source initialization creates a Phase-0 automation receipt instead of camp
   assert.doesNotMatch(writer,/web-bootstrap-agent|CHATGPT_WEB_CHAT_GITHUB_CONNECTOR|CAMPAIGN_STATE|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE/);
 });
 
-test('browser orchestrator begins only from a sealed receipt successor transition',()=>{
+test('browser orchestrator launches assignment-v2 reviewers and retains legacy receipt fallback',()=>{
   const orchestrator=read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
   assert.doesNotMatch(orchestrator,/web-bootstrap-agent|CAMPAIGN_STATE|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE/);
   assert.match(orchestrator,/Audit Campaign Directory\/campaigns/);
+  assert.match(orchestrator,/prepare-lite-assignment-successor-v2\.mjs/);
   assert.match(orchestrator,/prepare-lite-receipt-successor-v1\.mjs/);
   assert.match(orchestrator,/browser-agent-wake\.yml/);
 });

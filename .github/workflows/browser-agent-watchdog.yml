@@ -773,51 +773,90 @@ jobs:
                 echo "::warning::Audit Campaign Directory entry unavailable; watchdog will retry."
               else
                 printf '%s' "$encoded_directory" | base64 -d > /tmp/audit-campaign-directory.json
-                directory_status="$(jq -r '.status // empty' /tmp/audit-campaign-directory.json)"
+                directory_schema="$(jq -r '.schemaVersion // empty' /tmp/audit-campaign-directory.json)"
                 campaign_root="$(jq -r '.workspacePath // empty' /tmp/audit-campaign-directory.json)"
                 campaign_title="$(jq -r '.campaignName // empty' /tmp/audit-campaign-directory.json)"
-                current_receipt_path="$(jq -r '.currentReceiptPath // empty' /tmp/audit-campaign-directory.json)"
-                current_phase_seq="$(jq -r '.currentPhaseSequence // empty' /tmp/audit-campaign-directory.json)"
-                current_reviewer="$(jq -r '.currentReviewer // empty' /tmp/audit-campaign-directory.json)"
-                if [ "$directory_status" = "COMPLETE" ] || [ "$directory_status" = "STOPPED_BY_HUMAN" ]; then
-                  retire_state "LITE_RECEIPT_CAMPAIGN_TERMINAL_$directory_status"
-                  exit 0
-                fi
-                if [ -n "$current_receipt_path" ]; then
-                  encoded_receipt="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$current_receipt_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
-                  if [ -n "$encoded_receipt" ]; then
-                    printf '%s' "$encoded_receipt" | base64 -d > /tmp/lite-phase-receipt.json
-                    receipt_status="$(jq -r '.phase.status // empty' /tmp/lite-phase-receipt.json)"
-                    receipt_phase="$(jq -r '.phase.id // empty' /tmp/lite-phase-receipt.json)"
-                    receipt_seq="$(jq -r '.phase.sequence // empty' /tmp/lite-phase-receipt.json)"
-                    handoff_required="$(jq -r '.handoff.required // false' /tmp/lite-phase-receipt.json)"
-                    handoff_status="$(jq -r '.handoff.status // empty' /tmp/lite-phase-receipt.json)"
 
-                    if [ -n "$receipt_phase" ] && [ "$receipt_phase" != "$gate_expected_phase" ]; then
-                      echo "Lite receipt advanced $gate_expected_phase -> $receipt_phase; keeping the same chat on the current campaign directory pointer."
-                      jq --arg phase "$receipt_phase" '.phaseId=$phase | .gate.expectedPhaseId=$phase | .lastDecision=("RECEIPT_PHASE_SYNC_"+$phase)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
-                      mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
-                      persist_state || true
-                      gate_expected_phase="$receipt_phase"
-                    fi
+                if [ "$directory_schema" = "curveyield-audit-campaign-directory-entry-v2" ]; then
+                  campaign_status="$(jq -r '.campaignStatus // empty' /tmp/audit-campaign-directory.json)"
+                  assignment_status="$(jq -r '.currentAssignment.status // empty' /tmp/audit-campaign-directory.json)"
+                  assignment_phase="$(jq -r '.currentAssignment.phaseId // empty' /tmp/audit-campaign-directory.json)"
+                  assignment_seq="$(jq -r '.currentAssignment.phaseSequence // empty' /tmp/audit-campaign-directory.json)"
+                  assignment_reviewer="$(jq -r '.currentAssignment.reviewer // empty' /tmp/audit-campaign-directory.json)"
+                  packet_path="$(jq -r '.currentAssignment.packetPath // empty' /tmp/audit-campaign-directory.json)"
 
-                    if [ "$receipt_status" = "EVIDENCE_READY" ]; then
-                      echo "Lite receipt $receipt_phase is evidence-ready; dispatching deterministic receipt validation/transition."
-                      GH_TOKEN="$GH_TOKEN" gh workflow run lite-phase-receipt-controller-v1.yml --repo "$GITHUB_REPOSITORY" --ref main                         -f campaign_id="$campaign_id" -f campaign_path="$campaign_root" -f phase_sequence="$receipt_seq" -f audit_controller_ref="$gate_ref" || true
-                      jq '.lastDecision="RECEIPT_CONTROLLER_DISPATCHED"' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
-                      mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
-                      persist_state || true
-                    elif [ "$receipt_status" = "SEALED" ] && [ "$handoff_required" = "true" ] && [ "$handoff_status" = "SUCCESSOR_PENDING" ]; then
-                      echo "Lite receipt $receipt_phase is sealed and awaiting a fresh successor."
-                      GH_TOKEN="$GH_TOKEN" gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main                         -f campaign_id="$campaign_id" -f campaign_name="$campaign_title" -f campaign_path="$campaign_root" -f audit_controller_ref="$gate_ref"
-                      retire_state "LITE_RECEIPT_SUCCESSOR_ORCHESTRATION_DISPATCHED_$receipt_phase"
-                      exit 0
-                    elif [ "$receipt_status" = "COMPLETE" ]; then
-                      retire_state "LITE_RECEIPT_PHASE10_COMPLETE"
+                  if [ "$campaign_status" = "COMPLETE" ] || [ "$campaign_status" = "STOPPED_BY_HUMAN" ]; then
+                    retire_state "LITE_ASSIGNMENT_CAMPAIGN_TERMINAL_$campaign_status"
+                    exit 0
+                  fi
+
+                  if [ -n "$assignment_phase" ] && [ "$assignment_phase" != "$gate_expected_phase" ]; then
+                    if [ "$assignment_status" = "WAITING_FOR_SUCCESSOR_AGENT" ]; then
+                      echo "Fresh successor assignment $assignment_phase is pending; retiring predecessor watchdog."
+                      retire_state "LITE_ASSIGNMENT_FRESH_SUCCESSOR_PENDING_$assignment_phase"
                       exit 0
                     fi
-                  else
-                    echo "::warning::Current Lite phase receipt unavailable; watchdog will retry."
+                    echo "Lite assignment advanced $gate_expected_phase -> $assignment_phase; keeping same reviewer chat."
+                    jq --arg phase "$assignment_phase" '.phaseId=$phase | .gate.expectedPhaseId=$phase | .gate.expectedMilestoneId=("PHASE_"+($phase|sub("phase-";""))+"_WORK_PACKET") | .lastDecision=("ASSIGNMENT_PHASE_SYNC_"+$phase)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+                    mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+                    persist_state || true
+                    gate_expected_phase="$assignment_phase"
+                  fi
+
+                  if [ -n "$packet_path" ]; then
+                    encoded_packet="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+                    if [ -n "$encoded_packet" ]; then
+                      printf '%s' "$encoded_packet" | base64 -d > /tmp/lite-phase-work-packet.json
+                      packet_status="$(jq -r '.status // empty' /tmp/lite-phase-work-packet.json)"
+                      if [ "$packet_status" = "SUBMITTED" ]; then
+                        echo "Phase $assignment_seq work packet is submitted; dispatching schema validation/controller transaction."
+                        GH_TOKEN="$GH_TOKEN" gh workflow run lite-phase-work-packet-controller-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+                          -f campaign_id="$campaign_id" \
+                          -f campaign_path="$campaign_root" \
+                          -f campaign_directory_path="$gate_path" \
+                          -f phase_sequence="$assignment_seq" \
+                          -f audit_controller_ref="$gate_ref" || true
+                        jq '.lastDecision="PHASE_WORK_PACKET_CONTROLLER_DISPATCHED"' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+                        mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+                        persist_state || true
+                      fi
+                    fi
+                  fi
+                else
+                  directory_status="$(jq -r '.status // empty' /tmp/audit-campaign-directory.json)"
+                  current_receipt_path="$(jq -r '.currentReceiptPath // empty' /tmp/audit-campaign-directory.json)"
+                  if [ "$directory_status" = "COMPLETE" ] || [ "$directory_status" = "STOPPED_BY_HUMAN" ]; then
+                    retire_state "LITE_RECEIPT_CAMPAIGN_TERMINAL_$directory_status"
+                    exit 0
+                  fi
+                  if [ -n "$current_receipt_path" ]; then
+                    encoded_receipt="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$current_receipt_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+                    if [ -n "$encoded_receipt" ]; then
+                      printf '%s' "$encoded_receipt" | base64 -d > /tmp/lite-phase-receipt.json
+                      receipt_status="$(jq -r '.phase.status // empty' /tmp/lite-phase-receipt.json)"
+                      receipt_phase="$(jq -r '.phase.id // empty' /tmp/lite-phase-receipt.json)"
+                      receipt_seq="$(jq -r '.phase.sequence // empty' /tmp/lite-phase-receipt.json)"
+                      handoff_required="$(jq -r '.handoff.required // false' /tmp/lite-phase-receipt.json)"
+                      handoff_status="$(jq -r '.handoff.status // empty' /tmp/lite-phase-receipt.json)"
+                      if [ -n "$receipt_phase" ] && [ "$receipt_phase" != "$gate_expected_phase" ]; then
+                        jq --arg phase "$receipt_phase" '.phaseId=$phase | .gate.expectedPhaseId=$phase | .lastDecision=("RECEIPT_PHASE_SYNC_"+$phase)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+                        mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+                        persist_state || true
+                        gate_expected_phase="$receipt_phase"
+                      fi
+                      if [ "$receipt_status" = "EVIDENCE_READY" ]; then
+                        GH_TOKEN="$GH_TOKEN" gh workflow run lite-phase-receipt-controller-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+                          -f campaign_id="$campaign_id" -f campaign_path="$campaign_root" -f phase_sequence="$receipt_seq" -f audit_controller_ref="$gate_ref" || true
+                      elif [ "$receipt_status" = "SEALED" ] && [ "$handoff_required" = "true" ] && [ "$handoff_status" = "SUCCESSOR_PENDING" ]; then
+                        GH_TOKEN="$GH_TOKEN" gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+                          -f campaign_id="$campaign_id" -f campaign_name="$campaign_title" -f campaign_path="$campaign_root" -f audit_controller_ref="$gate_ref"
+                        retire_state "LITE_RECEIPT_SUCCESSOR_ORCHESTRATION_DISPATCHED_$receipt_phase"
+                        exit 0
+                      elif [ "$receipt_status" = "COMPLETE" ]; then
+                        retire_state "LITE_RECEIPT_PHASE10_COMPLETE"
+                        exit 0
+                      fi
+                    fi
                   fi
                 fi
               fi

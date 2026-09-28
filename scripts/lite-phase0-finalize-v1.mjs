@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import {preparePhaseWork} from './lib/lite-phase-work-v1.mjs';
 
 function args(argv){const out={};for(let i=2;i<argv.length;i+=2){const k=argv[i],v=argv[i+1];if(!k?.startsWith('--')||v===undefined)throw new Error('arguments must be --key value');out[k.slice(2)]=v;}return out;}
 function sha(bytes){return createHash('sha256').update(bytes).digest('hex');}
@@ -71,18 +72,41 @@ write(receiptPath,receipt);
 const directoryPath=path.join(controllerRoot,...String(receipt.campaign.campaignDirectoryEntryPath).split('/'));
 const directory=read(required(directoryPath,'Audit Campaign Directory entry'));
 if(directory.campaignId!==receipt.campaign.campaignId) throw new Error('campaign directory identity mismatch');
-directory.currentReceiptPath=rel(controllerRoot,receiptPath);
-directory.currentPhaseSequence=0;
-directory.currentReviewer='phase0-automation';
-directory.status='WAITING_FOR_SUCCESSOR_AGENT';
-directory.updatedAt=now;
-write(directoryPath,directory);
+const sealedPhase0Receipt=rel(controllerRoot,receiptPath);
+const authorityRoot=path.posix.dirname(receipt.authority.homepagePath);
+const assignment=preparePhaseWork({
+  root:controllerRoot,
+  campaignPath,
+  authorityRoot,
+  sequence:1,
+  reviewer:'reviewer-1',
+  predecessorReceiptPath:sealedPhase0Receipt,
+  derivedInputPaths:[
+    path.posix.join(campaignPath,'evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json'),
+    path.posix.join(campaignPath,'evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json')
+  ],
+  status:'WAITING_FOR_SUCCESSOR_AGENT'
+});
+const directoryV2={
+  schemaVersion:'curveyield-audit-campaign-directory-entry-v2',
+  campaignId:receipt.campaign.campaignId,
+  campaignGenerationId:receipt.campaign.campaignGenerationId,
+  campaignName:receipt.campaign.campaignName,
+  workspacePath:campaignPath,
+  mode:'LITE',
+  sourceSha256:sourceSha,
+  lastSealedReceiptPath:sealedPhase0Receipt,
+  campaignStatus:'WAITING_FOR_SUCCESSOR_AGENT',
+  currentAssignment:assignment,
+  updatedAt:now
+};
+write(directoryPath,directoryV2);
 
 process.stdout.write(JSON.stringify({
   status:'PASS',
   campaignId:receipt.campaign.campaignId,
   campaignName:receipt.campaign.campaignName,
-  receiptPath:rel(controllerRoot,receiptPath),
+  receiptPath:sealedPhase0Receipt,
   campaignDirectoryEntryPath:receipt.campaign.campaignDirectoryEntryPath,
   successorReviewer:'reviewer-1',
   successorPhase:1

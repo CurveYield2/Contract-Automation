@@ -74,23 +74,34 @@ jobs:
           test "$(jq -r '.campaignId' "${{ steps.directory.outputs.path }}")" = "$CAMPAIGN_ID"
           test "$(jq -r '.workspacePath' "${{ steps.directory.outputs.path }}")" = "$CAMPAIGN_PATH"
 
-      - name: Prepare incoming phase receipt and dynamic wake message
+      - name: Prepare current assignment and dynamic wake message
         id: successor
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/prepare-lite-receipt-successor-v1.mjs \
-            --controller-root .audit-controller \
-            --campaign-directory-path "${{ steps.directory.outputs.path }}" | tee /tmp/lite-successor.json
+          directory_schema="$(jq -r '.schemaVersion' ".audit-controller/${{ steps.directory.outputs.path }}")"
+          if [ "$directory_schema" = "curveyield-audit-campaign-directory-entry-v2" ]; then
+            node scripts/prepare-lite-assignment-successor-v2.mjs \
+              --controller-root .audit-controller \
+              --campaign-directory-path "${{ steps.directory.outputs.path }}" | tee /tmp/lite-successor.json
+            boundary="PHASE_$(jq -r '.incomingPhaseSequence' /tmp/lite-successor.json)_WORK_PACKET"
+          else
+            node scripts/prepare-lite-receipt-successor-v1.mjs \
+              --controller-root .audit-controller \
+              --campaign-directory-path "${{ steps.directory.outputs.path }}" | tee /tmp/lite-successor.json
+            boundary="$(jq -r '.boundary' /tmp/lite-successor.json)"
+          fi
           test "$(jq -r '.status' /tmp/lite-successor.json)" = PASS
           {
+            echo "directory_schema=$directory_schema"
             echo "incoming_phase=$(jq -r '.incomingPhaseId' /tmp/lite-successor.json)"
             echo "incoming_reviewer=$(jq -r '.incomingReviewer' /tmp/lite-successor.json)"
-            echo "boundary=$(jq -r '.boundary' /tmp/lite-successor.json)"
+            echo "boundary=$boundary"
             echo "wake_b64=$(jq -r '.wakeMessageB64' /tmp/lite-successor.json)"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Publish successor receipt preparation
+      - name: Publish legacy successor receipt preparation when applicable
+        if: steps.successor.outputs.directory_schema != 'curveyield-audit-campaign-directory-entry-v2'
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
@@ -175,4 +186,5 @@ jobs:
             echo "- Incoming phase: ${{ steps.successor.outputs.incoming_phase }}"
             echo "- Incoming reviewer: ${{ steps.successor.outputs.incoming_reviewer }}"
             echo "- Stored handoff/wake/start files: none"
+            echo "- Active-phase receipt for assignment-v2 campaigns: none"
           } >> "$GITHUB_STEP_SUMMARY"

@@ -505,6 +505,27 @@ jobs:
           cd .audit-controller-wake
           git fetch origin "$AUDIT_CONTROLLER_REF"
           git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
+          directory_schema="$(jq -r '.schemaVersion // empty' "$DIRECTORY_PATH")"
+          if [ "$directory_schema" = "curveyield-audit-campaign-directory-entry-v2" ]; then
+            campaign_status="$(jq -r '.campaignStatus // empty' "$DIRECTORY_PATH")"
+            assignment_status="$(jq -r '.currentAssignment.status // empty' "$DIRECTORY_PATH")"
+            if [ "$campaign_status" = "WAITING_FOR_SUCCESSOR_AGENT" ] && [ "$assignment_status" = "WAITING_FOR_SUCCESSOR_AGENT" ]; then
+              now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              jq --arg now "$now" '.campaignStatus="ACTIVE" | .currentAssignment.status="ACTIVE" | .updatedAt=$now' "$DIRECTORY_PATH" > /tmp/directory-v2.json
+              mv /tmp/directory-v2.json "$DIRECTORY_PATH"
+              reviewer="$(jq -r '.currentAssignment.reviewer' "$DIRECTORY_PATH")"
+              git config user.name 'CurveYield Browser Wake'
+              git config user.email 'browser-wake@users.noreply.github.com'
+              git add -- "$DIRECTORY_PATH"
+              if ! git diff --cached --quiet; then
+                git commit -m "audit(assignment): activate $CAMPAIGN_ID $reviewer"
+                git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+              fi
+            else
+              echo "Assignment-v2 wake resumes the current reviewer state without creating or modifying a phase receipt."
+            fi
+            exit 0
+          fi
           directory_status="$(jq -r '.status // empty' "$DIRECTORY_PATH")"
           if [ "$directory_status" = "ACTIVE" ] || [ "$directory_status" = "BLOCKED" ]; then
             current_path="$(jq -r '.currentReceiptPath' "$DIRECTORY_PATH")"
