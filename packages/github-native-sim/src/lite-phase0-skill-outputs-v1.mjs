@@ -27,7 +27,7 @@ async function latestVersioned(dir,prefix){
   if(!matches.length) throw new Error(`No ${prefix}_vN.json under ${dir}`);
   return path.join(dir,matches.at(-1).name);
 }
-function sourceIdentityString(state,build){
+function sourceIdentityString(receipt,build){
   const s=state?.source??{};
   const b=build?.source??{};
   const repo=s.archiveRepository??b.repository??'UNKNOWN_REPOSITORY';
@@ -48,8 +48,7 @@ function asArray(v){return Array.isArray(v)?v:[];}
 function uniq(values){return [...new Set(values.filter(v=>v!==null&&v!==undefined&&v!==''))];}
 
 async function buildCore({campaignRoot,skillRoot}){
-  const controllerDir=path.join(campaignRoot,'controller');
-  const state=await readJson(await latestVersioned(controllerDir,'CAMPAIGN_STATE'));
+  const receipt=await readJson(path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json'));
   const buildPath=path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
   const technicalPath=path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json');
   const readinessPath=path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json');
@@ -59,11 +58,11 @@ async function buildCore({campaignRoot,skillRoot}){
     readJson(buildPath),readJson(technicalPath),readJson(readinessPath),readJson(sbomPath),readJson(slitherPath)
   ]);
 
-  const campaignId=state.campaignId??build.campaignId;
-  const generation=state.campaignGenerationId??'UNRESOLVED_CAMPAIGN_GENERATION';
-  const sourceDigest=state?.source?.sha256??build?.source?.archiveSha256Observed??build?.source?.archiveSha256??technical?.sourceIdentity?.archiveSha256;
+  const campaignId=receipt.campaign?.campaignId??build.campaignId;
+  const generation=receipt.campaign?.campaignGenerationId??'UNRESOLVED_CAMPAIGN_GENERATION';
+  const sourceDigest=receipt?.source?.sha256??build?.source?.archiveSha256Observed??build?.source?.archiveSha256??technical?.sourceIdentity?.archiveSha256;
   if(!campaignId||!sourceDigest) throw new Error('campaign/source identity unavailable for canonical Phase-0 outputs');
-  const sourceIdentity=sourceIdentityString(state,build);
+  const sourceIdentity=sourceIdentityString(receipt,build);
   const buildIdentity=buildIdentityString(build);
   const buildDigest=await fileDigest(buildPath);
   const createdAt=new Date().toISOString();
@@ -75,7 +74,7 @@ async function buildCore({campaignRoot,skillRoot}){
     campaignId,
     campaignGenerationId:generation,
     phaseId:'phase-0',
-    phaseRevision:state?.phase?.revision??'v1',
+    phaseRevision:`v${receipt?.phase?.revision??1}`,
     sourceIdentity,
     sourceDigestSha256:sourceDigest,
     sourceCommitOrArchiveIdentity:build?.source?.archivePath
@@ -288,10 +287,10 @@ async function buildBundle({campaignRoot,skillRoot,acceptedCommit}){
   const state=await readJson(await latestVersioned(controllerDir,'CAMPAIGN_STATE'));
   const buildPath=path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
   const build=await readJson(buildPath);
-  const campaignId=state.campaignId??build.campaignId;
-  const generation=state.campaignGenerationId??'UNRESOLVED_CAMPAIGN_GENERATION';
-  const sourceDigest=state?.source?.sha256??build?.source?.archiveSha256Observed??build?.source?.archiveSha256;
-  const sourceIdentity=sourceIdentityString(state,build);
+  const campaignId=receipt.campaign?.campaignId??build.campaignId;
+  const generation=receipt.campaign?.campaignGenerationId??'UNRESOLVED_CAMPAIGN_GENERATION';
+  const sourceDigest=receipt?.source?.sha256??build?.source?.archiveSha256Observed??build?.source?.archiveSha256;
+  const sourceIdentity=sourceIdentityString(receipt,build);
   const buildIdentity=buildIdentityString(build);
   const buildDigest=await fileDigest(buildPath);
   const coreRel='evidence/source-intelligence/SOURCE_INTELLIGENCE_v1.json';
