@@ -80,12 +80,11 @@ jobs:
         run: |
           set -euo pipefail
           case "$CAMPAIGN_PATH" in campaigns/*) ;; *) echo "::error::campaign_path must be under campaigns/"; exit 1;; esac
-          controller_api="repos/CurveYield2/Audit-Controller/contents/$CAMPAIGN_PATH/controller?ref=$AUDIT_CONTROLLER_REF"
-          state_name="$(gh api "$controller_api" --jq '.[].name' | sed -n 's/^\(CAMPAIGN_STATE_v[0-9][0-9]*\.json\)$/\1/p' | sort -V | tail -n1)"
-          test -n "$state_name"
-          gh api "repos/CurveYield2/Audit-Controller/contents/$CAMPAIGN_PATH/controller/$state_name?ref=$AUDIT_CONTROLLER_REF" --jq '.content' | base64 -d > /tmp/phase0-state.json
-          test "$(jq -r '.campaignId' /tmp/phase0-state.json)" = "$CAMPAIGN_ID"
-          jq -n             --arg requestId "phase0-$CAMPAIGN_ID-$GITHUB_RUN_ID"             --arg campaignId "$CAMPAIGN_ID"             --arg sourceCommit "$(jq -r '.source.archiveCommit' /tmp/phase0-state.json)"             --arg archivePath "$(jq -r '.source.archivePath' /tmp/phase0-state.json)"             --arg archiveSha "$(jq -r '.source.sha256' /tmp/phase0-state.json)"             --arg destRef "$AUDIT_CONTROLLER_REF"             --arg campaignPath "$CAMPAIGN_PATH"             '{
+          receipt_path="$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"
+          gh api "repos/CurveYield2/Audit-Controller/contents/$receipt_path?ref=$AUDIT_CONTROLLER_REF" --jq '.content' | base64 -d > /tmp/phase0-receipt.json
+          test "$(jq -r '.campaign.campaignId' /tmp/phase0-receipt.json)" = "$CAMPAIGN_ID"
+          test "$(jq -r '.phase.sequence' /tmp/phase0-receipt.json)" = "0"
+          jq -n             --arg requestId "phase0-$CAMPAIGN_ID-$GITHUB_RUN_ID"             --arg campaignId "$CAMPAIGN_ID"             --arg sourceCommit "$(jq -r '.source.archiveCommit' /tmp/phase0-receipt.json)"             --arg archivePath "$(jq -r '.source.archivePath' /tmp/phase0-receipt.json)"             --arg archiveSha "$(jq -r '.source.sha256' /tmp/phase0-receipt.json)"             --arg destRef "$AUDIT_CONTROLLER_REF"             --arg campaignPath "$CAMPAIGN_PATH"             '{
               schemaVersion:"curveyield-lite-phase0-intelligence-request-v1",
               requestId:$requestId,
               campaignId:$campaignId,
@@ -148,7 +147,6 @@ jobs:
           mkdir -p "$campaign_path/evidence/source-intelligence"
           mkdir -p "$campaign_path/evidence/readiness"
           mkdir -p "$campaign_path/shared/source-intelligence"
-          mkdir -p "$campaign_path/shared/controller"
           mkdir -p "$campaign_path/controller"
 
           cp ../.phase0-intelligence-output/BUILD_AND_SOURCE_IDENTITY_v1.json "$campaign_path/evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json"
@@ -200,6 +198,7 @@ jobs:
             echo "- Automated Source Intelligence: generated"
             echo "- Canonical skill-required Source Intelligence core/overlays/bundle: generated at the exact Phase-0 contract paths"
             echo "- Deployment/config + testing/tooling readiness inventory: generated"
-            echo "- Campaign-global graph/ledger canonical Phase-0 paths: initialized"
+            echo "- Campaign-global graph/ledger/invalidation canonical paths: initialized"
+            echo "- Phase-0 audit surface: generated"
             echo "- No observer/ingestion/retirement/handoff receipts generated"
           } >> "$GITHUB_STEP_SUMMARY"
