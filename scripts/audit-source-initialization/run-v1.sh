@@ -72,7 +72,7 @@ else
       if [[ "$id" =~ ^${slug}-r([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -gt "$max" ]; then
         max="${BASH_REMATCH[1]}"
       fi
-    done < <(find campaigns .deep-assurance/active -type f -name '*.json' -print 2>/dev/null | LC_ALL=C sort)
+    done < <(find campaigns 'Audit Campaign Directory/campaigns' -type f -name '*.json' -print 2>/dev/null | LC_ALL=C sort)
 
     revision=$((max + 1))
     campaign_id="$slug-r$revision"
@@ -80,15 +80,15 @@ else
     campaign_root="campaigns/$campaign_name"
     source_dir="$campaign_root/source"
     source_path="$source_dir/$filename"
-    controller_dir="$campaign_root/controller"
-    active_path=".deep-assurance/active/$slug.json"
+    receipts_dir="$campaign_root/receipts"
+    campaign_directory_path="Audit Campaign Directory/campaigns/$slug.json"
     created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     compact="$(date -u +%Y%m%dT%H%M%SZ)"
     generation_id="$campaign_id-g1-$compact"
 
     [ ! -e "$campaign_root" ] || { echo "::error::Campaign path collision: $campaign_root"; exit 1; }
 
-    mkdir -p "$source_dir" "$controller_dir" .deep-assurance/active
+    mkdir -p "$source_dir" "$receipts_dir" "Audit Campaign Directory/campaigns"
     cp "$work/$filename" "$source_path"
     tree_sha="$(safe_extract_audit_zip "$source_path" "$source_dir" "$filename")"
 
@@ -103,11 +103,11 @@ else
     SOURCE_DIR="$source_dir" ADMISSION_COMMIT="$admission_commit" SOURCE_BLOB="$source_blob" TREE_SHA="$tree_sha" \
     CREATED_AT="$created_at" SKILL_RELEASE="$skill_release" SKILL_REVISION="$skill_revision" SKILL_HOME="$skill_home" \
     SKILL_SHA="$skill_sha" SKILL_BLOB="$skill_blob" SKILL_REPO_PATH="$skill_repo_path" \
-    CONTROLLER_DIR="$controller_dir" ACTIVE_PATH="$active_path" \
-      python3 "$ROOT/scripts/audit-source-initialization/write-state-v1.py"
+    RECEIPTS_DIR="$receipts_dir" CAMPAIGN_DIRECTORY_PATH="$campaign_directory_path" \
+      python3 "$ROOT/scripts/audit-source-initialization/write-phase0-receipt-v1.py"
 
-    git add -- "$controller_dir" "$active_path"
-    git commit -m "audit(controller): initialize $campaign_id"
+    git add -- "$receipts_dir" "$campaign_directory_path"
+    git commit -m "audit(receipt): initialize $campaign_id phase 0"
     init_commit="$(git rev-parse HEAD)"
 
     if git push origin HEAD:main; then
