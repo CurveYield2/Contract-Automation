@@ -13,7 +13,6 @@ const transitions={
   3:{next:4,same:true,reviewer:'reviewer-2',assigned:'Phase 4'},
   4:{next:5,same:true,reviewer:'reviewer-2',assigned:'Phase 5'},
   5:{next:6,same:false,boundary:'P5_TO_P6',reviewer:'reviewer-3L',assigned:'Merged Lite Phases 6–7'},
-  6:{next:7,same:true,reviewer:'reviewer-3L',assigned:'Phase 7 completion marker'},
   7:{next:8,same:false,boundary:'P67_TO_P8',reviewer:'reviewer-4',assigned:'Combined Lite Phases 8–10'},
   8:{next:9,same:true,reviewer:'reviewer-4',assigned:'Phase 9'},
   9:{next:10,same:true,reviewer:'reviewer-4',assigned:'Phase 10'},
