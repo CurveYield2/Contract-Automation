@@ -74,6 +74,7 @@ try{form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
 let reportText='';
 if(schema.finalReport){
   try{reportText=fs.readFileSync(requiredFile(root,assignment.finalReportPath,'phase final report'),'utf8');deficiencies.push(...validateFinalReport(schema,reportText));}catch(e){deficiencies.push(String(e.message||e));}
+}
 const now=new Date().toISOString();
 if(deficiencies.length){
   packet.status='REWORK_REQUIRED';
