@@ -65,7 +65,7 @@ jobs:
           rm -rf .audit-controller
           gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
           cd .audit-controller
-          git fetch origin upgrade/lite-single-receipt-v1
+          git fetch origin "$TEST_REF"
           git checkout --detach FETCH_HEAD
 
       - name: Validate matching Audit-Controller ref
