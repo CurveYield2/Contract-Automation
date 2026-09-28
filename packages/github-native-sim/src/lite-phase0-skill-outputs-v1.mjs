@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { renderDeployConfigMatrixV1 } from './lite-boundary-artifacts-v1.mjs';
 import { createHash } from 'node:crypto';
 
 function parseArgs(argv){
@@ -314,9 +315,18 @@ async function buildCore({campaignRoot,skillRoot}){
     ['controller/SECURITY_TRACEABILITY_GRAPH_v1.json',graph],
     ['controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json',ledger],
     ['controller/EVIDENCE_INVALIDATION_MATRIX_v1.json',invalidation],
-    ['evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json',auditSurface]
+    ['evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json',auditSurface],
+    ['work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md',renderDeployConfigMatrixV1({readiness,execution:deployExecution})]
   ];
-  for(const [rel,obj] of writes) await writeJson(path.join(campaignRoot,rel),obj);
+  for(const [rel,obj] of writes){
+    const target=path.join(campaignRoot,rel);
+    if(typeof obj==='string'){
+      await fs.mkdir(path.dirname(target),{recursive:true});
+      await fs.writeFile(target,obj);
+    }else{
+      await writeJson(target,obj);
+    }
+  }
   return {campaignId,generation,sourceDigest,buildDigest,createdAt,writes:writes.map(([rel])=>rel)};
 }
 
