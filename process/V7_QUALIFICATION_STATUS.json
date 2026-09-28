@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-v7-current-qualification-status-v1",
   "status": "PASS",
-  "qualifiedCommit": "1781b18040e9840ac81ee14ca14d37e48eec84ee",
-  "workflowRunId": "36361309676",
-  "qualifiedAt": "2026-09-28T00:17:04.868Z",
+  "qualifiedCommit": "031c25f78ce891df4cd1ec2c95187f515f07d691",
+  "workflowRunId": "36369329098",
+  "qualifiedAt": "2026-09-28T02:20:01.970Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
@@ -42,13 +42,13 @@
   },
   "controllerQualification": {
     "schemaVersion": "v26-controller-qualification-v1",
-    "controllerCommit": "ec90084bee0bd1ad1b92951f9974cb7a5b1e53aa",
+    "controllerCommit": "9968e4887a112bdc5068d37490900eaa4f280202",
     "controllerRef": "main",
     "status": "PASS",
-    "qualificationRunId": "36361309676",
-    "qualifiedAt": "2026-09-28T00:16:44Z",
-    "runnerQualifiedCommit": "1781b18040e9840ac81ee14ca14d37e48eec84ee",
-    "runnerQualificationRunId": "36361309676",
+    "qualificationRunId": "36369329098",
+    "qualifiedAt": "2026-09-28T02:19:41Z",
+    "runnerQualifiedCommit": "031c25f78ce891df4cd1ec2c95187f515f07d691",
+    "runnerQualificationRunId": "36369329098",
     "testedSchemas": [
       "audit-v7-sequential-review-state-v3",
       "v26-phase-contract-v1",
@@ -127,8 +127,8 @@
     },
     "runtime": {
       "identityNormalized": true,
-      "blockNumber": 26072286,
-      "blockHash": "0x6932f41b114abe83ba194ce1ce12b7fdff21a18137f30af6580d11a513412f87",
+      "blockNumber": 26072916,
+      "blockHash": "0x2d508fb7df0cd7de03feb8a2851c6f8c2e97b77dbd29aa669db7e0015bee6411",
       "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
       "rpcUrlExposed": false
     },
@@ -137,8 +137,8 @@
       "status": "PASS",
       "rpc": {
         "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
-        "blockNumber": 26072286,
-        "blockHash": "0x6932f41b114abe83ba194ce1ce12b7fdff21a18137f30af6580d11a513412f87",
+        "blockNumber": 26072916,
+        "blockHash": "0x2d508fb7df0cd7de03feb8a2851c6f8c2e97b77dbd29aa669db7e0015bee6411",
         "urlExposed": false
       },
       "checks": {
