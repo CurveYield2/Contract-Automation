@@ -59,7 +59,7 @@ The Contract-Automation receipt controller verifies that referenced required evi
 On PASS:
 - same-reviewer boundaries create the next phase receipt and advance the Audit Campaign Directory pointer while keeping the same chat;
 - fresh-reviewer boundaries mark the outgoing receipt `SUCCESSOR_PENDING`; the orchestrator creates the incoming receipt, dynamically generates the wake prompt from the receipts, and browser wake marks the transition `SUCCESSOR_ACTIVATED`;
-- Phase 10 marks the phase receipt and campaign directory COMPLETE.
+- Phase 8 may route to Phase 9 or directly to Phase 10; when remediation is absent automation creates one Phase-9 receipt with status SKIPPED before activating Phase 10.\n- Phase 10 marks the phase receipt and campaign directory COMPLETE.
 
 No persistent handoff/wake/start files are created.
 
@@ -289,6 +289,26 @@ for seq in range(11):
           'The Audit Campaign Directory entry is WAITING_FOR_SUCCESSOR_AGENT and the reviewer-1 transition is SUCCESSOR_PENDING before orchestration.',
           'The existing Lite orchestrator/watchdog reviewer-1 activation is dispatched.'
         ]
+    if seq==1:
+        d['steps'][7]['action']='File the combined P0_1 milestone report'
+        d['steps'][7]['instruction']='Reference sealed Phase-0 evidence and Phase-1 semantic/risk outputs in the single substantive P0_1 milestone report and record that report reference in PHASE_01_RECEIPT_v1.json.'
+        d['sealingCriteria']=[item.replace('Phase-0 controller validation PASS','Phase-0 receipt validation PASS').replace('sealed Phase-0 completion/audit-surface/Source-Intelligence evidence','sealed Phase-0 receipt, Audit Surface and Source Intelligence evidence') for item in d.get('sealingCriteria',[]) if 'Current controller/Phase-Contract completion validation reports PASS' not in item]
+        for route in d.get('recoveryRoutes',[]):
+            route['condition']=str(route.get('condition','')).replace('P0_TO_P1 handoff/bootstrap evidence invalid','Phase-0 receipt/bootstrap evidence invalid')
+    if seq==2:
+        d['steps'][0]['action']='Accept the sealed Phase-1 receipt and verify Source Intelligence once'
+        for route in d.get('recoveryRoutes',[]):
+            route['condition']=str(route.get('condition','')).replace('P1 handoff invalid','Phase-1 receipt invalid')
+            route['route']=str(route.get('route','')).replace('Use successor reception recovery','Use Lite receipt recovery')
+    if seq==6:
+        d['steps'][0]['action']='Accept the sealed Phase-5 receipt and admit the exact build'
+        d['steps'][0]['instruction']='Verify PHASE_05_RECEIPT_v1.json validation PASS and reuse exact build evidence only when identity remains valid; otherwise compile/build once after repair.'
+        d['steps'][-1]['action']='Disposition targets and record merged Phase-6 evidence'
+        d['steps'][-1]['instruction']='Record exact outcomes, limitations and Full-only omissions, reconcile global controls, update the merged Phase 6-7 evidence, then mark PHASE_06_RECEIPT_v1.json EVIDENCE_READY. Deterministic advancement creates the Phase-7 receipt in the same reviewer chat.'
+        d['sealingCriteria']=[item.replace('Merged evidence and P67_TO_P8 are sealed','Merged Phase-6 evidence is recorded and the Phase-6 receipt is validation-ready') for item in d.get('sealingCriteria',[])]
+    if seq==8:
+        d['steps'][0]['action']='Accept the sealed Phase-7 receipt and bind candidate set'
+        d['steps'][2]['instruction']='If remediation artifacts exist, set PHASE_08_RECEIPT_v1.json handoff.nextPhaseSequence=9. If none exist, record SKIPPED_NO_REMEDIATION and set handoff.nextPhaseSequence=10. Then mark Phase 8 EVIDENCE_READY. Deterministic advancement creates exactly one Phase-9 receipt; when skipped it is marked SKIPPED, then Phase 10 becomes active in the same reviewer chat.'
     if seq in (5,7):
         last=d['steps'][-1]
         last['action']=f'Mark Phase {seq} evidence ready'
