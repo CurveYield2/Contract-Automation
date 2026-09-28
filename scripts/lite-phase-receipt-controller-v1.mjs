@@ -47,7 +47,14 @@ const now=new Date().toISOString();
 receipt.validation={status:'PASS',validatedAt:now,failures:[]};
 receipt.phase.status=sequence===10?'COMPLETE':'SEALED';
 receipt.sealedAt=now; receipt.updatedAt=now;
-const t=transitions[sequence];
+let t=transitions[sequence];
+if(sequence===8){
+  const requested=receipt.handoff?.nextPhaseSequence;
+  if(requested!==9 && requested!==10) throw new Error('Phase 8 receipt must set handoff.nextPhaseSequence to 9 when remediation exists or 10 when remediation is skipped');
+  t=requested===10
+    ? {next:10,same:true,reviewer:'reviewer-4',assigned:'Phase 10'}
+    : {next:9,same:true,reviewer:'reviewer-4',assigned:'Phase 9'};
+}
 const directoryFile=requiredFile(root,receipt.campaign.campaignDirectoryEntryPath,'campaign directory entry');
 const directory=read(directoryFile);
 let freshSuccessorRequired=false,sameReviewerAdvanced=false,nextReceiptPath=null;
@@ -56,12 +63,29 @@ if(sequence===10){
   directory.status='COMPLETE'; directory.currentPhaseSequence=10; directory.currentReviewer=receipt.executor.lineage;
 }else if(t.same){
   receipt.handoff={required:false,boundary:null,incomingReviewer:t.reviewer,assignedWork:t.assigned,nextPhaseSequence:t.next,sameReviewer:true,status:'NOT_APPLICABLE'};
+  let predecessorPath=receiptRel;
+  if(sequence===8 && t.next===10){
+    const skipped9=createLitePhaseReceiptV1({
+      campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,campaignName:receipt.campaign.campaignName,
+      workspacePath:receipt.campaign.workspacePath,campaignDirectoryEntryPath:receipt.campaign.campaignDirectoryEntryPath,
+      sequence:9,executorType:'AI_REVIEWER',executorLineage:'reviewer-4',authority:receipt.authority,sourceSha256:receipt.source.sha256,source:receipt.source,
+      status:'SKIPPED',globalControls:receipt.globalControls,obligations:{due:[],created:[],closed:[],carriedForward:receipt.obligations.carriedForward??[]},
+      inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],
+      outputs:[{role:'SKIP_REASON',path:'NO_REMEDIATION_ARTIFACTS'}],
+      validation:{status:'NOT_APPLICABLE',validatedAt:now,failures:[]},
+      handoff:{required:false,boundary:null,incomingReviewer:'reviewer-4',assignedWork:'Phase 10',nextPhaseSequence:10,sameReviewer:true,status:'NOT_APPLICABLE'},now
+    });
+    skipped9.sealedAt=now;
+    const skippedPath=phaseReceiptPath(campaignPath,9,1);
+    write(path.join(root,...skippedPath.split('/')),skipped9);
+    predecessorPath=skippedPath;
+  }
   const next=createLitePhaseReceiptV1({
     campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,campaignName:receipt.campaign.campaignName,
     workspacePath:receipt.campaign.workspacePath,campaignDirectoryEntryPath:receipt.campaign.campaignDirectoryEntryPath,
     sequence:t.next,executorType:'AI_REVIEWER',executorLineage:t.reviewer,authority:receipt.authority,sourceSha256:receipt.source.sha256,source:receipt.source,
     status:'ACTIVE',globalControls:receipt.globalControls,obligations:{due:receipt.obligations.carriedForward??[],created:[],closed:[],carriedForward:[]},
-    inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],
+    inputs:[{role:'PREDECESSOR_RECEIPT',path:predecessorPath}],
     handoff:{required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:null,sameReviewer:false,status:'NOT_READY'},now
   });
   nextReceiptPath=phaseReceiptPath(campaignPath,t.next,1);
