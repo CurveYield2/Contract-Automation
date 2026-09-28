@@ -398,12 +398,23 @@ function compact(v){
 }
 export function renderControllerPhaseReport({schema,form,canonical}){
   const phase=schema.phase;
-  const outputs=Object.entries(form?.actions??{}).flatMap(([step,a])=>Object.entries(a?.outputs??{}).map(([key,value])=>({step,key,value})));
+  const sourceActions=canonical?.actions??form?.actions??{};
+  const outputs=Object.entries(sourceActions).flatMap(([step,a])=>Object.entries(a?.outputs??{}).map(([key,value])=>({step,key,value})));
+  const controllerOutputs=Object.entries(canonical?.automationOutputs??{}).map(([key,value])=>({step:'controller',key,value}));
+  const allOutputs=[...outputs,...controllerOutputs];
   const preferred=['liteVerdict','verdictRationale','clientFacingSummary','mergedExecutionConclusions','riskRationale','architectureTrustModel','findingDispositionSynthesis','residualRiskAssessment'];
-  const executive=preferred.map(k=>outputs.find(x=>x.key===k)?.value).find(v=>v!==undefined)??`Phase ${phase} structured substantive work completed and accepted for controller validation.`;
-  const material=outputs.filter(x=>!/(limitation|unresolved|ambigu|uncert)/i.test(x.key)).map(x=>`- ${x.step} / ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
-  const limitations=valuesByName(form,/(limitation|ambigu|uncert)/i).map(x=>`- ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
-  const unresolved=valuesByName(form,/unresolved/i).map(x=>`- ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
+  const executive=preferred.map(k=>allOutputs.find(x=>x.key===k)?.value).find(v=>v!==undefined)??`Phase ${phase} structured substantive work completed and accepted for controller validation.`;
+  const material=allOutputs.filter(x=>!/(limitation|unresolved|ambigu|uncert)/i.test(x.key)).map(x=>`- ${x.step} / ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
+  const limitationRows=[
+    ...valuesByName({actions:sourceActions},/(limitation|ambigu|uncert)/i),
+    ...controllerOutputs.filter(x=>/(limitation|ambigu|uncert)/i.test(x.key))
+  ];
+  const unresolvedRows=[
+    ...valuesByName({actions:sourceActions},/unresolved/i),
+    ...controllerOutputs.filter(x=>/unresolved/i.test(x.key))
+  ];
+  const limitations=limitationRows.map(x=>`- ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
+  const unresolved=unresolvedRows.map(x=>`- ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
   return `# Phase ${phase} Final Report
 
 > **CONTROLLER-GENERATED:** Deterministically rendered from the accepted schema-governed work form and controller-owned outputs. No hashes, handoff bookkeeping, or predecessor restatement is authored by the reviewer.
