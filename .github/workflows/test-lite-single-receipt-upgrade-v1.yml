@@ -1,15 +1,17 @@
-name: Test Lite Single-Receipt Upgrade v1
+name: Lite Single-Receipt Regression v1
 
 on:
   push:
     branches:
+      - main
       - upgrade/lite-single-receipt-v1
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: test-lite-single-receipt-upgrade-v1
+  group: lite-single-receipt-regression-v1-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:
@@ -17,10 +19,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Checkout Contract-Automation upgrade branch
+      - name: Checkout tested Contract-Automation ref
         uses: actions/checkout@v4
         with:
-          ref: upgrade/lite-single-receipt-v1
+          ref: ${{ github.ref_name }}
           persist-credentials: false
           fetch-depth: 1
 
@@ -35,6 +37,9 @@ jobs:
           node --check scripts/prepare-lite-receipt-successor-v1.mjs
           python3 -m py_compile scripts/audit-source-initialization/write-phase0-receipt-v1.py
           bash -n scripts/audit-source-initialization/run-v1.sh
+          test ! -e scripts/audit-source-initialization/write-state-v1.py
+          test ! -e .github/workflows/migrate-audit-campaign-directory-v1.yml
+          test ! -e .github/workflows/migrate-lite-single-receipt-authority-v1.yml
           node --test packages/github-native-sim/test/*.test.mjs
           npm run lint
           npm run build
@@ -46,7 +51,7 @@ jobs:
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         run: bash scripts/select-audit-controller-token.sh
 
-      - name: Clone matching Audit-Controller upgrade branch
+      - name: Clone matching Audit-Controller ref
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         run: |
@@ -58,7 +63,7 @@ jobs:
           git fetch origin upgrade/lite-single-receipt-v1
           git checkout --detach FETCH_HEAD
 
-      - name: Validate Audit-Controller upgrade branch
+      - name: Validate matching Audit-Controller ref
         working-directory: .audit-controller
         run: |
           set -euo pipefail
