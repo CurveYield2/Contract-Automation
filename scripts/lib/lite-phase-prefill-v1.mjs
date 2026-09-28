@@ -170,6 +170,24 @@ function sourceReviewScaffold(si){
       automationOwnedFields:['recordKey','sourceAnchor','contractOrModule','functionOrSurface']
     };
   });
+  let n=rows.length+1;
+  for(const s of si?.securitySurfaces??[]){
+    if(Array.isArray(s.functionIds)&&s.functionIds.length) continue;
+    rows.push({
+      recordKey:'AUTO-SRC-'+String(n++).padStart(4,'0'),
+      sourceAnchor:(s.sourceAnchorIds??[])[0]??s.surfaceId??'SOURCE_INTELLIGENCE',
+      contractOrModule:(s.contractIds??[]).map(id=>contracts.get(id)?.qualifiedName??id).join(', ')||'CROSS_CONTRACT_SURFACE',
+      functionOrSurface:[s.surfaceId,s.surfaceClass].filter(Boolean).join(' / ')||'SECURITY_SURFACE',
+      observedBehavior:'<REQUIRED>',
+      securityInterpretation:'<REQUIRED>',
+      relatedRequirementKeys:'<REQUIRED>',
+      relatedHypothesisKeys:'<REQUIRED>',
+      disposition:'<REQUIRED>',
+      candidateTempKeyOrNone:'<REQUIRED>',
+      limitations:'<REQUIRED>',
+      automationOwnedFields:['recordKey','sourceAnchor','contractOrModule','functionOrSurface']
+    });
+  }
   return rows.length?rows:['NONE_IDENTIFIED'];
 }
 
