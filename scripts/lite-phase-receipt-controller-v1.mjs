@@ -43,6 +43,26 @@ for(const row of [...(receipt.evidence??[]),...(receipt.outputs??[])]){
 for(const [key,rel] of Object.entries(receipt.globalControls??{})){
   if(rel) requiredFile(campaignRoot,rel,'global control '+key);
 }
+const homepage=receipt.authority?.homepagePath;
+if(typeof homepage!=='string'||!homepage.endsWith('/SKILL.md')) throw new Error('receipt authority.homepagePath must bind the current Lite SKILL.md');
+const authorityRoot=path.posix.dirname(homepage);
+const phaseContractRel=path.posix.join(authorityRoot,`phases/phase-${sequence}/PHASE_CONTRACT.json`);
+const phaseContract=read(requiredFile(root,phaseContractRel,'current Lite Phase Contract'));
+if(phaseContract.phase?.sequence!==sequence) throw new Error('Phase Contract sequence does not match receipt phase');
+const recorded=new Set();
+for(const row of [...(receipt.evidence??[]),...(receipt.outputs??[])]) if(row?.path) recorded.add(row.path);
+for(const rel of Object.values(receipt.globalControls??{})) if(rel) recorded.add(rel);
+const receiptLocalPath=path.posix.relative(campaignPath,receiptRel);
+recorded.add(receiptLocalPath);
+const missingRequired=[];
+for(const row of phaseContract.requiredOutputs??[]){
+  if(row?.required!==true) continue;
+  const artifact=row?.artifact;
+  if(typeof artifact!=='string'||!artifact) throw new Error('Phase Contract contains an invalid required output artifact');
+  if(!recorded.has(artifact)){missingRequired.push(artifact);continue;}
+  if(artifact!==receiptLocalPath) requiredFile(campaignRoot,artifact,`required Phase-${sequence} output`);
+}
+if(missingRequired.length) throw new Error(`receipt is missing required Phase Contract outputs: ${missingRequired.join(', ')}`);
 const now=new Date().toISOString();
 receipt.validation={status:'PASS',validatedAt:now,failures:[]};
 receipt.phase.status=sequence===10?'COMPLETE':'SEALED';
