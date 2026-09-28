@@ -505,6 +505,12 @@ jobs:
           cd .audit-controller-wake
           git fetch origin "$AUDIT_CONTROLLER_REF"
           git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
+          directory_status="$(jq -r '.status // empty' "$DIRECTORY_PATH")"
+          if [ "$directory_status" = "ACTIVE" ]; then
+            echo "Current Lite reviewer is already active; this is a replacement-chat wake, not a successor transition."
+            exit 0
+          fi
+          test "$directory_status" = "WAITING_FOR_SUCCESSOR_AGENT"
           outgoing_path="$(jq -r '.currentReceiptPath' "$DIRECTORY_PATH")"
           incoming_path="$(jq -r '.handoff.incomingReceiptPath // empty' "$outgoing_path")"
           test -n "$incoming_path"
