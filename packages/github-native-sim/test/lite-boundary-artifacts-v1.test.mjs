@@ -58,3 +58,17 @@ test('final evidence index intentionally retains summary identity',()=>{
   assert.match(text,/FIND-001/);
   assert.match(text,/stateful fuzzing/);
 });
+
+
+test('final evidence index accepts candidate disposition rows alongside findings',()=>{
+  const text=renderFinalEvidenceIndexV1({
+    identity:{campaignGeneration:'demo-r1/demo-r1-g1',skill:'skill',source:'source',build:'build',deployment:'matrix'},
+    findings:[
+      {id:'CAND-001',disposition:'REJECTED',severityOrStatus:'NOT_APPLICABLE',evidence:'phase8-evidence',remediationStatus:'NOT_APPLICABLE',residualLimitation:'none'},
+      {id:'FIND-001',disposition:'VALIDATED_FINDING',severityOrStatus:'MEDIUM',evidence:'proof',remediationStatus:'FIXED',residualLimitation:'none'}
+    ]
+  });
+  assert.match(text,/CAND-001/);
+  assert.match(text,/REJECTED/);
+  assert.match(text,/FIND-001/);
+});
