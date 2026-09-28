@@ -56,7 +56,7 @@ test('Phase3 boundary writes one controller domain registry and only references 
     'step-1':{section:'x',outputs:{architectureTrustModel:'<REQUIRED>',attackHypotheses:[{tempKey:'<REQUIRED>'}]}},
     'step-2':{section:'y',outputs:{customValidationObligations:['NONE_IDENTIFIED']}}
   }};
-  const out=applyPhaseBoundaryPrefill({...b,sequence:3,form,derivedInputPaths:[],predecessorReceiptPath:'campaigns/demo/receipts/P2.json'});
+  const out=applyPhaseBoundaryPrefill({root:b.root,campaignPath:b.campaign,authorityRoot:b.authority,sequence:3,form,derivedInputPaths:[],predecessorReceiptPath:'campaigns/demo/receipts/P2.json'});
   assert.equal(typeof out.automationInputs.domainRegistryPath,'string');
   assert.equal(out.automationInputs.domainAssessments,undefined);
   const registry=readJson(path.join(b.root,b.campaign,out.automationInputs.domainRegistryPath));
@@ -76,7 +76,7 @@ test('Phase4 boundary scaffolds source and specialist rows while coverage is con
     'step-2':{section:'y',outputs:{specialistReviewRecords:[]}},
     'step-3':{section:'z',outputs:{typedLimitations:['NONE_IDENTIFIED'],candidateRecords:['NO_CANDIDATE']}}
   }};
-  const out=applyPhaseBoundaryPrefill({...b,sequence:4,form,derivedInputPaths:[],predecessorReceiptPath:'campaigns/demo/receipts/P3.json'});
+  const out=applyPhaseBoundaryPrefill({root:b.root,campaignPath:b.campaign,authorityRoot:b.authority,sequence:4,form,derivedInputPaths:[],predecessorReceiptPath:'campaigns/demo/receipts/P3.json'});
   assert.equal(out.actions['step-1'].outputs.sourceReviewRecords.length,3);
   assert.ok(out.actions['step-2'].outputs.specialistReviewRecords.length>=2);
   const coverage=phase4CoverageFromForm(out);
