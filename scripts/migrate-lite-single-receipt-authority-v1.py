@@ -184,6 +184,12 @@ def xform(v):
         for a,b in replacements.items(): v=v.replace(a,b)
         v=v.replace('../../shared/handoff/SUCCESSOR_HANDOFF_RECEPTION_CHECKLIST.md','../../shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md')
         v=v.replace('../../shared/handoff/SUCCESSOR_HANDOFF_PROTOCOL.md','../../shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md')
+        v=v.replace('SUCCESSOR_HANDOFF.json','phase receipt transition state')
+        v=v.replace('SUCCESSOR_HANDOFF_VALIDATION_v1.json','phase receipt validation state')
+        v=v.replace('WAKE_UP_MESSAGE.md','dynamic successor wake prompt')
+        v=v.replace('START_HERE_SUCCESSOR.md','incoming phase receipt')
+        v=v.replace('MECHANICAL_WORK_PACKET_v2.json','legacy mechanical interphase packet')
+        v=v.replace('MECHANICAL_WORK_COMPLETION_v2.json','legacy mechanical completion packet')
         return v
     if isinstance(v,list): return [xform(x) for x in v]
     if isinstance(v,dict): return {k:xform(val) for k,val in v.items()}
