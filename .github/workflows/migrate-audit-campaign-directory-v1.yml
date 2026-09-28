@@ -1,0 +1,55 @@
+name: One-time Audit Campaign Directory path migration v1
+
+on:
+  push:
+    branches: [upgrade/lite-single-receipt-v1]
+    paths:
+      - '.github/workflows/migrate-audit-campaign-directory-v1.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: upgrade/lite-single-receipt-v1, persist-credentials: false, fetch-depth: 1}
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Repoint every literal old campaign-directory path
+        env: {GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          rm -rf .audit-controller
+          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
+          cd .audit-controller
+          git fetch origin upgrade/lite-single-receipt-v1
+          git checkout -B upgrade/lite-single-receipt-v1 origin/upgrade/lite-single-receipt-v1
+          mapfile -d '' files < <(git grep -Il -z -- '.deep-assurance' || true)
+          if [ "${#files[@]}" -gt 0 ]; then
+            for f in "${files[@]}"; do
+              python3 - "$f" <<'PY'
+import pathlib,sys
+p=pathlib.Path(sys.argv[1]); s=p.read_text(); p.write_text(s.replace('.deep-assurance','Audit Campaign Directory'))
+PY
+            done
+          fi
+          if git grep -I -- '.deep-assurance'; then
+            echo "::error::Stale .deep-assurance references remain"
+            exit 1
+          fi
+          git config user.name 'CurveYield Campaign Directory Migration'
+          git config user.email 'campaign-directory-migration@users.noreply.github.com'
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m 'refactor: repoint Audit Campaign Directory references'
+            git push origin HEAD:upgrade/lite-single-receipt-v1
+          fi
