@@ -28,7 +28,7 @@ async function latestVersioned(dir,prefix){
   return path.join(dir,matches.at(-1).name);
 }
 function sourceIdentityString(receipt,build){
-  const s=state?.source??{};
+  const s=receipt?.source??{};
   const b=build?.source??{};
   const repo=s.archiveRepository??b.repository??'UNKNOWN_REPOSITORY';
   const commit=s.archiveCommit??b.commit??b.checkoutCommit??'UNKNOWN_COMMIT';
