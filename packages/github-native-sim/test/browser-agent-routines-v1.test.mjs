@@ -85,14 +85,16 @@ test('technical execution callbacks never create a reviewer and only poke the ex
   assert.doesNotMatch(workflow, /\[AUDIT_AUTOMATION_WAKE_V1\]/);
 });
 
-test('receipt campaigns resolve current phase from the campaign directory and current receipt', () => {
+test('assignment-v2 campaigns resolve active phase from Audit Campaign Directory rather than an active receipt', () => {
   const watchdog = read('.github/workflows/browser-agent-watchdog.yml');
   const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
-  assert.match(watchdog, /currentReceiptPath/);
-  assert.match(watchdog, /receipt_phase="\$\(jq -r '\.phase\.id \/\/ empty'/);
+  assert.match(watchdog, /curveyield-audit-campaign-directory-entry-v2/);
+  assert.match(watchdog, /currentAssignment\.phaseId/);
+  assert.match(watchdog, /currentAssignment\.packetPath/);
   assert.match(repair, /directory_path="\$\(jq -r '\.watchdog\.gate\.statePath'/);
-  assert.match(repair, /receipt_path="\$\(jq -r '\.currentReceiptPath'/);
-  assert.match(repair, /phase_id="\$\(jq -r '\.phase\.id' \/tmp\/current-receipt\.json\)"/);
+  assert.match(repair, /currentAssignment\.workSchemaPath/);
+  assert.match(repair, /currentAssignment\.workFormPath/);
+  assert.match(repair, /currentAssignment\.packetPath/);
   assert.doesNotMatch(repair, /nextMilestone\.phaseRange/);
 });
 
@@ -164,12 +166,13 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.match(workflow, /activeChat=.*chatName/);
 });
 
-test('Lite browser orchestration resolves the Audit Campaign Directory and prepares a fresh reviewer from receipts', () => {
+test('Lite browser orchestration launches assignment-v2 reviewers without preparing an active receipt', () => {
   const workflow = read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
   assert.match(workflow, /Resolve campaign directory entry/);
   assert.match(workflow, /Audit Campaign Directory\/campaigns/);
-  assert.match(workflow, /prepare-lite-receipt-successor-v1\.mjs/);
-  assert.match(workflow, /Publish successor receipt preparation/);
+  assert.match(workflow, /prepare-lite-assignment-successor-v2\.mjs/);
+  assert.match(workflow, /curveyield-audit-campaign-directory-entry-v2/);
+  assert.match(workflow, /Publish legacy successor receipt preparation when applicable/);
   assert.match(workflow, /gh workflow run browser-agent-wake\.yml/);
   assert.doesNotMatch(workflow, /CAMPAIGN_STATE_v1|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE|web-bootstrap-agent/);
   assert.doesNotMatch(workflow, /SUCCESSOR_HANDOFF\.json|WAKE_UP_MESSAGE\.md|START_HERE_SUCCESSOR\.md/);
@@ -188,10 +191,11 @@ test('Audit Source Initialization creates only the Phase-0 receipt plus the sepa
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
-test('current receipt reviewer repair has no special Phase-0 browser reviewer path', () => {
+test('current assignment reviewer repair has no special Phase-0 browser reviewer path', () => {
   const workflow = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
   assert.match(workflow, /Resolve current or legacy repair mode/);
   assert.match(workflow, /Audit Campaign Directory\/campaigns/);
+  assert.match(workflow, /curveyield-audit-campaign-directory-entry-v2/);
   assert.match(workflow, /mode=receipt/);
   assert.match(workflow, /mode=legacy/);
   assert.match(workflow, /browser-agent-reviewer-repair-legacy-v1\.yml/);
@@ -260,26 +264,26 @@ test('fresh reviewer launch is idempotent per campaign milestone and post-delive
   assert.match(runtime, /never fail over to another browser provider for/);
 });
 
-test('repair targets the current receipt reviewer and generates replacement wake context dynamically', () => {
+test('repair targets the current assignment reviewer and schema-governed durable work', () => {
   const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
-  assert.match(repair, /receipt_path="\$\(jq -r '\.currentReceiptPath'/);
-  assert.match(repair, /reviewer="\$\(jq -r '\.executor\.lineage' \/tmp\/current-receipt\.json\)"/);
-  assert.match(repair, /phase_id="\$\(jq -r '\.phase\.id' \/tmp\/current-receipt\.json\)"/);
-  assert.match(repair, /cat > \/tmp\/replacement-wake\.txt <<EOF/);
-  assert.match(repair, /Resume from the latest durable evidence and the current phase receipt/);
-  assert.match(repair, /Clear confirmed dead reviewer chat binding/);
-  assert.match(repair, /Launch replacement reviewer from current receipt/);
+  assert.match(repair, /reviewer="\$\(jq -r '\.currentAssignment\.reviewer/);
+  assert.match(repair, /phase_id="\$\(jq -r '\.currentAssignment\.phaseId/);
+  assert.match(repair, /schema_path="\$\(jq -r '\.currentAssignment\.workSchemaPath/);
+  assert.match(repair, /form_path="\$\(jq -r '\.currentAssignment\.workFormPath/);
+  assert.match(repair, /packet_path="\$\(jq -r '\.currentAssignment\.packetPath/);
+  assert.match(repair, /controllerValidation\.deficiencies/);
+  assert.match(repair, /Resume from the latest durable schema-governed work form/);
   assert.doesNotMatch(repair, /WAKE_UP_MESSAGE\.md|nextMilestone\.reviewer/);
 });
 
-test('receipt reviewer repair resumes current durable state while legacy reset behavior stays isolated', () => {
+test('assignment reviewer repair resumes current work while legacy reset behavior stays isolated', () => {
   const workflow = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
   assert.match(workflow, /options: \[auto, resume_preferred, reset_to_handoff\]/);
   assert.match(workflow, /Current Lite campaigns have no reset-to-handoff control state/);
-  assert.match(workflow, /Repair resumes from the current phase receipt and Git history/);
+  assert.match(workflow, /Repair resumes from the current assignment\/work form and Git history/);
   assert.match(workflow, /Redispatch legacy repair for pre-receipt campaign/);
   assert.match(workflow, /browser-agent-reviewer-repair-legacy-v1\.yml/);
-  assert.match(workflow, /Launch replacement reviewer from current receipt/);
+  assert.match(workflow, /Launch replacement reviewer/);
   assert.match(workflow, /-f browser_context_b64="\$\{\{ steps\.current\.outputs\.browser_context_b64 \}\}"/);
   assert.doesNotMatch(workflow, /REVIEWER_REPAIR_RESET_v1\.json|authoritativeHandoffIdentity\.contentCommit|WAKE_UP_MESSAGE\.md/);
 });
