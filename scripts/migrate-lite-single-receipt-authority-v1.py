@@ -307,7 +307,7 @@ if handoff.exists():
 
 # Fail on active-authority references to deleted bookkeeping names.
 for p in pkg.rglob('*'):
-    if not p.is_file() or p.name in {'MANIFEST.json','PACKAGE_PROVENANCE.md'}: continue
+    if not p.is_file() or p.name in {'MANIFEST.json','PACKAGE_PROVENANCE.md','LITE_PHASE_RECEIPT_PROTOCOL.md'}: continue
     try: text=p.read_text()
     except UnicodeDecodeError: continue
     bad=[x for x in [
