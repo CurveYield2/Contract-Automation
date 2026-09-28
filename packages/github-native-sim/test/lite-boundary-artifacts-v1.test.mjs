@@ -26,6 +26,8 @@ test('target matrix is filled from accepted design plus machine result',()=>{
     executionResults:{'CAND-001':{status:'PASS',evidenceRef:'evidence/phase5-boundary/CAND-001/raw-result.json',rawResult:{simulation:{steps:[{},{}]}}}}
   });
   assert.match(text,/CAND-001/);
+  assert.match(text,/AI-guided attacker\/exploit sequence/);
+  assert.match(text,/AI-guided targeted fuzz variables\/bounds/);
   assert.match(text,/2 simulation step\(s\)/);
   assert.match(text,/evidence\/phase5-boundary\/CAND-001\/raw-result\.json/);
   assert.doesNotMatch(text,/Phase-8 obligation/);
