@@ -200,6 +200,7 @@ for seq in range(11):
     data=xform(json.loads(cp.read_text()))
     auth=data.setdefault('authorization',{})
     auth.pop('incomingSuccessorReceipt',None)
+    auth.pop('retirementRequiresAutomationPass',None)
     auth['phaseReceipt']=f'receipts/PHASE_{seq:02d}_RECEIPT_v1.json'
     auth['receiptProtocol']='shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md'
     auth['reviewerMaySelfSeal']=False
@@ -288,6 +289,13 @@ for seq in range(11):
           'The Audit Campaign Directory entry is WAITING_FOR_SUCCESSOR_AGENT and the reviewer-1 transition is SUCCESSOR_PENDING before orchestration.',
           'The existing Lite orchestrator/watchdog reviewer-1 activation is dispatched.'
         ]
+    if seq in (5,7):
+        last=d['steps'][-1]
+        last['action']=f'Mark Phase {seq} evidence ready'
+        reviewer='reviewer-3L' if seq==5 else 'reviewer-4'
+        boundary='P5_TO_P6' if seq==5 else 'P67_TO_P8'
+        last['instruction']=f'Record all substantive milestone outputs and carried obligations in PHASE_{seq:02d}_RECEIPT_v1.json, set phase.status=EVIDENCE_READY and validation.status=PENDING, then stop. Deterministic automation validates/seals the receipt and records {boundary} SUCCESSOR_PENDING before starting fresh {reviewer}.'
+        last['resources']=['../../shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md']
     if seq==1:
         d['inputs']['required']=[
           'Sealed Phase-0 receipt with validation PASS',
@@ -302,6 +310,20 @@ for seq in range(11):
             d['steps'][8]['action']='Mark Phase 1 evidence ready'
             d['steps'][8]['instruction']='Record Phase-1 outputs and carried obligations in PHASE_01_RECEIPT_v1.json, set phase.status=EVIDENCE_READY and validation.status=PENDING, then stop. Deterministic automation seals the receipt and prepares reviewer-2 when PASS.'
             d['steps'][8]['resources']=['../../shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md']
+    def scrub_legacy(v):
+        if isinstance(v,str):
+            if 'shared/handoff/' in v:
+                return '../../shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md'
+            return v.replace('P67_TO_P8 is sealed','Phase-7 receipt records successor transition readiness').replace('Handoff incomplete','Receipt transition incomplete').replace('Handoff cannot seal','Receipt transition cannot advance')
+        if isinstance(v,list): return [scrub_legacy(x) for x in v]
+        if isinstance(v,dict): return {k:scrub_legacy(val) for k,val in v.items()}
+        return v
+    d=scrub_legacy(d)
+    seen=set(); dedup=[]
+    for item in d.get('sealingCriteria',[]):
+        if item not in seen:
+            seen.add(item); dedup.append(item)
+    d['sealingCriteria']=dedup
     cp.write_text(json.dumps(d,indent=2)+'\n')
 
 # Give every phase card a concise, non-legacy receipt section and scrub deleted handoff links/phrasing.
