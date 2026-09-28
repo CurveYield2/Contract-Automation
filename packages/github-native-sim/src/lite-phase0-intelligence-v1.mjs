@@ -398,6 +398,70 @@ async function scanProjectReadiness({projectRoot,build,cfg}){
     }
   };
 }
+function sanitizedMachineEnv(environment=process.env){
+  const out={};
+  for(const key of ['PATH','HOME','USER','SHELL','TMPDIR','LANG','LC_ALL','NODE_OPTIONS','npm_config_cache']){
+    if(environment[key]!==undefined) out[key]=environment[key];
+  }
+  out.CI='true';
+  out.NODE_ENV='test';
+  return out;
+}
+
+async function executeSourceKnownLocalSetup({projectRoot,projectReadiness}){
+  const scripts=projectReadiness?.testingAndToolingReadiness?.packageScripts??{};
+  const names=Object.keys(scripts).filter((name)=>{
+    const semantic=/(deploy|deployment|simulate|simulation|integration)/i.test(name);
+    const local=/(local|test|dev|anvil|hardhat|sim)/i.test(name);
+    return semantic&&local;
+  }).sort().slice(0,8);
+  const attempts=[];
+  const gaps=[];
+  for(const [i,name] of names.entries()){
+    const result=await runProcess({
+      command:'timeout',
+      args:['180s','npm','run',name,'--if-present'],
+      cwd:projectRoot,
+      env:sanitizedMachineEnv(process.env)
+    });
+    attempts.push({
+      script:name,
+      command:`npm run ${name} --if-present`,
+      exitCode:result.exitCode,
+      status:result.exitCode===0?'PASS':'BLOCKED_SOURCE_SETUP_FAILED',
+      resultSummary:(String(result.stdout??'')+'\n'+String(result.stderr??'')).trim().slice(-6000)||`exit ${result.exitCode}`,
+      evidenceRef:`evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json#attempts/${i}`
+    });
+  }
+  if(names.length===0){
+    gaps.push({
+      id:'P0-GAP-DEPLOY-001',
+      value:'No deterministic local/test/dev/anvil/hardhat deployment or simulation npm script was discovered.',
+      recoveryAttempt:'Phase-0 automation completed source/build/readiness discovery; unsafe generic production deployment commands were not executed.',
+      securityEffect:'REQUIRES_PHASE6_INTERPRETATION',
+      candidateOrObligation:'PENDING_PHASE6_INTERPRETATION',
+      disposition:'BLOCKED_NO_ADMITTED_LOCAL_EXECUTION'
+    });
+  }
+  for(const [i,a] of attempts.entries()){
+    if(a.status!=='PASS') gaps.push({
+      id:`P0-GAP-DEPLOY-${String(i+2).padStart(3,'0')}`,
+      value:`Source-known local setup command failed: ${a.script}`,
+      recoveryAttempt:'Executed once in scrubbed deterministic Phase-0 environment with a 180-second cap.',
+      securityEffect:'REQUIRES_PHASE6_INTERPRETATION',
+      candidateOrObligation:'PENDING_PHASE6_INTERPRETATION',
+      disposition:a.status
+    });
+  }
+  return {
+    schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v1',
+    policy:'SOURCE_KNOWN_LOCAL_ONLY_NO_PRODUCTION_SECRETS_NO_GENERIC_PRODUCTION_DEPLOY',
+    attempts,
+    gaps,
+    status:gaps.length?'COMPLETE_WITH_TYPED_GAPS':'PASS'
+  };
+}
+
 async function buildContextReviewPacket({projectRoot,sourceIntelligence,projectReadiness,slither}){
   const sourceEntries=[];
   for(const item of sourceIntelligence.sourceFiles??[]){
@@ -459,6 +523,7 @@ async function main(){
   const sbom=await generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build});
   const sourceIntelligence=await generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}});
   const projectReadiness=await scanProjectReadiness({projectRoot:detected.absolute,build,cfg});
+  const deployConfigExecution=await executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness});
 
   if(!slitherSucceeded(slither))throw new Error('Slither terminal result is not successful');
   if(sourceIntelligence?.completion?.semanticReviewRequired!==true)throw new Error('Source Intelligence completion contract mismatch');
@@ -478,10 +543,11 @@ async function main(){
     ['SBOM_v1.json',sbom],
     ['SLITHER_v1.json',slither],
     ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence],
-    ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness]
+    ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness],
+    ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',deployConfigExecution]
   ];
   for(const [name,obj] of files)await fs.writeFile(path.join(out,name),JSON.stringify(obj,null,2)+'\n');
-  process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},outputs:files.map(([name])=>name)},null,2)+'\n');
+  process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},deployConfigExecution:{status:deployConfigExecution.status,attempts:deployConfigExecution.attempts.length,gaps:deployConfigExecution.gaps.length},outputs:files.map(([name])=>name)},null,2)+'\n');
 }
 
 main().catch(error=>{console.error(JSON.stringify({status:'FAIL',message:error?.message??String(error),code:error?.code??null,attempts:error?.attempts??null},null,2));process.exitCode=1;});
