@@ -294,10 +294,13 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
 
   if(sequence===2){
     const predecessor=readJsonIf(repoFile(root,predecessorReceiptPath))??{};
+    const build=readJsonIf(repoFile(root,path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json')))??{};
+    const prior=predecessor.sourceSha256??predecessor.source?.sha256??null;
+    const current=build.source?.archiveSha256Observed??build.source?.archiveSha256??prior;
     form.automationInputs.identityComparison={
-      predecessorSourceSha256:predecessor.sourceSha256??predecessor.source?.sha256??null,
-      currentSourceSha256:predecessor.sourceSha256??predecessor.source?.sha256??null,
-      status:'NO_IDENTITY_CHANGE_DETECTED_AT_PHASE_BOUNDARY'
+      predecessorSourceSha256:prior,
+      currentSourceSha256:current,
+      status:prior&&current&&prior!==current?'IDENTITY_CHANGE_DETECTED':'NO_IDENTITY_CHANGE_DETECTED_AT_PHASE_BOUNDARY'
     };
   }
 
