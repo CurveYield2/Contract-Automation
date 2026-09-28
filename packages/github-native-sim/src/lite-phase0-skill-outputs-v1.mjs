@@ -53,10 +53,11 @@ async function buildCore({campaignRoot,skillRoot}){
   const buildPath=path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
   const technicalPath=path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json');
   const readinessPath=path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json');
+  const deployExecutionPath=path.join(campaignRoot,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json');
   const sbomPath=path.join(campaignRoot,'evidence/dependencies/SBOM_v1.json');
   const slitherPath=path.join(campaignRoot,'evidence/static-analysis/SLITHER_v1.json');
-  const [build,technical,readiness,sbom,slither]=await Promise.all([
-    readJson(buildPath),readJson(technicalPath),readJson(readinessPath),readJson(sbomPath),readJson(slitherPath)
+  const [build,technical,readiness,deployExecution,sbom,slither]=await Promise.all([
+    readJson(buildPath),readJson(technicalPath),readJson(readinessPath),readJson(deployExecutionPath),readJson(sbomPath),readJson(slitherPath)
   ]);
 
   const campaignId=receipt.campaign?.campaignId??build.campaignId;
