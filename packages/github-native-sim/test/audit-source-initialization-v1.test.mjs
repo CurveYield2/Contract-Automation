@@ -9,7 +9,7 @@ const workflow = fs.readFileSync(path.join(root, '.github/workflows/audit-source
 const run = fs.readFileSync(path.join(root, 'scripts/audit-source-initialization/run-v1.sh'), 'utf8');
 const resolve = fs.readFileSync(path.join(root, 'scripts/audit-source-initialization/resolve-source-v1.sh'), 'utf8');
 const extract = fs.readFileSync(path.join(root, 'scripts/audit-source-initialization/extract-v1.sh'), 'utf8');
-const state = fs.readFileSync(path.join(root, 'scripts/audit-source-initialization/write-state-v1.py'), 'utf8');
+const receipt = fs.readFileSync(path.join(root, 'scripts/audit-source-initialization/write-phase0-receipt-v1.py'), 'utf8');
 const request = JSON.parse(fs.readFileSync(path.join(root, 'process/audit-source-initialization/REQUEST_TEMPLATE_v1.json'), 'utf8'));
 
 test('Audit Source Initialization accepts only source_url as request payload', () => {
@@ -53,13 +53,13 @@ test('campaign source folder contains retained ZIP plus safely unpacked source',
   assert.match(extract, /embedded \.git path forbidden/);
 });
 
-test('workflow writes initial controller state and active pointer on Audit-Controller main', () => {
-  assert.match(state, /CAMPAIGN_STATE_v1\.json/);
-  assert.match(state, /ACTIVE_PHASE_POINTER_v1\.json/);
-  assert.match(state, /SOLO_AUDIT_STATE_v1\.json/);
-  assert.match(state, /sourceFenceStatus/);
-  assert.match(state, /"BOUND"/);
-  assert.match(state, /ACTIVE_PATH/);
+test('workflow writes one Phase-0 receipt plus the separate Audit Campaign Directory entry on Audit-Controller main', () => {
+  assert.match(receipt, /PHASE_00_RECEIPT_v1\.json/);
+  assert.match(receipt, /curveyield-lite-phase-receipt-v1/);
+  assert.match(receipt, /campaignDirectoryEntryPath/);
+  assert.match(receipt, /curveyield-audit-campaign-directory-entry-v1/);
+  assert.match(run, /Audit Campaign Directory\/campaigns/);
+  assert.doesNotMatch(run, /write-state-v1\.py|CAMPAIGN_STATE_v1|ACTIVE_PHASE_POINTER_v1|SOLO_AUDIT_STATE_v1/);
   assert.match(run, /git push origin HEAD:main/);
 });
 
@@ -67,6 +67,6 @@ test('workflow dispatches fully automated Phase 0 after initialization', () => {
   assert.match(run, /lite-phase0-bootstrap-v1\.yml/);
   assert.match(run, /audit_controller_ref=main/);
   assert.doesNotMatch(run, /lite-audit-browser-orchestrator-v1\.yml/);
-  assert.match(state, /phase0-automation/);
-  assert.doesNotMatch(state, /web-bootstrap-agent/);
+  assert.match(receipt, /phase0-automation/);
+  assert.doesNotMatch(receipt, /web-bootstrap-agent/);
 });
