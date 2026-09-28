@@ -15,6 +15,10 @@ package = packages[0]
 target = root / f"{package.name}.zip"
 tmp = target.with_suffix(".zip.tmp")
 
+for stale in sorted(root.glob("*.zip")):
+    if stale != target:
+        stale.unlink()
+
 with ZipFile(tmp, "w", compression=ZIP_DEFLATED, compresslevel=9) as zf:
     for path in sorted(p for p in package.rglob("*") if p.is_file()):
         rel = Path(package.name) / path.relative_to(package)
