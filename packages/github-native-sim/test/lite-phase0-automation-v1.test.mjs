@@ -36,17 +36,18 @@ test('Phase 0 finalizer creates no interphase mechanical packet',()=>{
   assert.match(finalizer,/reviewer-1/);
 });
 
-test('source initialization state has no Phase 0 ChatGPT agent',()=>{
-  const state=read('scripts/audit-source-initialization/write-state-v1.py');
-  assert.match(state,/activeAutomation/);
-  assert.match(state,/phase0-automation/);
-  assert.doesNotMatch(state,/web-bootstrap-agent/);
-  assert.doesNotMatch(state,/CHATGPT_WEB_CHAT_GITHUB_CONNECTOR/);
+test('source initialization creates a Phase-0 automation receipt instead of campaign state sidecars',()=>{
+  const writer=read('scripts/audit-source-initialization/write-phase0-receipt-v1.py');
+  assert.match(writer,/PHASE_00_RECEIPT_v1\.json/);
+  assert.match(writer,/phase0-automation/);
+  assert.match(writer,/Audit Campaign Directory\/campaigns/);
+  assert.doesNotMatch(writer,/web-bootstrap-agent|CHATGPT_WEB_CHAT_GITHUB_CONNECTOR|CAMPAIGN_STATE|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE/);
 });
 
-test('browser orchestrator begins at successor state, not a Phase 0 bootstrap chat',()=>{
+test('browser orchestrator begins only from a sealed receipt successor transition',()=>{
   const orchestrator=read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
-  assert.doesNotMatch(orchestrator,/web-bootstrap-agent/);
-  assert.match(orchestrator,/WAITING_FOR_SUCCESSOR_AGENT/);
-  assert.match(orchestrator,/Phase 0: workflow-only/);
+  assert.doesNotMatch(orchestrator,/web-bootstrap-agent|CAMPAIGN_STATE|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE/);
+  assert.match(orchestrator,/Audit Campaign Directory\/campaigns/);
+  assert.match(orchestrator,/prepare-lite-receipt-successor-v1\.mjs/);
+  assert.match(orchestrator,/browser-agent-wake\.yml/);
 });
