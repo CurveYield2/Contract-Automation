@@ -27,7 +27,8 @@ test('receipt controller is the only normal Lite phase transition bookkeeping la
   assert.match(f,/EVIDENCE_READY/);
   assert.match(f,/SUCCESSOR_PENDING/);
   assert.match(f,/sameReviewerAdvanced/);
-  assert.match(f,/PHASE_10/);
+  assert.match(f,/phaseReceiptPath\(campaignPath,t\.next,1\)/);
+  assert.match(f,/sequence===10/);
   assert.doesNotMatch(f,/SUCCESSOR_HANDOFF|MECHANICAL_WORK_PACKET|retirement/i);
 });
 
