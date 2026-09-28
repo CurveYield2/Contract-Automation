@@ -165,7 +165,7 @@ jobs:
             --skill-root "$skill_root" \
             --stage core
 
-          git add "$campaign_path/evidence" "$campaign_path/shared" "$campaign_path/controller"
+          git add "$campaign_path/evidence" "$campaign_path/shared" "$campaign_path/controller" "$campaign_path/work"
           git config user.name 'CurveYield Lite Phase0 Automation'
           git config user.email 'lite-phase0-automation@users.noreply.github.com'
           if ! git diff --cached --quiet; then
