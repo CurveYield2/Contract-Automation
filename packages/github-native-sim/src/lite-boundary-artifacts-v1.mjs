@@ -62,7 +62,7 @@ export function renderDeployConfigMatrixV1({readiness={},execution={}}={}){
 
   return `# Lite Deployment and Configuration Matrix
 
-> **CONTROLLER-POPULATED:** Generated from Phase-0 boundary machine execution. The Phase-6 reviewer consumes this evidence and records only semantic security interpretation in the Phase-6 work form. Do not duplicate campaign identity, receipt state, handoff state, or controller bookkeeping here.
+> **CONTROLLER-POPULATED:** Generated from Phase-0 boundary machine execution. The Phase-6 reviewer consumes this evidence and records only semantic security interpretation in the Phase-6 work form. Do not duplicate campaign or controller metadata here.
 
 ## Required sequence
 
@@ -95,7 +95,7 @@ export function renderTargetedTestMatrixV1({targetDesigns=[],executionResults={}
     const obligation=(r?.status==='PASS'||statusText(r)==='DISPROVED'||statusText(r)==='SUPPORTED')
       ?'PENDING_PHASE6_INTERPRETATION'
       :'REQUIRES_PHASE8_IF_PHASE6_REMAINS_INCONCLUSIVE_OR_BLOCKED';
-    rows.push(`| ${md(key)} | ${md([key,t.expectedSecurityProperty].filter(Boolean).join(' — '))} | ${md([t.setup,t.prerequisites].filter(Boolean).join(' / '))} | ${md(t.transactionSequence)} | ${md(t.expectedSecurityProperty)} | ${md(t.oracle)} | ${md(deterministicSummary(r))} | ${md(t.fuzzVariablesAndBounds)} | ${md(statusText(r))} | ${md(r?.evidenceRef??'NO_MACHINE_EVIDENCE')} | ${md(obligation)} |`);
+    rows.push(`| ${md(key)} | ${md([key,t.expectedSecurityProperty].filter(Boolean).join(' — '))} | ${md([t.setup,t.prerequisites].filter(Boolean).join(' / '))} | ${md(t.transactionSequence)} | ${md(t.expectedSecurityProperty)} | ${md(t.oracle)} | ${md(deterministicSummary(r))} | ${md(t.fuzzVariablesAndBounds)} | ${md(`deterministic=${deterministicSummary(r)}; targetedFuzz=${fuzzSummary(r)}; status=${statusText(r)}`)} | ${md(r?.evidenceRef??'NO_MACHINE_EVIDENCE')} | ${md(obligation)} |`);
   }
   if(!rows.length) rows.push('| NO_TARGET | NO_CANDIDATE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NO_CANDIDATE | NO_MACHINE_EVIDENCE | NOT_APPLICABLE |');
   return `# Lite Candidate Target Matrix
