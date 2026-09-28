@@ -8,7 +8,7 @@ import {
   validateFinalReport,
   ensurePacketShape,
   EXPLICIT_NEGATIVES,
-} from '../../scripts/lib/lite-phase-work-v1.mjs';
+} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 
 const read=p=>fs.readFileSync(p,'utf8');
 
