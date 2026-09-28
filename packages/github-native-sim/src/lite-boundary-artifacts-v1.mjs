@@ -78,7 +78,7 @@ ${usability}
 
 ## Configuration gaps and limitations
 
-| Gap ID | Missing/uncertain value | Recovery attempted | Security effect | Candidate/obligation | Disposition |
+| Gap ID | Missing/uncertain value | Recovery attempted | Security effect | Related candidate / security question | Disposition |
 |---|---|---|---|---|---|
 ${gaps.join('\n')}
 
@@ -92,18 +92,15 @@ export function renderTargetedTestMatrixV1({targetDesigns=[],executionResults={}
     if(!t||typeof t!=='object') continue;
     const key=t.candidateKey??`TARGET-${i+1}`;
     const r=executionResults[key]??null;
-    const obligation=(r?.status==='PASS'||statusText(r)==='DISPROVED'||statusText(r)==='SUPPORTED')
-      ?'PENDING_PHASE6_INTERPRETATION'
-      :'REQUIRES_PHASE8_IF_PHASE6_REMAINS_INCONCLUSIVE_OR_BLOCKED';
-    rows.push(`| ${md(key)} | ${md([key,t.expectedSecurityProperty].filter(Boolean).join(' — '))} | ${md([t.setup,t.prerequisites].filter(Boolean).join(' / '))} | ${md(t.transactionSequence)} | ${md(t.expectedSecurityProperty)} | ${md(t.oracle)} | ${md(deterministicSummary(r))} | ${md(t.fuzzVariablesAndBounds)} | ${md(`deterministic=${deterministicSummary(r)}; targetedFuzz=${fuzzSummary(r)}; status=${statusText(r)}`)} | ${md(r?.evidenceRef??'NO_MACHINE_EVIDENCE')} | ${md(obligation)} |`);
+    rows.push(`| ${md(key)} | ${md([key,t.expectedSecurityProperty].filter(Boolean).join(' — '))} | ${md([t.setup,t.prerequisites].filter(Boolean).join(' / '))} | ${md(t.transactionSequence)} | ${md(t.expectedSecurityProperty)} | ${md(t.oracle)} | ${md(deterministicSummary(r))} | ${md(t.fuzzVariablesAndBounds)} | ${md(`deterministic=${deterministicSummary(r)}; targetedFuzz=${fuzzSummary(r)}; status=${statusText(r)}`)} | ${md(r?.evidenceRef??'NO_MACHINE_EVIDENCE')} |`);
   }
-  if(!rows.length) rows.push('| NO_TARGET | NO_CANDIDATE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NO_CANDIDATE | NO_MACHINE_EVIDENCE | NOT_APPLICABLE |');
+  if(!rows.length) rows.push('| NO_TARGET | NO_CANDIDATE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NO_CANDIDATE | NO_MACHINE_EVIDENCE |');
   return `# Lite Candidate Target Matrix
 
 > **CONTROLLER-POPULATED:** Seeded from accepted Phase-2–5 canonical data and finalized from Phase-5 boundary machine execution. The Phase-6 reviewer consumes the completed matrix and records only semantic interpretation/disposition in the Phase-6 work form. Do not duplicate campaign identity or controller bookkeeping here.
 
-| Target ID | Candidate / property / hypothesis | Exact setup and actor | Transaction sequence | Expected secure outcome | Exploit/failure oracle | Deterministic simulation | Targeted fuzz variables/bounds | Result | Evidence | Phase-8 obligation |
-|---|---|---|---|---|---|---|---|---|---|---|
+| Target ID | Candidate / property / hypothesis | Exact setup and actor | Transaction sequence | Expected secure outcome | Exploit/failure oracle | Deterministic simulation | Targeted fuzz variables/bounds | Result | Evidence |
+|---|---|---|---|---|---|---|---|---|---|
 ${rows.join('\n')}
 
 Rules:
@@ -111,7 +108,6 @@ Rules:
 - Include every material candidate and every due retained execution obligation from accepted Phase-2–5 canonical data.
 - Basic targeted fuzzing varies only candidate-relevant inputs and immediate boundaries.
 - A target cannot be closed merely because one happy-path case passed.
-- \`INCONCLUSIVE\` or unresolved \`BLOCKED\` always carries forward to Phase 8.
 `;
 }
 
@@ -193,8 +189,6 @@ ${rows.join('\n')}
 - Unrelated changes detected: PENDING_MACHINE_DELTA_OR_NONE
 - Source-bound evidence requiring broader invalidation/re-execution: SEE_CONTROLLER_EVIDENCE_INVALIDATION_STATE
 - New candidate issues introduced by remediation: PENDING_PHASE9_INTERPRETATION
-- Carried-forward obligations: SEE_CONTROLLER_OBLIGATION_STATE
-- Evidence invalidation triggers: SEE_CONTROLLER_EVIDENCE_INVALIDATION_STATE
 `;
 }
 
