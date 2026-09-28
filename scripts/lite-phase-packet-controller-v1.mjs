@@ -59,15 +59,21 @@ function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath
 function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRelFor(campaignPath,phase));}
 function uniqueExisting(root,rels){return [...new Set(rels.filter(Boolean))].filter(rel=>Boolean(maybeFile(root,rel)));}
 function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
-  const phaseCanonical=(p)=>canonicalRelFor(campaignPath,p);
+  const derived=(phase,name)=>path.posix.join(campaignPath,`derived/phase-${phase}/${name}`);
   const deploy=path.posix.join(campaignPath,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
   const targets=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
   const remediation=path.posix.join(campaignPath,'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md');
   const finalIndex=path.posix.join(campaignPath,'work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
-  if(target===5) return uniqueExisting(root,[phaseCanonical(2),phaseCanonical(3),...immediate]);
-  if(target===6) return uniqueExisting(root,[phaseCanonical(2),phaseCanonical(3),path.posix.join(campaignPath,'derived/phase-4/PHASE6_VALIDATION_TARGETS_v1.json'),phaseCanonical(5),...immediate,deploy,targets]);
-  if(target===8) return uniqueExisting(root,[phaseCanonical(2),phaseCanonical(3),phaseCanonical(4),phaseCanonical(5),phaseCanonical(6),deploy,targets,...immediate]);
-  if(target===9) return uniqueExisting(root,[phaseCanonical(8),...immediate,remediation]);
+  const p2=derived(2,'PHASE3_INPUT_v1.json');
+  const p3=derived(3,'PHASE4_INPUT_v1.json');
+  const p4=derived(4,'PHASE5_INPUT_v1.json');
+  const p5=derived(5,'PHASE6_INPUT_v1.json');
+  const p6=derived(6,'PHASE8_INPUT_v1.json');
+  const p8Remediation=derived(8,'PHASE9_REMEDIATION_INPUT_v1.json');
+  if(target===5) return uniqueExisting(root,[p2,p3,p4]);
+  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,deploy,targets]);
+  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,deploy,targets]);
+  if(target===9) return uniqueExisting(root,[p8Remediation,remediation]);
   if(target===10) return uniqueExisting(root,[finalIndex]);
   return uniqueExisting(root,immediate);
 }
