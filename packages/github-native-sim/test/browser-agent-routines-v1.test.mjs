@@ -85,13 +85,14 @@ test('technical execution callbacks never create a reviewer and only poke the ex
   assert.doesNotMatch(workflow, /\[AUDIT_AUTOMATION_WAKE_V1\]/);
 });
 
-test('successor phase comes from canonical pointer and repair phase comes from current campaign state', () => {
+test('receipt campaigns resolve current phase from the campaign directory and current receipt', () => {
   const watchdog = read('.github/workflows/browser-agent-watchdog.yml');
   const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
-  assert.match(watchdog, /next_phase="\$\(jq -r '\.nextPhaseId \/\/ empty'/);
-  assert.match(watchdog, /\[\[ "\$next_phase" =~ \^phase-\[0-9\]\+\$ \]\]/);
-  assert.match(repair, /current_phase_id="\$\(jq -r '\.phase\.id \/\/ empty'/);
-  assert.match(repair, /phase_start="\$\{BASH_REMATCH\[1\]\}"/);
+  assert.match(watchdog, /currentReceiptPath/);
+  assert.match(watchdog, /receipt_phase="\$\(jq -r '\.phase\.id \/\/ empty'/);
+  assert.match(repair, /directory_path="\$\(jq -r '\.watchdog\.gate\.statePath'/);
+  assert.match(repair, /receipt_path="\$\(jq -r '\.currentReceiptPath'/);
+  assert.match(repair, /phase_id="\$\(jq -r '\.phase\.id' \/tmp\/current-receipt\.json\)"/);
   assert.doesNotMatch(repair, /nextMilestone\.phaseRange/);
 });
 
@@ -187,15 +188,14 @@ test('Audit Source Initialization creates only the Phase-0 receipt plus the sepa
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
-test('Phase-0 repair remains a special bootstrap replacement without a predecessor handoff', () => {
+test('current receipt reviewer repair has no special Phase-0 browser reviewer path', () => {
   const workflow = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
-  assert.match(workflow, /phase0_bootstrap=false/);
-  assert.match(workflow, /gate_expected_phase.*phase-0/);
-  assert.match(workflow, /gate_expected_milestone.*P0_BOOTSTRAP/);
-  assert.match(workflow, /reviewer=.*web-bootstrap-agent/);
-  assert.match(workflow, /P0_BOOTSTRAP has no predecessor handoff baseline/);
-  assert.match(workflow, /CURVEYIELD_LITE_PHASE0_REPLACEMENT_V2/);
-  assert.match(workflow, /routineId:"",projectName:""/);
+  assert.match(workflow, /Resolve current or legacy repair mode/);
+  assert.match(workflow, /Audit Campaign Directory\/campaigns/);
+  assert.match(workflow, /mode=receipt/);
+  assert.match(workflow, /mode=legacy/);
+  assert.match(workflow, /browser-agent-reviewer-repair-legacy-v1\.yml/);
+  assert.doesNotMatch(workflow, /web-bootstrap-agent|P0_BOOTSTRAP has no predecessor handoff baseline|CURVEYIELD_LITE_PHASE0_REPLACEMENT_V2/);
 });
 
 test('successor routing uses canonical nextPhaseId and sealed WAKE_UP_MESSAGE verbatim', () => {
@@ -260,34 +260,28 @@ test('fresh reviewer launch is idempotent per campaign milestone and post-delive
   assert.match(runtime, /never fail over to another browser provider for/);
 });
 
-test('repair targets current reviewer and reuses its sealed wake instead of next reviewer', () => {
+test('repair targets the current receipt reviewer and generates replacement wake context dynamically', () => {
   const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
-  assert.match(repair, /Repair the CURRENT reviewer, never the next reviewer/);
-  assert.match(repair, /\.phase\.reviewer/);
-  assert.match(repair, /WAKE_UP_MESSAGE\.md/);
-  assert.match(repair, /base64 -d > \/tmp\/replacement-wake\.txt/);
+  assert.match(repair, /receipt_path="\$\(jq -r '\.currentReceiptPath'/);
+  assert.match(repair, /reviewer="\$\(jq -r '\.executor\.lineage' \/tmp\/current-receipt\.json\)"/);
+  assert.match(repair, /phase_id="\$\(jq -r '\.phase\.id' \/tmp\/current-receipt\.json\)"/);
+  assert.match(repair, /cat > \/tmp\/replacement-wake\.txt <<EOF/);
+  assert.match(repair, /Resume from the latest durable evidence and the current phase receipt/);
   assert.match(repair, /Clear confirmed dead reviewer chat binding/);
-  assert.match(repair, /Send one-time repair context after sealed wake/);
-  assert.match(repair, /messagePurpose:"repair_notice"/);
-  assert.doesNotMatch(repair, /reviewer="\$\(jq -r '\.nextMilestone\.reviewer/);
+  assert.match(repair, /Launch replacement reviewer from current receipt/);
+  assert.doesNotMatch(repair, /WAKE_UP_MESSAGE\.md|nextMilestone\.reviewer/);
 });
 
-test('reviewer repair resets only from an admitted exact handoff baseline and then reuses the sealed wake', () => {
+test('receipt reviewer repair resumes current durable state while legacy reset behavior stays isolated', () => {
   const workflow = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
   assert.match(workflow, /options: \[auto, resume_preferred, reset_to_handoff\]/);
-  assert.match(workflow, /repair_request_valid=false/);
-  assert.match(workflow, /curveyield-reviewer-repair-request-v1/);
-  assert.match(workflow, /authoritativeHandoffIdentity\.contentCommit/);
-  assert.match(workflow, /git rm -r --ignore-unmatch -- "\$CAMPAIGN_ROOT"/);
-  assert.match(workflow, /git checkout "\$BASELINE_COMMIT" -- "\$CAMPAIGN_ROOT"/);
-  assert.match(workflow, /for rel in source authority/);
-  assert.match(workflow, /REVIEWER_REPAIR_RESET_v1\.json/);
-  assert.match(workflow, /WAKE_UP_MESSAGE\.md/);
-  assert.match(workflow, /Clear confirmed dead reviewer chat binding/);
-  assert.match(workflow, /Send one-time repair context after sealed wake/);
-  assert.match(workflow, /messagePurpose:"repair_notice"/);
-  assert.match(workflow, /terminated in the middle of this same assigned task/);
-  assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
+  assert.match(workflow, /Current Lite campaigns have no reset-to-handoff control state/);
+  assert.match(workflow, /Repair resumes from the current phase receipt and Git history/);
+  assert.match(workflow, /Redispatch legacy repair for pre-receipt campaign/);
+  assert.match(workflow, /browser-agent-reviewer-repair-legacy-v1\.yml/);
+  assert.match(workflow, /Launch replacement reviewer from current receipt/);
+  assert.match(workflow, /-f browser_context_b64="\$\{\{ steps\.current\.outputs\.browser_context_b64 \}\}"/);
+  assert.doesNotMatch(workflow, /REVIEWER_REPAIR_RESET_v1\.json|authoritativeHandoffIdentity\.contentCommit|WAKE_UP_MESSAGE\.md/);
 });
 
 test('reviewer repair request schema is exact and reset-only', () => {
