@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 
 function repoFile(root,rel){return path.join(root,...String(rel).split('/'));}
 function readJsonIf(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
@@ -21,6 +22,27 @@ function findSourceIntelligence(root,campaignPath){
   parsed.sort((a,b)=>a.file.localeCompare(b.file));
   return parsed.at(-1)??null;
 }
+
+
+function getByPath(obj,dot){let cur=obj;for(const part of String(dot).split('.')){if(cur==null)return undefined;cur=cur[part];}return cur;}
+function controllerOwnedProjection(form){
+  const rows=[];
+  for(const [stepKey,action] of Object.entries(form?.actions??{})){
+    for(const [fieldName,value] of Object.entries(action?.outputs??{})){
+      if(!Array.isArray(value))continue;
+      value.forEach((item,index)=>{
+        if(!item||typeof item!=='object'||Array.isArray(item)||!Array.isArray(item.automationOwnedFields))return;
+        const owned={};
+        for(const k of item.automationOwnedFields)owned[k]=item[k];
+        rows.push({path:`actions.${stepKey}.outputs.${fieldName}[${index}]`,owned});
+      });
+    }
+  }
+  for(const p of form?.automationInputs?.controllerOwnedOutputPaths??[]) rows.push({path:p,value:getByPath(form,p)});
+  for(const k of form?.automationInputs?.controllerOwnedAutomationInputs??[]) rows.push({path:`automationInputs.${k}`,value:form?.automationInputs?.[k]});
+  return rows;
+}
+function controllerOwnedDigest(form){return createHash('sha256').update(JSON.stringify(controllerOwnedProjection(form))).digest('hex');}
 
 function sourceAnchorFor(si,symbolId,fallback){
   const a=(si?.sourceAnchors??[]).find(x=>x.symbolId===symbolId);
@@ -304,6 +326,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       currentSourceSha256:current,
       status:prior&&current&&prior!==current?'IDENTITY_CHANGE_DETECTED':'NO_IDENTITY_CHANGE_DETECTED_AT_PHASE_BOUNDARY'
     };
+    form.automationInputs.controllerOwnedAutomationInputs=[...(form.automationInputs.controllerOwnedAutomationInputs??[]),'identityComparison'];
   }
 
   if(sequence===3){
@@ -324,6 +347,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     });
     form.automationInputs.sourceIntelligencePath=siEntry?path.relative(repoFile(root,campaignPath),siEntry.file).split(path.sep).join('/'):'UNRESOLVED';
     form.automationInputs.domainRegistryPath=path.posix.relative(campaignPath,registryRel);
+    form.automationInputs.controllerOwnedAutomationInputs=[...(form.automationInputs.controllerOwnedAutomationInputs??[]),'sourceIntelligencePath','domainRegistryPath'];
   }
 
   if(sequence===4){
@@ -349,6 +373,10 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       form.actions['step-3'].outputs.typedExecutionLimitations=machineLimitations(deployRows,targetRows);
       const schema=readJsonIf(repoFile(root,path.posix.join(authorityRoot,'phases/phase-6/PHASE_06_SCHEMA_v1.json')))??{};
       form.actions['step-3'].outputs.fullOnlyOmissions=schema.controllerOwnedDefaults?.fullOnlyOmissions??['NONE_IDENTIFIED'];
+      form.automationInputs.controllerOwnedOutputPaths=[
+        'actions.step-3.outputs.typedExecutionLimitations',
+        'actions.step-3.outputs.fullOnlyOmissions'
+      ];
     }
   }
 
@@ -367,6 +395,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     }
   }
 
+  form.automationInputs.controllerPrefillDigestSha256=controllerOwnedDigest(form);
   return form;
 }
 
@@ -472,6 +501,8 @@ export function buildControllerPacket({directory,assignment,existing,now}){
 
 export function validatePhaseScaffold(sequence,form){
   const deficiencies=[];
+  const expectedDigest=form?.automationInputs?.controllerPrefillDigestSha256;
+  if(expectedDigest&&controllerOwnedDigest(form)!==expectedDigest) deficiencies.push('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
   if(sequence===4){
     const c=phase4CoverageFromForm(form);
     if(!(c.unreviewedRequiredSurfaces.length===1&&c.unreviewedRequiredSurfaces[0]==='NONE_IDENTIFIED')) deficiencies.push('Phase 4 required review scaffolds were removed or omitted: '+c.unreviewedRequiredSurfaces.join(', '));
