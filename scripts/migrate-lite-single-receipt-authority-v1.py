@@ -334,7 +334,7 @@ for seq in range(11):
         if isinstance(v,str):
             if 'shared/handoff/' in v:
                 return '../../shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md'
-            return v.replace('P67_TO_P8 is sealed','Phase-7 receipt records successor transition readiness').replace('Handoff incomplete','Receipt transition incomplete').replace('Handoff cannot seal','Receipt transition cannot advance')
+            return v.replace('P67_TO_P8 is sealed','Phase-7 receipt records successor transition readiness').replace('Handoff incomplete','Receipt transition incomplete').replace('Handoff cannot seal','Receipt transition cannot advance').replace('Repair P67_TO_P8','Repair the current Phase-7 receipt transition state')
         if isinstance(v,list): return [scrub_legacy(x) for x in v]
         if isinstance(v,dict): return {k:scrub_legacy(val) for k,val in v.items()}
         return v
