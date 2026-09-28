@@ -51,6 +51,22 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now}){
   graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:importedRecords(canonical,schema.bookkeepingMappings?.graphRecordPaths),importedAt:now});
   ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:importedRecords(canonical,schema.bookkeepingMappings?.obligationRecordPaths),importedAt:now});
   invalid.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:importedRecords(canonical,schema.bookkeepingMappings?.invalidationRecordPaths),importedAt:now});
+
+  const identityComparison=canonical?.automationInputs?.identityComparison;
+  if(identityComparison){
+    invalid.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'automationInputs.identityComparison',value:identityComparison}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
+  }
+
+  const domainRegistryPath=canonical?.automationInputs?.domainRegistryPath;
+  if(domainRegistryPath){
+    const domainRel=path.posix.join(campaignPath,domainRegistryPath);
+    const registry=maybeJson(root,domainRel);
+    if(registry){
+      graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry',value:{path:domainRegistryPath,decisions:registry.decisions??[]}}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
+      ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry.generatedObligations',value:registry.generatedObligations??[]}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
+    }
+  }
+
   writeJson(repoFile(root,graphRel),graph);writeJson(repoFile(root,ledgerRel),ledger);writeJson(repoFile(root,invalidRel),invalid);
   return {graphRel,ledgerRel,invalidRel};
 }
