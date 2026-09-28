@@ -40,6 +40,23 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      - name: Set up Node.js for Phase-5 boundary execution
+        if: inputs.phase_sequence == '5'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install trusted runner dependencies for Phase-5 boundary execution
+        if: inputs.phase_sequence == '5'
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --force
+
+      - name: Install retained audit toolchain for Phase-5 boundary execution
+        if: inputs.phase_sequence == '5'
+        uses: ./.github/actions/setup-v7-toolchain
+
       - name: Select Audit-Controller credential
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -164,4 +181,5 @@ jobs:
             echo "- phase: ${{ inputs.phase_sequence }}"
             echo "- result: ${{ steps.controller.outputs.status }}"
             echo "- bookkeeping before validation PASS: prohibited"
+            echo "- machine execution timing: phase-end boundaries only"
           } >> "$GITHUB_STEP_SUMMARY"
