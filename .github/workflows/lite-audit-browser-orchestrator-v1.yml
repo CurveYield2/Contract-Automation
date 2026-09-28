@@ -185,5 +185,6 @@ jobs:
             echo "- Directory: ${{ steps.directory.outputs.path }}"
             echo "- Incoming phase: ${{ steps.successor.outputs.incoming_phase }}"
             echo "- Incoming reviewer: ${{ steps.successor.outputs.incoming_reviewer }}"
-            echo "- Stored handoff/wake/start files: none\n            echo "- Active-phase receipt for assignment-v2 campaigns: none""
+            echo "- Stored handoff/wake/start files: none"
+            echo "- Active-phase receipt for assignment-v2 campaigns: none"
           } >> "$GITHUB_STEP_SUMMARY"
