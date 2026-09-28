@@ -179,7 +179,8 @@ test('Audit Source Initialization creates only the Phase-0 receipt plus the sepa
   const run = read('scripts/audit-source-initialization/run-v1.sh');
   const receiptWriter = read('scripts/audit-source-initialization/write-phase0-receipt-v1.py');
   assert.match(receiptWriter, /PHASE_00_RECEIPT_v1\.json/);
-  assert.match(receiptWriter, /Audit Campaign Directory\/campaigns/);
+  assert.match(receiptWriter, /CAMPAIGN_DIRECTORY_PATH/);
+  assert.match(run, /Audit Campaign Directory\/campaigns/);
   assert.match(receiptWriter, /phase0-automation/);
   assert.match(run, /gh workflow run lite-phase0-bootstrap-v1\.yml/);
   assert.doesNotMatch(run, /write-state-v1\.py|CAMPAIGN_STATE_v1|ACTIVE_PHASE_POINTER_v1|SOLO_AUDIT_STATE_v1|\.deep-assurance/);
