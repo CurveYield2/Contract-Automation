@@ -258,6 +258,74 @@ for seq in range(11):
         text=re.sub(r'(?im)^.*(?:SUCCESSOR_HANDOFF|WAKE_UP_MESSAGE|START_HERE_SUCCESSOR|handoff package|retirement gate).*$\n?','',text)
         sh.write_text(text)
 
+# Tighten current receipt semantics and remove residual legacy phase-boundary wording.
+for seq in range(11):
+    cp=pkg/f'phases/phase-{seq}/PHASE_CONTRACT.json'
+    d=json.loads(cp.read_text())
+    for step in d.get('steps',[]):
+        resources=[]
+        for resource in step.get('resources',[]):
+            if 'shared/handoff/' in resource:
+                resource='../../shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md'
+            if resource not in resources:
+                resources.append(resource)
+        if resources: step['resources']=resources
+        elif 'resources' in step: step['resources']=[]
+    if seq==0:
+        d['steps'][4]['action']='Update the Phase-0 receipt'
+        d['steps'][4]['instruction']='Record the accepted Phase-0 evidence references, global controls, automation identities and obligations in receipts/PHASE_00_RECEIPT_v1.json. Do not create a separate bootstrap/completion manifest.'
+        d['steps'][5]['action']='Validate and seal the Phase-0 receipt'
+        d['steps'][5]['instruction']='Deterministically verify required Phase-0 evidence, write validation PASS into the same receipt, seal it and mark the reviewer-1 transition SUCCESSOR_PENDING.'
+        d['steps'][6]['action']='Update the Audit Campaign Directory'
+        d['steps'][6]['instruction']='Keep the separate Audit Campaign Directory entry pointed at the sealed Phase-0 receipt with status WAITING_FOR_SUCCESSOR_AGENT until reviewer-1 activation succeeds.'
+        d['steps'][7]['instruction']='Dispatch the existing Lite browser orchestrator/watchdog system. It creates the Phase-1 receipt and dynamically generates reviewer-1 wake instructions from the receipts.'
+        d['sealingCriteria']=[
+          'The exact source ZIP and unpacked source are preserved under the canonical campaign source folder and bound to the campaign generation.',
+          'The Contract-Automation runner qualification used by Phase 0 is PASS and bound to the runner commit.',
+          'Build/compiler, SBOM, Slither/static, Source Intelligence, overlays, bundle, readiness and Phase-0 Audit Surface outputs are present and bound to the canonical source identity.',
+          'Traceability, obligation and invalidation state are initialized without authoritative security conclusions.',
+          'PHASE_00_RECEIPT_v1.json references every required Phase-0 output and contains deterministic validation PASS before seal.',
+          'The Audit Campaign Directory entry is WAITING_FOR_SUCCESSOR_AGENT and the reviewer-1 transition is SUCCESSOR_PENDING before orchestration.',
+          'The existing Lite orchestrator/watchdog reviewer-1 activation is dispatched.'
+        ]
+    if seq==1:
+        d['inputs']['required']=[
+          'Sealed Phase-0 receipt with validation PASS',
+          'Exact campaign/source/build identity',
+          'Phase-0 Audit Surface at evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json',
+          'Accepted Source Intelligence Bundle identities',
+          'Current Security Traceability Graph, obligation ledger and evidence invalidation matrix'
+        ]
+        d['steps'][0]['action']='Accept the sealed Phase-0 receipt and substantive baseline'
+        d['steps'][0]['instruction']='Verify exact identities and validation PASS in PHASE_00_RECEIPT_v1.json, then consume the Phase-0 Audit Surface, accepted Source Intelligence Bundle and current global controls without regenerating sealed mechanical work.'
+        if len(d['steps'])>=9:
+            d['steps'][8]['action']='Mark Phase 1 evidence ready'
+            d['steps'][8]['instruction']='Record Phase-1 outputs and carried obligations in PHASE_01_RECEIPT_v1.json, set phase.status=EVIDENCE_READY and validation.status=PENDING, then stop. Deterministic automation seals the receipt and prepares reviewer-2 when PASS.'
+            d['steps'][8]['resources']=['../../shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md']
+    cp.write_text(json.dumps(d,indent=2)+'\n')
+
+# Give every phase card a concise, non-legacy receipt section and scrub deleted handoff links/phrasing.
+for seq in range(11):
+    sh=pkg/f'phases/phase-{seq}/START_HERE.md'
+    if not sh.exists(): continue
+    text=sh.read_text()
+    text=text.replace('../../shared/handoff/SUCCESSOR_HANDOFF_BOUNDARY_PROFILES.json','../../shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md')
+    text=text.replace('Phase 0 was performed by the mechanical `web-bootstrap-agent`','Phase 0 was performed by deterministic `phase0-automation`')
+    text=text.replace('Verify the `P0_TO_P1` successor receipt and the Phase-0 controller validation `PASS`. If either is absent/invalid, repair the boundary; do not silently reconstruct Phase 0.','Verify PHASE_00_RECEIPT_v1.json is sealed with validation PASS. If not, repair only the failed receipt/evidence prerequisite; do not reconstruct Phase 0.')
+    text=text.replace('Bootstrap Audit Surface Manifest','Phase-0 Audit Surface')
+    text=text.replace('Phase-0 Audit Surface Manifest','Phase-0 Audit Surface')
+    text=text.replace('Phase-0 completion `PASS`','Phase-0 receipt validation `PASS`')
+    text=text.replace('The current controller/Phase-Contract completion validation must report `PASS`; if not, remain active and repair only the identified gap.','Record the substantive report reference in the current phase receipt; deterministic receipt validation supplies PASS/FAIL.')
+    text=text.replace('A fresh `reviewer-2` must receive and accept `P1_TO_P2`; reviewer-1 must not execute Phase 2.','After Phase 1 is marked EVIDENCE_READY, deterministic receipt advancement creates the Phase-2 receipt and the orchestrator starts fresh reviewer-2; reviewer-1 must not execute Phase 2.')
+    # Replace empty/old receipt-control section with compact authoritative instructions.
+    pattern=r'\n## Receipt control — mandatory\n.*?(?=\n## |\n> \*\*EXECUTOR:|\Z)'
+    note=f'''\n## Receipt control — mandatory\n\nResolve this campaign from `Audit Campaign Directory/campaigns/<slug>.json`, read its `currentReceiptPath`, and use only `receipts/PHASE_{seq:02d}_RECEIPT_v1.json` for Phase {seq} process state. Write substantive results to the designated evidence/resources and reference them from this receipt. When the phase work is complete, set `phase.status=EVIDENCE_READY` and leave `validation.status=PENDING`; do not self-seal. Contract-Automation validates and advances the same receipt. See [Lite Phase Receipt Protocol](../../shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md).\n'''
+    if re.search(pattern,text,flags=re.S):
+        text=re.sub(pattern,note,text,flags=re.S)
+    else:
+        lines=text.splitlines(True); text=''.join(lines[:1])+note+''.join(lines[1:])
+    sh.write_text(text)
+
 # Phase 0 contract must use the actual new audit surface names, not old bookkeeping.
 p0=pkg/'phases/phase-0/PHASE_CONTRACT.json'
 d=json.loads(p0.read_text())
