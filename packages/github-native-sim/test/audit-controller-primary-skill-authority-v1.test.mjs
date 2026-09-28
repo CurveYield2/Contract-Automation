@@ -14,7 +14,8 @@ test('controller operation resolves omitted Lite skill path from campaign author
   assert.match(workflow, /pointer\.status==='ACTIVE'/);
   assert.match(workflow, /resolved_skill_path/);
   assert.match(workflow, /resolved_skill_sha/);
-  assert.match(workflow, /sha256sum "\$skill_zip"/);
+  assert.match(workflow, /Stable authority folder must contain exactly one unpacked package directory with root SKILL\.md/);
+  assert.match(workflow, /sha256sum "\$skill_target"/);
   assert.match(workflow, /SKILL_PACKAGE_PATH=\$resolved_skill_path/);
 });
 
