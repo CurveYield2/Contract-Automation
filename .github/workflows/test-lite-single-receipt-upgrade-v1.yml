@@ -69,7 +69,13 @@ jobs:
           rm -rf .audit-controller
           gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
           cd .audit-controller
-          git fetch origin "$TEST_REF"
+          if git ls-remote --exit-code --heads origin "$TEST_REF" >/dev/null 2>&1; then
+            echo "Using matching Audit-Controller ref: $TEST_REF"
+            git fetch origin "$TEST_REF"
+          else
+            echo "No matching Audit-Controller ref; falling back to main"
+            git fetch origin main
+          fi
           git checkout --detach FETCH_HEAD
 
       - name: Validate matching Audit-Controller ref
@@ -85,7 +91,14 @@ jobs:
             echo "::error::Old .deep-assurance path reference remains"
             exit 1
           fi
-          authority="Audit Skill - Current Authority/Audit_Litemode_v10"
+          authority_parent="Audit Skill - Current Authority"
+          mapfile -t authority_dirs < <(find "$authority_parent" -mindepth 1 -maxdepth 1 -type d -name 'Audit_Litemode_v*' -print | sort)
+          if [[ "${#authority_dirs[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one unpacked current Lite authority package; found ${#authority_dirs[@]}"
+            printf '%s\n' "${authority_dirs[@]}"
+            exit 1
+          fi
+          authority="${authority_dirs[0]}"
           test -f "$authority/shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md"
           test ! -d "$authority/shared/handoff"
           for i in $(seq 0 10); do
