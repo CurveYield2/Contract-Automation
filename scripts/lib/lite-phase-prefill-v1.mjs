@@ -354,7 +354,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     const obligations=domainObligations(matrix,domains);
     const registryRel=path.posix.join(campaignPath,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json');
     writeJson(repoFile(root,registryRel),{
-      schemaVersion:'audit-v7-domain-applicability-registry-v2',
+      schemaVersion:'audit-v7-domain-applicability-registry-v1',
       artifactId:'DOMAIN_APPLICABILITY_REGISTRY',
       sourceIntelligencePath:siEntry?path.relative(repoFile(root,campaignPath),siEntry.file).split(path.sep).join('/'):'UNRESOLVED',
       matrixPath:matrixRel,
@@ -521,7 +521,8 @@ export function validatePhaseScaffold(sequence,form){
   const deficiencies=[];
   const expectedDigest=form?.automationInputs?.controllerPrefillDigestSha256;
   const ownedProjection=controllerOwnedProjection(form);
-  if(ownedProjection.length&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
+  if(form?.automationInputs&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
+  else if(ownedProjection.length&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
   if(expectedDigest&&controllerOwnedDigest(form)!==expectedDigest) deficiencies.push('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
   if(sequence===4){
     const c=phase4CoverageFromForm(form);
