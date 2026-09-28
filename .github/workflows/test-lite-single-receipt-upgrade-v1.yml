@@ -85,7 +85,14 @@ jobs:
             echo "::error::Old .deep-assurance path reference remains"
             exit 1
           fi
-          authority="Audit Skill - Current Authority/Audit_Litemode_v10"
+          authority_parent="Audit Skill - Current Authority"
+          mapfile -t authority_dirs < <(find "$authority_parent" -mindepth 1 -maxdepth 1 -type d -name 'Audit_Litemode_v*' -print | sort)
+          if [[ "${#authority_dirs[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one unpacked current Lite authority package; found ${#authority_dirs[@]}"
+            printf '%s\n' "${authority_dirs[@]}"
+            exit 1
+          fi
+          authority="${authority_dirs[0]}"
           test -f "$authority/shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md"
           test ! -d "$authority/shared/handoff"
           for i in $(seq 0 10); do
