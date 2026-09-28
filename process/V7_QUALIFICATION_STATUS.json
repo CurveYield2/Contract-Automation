@@ -3,7 +3,7 @@
   "status": "PASS",
   "qualifiedCommit": "1781b18040e9840ac81ee14ca14d37e48eec84ee",
   "workflowRunId": "36361309676",
-  "qualifiedAt": "2026-09-28T00:13:22.859Z",
+  "qualifiedAt": "2026-09-28T00:17:04.868Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
@@ -42,11 +42,11 @@
   },
   "controllerQualification": {
     "schemaVersion": "v26-controller-qualification-v1",
-    "controllerCommit": "9bb4cc1b6b54342166f846e59211954b35817953",
+    "controllerCommit": "ec90084bee0bd1ad1b92951f9974cb7a5b1e53aa",
     "controllerRef": "main",
     "status": "PASS",
     "qualificationRunId": "36361309676",
-    "qualifiedAt": "2026-09-28T00:13:03Z",
+    "qualifiedAt": "2026-09-28T00:16:44Z",
     "runnerQualifiedCommit": "1781b18040e9840ac81ee14ca14d37e48eec84ee",
     "runnerQualificationRunId": "36361309676",
     "testedSchemas": [
