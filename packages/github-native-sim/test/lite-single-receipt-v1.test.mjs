@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const read=(p)=>fs.readFileSync(p,'utf8');
+const read=p=>fs.readFileSync(p,'utf8');
 
 test('fresh Lite campaign keeps one ZIP URL as the only external initialization input',()=>{
   const workflow=read('.github/workflows/audit-source-initialization-v1.yml');
@@ -10,52 +10,58 @@ test('fresh Lite campaign keeps one ZIP URL as the only external initialization 
   assert.match(workflow,/source_url:/);
   assert.match(run,/write-phase0-receipt-v1\.py/);
   assert.match(run,/Audit Campaign Directory\/campaigns/);
-  assert.doesNotMatch(run,/write-state-v1\.py/);
-  assert.doesNotMatch(run,/\.deep-assurance/);
+  assert.doesNotMatch(run,/write-state-v1\.py|\.deep-assurance/);
 });
 
-test('Phase 0 finalizer updates the single receipt and creates no proof-of-proof files',()=>{
+test('Phase 0 remains automation-receipt based and creates Phase1 assignment-v2 only after seal',()=>{
   const f=read('scripts/lite-phase0-finalize-v1.mjs');
   assert.match(f,/PHASE_00_RECEIPT_v1\.json/);
   assert.match(f,/PHASE0_AUDIT_SURFACE_v1\.json/);
   assert.match(f,/EVIDENCE_INVALIDATION_MATRIX_v1\.json/);
-  assert.doesNotMatch(f,/PHASE0_AUTOMATION_COMPLETION_REPORT|PHASE0_AUTOMATION_VALIDATION|SUCCESSOR_HANDOFF\.json|WAKE_UP_MESSAGE\.md|START_HERE_SUCCESSOR\.md|CAMPAIGN_STATE|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE|MECHANICAL_WORK_PACKET/);
+  assert.match(f,/preparePhaseWork/);
+  assert.match(f,/curveyield-audit-campaign-directory-entry-v2/);
+  assert.match(f,/sequence:1/);
+  assert.doesNotMatch(f,/PHASE_01_RECEIPT_v1\.json/);
 });
 
-test('receipt controller is the only normal Lite phase transition bookkeeping layer',()=>{
-  const f=read('scripts/lite-phase-receipt-controller-v1.mjs');
-  assert.match(f,/EVIDENCE_READY/);
-  assert.match(f,/SUCCESSOR_PENDING/);
-  assert.match(f,/sameReviewerAdvanced/);
-  assert.match(f,/phaseReceiptPath\(campaignPath,t\.next,1\)/);
-  assert.match(f,/sequence===10/);
-  assert.doesNotMatch(f,/SUCCESSOR_HANDOFF|MECHANICAL_WORK_PACKET|retirement/i);
+test('assignment-v2 normal phases use packet controller while old receipt controller remains legacy-compatible',()=>{
+  const packet=read('scripts/lite-phase-packet-controller-v1.mjs');
+  const legacy=read('scripts/lite-phase-receipt-controller-v1.mjs');
+  assert.match(packet,/validateWorkForm/);
+  assert.match(packet,/validateFinalReport/);
+  assert.match(packet,/CONTROLLER_PHASE_PASS/);
+  assert.match(packet,/createLitePhaseReceiptV1/);
+  assert.match(legacy,/EVIDENCE_READY/);
 });
 
-test('fresh successor is generated dynamically from receipts',()=>{
-  const f=read('scripts/prepare-lite-receipt-successor-v1.mjs');
+test('fresh successor orchestration prefers assignment-v2 and retains legacy receipt fallback',()=>{
+  const assignment=read('scripts/prepare-lite-assignment-successor-v2.mjs');
+  const legacy=read('scripts/prepare-lite-receipt-successor-v1.mjs');
   const w=read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
-  assert.match(f,/buildWakeMessageFromReceiptsV1/);
-  assert.match(w,/Audit Campaign Directory\/campaigns/);
+  assert.match(assignment,/Phase schema:/);
+  assert.match(assignment,/Phase work form:/);
+  assert.match(assignment,/Phase packet submission path:/);
+  assert.match(legacy,/buildWakeMessageFromReceiptsV1/);
+  assert.match(w,/curveyield-audit-campaign-directory-entry-v2/);
+  assert.match(w,/prepare-lite-assignment-successor-v2\.mjs/);
   assert.match(w,/prepare-lite-receipt-successor-v1\.mjs/);
-  assert.doesNotMatch(w,/SUCCESSOR_HANDOFF\.json|WAKE_UP_MESSAGE\.md|START_HERE_SUCCESSOR\.md|MECHANICAL_WORK_PACKET/);
 });
 
-test('browser wake activates incoming receipt and moves only the campaign-directory pointer',()=>{
+test('browser wake activates assignment-v2 without active phase receipt mutation',()=>{
   const w=read('.github/workflows/browser-agent-wake.yml');
-  assert.match(w,/Activate prepared Lite receipt successor/);
-  assert.match(w,/SUCCESSOR_ACTIVATED/);
-  assert.match(w,/currentReceiptPath/);
+  assert.match(w,/curveyield-audit-campaign-directory-entry-v2/);
+  assert.match(w,/currentAssignment\.status="ACTIVE"/);
+  assert.match(w,/without creating or modifying a phase receipt/);
   assert.match(w,/Audit Campaign Directory\/campaigns/);
 });
 
-test('watchdog follows current receipt and dispatches deterministic receipt controller',()=>{
+test('watchdog dispatches current packet controller for assignment-v2 and retains legacy receipt gate',()=>{
   const w=read('.github/workflows/browser-agent-watchdog.yml');
-  assert.match(w,/Audit Campaign Directory\/campaigns/);
-  assert.match(w,/currentReceiptPath/);
+  assert.match(w,/curveyield-audit-campaign-directory-entry-v2/);
+  assert.match(w,/currentAssignment\.packetPath/);
+  assert.match(w,/packet_status.*SUBMITTED/);
+  assert.match(w,/lite-phase-work-packet-controller-v1\.yml/);
   assert.match(w,/lite-phase-receipt-controller-v1\.yml/);
-  assert.match(w,/EVIDENCE_READY/);
-  assert.match(w,/SUCCESSOR_PENDING/);
 });
 
 test('Phase 0 intelligence generates substantive audit surface rather than receipt substitutes',()=>{
@@ -69,37 +75,12 @@ test('Phase 0 intelligence generates substantive audit surface rather than recei
   assert.match(outputs,/PHASE_00_RECEIPT_v1\.json/);
 });
 
-
-test('receipt controller enforces current Phase Contract required outputs before sealing',()=>{
-  const f=read('scripts/lite-phase-receipt-controller-v1.mjs');
-  assert.match(f,/authority\.homepagePath/);
-  assert.match(f,/PHASE_CONTRACT\.json/);
-  assert.match(f,/phaseContract\.requiredOutputs/);
-  assert.match(f,/missing required Phase Contract outputs/);
-  assert.match(f,/recorded\.add\(receiptLocalPath\)/);
-});
-
-test('replacement wake resumes blocked receipt state without pretending it is a successor transition',()=>{
-  const w=read('.github/workflows/browser-agent-wake.yml');
-  assert.match(w,/directory_status" = "BLOCKED"/);
-  assert.match(w,/\.phase\.status="ACTIVE"/);
-  assert.match(w,/\.status="ACTIVE"/);
-  assert.match(w,/resume blocked reviewer/);
-  assert.match(w,/no successor transition is required/);
-});
-
-
-test('Phase 6 validation creates and seals the non-executable Phase 7 marker automatically',()=>{
-  const f=read('scripts/lite-phase-receipt-controller-v1.mjs');
+test('assignment-v2 Phase6 PASS creates and seals automatic Phase7 marker then assigns reviewer4 to Phase8',()=>{
+  const f=read('scripts/lite-phase-packet-controller-v1.mjs');
   assert.match(f,/if\(sequence===6\)/);
   assert.match(f,/sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation'/);
-  assert.match(f,/status:'SEALED'/);
+  assert.match(f,/markerDisposition:'SEALED_AUTOMATIC_MARKER'/);
   assert.match(f,/boundary:'P67_TO_P8'/);
-  assert.match(f,/incomingReviewer:'reviewer-4'/);
-  assert.match(f,/nextPhaseSequence:8/);
-  assert.match(f,/directory\.currentPhaseSequence=7/);
-  assert.match(f,/evidence:receipt\.evidence\?\?\[\]/);
-  assert.match(f,/outputs:\[\.\.\.\(receipt\.outputs\?\?\[\]\)/);
-  assert.match(f,/freshSuccessorRequired=true/);
-  assert.doesNotMatch(f,/6:\{next:7,same:true,reviewer:'reviewer-3L',assigned:'Phase 7 completion marker'\}/);
+  assert.match(f,/sequence:nextSequence,reviewer:nextReviewer/);
+  assert.match(f,/nextSequence=8/);
 });
