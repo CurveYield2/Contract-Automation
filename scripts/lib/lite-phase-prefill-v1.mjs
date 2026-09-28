@@ -502,6 +502,8 @@ export function buildControllerPacket({directory,assignment,existing,now}){
 export function validatePhaseScaffold(sequence,form){
   const deficiencies=[];
   const expectedDigest=form?.automationInputs?.controllerPrefillDigestSha256;
+  const ownedProjection=controllerOwnedProjection(form);
+  if(ownedProjection.length&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
   if(expectedDigest&&controllerOwnedDigest(form)!==expectedDigest) deficiencies.push('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
   if(sequence===4){
     const c=phase4CoverageFromForm(form);
