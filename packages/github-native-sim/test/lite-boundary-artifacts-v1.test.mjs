@@ -27,7 +27,8 @@ test('target matrix is filled from accepted design plus machine result',()=>{
   });
   assert.match(text,/CAND-001/);
   assert.match(text,/2 simulation step\(s\)/);
-  assert.match(text,/PENDING_PHASE6_INTERPRETATION/);
+  assert.match(text,/evidence\/phase5-boundary\/CAND-001\/raw-result\.json/);
+  assert.doesNotMatch(text,/Phase-8 obligation/);
   assert.doesNotMatch(text,/Campaign\/generation:/);
 });
 
@@ -43,6 +44,7 @@ test('remediation ledger has task data but no global bookkeeping section',()=>{
   });
   assert.match(text,/Vault\.sol:withdraw/);
   assert.doesNotMatch(text,/Campaign-global synchronization/);
+  assert.doesNotMatch(text,/Carried-forward obligations/);
 });
 
 test('final evidence index intentionally retains summary identity',()=>{
