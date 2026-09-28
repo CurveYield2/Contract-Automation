@@ -15,7 +15,8 @@ test('qualification workflow supports fail-closed controller-only verification w
   assert.match(workflow, /secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN/);
   assert.match(workflow, /gh repo clone CurveYield2\/Audit-Controller \.controller-under-test/);
   assert.match(workflow, /git fetch --depth=1 origin "\$CONTROLLER_REF"/);
-  assert.match(workflow, /test "\$\(git rev-parse HEAD\)" = "\$CONTROLLER_REF"/);
+  assert.match(workflow, /expected_controller_commit="\$\(git rev-parse FETCH_HEAD\)"/);
+  assert.match(workflow, /test "\$\(git rev-parse HEAD\)" = "\$expected_controller_commit"/);
   assert.match(workflow, /working-directory:\s*\.controller-under-test/);
   assert.match(workflow, /npm test/);
   assert.match(workflow, /npm run check/);
