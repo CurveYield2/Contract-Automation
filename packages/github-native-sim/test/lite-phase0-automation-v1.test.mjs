@@ -40,7 +40,9 @@ test('source initialization creates a Phase-0 automation receipt instead of camp
   const writer=read('scripts/audit-source-initialization/write-phase0-receipt-v1.py');
   assert.match(writer,/PHASE_00_RECEIPT_v1\.json/);
   assert.match(writer,/phase0-automation/);
-  assert.match(writer,/Audit Campaign Directory\/campaigns/);
+  assert.match(writer,/CAMPAIGN_DIRECTORY_PATH/);
+  const run=read('scripts/audit-source-initialization/run-v1.sh');
+  assert.match(run,/Audit Campaign Directory\/campaigns/);
   assert.doesNotMatch(writer,/web-bootstrap-agent|CHATGPT_WEB_CHAT_GITHUB_CONNECTOR|CAMPAIGN_STATE|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE/);
 });
 
