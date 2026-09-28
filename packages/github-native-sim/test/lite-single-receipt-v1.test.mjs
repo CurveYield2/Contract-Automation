@@ -98,6 +98,8 @@ test('Phase 6 validation creates and seals the non-executable Phase 7 marker aut
   assert.match(f,/incomingReviewer:'reviewer-4'/);
   assert.match(f,/nextPhaseSequence:8/);
   assert.match(f,/directory\.currentPhaseSequence=7/);
+  assert.match(f,/evidence:receipt\.evidence\?\?\[\]/);
+  assert.match(f,/outputs:\[\.\.\.\(receipt\.outputs\?\?\[\]\)/);
   assert.match(f,/freshSuccessorRequired=true/);
   assert.doesNotMatch(f,/6:\{next:7,same:true,reviewer:'reviewer-3L',assigned:'Phase 7 completion marker'\}/);
 });
