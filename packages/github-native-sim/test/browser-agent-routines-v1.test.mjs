@@ -163,30 +163,30 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.match(workflow, /activeChat=.*chatName/);
 });
 
-test('Lite entry workflow monitors the existing Phase-0 bootstrap and never creates a second Phase-0 chat', () => {
+test('Lite browser orchestration starts only after workflow-only Phase 0 reaches a successor boundary', () => {
   const workflow = read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
   assert.match(workflow, /Bind exact canonical campaign/);
   assert.match(workflow, /campaign_id does not match canonical campaign state/);
   assert.match(workflow, /Campaign is not Lite mode/);
-  assert.match(workflow, /Arm Lite campaign boundary monitor/);
-  assert.match(workflow, /Phase 0 is the existing human-started bootstrap agent/);
-  assert.match(workflow, /chatUrl:""/);
-  assert.match(workflow, /bootstrapMonitor:\(\$bootstrap=="true"\)/);
-  assert.match(workflow, /monitor_milestone/);
+  assert.match(workflow, /WAITING_FOR_SUCCESSOR_AGENT/);
+  assert.match(workflow, /Phase 0 is workflow-only/);
   assert.match(workflow, /gh workflow run browser-agent-watchdog\.yml/);
+  assert.doesNotMatch(workflow, /web-bootstrap-agent/);
   assert.doesNotMatch(workflow, /Dispatch normal-web Phase-0 bootstrap chat/);
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
-test('Audit Source Initialization creates durable campaign state then arms the state-only Lite orchestrator', () => {
+test('Audit Source Initialization creates durable campaign state then starts fully automated Phase 0', () => {
   const workflow = read('.github/workflows/audit-source-initialization-v1.yml');
   const run = read('scripts/audit-source-initialization/run-v1.sh');
   const state = read('scripts/audit-source-initialization/write-state-v1.py');
   assert.match(state, /\.deep-assurance\/active|ACTIVE_PATH/);
   assert.match(state, /CAMPAIGN_STATE_v1\.json/);
   assert.match(state, /ACTIVE_PHASE_POINTER_v1\.json/);
-  assert.match(run, /gh workflow run lite-audit-browser-orchestrator-v1\.yml/);
+  assert.match(state, /phase0-automation/);
+  assert.match(run, /gh workflow run lite-phase0-bootstrap-v1\.yml/);
   assert.match(run, /audit_controller_ref=main/);
+  assert.doesNotMatch(run, /lite-audit-browser-orchestrator-v1\.yml/);
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
   assert.doesNotMatch(run, /browser-agent-wake\.yml/);
 });
