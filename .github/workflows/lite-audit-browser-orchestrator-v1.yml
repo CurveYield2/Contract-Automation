@@ -3,23 +3,10 @@ name: Lite Audit Browser Orchestrator v1
 on:
   workflow_dispatch:
     inputs:
-      campaign_id:
-        description: Exact campaign ID
-        required: true
-        type: string
-      campaign_name:
-        description: Human-readable campaign / ChatGPT Project name
-        required: true
-        type: string
-      campaign_path:
-        description: Audit-Controller campaign path, e.g. campaigns/My Audit
-        required: true
-        type: string
-      audit_controller_ref:
-        description: Audit-Controller ref containing the campaign
-        required: false
-        default: main
-        type: string
+      campaign_id: {required: true, type: string}
+      campaign_name: {required: true, type: string}
+      campaign_path: {required: true, type: string}
+      audit_controller_ref: {required: false, default: main, type: string}
 
 permissions:
   contents: write
@@ -30,11 +17,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  bootstrap:
+  launch-successor:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      GH_TOKEN: ${{ github.token }}
       CAMPAIGN_ID: ${{ inputs.campaign_id }}
       CAMPAIGN_NAME: ${{ inputs.campaign_name }}
       CAMPAIGN_PATH: ${{ inputs.campaign_path }}
@@ -42,248 +28,135 @@ jobs:
     steps:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
-        with:
-          ref: main
-          persist-credentials: false
-          fetch-depth: 1
+        with: {ref: main, persist-credentials: false, fetch-depth: 1}
 
       - name: Select Audit-Controller credential
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
-        shell: bash
         run: bash scripts/select-audit-controller-token.sh
 
-      - name: Validate campaign inputs
+      - name: Resolve campaign directory entry
+        id: directory
         shell: bash
         run: |
           set -euo pipefail
-          case "$CAMPAIGN_PATH" in
-            campaigns/*) ;;
-            *) echo "::error::campaign_path must be under campaigns/"; exit 1 ;;
-          esac
-          if [[ "$CAMPAIGN_PATH" == *".."* || "$CAMPAIGN_PATH" == /* ]]; then
-            echo "::error::Unsafe campaign_path"
-            exit 1
-          fi
+          [[ "$CAMPAIGN_PATH" == campaigns/* ]] || { echo "::error::campaign_path must be under campaigns/"; exit 1; }
+          if [[ "$CAMPAIGN_ID" =~ ^(.+)-r[0-9]+$ ]]; then slug="${BASH_REMATCH[1]}"; else echo "::error::campaign_id does not end in -rN"; exit 1; fi
+          directory_path="Audit Campaign Directory/campaigns/$slug.json"
+          echo "path=$directory_path" >> "$GITHUB_OUTPUT"
 
-      - name: Bind exact canonical campaign
-        id: canonical
-        env:
-          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+      - name: Checkout Audit-Controller
+        env: {GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}}
         shell: bash
         run: |
           set -euo pipefail
-          controller_api="repos/CurveYield2/Audit-Controller/contents/$CAMPAIGN_PATH/controller?ref=$AUDIT_CONTROLLER_REF"
-          state_name="$(gh api "$controller_api" --jq '.[].name' | sed -n 's/^\(CAMPAIGN_STATE_v[0-9][0-9]*\.json\)$/\1/p' | sort -V | tail -n1)"
-          pointer_name="$(gh api "$controller_api" --jq '.[].name' | sed -n 's/^\(ACTIVE_PHASE_POINTER_v[0-9][0-9]*\.json\)$/\1/p' | sort -V | tail -n1)"
-          [ -n "$state_name" ] || { echo "::error::No versioned canonical campaign state found"; exit 1; }
-          [ -n "$pointer_name" ] || { echo "::error::No versioned active phase pointer found"; exit 1; }
-          state_path="$CAMPAIGN_PATH/controller/$state_name"
-          pointer_path="$CAMPAIGN_PATH/controller/$pointer_name"
-          api="repos/CurveYield2/Audit-Controller/contents/$state_path?ref=$AUDIT_CONTROLLER_REF"
-          encoded="$(gh api "$api" --jq '.content')"
-          printf '%s' "$encoded" | base64 -d > /tmp/canonical-campaign-state.json
+          gh auth setup-git
+          rm -rf .audit-controller
+          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
+          cd .audit-controller
+          git fetch origin "$AUDIT_CONTROLLER_REF"
+          git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
+          test "$(jq -r '.campaignId' "${{ steps.directory.outputs.path }}")" = "$CAMPAIGN_ID"
+          test "$(jq -r '.workspacePath' "${{ steps.directory.outputs.path }}")" = "$CAMPAIGN_PATH"
 
-          canonical_id="$(jq -r '.campaignId // empty' /tmp/canonical-campaign-state.json)"
-          canonical_name="$(jq -r '.auditName // .title // .projectSlug // empty' /tmp/canonical-campaign-state.json)"
-          canonical_path="$(jq -r '.controller.workspacePath // empty' /tmp/canonical-campaign-state.json)"
-          canonical_ref="$(jq -r '.controller.branch // empty' /tmp/canonical-campaign-state.json)"
-          canonical_mode="$(jq -r '.assuranceMode.mode // .mode // empty' /tmp/canonical-campaign-state.json)"
-          current_phase="$(jq -r '.phase.id // empty' /tmp/canonical-campaign-state.json)"
-          current_reviewer="$(jq -r '.activeReviewer.lineage // .phase.reviewer // empty' /tmp/canonical-campaign-state.json)"
-          current_milestone="$(jq -r '.phase.milestoneId // empty' /tmp/canonical-campaign-state.json)"
-          campaign_status="$(jq -r '.campaignCompletionStatus // .campaignStatus // .status // empty' /tmp/canonical-campaign-state.json)"
-          if [ -z "$current_milestone" ] && [ "$current_phase" = "phase-0" ]; then current_milestone="P0_BOOTSTRAP"; fi
+      - name: Prepare incoming phase receipt and dynamic wake message
+        id: successor
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/prepare-lite-receipt-successor-v1.mjs \
+            --controller-root .audit-controller \
+            --campaign-directory-path "${{ steps.directory.outputs.path }}" | tee /tmp/lite-successor.json
+          test "$(jq -r '.status' /tmp/lite-successor.json)" = PASS
+          {
+            echo "incoming_phase=$(jq -r '.incomingPhaseId' /tmp/lite-successor.json)"
+            echo "incoming_reviewer=$(jq -r '.incomingReviewer' /tmp/lite-successor.json)"
+            echo "boundary=$(jq -r '.boundary' /tmp/lite-successor.json)"
+            echo "wake_b64=$(jq -r '.wakeMessageB64' /tmp/lite-successor.json)"
+          } >> "$GITHUB_OUTPUT"
 
-          [ "$canonical_id" = "$CAMPAIGN_ID" ] || { echo "::error::campaign_id does not match canonical campaign state"; exit 1; }
-          [ "$canonical_path" = "$CAMPAIGN_PATH" ] || { echo "::error::campaign_path does not match canonical workspacePath"; exit 1; }
-          [ "$canonical_ref" = "$AUDIT_CONTROLLER_REF" ] || { echo "::error::audit_controller_ref does not match canonical controller branch"; exit 1; }
-          [ "$canonical_mode" = "LITE" ] || { echo "::error::Campaign is not Lite mode"; exit 1; }
-          if [ -n "$CAMPAIGN_NAME" ] && [ -n "$canonical_name" ] && [ "$CAMPAIGN_NAME" != "$canonical_name" ]; then
-            echo "::error::campaign_name does not match canonical auditName"
-            exit 1
+      - name: Publish successor receipt preparation
+        env: {GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git config user.name 'CurveYield Lite Browser Orchestrator'
+          git config user.email 'lite-browser-orchestrator@users.noreply.github.com'
+          git add -- "$CAMPAIGN_PATH/receipts"
+          if ! git diff --cached --quiet; then
+            git commit -m "audit(receipt): prepare ${{ steps.successor.outputs.incoming_reviewer }} for $CAMPAIGN_ID"
+            git push origin "HEAD:$AUDIT_CONTROLLER_REF"
           fi
 
-          arm_campaign_monitor=true
-          bootstrap_monitor=false
-          monitor_phase="$current_phase"
-          monitor_milestone="$current_milestone"
-          if [ "$campaign_status" = "COMPLETE" ] || [ "$campaign_status" = "STOPPED_BY_HUMAN" ]; then
-            arm_campaign_monitor=false
-          elif [ "$(jq -r '.phase.state // .phase.status // empty' /tmp/canonical-campaign-state.json)" = "WAITING_FOR_SUCCESSOR_AGENT" ]; then
-            history_phase="$(jq -r '.history[-1].phase // empty' /tmp/canonical-campaign-state.json)"
-            history_milestone="$(jq -r '.history[-1].milestone // empty' /tmp/canonical-campaign-state.json)"
-            if [ "$history_phase" = "0" ]; then monitor_milestone="P0_BOOTSTRAP"; else monitor_milestone="$history_milestone"; fi
-          elif [ -z "$monitor_milestone" ] && [ -n "$current_reviewer" ]; then
-            monitor_milestone="$(jq -r --arg reviewer "$current_reviewer" '[.routingPlan.workers[]? | select(.lineage==$reviewer) | .milestone][0] // empty' /tmp/canonical-campaign-state.json)"
-          fi
-          [ "$arm_campaign_monitor" != "true" ] || [ -n "$monitor_phase" ] || { echo "::error::Unable to resolve Lite monitor phase"; exit 1; }
-          [ "$arm_campaign_monitor" != "true" ] || [ -n "$monitor_milestone" ] || { echo "::error::Unable to resolve Lite monitor milestone"; exit 1; }
-
-          echo "arm_campaign_monitor=$arm_campaign_monitor" >> "$GITHUB_OUTPUT"
-          echo "bootstrap_monitor=$bootstrap_monitor" >> "$GITHUB_OUTPUT"
-          echo "canonical_name=$canonical_name" >> "$GITHUB_OUTPUT"
-          echo "current_phase=$current_phase" >> "$GITHUB_OUTPUT"
-          echo "current_reviewer=$current_reviewer" >> "$GITHUB_OUTPUT"
-          echo "current_milestone=$current_milestone" >> "$GITHUB_OUTPUT"
-          echo "monitor_phase=$monitor_phase" >> "$GITHUB_OUTPUT"
-          echo "monitor_milestone=$monitor_milestone" >> "$GITHUB_OUTPUT"
-          echo "campaign_status=$campaign_status" >> "$GITHUB_OUTPUT"
-          echo "state_path=$state_path" >> "$GITHUB_OUTPUT"
-          echo "pointer_path=$pointer_path" >> "$GITHUB_OUTPUT"
-
-      - name: Create or refresh campaign-chain registration
-        id: registration
-        if: steps.canonical.outputs.arm_campaign_monitor == 'true'
+      - name: Create or refresh campaign browser registration
+        env: {GH_TOKEN: ${{ github.token }}}
         shell: bash
         run: |
           set -euo pipefail
           safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
           registration="process/browser-agent-wake/registrations/$safe_campaign.json"
           api="repos/$GITHUB_REPOSITORY/contents/$registration"
-          existing="$(gh api "$api?ref=main" --jq '.content' 2>/dev/null || true)"
-
-          previous_chat=""
-          if [ -n "$existing" ]; then
-            printf '%s' "$existing" | base64 -d > /tmp/registration-existing.json
-            test "$(jq -r '.schemaVersion // empty' /tmp/registration-existing.json)" = 'curveyield-browser-agent-wake-registration-v1'
-            test "$(jq -r '.campaignId // empty' /tmp/registration-existing.json)" = "$CAMPAIGN_ID"
-            previous_chat="$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/registration-existing.json)"
-          fi
-
           jq -n \
             --arg campaignId "$CAMPAIGN_ID" \
             --arg projectName "$CAMPAIGN_NAME" \
             --arg ref "$AUDIT_CONTROLLER_REF" \
-            --arg statePath "${{ steps.canonical.outputs.state_path }}" \
-            --arg pointerPath "${{ steps.canonical.outputs.pointer_path }}" \
-            --arg phaseId "${{ steps.canonical.outputs.monitor_phase }}" \
-            --arg milestoneId "${{ steps.canonical.outputs.monitor_milestone }}" \
-            --arg reviewer "${{ steps.canonical.outputs.current_reviewer }}" \
-            --arg bootstrap "${{ steps.canonical.outputs.bootstrap_monitor }}" \
-            --arg previousChat "$previous_chat" \
+            --arg directoryPath "${{ steps.directory.outputs.path }}" \
+            --arg phaseId "${{ steps.successor.outputs.incoming_phase }}" \
+            --arg boundary "${{ steps.successor.outputs.boundary }}" \
+            --arg reviewer "${{ steps.successor.outputs.incoming_reviewer }}" \
             '{
               schemaVersion:"curveyield-browser-agent-wake-registration-v1",
-              campaignId:$campaignId,
-              mode:"create_fresh",
-              chatUrl:"",
+              campaignId:$campaignId,mode:"create_fresh",chatUrl:"",
               browserRoutine:"audit-lite-reviewer-v1",
-              chatgptProject:{name:$projectName,url:""},
-              activeChat:{name:"",url:""},
-              wakeMessage:"",
-              thinkingEffort:"high",
-              activeAssignment:{phaseId:$phaseId,milestoneId:$milestoneId,workerRole:"reviewer",reviewer:$reviewer,thinkingEffort:"high"},
-              bootstrapMonitor:{
-                status:(if $bootstrap=="true" then "ACTIVE" else "NOT_APPLICABLE" end),
-                note:"Phase 0 is workflow-only. Browser supervision begins with reviewer-1 or later reviewers.",
-                previousAutomationChat:(if $previousChat=="" then null else $previousChat end)
-              },
-              watchdog:{
-                enabled:true,
-                idleMessage:"GET BACK TO WORK",
-                gate:{
-                  mode:"LITE",
-                  repository:"CurveYield2/Audit-Controller",
-                  ref:$ref,
-                  statePath:$statePath,
-                  expectedPhaseId:$phaseId,
-                  expectedMilestoneId:$milestoneId,
-                  activePointerPath:$pointerPath,
-                  stopStates:["STOPPED_BY_HUMAN"],
-                  stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]
-                }
-              }
+              chatgptProject:{name:$projectName,url:""},activeChat:{name:"",url:""},wakeMessage:"",thinkingEffort:"high",
+              activeAssignment:{phaseId:$phaseId,milestoneId:$boundary,workerRole:"reviewer",reviewer:$reviewer,thinkingEffort:"high"},
+              watchdog:{enabled:true,idleMessage:"GET BACK TO WORK",gate:{mode:"LITE",repository:"CurveYield2/Audit-Controller",ref:$ref,statePath:$directoryPath,expectedPhaseId:$phaseId,expectedMilestoneId:$boundary,activePointerPath:"",stopStates:["STOPPED_BY_HUMAN"],stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]}}
             }' > /tmp/registration.json
-
-          current_sha="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
-          content="$(base64 -w0 /tmp/registration.json)"
-          if [ -n "$current_sha" ]; then
-            gh api --method PUT "$api" \
-              -f message="chore(audit): bind lite bootstrap monitor $CAMPAIGN_ID" \
-              -f content="$content" -f sha="$current_sha" -f branch=main >/dev/null
+          current="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
+          body="$(base64 -w0 /tmp/registration.json)"
+          if [ -n "$current" ]; then
+            gh api --method PUT "$api" -f message="chore(wake): prepare $CAMPAIGN_ID ${{ steps.successor.outputs.boundary }}" -f content="$body" -f sha="$current" -f branch=main >/dev/null
           else
-            gh api --method PUT "$api" \
-              -f message="chore(audit): register lite bootstrap monitor $CAMPAIGN_ID" \
-              -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "$api" -f message="chore(wake): register $CAMPAIGN_ID ${{ steps.successor.outputs.boundary }}" -f content="$body" -f branch=main >/dev/null
           fi
-          echo "registration=$registration" >> "$GITHUB_OUTPUT"
 
-      - name: Arm Lite campaign boundary monitor
-        id: monitor
-        if: steps.canonical.outputs.arm_campaign_monitor == 'true'
+      - name: Launch fresh reviewer
+        env: {GH_TOKEN: ${{ github.token }}}
         shell: bash
         run: |
           set -euo pipefail
-          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
-          wake_id="$CAMPAIGN_ID-${{ steps.canonical.outputs.monitor_milestone }}-campaign-monitor"
-          safe_id="$(printf '%s' "$wake_id" | tr -c 'A-Za-z0-9._-' '_')"
-          state_path="process/browser-agent-watchdog/active/$safe_id.json"
-          api="repos/$GITHUB_REPOSITORY/contents/$state_path"
+          poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
+          wake_id="$CAMPAIGN_ID-${{ steps.successor.outputs.boundary }}-${{ steps.successor.outputs.incoming_reviewer }}"
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$wake_id" \
+            -f campaign_id="$CAMPAIGN_ID" \
+            -f phase_id="${{ steps.successor.outputs.incoming_phase }}" \
+            -f mode=create_fresh \
+            -f chat_url="" \
+            -f wake_message_b64="${{ steps.successor.outputs.wake_b64 }}" \
+            -f watchdog_enabled=true \
+            -f worker_role=reviewer \
+            -f watchdog_message_b64="$poke_b64" \
+            -f gate_mode=LITE \
+            -f gate_repository=CurveYield2/Audit-Controller \
+            -f gate_ref="$AUDIT_CONTROLLER_REF" \
+            -f gate_state_path="${{ steps.directory.outputs.path }}" \
+            -f gate_expected_phase_id="${{ steps.successor.outputs.incoming_phase }}" \
+            -f gate_expected_milestone_id="${{ steps.successor.outputs.boundary }}" \
+            -f gate_active_pointer_path="" \
+            -f gate_stop_states_csv=STOPPED_BY_HUMAN \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
 
-          jq -n \
-            --arg wakeId "$wake_id" \
-            --arg campaignId "$CAMPAIGN_ID" \
-            --arg ref "$AUDIT_CONTROLLER_REF" \
-            --arg statePath "${{ steps.canonical.outputs.state_path }}" \
-            --arg pointerPath "${{ steps.canonical.outputs.pointer_path }}" \
-            --arg phaseId "${{ steps.canonical.outputs.monitor_phase }}" \
-            --arg milestoneId "${{ steps.canonical.outputs.monitor_milestone }}" \
-            --arg bootstrap "${{ steps.canonical.outputs.bootstrap_monitor }}" \
-            '{
-              schemaVersion:"curveyield-browser-agent-watchdog-state-v1",
-              wakeId:$wakeId,
-              campaignId:$campaignId,
-              phaseId:$phaseId,
-              workerRole:"reviewer",
-              status:"ACTIVE",
-              chatUrl:"",
-              lastProvider:"",
-              armedAt:(now|todate),
-              intervalMinutes:5,
-              idleMessage:"GET BACK TO WORK",
-              observation:{assistantCount:0,lastAssistantHash:"",observedAt:(now|todate)},
-              gate:{
-                mode:"LITE",
-                repository:"CurveYield2/Audit-Controller",
-                ref:$ref,
-                statePath:$statePath,
-                expectedPhaseId:$phaseId,
-                expectedMilestoneId:$milestoneId,
-                activePointerPath:$pointerPath,
-                interphase:{handoffPath:"",workPacketPath:"",completionPath:"",workPacketSha256:""},
-                stopStates:["STOPPED_BY_HUMAN"],
-                stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]
-              },
-              repair:{enabled:false,idlePokeThreshold:3,unviewableThreshold:2,consecutiveIdlePokes:0,consecutiveUnviewable:0},
-              bootstrapMonitor:($bootstrap=="true")
-            }' > /tmp/bootstrap-monitor.json
-
-          current_sha="$(gh api "$api?ref=main" --jq '.sha' 2>/dev/null || true)"
-          content="$(base64 -w0 /tmp/bootstrap-monitor.json)"
-          if [ -n "$current_sha" ]; then
-            gh api --method PUT "$api" -f message="chore(watchdog): refresh $wake_id" -f content="$content" -f sha="$current_sha" -f branch=main >/dev/null
-          else
-            gh api --method PUT "$api" -f message="chore(watchdog): arm $wake_id" -f content="$content" -f branch=main >/dev/null
-          fi
-
-          gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$wake_id"
-          echo "wake_id=$wake_id" >> "$GITHUB_OUTPUT"
-
-      - name: Summarize orchestration
-        shell: bash
+      - name: Summarize
         run: |
           {
-            echo "## Lite audit browser orchestration"
-            echo
-            echo "- Campaign: $CAMPAIGN_NAME"
-            echo "- Campaign ID: $CAMPAIGN_ID"
-            echo "- Phase 0: workflow-only; no bootstrap chat exists"
-            echo "- First browser reviewer: reviewer-1 after machine-valid P0_TO_P1"
-            echo "- Boundary monitor: ${{ steps.canonical.outputs.arm_campaign_monitor }}"
-            echo "- Successor first message: predecessor-created WAKE_UP_MESSAGE.md verbatim"
-            echo "- Later messages: GET BACK TO WORK"
-            echo "- Reviewer count and phase ranges: derived dynamically from canonical Audit-Controller state"
-            echo "- Overall termination: campaign COMPLETE or STOPPED_BY_HUMAN only"
+            echo "## Lite receipt successor dispatch"
+            echo "- Campaign: $CAMPAIGN_ID"
+            echo "- Directory: ${{ steps.directory.outputs.path }}"
+            echo "- Incoming phase: ${{ steps.successor.outputs.incoming_phase }}"
+            echo "- Incoming reviewer: ${{ steps.successor.outputs.incoming_reviewer }}"
+            echo "- Stored handoff/wake/start files: none"
           } >> "$GITHUB_STEP_SUMMARY"
