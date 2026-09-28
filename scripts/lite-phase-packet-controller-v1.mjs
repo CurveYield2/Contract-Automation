@@ -264,6 +264,22 @@ if(sequence===8){
   canonical.actions['step-2'].outputs.validatedFindings=materializeValidatedFindings(canonical.actions?.['step-2']?.outputs?.candidateValidations??[]);
   canonical.automationOutputs.validatedFindingsMaterialized=true;
 }
+if(sequence===10){
+  const p6=canonicalFor(root,campaignPath,6);
+  const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
+  const open=(ledger.obligations??[]).filter(o=>String(o.status??'OPEN').toUpperCase()!=='CLOSED');
+  const phase6Limits=phaseOutput(p6,'step-3','typedExecutionLimitations')??[];
+  const omissions=phaseOutput(p6,'step-3','fullOnlyOmissions')??[];
+  canonical.automationOutputs.residualLimitations=[
+    ...phase6Limits.filter(x=>String(x)!=='NONE_IDENTIFIED'),
+    ...open.map(o=>o.statusReason??o.obligationId).filter(Boolean)
+  ];
+  if(!canonical.automationOutputs.residualLimitations.length) canonical.automationOutputs.residualLimitations=['NONE_IDENTIFIED'];
+  canonical.automationOutputs.unresolvedSubstantiveQuestions=open.length?open.map(o=>o.obligationId??o.statusReason??'OPEN_OBLIGATION'):['NONE_IDENTIFIED'];
+  canonical.automationOutputs.fullUpgradeRecommendations=omissions.length&&!(omissions.length===1&&omissions[0]==='NONE_IDENTIFIED')
+    ? omissions.map(x=>'Execute Full-path delta for omitted Lite work: '+x)
+    : ['NONE_IDENTIFIED'];
+}
 
 let reportText='';
 if(schema.finalReport){
