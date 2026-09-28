@@ -359,6 +359,19 @@ for seq in range(11):
     text=text.replace('Phase-0 completion `PASS`','Phase-0 receipt validation `PASS`')
     text=text.replace('The current controller/Phase-Contract completion validation must report `PASS`; if not, remain active and repair only the identified gap.','Record the substantive report reference in the current phase receipt; deterministic receipt validation supplies PASS/FAIL.')
     text=text.replace('A fresh `reviewer-2` must receive and accept `P1_TO_P2`; reviewer-1 must not execute Phase 2.','After Phase 1 is marked EVIDENCE_READY, deterministic receipt advancement creates the Phase-2 receipt and the orchestrator starts fresh reviewer-2; reviewer-1 must not execute Phase 2.')
+    text=text.replace('validated `P0_TO_P1` successor package and Phase-1 wake message.','sealed PHASE_00_RECEIPT_v1.json with reviewer-1 successor state.')
+    text=text.replace('Phase 0 is complete only when all required machine evidence is present and source-bound, `P0_TO_P1` validation is `PASS`, canonical controller state is `WAITING_FOR_SUCCESSOR_AGENT`, and the orchestrator/watchdog activation for reviewer-1 has been dispatched.','Phase 0 is complete only when all required machine evidence is present and source-bound, PHASE_00_RECEIPT_v1.json is sealed with validation PASS, the Audit Campaign Directory is waiting for reviewer-1, and orchestrator/watchdog activation has been dispatched.')
+    text=text.replace('**Accept P0_TO_P1 and the sealed bootstrap baseline**','**Accept the sealed Phase-0 receipt and bootstrap baseline**')
+    text=text.replace('[Handoff checklist]','[Receipt protocol]')
+    text=text.replace('**File the single P0_1 milestone report and obtain completion PASS**','**File the single P0_1 milestone report**')
+    text=text.replace('Accept P1_TO_P2','Accept the sealed Phase-1 receipt')
+    text=text.replace('Handoff to reviewer-3L','Mark Phase 5 evidence ready')
+    text=text.replace('Create P5_TO_P6 for the one merged Lite Phase 6–7 reviewer, enter `WAITING_FOR_SUCCESSOR_AGENT`, and stop.','Record Phase-5 outputs in PHASE_05_RECEIPT_v1.json, set EVIDENCE_READY/PENDING and stop. Automation seals it and starts fresh reviewer-3L after PASS.')
+    text=text.replace('Accept P5_TO_P6','Accept the sealed Phase-5 receipt')
+    text=text.replace('successor receipt','predecessor phase receipt')
+    text=text.replace('Handoff to reviewer-4','Advance to the Phase-7 receipt')
+    text=text.replace('Create `P67_TO_P8`, enter `WAITING_FOR_SUCCESSOR_AGENT`, and stop.','Mark PHASE_06_RECEIPT_v1.json EVIDENCE_READY/PENDING. Automation creates PHASE_07_RECEIPT_v1.json and reviewer-3L continues in this same chat; reviewer-4 is started only after Phase 7 validates.')
+    text=text.replace('Accept P67_TO_P8','Accept the sealed Phase-7 receipt')
     # Replace empty/old receipt-control section with compact authoritative instructions.
     pattern=r'\n## Receipt control — mandatory\n.*?(?=\n## |\n> \*\*EXECUTOR:|\Z)'
     note=f'''\n## Receipt control — mandatory\n\nResolve this campaign from `Audit Campaign Directory/campaigns/<slug>.json`, read its `currentReceiptPath`, and use only `receipts/PHASE_{seq:02d}_RECEIPT_v1.json` for Phase {seq} process state. Write substantive results to the designated evidence/resources and reference them from this receipt. When the phase work is complete, set `phase.status=EVIDENCE_READY` and leave `validation.status=PENDING`; do not self-seal. Contract-Automation validates and advances the same receipt. See [Lite Phase Receipt Protocol](../../shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md).\n'''
