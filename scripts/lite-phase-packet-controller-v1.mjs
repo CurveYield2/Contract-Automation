@@ -111,18 +111,61 @@ function remediationDeltaRows(campaignRoot,validatedFindings){
     finalDisposition:'PENDING_PHASE9_INTERPRETATION'
   }));
 }
+function finalizeRemediationDeltaRows(deltaRows,canonical9){
+  const surfaceRows=phaseOutput(canonical9,'step-1','changedSurfaceAssessments')??[];
+  const dispositions=phaseOutput(canonical9,'step-2','remediationDispositions')??[];
+  const byFinding=(rows)=>new Map(rows.map(r=>[String(r.findingKey??r.findingId??''),r]).filter(([k])=>k));
+  const surfaces=byFinding(surfaceRows), remediations=byFinding(dispositions);
+  return deltaRows.map(row=>{
+    const key=String(row.findingId??'');
+    const surface=surfaces.get(key)??{};
+    const remediation=remediations.get(key)??{};
+    const reruns=Array.isArray(remediation.rerunEvidenceRefs)?remediation.rerunEvidenceRefs.join(', '):(remediation.rerunEvidenceRefs??row.decisiveProofRerun);
+    return {
+      ...row,
+      rootCauseFix:remediation.rootCauseFixed===undefined
+        ? row.rootCauseFix
+        : String(remediation.rootCauseFixed)+' — '+String(remediation.rationale??'NO_ADDITIONAL_RATIONALE'),
+      decisiveProofRerun:reruns??row.decisiveProofRerun,
+      affectedSurfaces:[
+        surface.changedSurface,
+        surface.affectedCallersOrState
+      ].filter(Boolean).join(' / ')||row.affectedSurfaces,
+      newEvidenceRefs:reruns??row.newEvidenceRefs,
+      residualRisk:[
+        surface.newRiskOrNone,
+        remediation.regressionAssessment
+      ].filter(Boolean).join(' / ')||row.residualRisk,
+      finalDisposition:remediation.disposition??row.finalDisposition
+    };
+  });
+}
 function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
   const p6=canonicalFor(root,campaignPath,6); const p8=canonicalFor(root,campaignPath,8); const p9=canonicalFor(root,campaignPath,9);
   const build=maybeJson(root,path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'))??{};
   const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
-  const findings=(phaseOutput(p8,'step-2','validatedFindings')??[]).map(f=>({
-    id:f.canonicalId??f.findingTempKey??f.candidateKey,
-    disposition:'VALIDATED_FINDING',
-    severityOrStatus:f.severity??'UNRESOLVED',
-    evidence:Array.isArray(f.proofEvidenceRefs)?f.proofEvidenceRefs.join(', '):f.proofEvidenceRefs,
-    remediationStatus:(phaseOutput(p9,'step-2','remediationDispositions')??[]).find(r=>r.findingKey===(f.canonicalId??f.findingTempKey))?.disposition??(p9?'UNRESOLVED':'SKIPPED_NO_REMEDIATION'),
-    residualLimitation:'SEE_ACCEPTED_PHASE_DATA'
+  const remediations=phaseOutput(p9,'step-2','remediationDispositions')??[];
+  const candidateRows=(phaseOutput(p8,'step-2','candidateValidations')??[]).map(v=>({
+    id:v.candidateKey,
+    disposition:v.finalDisposition??v.outcome??'UNRESOLVED',
+    severityOrStatus:v.severity??'UNRESOLVED',
+    evidence:Array.isArray(v.evidenceRefs)?v.evidenceRefs.join(', '):v.evidenceRefs,
+    remediationStatus:'NOT_APPLICABLE',
+    residualLimitation:v.rationale??'SEE_ACCEPTED_PHASE8_DATA'
   }));
+  const findingRows=(phaseOutput(p8,'step-2','validatedFindings')??[]).map(f=>{
+    const id=f.canonicalId??f.findingTempKey??f.candidateKey;
+    const remediation=remediations.find(r=>r.findingKey===id||r.findingKey===f.findingTempKey||r.findingKey===f.candidateKey);
+    return {
+      id,
+      disposition:'VALIDATED_FINDING',
+      severityOrStatus:f.severity??'UNRESOLVED',
+      evidence:Array.isArray(f.proofEvidenceRefs)?f.proofEvidenceRefs.join(', '):f.proofEvidenceRefs,
+      remediationStatus:remediation?.disposition??(p9?'UNRESOLVED':'SKIPPED_NO_REMEDIATION'),
+      residualLimitation:remediation?.regressionAssessment??'SEE_ACCEPTED_PHASE_DATA'
+    };
+  });
+  const findings=[...candidateRows,...findingRows];
   const obligations=(ledger.obligations??[]).filter(o=>String(o.status??'OPEN').toUpperCase()!=='CLOSED').map(o=>({
     id:o.obligationId,disposition:o.status??'OPEN',severityOrStatus:'OBLIGATION',evidence:(o.originatingEvidenceRefs??[]).join(', '),remediationStatus:'NOT_APPLICABLE',residualLimitation:o.statusReason??'OPEN'
   }));
@@ -211,6 +254,14 @@ if(sequence===8&&!hasRemediation(campaignRoot)){
   boundaryArtifactRels.push(indexRel);
 }
 if(sequence===9){
+  const p8=canonicalFor(root,campaignPath,8);
+  const validatedFindings=phaseOutput(p8,'step-2','validatedFindings')??[];
+  const ledgerRel=path.posix.join(campaignPath,'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md');
+  const finalizedRows=finalizeRemediationDeltaRows(remediationDeltaRows(campaignRoot,validatedFindings),canonical);
+  fs.mkdirSync(path.dirname(repoFile(root,ledgerRel)),{recursive:true});
+  fs.writeFileSync(repoFile(root,ledgerRel),renderRemediationDeltaLedgerV1({validatedFindings,deltaRows:finalizedRows,noRemediation:false}));
+  boundaryArtifactRels.push(ledgerRel);
+
   const indexRel=path.posix.join(campaignPath,'work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
   fs.mkdirSync(path.dirname(repoFile(root,indexRel)),{recursive:true});
   fs.writeFileSync(repoFile(root,indexRel),renderFinalEvidenceIndexV1(buildFinalIndexInput({root,campaignPath,directory,predecessor})));
