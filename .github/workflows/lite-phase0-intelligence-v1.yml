@@ -146,6 +146,7 @@ jobs:
           mkdir -p "$campaign_path/evidence/static-analysis"
           mkdir -p "$campaign_path/evidence/source-intelligence"
           mkdir -p "$campaign_path/evidence/readiness"
+          mkdir -p "$campaign_path/evidence/phase0"
           mkdir -p "$campaign_path/shared/source-intelligence"
           mkdir -p "$campaign_path/controller"
 
@@ -154,6 +155,7 @@ jobs:
           cp ../.phase0-intelligence-output/SLITHER_v1.json "$campaign_path/evidence/static-analysis/SLITHER_v1.json"
           cp ../.phase0-intelligence-output/SOURCE_INTELLIGENCE_AUTOMATED_v1.json "$campaign_path/evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json"
           cp ../.phase0-intelligence-output/PROJECT_READINESS_AUTOMATED_v1.json "$campaign_path/evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json"
+          cp ../.phase0-intelligence-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json "$campaign_path/evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json"
 
           # Project machine evidence into the exact canonical output paths already
           # required by the Lite Phase-0 skill. The automation adapts to the skill;
@@ -198,6 +200,8 @@ jobs:
             echo "- Automated Source Intelligence: generated"
             echo "- Canonical skill-required Source Intelligence core/overlays/bundle: generated at the exact Phase-0 contract paths"
             echo "- Deployment/config + testing/tooling readiness inventory: generated"
+            echo "- Source-known local deploy/config machine execution: generated"
+            echo "- Phase-6 deploy/config matrix: generated from Phase-0 machine evidence"
             echo "- Campaign-global graph/ledger/invalidation canonical paths: initialized"
             echo "- Phase-0 audit surface: generated"
             echo "- No observer/ingestion/retirement/handoff receipts generated"
