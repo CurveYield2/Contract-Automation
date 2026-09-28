@@ -15,7 +15,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with: {ref: upgrade/lite-single-receipt-v1, persist-credentials: false, fetch-depth: 1}
+        with:
+          ref: upgrade/lite-single-receipt-v1
+          persist-credentials: false
+          fetch-depth: 1
       - name: Select Audit-Controller credential
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -23,7 +26,8 @@ jobs:
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         run: bash scripts/select-audit-controller-token.sh
       - name: Repoint every literal old campaign-directory path
-        env: {GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}}
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
