@@ -163,32 +163,27 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.match(workflow, /activeChat=.*chatName/);
 });
 
-test('Lite browser orchestration starts only after workflow-only Phase 0 reaches a successor boundary', () => {
+test('Lite browser orchestration resolves the Audit Campaign Directory and prepares a fresh reviewer from receipts', () => {
   const workflow = read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
-  assert.match(workflow, /Bind exact canonical campaign/);
-  assert.match(workflow, /campaign_id does not match canonical campaign state/);
-  assert.match(workflow, /Campaign is not Lite mode/);
-  assert.match(workflow, /WAITING_FOR_SUCCESSOR_AGENT/);
-  assert.match(workflow, /Phase 0 is workflow-only/);
-  assert.match(workflow, /gh workflow run browser-agent-watchdog\.yml/);
-  assert.doesNotMatch(workflow, /web-bootstrap-agent/);
-  assert.doesNotMatch(workflow, /Dispatch normal-web Phase-0 bootstrap chat/);
-  assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
+  assert.match(workflow, /Resolve campaign directory entry/);
+  assert.match(workflow, /Audit Campaign Directory\/campaigns/);
+  assert.match(workflow, /prepare-lite-receipt-successor-v1\.mjs/);
+  assert.match(workflow, /Publish successor receipt preparation/);
+  assert.match(workflow, /gh workflow run browser-agent-wake\.yml/);
+  assert.doesNotMatch(workflow, /CAMPAIGN_STATE_v1|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE|web-bootstrap-agent/);
+  assert.doesNotMatch(workflow, /SUCCESSOR_HANDOFF\.json|WAKE_UP_MESSAGE\.md|START_HERE_SUCCESSOR\.md/);
 });
 
-test('Audit Source Initialization creates durable campaign state then starts fully automated Phase 0', () => {
+test('Audit Source Initialization creates only the Phase-0 receipt plus the separate campaign-directory entry', () => {
   const workflow = read('.github/workflows/audit-source-initialization-v1.yml');
   const run = read('scripts/audit-source-initialization/run-v1.sh');
-  const state = read('scripts/audit-source-initialization/write-state-v1.py');
-  assert.match(state, /\.deep-assurance\/active|ACTIVE_PATH/);
-  assert.match(state, /CAMPAIGN_STATE_v1\.json/);
-  assert.match(state, /ACTIVE_PHASE_POINTER_v1\.json/);
-  assert.match(state, /phase0-automation/);
+  const receiptWriter = read('scripts/audit-source-initialization/write-phase0-receipt-v1.py');
+  assert.match(receiptWriter, /PHASE_00_RECEIPT_v1\.json/);
+  assert.match(receiptWriter, /Audit Campaign Directory\/campaigns/);
+  assert.match(receiptWriter, /phase0-automation/);
   assert.match(run, /gh workflow run lite-phase0-bootstrap-v1\.yml/);
-  assert.match(run, /audit_controller_ref=main/);
-  assert.doesNotMatch(run, /lite-audit-browser-orchestrator-v1\.yml/);
+  assert.doesNotMatch(run, /write-state-v1\.py|CAMPAIGN_STATE_v1|ACTIVE_PHASE_POINTER_v1|SOLO_AUDIT_STATE_v1|\.deep-assurance/);
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
-  assert.doesNotMatch(run, /browser-agent-wake\.yml/);
 });
 
 test('Phase-0 repair remains a special bootstrap replacement without a predecessor handoff', () => {
