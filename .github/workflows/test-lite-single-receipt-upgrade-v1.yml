@@ -1,0 +1,82 @@
+name: Test Lite Single-Receipt Upgrade v1
+
+on:
+  push:
+    branches:
+      - upgrade/lite-single-receipt-v1
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-lite-single-receipt-upgrade-v1
+  cancel-in-progress: true
+
+jobs:
+  cross-repo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Contract-Automation upgrade branch
+        uses: actions/checkout@v4
+        with:
+          ref: upgrade/lite-single-receipt-v1
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install locked Contract-Automation dependencies
+        run: npm ci --force
+
+      - name: Test Contract-Automation
+        run: |
+          set -euo pipefail
+          node --check scripts/lite-phase0-finalize-v1.mjs
+          node --check scripts/lite-phase-receipt-controller-v1.mjs
+          node --check scripts/prepare-lite-receipt-successor-v1.mjs
+          python3 -m py_compile scripts/audit-source-initialization/write-phase0-receipt-v1.py
+          bash -n scripts/audit-source-initialization/run-v1.sh
+          node --test packages/github-native-sim/test/*.test.mjs
+          npm run lint
+          npm run build
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Clone matching Audit-Controller upgrade branch
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          rm -rf .audit-controller
+          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
+          cd .audit-controller
+          git fetch origin upgrade/lite-single-receipt-v1
+          git checkout --detach FETCH_HEAD
+
+      - name: Validate Audit-Controller upgrade branch
+        working-directory: .audit-controller
+        run: |
+          set -euo pipefail
+          npm test
+          npm run check
+          test -d "Audit Campaign Directory"
+          test ! -e ".deep-assurance"
+          if git grep -FI -- '.deep-assurance'; then
+            echo "::error::Old .deep-assurance path reference remains"
+            exit 1
+          fi
+          authority="Audit Skill - Current Authority/Audit_Litemode_v10"
+          test -f "$authority/shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md"
+          test ! -d "$authority/shared/handoff"
+          for i in $(seq 0 10); do
+            grep -Fq "receipts/PHASE_$(printf '%02d' "$i")_RECEIPT_v1.json" "$authority/phases/phase-$i/PHASE_CONTRACT.json"
+          done
+          if git grep -I -E 'SUCCESSOR_HANDOFF\.json|SUCCESSOR_HANDOFF_RECEIPT\.json|PHASE0_WEB_BOOTSTRAP_COMPLETION_REPORT|PHASE0_CAPABILITY_PREFLIGHT|INSTRUCTION_READ_PROOF\.json|PROCESS_BLOCKER_RECEIPT\.json' -- "$authority" ':!**/PACKAGE_PROVENANCE.md' ':!**/LITE_PHASE_RECEIPT_PROTOCOL.md'; then
+            echo "::error::Obsolete current Lite bookkeeping reference remains"
+            exit 1
+          fi
