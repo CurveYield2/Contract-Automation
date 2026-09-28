@@ -14,7 +14,7 @@ function fixture(){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'lite-packet-controller-'));
   const campaign='campaigns/demo';
   const dirRel='Audit Campaign Directory/campaigns/demo.json';
-  const authority='Audit Skill - Current Authority/Audit_Litemode_v10';
+  const authority='Audit Skill - Current Authority/Audit_Litemode_v10.2';
   const source='a'.repeat(64);
 
   const receiptStub=`export function phaseReceiptPath(workspacePath,sequence,revision=1){return workspacePath+'/receipts/PHASE_'+String(sequence).padStart(2,'0')+'_RECEIPT_v'+revision+'.json';}
@@ -59,8 +59,7 @@ export function createLitePhaseReceiptV1(input){return {schemaVersion:'curveyiel
   const reportRel=campaign+'/work/phase-01/PHASE_01_FINAL_REPORT_v1.md';
   const packetRel=campaign+'/submissions/PHASE_01_WORK_PACKET_v1.json';
   writeJson(path.join(root,formRel),{schemaVersion:'curveyield-lite-phase-work-form-v1',phase:1,actions:{'step-1':{section:'Step 1 Input — Analyze',outputs:{analysis:'<REQUIRED>'}}}});
-  write(path.join(root,reportRel),'# Phase 1 Final Report\n\n## Executive Conclusion\nComplete\n\n## Material Results\nComplete\n\n## Limitations\nNONE_IDENTIFIED\n\n## Unresolved Substantive Questions\nNONE_IDENTIFIED\n');
-  writeJson(path.join(root,packetRel),{schemaVersion:'curveyield-lite-phase-work-packet-v1',campaignId:'demo-r1',phaseSequence:1,status:'SUBMITTED',workFormPath:formRel,finalReportPath:reportRel,submissionAttempt:1,submittedAt:'2026-09-28T00:00:00Z'});
+  // Packet and final report are intentionally absent: controller automation owns both.
   writeJson(path.join(root,dirRel),{
     schemaVersion:'curveyield-audit-campaign-directory-entry-v2',campaignId:'demo-r1',campaignGenerationId:'demo-r1-g1',campaignName:'Demo',workspacePath:campaign,mode:'LITE',sourceSha256:source,lastSealedReceiptPath:predecessorRel,campaignStatus:'ACTIVE',
     currentAssignment:{phaseSequence:1,phaseId:'phase-1',reviewer:'reviewer-1',status:'ACTIVE',workSchemaPath:authority+'/phases/phase-1/PHASE_01_SCHEMA_v1.json',workFormPath:formRel,finalReportPath:reportRel,packetPath:packetRel,predecessorReceiptPath:predecessorRel,derivedInputPaths:[]},updatedAt:'2026-09-28T00:00:00Z'
@@ -73,7 +72,7 @@ function run(f){
   return JSON.parse(out.trim());
 }
 
-test('incomplete packet causes exact rework with zero receipt/global-control bookkeeping',()=>{
+test('incomplete semantic work causes exact rework while controller creates the packet and does zero bookkeeping',()=>{
   const f=fixture();
   const graphBefore=fs.readFileSync(path.join(f.root,f.campaign,'controller/SECURITY_TRACEABILITY_GRAPH_v1.json'),'utf8');
   const result=run(f);
@@ -81,19 +80,20 @@ test('incomplete packet causes exact rework with zero receipt/global-control boo
   assert.match(result.feedbackText,/actions\.step-1\.outputs\.analysis is missing/);
   assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v1.json')),false);
   assert.equal(fs.readFileSync(path.join(f.root,f.campaign,'controller/SECURITY_TRACEABILITY_GRAPH_v1.json'),'utf8'),graphBefore);
-  assert.equal(readJson(path.join(f.root,f.packetRel)).status,'REWORK_REQUIRED');
+  const packet=readJson(path.join(f.root,f.packetRel));
+  assert.equal(packet.status,'REWORK_REQUIRED');
+  assert.equal(packet.controllerGenerated,true);
+  assert.equal(packet.submissionAttempt,1);
+  assert.equal(fs.existsSync(path.join(f.root,f.reportRel)),false);
   assert.equal(readJson(path.join(f.root,f.dirRel)).currentAssignment.status,'REWORK_REQUIRED');
 });
 
-test('repaired packet PASS performs one bookkeeping transaction and prepares Phase2 without active Phase2 receipt',()=>{
+test('repaired semantic work PASS auto-regenerates packet/report, bookkeeps once, and prepares Phase2',()=>{
   const f=fixture();
   run(f);
   const form=readJson(path.join(f.root,f.formRel));
   form.actions['step-1'].outputs.analysis='Substantive Phase-1 analysis complete.';
   writeJson(path.join(f.root,f.formRel),form);
-  const packet=readJson(path.join(f.root,f.packetRel));
-  packet.status='SUBMITTED';packet.submissionAttempt=2;packet.submittedAt='2026-09-28T00:05:00Z';
-  writeJson(path.join(f.root,f.packetRel),packet);
   const result=run(f);
   assert.equal(result.status,'PASS');
   assert.equal(result.controllerPassToken,'CONTROLLER_PHASE_PASS');
@@ -104,7 +104,12 @@ test('repaired packet PASS performs one bookkeeping transaction and prepares Pha
   assert.equal(directory.currentAssignment.reviewer,'reviewer-2');
   assert.equal(directory.currentAssignment.status,'WAITING_FOR_SUCCESSOR_AGENT');
   assert.equal(fs.existsSync(path.join(f.root,directory.currentAssignment.workFormPath)),true);
-  assert.equal(readJson(path.join(f.root,f.packetRel)).status,'ACCEPTED');
+  const acceptedPacket=readJson(path.join(f.root,f.packetRel));
+  assert.equal(acceptedPacket.status,'ACCEPTED');
+  assert.equal(acceptedPacket.controllerGenerated,true);
+  assert.equal(acceptedPacket.submissionAttempt,2);
+  assert.equal(fs.existsSync(path.join(f.root,f.reportRel)),true);
+  assert.match(fs.readFileSync(path.join(f.root,f.reportRel),'utf8'),/CONTROLLER-GENERATED/);
   const graph=readJson(path.join(f.root,f.campaign,'controller/SECURITY_TRACEABILITY_GRAPH_v1.json'));
   assert.equal(graph.controllerImports.length,1);
 });
