@@ -1,0 +1,463 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+function repoFile(root,rel){return path.join(root,...String(rel).split('/'));}
+function readJsonIf(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
+function walk(dir,out=[]){if(!fs.existsSync(dir))return out;for(const ent of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,ent.name);if(ent.isDirectory())walk(p,out);else if(ent.isFile())out.push(p);}return out;}
+function explicit(value){return value===undefined||value===null||value===''?'<REQUIRED>':value;}
+function uniq(values){return [...new Set(values.filter(v=>v!==undefined&&v!==null&&String(v).length>0))];}
+function text(v){return typeof v==='string'?v:JSON.stringify(v);}
+function matchesAny(value,patterns){const s=String(value??'').toLowerCase();return patterns.some(p=>s.includes(p));}
+
+function findSourceIntelligence(root,campaignPath){
+  const dir=repoFile(root,path.posix.join(campaignPath,'evidence/source-intelligence'));
+  const candidates=walk(dir).filter(f=>f.endsWith('.json'));
+  const parsed=[];
+  for(const file of candidates){
+    const j=readJsonIf(file);
+    if(j?.artifactType==='CANONICAL_SOURCE_INTELLIGENCE') parsed.push({file,j});
+  }
+  parsed.sort((a,b)=>a.file.localeCompare(b.file));
+  return parsed.at(-1)?.j??null;
+}
+
+function sourceAnchorFor(si,symbolId,fallback){
+  const a=(si?.sourceAnchors??[]).find(x=>x.symbolId===symbolId);
+  return a?.anchorId??a?.sourceLocation??fallback??'SOURCE_INTELLIGENCE';
+}
+
+function structuralInputs(si){
+  const privileges=(si?.privilegeCandidates??[]).map(x=>({
+    candidateId:x.candidateId,functionId:x.functionId,candidateKind:x.candidateKind,
+    authorityExpression:x.authorityExpression,modifierOrGuard:x.modifierOrGuard,sourceLocation:x.sourceLocation
+  }));
+  const funcs=si?.functions??[];
+  const calls=si?.callGraph??[];
+  const external=si?.externalInterfaces??[];
+  const topology=si?.protocolTopology??{};
+  const upgradePaths=[
+    ...(topology.upgradeabilityEdges??[]),
+    ...funcs.filter(f=>matchesAny(f.signature,['upgrade','initialize','reinitialize','changeadmin','beacon','facet'])).map(f=>({functionId:f.functionId,signature:f.signature,sourceLocation:f.sourceLocation})),
+    ...calls.filter(c=>matchesAny(c.callKind,['delegatecall','callcode'])).map(c=>({callerFunctionId:c.callerFunctionId,callKind:c.callKind,target:c.target,sourceLocation:c.sourceLocation}))
+  ];
+  const callbackSurfaces=[
+    ...external.filter(e=>matchesAny([e.interactionKind,e.selectorOrSignature,e.dependencyOrInterface].join(' '),['callback','hook','receiver','fallback'])),
+    ...funcs.filter(f=>matchesAny(f.signature,['callback','hook','onerc','tokensreceived','fallback','receive('])).map(f=>({functionId:f.functionId,signature:f.signature,sourceLocation:f.sourceLocation}))
+  ];
+  return {privilegeCandidates:privileges,authorityTransitions:privileges,upgradePaths,callbackSurfaces};
+}
+
+function domainSignals(si){
+  const funcs=(si?.functions??[]).map(f=>String(f.signature??'').toLowerCase());
+  const ext=(si?.externalInterfaces??[]).map(e=>[e.dependencyOrInterface,e.selectorOrSignature,e.interactionKind].join(' ').toLowerCase());
+  const calls=(si?.callGraph??[]).map(c=>[c.callKind,c.target,c.targetFunctionOrSelector].join(' ').toLowerCase());
+  const flows=(si?.valueFlowCandidates??[]).map(f=>[f.assetOrValueExpression,f.mechanism,f.counterpartyExpression].join(' ').toLowerCase());
+  const top=si?.protocolTopology??{};
+  const all=[...funcs,...ext,...calls,...flows].join('\n');
+  return {funcs,ext,calls,flows,all,top};
+}
+function hasAny(all,words){return words.some(w=>all.includes(w));}
+
+function classifyDomains(si,matrix){
+  const s=domainSignals(si);
+  const complete=si?.completion?.status==='PASS'||si?.completion?.status==='COMPLETE'||si?.completion?.noFillSentinelsRemaining===true;
+  const limitations=(si?.limitations??[]).filter(x=>x&&x.reason&&!matchesAny(x.reason,['none','not applicable']));
+  const uncertain=!complete||limitations.length>0;
+  const checks={
+    'DOMAIN-UPGRADE':()=>Boolean((s.top.upgradeabilityEdges??[]).length)||hasAny(s.all,['delegatecall','callcode','upgradeto','upgrade','reinitialize','changeadmin','beacon','facet']),
+    'DOMAIN-DEPENDENCY':()=>Boolean((s.top.dependencyEdges??[]).length)||Boolean(s.ext.length),
+    'DOMAIN-CROSSCHAIN':()=>Boolean((s.top.crossChainEdges??[]).length)||hasAny(s.all,['bridge','messenger','crosschain','cross-chain','remote chain','chainid','domain separator']),
+    'DOMAIN-VAULT':()=>hasAny(s.all,['deposit(','withdraw(','redeem(','mint(','totalassets','converttoassets','converttoshares','pricepershare','share']),
+    'DOMAIN-ORACLE':()=>hasAny(s.all,['oracle','pricefeed','aggregator','twap','get_dy','quote(','pricepershare','share rate','exchangerate']),
+    'DOMAIN-LENDING':()=>hasAny(s.all,['borrow(','repay(','liquidat','collateral','debt','health factor','ltv']),
+    'DOMAIN-AMM':()=>hasAny(s.all,['swap(','addliquidity','remove_liquidity','removeliquidity','pool','hook','slippage','minout']),
+    'DOMAIN-SIGNATURE':()=>hasAny(s.all,['ecrecover','permit(','permit2','nonce','domainseparator','useroperation','erc1271','signature']),
+    'DOMAIN-STAKING':()=>hasAny(s.all,['stake(','unstake(','getreward','claim(','rewardrate','rewardpertoken','emission','gauge','checkpoint']),
+    'DOMAIN-OFFCHAIN':()=>Boolean((s.top.offchainAutomationEdges??[]).length)||hasAny(s.all,['keeper','checkupkeep','automation','harvest(','rebalance(','checkpoint('])
+  };
+  return (matrix?.domains??[]).map(d=>{
+    const triggered=Boolean(checks[d.domainId]?.());
+    const classification=triggered?'TRIGGERED':(uncertain?'UNCERTAIN_INCLUDE':'NOT_TRIGGERED');
+    const triggerFacts=triggered
+      ? ['STRUCTURED_SOURCE_INTELLIGENCE_TRIGGER_MATCH']
+      : classification==='UNCERTAIN_INCLUDE'
+        ? ['NO_POSITIVE_STRUCTURED_TRIGGER_FOUND_BUT_SOURCE_INTELLIGENCE_HAS_LIMITATIONS']
+        : ['COMPLETE_SOURCE_INTELLIGENCE_CONTAINS_NO_POSITIVE_TRIGGER_CLASS'];
+    return {
+      domainId:d.domainId,
+      triggerFacts,
+      classification,
+      rationale:triggered?'Deterministic structured Source Intelligence trigger matched.':classification==='UNCERTAIN_INCLUDE'?'No positive trigger matched, but negative evidence is not complete enough to exclude applicability.':'Complete exact-source-bound Source Intelligence contains no structured positive trigger for this domain.',
+      requiredPhase4Method:(d.methodResources??[])[0]??'DOMAIN_METHOD_RESOURCE'
+    };
+  });
+}
+
+function domainObligations(matrix,assessments){
+  const byId=new Map((matrix?.domains??[]).map(d=>[d.domainId,d]));
+  const out=[];
+  let n=1;
+  for(const a of assessments){
+    if(!['TRIGGERED','UNCERTAIN_INCLUDE'].includes(a.classification)) continue;
+    const d=byId.get(a.domainId);
+    for(const phase of d?.requiredExecutionPhases??[]){
+      out.push({
+        tempKey:'AUTO-DOM-'+String(n++).padStart(3,'0'),
+        originFactKeys:[a.domainId],
+        requiredPhase:String(phase),
+        requiredAction:`Apply ${a.domainId} specialist method at Phase ${phase}`,
+        completionCondition:`Accepted Phase-${phase} evidence addresses ${a.domainId}`,
+        priority:a.classification==='TRIGGERED'?'REQUIRED':'REQUIRED_UNCERTAIN_INCLUDE',
+        automationGenerated:true
+      });
+    }
+  }
+  return out.length?out:['NONE_IDENTIFIED'];
+}
+
+function loadDerived(root,paths){
+  const out=[];
+  for(const rel of paths??[]){const j=readJsonIf(repoFile(root,rel));if(j)out.push(j);}
+  return out;
+}
+function findAutomationInput(derived,key){
+  for(const d of derived){
+    const v=d?.data?.automationInputs?.[key]??d?.automationInputs?.[key];
+    if(v!==undefined)return v;
+  }
+  return undefined;
+}
+
+function sourceReviewScaffold(si){
+  const contracts=new Map((si?.contracts??[]).map(c=>[c.contractId,c]));
+  const rows=(si?.functions??[]).map((f,i)=>{
+    const c=contracts.get(f.contractId);
+    return {
+      recordKey:'AUTO-SRC-'+String(i+1).padStart(4,'0'),
+      sourceAnchor:sourceAnchorFor(si,f.functionId,f.sourceLocation),
+      contractOrModule:c?.qualifiedName??f.contractId,
+      functionOrSurface:f.signature??f.functionId,
+      observedBehavior:'<REQUIRED>',
+      securityInterpretation:'<REQUIRED>',
+      relatedRequirementKeys:'<REQUIRED>',
+      relatedHypothesisKeys:'<REQUIRED>',
+      disposition:'<REQUIRED>',
+      candidateTempKeyOrNone:'<REQUIRED>',
+      limitations:'<REQUIRED>',
+      automationOwnedFields:['recordKey','sourceAnchor','contractOrModule','functionOrSurface']
+    };
+  });
+  return rows.length?rows:['NONE_IDENTIFIED'];
+}
+
+function specialistScaffold(si,domainAssessments){
+  const rows=[];let n=1;
+  for(const d of domainAssessments??[]){
+    if(!['TRIGGERED','UNCERTAIN_INCLUDE'].includes(d.classification)) continue;
+    rows.push({
+      recordKey:'AUTO-SPEC-'+String(n++).padStart(4,'0'),
+      domainOrPrivilege:d.domainId,
+      sourceAnchor:'AUTOMATED_DOMAIN_CLASSIFICATION',
+      method:d.requiredPhase4Method,
+      observation:'<REQUIRED>',
+      securityInterpretation:'<REQUIRED>',
+      disposition:'<REQUIRED>',
+      candidateTempKeyOrNone:'<REQUIRED>',
+      automationOwnedFields:['recordKey','domainOrPrivilege','sourceAnchor','method']
+    });
+  }
+  for(const p of si?.privilegeCandidates??[]){
+    rows.push({
+      recordKey:'AUTO-SPEC-'+String(n++).padStart(4,'0'),
+      domainOrPrivilege:'PRIVILEGE:'+String(p.candidateId??p.candidateKind??'UNRESOLVED'),
+      sourceAnchor:sourceAnchorFor(si,p.functionId,p.sourceLocation),
+      method:'PRIVILEGE_REVIEW',
+      observation:'<REQUIRED>',
+      securityInterpretation:'<REQUIRED>',
+      disposition:'<REQUIRED>',
+      candidateTempKeyOrNone:'<REQUIRED>',
+      automationOwnedFields:['recordKey','domainOrPrivilege','sourceAnchor','method']
+    });
+  }
+  return rows.length?rows:['NONE_IDENTIFIED'];
+}
+
+function economicScaffold(si,current){
+  const flows=si?.valueFlowCandidates??[];
+  if(!flows.length)return current;
+  return flows.map((f,i)=>({
+    recordKey:f.flowId??'AUTO-ECO-'+String(i+1).padStart(4,'0'),
+    sourceAnchor:sourceAnchorFor(si,f.sourceFunctionId,f.sourceLocation),
+    valueFlowOrFormula:[f.assetOrValueExpression,f.direction,f.mechanism,f.counterpartyExpression].filter(Boolean).join(' | ')||'STRUCTURED_VALUE_FLOW',
+    unitsAndBounds:'<REQUIRED>',
+    boundaryCases:'<REQUIRED>',
+    roundingPrecision:'<REQUIRED>',
+    incentiveExtractionAnalysis:'<REQUIRED>',
+    solvencyOrConservationAnalysis:'<REQUIRED>',
+    conclusion:'<REQUIRED>',
+    relatedCandidateKeys:'<REQUIRED>',
+    automationOwnedFields:['recordKey','sourceAnchor','valueFlowOrFormula']
+  }));
+}
+
+function deployAssessmentScaffold(root,campaignPath){
+  const ev=readJsonIf(repoFile(root,path.posix.join(campaignPath,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json')))??{};
+  const rows=[];let n=1;
+  for(const a of ev.attempts??[]){
+    rows.push({
+      componentOrAction:a.script??a.action??'PHASE0_DEPLOY_CONFIG_ACTION_'+n,
+      executionEvidenceRef:a.evidenceRef??'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',
+      observedState:a.resultSummary??a.status??'MACHINE_RESULT_RECORDED',
+      securityInterpretation:'<REQUIRED>',
+      contradictionOrNone:'<REQUIRED>',
+      limitationOrNone:'<REQUIRED>',
+      automationOwnedFields:['componentOrAction','executionEvidenceRef','observedState']
+    }); n++;
+  }
+  for(const g of ev.gaps??[]){
+    rows.push({
+      componentOrAction:g.id??'PHASE0_DEPLOY_CONFIG_GAP_'+n,
+      executionEvidenceRef:'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',
+      observedState:g.value??g.reason??g.disposition??'TYPED_GAP',
+      securityInterpretation:'<REQUIRED>',
+      contradictionOrNone:'<REQUIRED>',
+      limitationOrNone:'<REQUIRED>',
+      automationOwnedFields:['componentOrAction','executionEvidenceRef','observedState']
+    }); n++;
+  }
+  return rows.length?rows:['NONE_IDENTIFIED'];
+}
+
+function targetDispositionScaffold(targetDesigns,results){
+  const rows=[];
+  for(const t of targetDesigns??[]){
+    const key=t?.candidateKey;if(!key)continue;
+    const r=results?.[key]??{};
+    const raw=r.rawResult??{};
+    rows.push({
+      candidateKey:key,
+      executionEvidenceRefs:r.evidenceRef?[r.evidenceRef]:['NO_MACHINE_EVIDENCE'],
+      oracleOutcome:raw?.reproduction?.status??raw?.disposition??r.status??'UNRESOLVED',
+      reproductionStatus:r.status??raw?.status??'UNRESOLVED',
+      securityInterpretation:'<REQUIRED>',
+      limitations:'<REQUIRED>',
+      recommendedPhase8Disposition:'<REQUIRED>',
+      automationOwnedFields:['candidateKey','executionEvidenceRefs','oracleOutcome','reproductionStatus']
+    });
+  }
+  return rows.length?rows:['NONE_IDENTIFIED'];
+}
+
+function machineLimitations(deployRows,targetRows){
+  const out=[];
+  for(const row of deployRows??[]){
+    if(typeof row==='string')continue;
+    if(matchesAny(row.observedState,['blocked','failed','gap','unavailable','inconclusive'])) out.push(`${row.componentOrAction}: ${row.observedState}`);
+  }
+  for(const row of targetRows??[]){
+    if(typeof row==='string')continue;
+    if(!['PASS','SUPPORTED','DISPROVED','COMPLETED'].some(x=>String(row.reproductionStatus).toUpperCase().includes(x))) out.push(`${row.candidateKey}: ${row.reproductionStatus}`);
+  }
+  return out.length?uniq(out):['NONE_IDENTIFIED'];
+}
+
+export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths=[],predecessorReceiptPath,prefillContext={}}){
+  form.automationInputs={...(form.automationInputs??{}),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths]};
+  const si=findSourceIntelligence(root,campaignPath);
+  const derived=loadDerived(root,derivedInputPaths);
+
+  if(sequence===1&&si){
+    form.automationInputs.structuralInventory={
+      securitySurfaces:si.securitySurfaces??[],
+      privilegeCandidates:si.privilegeCandidates??[],
+      externalInterfaces:si.externalInterfaces??[],
+      sourceAnchors:si.sourceAnchors??[],
+      valueFlowCandidates:si.valueFlowCandidates??[]
+    };
+    const deps=new Map();
+    for(const e of si.externalInterfaces??[]){
+      const key=e.dependencyOrInterface??e.interfaceId;
+      if(!key||deps.has(key))continue;
+      deps.set(key,{
+        dependencyKey:e.interfaceId??key,
+        identity:key,
+        trustAssumptions:'<REQUIRED>',
+        failureModes:'<REQUIRED>',
+        authorityImplications:'<REQUIRED>',
+        securitySignificance:'<REQUIRED>',
+        laterEvidenceNeeds:'<REQUIRED>',
+        automationOwnedFields:['dependencyKey','identity']
+      });
+    }
+    if(deps.size)form.actions['step-3'].outputs.dependencyAssessments=[...deps.values()];
+  }
+
+  if(sequence===2){
+    const predecessor=readJsonIf(repoFile(root,predecessorReceiptPath))??{};
+    form.automationInputs.identityComparison={
+      predecessorSourceSha256:predecessor.sourceSha256??predecessor.source?.sha256??null,
+      currentSourceSha256:predecessor.sourceSha256??predecessor.source?.sha256??null,
+      status:'NO_IDENTITY_CHANGE_DETECTED_AT_PHASE_BOUNDARY'
+    };
+  }
+
+  if(sequence===3){
+    const matrix=readJsonIf(repoFile(root,path.posix.join(authorityRoot,'shared/controller/DOMAIN_APPLICABILITY_MATRIX.json')))??{};
+    const domains=classifyDomains(si??{},matrix);
+    form.automationInputs.structuralThreatInputs=structuralInputs(si??{});
+    form.automationInputs.domainAssessments=domains;
+    form.automationInputs.specialistObligations=domainObligations(matrix,domains);
+  }
+
+  if(sequence===4){
+    const domains=findAutomationInput(derived,'domainAssessments')??[];
+    form.actions['step-1'].outputs.sourceReviewRecords=sourceReviewScaffold(si??{});
+    form.actions['step-2'].outputs.specialistReviewRecords=specialistScaffold(si??{},domains);
+    form.automationInputs.expectedSourceReviewKeys=(form.actions['step-1'].outputs.sourceReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey);
+    form.automationInputs.expectedSpecialistReviewKeys=(form.actions['step-2'].outputs.specialistReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey);
+  }
+
+  if(sequence===5){
+    form.actions['step-1'].outputs.economicReviewRecords=economicScaffold(si??{},form.actions['step-1'].outputs.economicReviewRecords);
+  }
+
+  if(sequence===6){
+    const deployRows=deployAssessmentScaffold(root,campaignPath);
+    const targetRows=targetDispositionScaffold(prefillContext.targetDesigns??[],prefillContext.phase5ExecutionResults??{});
+    form.actions['step-1'].outputs.deploymentAssessments=deployRows;
+    form.actions['step-2'].outputs.targetDispositions=targetRows;
+    if(form.actions['step-3']){
+      form.actions['step-3'].outputs.typedExecutionLimitations=machineLimitations(deployRows,targetRows);
+      const schema=readJsonIf(repoFile(root,path.posix.join(authorityRoot,'phases/phase-6/PHASE_06_SCHEMA_v1.json')))??{};
+      form.actions['step-3'].outputs.fullOnlyOmissions=schema.controllerOwnedDefaults?.fullOnlyOmissions??['NONE_IDENTIFIED'];
+    }
+  }
+
+  if(sequence===9&&Array.isArray(prefillContext.remediationDeltaRows)){
+    const rows=prefillContext.remediationDeltaRows;
+    if(rows.length){
+      form.actions['step-1'].outputs.changedSurfaceAssessments=rows.map(r=>({
+        findingKey:r.findingId??'UNRESOLVED',
+        changedSurface:r.changedFilesAndSymbols??'UNRESOLVED',
+        affectedCallersOrState:r.affectedSurfaces??'UNRESOLVED',
+        securitySignificance:'<REQUIRED>',
+        requiredRegressionScope:'<REQUIRED>',
+        newRiskOrNone:'<REQUIRED>',
+        automationOwnedFields:['findingKey','changedSurface','affectedCallersOrState']
+      }));
+    }
+  }
+
+  return form;
+}
+
+export function phase4CoverageFromForm(form){
+  const expectedSource=new Set(form?.automationInputs?.expectedSourceReviewKeys??[]);
+  const expectedSpec=new Set(form?.automationInputs?.expectedSpecialistReviewKeys??[]);
+  const actualSource=new Set((form?.actions?.['step-1']?.outputs?.sourceReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey));
+  const actualSpec=new Set((form?.actions?.['step-2']?.outputs?.specialistReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey));
+  const missing=[
+    ...[...expectedSource].filter(x=>!actualSource.has(x)),
+    ...[...expectedSpec].filter(x=>!actualSpec.has(x))
+  ];
+  return {
+    coverageSummary:`Required source rows: ${expectedSource.size}; completed/present: ${actualSource.size}. Required specialist rows: ${expectedSpec.size}; completed/present: ${actualSpec.size}.`,
+    unreviewedRequiredSurfaces:missing.length?missing:['NONE_IDENTIFIED']
+  };
+}
+
+export function materializeValidatedFindings(candidateValidations=[]){
+  const out=[];let n=1;
+  for(const v of candidateValidations??[]){
+    if(v?.findingPromotion!=='PROMOTE_FINDING')continue;
+    out.push({
+      findingTempKey:'AUTO-FIND-'+String(n++).padStart(3,'0'),
+      candidateKey:v.candidateKey,
+      title:v.findingTitleOrNone,
+      rootCause:v.rootCauseOrNone,
+      impact:v.impact,
+      severity:v.severity,
+      proofEvidenceRefs:v.evidenceRefs,
+      controllerMaterialized:true
+    });
+  }
+  return out.length?out:['NONE_IDENTIFIED'];
+}
+
+function valuesByName(form,re){
+  const out=[];
+  for(const action of Object.values(form?.actions??{})){
+    for(const [k,v] of Object.entries(action?.outputs??{})) if(re.test(k)) out.push({key:k,value:v});
+  }
+  return out;
+}
+function compact(v){
+  if(Array.isArray(v))return v.length===1&&typeof v[0]==='string'?v[0]:`${v.length} record(s)`;
+  if(v&&typeof v==='object')return JSON.stringify(v);
+  return String(v??'NONE_IDENTIFIED');
+}
+export function renderControllerPhaseReport({schema,form,canonical}){
+  const phase=schema.phase;
+  const outputs=Object.entries(form?.actions??{}).flatMap(([step,a])=>Object.entries(a?.outputs??{}).map(([key,value])=>({step,key,value})));
+  const preferred=['liteVerdict','verdictRationale','clientFacingSummary','mergedExecutionConclusions','riskRationale','architectureTrustModel','findingDispositionSynthesis','residualRiskAssessment'];
+  const executive=preferred.map(k=>outputs.find(x=>x.key===k)?.value).find(v=>v!==undefined)??`Phase ${phase} structured substantive work completed and accepted for controller validation.`;
+  const material=outputs.filter(x=>!/(limitation|unresolved|ambigu|uncert)/i.test(x.key)).map(x=>`- ${x.step} / ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
+  const limitations=valuesByName(form,/(limitation|ambigu|uncert)/i).map(x=>`- ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
+  const unresolved=valuesByName(form,/unresolved/i).map(x=>`- ${x.key}: ${compact(x.value)}`).join('\n')||'- NONE_IDENTIFIED';
+  return `# Phase ${phase} Final Report
+
+> **CONTROLLER-GENERATED:** Deterministically rendered from the accepted schema-governed work form and controller-owned outputs. No hashes, handoff bookkeeping, or predecessor restatement is authored by the reviewer.
+
+## Executive Conclusion
+
+${text(executive)}
+
+## Material Results
+
+${material}
+
+## Limitations
+
+${limitations}
+
+## Unresolved Substantive Questions
+
+${unresolved}
+`;
+}
+
+export function buildControllerPacket({directory,assignment,existing,now}){
+  return {
+    schemaVersion:'curveyield-lite-phase-work-packet-v1',
+    campaignId:directory.campaignId,
+    phaseSequence:assignment.phaseSequence,
+    status:'SUBMITTED',
+    workFormPath:assignment.workFormPath,
+    finalReportPath:assignment.finalReportPath??null,
+    submissionAttempt:Math.max(0,Number(existing?.submissionAttempt??0))+1,
+    submittedAt:now,
+    controllerGenerated:true
+  };
+}
+
+export function validatePhaseScaffold(sequence,form){
+  const deficiencies=[];
+  if(sequence===4){
+    const c=phase4CoverageFromForm(form);
+    if(!(c.unreviewedRequiredSurfaces.length===1&&c.unreviewedRequiredSurfaces[0]==='NONE_IDENTIFIED')) deficiencies.push('Phase 4 required review scaffolds were removed or omitted: '+c.unreviewedRequiredSurfaces.join(', '));
+  }
+  return deficiencies;
+}
+
+export function resolveTargetExecutionRequestRef({root,campaignPath,target}){
+  if(target?.executionMethod==='NOT_APPLICABLE')return null;
+  const explicitRef=typeof target?.executionRequestRef==='string'&&!target.executionRequestRef.startsWith('<')?target.executionRequestRef:null;
+  const safe=String(target?.candidateKey??'target').replace(/[^A-Za-z0-9._-]+/g,'_');
+  const candidates=[
+    explicitRef,
+    path.posix.join(campaignPath,'work/phase-05/execution-requests',safe+'.json'),
+    path.posix.join(campaignPath,'evidence/phase5-target-requests',safe+'.json')
+  ].filter(Boolean);
+  for(const rel of candidates) if(fs.existsSync(repoFile(root,rel))) return path.posix.relative(campaignPath,rel);
+  return null;
+}
