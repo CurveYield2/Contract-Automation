@@ -68,3 +68,22 @@ test('Phase 0 intelligence generates substantive audit surface rather than recei
   assert.match(outputs,/EVIDENCE_INVALIDATION_MATRIX_v1\.json/);
   assert.match(outputs,/PHASE_00_RECEIPT_v1\.json/);
 });
+
+
+test('receipt controller enforces current Phase Contract required outputs before sealing',()=>{
+  const f=read('scripts/lite-phase-receipt-controller-v1.mjs');
+  assert.match(f,/authority\.homepagePath/);
+  assert.match(f,/PHASE_CONTRACT\.json/);
+  assert.match(f,/phaseContract\.requiredOutputs/);
+  assert.match(f,/missing required Phase Contract outputs/);
+  assert.match(f,/recorded\.add\(receiptLocalPath\)/);
+});
+
+test('replacement wake resumes blocked receipt state without pretending it is a successor transition',()=>{
+  const w=read('.github/workflows/browser-agent-wake.yml');
+  assert.match(w,/directory_status" = "BLOCKED"/);
+  assert.match(w,/\.phase\.status="ACTIVE"/);
+  assert.match(w,/\.status="ACTIVE"/);
+  assert.match(w,/resume blocked reviewer/);
+  assert.match(w,/no successor transition is required/);
+});
