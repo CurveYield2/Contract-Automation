@@ -130,7 +130,7 @@ export async function executePhase5TargetsV1({controllerRoot,campaignPath,target
       executionResults[key]={status:'BLOCKED_UNSUPPORTED_EXECUTION_METHOD',evidenceRef:'NO_MACHINE_EVIDENCE'};
       continue;
     }
-    const rel=safeRel(t.harnessOrCommandRef);
+    const rel=safeRel(t.executionRequestRef);
     if(!rel){
       executionResults[key]={status:'BLOCKED_INVALID_EXECUTION_REQUEST_REF',evidenceRef:'NO_MACHINE_EVIDENCE'};
       continue;
