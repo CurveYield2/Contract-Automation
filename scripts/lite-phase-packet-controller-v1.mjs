@@ -76,6 +76,7 @@ if(schema.finalReport){
   try{reportText=fs.readFileSync(requiredFile(root,assignment.finalReportPath,'phase final report'),'utf8');deficiencies.push(...validateFinalReport(schema,reportText));}catch(e){deficiencies.push(String(e.message||e));}
 const now=new Date().toISOString();
 if(deficiencies.length){
+  packet.status='REWORK_REQUIRED';
   packet.controllerValidation={status:'FAIL',validatedAt:now,deficiencies};
   directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
   writeJson(packetFile,packet);writeJson(directoryFile,directory);
