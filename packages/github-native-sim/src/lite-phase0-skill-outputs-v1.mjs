@@ -204,7 +204,7 @@ async function buildCore({campaignRoot,skillRoot}){
 
   const runtime=await readJson(path.join(skillRoot,'shared/source-intelligence/RUNTIME_DEPLOYMENT_OVERLAY_TEMPLATE.json'));
   runtime.identity={logicalArtifactId:'SI-RUNTIME-OVERLAY',campaignId,campaignGenerationId:generation,sourceIdentity,sourceDigestSha256:sourceDigest,buildIdentity,buildDigestSha256:buildDigest};
-  runtime.revision={revisionNumber:1,parentAcceptedRevision:'NONE_INITIAL_REVISION',createdByPhase:'phase-0',acceptanceOwnerPhase:'phase-7',createdAt,changeSummary:'Initial neutral Phase-0 deployment/configuration inventory from admitted source.'};
+  runtime.revision={revisionNumber:1,parentAcceptedRevision:'NONE_INITIAL_REVISION',createdByPhase:'phase-0',acceptanceOwnerPhase:'phase-6',createdAt,changeSummary:'Initial neutral Phase-0 deployment/configuration inventory from admitted source.'};
   const dep=readiness.deploymentAndConfiguration??{};
   const chainIds=uniq(asArray(dep.discoveredChainIds).map(x=>String(x.chainId)));
   runtime.deploymentIdentity={
@@ -225,20 +225,20 @@ async function buildCore({campaignRoot,skillRoot}){
     rawEvidenceRefs:['evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json']
   };
   runtime.gasAcceptance={
-    acceptanceOwnerPhase:'phase-7',
-    status:'PENDING_PHASE7_ACCEPTANCE',
+    acceptanceOwnerPhase:'phase-6',
+    status:'PENDING_PHASE6_INTERPRETATION',
     preliminaryCoreEstimateRefs:['evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json#bytecodeAndGasEvidence'],
     acceptedLifecycleEvidenceRefs:[],
     acceptedGasReportRef:'NOT_AVAILABLE_PHASE0',
     identityMatchVerified:false,
     limitations:['PHASE0_COMPILER_ESTIMATES_ARE_PRELIMINARY_ONLY']
   };
-  runtime.limitations=['RUNTIME_CHAIN_FORK_DEPLOYMENT_AND_LIVE_CONFIGURATION_ACCEPTANCE_DEFERRED_TO_PHASE7'];
-  runtime.completion={status:'COMPLETE_WITH_LIMITATION',phase1InitializationOnly:true,runtimeAcceptanceByPhase7:false,acceptedRevisionDigestRecordedExternally:true};
+  runtime.limitations=['RUNTIME_DEPLOYMENT_AND_CONFIGURATION_SECURITY_INTERPRETATION_DEFERRED_TO_PHASE6'];
+  runtime.completion={status:'COMPLETE_WITH_LIMITATION',phase1InitializationOnly:true,runtimeAcceptanceByPhase6:false,acceptedRevisionDigestRecordedExternally:true};
 
   const readinessOverlay=await readJson(path.join(skillRoot,'shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_TEMPLATE.json'));
   readinessOverlay.identity={logicalArtifactId:'SI-READINESS-OVERLAY',campaignId,campaignGenerationId:generation,sourceIdentity,sourceDigestSha256:sourceDigest,buildIdentity,buildDigestSha256:buildDigest};
-  readinessOverlay.revision={revisionNumber:1,parentAcceptedRevision:'NONE_INITIAL_REVISION',createdByPhase:'phase-0',acceptanceOwnerPhase:'merged-lite-phase-6-7',createdAt,changeSummary:'Initial neutral Phase-0 tool/harness/configuration inventory.'};
+  readinessOverlay.revision={revisionNumber:1,parentAcceptedRevision:'NONE_INITIAL_REVISION',createdByPhase:'phase-0',acceptanceOwnerPhase:'phase-6',createdAt,changeSummary:'Initial neutral Phase-0 tool/harness/configuration inventory.'};
   const rt=readiness.testingAndToolingReadiness??{};
   readinessOverlay.toolchainReadiness={
     phase1StructuralStatus:'DISCOVERED',
@@ -249,9 +249,9 @@ async function buildCore({campaignRoot,skillRoot}){
   readinessOverlay.harnessInventory=asArray(rt.harnessFiles).map(p=>({path:p,status:'DISCOVERED'}));
   readinessOverlay.configurationInventory=asArray(rt.configFiles).map(p=>({path:p,status:'DISCOVERED'}));
   readinessOverlay.skeletonInventory=asArray(rt.scriptFiles).map(p=>({path:p,status:'DISCOVERED'}));
-  readinessOverlay.adequacyAssessment={acceptanceOwnerPhase:'merged-lite-phase-6-7',phase1MayAcceptAdequacy:false,status:'PENDING_LITE_PHASE6_7_ASSESSMENT',assessmentEvidenceRefs:[],requiredRepairs:[],acceptedForSubgates:[]};
-  readinessOverlay.limitations=['HARNESS_AND_EXECUTION_ADEQUACY_REQUIRES_LITE_PHASE6_7_ASSESSMENT'];
-  readinessOverlay.completion={status:'COMPLETE_WITH_LIMITATION',phase1StructuralInventoryComplete:true,litePhase6_7AdequacyAccepted:false,acceptedRevisionDigestRecordedExternally:true};
+  readinessOverlay.adequacyAssessment={acceptanceOwnerPhase:'phase-6',phase1MayAcceptAdequacy:false,status:'PENDING_PHASE6_INTERPRETATION',assessmentEvidenceRefs:[],requiredRepairs:[],acceptedForSubgates:[]};
+  readinessOverlay.limitations=['HARNESS_AND_EXECUTION_ADEQUACY_REQUIRES_PHASE6_INTERPRETATION'];
+  readinessOverlay.completion={status:'COMPLETE_WITH_LIMITATION',phase1StructuralInventoryComplete:true,phase6AdequacyAccepted:false,acceptedRevisionDigestRecordedExternally:true};
 
   const graph=await readJson(path.join(skillRoot,'shared/controller/SECURITY_TRACEABILITY_GRAPH.json'));
   graph.campaignBinding={campaignId,campaignGenerationId:generation,sourceIdentity,currentSourceRevision:sourceDigest,graphRevision:1};
