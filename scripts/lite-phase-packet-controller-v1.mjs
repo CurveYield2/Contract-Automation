@@ -7,6 +7,9 @@ import {
   readJson,writeJson,repoFile,requiredFile,authorityRootFromReceipt,loadPhaseSchema,
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-phase-work-v1.mjs';
+import {
+  executePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1
+} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
@@ -50,6 +53,93 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now}){
 function receiptRef(root,campaignPath,rel,role){return {role,path:path.posix.relative(campaignPath,rel),sha256:shaFile(repoFile(root,rel))};}
 function assignmentReviewer(sequence){if(sequence===1)return'reviewer-1';if(sequence>=2&&sequence<=5)return'reviewer-2';if(sequence===6)return'reviewer-3L';if(sequence>=8&&sequence<=10)return'reviewer-4';throw new Error('no agent reviewer for phase '+sequence);}
 function isFreshBoundary(next){return next===2||next===6||next===8;}
+function maybeFile(root,rel){const f=repoFile(root,rel);return fs.existsSync(f)&&fs.statSync(f).isFile()?f:null;}
+function maybeJson(root,rel){const f=maybeFile(root,rel);if(!f)return null;try{return readJson(f);}catch{return null;}}
+function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNum(phase)+'_CANONICAL_DATA_v1.json');}
+function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRelFor(campaignPath,phase));}
+function uniqueExisting(root,rels){return [...new Set(rels.filter(Boolean))].filter(rel=>Boolean(maybeFile(root,rel)));}
+function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
+  const phaseCanonical=(p)=>canonicalRelFor(campaignPath,p);
+  const deploy=path.posix.join(campaignPath,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
+  const targets=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
+  const remediation=path.posix.join(campaignPath,'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md');
+  const finalIndex=path.posix.join(campaignPath,'work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
+  if(target===5) return uniqueExisting(root,[phaseCanonical(2),phaseCanonical(3),...immediate]);
+  if(target===6) return uniqueExisting(root,[phaseCanonical(2),phaseCanonical(3),path.posix.join(campaignPath,'derived/phase-4/PHASE6_VALIDATION_TARGETS_v1.json'),phaseCanonical(5),...immediate,deploy,targets]);
+  if(target===8) return uniqueExisting(root,[phaseCanonical(2),phaseCanonical(3),phaseCanonical(4),phaseCanonical(5),phaseCanonical(6),deploy,targets,...immediate]);
+  if(target===9) return uniqueExisting(root,[phaseCanonical(8),...immediate,remediation]);
+  if(target===10) return uniqueExisting(root,[finalIndex]);
+  return uniqueExisting(root,immediate);
+}
+function phaseOutput(canonical,step,field){return canonical?.actions?.[step]?.outputs?.[field];}
+function remediationDeltaRows(campaignRoot,validatedFindings){
+  const remediationRoot=path.join(campaignRoot,'remediation');
+  const files=listFilesRecursive(remediationRoot);
+  const changed=new Set(); const symbols=new Set(); const evidence=[];
+  for(const file of files){
+    const rel=path.relative(campaignRoot,file).split(path.sep).join('/'); evidence.push(rel);
+    const ext=path.extname(file).toLowerCase();
+    if(['.patch','.diff'].includes(ext)){
+      const text=fs.readFileSync(file,'utf8');
+      for(const line of text.split(/\r?\n/)){
+        const m=line.match(/^\+\+\+\s+(?:b\/)?(.+)$/); if(m&&m[1]!=='/dev/null') changed.add(m[1]);
+        if(/^[+-](?![+-])/.test(line)){
+          const s=line.match(/\b(?:function|contract|library|interface|struct|modifier|event|error)\s+([A-Za-z_][A-Za-z0-9_]*)/);
+          if(s) symbols.add(s[1]);
+        }
+      }
+    }else changed.add(rel.replace(/^remediation\//,''));
+  }
+  const deltaText='files='+([...changed].join(', ')||'UNRESOLVED')+'; symbols='+([...symbols].join(', ')||'NOT_MACHINE_DERIVABLE_FROM_AVAILABLE_REMEDIATION_ARTIFACTS');
+  return (validatedFindings?.length?validatedFindings:[{findingTempKey:'REMEDIATION-DELTA'}]).map(f=>({
+    findingId:f.findingTempKey??f.canonicalId??f.candidateKey??'REMEDIATION-DELTA',
+    oldIdentityRef:'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json',
+    remediationIdentityRef:evidence.join(', ')||'NO_REMEDIATION_ARTIFACT',
+    changedFilesAndSymbols:deltaText,
+    rootCauseFix:'PENDING_PHASE9_INTERPRETATION',
+    staleEvidenceInvalidated:'SEE_CONTROLLER_EVIDENCE_INVALIDATION_STATE',
+    decisiveProofRerun:'PENDING_PHASE9',
+    affectedSurfaces:[...changed].join(', ')||'UNRESOLVED',
+    newEvidenceRefs:evidence.join(', ')||'NONE',
+    residualRisk:'PENDING_PHASE9_INTERPRETATION',
+    finalDisposition:'PENDING_PHASE9_INTERPRETATION'
+  }));
+}
+function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
+  const p6=canonicalFor(root,campaignPath,6); const p8=canonicalFor(root,campaignPath,8); const p9=canonicalFor(root,campaignPath,9);
+  const build=maybeJson(root,path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'))??{};
+  const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
+  const findings=(phaseOutput(p8,'step-2','validatedFindings')??[]).map(f=>({
+    id:f.canonicalId??f.findingTempKey??f.candidateKey,
+    disposition:'VALIDATED_FINDING',
+    severityOrStatus:f.severity??'UNRESOLVED',
+    evidence:Array.isArray(f.proofEvidenceRefs)?f.proofEvidenceRefs.join(', '):f.proofEvidenceRefs,
+    remediationStatus:(phaseOutput(p9,'step-2','remediationDispositions')??[]).find(r=>r.findingKey===(f.canonicalId??f.findingTempKey))?.disposition??(p9?'UNRESOLVED':'SKIPPED_NO_REMEDIATION'),
+    residualLimitation:'SEE_ACCEPTED_PHASE_DATA'
+  }));
+  const obligations=(ledger.obligations??[]).filter(o=>String(o.status??'OPEN').toUpperCase()!=='CLOSED').map(o=>({
+    id:o.obligationId,disposition:o.status??'OPEN',severityOrStatus:'OBLIGATION',evidence:(o.originatingEvidenceRefs??[]).join(', '),remediationStatus:'NOT_APPLICABLE',residualLimitation:o.statusReason??'OPEN'
+  }));
+  const omissions=phaseOutput(p6,'step-3','fullOnlyOmissions')??phaseOutput(p6,'step-4','fullOnlyOmissions')??[];
+  return {
+    identity:{
+      campaignGeneration:directory.campaignId+'/'+directory.campaignGenerationId,
+      skill:predecessor.authority?.homepagePath??'UNRESOLVED_AUTHORITY',
+      source:[predecessor.source?.repository,predecessor.source?.commit,directory.sourceSha256].filter(Boolean).join('@'),
+      build:JSON.stringify({compiler:build.configurationDetection?.compilerVersion??build.build?.compilerVersion??null,compilerOutputSha256:build.build?.compilerOutputSha256??null}),
+      deployment:'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md',
+      remediation:p9?'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md':'SKIPPED_NO_REMEDIATION'
+    },
+    milestones:[
+      {milestone:'Phase 0–1',requiredEvidence:'admission, source fence, risk grade, Source Intelligence',reference:'receipts/PHASE_00_RECEIPT_v1.json + accepted Phase-1 canonical data',sourceIdentity:directory.sourceSha256,status:'COMPLETE',limitation:'SEE_REFERENCED_EVIDENCE'},
+      {milestone:'Combined Phase 2–5',requiredEvidence:'specification, threats/domains, manual review, economic/math, reconciliation',reference:'derived/phase-2..5 canonical data',sourceIdentity:directory.sourceSha256,status:'COMPLETE',limitation:'SEE_ACCEPTED_PHASE_DATA'},
+      {milestone:'Merged Lite Phase 6–7',requiredEvidence:'deploy/config, deterministic candidate simulation, targeted fuzz, interpretation',reference:'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md + work/phase-06/LITE_TARGETED_TEST_MATRIX.md + accepted Phase-6 canonical data',sourceIdentity:directory.sourceSha256,status:'COMPLETE',limitation:(phaseOutput(p6,'step-3','typedExecutionLimitations')??phaseOutput(p6,'step-4','typedExecutionLimitations')??[]).join('; ')||'NONE_IDENTIFIED'},
+      {milestone:'Combined Phase 8–10',requiredEvidence:'validation, remediation/skip, final reconciliation',reference:p9?'accepted Phase-8 and Phase-9 canonical data':'accepted Phase-8 canonical data + Phase-9 skip receipt',sourceIdentity:directory.sourceSha256,status:'READY_FOR_PHASE10',limitation:'SEE_FINDINGS_AND_OBLIGATIONS'}
+    ],
+    findings,obligations,omissions
+  };
+}
+
 
 const a=parse(process.argv);
 for(const k of ['controller-root','campaign-path','campaign-directory-path','phase-sequence']) if(a[k]===undefined) throw new Error('missing --'+k);
@@ -92,6 +182,34 @@ const canonical={schemaVersion:'curveyield-lite-phase-canonical-data-v1',phase:s
 const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now});
 writeJson(repoFile(root,canonicalRel),canonical);
 const derivedRels=buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical,canonicalRel,now});
+const boundaryArtifactRels=[];
+if(sequence===5){
+  const targetDesigns=phaseOutput(canonical,'step-3','targetDesigns')??[];
+  const executionResults=await executePhase5TargetsV1({controllerRoot:root,campaignPath,targetDesigns});
+  const targetMatrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
+  fs.mkdirSync(path.dirname(repoFile(root,targetMatrixRel)),{recursive:true});
+  fs.writeFileSync(repoFile(root,targetMatrixRel),renderTargetedTestMatrixV1({targetDesigns,executionResults}));
+  boundaryArtifactRels.push(targetMatrixRel);
+}
+if(sequence===8&&hasRemediation(campaignRoot)){
+  const validatedFindings=phaseOutput(canonical,'step-2','validatedFindings')??[];
+  const ledgerRel=path.posix.join(campaignPath,'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md');
+  fs.mkdirSync(path.dirname(repoFile(root,ledgerRel)),{recursive:true});
+  fs.writeFileSync(repoFile(root,ledgerRel),renderRemediationDeltaLedgerV1({validatedFindings,deltaRows:remediationDeltaRows(campaignRoot,validatedFindings),noRemediation:false}));
+  boundaryArtifactRels.push(ledgerRel);
+}
+if(sequence===8&&!hasRemediation(campaignRoot)){
+  const indexRel=path.posix.join(campaignPath,'work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
+  fs.mkdirSync(path.dirname(repoFile(root,indexRel)),{recursive:true});
+  fs.writeFileSync(repoFile(root,indexRel),renderFinalEvidenceIndexV1(buildFinalIndexInput({root,campaignPath,directory,predecessor})));
+  boundaryArtifactRels.push(indexRel);
+}
+if(sequence===9){
+  const indexRel=path.posix.join(campaignPath,'work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
+  fs.mkdirSync(path.dirname(repoFile(root,indexRel)),{recursive:true});
+  fs.writeFileSync(repoFile(root,indexRel),renderFinalEvidenceIndexV1(buildFinalIndexInput({root,campaignPath,directory,predecessor})));
+  boundaryArtifactRels.push(indexRel);
+}
 
 const receiptLibUrl=pathToFileURL(repoFile(root,'packages/controller-core/src/lite-phase-receipt-v1.mjs')).href;
 const receiptLib=await import(receiptLibUrl);
@@ -100,9 +218,10 @@ const evidence=[receiptRef(root,campaignPath,assignment.workFormPath,'PHASE_WORK
 if(assignment.finalReportPath) evidence.push(receiptRef(root,campaignPath,assignment.finalReportPath,'PHASE_FINAL_REPORT'));
 evidence.push(receiptRef(root,campaignPath,canonicalRel,'PHASE_CANONICAL_DATA'));
 for(const rel of derivedRels) evidence.push(receiptRef(root,campaignPath,rel,'DERIVED_DOWNSTREAM_DATA'));
+for(const rel of boundaryArtifactRels) evidence.push(receiptRef(root,campaignPath,rel,'BOUNDARY_MACHINE_ARTIFACT'));
 
 let nextSequence=sequence===10?null:sequence+1;
-let fresh=false;let nextAssignment=null;let nextDerivedInputs=[...derivedRels];
+let fresh=false;let nextAssignment=null;let nextDerivedInputs=[];
 let handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};
 if(sequence===1){nextSequence=2;fresh=true;handoff={required:true,boundary:'P1_TO_P2',incomingReviewer:'reviewer-2',assignedWork:'Combined Lite Phases 2-5',nextPhaseSequence:2,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
 if(sequence===5){nextSequence=6;fresh=true;handoff={required:true,boundary:'P5_TO_P6',incomingReviewer:'reviewer-3L',assignedWork:'Merged Lite Phases 6-7',nextPhaseSequence:6,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
@@ -110,6 +229,7 @@ if(sequence===6){nextSequence=8;}
 if(sequence===8){nextSequence=hasRemediation(campaignRoot)?9:10;handoff={required:false,boundary:null,incomingReviewer:'reviewer-4',assignedWork:'Phase '+nextSequence,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};}
 if(sequence===9){nextSequence=10;}
 if(sequence===10){handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:null,sameReviewer:false,status:'NOT_APPLICABLE'};}
+if(nextSequence!==null) nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:nextSequence,immediate:[...derivedRels,...boundaryArtifactRels]});
 
 const receipt=receiptLib.createLitePhaseReceiptV1({
   campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,
@@ -122,7 +242,7 @@ const receipt=receiptLib.createLitePhaseReceiptV1({
 });
 receipt.sealedAt=now;receipt.updatedAt=now;
 writeJson(repoFile(root,receiptRel),receipt);
-packet.status='ACCEPTED';packet.controllerValidation.receiptPath=receiptRel;packet.controllerValidation.canonicalDataPath=canonicalRel;packet.controllerValidation.derivedOutputPaths=derivedRels;
+packet.status='ACCEPTED';packet.controllerValidation.receiptPath=receiptRel;packet.controllerValidation.canonicalDataPath=canonicalRel;packet.controllerValidation.derivedOutputPaths=derivedRels;packet.controllerValidation.boundaryMachineArtifactPaths=boundaryArtifactRels;
 writeJson(packetFile,packet);
 
 let sealedReceiptRel=receiptRel;
@@ -139,7 +259,7 @@ if(sequence===6){
   const markerRel=receiptLib.phaseReceiptPath(campaignPath,7,1);
   const markerEvidence=[receiptRef(root,campaignPath,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,campaignPath,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,x,'DERIVED_DOWNSTREAM_DATA'))];
   const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],evidence:markerEvidence,outputs:markerEvidence,globalControls:receipt.globalControls,validation:{status:'PASS',validatedAt:now,failures:[]},handoff:{required:true,boundary:'P67_TO_P8',incomingReviewer:'reviewer-4',assignedWork:'Combined Lite Phases 8-10',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'},now});
-  marker.sealedAt=now;writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;nextDerivedInputs=[...derivedRels,...derived7];fresh=true;nextSequence=8;
+  marker.sealedAt=now;writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=true;nextSequence=8;nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:8,immediate:[...derivedRels,...derived7,...boundaryArtifactRels]});
 }
 if(sequence===8&&nextSequence===10){
   const skippedRel=receiptLib.phaseReceiptPath(campaignPath,9,1);
