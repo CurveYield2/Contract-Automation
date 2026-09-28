@@ -265,6 +265,45 @@ async function buildCore({campaignRoot,skillRoot}){
   ];
   ledger.phaseCheckpoints=[{phaseId:'phase-0',status:'INITIALIZED',dueOpenOrInProgress:0,recordedAt:createdAt}];
 
+  const docs=readiness.documentationInventory??{};
+  const auditSurface={
+    schemaVersion:'curveyield-lite-phase0-audit-surface-v1',
+    status:'PASS',
+    campaignId,
+    campaignGenerationId:generation,
+    sourceIdentity:{sourceIdentity,sourceDigestSha256:sourceDigest},
+    inScopeSourceFiles:asArray(technical.sourceFiles),
+    deployableContracts:asArray(technical.contracts).filter(x=>String(x.deployability??'').toUpperCase()!=='NON_DEPLOYABLE'),
+    documentedInputs:{
+      documentationFiles:asArray(docs.documentationFiles),
+      declaredFacts:asArray(docs.declaredFacts),
+      explicitExclusions:asArray(docs.explicitExclusions),
+      claimedStandardsAndInterfaces:asArray(docs.claimedStandards)
+    },
+    structuralSurfaces:{
+      externalInterfaces:asArray(technical.externalInterfaces),
+      dependencyEdges:asArray(technical.protocolTopology?.dependencyEdges),
+      privilegeCandidates:asArray(technical.privilegeCandidates),
+      valueFlowCandidates:asArray(technical.valueFlowCandidates),
+      deploymentAndConfiguration:readiness.deploymentAndConfiguration??{},
+      testingAndToolingReadiness:readiness.testingAndToolingReadiness??{}
+    },
+    canonicalEvidence:{
+      sourceIntelligence:'evidence/source-intelligence/SOURCE_INTELLIGENCE_v1.json',
+      buildIdentity:'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json',
+      sbom:'evidence/dependencies/SBOM_v1.json',
+      staticAnalysis:'evidence/static-analysis/SLITHER_v1.json',
+      readiness:'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'
+    },
+    neutralityStatement:'This artifact is a mechanical Phase-0 audit surface. Security meaning, standards conformance, trust significance, exploitability, materiality and findings are deferred to authorized later reviewers.',
+    createdAt
+  };
+
+  const invalidation=await readJson(path.join(skillRoot,'shared/controller/EVIDENCE_INVALIDATION_MATRIX.json'));
+  invalidation.campaignBinding={campaignId,campaignGenerationId:generation,sourceIdentity,currentSourceRevision:sourceDigest,matrixRevision:1};
+  invalidation.events=[];
+  invalidation.phaseCheckpoints=[{phaseId:'phase-0',status:'INITIALIZED_NO_CHANGE_EVENTS',recordedAt:createdAt}];
+
   const writes=[
     ['shared/source-intelligence/SOURCE_INTELLIGENCE_TEMPLATE.json',core],
     ['evidence/source-intelligence/SOURCE_INTELLIGENCE_v1.json',core],
@@ -272,10 +311,10 @@ async function buildCore({campaignRoot,skillRoot}){
     ['evidence/source-intelligence/runtime-deployment-overlay_v1.json',runtime],
     ['shared/source-intelligence/ASSURANCE_READINESS_OVERLAY_TEMPLATE.json',readinessOverlay],
     ['evidence/source-intelligence/assurance-readiness-overlay_v1.json',readinessOverlay],
-    ['shared/controller/SECURITY_TRACEABILITY_GRAPH.json',graph],
     ['controller/SECURITY_TRACEABILITY_GRAPH_v1.json',graph],
-    ['shared/controller/CARRIED_FORWARD_OBLIGATION_LEDGER.json',ledger],
-    ['controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json',ledger]
+    ['controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json',ledger],
+    ['controller/EVIDENCE_INVALIDATION_MATRIX_v1.json',invalidation],
+    ['evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json',auditSurface]
   ];
   for(const [rel,obj] of writes) await writeJson(path.join(campaignRoot,rel),obj);
   return {campaignId,generation,sourceDigest,buildDigest,createdAt,writes:writes.map(([rel])=>rel)};
@@ -283,8 +322,7 @@ async function buildCore({campaignRoot,skillRoot}){
 
 async function buildBundle({campaignRoot,skillRoot,acceptedCommit}){
   if(!/^[0-9a-f]{40}$/.test(acceptedCommit??'')) throw new Error('--accepted-commit must be a 40-char Git SHA');
-  const controllerDir=path.join(campaignRoot,'controller');
-  const state=await readJson(await latestVersioned(controllerDir,'CAMPAIGN_STATE'));
+  const receipt=await readJson(path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json'));
   const buildPath=path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
   const build=await readJson(buildPath);
   const campaignId=receipt.campaign?.campaignId??build.campaignId;
