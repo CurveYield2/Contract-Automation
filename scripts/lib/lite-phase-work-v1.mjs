@@ -48,7 +48,7 @@ export function validateWorkForm(schema,form){
 }
 export function validateFinalReport(schema,text){
   const deficiencies=[];const report=schema.finalReport;if(!report) return deficiencies;
-  const lines=String(text??'').split(/\\r?\\n/);
+  const lines=String(text??'').split(/\r?\n/);
   const headings=[];
   for(let i=0;i<lines.length;i++) if(lines[i].startsWith('## ')) headings.push({name:lines[i].slice(3).trim(),line:i});
   for(const heading of report.requiredSections??[]){
@@ -56,7 +56,7 @@ export function validateFinalReport(schema,text){
     if(idx<0){deficiencies.push('finalReport section missing: '+heading);continue;}
     const start=headings[idx].line+1;
     const end=idx+1<headings.length?headings[idx+1].line:lines.length;
-    const body=lines.slice(start,end).join('\\n').trim();
+    const body=lines.slice(start,end).join('\n').trim();
     if(!body||/^<REQUIRED/.test(body)) deficiencies.push('finalReport section incomplete: '+heading);
   }
   return deficiencies;
