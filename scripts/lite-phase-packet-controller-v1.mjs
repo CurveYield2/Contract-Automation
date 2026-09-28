@@ -47,7 +47,7 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now}){
   writeJson(repoFile(root,graphRel),graph);writeJson(repoFile(root,ledgerRel),ledger);writeJson(repoFile(root,invalidRel),invalid);
   return {graphRel,ledgerRel,invalidRel};
 }
-function receiptRef(root,rel,role){return {role,path:rel.split('/').slice(2).join('/'),sha256:shaFile(repoFile(root,rel))};}
+function receiptRef(root,campaignPath,rel,role){return {role,path:path.posix.relative(campaignPath,rel),sha256:shaFile(repoFile(root,rel))};}
 function assignmentReviewer(sequence){if(sequence===1)return'reviewer-1';if(sequence>=2&&sequence<=5)return'reviewer-2';if(sequence===6)return'reviewer-3L';if(sequence>=8&&sequence<=10)return'reviewer-4';throw new Error('no agent reviewer for phase '+sequence);}
 function isFreshBoundary(next){return next===2||next===6||next===8;}
 
@@ -95,10 +95,10 @@ const derivedRels=buildDerivedOutputs({root,campaignPath,schema,canonicalData:ca
 const receiptLibUrl=pathToFileURL(repoFile(root,'packages/controller-core/src/lite-phase-receipt-v1.mjs')).href;
 const receiptLib=await import(receiptLibUrl);
 const receiptRel=receiptLib.phaseReceiptPath(campaignPath,sequence,1);
-const evidence=[receiptRef(root,assignment.workFormPath,'PHASE_WORK_FORM')];
-if(assignment.finalReportPath) evidence.push(receiptRef(root,assignment.finalReportPath,'PHASE_FINAL_REPORT'));
-evidence.push(receiptRef(root,canonicalRel,'PHASE_CANONICAL_DATA'));
-for(const rel of derivedRels) evidence.push(receiptRef(root,rel,'DERIVED_DOWNSTREAM_DATA'));
+const evidence=[receiptRef(root,campaignPath,assignment.workFormPath,'PHASE_WORK_FORM')];
+if(assignment.finalReportPath) evidence.push(receiptRef(root,campaignPath,assignment.finalReportPath,'PHASE_FINAL_REPORT'));
+evidence.push(receiptRef(root,campaignPath,canonicalRel,'PHASE_CANONICAL_DATA'));
+for(const rel of derivedRels) evidence.push(receiptRef(root,campaignPath,rel,'DERIVED_DOWNSTREAM_DATA'));
 
 let nextSequence=sequence===10?null:sequence+1;
 let fresh=false;let nextAssignment=null;let nextDerivedInputs=[...derivedRels];
@@ -136,7 +136,7 @@ if(sequence===6){
   writeJson(repoFile(root,canonical7Rel),canonical7);
   const derived7=buildDerivedOutputs({root,campaignPath,schema:schema7,canonicalData:canonical7,canonicalRel:canonical7Rel,now});
   const markerRel=receiptLib.phaseReceiptPath(campaignPath,7,1);
-  const markerEvidence=[receiptRef(root,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,x,'DERIVED_DOWNSTREAM_DATA'))];
+  const markerEvidence=[receiptRef(root,campaignPath,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,campaignPath,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,x,'DERIVED_DOWNSTREAM_DATA'))];
   const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],evidence:markerEvidence,outputs:markerEvidence,globalControls:receipt.globalControls,validation:{status:'PASS',validatedAt:now,failures:[]},handoff:{required:true,boundary:'P67_TO_P8',incomingReviewer:'reviewer-4',assignedWork:'Combined Lite Phases 8-10',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'},now});
   marker.sealedAt=now;writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;nextDerivedInputs=[...derivedRels,...derived7];fresh=true;nextSequence=8;
 }
