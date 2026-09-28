@@ -105,32 +105,76 @@ jobs:
           project_name="$(jq -r '.chatgptProject.name // empty' "$REGISTRATION")"
           gh api "repos/$gate_repo/contents/$directory_path?ref=$gate_ref" --jq '.content' | base64 -d > /tmp/campaign-directory.json
           test "$(jq -r '.campaignId' /tmp/campaign-directory.json)" = "$CAMPAIGN_ID"
-          directory_status="$(jq -r '.status' /tmp/campaign-directory.json)"
-          case "$directory_status" in ACTIVE|BLOCKED) ;; *) echo "::error::Receipt reviewer repair requires ACTIVE/BLOCKED campaign state; observed $directory_status"; exit 1;; esac
-          receipt_path="$(jq -r '.currentReceiptPath' /tmp/campaign-directory.json)"
-          gh api "repos/$gate_repo/contents/$receipt_path?ref=$gate_ref" --jq '.content' | base64 -d > /tmp/current-receipt.json
-          receipt_status="$(jq -r '.phase.status' /tmp/current-receipt.json)"
-          case "$receipt_status" in ACTIVE|BLOCKED) ;; *) echo "::error::Current receipt does not require reviewer repair: $receipt_status"; exit 1;; esac
-          reviewer="$(jq -r '.executor.lineage' /tmp/current-receipt.json)"
-          phase_id="$(jq -r '.phase.id' /tmp/current-receipt.json)"
-          campaign_name="$(jq -r '.campaign.campaignName' /tmp/current-receipt.json)"
-          workspace="$(jq -r '.campaign.workspacePath' /tmp/current-receipt.json)"
-          [ -n "$project_name" ] || project_name="$campaign_name"
+          directory_schema="$(jq -r '.schemaVersion // empty' /tmp/campaign-directory.json)"
           reason="${REPAIR_REASON:-watchdog detected reviewer failure}"
-          cat > /tmp/replacement-wake.txt <<EOF
-          Campaign type: LITE
-          Campaign name: $campaign_name
-          Campaign ID: $CAMPAIGN_ID
-          Incoming reviewer: $reviewer
-          Current phase: $phase_id
-          Current phase receipt: $receipt_path
-          Current authority: https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority
+          if [ "$directory_schema" = "curveyield-audit-campaign-directory-entry-v2" ]; then
+            campaign_status="$(jq -r '.campaignStatus // empty' /tmp/campaign-directory.json)"
+            case "$campaign_status" in ACTIVE|BLOCKED) ;; *) echo "::error::Assignment reviewer repair requires ACTIVE/BLOCKED campaign state; observed $campaign_status"; exit 1;; esac
+            reviewer="$(jq -r '.currentAssignment.reviewer // empty' /tmp/campaign-directory.json)"
+            phase_id="$(jq -r '.currentAssignment.phaseId // empty' /tmp/campaign-directory.json)"
+            workspace="$(jq -r '.workspacePath' /tmp/campaign-directory.json)"
+            campaign_name="$(jq -r '.campaignName' /tmp/campaign-directory.json)"
+            schema_path="$(jq -r '.currentAssignment.workSchemaPath // empty' /tmp/campaign-directory.json)"
+            form_path="$(jq -r '.currentAssignment.workFormPath // empty' /tmp/campaign-directory.json)"
+            report_path="$(jq -r '.currentAssignment.finalReportPath // empty' /tmp/campaign-directory.json)"
+            packet_path="$(jq -r '.currentAssignment.packetPath // empty' /tmp/campaign-directory.json)"
+            receipt_path="$(jq -r '.currentAssignment.predecessorReceiptPath // .lastSealedReceiptPath // empty' /tmp/campaign-directory.json)"
+            assignment_status="$(jq -r '.currentAssignment.status // empty' /tmp/campaign-directory.json)"
+            [ -n "$reviewer" ] && [ -n "$phase_id" ] && [ -n "$schema_path" ] && [ -n "$form_path" ] && [ -n "$packet_path" ]
+            feedback=""
+            if [ "$assignment_status" = "REWORK_REQUIRED" ]; then
+              packet_encoded="$(gh api "repos/$gate_repo/contents/$packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+              if [ -n "$packet_encoded" ]; then
+                printf '%s' "$packet_encoded" | base64 -d > /tmp/current-packet.json
+                feedback="$(jq -r '.controllerValidation.deficiencies // [] | map("- "+.) | join("\n")' /tmp/current-packet.json)"
+              fi
+            fi
+            [ -n "$project_name" ] || project_name="$campaign_name"
+            cat > /tmp/replacement-wake.txt <<EOF
+Campaign type: LITE
+Campaign name: $campaign_name
+Campaign ID: $CAMPAIGN_ID
+Incoming reviewer: $reviewer
+Current phase: $phase_id
+Phase schema: $schema_path
+Phase work form: $form_path
+Phase final report: $report_path
+Phase packet: $packet_path
+Last sealed predecessor receipt: $receipt_path
+Current authority: https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority
 
-          You are a repair/replacement reviewer taking over because the prior reviewer stopped during this same assignment.
-          Resume from the latest durable evidence and the current phase receipt. Do not restart completed work and do not reconstruct old handoff/completion/retirement paperwork.
-          Read the current authority, then the current receipt, then continue exactly from the unfinished Phase $phase_id work.
-          Repair reason: $reason
-          EOF
+You are a repair/replacement reviewer taking over because the prior reviewer stopped during this same assignment.
+Resume from the latest durable schema-governed work form and substantive evidence. Do not restart completed work and do not reconstruct controller bookkeeping.
+If packet validation previously failed, repair only the exact missing fields before resubmitting.
+Repair reason: $reason
+$feedback
+EOF
+          else
+            directory_status="$(jq -r '.status' /tmp/campaign-directory.json)"
+            case "$directory_status" in ACTIVE|BLOCKED) ;; *) echo "::error::Receipt reviewer repair requires ACTIVE/BLOCKED campaign state; observed $directory_status"; exit 1;; esac
+            receipt_path="$(jq -r '.currentReceiptPath' /tmp/campaign-directory.json)"
+            gh api "repos/$gate_repo/contents/$receipt_path?ref=$gate_ref" --jq '.content' | base64 -d > /tmp/current-receipt.json
+            receipt_status="$(jq -r '.phase.status' /tmp/current-receipt.json)"
+            case "$receipt_status" in ACTIVE|BLOCKED) ;; *) echo "::error::Current receipt does not require reviewer repair: $receipt_status"; exit 1;; esac
+            reviewer="$(jq -r '.executor.lineage' /tmp/current-receipt.json)"
+            phase_id="$(jq -r '.phase.id' /tmp/current-receipt.json)"
+            campaign_name="$(jq -r '.campaign.campaignName' /tmp/current-receipt.json)"
+            workspace="$(jq -r '.campaign.workspacePath' /tmp/current-receipt.json)"
+            [ -n "$project_name" ] || project_name="$campaign_name"
+            cat > /tmp/replacement-wake.txt <<EOF
+Campaign type: LITE
+Campaign name: $campaign_name
+Campaign ID: $CAMPAIGN_ID
+Incoming reviewer: $reviewer
+Current phase: $phase_id
+Current phase receipt: $receipt_path
+Current authority: https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority
+
+You are a repair/replacement reviewer taking over because the prior reviewer stopped during this same assignment.
+Resume from the latest durable evidence and the current phase receipt. Do not restart completed work.
+Repair reason: $reason
+EOF
+          fi
           jq -cn \
             --arg routine 'audit-lite-reviewer-v1' \
             --arg project "$project_name" \
