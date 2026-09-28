@@ -1,4 +1,4 @@
-name: Lite Phase Work Packet Controller v1
+name: Lite Phase Boundary Controller v2
 
 on:
   workflow_dispatch:
@@ -25,7 +25,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: lite-phase-work-packet-${{ inputs.campaign_id }}-${{ inputs.phase_sequence }}
+  group: lite-phase-boundary-${{ inputs.campaign_id }}-${{ inputs.phase_sequence }}
   cancel-in-progress: false
 
 jobs:
@@ -77,7 +77,7 @@ jobs:
           git fetch origin "${{ inputs.audit_controller_ref }}"
           git checkout -B "${{ inputs.audit_controller_ref }}" "origin/${{ inputs.audit_controller_ref }}"
 
-      - name: Validate packet and perform bookkeeping only after PASS
+      - name: Generate packet/report, validate semantic work, then bookkeep after PASS
         id: controller
         shell: bash
         run: |
@@ -100,11 +100,11 @@ jobs:
         run: |
           set -euo pipefail
           cd .audit-controller
-          git config user.name 'CurveYield Lite Packet Controller'
-          git config user.email 'lite-packet-controller@users.noreply.github.com'
+          git config user.name 'CurveYield Lite Phase Controller'
+          git config user.email 'lite-phase-controller@users.noreply.github.com'
           git add -- "${{ inputs.campaign_path }}" "${{ inputs.campaign_directory_path }}"
           if ! git diff --cached --quiet; then
-            git commit -m "audit(controller): phase ${{ inputs.phase_sequence }} packet ${{ steps.controller.outputs.status }} for ${{ inputs.campaign_id }}"
+            git commit -m "audit(controller): phase ${{ inputs.phase_sequence }} validation ${{ steps.controller.outputs.status }} for ${{ inputs.campaign_id }}"
             git push origin "HEAD:${{ inputs.audit_controller_ref }}"
           fi
 
@@ -176,10 +176,11 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "## Lite Phase Work Packet Controller"
+            echo "## Lite Phase Boundary Controller"
             echo "- campaign: ${{ inputs.campaign_id }}"
             echo "- phase: ${{ inputs.phase_sequence }}"
             echo "- result: ${{ steps.controller.outputs.status }}"
+            echo "- packet/report ownership: controller-generated"
             echo "- bookkeeping before validation PASS: prohibited"
             echo "- machine execution timing: phase-end boundaries only"
           } >> "$GITHUB_STEP_SUMMARY"
