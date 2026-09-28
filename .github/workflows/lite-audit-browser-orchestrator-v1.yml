@@ -3,10 +3,19 @@ name: Lite Audit Browser Orchestrator v1
 on:
   workflow_dispatch:
     inputs:
-      campaign_id: {required: true, type: string}
-      campaign_name: {required: true, type: string}
-      campaign_path: {required: true, type: string}
-      audit_controller_ref: {required: false, default: main, type: string}
+      campaign_id:
+        required: true
+        type: string
+      campaign_name:
+        required: true
+        type: string
+      campaign_path:
+        required: true
+        type: string
+      audit_controller_ref:
+        required: false
+        default: main
+        type: string
 
 permissions:
   contents: write
@@ -28,7 +37,10 @@ jobs:
     steps:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
-        with: {ref: main, persist-credentials: false, fetch-depth: 1}
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
 
       - name: Select Audit-Controller credential
         env:
@@ -48,7 +60,8 @@ jobs:
           echo "path=$directory_path" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Audit-Controller
-        env: {GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}}
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -78,7 +91,8 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish successor receipt preparation
-        env: {GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}}
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
@@ -92,7 +106,8 @@ jobs:
           fi
 
       - name: Create or refresh campaign browser registration
-        env: {GH_TOKEN: ${{ github.token }}}
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -124,7 +139,8 @@ jobs:
           fi
 
       - name: Launch fresh reviewer
-        env: {GH_TOKEN: ${{ github.token }}}
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
