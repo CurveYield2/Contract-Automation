@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {refreshControllerPrefillDigest} from '../../../scripts/lib/lite-phase-prefill-v1.mjs';
 
 const mkdir=p=>fs.mkdirSync(p,{recursive:true});
 const writeJson=(p,v)=>{mkdir(path.dirname(p));fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n');};
@@ -18,7 +19,7 @@ function fixture(){
   const source='a'.repeat(64);
 
   const receiptStub=`export function phaseReceiptPath(workspacePath,sequence,revision=1){return workspacePath+'/receipts/PHASE_'+String(sequence).padStart(2,'0')+'_RECEIPT_v'+revision+'.json';}
-export function createLitePhaseReceiptV1(input){return {schemaVersion:'curveyield-lite-phase-receipt-v1',campaign:{campaignId:input.campaignId,campaignGenerationId:input.campaignGenerationId,campaignName:input.campaignName,workspacePath:input.workspacePath,campaignDirectoryEntryPath:input.campaignDirectoryEntryPath,mode:'LITE'},phase:{sequence:input.sequence,id:'phase-'+input.sequence,revision:1,status:input.status},executor:{type:input.executorType,lineage:input.executorLineage},authority:input.authority,source:{sha256:input.sourceSha256,...input.source},startedAt:input.now,updatedAt:input.now,sealedAt:null,inputs:input.inputs??[],evidence:input.evidence??[],outputs:input.outputs??[],globalControls:input.globalControls??{},obligations:{due:[],created:[],closed:[],carriedForward:[]},invalidation:{status:'NO_MATERIAL_CHANGE',events:[]},automation:[],validation:input.validation??{status:'PENDING',failures:[]},handoff:input.handoff??{required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:null,sameReviewer:false,status:'NOT_APPLICABLE'},errors:[]};}
+export function createLitePhaseReceiptV1(input){return {schemaVersion:'curveyield-lite-phase-receipt-v1',campaign:{campaignId:input.campaignId,campaignGenerationId:input.campaignGenerationId,campaignName:input.campaignName,workspacePath:input.workspacePath,campaignDirectoryEntryPath:input.campaignDirectoryEntryPath,mode:'LITE'},phase:{sequence:input.sequence,id:'phase-'+input.sequence,revision:1,status:input.status},executor:{type:input.executorType,lineage:input.executorLineage},authority:input.authority,source:{sha256:input.sourceSha256,...input.source},startedAt:input.now,updatedAt:input.now,sealedAt:null,inputs:input.inputs??[],evidence:input.evidence??[],outputs:input.outputs??[],globalControls:input.globalControls??{},obligations:{due:[],created:[],closed:[],carriedForward:[],...(input.obligations??{})},invalidation:{status:'NO_MATERIAL_CHANGE',events:[]},automation:[],validation:input.validation??{status:'PENDING',failures:[]},handoff:input.handoff??{required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:null,sameReviewer:false,status:'NOT_APPLICABLE'},errors:[]};}
 `;
   write(path.join(root,'packages/controller-core/src/lite-phase-receipt-v1.mjs'),receiptStub);
 
@@ -58,13 +59,15 @@ export function createLitePhaseReceiptV1(input){return {schemaVersion:'curveyiel
   const formRel=campaign+'/work/phase-01/PHASE_01_WORK_FORM_v1.json';
   const reportRel=campaign+'/work/phase-01/PHASE_01_FINAL_REPORT_v1.md';
   const packetRel=campaign+'/submissions/PHASE_01_WORK_PACKET_v1.json';
-  writeJson(path.join(root,formRel),{schemaVersion:'curveyield-lite-phase-work-form-v1',phase:1,actions:{'step-1':{section:'Step 1 Input — Analyze',outputs:{analysis:'<REQUIRED>'}}}});
+  const initialForm={schemaVersion:'curveyield-lite-phase-work-form-v1',phase:1,automationInputs:{predecessorReceiptPath:predecessorRel,derivedInputPaths:[],controllerOwnedAutomationInputs:['predecessorReceiptPath','derivedInputPaths']},actions:{'step-1':{section:'Step 1 Input — Analyze',outputs:{analysis:'<REQUIRED>'}}}};
+  const prefillDigest=refreshControllerPrefillDigest(initialForm);
+  writeJson(path.join(root,formRel),initialForm);
   // Packet and final report are intentionally absent: controller automation owns both.
   writeJson(path.join(root,dirRel),{
     schemaVersion:'curveyield-audit-campaign-directory-entry-v2',campaignId:'demo-r1',campaignGenerationId:'demo-r1-g1',campaignName:'Demo',workspacePath:campaign,mode:'LITE',sourceSha256:source,lastSealedReceiptPath:predecessorRel,campaignStatus:'ACTIVE',
-    currentAssignment:{phaseSequence:1,phaseId:'phase-1',reviewer:'reviewer-1',status:'ACTIVE',workSchemaPath:authority+'/phases/phase-1/PHASE_01_SCHEMA_v1.json',workFormPath:formRel,finalReportPath:reportRel,packetPath:packetRel,predecessorReceiptPath:predecessorRel,derivedInputPaths:[]},updatedAt:'2026-09-28T00:00:00Z'
+    currentAssignment:{phaseSequence:1,phaseId:'phase-1',reviewer:'reviewer-1',status:'ACTIVE',workSchemaPath:authority+'/phases/phase-1/PHASE_01_SCHEMA_v1.json',workFormPath:formRel,finalReportPath:reportRel,packetPath:packetRel,predecessorReceiptPath:predecessorRel,derivedInputPaths:[],controllerPrefillDigestSha256:prefillDigest},updatedAt:'2026-09-28T00:00:00Z'
   });
-  return {root,campaign,dirRel,formRel,reportRel,packetRel};
+  return {root,campaign,dirRel,formRel,reportRel,packetRel,authority};
 }
 
 function run(f){
@@ -112,4 +115,75 @@ test('repaired semantic work PASS auto-regenerates packet/report, bookkeeps once
   assert.match(fs.readFileSync(path.join(f.root,f.reportRel),'utf8'),/CONTROLLER-GENERATED/);
   const graph=readJson(path.join(f.root,f.campaign,'controller/SECURITY_TRACEABILITY_GRAPH_v1.json'));
   assert.equal(graph.controllerImports.length,1);
+});
+
+
+test('assignment-backed digest rejects tampered controller input even if reviewer recomputes local digest',()=>{
+  const f=fixture();
+  const form=readJson(path.join(f.root,f.formRel));
+  form.automationInputs.derivedInputPaths=['campaigns/demo/derived/forged.json'];
+  refreshControllerPrefillDigest(form);
+  form.actions['step-1'].outputs.analysis='Complete semantic work.';
+  writeJson(path.join(f.root,f.formRel),form);
+  const result=run(f);
+  assert.equal(result.status,'NEEDS_REWORK');
+  assert.match(result.feedbackText,/controller-prefill digest does not match the controller-owned assignment digest|Controller-prefilled\/read-only fields were modified/);
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v1.json')),false);
+});
+
+
+test('accepted due-obligation disposition updates ledger and sealed receipt consistently',()=>{
+  const f=fixture();
+  const schemaPath=path.join(f.root,f.authority,'phases/phase-1/PHASE_01_SCHEMA_v1.json');
+  const schema=readJson(schemaPath);
+  schema.actions['step-1'].fields.push({
+    name:'obligationDispositions',
+    type:'REQUIRED_RECORD_LIST',
+    consumers:['controller-bookkeeping'],
+    itemRequiredFields:['obligationId','requiredAction','completionCondition','disposition','rationale','evidenceRefs','carryForwardPhaseOrNone'],
+    itemFieldAllowedValues:{disposition:['SATISFIED','CARRY_FORWARD','BLOCKED_CARRIED','NOT_APPLICABLE'],carryForwardPhaseOrNone:['NONE_IDENTIFIED','4','6']}
+  });
+  schema.bookkeepingMappings.obligationRecordPaths=['actions.step-1.outputs.obligationDispositions'];
+  writeJson(schemaPath,schema);
+
+  const ledgerPath=path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json');
+  const obligation={
+    obligationId:'OBL-P1-CONTEXT-001',originPhase:'0',originatingFactIds:[],originatingEvidenceRefs:['e0'],
+    requiredPhase:'1',requiredReviewer:'reviewer-1',requiredAction:'Interpret Phase-0 evidence',
+    completionCondition:'Record semantic disposition',mandatory:true,status:'OPEN',statusReason:null,
+    closureEvidenceRefs:[],supersedesOrReplaces:[],createdAt:'2026-09-29T00:00:00Z',updatedAt:'2026-09-29T00:00:00Z'
+  };
+  writeJson(ledgerPath,{obligations:[obligation],phaseCheckpoints:[]});
+
+  const form=readJson(path.join(f.root,f.formRel));
+  form.actions['step-1'].outputs.analysis='Substantive Phase-1 analysis complete.';
+  form.actions['step-1'].outputs.obligationDispositions=[{
+    obligationId:obligation.obligationId,
+    requiredAction:obligation.requiredAction,
+    completionCondition:obligation.completionCondition,
+    disposition:'SATISFIED',
+    rationale:'Phase-1 semantic review completed the obligation.',
+    evidenceRefs:['work/phase-01/PHASE_01_WORK_FORM_v1.json'],
+    carryForwardPhaseOrNone:'NONE_IDENTIFIED',
+    automationOwnedFields:['obligationId','requiredAction','completionCondition']
+  }];
+  form.automationInputs.expectedDueObligationIds=[obligation.obligationId];
+  form.automationInputs.controllerOwnedAutomationInputs=[
+    ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+    'expectedDueObligationIds'
+  ];
+  const digest=refreshControllerPrefillDigest(form);
+  writeJson(path.join(f.root,f.formRel),form);
+  const directory=readJson(path.join(f.root,f.dirRel));
+  directory.currentAssignment.controllerPrefillDigestSha256=digest;
+  writeJson(path.join(f.root,f.dirRel),directory);
+
+  const result=run(f);
+  assert.equal(result.status,'PASS');
+  const ledger=readJson(ledgerPath);
+  assert.equal(ledger.obligations[0].status,'SATISFIED');
+  assert.ok(ledger.obligations[0].closureEvidenceRefs.some(x=>x.includes('PHASE_01_CANONICAL_DATA_v1.json')));
+  const receipt=readJson(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v1.json'));
+  assert.equal(receipt.obligations.due[0].obligationId,obligation.obligationId);
+  assert.equal(receipt.obligations.closed[0].obligationId,obligation.obligationId);
 });

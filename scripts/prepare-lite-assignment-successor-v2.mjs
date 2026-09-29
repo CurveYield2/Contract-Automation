@@ -14,7 +14,11 @@ const assignment=directory.currentAssignment;
 if(!assignment||assignment.status!=='WAITING_FOR_SUCCESSOR_AGENT') throw new Error('current assignment is not waiting for successor');
 requiredFile(root,assignment.workSchemaPath,'incoming phase schema');
 requiredFile(root,assignment.workFormPath,'incoming phase work form');
-if(assignment.finalReportPath) requiredFile(root,assignment.finalReportPath,'incoming phase final report');
+if(assignment.finalReportPath){
+  const expectedPrefix=directory.workspacePath.replace(/\/+$/,'')+'/work/phase-'+String(assignment.phaseSequence).padStart(2,'0')+'/';
+  if(!assignment.finalReportPath.startsWith(expectedPrefix)) throw new Error('incoming phase final report path is outside the assigned phase work directory');
+  if(fs.existsSync(repoFile(root,assignment.finalReportPath))) throw new Error('incoming phase final report must not exist before reviewer semantic work; controller owns report generation at validation time');
+}
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'sealed predecessor receipt'));
 if(!['SEALED','SKIPPED'].includes(predecessor.phase?.status)) throw new Error('predecessor receipt is not sealed/skipped');
 const authorityUrl='https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority';
@@ -29,10 +33,10 @@ const lines=[
   'Predecessor sealed receipt: '+assignment.predecessorReceiptPath,
   'Phase schema: '+assignment.workSchemaPath,
   'Phase work form: '+assignment.workFormPath,
-  'Phase final report: '+(assignment.finalReportPath??'NONE_AUTOMATION_ONLY'),
-  'Phase packet submission path: '+assignment.packetPath,
+  'Controller-owned phase final report path: '+(assignment.finalReportPath??'NONE_AUTOMATION_ONLY'),
+  'Controller-owned phase packet path: '+assignment.packetPath,
   'Automation-derived input files: '+(assignment.derivedInputPaths.length?assignment.derivedInputPaths.join(', '):'NONE'),
-  'Use the GitHub connector app. Perform only the assigned phase. Every agent action must fill its schema-defined Step X Input fields while the action is performed. Do not perform controller bookkeeping. At phase end submit the Phase Work Packet and wait for CONTROLLER_PHASE_PASS before advancing or retiring.'
+  'Use the GitHub connector app. Perform only the assigned phase. Every agent action must fill its schema-defined Step X Input fields while the action is performed. Preserve controller-prefilled/read-only data. Do not create or edit the Phase Work Packet or phase final report and do not perform controller bookkeeping. At phase end invoke controller validation; repair only exact substantive deficiencies and wait for CONTROLLER_PHASE_PASS before advancing or retiring.'
 ];
 const wakeMessage=lines.join('\n');
 process.stdout.write(JSON.stringify({status:'PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,directoryPath:a['campaign-directory-path'],incomingPhaseId:assignment.phaseId,incomingPhaseSequence:assignment.phaseSequence,incomingReviewer:assignment.reviewer,wakeMessage,wakeMessageB64:Buffer.from(wakeMessage).toString('base64')})+'\n');

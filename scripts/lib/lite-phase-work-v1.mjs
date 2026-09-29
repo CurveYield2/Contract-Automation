@@ -86,7 +86,7 @@ export function preparePhaseWork({root,campaignPath,authorityRoot,sequence,revie
   form=applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths,predecessorReceiptPath,prefillContext});
   writeJson(repoFile(root,formRel),form);
   const reportRel=schema.finalReport?fullCampaignPath(campaignPath,schema.finalReport.campaignPath):null;
-  return {phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer,status,workSchemaPath:schemaRel,workFormPath:formRel,finalReportPath:reportRel,packetPath:fullCampaignPath(campaignPath,schema.submission.packetPath),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths]};
+  return {phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer,status,workSchemaPath:schemaRel,workFormPath:formRel,finalReportPath:reportRel,packetPath:fullCampaignPath(campaignPath,schema.submission.packetPath),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths],controllerPrefillDigestSha256:form?.automationInputs?.controllerPrefillDigestSha256??null};
 }
 export function ensurePacketShape({packet,directory,assignment}){
   const deficiencies=[];

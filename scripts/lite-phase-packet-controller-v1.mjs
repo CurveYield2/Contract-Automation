@@ -8,12 +8,14 @@ import {
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-phase-work-v1.mjs';
 import {
-  executePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1
+  executePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
+  validateTargetExecutionRequestBindingV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
   buildControllerPacket,renderControllerPhaseReport,validatePhaseScaffold,
   phase4CoverageFromForm,materializeValidatedFindings,resolveTargetExecutionRequestRef,
-  populatePhase9RerunEvidenceRefs
+  populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
+  normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -39,6 +41,21 @@ function assignCanonicalIds(canonical,graph,phase){
   }
 }
 function importedRecords(canonical,paths){return (paths??[]).map(p=>({path:p,value:getByPath(canonical,p)}));}
+function receiptObligationSummary({ledger,canonical,form,sequence,now}){
+  const all=ledger?.obligations??[];
+  const byId=new Map(all.map(o=>[String(o?.obligationId??''),o]).filter(([id])=>id));
+  const dueIds=form?.automationInputs?.expectedDueObligationIds??[];
+  const rows=[];
+  for(const action of Object.values(canonical?.actions??{})){
+    const value=action?.outputs?.obligationDispositions;
+    if(Array.isArray(value)) rows.push(...value.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)));
+  }
+  const created=all.filter(o=>String(o.originPhase??'')===String(sequence)&&o.createdAt===now);
+  const closed=rows.filter(r=>['SATISFIED','NOT_APPLICABLE'].includes(String(r.disposition??''))).map(r=>byId.get(String(r.obligationId))??r);
+  const carriedForward=rows.filter(r=>['CARRY_FORWARD','BLOCKED_CARRIED'].includes(String(r.disposition??''))).map(r=>byId.get(String(r.obligationId))??r);
+  const due=dueIds.map(id=>byId.get(String(id))??{obligationId:id,status:'UNRESOLVED_LEDGER_REFERENCE'});
+  return {due,created,closed,carriedForward};
+}
 function syncControls({root,campaignPath,schema,canonical,canonicalRel,now}){
   const controlDir=path.posix.join(campaignPath,'controller');
   const graphRel=path.posix.join(controlDir,'SECURITY_TRACEABILITY_GRAPH_v1.json');
@@ -49,9 +66,16 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now}){
   const invalid=readJson(requiredFile(root,invalidRel,'invalidation matrix'));
   assignCanonicalIds(canonical,graph,schema.phase);
   graph.controllerImports??=[]; ledger.controllerImports??=[]; invalid.controllerImports??=[];
-  graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:importedRecords(canonical,schema.bookkeepingMappings?.graphRecordPaths),importedAt:now});
-  ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:importedRecords(canonical,schema.bookkeepingMappings?.obligationRecordPaths),importedAt:now});
-  invalid.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:importedRecords(canonical,schema.bookkeepingMappings?.invalidationRecordPaths),importedAt:now});
+  const graphRecords=importedRecords(canonical,schema.bookkeepingMappings?.graphRecordPaths);
+  const obligationRecords=importedRecords(canonical,schema.bookkeepingMappings?.obligationRecordPaths);
+  const invalidationRecords=importedRecords(canonical,schema.bookkeepingMappings?.invalidationRecordPaths);
+  graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:graphRecords,importedAt:now});
+  ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:obligationRecords,importedAt:now});
+  invalid.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:invalidationRecords,importedAt:now});
+
+  for(const record of obligationRecords){
+    normalizeFormalObligationsIntoLedger({ledger,items:record.value,originPhase:schema.phase,canonicalRel,now});
+  }
 
   const identityComparison=canonical?.automationInputs?.identityComparison;
   if(identityComparison){
@@ -65,9 +89,11 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now}){
     if(registry){
       graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry',value:{path:domainRegistryPath,decisions:registry.decisions??[]}}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
       ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry.generatedObligations',value:registry.generatedObligations??[]}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
+      normalizeFormalObligationsIntoLedger({ledger,items:registry.generatedObligations??[],originPhase:schema.phase,canonicalRel,now});
     }
   }
 
+  applyObligationDispositionsToLedger({ledger,canonical,sequence:schema.phase,canonicalRel,now});
   writeJson(repoFile(root,graphRel),graph);writeJson(repoFile(root,ledgerRel),ledger);writeJson(repoFile(root,invalidRel),invalid);
   return {graphRel,ledgerRel,invalidRel};
 }
@@ -81,6 +107,7 @@ function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRe
 function uniqueExisting(root,rels){return [...new Set(rels.filter(Boolean))].filter(rel=>Boolean(maybeFile(root,rel)));}
 function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const derived=(phase,name)=>path.posix.join(campaignPath,`derived/phase-${phase}/${name}`);
+  const buildIdentity=path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
   const deploy=path.posix.join(campaignPath,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
   const targets=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
   const remediation=path.posix.join(campaignPath,'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md');
@@ -91,9 +118,10 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const p5=derived(5,'PHASE6_INPUT_v1.json');
   const p6=derived(6,'PHASE8_INPUT_v1.json');
   const p8Remediation=derived(8,'PHASE9_REMEDIATION_INPUT_v1.json');
+  if(target===4) return uniqueExisting(root,[p2,p3]);
   if(target===5) return uniqueExisting(root,[p2,p3,p4]);
-  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,deploy,targets]);
-  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,deploy,targets]);
+  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,buildIdentity,deploy,targets]);
+  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,buildIdentity,deploy,targets]);
   if(target===9) return uniqueExisting(root,[p8Remediation,remediation]);
   if(target===10) return uniqueExisting(root,[finalIndex]);
   return uniqueExisting(root,immediate);
@@ -162,6 +190,73 @@ function finalizeRemediationDeltaRows(deltaRows,canonical9){
     };
   });
 }
+function explicitNegativeValue(v){
+  return ['NONE_IDENTIFIED','NOT_APPLICABLE','NOT_TRIGGERED','NO_CANDIDATE','NO_REMEDIATION','NO_ADDITIONAL_OBLIGATION','NO_CONTRADICTION'].includes(String(v??''));
+}
+function collectCarriedLimitations({root,campaignPath,maxPhase=9}){
+  const rows=[];
+  for(let phase=1;phase<=maxPhase;phase++){
+    if(phase===7) continue;
+    const canonical=canonicalFor(root,campaignPath,phase);
+    if(!canonical) continue;
+    for(const [stepKey,action] of Object.entries(canonical.actions??{})){
+      for(const [fieldName,value] of Object.entries(action?.outputs??{})){
+        if(!/(limitation|ambigu|unresolved|uncert)/i.test(fieldName)) continue;
+        const values=Array.isArray(value)?value:[value];
+        for(const item of values){
+          if(item===undefined||item===null||explicitNegativeValue(item)) continue;
+          rows.push(`Phase ${phase} ${stepKey}.${fieldName}: ${typeof item==='string'?item:JSON.stringify(item)}`);
+        }
+      }
+    }
+    for(const [fieldName,value] of Object.entries(canonical.automationOutputs??{})){
+      if(!/(limitation|ambigu|unresolved|uncert)/i.test(fieldName)) continue;
+      const values=Array.isArray(value)?value:[value];
+      for(const item of values){
+        if(item===undefined||item===null||explicitNegativeValue(item)) continue;
+        rows.push(`Phase ${phase} automationOutputs.${fieldName}: ${typeof item==='string'?item:JSON.stringify(item)}`);
+      }
+    }
+  }
+  return [...new Set(rows)];
+}
+function importedFormalObligations(ledger){
+  const out=[];let fallback=1;
+  for(const entry of ledger?.controllerImports??[]){
+    for(const record of entry?.records??[]){
+      const values=Array.isArray(record?.value)?record.value:[record?.value];
+      for(const item of values){
+        if(!item||typeof item!=='object'||Array.isArray(item)) continue;
+        if(item.requiredPhase===undefined||!item.requiredAction||!item.completionCondition) continue;
+        const rawId=item.obligationId??item.canonicalId??item.tempKey??`AUTO-${String(fallback++).padStart(3,'0')}`;
+        const importedId=String(rawId).startsWith('OBL-')
+          ? String(rawId)
+          : 'OBL-P'+String(entry.phase??'X')+'-'+String(rawId).replace(/[^A-Za-z0-9._-]+/g,'_');
+        out.push({
+          obligationId:importedId,
+          status:item.status??'OPEN_IMPORTED',
+          originatingEvidenceRefs:item.originatingEvidenceRefs??[entry.canonicalDataPath].filter(Boolean),
+          statusReason:item.statusReason??`${record.path} imported after Phase ${entry.phase}`,
+          requiredPhase:String(item.requiredPhase),
+          requiredAction:item.requiredAction,
+          completionCondition:item.completionCondition
+        });
+      }
+    }
+  }
+  return out;
+}
+function finalIndexObligations(ledger){
+  const normalized=(ledger?.obligations??[]).filter(o=>!['CLOSED','SATISFIED','NOT_APPLICABLE','SUPERSEDED'].includes(String(o.status??'OPEN').toUpperCase()));
+  const imported=importedFormalObligations(ledger);
+  const byId=new Map();
+  for(const o of [...normalized,...imported]){
+    const id=String(o.obligationId??'').trim(); if(!id) continue;
+    if(!byId.has(id)||String(byId.get(id)?.status??'').startsWith('OPEN_IMPORTED')) byId.set(id,o);
+  }
+  return [...byId.values()];
+}
+
 function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
   const p6=canonicalFor(root,campaignPath,6); const p8=canonicalFor(root,campaignPath,8); const p9=canonicalFor(root,campaignPath,9);
   const build=maybeJson(root,path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'))??{};
@@ -188,9 +283,15 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
     };
   });
   const findings=[...candidateRows,...findingRows];
-  const obligations=(ledger.obligations??[]).filter(o=>String(o.status??'OPEN').toUpperCase()!=='CLOSED').map(o=>({
-    id:o.obligationId,disposition:o.status??'OPEN',severityOrStatus:'OBLIGATION',evidence:(o.originatingEvidenceRefs??[]).join(', '),remediationStatus:'NOT_APPLICABLE',residualLimitation:o.statusReason??'OPEN'
+  const obligations=finalIndexObligations(ledger).map(o=>({
+    id:o.obligationId,
+    disposition:o.status??'OPEN',
+    severityOrStatus:'OBLIGATION',
+    evidence:(o.originatingEvidenceRefs??[]).join(', '),
+    remediationStatus:'NOT_APPLICABLE',
+    residualLimitation:[o.statusReason,o.requiredPhase?('requiredPhase='+o.requiredPhase):null,o.requiredAction].filter(Boolean).join(' | ')||'OPEN'
   }));
+  const limitations=collectCarriedLimitations({root,campaignPath,maxPhase:9});
   const omissions=phaseOutput(p6,'step-3','fullOnlyOmissions')??phaseOutput(p6,'step-4','fullOnlyOmissions')??[];
   return {
     identity:{
@@ -207,7 +308,7 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
       {milestone:'Merged Lite Phase 6–7',requiredEvidence:'deploy/config, deterministic candidate simulation, targeted fuzz, interpretation',reference:'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md + work/phase-06/LITE_TARGETED_TEST_MATRIX.md + accepted Phase-6 canonical data',sourceIdentity:directory.sourceSha256,status:'COMPLETE',limitation:(phaseOutput(p6,'step-3','typedExecutionLimitations')??phaseOutput(p6,'step-4','typedExecutionLimitations')??[]).join('; ')||'NONE_IDENTIFIED'},
       {milestone:'Combined Phase 8–10',requiredEvidence:'validation, remediation/skip, final reconciliation',reference:p9?'accepted Phase-8 and Phase-9 canonical data':'accepted Phase-8 canonical data + Phase-9 skip receipt',sourceIdentity:directory.sourceSha256,status:'READY_FOR_PHASE10',limitation:'SEE_FINDINGS_AND_OBLIGATIONS'}
     ],
-    findings,obligations,omissions
+    findings,obligations,limitations,omissions
   };
 }
 
@@ -235,27 +336,88 @@ let deficiencies=ensurePacketShape({packet,directory,assignment});
 let form=null;
 try{
   form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
-  if(sequence===9){
-    deficiencies.push(...populatePhase9RerunEvidenceRefs({root,campaignPath,form}));
-    writeJson(repoFile(root,assignment.workFormPath),form);
-  }
-  deficiencies.push(...validateWorkForm(schema,form));
-  deficiencies.push(...validatePhaseScaffold(sequence,form));
-}catch(e){deficiencies.push(String(e.message||e));}
 
-if(sequence===5&&form){
-  const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
-  for(const target of targets){
-    if(!target||typeof target!=='object'||target.executionMethod==='NOT_APPLICABLE') continue;
-    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
-    if(resolved){
-      target.executionRequestRef=resolved;
-      target.automationResolvedExecutionRequest=true;
+  // v10.3 stores the authoritative prefill digest outside the reviewer-editable
+  // form. Older active assignments are migrated once from the pre-existing form
+  // digest so in-flight v10.2 campaigns remain resumable.
+  if(!assignment.controllerPrefillDigestSha256){
+    const legacyDigest=form?.automationInputs?.controllerPrefillDigestSha256;
+    if(typeof legacyDigest!=='string'||!/^[0-9a-f]{64}$/.test(legacyDigest)){
+      deficiencies.push('Controller-owned assignment prefill digest is missing and no valid legacy form digest is available for one-time migration.');
     }else{
-      deficiencies.push('Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+' has no deterministically resolvable execution request. Provide executionRequestRef only for this target or materialize the conventional request path.');
+      assignment.controllerPrefillDigestSha256=legacyDigest;
+      assignment.controllerPrefillDigestMigration='BOUND_FROM_LEGACY_FORM_DIGEST';
     }
   }
-  if(!deficiencies.length) writeJson(repoFile(root,assignment.workFormPath),form);
+
+  deficiencies.push(...validateWorkForm(schema,form));
+  deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+
+  if(sequence===9&&deficiencies.length===0){
+    const collectionDeficiencies=populatePhase9RerunEvidenceRefs({root,campaignPath,form});
+    deficiencies.push(...collectionDeficiencies);
+    if(collectionDeficiencies.length===0){
+      assignment.controllerPrefillDigestSha256=form.automationInputs.controllerPrefillDigestSha256;
+      writeJson(repoFile(root,assignment.workFormPath),form);
+      deficiencies.push(...validateWorkForm(schema,form));
+      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+    }
+  }
+}catch(e){deficiencies.push(String(e.message||e));}
+
+if(sequence===5&&form&&deficiencies.length===0){
+  const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
+  for(const target of targets){
+    if(!target||typeof target!=='object') continue;
+    const method=String(target.executionMethod??'').toUpperCase();
+    if(method==='NOT_APPLICABLE'){
+      target.executionRequestRef='NOT_APPLICABLE';
+      target.automationResolvedExecutionRequest=false;
+      target.requestBindingStatus='NOT_APPLICABLE';
+      target.requestBindingEvidenceRef='NOT_APPLICABLE';
+      target.automationOwnedFields=[...new Set([
+        ...(target.automationOwnedFields??[]),
+        'executionRequestRef','automationResolvedExecutionRequest','requestBindingStatus','requestBindingEvidenceRef'
+      ])];
+      continue;
+    }
+    const explicitBeforeResolve=typeof target.executionRequestRef==='string'
+      && !target.executionRequestRef.startsWith('<')
+      && target.executionRequestRef!=='NOT_APPLICABLE';
+    const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
+    if(!resolved){
+      deficiencies.push('Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+' has no deterministically resolvable execution request. Materialize the exact trusted V7 request at a conventional campaign request path or provide a campaign-relative executionRequestRef only for this target.');
+      continue;
+    }
+    target.executionRequestRef=resolved;
+    target.automationResolvedExecutionRequest=!explicitBeforeResolve;
+
+    const binding=validateTargetExecutionRequestBindingV1({
+      controllerRoot:root,
+      campaignPath,
+      target,
+      expectedCampaignId:directory.campaignId,
+      expectedSourceSha256:directory.sourceSha256
+    });
+    target.requestBindingStatus=binding.status;
+    target.requestBindingEvidenceRef=binding.requestRef??resolved;
+    target.automationOwnedFields=[...new Set([
+      ...(target.automationOwnedFields??[]),
+      'executionRequestRef','automationResolvedExecutionRequest','requestBindingStatus','requestBindingEvidenceRef'
+    ])];
+    if(!String(binding.status).startsWith('PASS_')){
+      deficiencies.push(
+        'Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+
+        ' execution request is not structurally bound to the accepted target/source: '+
+        String(binding.status)+' — '+(binding.reasons??[]).join('; ')
+      );
+    }
+  }
+  if(!deficiencies.length){
+    assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
+    writeJson(repoFile(root,assignment.workFormPath),form);
+    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+  }
 }
 
 if(deficiencies.length){
@@ -289,12 +451,12 @@ if(sequence===8){
 if(sequence===10){
   const p6=canonicalFor(root,campaignPath,6);
   const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
-  const open=(ledger.obligations??[]).filter(o=>String(o.status??'OPEN').toUpperCase()!=='CLOSED');
-  const phase6Limits=phaseOutput(p6,'step-3','typedExecutionLimitations')??[];
+  const open=finalIndexObligations(ledger);
+  const carriedLimitations=collectCarriedLimitations({root,campaignPath,maxPhase:9});
   const omissions=phaseOutput(p6,'step-3','fullOnlyOmissions')??[];
   canonical.automationOutputs.residualLimitations=[
-    ...phase6Limits.filter(x=>String(x)!=='NONE_IDENTIFIED'),
-    ...open.map(o=>o.statusReason??o.obligationId).filter(Boolean)
+    ...carriedLimitations,
+    ...open.map(o=>[o.obligationId,o.statusReason,o.requiredAction].filter(Boolean).join(' | ')).filter(Boolean)
   ];
   if(!canonical.automationOutputs.residualLimitations.length) canonical.automationOutputs.residualLimitations=['NONE_IDENTIFIED'];
   canonical.automationOutputs.unresolvedSubstantiveQuestions=open.length?open.map(o=>o.obligationId??o.statusReason??'OPEN_OBLIGATION'):['NONE_IDENTIFIED'];
@@ -319,7 +481,13 @@ const boundaryArtifactRels=[];
 let successorPrefillContext={};
 if(sequence===5){
   const targetDesigns=phaseOutput(canonical,'step-3','targetDesigns')??[];
-  const executionResults=await executePhase5TargetsV1({controllerRoot:root,campaignPath,targetDesigns});
+  const executionResults=await executePhase5TargetsV1({
+    controllerRoot:root,
+    campaignPath,
+    targetDesigns,
+    expectedCampaignId:directory.campaignId,
+    expectedSourceSha256:directory.sourceSha256
+  });
   successorPrefillContext={targetDesigns,phase5ExecutionResults:executionResults};
   const targetMatrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
   fs.mkdirSync(path.dirname(repoFile(root,targetMatrixRel)),{recursive:true});
@@ -376,6 +544,7 @@ if(sequence===9){nextSequence=10;}
 if(sequence===10){handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:null,sameReviewer:false,status:'NOT_APPLICABLE'};}
 if(nextSequence!==null) nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:nextSequence,immediate:[...derivedRels,...boundaryArtifactRels]});
 
+const ledgerAfter=maybeJson(root,controls.ledgerRel)??{};
 const receipt=receiptLib.createLitePhaseReceiptV1({
   campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,
   workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence,executorType:'AI_REVIEWER',executorLineage:assignment.reviewer,
@@ -383,6 +552,7 @@ const receipt=receiptLib.createLitePhaseReceiptV1({
   inputs:[{role:'PREDECESSOR_RECEIPT',path:assignment.predecessorReceiptPath},{role:'CONTROLLER_GENERATED_PHASE_WORK_PACKET',path:assignment.packetPath}],
   evidence,outputs:evidence,
   globalControls:{securityTraceabilityGraph:path.posix.relative(campaignPath,controls.graphRel),carriedForwardObligationLedger:path.posix.relative(campaignPath,controls.ledgerRel),evidenceInvalidationMatrix:path.posix.relative(campaignPath,controls.invalidRel),sourceIntelligenceBundle:predecessor.globalControls?.sourceIntelligenceBundle??null},
+  obligations:receiptObligationSummary({ledger:ledgerAfter,canonical,form,sequence,now}),
   validation:{status:'PASS',validatedAt:now,failures:[]},handoff,now
 });
 receipt.sealedAt=now;receipt.updatedAt=now;

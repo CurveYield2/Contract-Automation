@@ -8,7 +8,10 @@ import {
   phase4CoverageFromForm,
   materializeValidatedFindings,
   renderControllerPhaseReport,
-  populatePhase9RerunEvidenceRefs
+  populatePhase9RerunEvidenceRefs,
+  normalizeFormalObligationsIntoLedger,
+  applyObligationDispositionsToLedger,
+  validatePhaseScaffold
 } from '../../../scripts/lib/lite-phase-prefill-v1.mjs';
 
 const mkdir=p=>fs.mkdirSync(p,{recursive:true});
@@ -180,4 +183,68 @@ test('Phase9 controller fails closed while rerun evidence ingestion is incomplet
   }};
   const deficiencies=populatePhase9RerunEvidenceRefs({root:b.root,campaignPath:b.campaign,form});
   assert.ok(deficiencies.some(x=>x.includes('no durable ingested execution evidence yet')));
+});
+
+
+test('controller prefills exact due obligations and scaffold validation rejects dropped rows',()=>{
+  const b=base();
+  writeJson(path.join(b.root,b.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),{
+    obligations:[{
+      obligationId:'OBL-P1-CONTEXT-001',originPhase:'0',requiredPhase:'1',requiredReviewer:'reviewer-1',
+      requiredAction:'Interpret Phase-0 evidence',completionCondition:'Record semantic disposition',mandatory:true,status:'OPEN',
+      originatingFactIds:[],originatingEvidenceRefs:['e0'],statusReason:null,closureEvidenceRefs:[],supersedesOrReplaces:[],
+      createdAt:'2026-09-29T00:00:00Z',updatedAt:'2026-09-29T00:00:00Z'
+    }]
+  });
+  const form={schemaVersion:'curveyield-lite-phase-work-form-v1',phase:1,actions:{
+    'step-1':{section:'x',outputs:{obligationDispositions:[{obligationId:'<CONTROLLER_PREFILL>'}]}},
+    'step-3':{section:'z',outputs:{dependencyAssessments:['NONE_IDENTIFIED']}}
+  }};
+  const out=applyPhaseBoundaryPrefill({root:b.root,campaignPath:b.campaign,authorityRoot:b.authority,sequence:1,form,derivedInputPaths:[],predecessorReceiptPath:'campaigns/demo/receipts/P0.json'});
+  const rows=out.actions['step-1'].outputs.obligationDispositions;
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].obligationId,'OBL-P1-CONTEXT-001');
+  assert.deepEqual(rows[0].automationOwnedFields,['obligationId','requiredAction','completionCondition']);
+  assert.deepEqual(out.automationInputs.expectedDueObligationIds,['OBL-P1-CONTEXT-001']);
+  const digest=out.automationInputs.controllerPrefillDigestSha256;
+  assert.deepEqual(validatePhaseScaffold(1,out,digest),[]);
+  rows.splice(0,1);
+  assert.ok(validatePhaseScaffold(1,out,digest).some(x=>/Due-obligation disposition rows/.test(x)||/prefilled\/read-only/.test(x)));
+});
+
+test('formal obligations normalize, carry forward, and close on the same stable ledger ID',()=>{
+  const ledger={obligations:[],phaseCheckpoints:[]};
+  normalizeFormalObligationsIntoLedger({
+    ledger,
+    items:[{tempKey:'CUSTOM-001',originFactKeys:['HYP-1'],requiredPhase:'4',requiredAction:'Review attack surface',completionCondition:'Bounded evidence resolves hypothesis'}],
+    originPhase:3,
+    canonicalRel:'campaigns/demo/derived/phase-3/PHASE_03_CANONICAL_DATA_v1.json',
+    now:'2026-09-29T01:00:00Z'
+  });
+  assert.equal(ledger.obligations.length,1);
+  const id=ledger.obligations[0].obligationId;
+  assert.equal(id,'OBL-P3-CUSTOM-001');
+  applyObligationDispositionsToLedger({
+    ledger,
+    canonical:{actions:{'step-3':{outputs:{obligationDispositions:[{
+      obligationId:id,disposition:'CARRY_FORWARD',rationale:'Needs execution',evidenceRefs:['phase4-evidence'],carryForwardPhaseOrNone:'6'
+    }]}}}},
+    sequence:4,
+    canonicalRel:'campaigns/demo/derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json',
+    now:'2026-09-29T02:00:00Z'
+  });
+  assert.equal(ledger.obligations[0].status,'OPEN');
+  assert.equal(ledger.obligations[0].requiredPhase,'6');
+  assert.equal(ledger.obligations[0].requiredReviewer,'reviewer-3L');
+  applyObligationDispositionsToLedger({
+    ledger,
+    canonical:{actions:{'step-3':{outputs:{obligationDispositions:[{
+      obligationId:id,disposition:'SATISFIED',rationale:'Execution resolved it',evidenceRefs:['phase6-evidence'],carryForwardPhaseOrNone:'NONE_IDENTIFIED'
+    }]}}}},
+    sequence:6,
+    canonicalRel:'campaigns/demo/derived/phase-6/PHASE_06_CANONICAL_DATA_v1.json',
+    now:'2026-09-29T03:00:00Z'
+  });
+  assert.equal(ledger.obligations[0].status,'SATISFIED');
+  assert.ok(ledger.obligations[0].closureEvidenceRefs.includes('phase6-evidence'));
 });

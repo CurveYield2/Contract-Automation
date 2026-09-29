@@ -95,9 +95,10 @@ test('fresh assignment wake names schema form report and packet instead of an ac
   const orch=read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
   assert.match(script,/Phase schema:/);
   assert.match(script,/Phase work form:/);
-  assert.match(script,/Phase final report:/);
-  assert.match(script,/Phase packet submission path:/);
+  assert.match(script,/Controller-owned phase final report path:/);
+  assert.match(script,/Controller-owned phase packet path:/);
   assert.match(script,/wait for CONTROLLER_PHASE_PASS/);
+  assert.match(script,/Do not create or edit the Phase Work Packet or phase final report/);
   assert.match(orch,/prepare-lite-assignment-successor-v2\.mjs/);
 });
 
