@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
+  "campaignId": "curveyield-dex-fresh-audit-package-2026-08-16-r1",
+  "mode": "create_fresh",
+  "chatUrl": "",
+  "browserRoutine": "audit-lite-reviewer-v1",
+  "chatgptProject": {
+    "name": "CurveYield_DEX_Fresh_Audit_Package_2026-08-16 r1",
+    "url": ""
+  },
+  "activeChat": {
+    "name": "",
+    "url": ""
+  },
+  "wakeMessage": "",
+  "thinkingEffort": "high",
+  "activeAssignment": {
+    "phaseId": "phase-1",
+    "milestoneId": "PHASE_1_WORK_PACKET",
+    "workerRole": "reviewer",
+    "reviewer": "reviewer-1",
+    "thinkingEffort": "high"
+  },
+  "watchdog": {
+    "enabled": true,
+    "idleMessage": "GET BACK TO WORK",
+    "gate": {
+      "mode": "LITE",
+      "repository": "CurveYield2/Audit-Controller",
+      "ref": "main",
+      "statePath": "Audit Campaign Directory/campaigns/curveyield-dex-fresh-audit-package-2026-08-16.json",
+      "expectedPhaseId": "phase-1",
+      "expectedMilestoneId": "PHASE_1_WORK_PACKET",
+      "activePointerPath": "",
+      "stopStates": [
+        "STOPPED_BY_HUMAN"
+      ],
+      "stopCampaignStatuses": [
+        "COMPLETE",
+        "STOPPED_BY_HUMAN"
+      ]
+    }
+  }
+}
