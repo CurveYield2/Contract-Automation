@@ -55,3 +55,11 @@ test('browser orchestrator launches assignment-v2 reviewers and retains legacy r
   assert.match(orchestrator,/prepare-lite-receipt-successor-v1\.mjs/);
   assert.match(orchestrator,/browser-agent-wake\.yml/);
 });
+
+
+test('reusable Phase-0 intelligence materializes its request from inputs even when caller event is workflow_dispatch',()=>{
+  const workflow=read('.github/workflows/lite-phase0-intelligence-v1.yml');
+  assert.match(workflow,/Materialize workflow-call Phase-0 request\n\s+if: inputs\.campaign_id != ''/);
+  assert.match(workflow,/if \[ -s \.phase0-request\.json \]; then/);
+  assert.doesNotMatch(workflow,/if \[ "\$GITHUB_EVENT_NAME" = "workflow_call" \]; then/);
+});
