@@ -19,6 +19,10 @@ const DEPLOY_SCRIPT_RE=/(?:deploy|deployment|bootstrap|setup|initialize|initiali
 const SAFE_ABI_TYPE_RE=/^(?:u?int(?:8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?|address|bool|string|bytes(?:[1-9]|[12][0-9]|3[0-2])?)(?:\[[0-9]*\])*$/;
 
 function sha256(v){return createHash('sha256').update(v).digest('hex');}
+export function phase0DiscoveredTargetChainIdsV1(readiness={}){
+  const rows=readiness?.deploymentAndConfiguration?.discoveredChainIds??[];
+  return [...new Set(rows.map(x=>Number(x?.chainId)).filter(x=>Number.isInteger(x)&&x>0))].sort((a,b)=>a-b);
+}
 function normalize(v){
   if(typeof v==='bigint')return v.toString();
   if(Array.isArray(v))return v.map(normalize);
@@ -379,6 +383,8 @@ function baselineTargetRows({medusa,telemetry}){
 export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl}){
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/')),buildIdentity=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
   const receipt=JSON.parse(await fs.readFile(path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json'),'utf8'));
+  const readiness=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'utf8'));
+  const targetChainIds=phase0DiscoveredTargetChainIdsV1(readiness);
   const archivePath=receipt.source.archivePath,archiveSha256=receipt.source.sha256,workspace=path.join(path.dirname(outputRoot),'.phase0-simulation-work');
   const staged=await stageExactArchiveSource({checkoutRoot:controllerRoot,workspaceRoot:workspace,archivePath,archiveSha256,projectPath:buildIdentity.discovery.projectPath});
   const cfg=buildIdentity.configurationDetection,pseudo={requestId:`phase0-sim-${receipt.campaign.campaignId}`,requestDigest:sha256(JSON.stringify(buildIdentity)),campaignId:receipt.campaign.campaignId,assignmentId:'phase0-simulation',phaseId:'phase-0',profileId:'github-native-compile-v2',source:{repository:'CurveYield2/Audit-Controller',commit:receipt.source.archiveCommit,projectPath:buildIdentity.discovery.projectPath,archivePath,archiveSha256},configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}};
@@ -386,6 +392,12 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   await fs.rm(outputRoot,{recursive:true,force:true});await fs.mkdir(path.join(outputRoot,'runs'),{recursive:true});
   let anvil;
   try{
+    if(targetChainIds.some(id=>id!==1)){
+      const error=new Error('Phase-0 Anvil-to-Medusa baseline is admitted only for Ethereum chainId=1; campaign readiness discovered target chain IDs: '+targetChainIds.join(','));
+      error.code='PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED';
+      error.targetChainIds=targetChainIds;
+      throw error;
+    }
     anvil=await startAnvil({forkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
     const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
     const detected=await detectDeploymentScripts(staged.projectRoot),deployment=await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],detected});
@@ -402,13 +414,13 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     return{summary,runIndex,deployEvidence};
   }catch(error){
     const nonEthereum=error?.code==='PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED';
-    const typed={type:nonEthereum?'NON_ETHEREUM_FORK_NOT_ADMITTED':'PHASE0_SIMULATION_FAILURE',code:error?.code??'PHASE0_SIMULATION_FAILURE',message:String(error?.message??error),securityEffect:'REQUIRES_PHASE6_INTERPRETATION'};
+    const typed={type:nonEthereum?'NON_ETHEREUM_FORK_NOT_ADMITTED':'PHASE0_SIMULATION_FAILURE',code:error?.code??'PHASE0_SIMULATION_FAILURE',message:String(error?.message??error),targetChainIds:error?.targetChainIds??targetChainIds,securityEffect:'REQUIRES_PHASE6_INTERPRETATION'};
     const limitation={
       schemaVersion:'curveyield-phase0-randomized-simulation-summary-v1',
       status:nonEthereum?'COMPLETE_WITH_TYPED_LIMITATIONS':'BLOCKED',
       code:typed.code,
       message:typed.message,
-      chainLimitation:nonEthereum?'The Anvil-state to Medusa fork path is currently admitted only for the default Ethereum fork profile.':null,
+      chainLimitation:nonEthereum?'The Anvil-state to Medusa fork path is currently admitted only for the default Ethereum fork profile. Discovered target chain IDs: '+(error?.targetChainIds??targetChainIds).join(','):null,
       limitations:[typed],
       medusa:{status:nonEthereum?'NOT_APPLICABLE_NON_ETHEREUM':'BLOCKED',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0},
       telemetry:[],
