@@ -226,18 +226,28 @@ function targetObjects(ethers,artifacts,deployed){
   const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
   return deployed.filter(d=>d.qualifiedName&&byQ.has(d.qualifiedName)).map(d=>{const artifact=byQ.get(d.qualifiedName);return{...d,artifact,functions:mutableFunctions(ethers,artifact),plan:probePlan(ethers,artifact)};}).filter(t=>t.functions.length);
 }
-function pickFn(target,rng){
+function pickFn(target,rng,actionClass){
   const accounting=target.functions.filter(x=>x.accounting),other=target.functions.filter(x=>!x.accounting);
-  const preferred=rng()<PHASE0_ACCOUNTING_ACTION_WEIGHT_V1?accounting:other;
-  const pool=preferred.length?preferred:(accounting.length?accounting:other);return pool[ri(rng,pool.length)];
+  const pool=actionClass==='ACCOUNTING_STATE_CHANGE'?accounting:other;
+  const fallback=pool.length?pool:(accounting.length?accounting:other);return fallback[ri(rng,fallback.length)];
 }
 function buildBurstSchedule(targets,calls,rng){
-  const out=[];let remaining=calls,previous=-1;
-  while(remaining>0){
-    let idx=ri(rng,targets.length);
-    if(targets.length>1&&idx===previous)idx=(idx+1+ri(rng,targets.length-1))%targets.length;
-    const count=Math.min(remaining,20+ri(rng,101));
-    out.push({targetIndex:idx,count});remaining-=count;previous=idx;
+  const out=[];let accountingRemaining=Math.round(calls*PHASE0_ACCOUNTING_ACTION_WEIGHT_V1),otherRemaining=calls-accountingRemaining,previous=-1;
+  const accountingTargets=targets.map((t,i)=>({t,i})).filter(x=>x.t.functions.some(f=>f.accounting));
+  const otherTargets=targets.map((t,i)=>({t,i})).filter(x=>x.t.functions.some(f=>!f.accounting));
+  while(accountingRemaining+otherRemaining>0){
+    let actionClass;
+    if(accountingRemaining===0) actionClass='OTHER_STATE_CHANGE';
+    else if(otherRemaining===0) actionClass='ACCOUNTING_STATE_CHANGE';
+    else actionClass=rng()<(accountingRemaining/(accountingRemaining+otherRemaining))?'ACCOUNTING_STATE_CHANGE':'OTHER_STATE_CHANGE';
+    let pool=actionClass==='ACCOUNTING_STATE_CHANGE'?accountingTargets:otherTargets;
+    if(!pool.length){actionClass=actionClass==='ACCOUNTING_STATE_CHANGE'?'OTHER_STATE_CHANGE':'ACCOUNTING_STATE_CHANGE';pool=actionClass==='ACCOUNTING_STATE_CHANGE'?accountingTargets:otherTargets;}
+    if(!pool.length) break;
+    let choices=pool.filter(x=>x.i!==previous);if(!choices.length) choices=pool;
+    const chosen=choices[ri(rng,choices.length)],budget=actionClass==='ACCOUNTING_STATE_CHANGE'?accountingRemaining:otherRemaining,count=Math.min(budget,20+ri(rng,101));
+    out.push({targetIndex:chosen.i,count,actionClass});
+    if(actionClass==='ACCOUNTING_STATE_CHANGE')accountingRemaining-=count;else otherRemaining-=count;
+    previous=chosen.i;
   }
   return out;
 }
@@ -249,12 +259,12 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
     const runId=`abi-telemetry-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
     const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(`${runId}-phase0-v1`);
     const schedule=buildBurstSchedule(targets,PHASE0_TELEMETRY_CALLS_PER_RUN_V1,rng);
-    const stats={calls:0,accountingActions:0,otherActions:0,successes:0,reverts:0,errors:0,byContract:{},byFunction:{},burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count}))};
+    const stats={calls:0,accountingActions:0,otherActions:0,successes:0,reverts:0,errors:0,byContract:{},byFunction:{},burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))};
     try{
       for(const burst of schedule){
         const target=targets[burst.targetIndex];
         for(let k=0;k<burst.count;k++){
-          const selected=pickFn(target,rng),f=selected.fragment,sender=actors[ri(rng,actors.length)],iface=new ethers.Interface(target.artifact.abi);
+          const selected=pickFn(target,rng,burst.actionClass),f=selected.fragment,sender=actors[ri(rng,actors.length)],iface=new ethers.Interface(target.artifact.abi);
           let args=[],argError=null;try{args=f.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));}catch(e){argError=e;}
           const before=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
           const rec={schemaVersion:'curveyield-phase0-raw-simulation-call-v1',runId,callIndex:stats.calls+1,target:{qualifiedName:target.qualifiedName,address:target.address},sender,functionSignature:selected.signature,actionClass:selected.accounting?'ACCOUNTING_STATE_CHANGE':'OTHER_STATE_CHANGE',decodedInputs:argError?null:normalize(args),abiGenerated:true,rawRandomBytes:false,beforeAccounting:before,transaction:null,error:null,afterAccounting:null,accountingDeltas:{}};
@@ -281,7 +291,7 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
 function solidityType(param){
   const type=String(param.type??'');
   if(!SAFE_ABI_TYPE_RE.test(type)||param.baseType==='tuple')return null;
-  const dynamic=type==='string'||type==='bytes'||/\[\]$/.test(type);
+  const dynamic=type==='string'||type==='bytes'||type.includes('[');
   return dynamic?`${type} calldata`:type;
 }
 function medusaWrappers(ethers,targets){
@@ -292,10 +302,16 @@ function medusaWrappers(ethers,targets){
       const row={target:t,selected:x,types};(x.accounting?accounting:other).push(row);
     }
   }
-  const accCopies=accounting.length?Math.max(1,Math.min(16,Math.ceil((4*Math.max(1,other.length))/accounting.length))):0;
   const rows=[];let id=0;
+  const accCopies=accounting.length?4:0;
   for(const x of accounting)for(let n=0;n<accCopies;n++)rows.push({...x,wrapperName:`p0_acc_${id++}_${n}`});
-  for(const x of other)rows.push({...x,wrapperName:`p0_other_${id++}`});
+  let selectedOther=other;
+  if(accounting.length&&other.length>accounting.length){
+    const step=other.length/accounting.length;
+    selectedOther=Array.from({length:accounting.length},(_,i)=>other[Math.floor(i*step)]);
+    for(const x of other)if(!selectedOther.includes(x))omitted.push({qualifiedName:x.target.qualifiedName,signature:x.selected.signature,reason:'NON_ACCOUNTING_WRAPPER_DOWNSAMPLED_FOR_80_PERCENT_WEIGHT'});
+  }
+  for(const x of selectedOther)rows.push({...x,wrapperName:`p0_other_${id++}`});
   return{rows,omitted,accCopies,accountingWrapperShare:rows.length?rows.filter(x=>x.selected.accounting).length/rows.length:0};
 }
 function renderMedusaRouter(ethers,targets){
