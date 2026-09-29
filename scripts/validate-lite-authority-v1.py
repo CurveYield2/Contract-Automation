@@ -81,6 +81,7 @@ for phase in range(1,11):
         contract=json.loads((phase_dir/"PHASE_CONTRACT.json").read_text())
         template_path=pkg/schema["workForm"]["template"]
         form_template=json.loads(template_path.read_text())
+        start_here=(phase_dir/"START_HERE.md").read_text()
     except Exception as exc:
         errors.append(f"phase-{phase}: failed to load schema/contract/form template: {exc}")
         continue
@@ -91,6 +92,17 @@ for phase in range(1,11):
         errors.append(f"phase-{phase}: contract workSchema mismatch")
     if contract.get("workForm")!=schema.get("workForm",{}).get("campaignPath"):
         errors.append(f"phase-{phase}: contract workForm mismatch")
+    if schema.get("submission",{}).get("packetPath")!=contract.get("submissionPolicy",{}).get("packetPath"):
+        errors.append(f"phase-{phase}: contract/schema packet path mismatch")
+    required_outputs={x.get("artifact"):x for x in contract.get("requiredOutputs",[]) if isinstance(x,dict) and x.get("artifact")}
+    if schema.get("workForm",{}).get("campaignPath") not in required_outputs:
+        errors.append(f"phase-{phase}: contract requiredOutputs missing schema work form")
+    if not schema.get("automationOnly") and schema.get("finalReport",{}).get("campaignPath") not in required_outputs:
+        errors.append(f"phase-{phase}: contract requiredOutputs missing schema final report")
+    if not schema.get("automationOnly"):
+        report_output=required_outputs.get(schema.get("finalReport",{}).get("campaignPath"),{})
+        if report_output.get("producer")!="CONTROLLER":
+            errors.append(f"phase-{phase}: final report requiredOutput producer must be CONTROLLER")
     auth=contract.get("authorization",{})
     if auth.get("activeReceiptExistsDuringAgentWork") is not False:
         errors.append(f"phase-{phase}: activeReceiptExistsDuringAgentWork must be false")
@@ -142,6 +154,14 @@ for phase in range(1,11):
             continue
         if step.get("action")!=action.get("title"):
             errors.append(f"phase-{phase} step {n}: contract action title does not exactly match schema title")
+        expected_start_heading=f"## Step {n} — {action.get('title')}"
+        if expected_start_heading not in start_here:
+            errors.append(f"phase-{phase} step {n}: START_HERE missing exact action heading {expected_start_heading!r}")
+        schema_anchor=f"PHASE_{phase:02d}_SCHEMA_v1.json#actions.{key}"
+        if schema_anchor not in start_here:
+            errors.append(f"phase-{phase} step {n}: START_HERE missing exact schema action reference {schema_anchor}")
+        if schema.get("workForm",{}).get("campaignPath") not in start_here:
+            errors.append(f"phase-{phase} step {n}: START_HERE missing campaign work-form path")
         dest=step.get("outputDestination")
         if not isinstance(dest,dict):
             errors.append(f"phase-{phase} step {n}: outputDestination is mandatory")
@@ -191,6 +211,20 @@ for phase in range(1,11):
             for key_name in action.get("controllerPrefillFields",[])+action.get("controllerCollectedFields",[]):
                 if key_name not in record_item_keys:
                     errors.append(f"phase-{phase} step {n}: action controller-owned field {key_name} is absent from record schema/template")
+        for resource in step.get("resources",[]):
+            if not isinstance(resource,str) or not resource:
+                errors.append(f"phase-{phase} step {n}: invalid empty/non-string resource reference")
+                continue
+            if resource.startswith("campaign:"):
+                continue
+            candidate=(phase_dir/resource).resolve()
+            try:
+                candidate.relative_to(pkg.resolve())
+            except ValueError:
+                errors.append(f"phase-{phase} step {n}: resource escapes authority package: {resource}")
+                continue
+            if not candidate.exists():
+                errors.append(f"phase-{phase} step {n}: missing referenced resource: {resource}")
         if not action.get("fields"):
             errors.append(f"phase-{phase} step {n}: every agent/automation action must produce defined output fields")
 
