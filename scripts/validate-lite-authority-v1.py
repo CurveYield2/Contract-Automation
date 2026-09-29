@@ -104,9 +104,13 @@ for phase in range(1,11):
         if report_output.get("producer")!="CONTROLLER":
             errors.append(f"phase-{phase}: final report requiredOutput producer must be CONTROLLER")
     auth=contract.get("authorization",{})
+    automation_only=bool(schema.get("automationOnly"))
     if auth.get("activeReceiptExistsDuringAgentWork") is not False:
         errors.append(f"phase-{phase}: activeReceiptExistsDuringAgentWork must be false")
-    if auth.get("controllerBookkeepingTiming")!="AFTER_PACKET_VALIDATION_PASS_ONLY":
+    if automation_only:
+        if phase==7 and auth.get("controllerBookkeepingTiming")!="IN_SAME_PHASE6_CONTROLLER_PASS_TRANSACTION":
+            errors.append("phase-7: controllerBookkeepingTiming must bind the automatic marker to the Phase-6 PASS transaction")
+    elif auth.get("controllerBookkeepingTiming")!="AFTER_PACKET_VALIDATION_PASS_ONLY":
         errors.append(f"phase-{phase}: controllerBookkeepingTiming mismatch")
     submission=contract.get("submissionPolicy",{})
     if submission.get("agentCreatesReceipt") is not False or submission.get("agentPerformsBookkeeping") is not False:

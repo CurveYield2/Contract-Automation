@@ -83,7 +83,8 @@ jobs:
           if [ "$directory_schema" = "curveyield-audit-campaign-directory-entry-v2" ]; then
             node scripts/prepare-lite-assignment-successor-v2.mjs \
               --controller-root .audit-controller \
-              --campaign-directory-path "${{ steps.directory.outputs.path }}" | tee /tmp/lite-successor.json
+              --campaign-directory-path "${{ steps.directory.outputs.path }}" \
+              --audit-controller-ref "$AUDIT_CONTROLLER_REF" | tee /tmp/lite-successor.json
             boundary="PHASE_$(jq -r '.incomingPhaseSequence' /tmp/lite-successor.json)_WORK_PACKET"
           else
             node scripts/prepare-lite-receipt-successor-v1.mjs \
