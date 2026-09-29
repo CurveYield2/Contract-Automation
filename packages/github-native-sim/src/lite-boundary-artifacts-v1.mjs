@@ -13,6 +13,60 @@ function safeRel(v){
   if(typeof v!=='string'||!v||v.startsWith('/')||v.includes('\\')||v.split('/').some(p=>!p||p==='.'||p==='..')) return null;
   return v;
 }
+function stableJson(value){
+  if(Array.isArray(value)) return '['+value.map(stableJson).join(',')+']';
+  if(value&&typeof value==='object'){
+    return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+stableJson(value[k])).join(',')+'}';
+  }
+  return JSON.stringify(value);
+}
+
+export function validateTargetExecutionRequestBindingV1({controllerRoot,campaignPath,target,expectedCampaignId=null,expectedSourceSha256=null}={}){
+  const key=String(target?.candidateKey??'').trim();
+  const method=String(target?.executionMethod??'').toUpperCase();
+  if(method==='NOT_APPLICABLE'){
+    const ok=String(target?.reproductionType??'').toUpperCase()==='NOT_APPLICABLE';
+    return {
+      status:ok?'NOT_APPLICABLE':'FAIL_TARGET_NOT_APPLICABLE_MISMATCH',
+      requestRef:'NOT_APPLICABLE',
+      reasons:ok?[]:['executionMethod NOT_APPLICABLE requires reproductionType NOT_APPLICABLE']
+    };
+  }
+  const rel=safeRel(target?.executionRequestRef);
+  if(!rel) return {status:'FAIL_INVALID_EXECUTION_REQUEST_REF',requestRef:null,reasons:['executionRequestRef is missing or unsafe']};
+  const requestAbs=path.join(controllerRoot,...campaignPath.split('/'),...rel.split('/'));
+  if(!fs.existsSync(requestAbs)) return {status:'FAIL_MISSING_EXECUTION_REQUEST',requestRef:rel,reasons:['execution request file does not exist']};
+  let request;
+  try{request=JSON.parse(fs.readFileSync(requestAbs,'utf8'));}catch(error){
+    return {status:'FAIL_INVALID_EXECUTION_REQUEST_JSON',requestRef:rel,reasons:[String(error?.message??error)]};
+  }
+  const reasons=[];
+  if(expectedCampaignId&&request.campaignId!==expectedCampaignId) reasons.push('campaignId mismatch');
+  if(expectedSourceSha256){
+    if(!request?.source?.archiveSha256) reasons.push('request source.archiveSha256 missing');
+    else if(request.source.archiveSha256!==expectedSourceSha256) reasons.push('source archive SHA-256 mismatch');
+  }
+  const reproduction=request?.configuration?.v26?.reproduction;
+  if(!reproduction) reasons.push('configuration.v26.reproduction missing');
+  else{
+    if(reproduction.candidateId!==key) reasons.push('reproduction candidateId mismatch');
+    if(String(reproduction.reproductionType??'')!==String(target?.reproductionType??'')) reasons.push('reproductionType mismatch');
+    if(stableJson(reproduction.expectedObservation)!==stableJson(target?.expectedMachineObservation)) reasons.push('expected machine observation mismatch');
+    const type=String(reproduction.reproductionType??'');
+    if(['FOUNDRY_TEST','MEDUSA_PROPERTY'].includes(type)&&request.phaseId!=='build-and-test') reasons.push('Foundry/Medusa reproduction must use build-and-test');
+    if(type==='ANVIL_WORKFLOW'&&request.phaseId!=='fork-simulation-lifecycle') reasons.push('Anvil reproduction must use fork-simulation-lifecycle');
+  }
+  const harness=request?.configuration?.harness;
+  return {
+    status:reasons.length?'FAIL_STRUCTURAL_REQUEST_TARGET_BINDING':'PASS_STRUCTURAL_BINDING_REQUIRES_PHASE6_SEMANTIC_HARNESS_REVIEW',
+    requestRef:rel,
+    reasons,
+    candidateId:reproduction?.candidateId??null,
+    reproductionType:reproduction?.reproductionType??null,
+    harnessBundleId:harness?.bundleId??null,
+    harnessRecipeId:harness?.recipeId??null
+  };
+}
 function statusText(r){
   if(!r) return 'BLOCKED_NO_MACHINE_RESULT';
   if(r.status) return String(r.status);
@@ -92,15 +146,15 @@ export function renderTargetedTestMatrixV1({targetDesigns=[],executionResults={}
     if(!t||typeof t!=='object') continue;
     const key=t.candidateKey??`TARGET-${i+1}`;
     const r=executionResults[key]??null;
-    rows.push(`| ${md(key)} | ${md([key,t.expectedSecurityProperty].filter(Boolean).join(' — '))} | ${md([t.setup,t.prerequisites].filter(Boolean).join(' / '))} | ${md(t.transactionSequence)} | ${md(t.expectedSecurityProperty)} | ${md(t.oracle)} | ${md(deterministicSummary(r))} | ${md(t.fuzzVariablesAndBounds)} | ${md(`deterministic=${deterministicSummary(r)}; targetedFuzz=${fuzzSummary(r)}; status=${statusText(r)}`)} | ${md(r?.evidenceRef??'NO_MACHINE_EVIDENCE')} |`);
+    rows.push(`| ${md(key)} | ${md([key,t.expectedSecurityProperty].filter(Boolean).join(' — '))} | ${md([t.setup,t.prerequisites].filter(Boolean).join(' / '))} | ${md(t.transactionSequence)} | ${md(t.expectedSecurityProperty)} | ${md(t.oracle)} | ${md(r?.requestBindingStatus??t.requestBindingStatus??'UNVERIFIED')} | ${md(deterministicSummary(r))} | ${md(t.fuzzVariablesAndBounds)} | ${md(`deterministic=${deterministicSummary(r)}; targetedFuzz=${fuzzSummary(r)}; status=${statusText(r)}`)} | ${md(r?.evidenceRef??'NO_MACHINE_EVIDENCE')} |`);
   }
-  if(!rows.length) rows.push('| NO_TARGET | NO_CANDIDATE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NO_CANDIDATE | NO_MACHINE_EVIDENCE |');
+  if(!rows.length) rows.push('| NO_TARGET | NO_CANDIDATE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NO_CANDIDATE | NO_MACHINE_EVIDENCE |');
   return `# Lite Candidate Target Matrix
 
 > **CONTROLLER-POPULATED:** Seeded from accepted Phase-2–5 canonical data and finalized from Phase-5 boundary machine execution. The Phase-6 reviewer consumes the completed matrix and records only semantic interpretation/disposition in the Phase-6 work form. Do not duplicate campaign identity or controller bookkeeping here.
 
-| Target ID | Candidate / property / hypothesis | Exact setup and attacker/actor | AI-guided attacker/exploit sequence | Expected secure outcome | Exploit/failure oracle | Attacker/exploit simulation result | AI-guided targeted fuzz variables/bounds | Result | Evidence |
-|---|---|---|---|---|---|---|---|---|---|
+| Target ID | Candidate / property / hypothesis | Exact setup and attacker/actor | AI-guided attacker/exploit sequence | Expected secure outcome | Exploit/failure oracle | Request/target structural binding | Attacker/exploit simulation result | AI-guided targeted fuzz variables/bounds | Result | Evidence |
+|---|---|---|---|---|---|---|---|---|---|---|
 ${rows.join('\n')}
 
 Rules:
@@ -111,7 +165,7 @@ Rules:
 `;
 }
 
-export async function executePhase5TargetsV1({controllerRoot,campaignPath,targetDesigns=[]}={}){
+export async function executePhase5TargetsV1({controllerRoot,campaignPath,targetDesigns=[],expectedCampaignId=null,expectedSourceSha256=null}={}){
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
   const executionResults={};
   for(const t of arr(targetDesigns)){
@@ -126,16 +180,21 @@ export async function executePhase5TargetsV1({controllerRoot,campaignPath,target
       executionResults[key]={status:'BLOCKED_UNSUPPORTED_EXECUTION_METHOD',evidenceRef:'NO_MACHINE_EVIDENCE'};
       continue;
     }
-    const rel=safeRel(t.executionRequestRef);
-    if(!rel){
-      executionResults[key]={status:'BLOCKED_INVALID_EXECUTION_REQUEST_REF',evidenceRef:'NO_MACHINE_EVIDENCE'};
+    const binding=validateTargetExecutionRequestBindingV1({
+      controllerRoot,campaignPath,target:t,expectedCampaignId,expectedSourceSha256
+    });
+    if(!String(binding.status).startsWith('PASS_')){
+      executionResults[key]={
+        status:'BLOCKED_REQUEST_TARGET_BINDING_MISMATCH',
+        requestBindingStatus:binding.status,
+        requestBindingReasons:binding.reasons,
+        requestBindingEvidenceRef:binding.requestRef??'NO_REQUEST',
+        evidenceRef:binding.requestRef??'NO_MACHINE_EVIDENCE'
+      };
       continue;
     }
+    const rel=binding.requestRef;
     const requestAbs=path.join(campaignRoot,...rel.split('/'));
-    if(!fs.existsSync(requestAbs)){
-      executionResults[key]={status:'BLOCKED_MISSING_EXECUTION_REQUEST',evidenceRef:rel};
-      continue;
-    }
     const evRel=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key));
     const evAbs=path.join(controllerRoot,...evRel.split('/'));
     const workspace=path.join(process.cwd(),'.audit-work','phase5-boundary',safePart(key));
@@ -152,6 +211,9 @@ export async function executePhase5TargetsV1({controllerRoot,campaignPath,target
       status:result.exitCode===0?'PASS':(rawResult?.blocking?'BLOCKED':'INCONCLUSIVE'),
       exitCode:result.exitCode,
       evidenceRef:path.posix.join(evRel,'raw-result.json'),
+      requestBindingStatus:binding.status,
+      requestBindingEvidenceRef:binding.requestRef,
+      requestBindingReasons:binding.reasons,
       rawResult,
       stdout:String(result.stdout??'').slice(-12000),
       stderr:String(result.stderr??'').slice(-12000)
