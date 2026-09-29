@@ -24,9 +24,7 @@ test('only direct single ZIP files on Google Drive or GitHub are accepted', () =
   assert.match(resolve, /Google Drive folder submissions are not accepted/);
   assert.match(resolve, /GitHub folders\/repository archives are not accepted/);
   assert.match(resolve, /GitHub URL must identify one \.zip file/);
-  assert.match(resolve, /https:\/\/api\.github\.com\/repos\/\$gh_owner\/\$gh_repo\/contents\/\$gh_path\?ref=\$gh_ref/);
-  assert.match(resolve, /Authorization: Bearer \$github_token/);
-  assert.match(resolve, /curl --fail --location/);
+  assert.match(resolve, /GH_TOKEN="\$github_token" gh api "repos\/\$gh_owner\/\$gh_repo\/contents\/\$gh_path\?ref=\$gh_ref"/);
   assert.match(resolve, /blob_sha=.*contents\/\$gh_path\?ref=\$gh_ref/);
   assert.match(resolve, /git\/blobs\/\$blob_sha/);
   assert.match(resolve, /base64 -d > "\$work\/source\.download"/);
