@@ -227,8 +227,12 @@ function importedFormalObligations(ledger){
       for(const item of values){
         if(!item||typeof item!=='object'||Array.isArray(item)) continue;
         if(item.requiredPhase===undefined||!item.requiredAction||!item.completionCondition) continue;
+        const rawId=item.obligationId??item.canonicalId??item.tempKey??`AUTO-${String(fallback++).padStart(3,'0')}`;
+        const importedId=String(rawId).startsWith('OBL-')
+          ? String(rawId)
+          : 'OBL-P'+String(entry.phase??'X')+'-'+String(rawId).replace(/[^A-Za-z0-9._-]+/g,'_');
         out.push({
-          obligationId:item.obligationId??item.canonicalId??item.tempKey??`IMPORTED-OBL-${String(fallback++).padStart(3,'0')}`,
+          obligationId:importedId,
           status:item.status??'OPEN_IMPORTED',
           originatingEvidenceRefs:item.originatingEvidenceRefs??[entry.canonicalDataPath].filter(Boolean),
           statusReason:item.statusReason??`${record.path} imported after Phase ${entry.phase}`,
