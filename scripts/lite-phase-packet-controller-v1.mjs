@@ -162,6 +162,69 @@ function finalizeRemediationDeltaRows(deltaRows,canonical9){
     };
   });
 }
+function explicitNegativeValue(v){
+  return ['NONE_IDENTIFIED','NOT_APPLICABLE','NOT_TRIGGERED','NO_CANDIDATE','NO_REMEDIATION','NO_ADDITIONAL_OBLIGATION','NO_CONTRADICTION'].includes(String(v??''));
+}
+function collectCarriedLimitations({root,campaignPath,maxPhase=9}){
+  const rows=[];
+  for(let phase=1;phase<=maxPhase;phase++){
+    if(phase===7) continue;
+    const canonical=canonicalFor(root,campaignPath,phase);
+    if(!canonical) continue;
+    for(const [stepKey,action] of Object.entries(canonical.actions??{})){
+      for(const [fieldName,value] of Object.entries(action?.outputs??{})){
+        if(!/(limitation|ambigu|unresolved|uncert)/i.test(fieldName)) continue;
+        const values=Array.isArray(value)?value:[value];
+        for(const item of values){
+          if(item===undefined||item===null||explicitNegativeValue(item)) continue;
+          rows.push(`Phase ${phase} ${stepKey}.${fieldName}: ${typeof item==='string'?item:JSON.stringify(item)}`);
+        }
+      }
+    }
+    for(const [fieldName,value] of Object.entries(canonical.automationOutputs??{})){
+      if(!/(limitation|ambigu|unresolved|uncert)/i.test(fieldName)) continue;
+      const values=Array.isArray(value)?value:[value];
+      for(const item of values){
+        if(item===undefined||item===null||explicitNegativeValue(item)) continue;
+        rows.push(`Phase ${phase} automationOutputs.${fieldName}: ${typeof item==='string'?item:JSON.stringify(item)}`);
+      }
+    }
+  }
+  return [...new Set(rows)];
+}
+function importedFormalObligations(ledger){
+  const out=[];let fallback=1;
+  for(const entry of ledger?.controllerImports??[]){
+    for(const record of entry?.records??[]){
+      const values=Array.isArray(record?.value)?record.value:[record?.value];
+      for(const item of values){
+        if(!item||typeof item!=='object'||Array.isArray(item)) continue;
+        if(item.requiredPhase===undefined||!item.requiredAction||!item.completionCondition) continue;
+        out.push({
+          obligationId:item.obligationId??item.canonicalId??item.tempKey??`IMPORTED-OBL-${String(fallback++).padStart(3,'0')}`,
+          status:item.status??'OPEN_IMPORTED',
+          originatingEvidenceRefs:item.originatingEvidenceRefs??[entry.canonicalDataPath].filter(Boolean),
+          statusReason:item.statusReason??`${record.path} imported after Phase ${entry.phase}`,
+          requiredPhase:String(item.requiredPhase),
+          requiredAction:item.requiredAction,
+          completionCondition:item.completionCondition
+        });
+      }
+    }
+  }
+  return out;
+}
+function finalIndexObligations(ledger){
+  const normalized=(ledger?.obligations??[]).filter(o=>!['CLOSED','SATISFIED','NOT_APPLICABLE','SUPERSEDED'].includes(String(o.status??'OPEN').toUpperCase()));
+  const imported=importedFormalObligations(ledger);
+  const byId=new Map();
+  for(const o of [...normalized,...imported]){
+    const id=String(o.obligationId??'').trim(); if(!id) continue;
+    if(!byId.has(id)||String(byId.get(id)?.status??'').startsWith('OPEN_IMPORTED')) byId.set(id,o);
+  }
+  return [...byId.values()];
+}
+
 function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
   const p6=canonicalFor(root,campaignPath,6); const p8=canonicalFor(root,campaignPath,8); const p9=canonicalFor(root,campaignPath,9);
   const build=maybeJson(root,path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'))??{};
@@ -188,9 +251,15 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
     };
   });
   const findings=[...candidateRows,...findingRows];
-  const obligations=(ledger.obligations??[]).filter(o=>String(o.status??'OPEN').toUpperCase()!=='CLOSED').map(o=>({
-    id:o.obligationId,disposition:o.status??'OPEN',severityOrStatus:'OBLIGATION',evidence:(o.originatingEvidenceRefs??[]).join(', '),remediationStatus:'NOT_APPLICABLE',residualLimitation:o.statusReason??'OPEN'
+  const obligations=finalIndexObligations(ledger).map(o=>({
+    id:o.obligationId,
+    disposition:o.status??'OPEN',
+    severityOrStatus:'OBLIGATION',
+    evidence:(o.originatingEvidenceRefs??[]).join(', '),
+    remediationStatus:'NOT_APPLICABLE',
+    residualLimitation:[o.statusReason,o.requiredPhase?('requiredPhase='+o.requiredPhase):null,o.requiredAction].filter(Boolean).join(' | ')||'OPEN'
   }));
+  const limitations=collectCarriedLimitations({root,campaignPath,maxPhase:9});
   const omissions=phaseOutput(p6,'step-3','fullOnlyOmissions')??phaseOutput(p6,'step-4','fullOnlyOmissions')??[];
   return {
     identity:{
@@ -207,7 +276,7 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
       {milestone:'Merged Lite Phase 6–7',requiredEvidence:'deploy/config, deterministic candidate simulation, targeted fuzz, interpretation',reference:'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md + work/phase-06/LITE_TARGETED_TEST_MATRIX.md + accepted Phase-6 canonical data',sourceIdentity:directory.sourceSha256,status:'COMPLETE',limitation:(phaseOutput(p6,'step-3','typedExecutionLimitations')??phaseOutput(p6,'step-4','typedExecutionLimitations')??[]).join('; ')||'NONE_IDENTIFIED'},
       {milestone:'Combined Phase 8–10',requiredEvidence:'validation, remediation/skip, final reconciliation',reference:p9?'accepted Phase-8 and Phase-9 canonical data':'accepted Phase-8 canonical data + Phase-9 skip receipt',sourceIdentity:directory.sourceSha256,status:'READY_FOR_PHASE10',limitation:'SEE_FINDINGS_AND_OBLIGATIONS'}
     ],
-    findings,obligations,omissions
+    findings,obligations,limitations,omissions
   };
 }
 
@@ -315,12 +384,12 @@ if(sequence===8){
 if(sequence===10){
   const p6=canonicalFor(root,campaignPath,6);
   const ledger=maybeJson(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'))??{};
-  const open=(ledger.obligations??[]).filter(o=>String(o.status??'OPEN').toUpperCase()!=='CLOSED');
-  const phase6Limits=phaseOutput(p6,'step-3','typedExecutionLimitations')??[];
+  const open=finalIndexObligations(ledger);
+  const carriedLimitations=collectCarriedLimitations({root,campaignPath,maxPhase:9});
   const omissions=phaseOutput(p6,'step-3','fullOnlyOmissions')??[];
   canonical.automationOutputs.residualLimitations=[
-    ...phase6Limits.filter(x=>String(x)!=='NONE_IDENTIFIED'),
-    ...open.map(o=>o.statusReason??o.obligationId).filter(Boolean)
+    ...carriedLimitations,
+    ...open.map(o=>[o.obligationId,o.statusReason,o.requiredAction].filter(Boolean).join(' | ')).filter(Boolean)
   ];
   if(!canonical.automationOutputs.residualLimitations.length) canonical.automationOutputs.residualLimitations=['NONE_IDENTIFIED'];
   canonical.automationOutputs.unresolvedSubstantiveQuestions=open.length?open.map(o=>o.obligationId??o.statusReason??'OPEN_OBLIGATION'):['NONE_IDENTIFIED'];
