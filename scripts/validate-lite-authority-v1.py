@@ -103,6 +103,20 @@ for phase in range(1,11):
 
     actions=schema.get("actions",{})
     steps=contract.get("steps",[])
+    controller_generated_paths={x.get("path") for x in schema.get("controllerGeneratedOutputs",[]) if isinstance(x,dict) and x.get("path")}
+    controller_inputs=schema.get("controllerAutomationInputs",[])
+    input_names=[x.get("name") for x in controller_inputs if isinstance(x,dict)]
+    if len(input_names)!=len(set(input_names)):
+        errors.append(f"phase-{phase}: duplicate controllerAutomationInputs names")
+    for item in controller_inputs:
+        if not isinstance(item,dict) or not item.get("name") or not item.get("type") or not item.get("consumers"):
+            errors.append(f"phase-{phase}: controllerAutomationInputs entries require name/type/consumers")
+    generated_paths=[x.get("path") for x in schema.get("controllerGeneratedOutputs",[]) if isinstance(x,dict)]
+    if len(generated_paths)!=len(set(generated_paths)):
+        errors.append(f"phase-{phase}: duplicate controllerGeneratedOutputs paths")
+    for item in schema.get("controllerGeneratedOutputs",[]):
+        if not isinstance(item,dict) or not item.get("path") or not item.get("type") or not item.get("source") or not item.get("consumers"):
+            errors.append(f"phase-{phase}: controllerGeneratedOutputs entries require path/type/source/consumers")
     if len(actions)!=len(steps):
         errors.append(f"phase-{phase}: schema action count {len(actions)} != contract step count {len(steps)}")
     for step in steps:
@@ -112,6 +126,8 @@ for phase in range(1,11):
         if not action:
             errors.append(f"phase-{phase}: contract step {n} has no schema action")
             continue
+        if step.get("action")!=action.get("title"):
+            errors.append(f"phase-{phase} step {n}: contract action title does not exactly match schema title")
         dest=step.get("outputDestination")
         if not isinstance(dest,dict):
             errors.append(f"phase-{phase} step {n}: outputDestination is mandatory")
@@ -133,12 +149,34 @@ for phase in range(1,11):
             if form_action.get("section")!=action.get("section"):
                 errors.append(f"phase-{phase} step {n}: work-form section title mismatch")
             outputs=form_action.get("outputs",{})
+            if set(outputs.keys())!=set(field_names):
+                errors.append(f"phase-{phase} step {n}: work-form output keys do not exactly match schema fields")
             for field in action.get("fields",[]):
                 name=field.get("name")
                 if name not in outputs:
                     errors.append(f"phase-{phase} step {n}: form field {name} missing")
                 if not field.get("consumers"):
                     errors.append(f"phase-{phase} step {n}: required field {name} has no declared consumer/purpose")
+                if field.get("type")=="REQUIRED_RECORD_LIST":
+                    value=outputs.get(name)
+                    template_keys=set(value[0].keys()) if isinstance(value,list) and value and isinstance(value[0],dict) else set()
+                    missing=[k for k in field.get("itemRequiredFields",[]) if template_keys and k not in template_keys]
+                    if missing:
+                        errors.append(f"phase-{phase} step {n}: form record {name} missing itemRequiredFields {missing}")
+                    valid_item_keys=set(field.get("itemRequiredFields",[]))|template_keys
+                    for key_name in field.get("controllerPrefillFields",[])+field.get("controllerCollectedFields",[]):
+                        if key_name not in valid_item_keys:
+                            errors.append(f"phase-{phase} step {n}: field-level controller-owned item {key_name} is absent from record schema/template")
+            record_item_keys=set()
+            for field in action.get("fields",[]):
+                if field.get("type")=="REQUIRED_RECORD_LIST":
+                    record_item_keys.update(field.get("itemRequiredFields",[]))
+                    value=outputs.get(field.get("name"))
+                    if isinstance(value,list) and value and isinstance(value[0],dict):
+                        record_item_keys.update(value[0].keys())
+            for key_name in action.get("controllerPrefillFields",[])+action.get("controllerCollectedFields",[]):
+                if key_name not in record_item_keys:
+                    errors.append(f"phase-{phase} step {n}: action controller-owned field {key_name} is absent from record schema/template")
         if not action.get("fields"):
             errors.append(f"phase-{phase} step {n}: every agent/automation action must produce defined output fields")
 
@@ -150,6 +188,27 @@ for phase in range(1,11):
             continue
         if not any(s.get("step")==n for s in steps):
             errors.append(f"phase-{phase}: schema action {key} has no matching contract step")
+
+    contract_derived=sorted(contract.get("derivedOutputPolicy",{}).get("outputs",[]))
+    schema_derived=sorted(x.get("path") for x in schema.get("derivedOutputs",[]) if isinstance(x,dict) and x.get("path"))
+    if contract_derived!=schema_derived:
+        errors.append(f"phase-{phase}: contract derived outputs do not exactly match schema derivedOutputs")
+
+    declared_action_paths=set()
+    for action_key,action in actions.items():
+        for field in action.get("fields",[]):
+            declared_action_paths.add(f"actions.{action_key}.outputs.{field.get('name')}")
+    valid_output_paths=declared_action_paths|controller_generated_paths
+    for mapping_name,paths in schema.get("bookkeepingMappings",{}).items():
+        for output_path in paths:
+            if output_path.startswith("actions.") and output_path not in valid_output_paths:
+                errors.append(f"phase-{phase}: {mapping_name} references undeclared output {output_path}")
+    for spec in schema.get("derivedOutputs",[]):
+        for selector in spec.get("selectors",[]):
+            if selector in {"actions","automationOutputs"}:
+                continue
+            if selector.startswith("actions.") and selector not in valid_output_paths:
+                errors.append(f"phase-{phase}: derived selector references undeclared output {selector}")
 
     report=schema.get("finalReport")
     if schema.get("automationOnly"):
@@ -164,6 +223,31 @@ for phase in range(1,11):
                 errors.append(f"phase-{phase}: final-report template missing: {report.get('template')}")
             if contract.get("finalReport")!=report.get("campaignPath"):
                 errors.append(f"phase-{phase}: contract finalReport mismatch")
+            try:
+                report_text=report_template.read_text()
+                headings={line[3:].strip() for line in report_text.splitlines() if line.startswith("## ")}
+                for required_heading in report.get("requiredSections",[]):
+                    if required_heading not in headings:
+                        errors.append(f"phase-{phase}: final-report template missing required section {required_heading!r}")
+            except Exception as exc:
+                errors.append(f"phase-{phase}: failed to inspect final-report template: {exc}")
+
+phase0=json.loads((pkg/"phases/phase-0/PHASE_CONTRACT.json").read_text())
+phase0_outputs={x.get("artifact") for x in phase0.get("requiredOutputs",[]) if isinstance(x,dict)}
+for required_output in {
+    "evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json",
+    "evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json",
+    "work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md",
+}:
+    if required_output not in phase0_outputs:
+        errors.append(f"phase-0: finalizer-required machine output is undeclared: {required_output}")
+
+domain_matrix=json.loads((pkg/"shared/controller/DOMAIN_APPLICABILITY_MATRIX.json").read_text())
+for domain in domain_matrix.get("domains",[]):
+    if 7 in domain.get("requiredExecutionPhases",[]):
+        errors.append(f"DOMAIN_APPLICABILITY_MATRIX: {domain.get('domainId')} assigns substantive work to automation-only Phase 7")
+if 7 in domain_matrix.get("executionReusePhases",[]):
+    errors.append("DOMAIN_APPLICABILITY_MATRIX: executionReusePhases still includes automation-only Phase 7")
 
 phase7=json.loads((pkg/"phases/phase-7/PHASE_CONTRACT.json").read_text())
 auth=phase7.get("authorization",{})
