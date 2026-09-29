@@ -10,6 +10,7 @@ function explicit(value){return value===undefined||value===null||value===''?'<RE
 function uniq(values){return [...new Set(values.filter(v=>v!==undefined&&v!==null&&String(v).length>0))];}
 function text(v){return typeof v==='string'?v:JSON.stringify(v);}
 function matchesAny(value,patterns){const s=String(value??'').toLowerCase();return patterns.some(p=>s.includes(p));}
+function safeSegment(value,fallback='item'){const s=String(value??'').replace(/[^A-Za-z0-9._-]+/g,'_').replace(/^_+|_+$/g,'');return s||fallback;}
 
 function findSourceIntelligence(root,campaignPath){
   const dir=repoFile(root,path.posix.join(campaignPath,'evidence/source-intelligence'));
@@ -410,11 +411,74 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
         newRiskOrNone:'<REQUIRED>',
         automationOwnedFields:['findingKey','changedSurface','affectedCallersOrState']
       }));
+      form.actions['step-2'].outputs.remediationDispositions=rows.map(r=>{
+        const findingKey=r.findingId??'UNRESOLVED';
+        return {
+          findingKey,
+          rerunRequestDirectory:path.posix.join('controller/phase9-reruns',safeSegment(findingKey))+'/',
+          rerunEvidenceRefs:['<CONTROLLER_AUTO_COLLECT_AFTER_RERUNS>'],
+          rootCauseFixed:'<REQUIRED>',
+          regressionAssessment:'<REQUIRED>',
+          disposition:'<REQUIRED>',
+          rationale:'<REQUIRED>',
+          newCandidateOrNone:'<REQUIRED>',
+          automationOwnedFields:['findingKey','rerunRequestDirectory']
+        };
+      });
     }
   }
 
   form.automationInputs.controllerPrefillDigestSha256=controllerOwnedDigest(form);
   return form;
+}
+
+export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
+  const deficiencies=[];
+  const rows=form?.actions?.['step-2']?.outputs?.remediationDispositions??[];
+  for(const row of rows){
+    if(!row||typeof row!=='object'||Array.isArray(row)) continue;
+    const findingKey=String(row.findingKey??'').trim();
+    if(!findingKey){deficiencies.push('Phase 9 remediation disposition is missing findingKey.');continue;}
+    const requestDirRel=typeof row.rerunRequestDirectory==='string'&&row.rerunRequestDirectory
+      ? row.rerunRequestDirectory.replace(/\/+$/,'')
+      : path.posix.join('controller/phase9-reruns',safeSegment(findingKey));
+    const requestDirAbs=repoFile(root,path.posix.join(campaignPath,requestDirRel));
+    const requestFiles=walk(requestDirAbs).filter(file=>file.toLowerCase().endsWith('.json'));
+    const refs=[];
+    let discoveredRequests=0;
+    for(const requestFile of requestFiles){
+      const request=readJsonIf(requestFile);
+      const requestId=typeof request?.requestId==='string'?request.requestId.trim():'';
+      if(!requestId) continue;
+      discoveredRequests++;
+      const safeRequest=safeSegment(requestId,'request');
+      const baseRel=path.posix.join('controller/automation',safeRequest);
+      const evidenceRel=path.posix.join(baseRel,'EXECUTION_EVIDENCE_v1.json');
+      const observerRel=path.posix.join(baseRel,'EXECUTION_OBSERVER_RECEIPT_v1.json');
+      const ingestionRel=path.posix.join(baseRel,'ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json');
+      const evidenceAbs=repoFile(root,path.posix.join(campaignPath,evidenceRel));
+      const ingestionAbs=repoFile(root,path.posix.join(campaignPath,ingestionRel));
+      const observerAbs=repoFile(root,path.posix.join(campaignPath,observerRel));
+      const ingestion=readJsonIf(ingestionAbs);
+      if(!fs.existsSync(evidenceAbs)||!ingestion||ingestion.schemaVersion!=='audit-execution-evidence-ingestion-receipt-v1'||ingestion.requestId!==requestId) continue;
+      refs.push(evidenceRel,ingestionRel);
+      if(fs.existsSync(observerAbs)) refs.push(observerRel);
+    }
+    if(!discoveredRequests){
+      deficiencies.push('Phase 9 finding '+findingKey+' has no rerun execution request under '+requestDirRel+'. Run the required remediation sub-phase tests before validation.');
+      continue;
+    }
+    const uniqueRefs=uniq(refs);
+    if(!uniqueRefs.length){
+      deficiencies.push('Phase 9 finding '+findingKey+' has rerun request(s) but no durable ingested execution evidence yet. Complete trusted execution and evidence ingestion before validation.');
+      continue;
+    }
+    row.rerunEvidenceRefs=uniqueRefs;
+    row.automationOwnedFields=uniq([...(row.automationOwnedFields??[]),'findingKey','rerunRequestDirectory','rerunEvidenceRefs']);
+  }
+  form.automationInputs??={};
+  form.automationInputs.controllerPrefillDigestSha256=controllerOwnedDigest(form);
+  return deficiencies;
 }
 
 export function phase4CoverageFromForm(form){
