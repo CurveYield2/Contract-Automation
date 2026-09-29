@@ -19,7 +19,12 @@ const simEvidence=path.join(phase0Evidence,'simulations');
 await fs.mkdir(simEvidence,{recursive:true});
 await fs.copyFile(path.join(src,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),path.join(phase0Evidence,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'));
 await fs.copyFile(path.join(src,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),path.join(simEvidence,'PHASE0_SIMULATION_RUN_INDEX_v1.json'));
-await fs.copyFile(deployPath,path.join(phase0Evidence,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json')).catch(()=>{});
+const campaignDeployPath=path.join(phase0Evidence,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json');
+try{
+  await fs.copyFile(deployPath,campaignDeployPath);
+}catch{
+  await writeJson(campaignDeployPath,deploy);
+}
 await fs.rm(path.join(simEvidence,'runs'),{recursive:true,force:true});
 await fs.cp(path.join(src,'runs'),path.join(simEvidence,'runs'),{recursive:true}).catch(()=>{});
 
