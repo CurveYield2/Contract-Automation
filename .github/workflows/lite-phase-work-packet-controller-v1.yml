@@ -67,22 +67,50 @@ jobs:
           else
             mapfile -t request_paths < <(
               gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status != "removed") | .filename' |
-              grep -E '^\.agent-upload/lite-phase-boundary/[^/]+\.json
+              grep -E '^\.agent-upload/lite-phase-boundary/[^/]+\.json$' || true
+            )
+            [ "${#request_paths[@]}" -eq 1 ] || { echo "::error::Expected exactly one changed Lite phase-boundary request; found ${#request_paths[@]}."; exit 1; }
+            request_path="${request_paths[0]}"
+            encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$request_path?ref=$GITHUB_SHA" --jq '.content')"
+            printf '%s' "$encoded" | base64 -d > /tmp/lite-phase-boundary-request.json
+            jq -e '
+              .schemaVersion=="curveyield-lite-phase-boundary-request-v1" and
+              ((.campaignId|type)=="string") and (.campaignId|length)>0 and
+              ((.phaseSequence|type)=="number") and ((.phaseSequence|floor)==.phaseSequence) and .phaseSequence>=1 and .phaseSequence<=10 and
+              ((.auditControllerRef|type)=="string") and (.auditControllerRef|length)>0 and
+              ((.attempt|type)=="number") and ((.attempt|floor)==.attempt) and .attempt>=1
+            ' /tmp/lite-phase-boundary-request.json >/dev/null
+            campaign_id="$(jq -r '.campaignId' /tmp/lite-phase-boundary-request.json)"
+            phase_sequence="$(jq -r '.phaseSequence' /tmp/lite-phase-boundary-request.json)"
+            controller_ref="$(jq -r '.auditControllerRef' /tmp/lite-phase-boundary-request.json)"
+            supplied_campaign_path=""
+            supplied_directory_path=""
+          fi
+          [[ "$campaign_id" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || { echo "::error::Invalid campaign_id"; exit 1; }
+          [[ "$phase_sequence" =~ ^([1-9]|10)$ ]] || { echo "::error::Invalid phase_sequence"; exit 1; }
+          [[ "$controller_ref" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::Invalid audit_controller_ref"; exit 1; }
+          {
+            echo "campaign_id=$campaign_id"
+            echo "phase_sequence=$phase_sequence"
+            echo "audit_controller_ref=$controller_ref"
+            echo "supplied_campaign_path=$supplied_campaign_path"
+            echo "supplied_directory_path=$supplied_directory_path"
+          } >> "$GITHUB_OUTPUT"
       - name: Set up Node.js for Phase-5 boundary execution
-        if: inputs.phase_sequence == '5'
+        if: steps.request.outputs.phase_sequence == '5'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install trusted runner dependencies for Phase-5 boundary execution
-        if: inputs.phase_sequence == '5'
+        if: steps.request.outputs.phase_sequence == '5'
         shell: bash
         run: |
           set -euo pipefail
           npm ci --force
 
       - name: Install retained audit toolchain for Phase-5 boundary execution
-        if: inputs.phase_sequence == '5'
+        if: steps.request.outputs.phase_sequence == '5'
         uses: ./.github/actions/setup-v7-toolchain
 
       - name: Select Audit-Controller credential
@@ -267,20 +295,20 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js for Phase-5 boundary execution
-        if: inputs.phase_sequence == '5'
+        if: steps.request.outputs.phase_sequence == '5'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install trusted runner dependencies for Phase-5 boundary execution
-        if: inputs.phase_sequence == '5'
+        if: steps.request.outputs.phase_sequence == '5'
         shell: bash
         run: |
           set -euo pipefail
           npm ci --force
 
       - name: Install retained audit toolchain for Phase-5 boundary execution
-        if: inputs.phase_sequence == '5'
+        if: steps.request.outputs.phase_sequence == '5'
         uses: ./.github/actions/setup-v7-toolchain
 
       - name: Select Audit-Controller credential
