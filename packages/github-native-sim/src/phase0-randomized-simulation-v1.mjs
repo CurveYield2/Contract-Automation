@@ -98,21 +98,28 @@ function detectFoundryScripts(files,texts){
   }
   return out.slice(0,4);
 }
-function detectHardhatScripts(files){
-  return files.filter(f=>/(^|\/)scripts?\/.*\.(?:js|cjs|mjs|ts)$/i.test(f)&&DEPLOY_SCRIPT_RE.test(f)).slice(0,4).map(rel=>({framework:'HARDHAT',path:rel,entry:rel}));
+function detectHardhatScripts(files,configText){
+  const scripts=files.filter(f=>/(^|\/)scripts?\/.*\.(?:js|cjs|mjs|ts)$/i.test(f)&&DEPLOY_SCRIPT_RE.test(f)).slice(0,4);
+  const hasLocalhostNetwork=/localhost\s*:\s*\{[\s\S]{0,800}?(?:127\.0\.0\.1|localhost|ETH_RPC_URL|RPC_URL|LOCALHOST_RPC_URL)/i.test(configText);
+  return {
+    safe:hasLocalhostNetwork?scripts.map(rel=>({framework:'HARDHAT',path:rel,entry:rel})):[],
+    unsafe:hasLocalhostNetwork?[]:scripts.map(rel=>({framework:'HARDHAT',path:rel,entry:rel,reason:'Hardhat localhost network is not mechanically proven to bind to a local RPC URL.'}))
+  };
 }
 async function detectDeploymentScripts(projectRoot){
   const files=await walk(projectRoot),texts=new Map();
   for(const rel of files.filter(f=>f.endsWith('.sol'))){try{texts.set(rel,await fs.readFile(path.join(projectRoot,...rel.split('/')),'utf8'));}catch{}}
   const foundry=(await fs.stat(path.join(projectRoot,'foundry.toml')).catch(()=>null))?detectFoundryScripts(files,texts):[];
-  const hasHardhat=files.some(f=>/^hardhat\.config\.(?:js|cjs|mjs|ts)$/i.test(f));
-  const hardhat=hasHardhat?detectHardhatScripts(files):[];
+  const hardhatConfig=files.find(f=>/^hardhat\.config\.(?:js|cjs|mjs|ts)$/i.test(f));
+  const hardhatDetected=hardhatConfig?detectHardhatScripts(files,await fs.readFile(path.join(projectRoot,...hardhatConfig.split('/')),'utf8').catch(()=>'')):{safe:[],unsafe:[]};
+  const hardhat=hardhatDetected.safe;
+  const unsafeHardhat=hardhatDetected.unsafe;
   const genericPackageScripts=[];
   try{
     const pkg=JSON.parse(await fs.readFile(path.join(projectRoot,'package.json'),'utf8'));
     for(const [name,cmd] of Object.entries(pkg.scripts??{}))if(DEPLOY_SCRIPT_RE.test(name)&&!String(cmd).includes('hardhat'))genericPackageScripts.push({name,command:String(cmd)});
   }catch{}
-  return{foundry,hardhat,genericPackageScripts};
+  return{foundry,hardhat,unsafeHardhat,genericPackageScripts};
 }
 async function executeDeploymentScripts({projectRoot,anvilUrl,account0,detected}){
   const attempts=[],limitations=[];
@@ -130,6 +137,7 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,detected}
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     attempts.push({framework:'FOUNDRY',path:item.path,entry:item.entry,command:['forge',...args].join(' '),exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
   }
+  for(const item of detected.unsafeHardhat??[]) limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'HARDHAT',path:item.path,reason:item.reason});
   for(const item of detected.hardhat){
     const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     const r=await runProcess({command:'timeout',args:['240s','npx','hardhat','run',item.path,'--network','localhost'],cwd:projectRoot,env:scrubbedEnv({ETH_RPC_URL:anvilUrl,RPC_URL:anvilUrl,LOCALHOST_RPC_URL:anvilUrl,HARDHAT_NETWORK:'localhost'})});
@@ -312,6 +320,7 @@ function medusaWrappers(ethers,targets){
     for(const x of other)if(!selectedOther.includes(x))omitted.push({qualifiedName:x.target.qualifiedName,signature:x.selected.signature,reason:'NON_ACCOUNTING_WRAPPER_DOWNSAMPLED_FOR_80_PERCENT_WEIGHT'});
   }
   for(const x of selectedOther)rows.push({...x,wrapperName:`p0_other_${id++}`});
+  if(!accounting.length) omitted.push({qualifiedName:'ALL_TARGETS',signature:'N/A',reason:'NO_ACCOUNTING_STATE_CHANGE_FUNCTIONS_DETECTED_FOR_MEDUSA_WEIGHTING'});
   return{rows,omitted,accCopies,accountingWrapperShare:rows.length?rows.filter(x=>x.selected.accounting).length/rows.length:0};
 }
 function renderMedusaRouter(ethers,targets){
