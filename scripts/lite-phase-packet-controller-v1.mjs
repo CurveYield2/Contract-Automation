@@ -40,6 +40,21 @@ function assignCanonicalIds(canonical,graph,phase){
   }
 }
 function importedRecords(canonical,paths){return (paths??[]).map(p=>({path:p,value:getByPath(canonical,p)}));}
+function receiptObligationSummary({ledger,canonical,form,sequence,now}){
+  const all=ledger?.obligations??[];
+  const byId=new Map(all.map(o=>[String(o?.obligationId??''),o]).filter(([id])=>id));
+  const dueIds=form?.automationInputs?.expectedDueObligationIds??[];
+  const rows=[];
+  for(const action of Object.values(canonical?.actions??{})){
+    const value=action?.outputs?.obligationDispositions;
+    if(Array.isArray(value)) rows.push(...value.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)));
+  }
+  const created=all.filter(o=>String(o.originPhase??'')===String(sequence)&&o.createdAt===now);
+  const closed=rows.filter(r=>['SATISFIED','NOT_APPLICABLE'].includes(String(r.disposition??''))).map(r=>byId.get(String(r.obligationId))??r);
+  const carriedForward=rows.filter(r=>['CARRY_FORWARD','BLOCKED_CARRIED'].includes(String(r.disposition??''))).map(r=>byId.get(String(r.obligationId))??r);
+  const due=dueIds.map(id=>byId.get(String(id))??{obligationId:id,status:'UNRESOLVED_LEDGER_REFERENCE'});
+  return {due,created,closed,carriedForward};
+}
 function syncControls({root,campaignPath,schema,canonical,canonicalRel,now}){
   const controlDir=path.posix.join(campaignPath,'controller');
   const graphRel=path.posix.join(controlDir,'SECURITY_TRACEABILITY_GRAPH_v1.json');
@@ -483,6 +498,7 @@ if(sequence===9){nextSequence=10;}
 if(sequence===10){handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:null,sameReviewer:false,status:'NOT_APPLICABLE'};}
 if(nextSequence!==null) nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:nextSequence,immediate:[...derivedRels,...boundaryArtifactRels]});
 
+const ledgerAfter=maybeJson(root,controls.ledgerRel)??{};
 const receipt=receiptLib.createLitePhaseReceiptV1({
   campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,
   workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence,executorType:'AI_REVIEWER',executorLineage:assignment.reviewer,
@@ -490,6 +506,7 @@ const receipt=receiptLib.createLitePhaseReceiptV1({
   inputs:[{role:'PREDECESSOR_RECEIPT',path:assignment.predecessorReceiptPath},{role:'CONTROLLER_GENERATED_PHASE_WORK_PACKET',path:assignment.packetPath}],
   evidence,outputs:evidence,
   globalControls:{securityTraceabilityGraph:path.posix.relative(campaignPath,controls.graphRel),carriedForwardObligationLedger:path.posix.relative(campaignPath,controls.ledgerRel),evidenceInvalidationMatrix:path.posix.relative(campaignPath,controls.invalidRel),sourceIntelligenceBundle:predecessor.globalControls?.sourceIntelligenceBundle??null},
+  obligations:receiptObligationSummary({ledger:ledgerAfter,canonical,form,sequence,now}),
   validation:{status:'PASS',validatedAt:now,failures:[]},handoff,now
 });
 receipt.sealedAt=now;receipt.updatedAt=now;
