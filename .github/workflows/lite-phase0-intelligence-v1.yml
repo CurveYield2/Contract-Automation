@@ -70,7 +70,7 @@ jobs:
         run: bash scripts/select-audit-controller-token.sh
 
       - name: Materialize workflow-call Phase-0 request
-        if: github.event_name == 'workflow_call'
+        if: inputs.campaign_id != ''
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           CAMPAIGN_ID: ${{ inputs.campaign_id }}
@@ -97,8 +97,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = "workflow_call" ]; then
-            test -s .phase0-request.json
+          if [ -s .phase0-request.json ]; then
             echo "path=.phase0-request.json" >> "$GITHUB_OUTPUT"
           else
             mapfile -t requests < <(find .request-source/lite-phase0/requests -type f -name request.json | sort)
