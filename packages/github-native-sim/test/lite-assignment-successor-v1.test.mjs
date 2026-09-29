@@ -32,10 +32,14 @@ test('fresh successor preparation accepts absent controller-owned final report a
     }
   });
   assert.equal(fs.existsSync(path.join(root,reportRel)),false);
-  const raw=execFileSync(process.execPath,['scripts/prepare-lite-assignment-successor-v2.mjs','--controller-root',root,'--campaign-directory-path',directoryRel],{encoding:'utf8'});
+  const controllerRef='campaign/ref-v1';
+  const raw=execFileSync(process.execPath,['scripts/prepare-lite-assignment-successor-v2.mjs','--controller-root',root,'--campaign-directory-path',directoryRel,'--audit-controller-ref',controllerRef],{encoding:'utf8'});
   const result=JSON.parse(raw);
   assert.equal(result.status,'PASS');
   assert.match(result.wakeMessage,/Controller-owned phase final report path:/);
   assert.match(result.wakeMessage,/Do not create or edit the Phase Work Packet or phase final report/);
   assert.doesNotMatch(result.wakeMessage,/submit the Phase Work Packet/i);
+  assert.match(result.wakeMessage,/tree\/campaign\/ref-v1\/Audit%20Skill%20-%20Current%20Authority/);
+  assert.match(result.wakeMessage,/tree\/campaign\/ref-v1\/campaigns\/demo/);
+  assert.match(result.wakeMessage,/\"auditControllerRef\":\"campaign\/ref-v1\"/);
 });
