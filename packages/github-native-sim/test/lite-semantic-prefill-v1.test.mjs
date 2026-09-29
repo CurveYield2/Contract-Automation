@@ -39,10 +39,18 @@ function base(){
     limitations:[]
   });
   writeJson(path.join(root,authority,'shared/controller/DOMAIN_APPLICABILITY_MATRIX.json'),{
+    machineClassification:{corpusSources:['functions','externalInterfaces','protocolTopology']},
     domains:[
-      {domainId:'DOMAIN-UPGRADE',methodResources:['upgrade.md'],requiredExecutionPhases:[4]},
-      {domainId:'DOMAIN-DEPENDENCY',methodResources:['dependency.md'],requiredExecutionPhases:[4,6]},
-      {domainId:'DOMAIN-VAULT',methodResources:['vault.md'],requiredExecutionPhases:[4,6]}
+      {domainId:'DOMAIN-UPGRADE',methodResources:['upgrade.md'],requiredExecutionPhases:[4],machineMatchers:[
+        {kind:'arrayNonEmpty',path:'protocolTopology.upgradeabilityEdges'},
+        {kind:'textContainsAny',terms:['upgradeto','delegatecall']}
+      ]},
+      {domainId:'DOMAIN-DEPENDENCY',methodResources:['dependency.md'],requiredExecutionPhases:[4,6],machineMatchers:[
+        {kind:'arrayNonEmpty',path:'externalInterfaces'}
+      ]},
+      {domainId:'DOMAIN-VAULT',methodResources:['vault.md'],requiredExecutionPhases:[4,6],machineMatchers:[
+        {kind:'textContainsAny',terms:['deposit(','withdraw(']}
+      ]}
     ]
   });
   writeJson(path.join(root,authority,'phases/phase-6/PHASE_06_SCHEMA_v1.json'),{
