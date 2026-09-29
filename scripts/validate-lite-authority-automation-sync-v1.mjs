@@ -100,7 +100,7 @@ for(let phase=1;phase<=10;phase++){
   const contractDerived=contract.derivedOutputPolicy?.outputs??[];
   const schemaDerived=(schema.derivedOutputs??[]).map(x=>x.path);
   need(sameSet(contractDerived,schemaDerived),`phase ${phase}: contract/schema derived outputs mismatch`);
-  for(const rel of schemaDerived) need(packetController.includes(rel.split('/').at(-1)),`phase ${phase}: derived output ${rel} is not represented in boundary controller`);
+  need(packetController.includes('buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical'),`phase ${phase}: generic schema-driven derived-output generation is missing from boundary controller`);
   phaseSummaries.push({phase,steps:schemaSteps.length,derivedOutputs:schemaDerived.length});
 }
 
