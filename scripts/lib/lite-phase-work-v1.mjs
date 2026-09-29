@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {applyPhaseBoundaryPrefill} from './lite-phase-prefill-v1.mjs';
 
 export const EXPLICIT_NEGATIVES=new Set(['NONE_IDENTIFIED','NOT_APPLICABLE','NOT_TRIGGERED','NO_CANDIDATE','NO_REMEDIATION','INSUFFICIENT_EVIDENCE','UNRESOLVED','NO_ADDITIONAL_OBLIGATION','NO_CONTRADICTION']);
 
@@ -40,6 +41,9 @@ export function validateWorkForm(schema,form){
           const item=v[i];
           if(!item||typeof item!=='object'||Array.isArray(item)){deficiencies.push(p+'['+i+'] must be an object or explicit negative sentinel');continue;}
           for(const k of field.itemRequiredFields??[]) if(isPlaceholder(item[k])||item[k]===null||item[k]===undefined) deficiencies.push(p+'['+i+'].'+k+' is missing');
+          for(const [k,allowed] of Object.entries(field.itemFieldAllowedValues??{})){
+            if(item[k]!==undefined&&!allowed.includes(String(item[k]))) deficiencies.push(p+'['+i+'].'+k+' must be one of: '+allowed.join(', '));
+          }
         }
       }else deficiencies.push(...validateScalar(v,p,field));
     }
@@ -74,19 +78,14 @@ export function buildDerivedOutputs({root,campaignPath,schema,canonicalData,cano
   }
   return out;
 }
-export function preparePhaseWork({root,campaignPath,authorityRoot,sequence,reviewer,predecessorReceiptPath,derivedInputPaths=[],status='ACTIVE'}){
+export function preparePhaseWork({root,campaignPath,authorityRoot,sequence,reviewer,predecessorReceiptPath,derivedInputPaths=[],status='ACTIVE',prefillContext={}}){
   const loaded=loadPhaseSchema(root,authorityRoot,sequence);const schema=loaded.schema;const schemaRel=loaded.rel;
   const formRel=fullCampaignPath(campaignPath,schema.workForm.campaignPath);
   const formTemplateRel=path.posix.join(authorityRoot,schema.workForm.template);
-  const form=readJson(requiredFile(root,formTemplateRel,'work-form template'));
-  form.automationInputs={predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths]};
+  let form=readJson(requiredFile(root,formTemplateRel,'work-form template'));
+  form=applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths,predecessorReceiptPath,prefillContext});
   writeJson(repoFile(root,formRel),form);
-  let reportRel=null;
-  if(schema.finalReport){
-    reportRel=fullCampaignPath(campaignPath,schema.finalReport.campaignPath);
-    const reportTemplateRel=path.posix.join(authorityRoot,schema.finalReport.template);
-    writeText(repoFile(root,reportRel),fs.readFileSync(requiredFile(root,reportTemplateRel,'final-report template'),'utf8'));
-  }
+  const reportRel=schema.finalReport?fullCampaignPath(campaignPath,schema.finalReport.campaignPath):null;
   return {phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer,status,workSchemaPath:schemaRel,workFormPath:formRel,finalReportPath:reportRel,packetPath:fullCampaignPath(campaignPath,schema.submission.packetPath),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths]};
 }
 export function ensurePacketShape({packet,directory,assignment}){
