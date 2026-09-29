@@ -111,7 +111,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: v7-qualification-${{ github.event.pull_request.number || github.ref }}
+  group: v7-qualification-${{ github.event_name == 'workflow_call' && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
