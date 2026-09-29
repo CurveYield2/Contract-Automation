@@ -71,12 +71,11 @@ print(parts[0],parts[1],parts[3],"/".join(parts[4:]))
 PY
 )
       test -n "$gh_owner" && test -n "$gh_repo" && test -n "$gh_ref" && test -n "$gh_path"
-      download_url="https://api.github.com/repos/$gh_owner/$gh_repo/contents/$gh_path?ref=$gh_ref"
-      curl --fail --location --retry 4 --retry-all-errors --connect-timeout 20 \
-        -H "Authorization: Bearer $github_token" \
-        -H 'Accept: application/vnd.github.raw+json' \
-        -H 'X-GitHub-Api-Version: 2022-11-28' \
-        -o "$work/source.download" "$download_url"
+      blob_sha="$(GH_TOKEN="$github_token" gh api "repos/$gh_owner/$gh_repo/contents/$gh_path?ref=$gh_ref" --jq '.sha')"
+      [[ "$blob_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::GitHub contents API did not return a committed blob SHA." >&2; return 1; }
+      GH_TOKEN="$github_token" gh api "repos/$gh_owner/$gh_repo/git/blobs/$blob_sha" --jq '.content' \
+        | tr -d '\n' | base64 -d > "$work/source.download"
+      download_url="https://api.github.com/repos/$gh_owner/$gh_repo/git/blobs/$blob_sha"
     else
       download_url="$source_url"
       curl --fail --location --retry 4 --retry-all-errors --connect-timeout 20 \
