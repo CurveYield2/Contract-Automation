@@ -54,6 +54,7 @@ for(let phase=1;phase<=10;phase++){
   const schema=json(path.join(phaseDir,`PHASE_${n}_SCHEMA_v1.json`));
   const template=json(path.join(phaseDir,'resources',`PHASE_${n}_WORK_FORM_TEMPLATE_v1.json`));
   need(contract.phase?.sequence===phase,`phase ${phase}: contract sequence mismatch`);
+  need(contract.phase?.id===`phase-${phase}`,`phase ${phase}: contract phase.id must match runtime assignment phaseId`);
   need(schema.phase===phase,`phase ${phase}: schema sequence mismatch`);
   need(template.phase===phase,`phase ${phase}: template sequence mismatch`);
   need(contract.workSchema===`phases/phase-${phase}/PHASE_${n}_SCHEMA_v1.json`,`phase ${phase}: contract workSchema mismatch`);
@@ -108,6 +109,19 @@ for(let phase=1;phase<=10;phase++){
   const schemaDerived=(schema.derivedOutputs??[]).map(x=>x.path);
   need(sameSet(contractDerived,schemaDerived),`phase ${phase}: contract/schema derived outputs mismatch`);
   need(packetController.includes('buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical'),`phase ${phase}: generic schema-driven derived-output generation is missing from boundary controller`);
+  const expectedNextStates={
+    1:['REWORK_REQUIRED','WAITING_FOR_SUCCESSOR_AGENT'],
+    2:['REWORK_REQUIRED','ACTIVE'],
+    3:['REWORK_REQUIRED','ACTIVE'],
+    4:['REWORK_REQUIRED','ACTIVE'],
+    5:['REWORK_REQUIRED','WAITING_FOR_SUCCESSOR_AGENT'],
+    6:['REWORK_REQUIRED','WAITING_FOR_SUCCESSOR_AGENT'],
+    7:['WAITING_FOR_SUCCESSOR_AGENT'],
+    8:['REWORK_REQUIRED','ACTIVE'],
+    9:['REWORK_REQUIRED','ACTIVE'],
+    10:['REWORK_REQUIRED','COMPLETE']
+  };
+  need(sameSet(contract.allowedNextStates??[],expectedNextStates[phase]),`phase ${phase}: allowedNextStates do not match current assignment-v2 controller transitions`);
   phaseSummaries.push({phase,steps:schemaSteps.length,derivedOutputs:schemaDerived.length});
 }
 
@@ -123,7 +137,17 @@ for(const row of phase0.requiredOutputs??[]){
   if(row?.required!==true) continue;
   need(phase0Corpus.includes(row.artifact),`phase 0 required output is not produced/consumed by current automation: ${row.artifact}`);
 }
+need(phase0.phase?.id==='phase-0','phase 0 contract phase.id must match runtime identity');
+need(sameSet(phase0.allowedNextStates??[],['ACTIVE','WAITING_FOR_SUCCESSOR_AGENT']),'phase 0 allowedNextStates do not match bootstrap/finalizer routing');
 need(!String(phase0.steps?.find(x=>x.step===8)?.instruction??'').includes('creates the Phase-1 receipt'),'phase 0 step 8 still describes obsolete active Phase-1 receipt creation');
+need(!/EVIDENCE_READY/.test(String(phase0.receiptCompletionRule??'')),'phase 0 contract still requires obsolete intermediate EVIDENCE_READY state');
+const phase0StartHere=read(path.join(authorityRoot,'phases/phase-0/START_HERE.md'));
+need(!/set `?phase\.status`?=EVIDENCE_READY|set phase\.status=EVIDENCE_READY/i.test(phase0StartHere),'phase 0 START_HERE still instructs an EVIDENCE_READY state write');
+const controllerGithubProtocol=read(path.join(authorityRoot,'shared/controller/AUDIT_CONTROLLER_AND_GITHUB_PROTOCOL.md'));
+need(controllerGithubProtocol.includes('currentAssignment'),'controller/GitHub protocol does not route assignment-v2 reviewer work from currentAssignment');
+need(!/read its `currentReceiptPath`[\s\S]{0,200}execute only the phase authorized by the receipt/i.test(controllerGithubProtocol),'controller/GitHub protocol still routes reviewer work from active receipts');
+const schemaPolicy=read(path.join(authorityRoot,'shared/controller/LITE_PHASE_SCHEMA_POLICY.md'));
+need(!/"auditControllerRef"\s*:\s*"main"/.test(schemaPolicy),'schema policy hardcodes auditControllerRef=main in reviewer validation request');
 
 need(boundaryWorkflow.includes(".agent-upload/lite-phase-boundary/*.json"),'phase-boundary controller lacks an agent-operable request trigger');
 need(boundaryWorkflow.includes('curveyield-lite-phase-boundary-request-v1'),'phase-boundary controller does not validate the request schema');
@@ -225,10 +249,12 @@ process.stdout.write(JSON.stringify({
   agentStepsValidated:stepCount,
   phaseSummaries,
   checks:[
+    'runtime phase identity and assignment-v2 next-state alignment',
     'phase contract/schema/template field and section identity',
     'controller-prefill declarations versus automation production/protection',
     'derived-output declarations versus controller generation/routing',
-    'Phase-0 required outputs versus current automation producers/consumers',
+    'Phase-0 required outputs/state transitions versus current automation producers/finalizer',
+    'assignment-v2 campaign discovery versus shared controller protocol',
     'agent-operable controller-validation trigger and canonical routing',
     'assignment-v2/legacy-controller separation',
     'literal Phase-5 adapter and harness capability alignment',
