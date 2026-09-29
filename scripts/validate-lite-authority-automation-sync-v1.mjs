@@ -139,9 +139,44 @@ need(legacyReceiptController.includes("legacy receipt controller is prohibited f
 const phase5Schema=json(path.join(authorityRoot,'phases','phase-5','PHASE_05_SCHEMA_v1.json'));
 const phase5Text=JSON.stringify(phase5Schema);
 if(phase5Text.includes('MEDUSA_PROPERTY')){
-  need(boundaryArtifacts.includes('MEDUSA_PROPERTY'),'authority allows retained MEDUSA_PROPERTY but boundary automation does not support it');
-  need(capabilityMap.includes('candidate-specific `MEDUSA_PROPERTY` execution'),'capability map contradicts retained candidate-specific MEDUSA_PROPERTY execution');
+  need(boundaryArtifacts.includes('MEDUSA_PROPERTY'),'authority allows MEDUSA_PROPERTY but boundary automation does not support it');
 }
+const permittedLiteCapabilities=[
+  'Medusa fuzz/property execution',
+  'Broad/stateful random discovery',
+  'Chaos testing',
+  'Mutation testing',
+  'Differential/reference testing',
+  'Corpus/deep testing',
+  'Exhaustive known-attack testing',
+  'Coverage-closure testing'
+];
+for(const capability of permittedLiteCapabilities){
+  need(capabilityMap.includes('| '+capability+' |'),'capability map must explicitly include permitted Lite capability: '+capability);
+}
+const prohibitedCapabilityLine=capabilityMap.split(/\r?\n/).find(line=>
+  /^(?:Do not|Never|Must not|Forbidden|Prohibited)/i.test(line.trim()) &&
+  /Medusa|random discovery|chaos|mutation|differential|corpus|exhaustive known-attack|coverage-closure/i.test(line)
+);
+need(!prohibitedCapabilityLine,'capability map contains a Lite execution prohibition: '+prohibitedCapabilityLine);
+
+const prohibitedExecutionTerms=/Medusa|random discovery|stateful random|chaos|mutation|differential\/reference|differential testing|reference testing|corpus\/deep|corpus testing|deep testing|exhaustive known-attack|coverage-closure/i;
+const prohibitionLanguage=/\b(?:do not|must not|never|forbid(?:den|s)?|prohibit(?:ed|s)?|disallow(?:ed|s)?|not request|not execute|not run)\b/i;
+const authorityProhibitionHits=[];
+function scanAuthority(dir){
+  for(const ent of fs.readdirSync(dir,{withFileTypes:true})){
+    const file=path.join(dir,ent.name);
+    if(ent.isDirectory()){scanAuthority(file);continue;}
+    if(!ent.isFile()||!/\.(?:md|json|txt|ya?ml)$/i.test(ent.name)) continue;
+    read(file).split(/\r?\n/).forEach((line,index)=>{
+      if(prohibitedExecutionTerms.test(line)&&prohibitionLanguage.test(line)){
+        authorityProhibitionHits.push(path.relative(authorityRoot,file).split(path.sep).join('/')+':'+(index+1)+': '+line.trim());
+      }
+    });
+  }
+}
+scanAuthority(authorityRoot);
+need(authorityProhibitionHits.length===0,'Lite authority still contains execution prohibitions: '+authorityProhibitionHits.join(' | '));
 
 process.stdout.write(JSON.stringify({
   status:'PASS',
@@ -156,6 +191,7 @@ process.stdout.write(JSON.stringify({
     'Phase-0 required outputs versus current automation producers/consumers',
     'agent-operable controller-validation trigger and canonical routing',
     'assignment-v2/legacy-controller separation',
-    'retained targeted execution capability alignment'
+    'retained targeted execution capability alignment',
+    'full-authority scan for Lite execution capability prohibitions'
   ]
 },null,2)+'\n');
