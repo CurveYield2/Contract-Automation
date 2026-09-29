@@ -8,7 +8,8 @@ import {
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-phase-work-v1.mjs';
 import {
-  executePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1
+  executePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
+  validateTargetExecutionRequestBindingV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
   buildControllerPacket,renderControllerPhaseReport,validatePhaseScaffold,
@@ -367,14 +368,50 @@ try{
 if(sequence===5&&form&&deficiencies.length===0){
   const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
   for(const target of targets){
-    if(!target||typeof target!=='object'||target.executionMethod==='NOT_APPLICABLE') continue;
+    if(!target||typeof target!=='object') continue;
+    const method=String(target.executionMethod??'').toUpperCase();
+    if(method==='NOT_APPLICABLE'){
+      target.executionRequestRef='NOT_APPLICABLE';
+      target.automationResolvedExecutionRequest=false;
+      target.requestBindingStatus='NOT_APPLICABLE';
+      target.requestBindingEvidenceRef='NOT_APPLICABLE';
+      target.automationOwnedFields=[...new Set([
+        ...(target.automationOwnedFields??[]),
+        'executionRequestRef','automationResolvedExecutionRequest','requestBindingStatus','requestBindingEvidenceRef'
+      ])];
+      continue;
+    }
     const resolved=resolveTargetExecutionRequestRef({root,campaignPath,target});
-    if(resolved){
-      target.executionRequestRef=resolved;
-      target.automationResolvedExecutionRequest=true;
-      target.automationOwnedFields=[...new Set([...(target.automationOwnedFields??[]),'executionRequestRef','automationResolvedExecutionRequest'])];
-    }else{
-      deficiencies.push('Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+' has no deterministically resolvable execution request. Provide executionRequestRef only for this target or materialize the conventional request path.');
+    if(!resolved){
+      deficiencies.push('Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+' has no deterministically resolvable execution request. Materialize the exact trusted V7 request at a conventional campaign request path or provide executionRequestRef only for this target.');
+      continue;
+    }
+    target.executionRequestRef=resolved;
+    target.automationResolvedExecutionRequest=!(
+      typeof target.executionRequestRef==='string'
+      && target.executionRequestRef===resolved
+      && typeof target.requestBindingStatus==='string'
+      && target.requestBindingStatus.startsWith('PASS_')
+    );
+    const binding=validateTargetExecutionRequestBindingV1({
+      controllerRoot:root,
+      campaignPath,
+      target,
+      expectedCampaignId:directory.campaignId,
+      expectedSourceSha256:directory.sourceSha256
+    });
+    target.requestBindingStatus=binding.status;
+    target.requestBindingEvidenceRef=binding.requestRef??resolved;
+    target.automationOwnedFields=[...new Set([
+      ...(target.automationOwnedFields??[]),
+      'executionRequestRef','automationResolvedExecutionRequest','requestBindingStatus','requestBindingEvidenceRef'
+    ])];
+    if(!String(binding.status).startsWith('PASS_')){
+      deficiencies.push(
+        'Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+
+        ' execution request is not structurally bound to the accepted target/source: '+
+        String(binding.status)+' — '+(binding.reasons??[]).join('; ')
+      );
     }
   }
   if(!deficiencies.length){
@@ -445,7 +482,13 @@ const boundaryArtifactRels=[];
 let successorPrefillContext={};
 if(sequence===5){
   const targetDesigns=phaseOutput(canonical,'step-3','targetDesigns')??[];
-  const executionResults=await executePhase5TargetsV1({controllerRoot:root,campaignPath,targetDesigns});
+  const executionResults=await executePhase5TargetsV1({
+    controllerRoot:root,
+    campaignPath,
+    targetDesigns,
+    expectedCampaignId:directory.campaignId,
+    expectedSourceSha256:directory.sourceSha256
+  });
   successorPrefillContext={targetDesigns,phase5ExecutionResults:executionResults};
   const targetMatrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
   fs.mkdirSync(path.dirname(repoFile(root,targetMatrixRel)),{recursive:true});
