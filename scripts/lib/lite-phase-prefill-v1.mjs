@@ -318,7 +318,16 @@ function machineLimitations(deployRows,targetRows){
 }
 
 export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths=[],predecessorReceiptPath,prefillContext={}}){
-  form.automationInputs={...(form.automationInputs??{}),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths]};
+  form.automationInputs={
+    ...(form.automationInputs??{}),
+    predecessorReceiptPath,
+    derivedInputPaths:[...derivedInputPaths],
+    controllerOwnedAutomationInputs:uniq([
+      ...((form.automationInputs??{}).controllerOwnedAutomationInputs??[]),
+      'predecessorReceiptPath',
+      'derivedInputPaths'
+    ])
+  };
   const siEntry=findSourceIntelligence(root,campaignPath);
   const si=siEntry?.j??null;
   const derived=loadDerived(root,derivedInputPaths);
@@ -331,6 +340,10 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       sourceAnchors:si.sourceAnchors??[],
       valueFlowCandidates:si.valueFlowCandidates??[]
     };
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+      'structuralInventory'
+    ]);
     const deps=new Map();
     for(const e of si.externalInterfaces??[]){
       const key=e.dependencyOrInterface??e.interfaceId;
@@ -391,6 +404,11 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     form.actions['step-2'].outputs.specialistReviewRecords=specialistScaffold(si??{},domains);
     form.automationInputs.expectedSourceReviewKeys=(form.actions['step-1'].outputs.sourceReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey);
     form.automationInputs.expectedSpecialistReviewKeys=(form.actions['step-2'].outputs.specialistReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey);
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+      'expectedSourceReviewKeys',
+      'expectedSpecialistReviewKeys'
+    ]);
   }
 
   if(sequence===5){
@@ -595,12 +613,14 @@ export function buildControllerPacket({directory,assignment,existing,now}){
   };
 }
 
-export function validatePhaseScaffold(sequence,form){
+export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=null){
   const deficiencies=[];
-  const expectedDigest=form?.automationInputs?.controllerPrefillDigestSha256;
+  const formDigest=form?.automationInputs?.controllerPrefillDigestSha256??null;
+  const expectedDigest=assignmentExpectedDigest??formDigest;
   const ownedProjection=controllerOwnedProjection(form);
   if(form?.automationInputs&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
   else if(ownedProjection.length&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
+  if(assignmentExpectedDigest&&formDigest!==assignmentExpectedDigest) deficiencies.push('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.');
   if(expectedDigest&&controllerOwnedDigest(form)!==expectedDigest) deficiencies.push('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
   if(sequence===4){
     const c=phase4CoverageFromForm(form);
