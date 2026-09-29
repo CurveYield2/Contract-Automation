@@ -7,7 +7,8 @@ import {
   applyPhaseBoundaryPrefill,
   phase4CoverageFromForm,
   materializeValidatedFindings,
-  renderControllerPhaseReport
+  renderControllerPhaseReport,
+  populatePhase9RerunEvidenceRefs
 } from '../../../scripts/lib/lite-phase-prefill-v1.mjs';
 
 const mkdir=p=>fs.mkdirSync(p,{recursive:true});
@@ -105,4 +106,70 @@ test('controller report includes controller-owned materializations',()=>{
   assert.match(report,/CONTROLLER-GENERATED/);
   assert.match(report,/residualLimitations/);
   assert.match(report,/fullUpgradeRecommendations/);
+});
+
+
+test('Phase9 controller harvests rerun evidence refs from trusted ingested execution evidence',()=>{
+  const b=base();
+  const findingKey='FIND-001';
+  const requestId='dar-0123456789abcdef0123456789abcdef';
+  const requestDir='controller/phase9-reruns/FIND-001/rerun-1';
+  writeJson(path.join(b.root,b.campaign,requestDir,'EXECUTION_REQUEST_v1.json'),{requestId});
+  const evidenceDir=path.join(b.root,b.campaign,'controller/automation',requestId);
+  writeJson(path.join(evidenceDir,'EXECUTION_EVIDENCE_v1.json'),{schemaVersion:'test-evidence',requestId});
+  writeJson(path.join(evidenceDir,'EXECUTION_OBSERVER_RECEIPT_v1.json'),{schemaVersion:'observer',requestId});
+  writeJson(path.join(evidenceDir,'ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json'),{
+    schemaVersion:'audit-execution-evidence-ingestion-receipt-v1',
+    requestId,
+    requestDigest:'a'.repeat(64),
+    phaseId:'build-and-test',
+    profileId:'test',
+    source:{},
+    artifactDigest:'b'.repeat(64),
+    componentRefs:[],
+    securityDisposition:'REVIEWER_REQUIRED',
+    findingPromotion:'FORBIDDEN_BY_INGESTOR',
+    ingestionDigest:'c'.repeat(64)
+  });
+  const form={schemaVersion:'curveyield-lite-phase-work-form-v1',phase:9,automationInputs:{},actions:{
+    'step-2':{outputs:{remediationDispositions:[{
+      findingKey,
+      rerunRequestDirectory:'controller/phase9-reruns/FIND-001/',
+      rerunEvidenceRefs:['<CONTROLLER_AUTO_COLLECT_AFTER_RERUNS>'],
+      rootCauseFixed:'YES',
+      regressionAssessment:'NO_REGRESSION',
+      disposition:'FIXED',
+      rationale:'evidence-backed',
+      newCandidateOrNone:'NONE_IDENTIFIED',
+      automationOwnedFields:['findingKey','rerunRequestDirectory']
+    }]}}
+  }};
+  const deficiencies=populatePhase9RerunEvidenceRefs({root:b.root,campaignPath:b.campaign,form});
+  assert.deepEqual(deficiencies,[]);
+  const row=form.actions['step-2'].outputs.remediationDispositions[0];
+  assert.ok(row.rerunEvidenceRefs.includes('controller/automation/'+requestId+'/EXECUTION_EVIDENCE_v1.json'));
+  assert.ok(row.rerunEvidenceRefs.includes('controller/automation/'+requestId+'/ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json'));
+  assert.ok(row.automationOwnedFields.includes('rerunEvidenceRefs'));
+  assert.match(form.automationInputs.controllerPrefillDigestSha256,/^[0-9a-f]{64}$/);
+});
+
+test('Phase9 controller fails closed while rerun evidence ingestion is incomplete',()=>{
+  const b=base();
+  const requestId='dar-fedcba9876543210fedcba9876543210';
+  writeJson(path.join(b.root,b.campaign,'controller/phase9-reruns/FIND-002/rerun-1/EXECUTION_REQUEST_v1.json'),{requestId});
+  const form={schemaVersion:'curveyield-lite-phase-work-form-v1',phase:9,automationInputs:{},actions:{
+    'step-2':{outputs:{remediationDispositions:[{
+      findingKey:'FIND-002',
+      rerunRequestDirectory:'controller/phase9-reruns/FIND-002/',
+      rerunEvidenceRefs:['<CONTROLLER_AUTO_COLLECT_AFTER_RERUNS>'],
+      rootCauseFixed:'YES',
+      regressionAssessment:'PENDING',
+      disposition:'PENDING',
+      rationale:'pending evidence',
+      newCandidateOrNone:'NONE_IDENTIFIED',
+      automationOwnedFields:['findingKey','rerunRequestDirectory']
+    }]}}
+  }};
+  const deficiencies=populatePhase9RerunEvidenceRefs({root:b.root,campaignPath:b.campaign,form});
+  assert.ok(deficiencies.some(x=>x.includes('no durable ingested execution evidence yet')));
 });
