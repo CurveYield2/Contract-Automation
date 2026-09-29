@@ -36,7 +36,14 @@ const watchdog=read(join(automationRoot,'.github/workflows/browser-agent-watchdo
 const successorWake=read(join(automationRoot,'scripts/prepare-lite-assignment-successor-v2.mjs'));
 const legacyReceiptController=read(join(automationRoot,'scripts/lite-phase-receipt-controller-v1.mjs'));
 const boundaryArtifacts=read(join(automationRoot,'packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs'));
+const orchestrator=read(join(automationRoot,'.github/workflows/lite-audit-browser-orchestrator-v1.yml'));
+const v26RequestConfig=read(join(automationRoot,'packages/github-native-sim/src/v26-request-config-v1.mjs'));
+const phase6HarnessAuthoring=read(join(automationRoot,'packages/github-native-sim/src/phase6-harness-authoring-v1.mjs'));
+const phase6CampaignController=read(join(automationRoot,'packages/github-native-sim/src/phase6-campaign-controller-v1.mjs'));
+const foundryCoverage=read(join(automationRoot,'packages/github-native-sim/src/foundry-coverage-v1.mjs'));
+const runJob=read(join(automationRoot,'packages/github-native-sim/src/run-job-file.mjs'));
 const capabilityMap=read(path.join(authorityRoot,'shared/execution/CONTRACT_AUTOMATION_CAPABILITY_MAP.md'));
+const technicalExecutionPlaybook=read(path.join(authorityRoot,'shared/execution/TECHNICAL_EXECUTION_REQUEST_PLAYBOOK.md'));
 
 let stepCount=0;
 const phaseSummaries=[];
@@ -134,42 +141,75 @@ need(/target===10[^\n]*\[[^\]]*p8Final[^\]]*p9Final[^\]]*finalIndex/.test(packet
 need(!/packet_status.*SUBMITTED[\s\S]{0,500}lite-phase-work-packet-controller-v1\.yml/.test(watchdog),'watchdog still contains circular SUBMITTED-packet validation dispatch');
 need(successorWake.includes('.agent-upload/lite-phase-boundary/'),'fresh reviewer wake omits controller-validation request path');
 need(successorWake.includes('curveyield-lite-phase-boundary-request-v1'),'fresh reviewer wake omits controller-validation request schema');
+need(successorWake.includes("'audit-controller-ref'"),'fresh reviewer wake generator does not require exact Audit-Controller ref');
+need(successorWake.includes("controllerRef=a['audit-controller-ref']"),'fresh reviewer wake generator does not bind URLs/request schema to exact Audit-Controller ref');
+need(!successorWake.includes('auditControllerRef":"main'),'fresh reviewer wake hardcodes auditControllerRef=main');
+need(orchestrator.includes('--audit-controller-ref "$AUDIT_CONTROLLER_REF"'),'Lite orchestrator does not pass exact Audit-Controller ref to successor wake generator');
 need(legacyReceiptController.includes("legacy receipt controller is prohibited for current assignment-v2 Lite campaigns"),'legacy receipt controller is not fenced off from current assignment-v2 campaigns');
 
 const phase5Schema=json(path.join(authorityRoot,'phases','phase-5','PHASE_05_SCHEMA_v1.json'));
-const phase5Text=JSON.stringify(phase5Schema);
-if(phase5Text.includes('MEDUSA_PROPERTY')){
-  need(boundaryArtifacts.includes('MEDUSA_PROPERTY'),'authority allows MEDUSA_PROPERTY but boundary automation does not support it');
+const reproductionAllowed=phase5Schema.actions?.['step-3']?.fields?.find(f=>f.name==='targetDesigns')?.itemFieldAllowedValues?.reproductionType??[];
+need(sameSet(reproductionAllowed,['FOUNDRY_TEST','MEDUSA_PROPERTY','ANVIL_WORKFLOW','NOT_APPLICABLE']),'Phase 5 reproductionType values must match literal candidate-reproduction adapters');
+for(const type of ['FOUNDRY_TEST','MEDUSA_PROPERTY','ANVIL_WORKFLOW']){
+  need(v26RequestConfig.includes(type),'V26 request configuration does not literally support Phase 5 reproductionType '+type);
+  need(boundaryArtifacts.includes(type),'Phase-5 boundary automation does not literally bind/execute reproductionType '+type);
 }
-const permittedLiteCapabilities=[
-  'Medusa fuzz/property execution',
-  'Broad/stateful random discovery',
-  'Chaos testing',
-  'Mutation testing',
-  'Differential/reference testing',
-  'Corpus/deep testing',
-  'Exhaustive known-attack testing',
-  'Coverage-closure testing'
-];
-for(const capability of permittedLiteCapabilities){
-  need(capabilityMap.includes('| '+capability+' |'),'capability map must explicitly include permitted Lite capability: '+capability);
+need(runJob.includes("command: 'forge'")&&runJob.includes("'--fuzz-runs'"),'literal Foundry fuzz execution path missing');
+need(runJob.includes('executeMedusa')&&runJob.includes('runMedusaAnalysis'),'literal Medusa execution path missing');
+need(runJob.includes('executePhase7Simulation')&&runJob.includes("engine?.engine !== 'anvil'"),'literal Anvil lifecycle execution path missing');
+for(const campaign of ['discovery','property','targeted']){
+  need(phase6HarnessAuthoring.includes(campaign+':'),'Phase-6 harness initializer missing literal Medusa campaign '+campaign);
 }
-const prohibitedCapabilityLine=capabilityMap.split(/\r?\n/).find(line=>
-  /^(?:Do not|Never|Must not|Forbidden|Prohibited)/i.test(line.trim()) &&
-  /Medusa|random discovery|chaos|mutation|differential|corpus|exhaustive known-attack|coverage-closure/i.test(line)
-);
-need(!prohibitedCapabilityLine,'capability map contains a Lite execution prohibition: '+prohibitedCapabilityLine);
+for(const skeleton of ['Phase6StatefulHandler_v2.sol.template','Phase6BoundaryFuzz_v2.t.sol.template','Phase6DifferentialFuzz_v2.t.sol.template','Phase6GhostModel_v2.sol.template']){
+  need(phase6HarnessAuthoring.includes(skeleton),'Phase-6 harness bundle omits shipped Foundry capability '+skeleton);
+}
+for(const campaignClass of ['stateful','boundary-dictionary','multi-actor','ghost-reference','differential','deep-escalation']){
+  need(phase6CampaignController.includes("'"+campaignClass+"'"),'Phase-6 campaign controller missing declared campaign class '+campaignClass);
+}
+need(foundryCoverage.includes("command:'forge'")&&foundryCoverage.includes("args:['coverage'"),'Foundry coverage execution path missing');
 
-const prohibitedExecutionTerms=/Medusa|random discovery|stateful random|chaos|mutation|differential\/reference|differential testing|reference testing|corpus\/deep|corpus testing|deep testing|exhaustive known-attack|coverage-closure/i;
-const prohibitionLanguage=/\b(?:do not|must not|never|forbid(?:den|s)?|prohibit(?:ed|s)?|disallow(?:ed|s)?|not request|not execute|not run)\b/i;
+const capabilityExpectations=[
+  ['Medusa fuzz/property execution','DIRECT'],
+  ['Medusa discovery/property/targeted campaigns','HARNESS_BACKED'],
+  ['Stateful invariant / multi-actor testing','HARNESS_BACKED'],
+  ['Boundary/dictionary-directed fuzzing','HARNESS_BACKED'],
+  ['Differential/reference testing','HARNESS_BACKED'],
+  ['Ghost/reference-model testing','HARNESS_BACKED'],
+  ['Corpus-driven Medusa testing','HARNESS_BACKED'],
+  ['Foundry coverage and refinement','DIRECT'],
+  ['Deep escalation','PLAN_ORCHESTRATED'],
+  ['Broad/stateful random discovery','HARNESS_BACKED'],
+  ['Chaos testing','NO_FIRST_CLASS_ADAPTER'],
+  ['Mutation testing','NO_FIRST_CLASS_ADAPTER'],
+  ['Exhaustive known-attack testing','NO_FIRST_CLASS_ADAPTER'],
+  ['Coverage-guided closure','PLAN_ORCHESTRATED']
+];
+for(const [capability,status] of capabilityExpectations){
+  need(capabilityMap.includes('| '+capability+' | '+status+' |'),'capability map support status mismatch for '+capability);
+}
+need(!/not valid Lite request types/i.test(technicalExecutionPlaybook),'technical execution playbook still contains a Lite execution-type prohibition');
+
+const phase7Contract=json(path.join(authorityRoot,'phases/phase-7/PHASE_CONTRACT.json'));
+need(phase7Contract.authorization?.controllerBoundCurrentPhaseRequired===false,'Phase 7 automation marker incorrectly requires Phase 7 to be the current assigned phase');
+need(phase7Contract.authorization?.controllerBoundPredecessorPhase6Required===true,'Phase 7 automation marker is not explicitly bound to accepted Phase 6');
+need(phase7Contract.submissionPolicy?.packetPath===null,'Phase 7 automation marker must not have a packet path');
+need(phase7Contract.recoveryRoutes?.every(r=>!/reviewer repairs|resubmit/i.test(String(r.route??''))),'Phase 7 automation-only recovery still instructs reviewer rework');
+
+const prohibitedExecutionTerms=/Medusa|random discovery|stateful random|chaos|mutation|differential\/reference|differential testing|reference testing|corpus\/deep|corpus testing|deep testing|exhaustive known-attack|coverage-(?:closure|guided)/i;
 const authorityProhibitionHits=[];
+function isActiveProhibition(line){
+  const lower=line.toLowerCase();
+  if(/not prohibited|not forbidden|not disallowed|does not prohibit|is not a .*prohibition/.test(lower)) return false;
+  return /\b(?:do not|must not|never|forbidden|disallowed|not allowed|not valid|may not|cannot|can't|not request|not execute|not run)\b/i.test(line)
+    || (/\bprohibit(?:ed|s)?\b/i.test(line)&&!/\bnot prohibited\b/i.test(line));
+}
 function scanAuthority(dir){
   for(const ent of fs.readdirSync(dir,{withFileTypes:true})){
     const file=path.join(dir,ent.name);
     if(ent.isDirectory()){scanAuthority(file);continue;}
     if(!ent.isFile()||!/\.(?:md|json|txt|ya?ml)$/i.test(ent.name)) continue;
     read(file).split(/\r?\n/).forEach((line,index)=>{
-      if(prohibitedExecutionTerms.test(line)&&prohibitionLanguage.test(line)){
+      if(prohibitedExecutionTerms.test(line)&&isActiveProhibition(line)){
         authorityProhibitionHits.push(path.relative(authorityRoot,file).split(path.sep).join('/')+':'+(index+1)+': '+line.trim());
       }
     });
@@ -191,7 +231,10 @@ process.stdout.write(JSON.stringify({
     'Phase-0 required outputs versus current automation producers/consumers',
     'agent-operable controller-validation trigger and canonical routing',
     'assignment-v2/legacy-controller separation',
-    'retained targeted execution capability alignment',
+    'literal Phase-5 adapter and harness capability alignment',
+    'capability permission versus implementation-status accuracy',
+    'exact Audit-Controller ref propagation into successor wakes',
+    'automation-only Phase-7 transaction semantics',
     'full-authority scan for Lite execution capability prohibitions'
   ]
 },null,2)+'\n');
