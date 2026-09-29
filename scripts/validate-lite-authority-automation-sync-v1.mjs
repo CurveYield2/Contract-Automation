@@ -32,6 +32,7 @@ const authorityRel=path.relative(controllerRoot,authorityRoot).split(path.sep).j
 const prefillSource=read(join(automationRoot,'scripts/lib/lite-phase-prefill-v1.mjs'));
 const packetController=read(join(automationRoot,'scripts/lite-phase-packet-controller-v1.mjs'));
 const boundaryWorkflow=read(join(automationRoot,'.github/workflows/lite-phase-work-packet-controller-v1.yml'));
+const phase9ExecutionDispatch=read(join(automationRoot,'.github/workflows/lite-v7-execution-dispatch-v1.yml'));
 const watchdog=read(join(automationRoot,'.github/workflows/browser-agent-watchdog.yml'));
 const successorWake=read(join(automationRoot,'scripts/prepare-lite-assignment-successor-v2.mjs'));
 const legacyReceiptController=read(join(automationRoot,'scripts/lite-phase-receipt-controller-v1.mjs'));
@@ -170,6 +171,14 @@ need(successorWake.includes("controllerRef=a['audit-controller-ref']"),'fresh re
 need(!successorWake.includes('auditControllerRef":"main'),'fresh reviewer wake hardcodes auditControllerRef=main');
 need(orchestrator.includes('--audit-controller-ref "$AUDIT_CONTROLLER_REF"'),'Lite orchestrator does not pass exact Audit-Controller ref to successor wake generator');
 need(legacyReceiptController.includes("legacy receipt controller is prohibited for current assignment-v2 Lite campaigns"),'legacy receipt controller is not fenced off from current assignment-v2 campaigns');
+need(phase9ExecutionDispatch.includes(".agent-upload/lite-v7-execution/*.json"),'Phase 9 V7 execution lacks a connector-operable request-file trigger');
+need(phase9ExecutionDispatch.includes('curveyield-lite-v7-execution-dispatch-v1'),'Phase 9 V7 execution trigger does not validate its dispatch schema');
+need(phase9ExecutionDispatch.includes('.currentAssignment.phaseSequence')&&phase9ExecutionDispatch.includes('= "9"'),'Phase 9 V7 execution trigger does not bind dispatch to current Phase-9 assignment');
+need(phase9ExecutionDispatch.includes('gh workflow run audit-controller-execution.yml'),'Phase 9 V7 execution trigger does not launch the qualified V7 execution lane');
+need(phase9ExecutionDispatch.includes('controller_writeback_ref'),'Phase 9 V7 execution trigger does not bind durable evidence writeback');
+const phase9StartHere=read(path.join(authorityRoot,'phases/phase-9/START_HERE.md'));
+need(phase9StartHere.includes('curveyield-lite-v7-execution-dispatch-v1'),'Phase 9 instructions do not expose the connector-operable V7 execution dispatch');
+need(schemaPolicy.includes('curveyield-lite-v7-execution-dispatch-v1'),'shared schema policy does not define the Phase-9 V7 execution dispatch contract');
 
 const phase5Schema=json(path.join(authorityRoot,'phases','phase-5','PHASE_05_SCHEMA_v1.json'));
 const reproductionAllowed=phase5Schema.actions?.['step-3']?.fields?.find(f=>f.name==='targetDesigns')?.itemFieldAllowedValues?.reproductionType??[];
@@ -257,6 +266,7 @@ process.stdout.write(JSON.stringify({
     'assignment-v2 campaign discovery versus shared controller protocol',
     'agent-operable controller-validation trigger and canonical routing',
     'assignment-v2/legacy-controller separation',
+    'connector-operable Phase-9 rerun execution and durable evidence ingestion dispatch',
     'literal Phase-5 adapter and harness capability alignment',
     'capability permission versus implementation-status accuracy',
     'exact Audit-Controller ref propagation into successor wakes',
