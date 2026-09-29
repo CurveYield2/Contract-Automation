@@ -16,8 +16,10 @@ report_path="process/audit-source-initialization/reports/$safe_request.json"
 
 # Exact workflow retries are idempotent. A new request using the same ZIP is NOT
 # deduplicated; it intentionally creates the next rN campaign revision.
-encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$report_path?ref=main" --jq '.content // empty' 2>/dev/null || true)"
-if [ -n "$encoded" ] && [ "$encoded" != "null" ]; then
+report_api="repos/$GITHUB_REPOSITORY/contents/$report_path"
+report_sha="$(gh api "$report_api?ref=main" --jq '.sha // empty' 2>/dev/null || true)"
+if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  encoded="$(gh api "$report_api?ref=main" --jq '.content')"
   printf '%s' "$encoded" | base64 -d > /tmp/prior-source-init.json
   jq -e --arg u "$SOURCE_URL" \
     '.schemaVersion=="curveyield-audit-source-initialization-report-v1"
