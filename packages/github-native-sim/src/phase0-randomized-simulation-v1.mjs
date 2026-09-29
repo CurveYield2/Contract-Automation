@@ -370,9 +370,9 @@ async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoo
   await fs.rm(harnessAbs,{force:true});await fs.rm(cfgPath,{force:true});return summary;
 }
 function baselineTargetRows({medusa,telemetry}){
-  const refs=[medusa?.rawOutputRef,...telemetry.map(x=>x.rawTranscriptRef)].filter(Boolean);
+  const refs=[medusa?.rawOutputRef,medusa?.corpusIndexRef,...telemetry.map(x=>x.rawTranscriptRef)].filter(Boolean);
   return[
-    {candidateKey:'PHASE0-BASELINE-MEDUSA',executionEvidenceRefs:[medusa?.rawOutputRef??'NO_MEDUSA_OUTPUT'],oracleOutcome:medusa?.status==='PASS'?'BASELINE_RANDOMIZED_EXECUTION_COMPLETED':'BASELINE_RANDOMIZED_EXECUTION_LIMITED',reproductionStatus:medusa?.status??'UNKNOWN',requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',requestBindingEvidenceRef:medusa?.configRef??'NO_CONFIG'},
+    {candidateKey:'PHASE0-BASELINE-MEDUSA',executionEvidenceRefs:[medusa?.rawOutputRef,medusa?.corpusIndexRef].filter(Boolean).length?[medusa?.rawOutputRef,medusa?.corpusIndexRef].filter(Boolean):['NO_MEDUSA_OUTPUT'],oracleOutcome:medusa?.status==='PASS'?'BASELINE_RANDOMIZED_EXECUTION_COMPLETED':'BASELINE_RANDOMIZED_EXECUTION_LIMITED',reproductionStatus:medusa?.status??'UNKNOWN',requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',requestBindingEvidenceRef:medusa?.configRef??'NO_CONFIG'},
     {candidateKey:'PHASE0-BASELINE-ABI-TELEMETRY',executionEvidenceRefs:refs,oracleOutcome:'INVESTIGATIVE_BASELINE_TELEMETRY_GENERATED',reproductionStatus:telemetry.every(x=>x.status==='PASS')?'PASS':'INCOMPLETE',requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',requestBindingEvidenceRef:'evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.json'}
   ];
 }
