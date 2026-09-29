@@ -65,7 +65,11 @@ test('audit wakes enforce verified High reasoning effort and keep follow-up mess
   const runtime = read('scripts/browser-agent-wake.mjs');
   const wake = read('.github/workflows/browser-agent-wake.yml');
   assert.match(operations, /ensureThinkingEffort/);
-  assert.match(operations, /getByText\('High', \{ exact: true \}\)/);
+  assert.match(operations, /menuitemradio/);
+  assert.match(operations, /Thinking time/);
+  assert.match(operations, /button:has-text\("GPT-5\.6"\)/);
+  assert.match(operations, /THINKING_EFFORT_UI_CHANGED/);
+  assert.match(operations, /visibleControls=/);
   assert.match(operations, /High thinking-effort control could not be selected and verified/);
   assert.match(runtime, /CHATGPT_THINKING_EFFORT/);
   assert.match(runtime, /chatgpt\.ensure_thinking_effort/);
