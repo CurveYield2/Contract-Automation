@@ -191,6 +191,7 @@ process.stdout.write(JSON.stringify({
     'Phase-0 required outputs versus current automation producers/consumers',
     'agent-operable controller-validation trigger and canonical routing',
     'assignment-v2/legacy-controller separation',
-    'retained targeted execution capability alignment'
+    'retained targeted execution capability alignment',
+    'full-authority scan for Lite execution capability prohibitions'
   ]
 },null,2)+'\n');
