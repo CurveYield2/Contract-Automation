@@ -91,6 +91,7 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const p5=derived(5,'PHASE6_INPUT_v1.json');
   const p6=derived(6,'PHASE8_INPUT_v1.json');
   const p8Remediation=derived(8,'PHASE9_REMEDIATION_INPUT_v1.json');
+  if(target===4) return uniqueExisting(root,[p2,p3]);
   if(target===5) return uniqueExisting(root,[p2,p3,p4]);
   if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,deploy,targets]);
   if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,deploy,targets]);
