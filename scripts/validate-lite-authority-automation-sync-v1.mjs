@@ -228,6 +228,14 @@ need(phase7Contract.authorization?.controllerBoundPredecessorPhase6Required===tr
 need(phase7Contract.submissionPolicy?.packetPath===null,'Phase 7 automation marker must not have a packet path');
 need(phase7Contract.recoveryRoutes?.every(r=>!/reviewer repairs|resubmit/i.test(String(r.route??''))),'Phase 7 automation-only recovery still instructs reviewer rework');
 
+const phase9Contract=json(path.join(authorityRoot,'phases/phase-9/PHASE_CONTRACT.json'));
+need(phase9Contract.authorization?.entryCondition==='REMEDIATION_ARTIFACTS_EXIST','Phase 9 contract entry condition mismatch');
+need((phase9Contract.requiredOutputs??[]).every(x=>x.condition==='REMEDIATION_ARTIFACTS_EXIST'),'Phase 9 reviewer outputs must be conditional on remediation artifacts');
+need(phase9Contract.derivedOutputPolicy?.condition==='REMEDIATION_ARTIFACTS_EXIST','Phase 9 remediation-derived output must be conditional on execution');
+need(phase9Contract.skipOutputs?.condition==='NO_REMEDIATION_ARTIFACTS','Phase 9 skip-output contract is missing');
+need(phase9Contract.skipOutputs?.reviewerWorkFormRequired===false&&phase9Contract.skipOutputs?.finalReportRequired===false,'Phase 9 skip branch incorrectly requires reviewer outputs');
+need(packetController.includes("status:'SKIPPED'")&&packetController.includes("action:'SKIPPED_NO_REMEDIATION'"),'Phase 9 no-remediation skip contract is not implemented by packet controller');
+
 const prohibitedExecutionTerms=/Medusa|random discovery|stateful random|chaos|mutation|differential\/reference|differential testing|reference testing|corpus\/deep|corpus testing|deep testing|exhaustive known-attack|coverage-(?:closure|guided)/i;
 const authorityProhibitionHits=[];
 function isActiveProhibition(line){
@@ -271,6 +279,7 @@ process.stdout.write(JSON.stringify({
     'capability permission versus implementation-status accuracy',
     'exact Audit-Controller ref propagation into successor wakes',
     'automation-only Phase-7 transaction semantics',
+    'conditional Phase-9 execute-versus-skip output contract',
     'full-authority scan for Lite execution capability prohibitions'
   ]
 },null,2)+'\n');
