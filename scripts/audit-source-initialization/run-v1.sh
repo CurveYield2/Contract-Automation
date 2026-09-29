@@ -32,6 +32,7 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   campaign_root="$(jq -r '.campaign.workspacePath' /tmp/prior-source-init.json)"
 else
   export GH_TOKEN="$AUDIT_CONTROLLER_TOKEN"
+  gh auth setup-git
   work='/tmp/audit-source-initialization'
   resolve_audit_source_zip "$SOURCE_URL" "$work" "$AUDIT_CONTROLLER_TOKEN"
 
