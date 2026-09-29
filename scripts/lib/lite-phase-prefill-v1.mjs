@@ -44,6 +44,7 @@ function controllerOwnedProjection(form){
   return rows;
 }
 function controllerOwnedDigest(form){return createHash('sha256').update(JSON.stringify(controllerOwnedProjection(form))).digest('hex');}
+export function refreshControllerPrefillDigest(form){form.automationInputs??={};form.automationInputs.controllerPrefillDigestSha256=controllerOwnedDigest(form);return form.automationInputs.controllerPrefillDigestSha256;}
 
 function sourceAnchorFor(si,symbolId,fallback){
   const a=(si?.sourceAnchors??[]).find(x=>x.symbolId===symbolId);
@@ -460,7 +461,7 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     }
   }
 
-  form.automationInputs.controllerPrefillDigestSha256=controllerOwnedDigest(form);
+  refreshControllerPrefillDigest(form);
   return form;
 }
 
@@ -509,7 +510,7 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
     row.automationOwnedFields=uniq([...(row.automationOwnedFields??[]),'findingKey','rerunRequestDirectory','rerunEvidenceRefs']);
   }
   form.automationInputs??={};
-  form.automationInputs.controllerPrefillDigestSha256=controllerOwnedDigest(form);
+  refreshControllerPrefillDigest(form);
   return deficiencies;
 }
 
