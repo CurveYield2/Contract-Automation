@@ -57,7 +57,13 @@ if(bundle.identity?.sourceDigestSha256!==sourceSha) throw new Error('Source Inte
 
 const simulation=read(evidence.randomizedSimulation);
 const runIndex=read(evidence.simulationRunIndex);
-if(simulation.code!=='PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED'){
+const deployExecution=read(evidence.deployConfigExecution);
+if(simulation.code==='PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED'){
+  if(simulation.status!=='COMPLETE_WITH_TYPED_LIMITATIONS') throw new Error('Non-Ethereum Phase-0 simulation must seal only as COMPLETE_WITH_TYPED_LIMITATIONS');
+  if(deployExecution.status!=='NOT_APPLICABLE_NON_ETHEREUM') throw new Error('Non-Ethereum Phase-0 path must materialize deploy/config evidence as NOT_APPLICABLE_NON_ETHEREUM');
+  if((runIndex.runs??[]).length!==0) throw new Error('Non-Ethereum Phase-0 limitation path must not claim randomized simulation runs');
+  if(simulation.medusa?.status!=='NOT_APPLICABLE_NON_ETHEREUM') throw new Error('Non-Ethereum Phase-0 path must mark Medusa NOT_APPLICABLE_NON_ETHEREUM');
+}else{
   const medusa=simulation.medusa??{};
   if(medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS'){
     if(medusa.status!=='PASS') throw new Error('Phase-0 Medusa simulation did not PASS on the admitted Ethereum path: '+String(medusa.status??'MISSING'));
