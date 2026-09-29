@@ -374,7 +374,37 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deployEvidence,null,2)+'\n');await provider.destroy();
     return{summary,runIndex,deployEvidence};
   }catch(error){
-    const limitation={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v1',status:'BLOCKED',code:error?.code??'PHASE0_SIMULATION_FAILURE',message:String(error?.message??error),chainLimitation:error?.code==='PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED'?'The Anvil-state to Medusa fork path is currently admitted only for the default Ethereum fork profile.':null};
-    await fs.mkdir(outputRoot,{recursive:true});await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(limitation,null,2)+'\n');await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify({schemaVersion:'curveyield-phase0-simulation-run-index-v1',status:'BLOCKED',runs:[],limitation},null,2)+'\n');return{summary:limitation,runIndex:{runs:[]},deployEvidence:null};
+    const nonEthereum=error?.code==='PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED';
+    const typed={type:nonEthereum?'NON_ETHEREUM_FORK_NOT_ADMITTED':'PHASE0_SIMULATION_FAILURE',code:error?.code??'PHASE0_SIMULATION_FAILURE',message:String(error?.message??error),securityEffect:'REQUIRES_PHASE6_INTERPRETATION'};
+    const limitation={
+      schemaVersion:'curveyield-phase0-randomized-simulation-summary-v1',
+      status:nonEthereum?'COMPLETE_WITH_TYPED_LIMITATIONS':'BLOCKED',
+      code:typed.code,
+      message:typed.message,
+      chainLimitation:nonEthereum?'The Anvil-state to Medusa fork path is currently admitted only for the default Ethereum fork profile.':null,
+      limitations:[typed],
+      medusa:{status:nonEthereum?'NOT_APPLICABLE_NON_ETHEREUM':'BLOCKED',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0},
+      telemetry:[],
+      baselineTargetDispositions:[{
+        candidateKey:'PHASE0-BASELINE-RANDOMIZED-SIMULATION',
+        executionEvidenceRefs:['evidence/phase0/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'],
+        oracleOutcome:nonEthereum?'NOT_EXECUTED_CHAIN_FIDELITY_LIMITATION':'BLOCKED',
+        reproductionStatus:nonEthereum?'NOT_APPLICABLE_NON_ETHEREUM':'BLOCKED',
+        requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',
+        requestBindingEvidenceRef:'evidence/phase0/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'
+      }]
+    };
+    const runIndex={
+      schemaVersion:'curveyield-phase0-simulation-run-index-v1',
+      status:limitation.status,
+      purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',
+      policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},
+      runs:[],
+      limitation:typed
+    };
+    await fs.mkdir(outputRoot,{recursive:true});
+    await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(limitation,null,2)+'\n');
+    await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');
+    return{summary:limitation,runIndex,deployEvidence:null};
   }finally{if(anvil)await anvil.close().catch(()=>{});}
 }
