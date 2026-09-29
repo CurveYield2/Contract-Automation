@@ -575,8 +575,14 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
       form.automationInputs.controllerOwnedAutomationInputs=uniq([...(form.automationInputs.controllerOwnedAutomationInputs??[]),'phase0SimulationRunIndexRef']);
     }
     if(form.actions['step-3']){
-      const phase0Limitations=phase0Baseline?.data?.automationInputs?.phase0SimulationLimitations??[];
-      form.actions['step-3'].outputs.typedExecutionLimitations=[...machineLimitations(deployRows,targetRows),...(Array.isArray(phase0Limitations)?phase0Limitations:[])];
+      const phase0Limitations=(phase0Baseline?.data?.automationInputs?.phase0SimulationLimitations??[]).map(x=>{
+        if(typeof x==='string') return x;
+        if(!x||typeof x!=='object') return String(x);
+        const type=x.type??x.code??'PHASE0_SIMULATION_LIMITATION';
+        const detail=x.reason??x.message??x.runId??x.qualifiedName??'SEE_PHASE0_SIMULATION_SUMMARY';
+        return type+': '+detail;
+      });
+      form.actions['step-3'].outputs.typedExecutionLimitations=uniq([...machineLimitations(deployRows,targetRows),...phase0Limitations]);
       const schema=readJsonIf(repoFile(root,path.posix.join(authorityRoot,'phases/phase-6/PHASE_06_SCHEMA_v1.json')))??{};
       form.actions['step-3'].outputs.fullOnlyOmissions=schema.controllerOwnedDefaults?.fullOnlyOmissions??['NONE_IDENTIFIED'];
       form.automationInputs.controllerOwnedOutputPaths=[
