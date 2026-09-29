@@ -239,7 +239,7 @@ function pickFn(target,rng,actionClass){
   const pool=actionClass==='ACCOUNTING_STATE_CHANGE'?accounting:other;
   const fallback=pool.length?pool:(accounting.length?accounting:other);return fallback[ri(rng,fallback.length)];
 }
-function buildBurstSchedule(targets,calls,rng){
+export function buildBurstSchedule(targets,calls,rng){
   const out=[];
   const accountingTargets=targets.map((t,i)=>({t,i})).filter(x=>x.t.functions.some(f=>f.accounting));
   const otherTargets=targets.map((t,i)=>({t,i})).filter(x=>x.t.functions.some(f=>!f.accounting));
@@ -309,7 +309,7 @@ function solidityType(param){
   const dynamic=type==='string'||type==='bytes'||type.includes('[');
   return dynamic?`${type} calldata`:type;
 }
-function medusaWrappers(ethers,targets){
+export function medusaWrappers(ethers,targets){
   const accounting=[],other=[],omitted=[];
   for(const t of targets){
     for(const x of t.functions){
