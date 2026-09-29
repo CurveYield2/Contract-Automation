@@ -57,7 +57,7 @@ const baselineRows=[
 const phase5={schemaVersion:'curveyield-lite-phase0-phase5-simulation-baseline-input-v1',data:{automationInputs:{phase0BaselineSimulation:{
   purpose:'USE_PHASE0_RANDOMIZED_EVIDENCE_TO_DESIGN_HIGHER_VALUE_PHASE5_TARGETED_TESTS',summaryRef,runIndexRef,deployEvidenceRef:deployRef,
   medusa:{status:summary.medusa?.status??'UNRESOLVED',configuredCallLimit:summary.medusa?.configuredCallLimit??null,observedCalls:summary.medusa?.observedCalls??0,minimumRequiredCalls:summary.medusa?.minimumRequiredCalls??100001},
-  telemetry:(summary.telemetry??[]).map(x=>({runId:x.runId,calls:x.calls,accountingActionShare:x.accountingActionShare,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:'evidence/phase0/simulations/'+x.rawTranscriptRef,burstSchedule:x.burstSchedule})),
+  telemetry:(summary.telemetry??[]).map(x=>({runId:x.runId,calls:x.calls,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:'evidence/phase0/simulations/'+x.rawTranscriptRef,burstSchedule:x.burstSchedule})),
   limitations:summary.limitations??[],
   reviewerUse:'Investigate patterns/anomalies and use them to design Phase-5 candidate-specific simulations. Raw transcripts are investigative telemetry, not a manual reverification obligation.'
 }}}};
