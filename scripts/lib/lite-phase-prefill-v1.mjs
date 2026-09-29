@@ -296,10 +296,16 @@ function targetDispositionScaffold(targetDesigns,results){
       executionEvidenceRefs:r.evidenceRef?[r.evidenceRef]:['NO_MACHINE_EVIDENCE'],
       oracleOutcome:raw?.reproduction?.status??raw?.disposition??r.status??'UNRESOLVED',
       reproductionStatus:r.status??raw?.status??'UNRESOLVED',
+      requestBindingStatus:r.requestBindingStatus??t.requestBindingStatus??'UNVERIFIED',
+      requestBindingEvidenceRef:r.requestBindingEvidenceRef??t.requestBindingEvidenceRef??'NO_BINDING_EVIDENCE',
+      semanticHarnessBindingAssessment:'<REQUIRED>',
       securityInterpretation:'<REQUIRED>',
       limitations:'<REQUIRED>',
       recommendedPhase8Disposition:'<REQUIRED>',
-      automationOwnedFields:['candidateKey','executionEvidenceRefs','oracleOutcome','reproductionStatus']
+      automationOwnedFields:[
+        'candidateKey','executionEvidenceRefs','oracleOutcome','reproductionStatus',
+        'requestBindingStatus','requestBindingEvidenceRef'
+      ]
     });
   }
   return rows.length?rows:['NONE_IDENTIFIED'];
@@ -770,6 +776,23 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
   if(sequence===4){
     const c=phase4CoverageFromForm(form);
     if(!(c.unreviewedRequiredSurfaces.length===1&&c.unreviewedRequiredSurfaces[0]==='NONE_IDENTIFIED')) deficiencies.push('Phase 4 required review scaffolds were removed or omitted: '+c.unreviewedRequiredSurfaces.join(', '));
+  }
+  if(sequence===5){
+    const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
+    for(const target of targets){
+      if(!target||typeof target!=='object'||Array.isArray(target)) continue;
+      const key=String(target.candidateKey??'UNRESOLVED');
+      const method=String(target.executionMethod??'').toUpperCase();
+      const type=String(target.reproductionType??'').toUpperCase();
+      const observation=target.expectedMachineObservation;
+      if(method==='NOT_APPLICABLE'){
+        if(type!=='NOT_APPLICABLE') deficiencies.push('Phase 5 target '+key+' executionMethod NOT_APPLICABLE requires reproductionType NOT_APPLICABLE.');
+        if(observation!=='NOT_APPLICABLE') deficiencies.push('Phase 5 target '+key+' executionMethod NOT_APPLICABLE requires expectedMachineObservation=NOT_APPLICABLE.');
+      }else if(method==='V7_REQUEST'){
+        if(type==='NOT_APPLICABLE'||!['FOUNDRY_TEST','MEDUSA_PROPERTY','ANVIL_WORKFLOW'].includes(type)) deficiencies.push('Phase 5 target '+key+' V7_REQUEST requires an executable reproductionType.');
+        if(!observation||typeof observation!=='object'||Array.isArray(observation)) deficiencies.push('Phase 5 target '+key+' V7_REQUEST requires expectedMachineObservation as a structured object.');
+      }
+    }
   }
   if(Array.isArray(form?.automationInputs?.expectedDueObligationIds)){
     const expected=[...form.automationInputs.expectedDueObligationIds].sort();
