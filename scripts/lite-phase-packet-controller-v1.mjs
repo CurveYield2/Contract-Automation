@@ -13,7 +13,7 @@ import {
 import {
   buildControllerPacket,renderControllerPhaseReport,validatePhaseScaffold,
   phase4CoverageFromForm,materializeValidatedFindings,resolveTargetExecutionRequestRef,
-  populatePhase9RerunEvidenceRefs
+  populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest
 } from './lib/lite-phase-prefill-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -235,15 +235,36 @@ let deficiencies=ensurePacketShape({packet,directory,assignment});
 let form=null;
 try{
   form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
-  if(sequence===9){
-    deficiencies.push(...populatePhase9RerunEvidenceRefs({root,campaignPath,form}));
-    writeJson(repoFile(root,assignment.workFormPath),form);
+
+  // v10.3 stores the authoritative prefill digest outside the reviewer-editable
+  // form. Older active assignments are migrated once from the pre-existing form
+  // digest so in-flight v10.2 campaigns remain resumable.
+  if(!assignment.controllerPrefillDigestSha256){
+    const legacyDigest=form?.automationInputs?.controllerPrefillDigestSha256;
+    if(typeof legacyDigest!=='string'||!/^[0-9a-f]{64}$/.test(legacyDigest)){
+      deficiencies.push('Controller-owned assignment prefill digest is missing and no valid legacy form digest is available for one-time migration.');
+    }else{
+      assignment.controllerPrefillDigestSha256=legacyDigest;
+      assignment.controllerPrefillDigestMigration='BOUND_FROM_LEGACY_FORM_DIGEST';
+    }
   }
+
   deficiencies.push(...validateWorkForm(schema,form));
-  deficiencies.push(...validatePhaseScaffold(sequence,form));
+  deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+
+  if(sequence===9&&deficiencies.length===0){
+    const collectionDeficiencies=populatePhase9RerunEvidenceRefs({root,campaignPath,form});
+    deficiencies.push(...collectionDeficiencies);
+    if(collectionDeficiencies.length===0){
+      assignment.controllerPrefillDigestSha256=form.automationInputs.controllerPrefillDigestSha256;
+      writeJson(repoFile(root,assignment.workFormPath),form);
+      deficiencies.push(...validateWorkForm(schema,form));
+      deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+    }
+  }
 }catch(e){deficiencies.push(String(e.message||e));}
 
-if(sequence===5&&form){
+if(sequence===5&&form&&deficiencies.length===0){
   const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
   for(const target of targets){
     if(!target||typeof target!=='object'||target.executionMethod==='NOT_APPLICABLE') continue;
@@ -251,11 +272,16 @@ if(sequence===5&&form){
     if(resolved){
       target.executionRequestRef=resolved;
       target.automationResolvedExecutionRequest=true;
+      target.automationOwnedFields=[...new Set([...(target.automationOwnedFields??[]),'executionRequestRef','automationResolvedExecutionRequest'])];
     }else{
       deficiencies.push('Phase 5 target '+String(target.candidateKey??'UNRESOLVED')+' has no deterministically resolvable execution request. Provide executionRequestRef only for this target or materialize the conventional request path.');
     }
   }
-  if(!deficiencies.length) writeJson(repoFile(root,assignment.workFormPath),form);
+  if(!deficiencies.length){
+    assignment.controllerPrefillDigestSha256=refreshControllerPrefillDigest(form);
+    writeJson(repoFile(root,assignment.workFormPath),form);
+    deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+  }
 }
 
 if(deficiencies.length){
