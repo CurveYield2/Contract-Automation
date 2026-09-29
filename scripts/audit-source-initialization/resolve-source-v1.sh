@@ -61,13 +61,26 @@ u=urlsplit(sys.argv[1]); print(urlunsplit((u.scheme,u.netloc,u.path,'','')))
 PY
 )"
     if [[ "$source_url" == *"/blob/"* ]]; then
-      if [[ "$source_url" == *"?"* ]]; then download_url="$source_url&raw=1"; else download_url="$source_url?raw=1"; fi
+      read -r gh_owner gh_repo gh_ref gh_path < <(python3 - "$source_url" <<'PY'
+import sys
+from urllib.parse import urlsplit,unquote
+parts=[unquote(x) for x in urlsplit(sys.argv[1]).path.split('/') if x]
+if len(parts)<5 or parts[2]!="blob":
+    raise SystemExit("unsupported GitHub blob URL")
+print(parts[0],parts[1],parts[3],"/".join(parts[4:]))
+PY
+)
+      test -n "$gh_owner" && test -n "$gh_repo" && test -n "$gh_ref" && test -n "$gh_path"
+      GH_TOKEN="$github_token" gh api \
+        -H 'Accept: application/vnd.github.raw+json' \
+        "repos/$gh_owner/$gh_repo/contents/$gh_path?ref=$gh_ref" > "$work/source.download"
+      download_url="https://api.github.com/repos/$gh_owner/$gh_repo/contents/$gh_path?ref=$gh_ref"
     else
       download_url="$source_url"
+      curl --fail --location --retry 4 --retry-all-errors --connect-timeout 20 \
+        -H "Authorization: Bearer $github_token" -H 'Accept: application/octet-stream' \
+        -o "$work/source.download" "$download_url"
     fi
-    curl --fail --location --retry 4 --retry-all-errors --connect-timeout 20 \
-      -H "Authorization: Bearer $github_token" -H 'Accept: application/octet-stream' \
-      -o "$work/source.download" "$download_url"
   else
     echo "::error::Only direct single-file Google Drive and GitHub ZIP URLs are accepted." >&2
     return 1
