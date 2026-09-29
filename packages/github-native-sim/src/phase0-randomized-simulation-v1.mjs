@@ -303,7 +303,8 @@ function renderMedusaRouter(ethers,targets){
   for(const x of plan.rows){
     const names=x.types.map((t,i)=>`${t} a${i}`),args=x.types.map((_,i)=>`a${i}`),selector=ethers.id(x.selected.signature).slice(0,10),payable=x.selected.fragment.stateMutability==='payable'?' payable':'';
     const value=x.selected.fragment.stateMutability==='payable'?'msg.value':'0';
-    body.push(`  function ${x.wrapperName}(${names.join(', ')}) external${payable} { (bool ok, bytes memory data)=address(${x.target.address}).call{value:${value}}(abi.encodeWithSelector(bytes4(${selector}),${args.join(',')})); emit Phase0Call(address(${x.target.address}),bytes4(${selector}),ok,data); }`);
+    const encodedArgs=args.length?`,`+args.join(','):'';
+    body.push(`  function ${x.wrapperName}(${names.join(', ')}) external${payable} { (bool ok, bytes memory data)=address(${x.target.address}).call{value:${value}}(abi.encodeWithSelector(bytes4(${selector})${encodedArgs})); emit Phase0Call(address(${x.target.address}),bytes4(${selector}),ok,data); }`);
   }
   return{...plan,source:`// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.20;\ncontract Phase0MedusaRouterV1 {\n  event Phase0Call(address indexed target, bytes4 indexed selector, bool success, bytes data);\n${body.join('\n')}\n}\n`};
 }
@@ -335,7 +336,7 @@ function baselineTargetRows({medusa,telemetry}){
 export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl}){
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/')),buildIdentity=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
   const receipt=JSON.parse(await fs.readFile(path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json'),'utf8'));
-  const archivePath=receipt.source.archivePath,archiveSha256=receipt.source.sha256,workspace=path.join(outputRoot,'.work');
+  const archivePath=receipt.source.archivePath,archiveSha256=receipt.source.sha256,workspace=path.join(path.dirname(outputRoot),'.phase0-simulation-work');
   const staged=await stageExactArchiveSource({checkoutRoot:controllerRoot,workspaceRoot:workspace,archivePath,archiveSha256,projectPath:buildIdentity.discovery.projectPath});
   const cfg=buildIdentity.configurationDetection,pseudo={requestId:`phase0-sim-${receipt.campaign.campaignId}`,requestDigest:sha256(JSON.stringify(buildIdentity)),campaignId:receipt.campaign.campaignId,assignmentId:'phase0-simulation',phaseId:'phase-0',profileId:'github-native-compile-v2',source:{repository:'CurveYield2/Audit-Controller',commit:receipt.source.archiveCommit,projectPath:buildIdentity.discovery.projectPath,archivePath,archiveSha256},configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}};
   const build=await buildProject({projectRoot:staged.projectRoot,request:pseudo}),artifacts=build.artifacts??[],ethers=await import('ethers');
