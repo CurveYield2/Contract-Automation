@@ -42,8 +42,9 @@ test('repeated submissions allocate new rN while exact workflow retry is idempot
   assert.match(run, /campaign_id="\$slug-r\$revision"/);
   assert.match(run, /new request using the same ZIP is NOT/);
   assert.match(run, /prior-source-init\.json/);
-  assert.match(run, /\.content \/\/ empty/);
-  assert.match(run, /\[ "\$encoded" != "null" \]/);
+  assert.match(run, /report_sha=.*\.sha \/\/ empty/);
+  assert.match(run, /\^\[0-9a-f\]\{40\}\$/);
+  assert.match(run, /report_api/);
 });
 
 test('campaign source folder contains retained ZIP plus safely unpacked source', () => {
