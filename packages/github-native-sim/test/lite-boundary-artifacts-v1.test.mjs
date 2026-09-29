@@ -54,10 +54,13 @@ test('final evidence index intentionally retains summary identity',()=>{
     identity:{campaignGeneration:'demo-r1/demo-r1-g1',skill:'skill@sha',source:'src@sha',build:'build@sha',deployment:'matrix',remediation:'SKIPPED_NO_REMEDIATION'},
     milestones:[{milestone:'Phase 0–1',requiredEvidence:'admission',reference:'receipt',sourceIdentity:'src',status:'COMPLETE',limitation:'NONE'}],
     findings:[{id:'FIND-001',disposition:'VALIDATED_FINDING',severityOrStatus:'MEDIUM',evidence:'proof',remediationStatus:'OPEN',residualLimitation:'NONE'}],
+    limitations:['Phase 4 step-3.typedLimitations: unresolved callback behavior'],
     omissions:['stateful fuzzing']
   });
   assert.match(text,/Campaign\/generation: demo-r1\/demo-r1-g1/);
   assert.match(text,/FIND-001/);
+  assert.match(text,/Carried limitations and unresolved questions/);
+  assert.match(text,/unresolved callback behavior/);
   assert.match(text,/stateful fuzzing/);
 });
 
