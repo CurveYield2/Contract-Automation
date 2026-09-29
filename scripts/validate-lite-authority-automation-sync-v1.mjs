@@ -180,6 +180,10 @@ const phase9StartHere=read(path.join(authorityRoot,'phases/phase-9/START_HERE.md
 need(phase9StartHere.includes('curveyield-lite-v7-execution-dispatch-v1'),'Phase 9 instructions do not expose the connector-operable V7 execution dispatch');
 need(schemaPolicy.includes('curveyield-lite-v7-execution-dispatch-v1'),'shared schema policy does not define the Phase-9 V7 execution dispatch contract');
 
+const phase4Schema=json(path.join(authorityRoot,'phases','phase-4','PHASE_04_SCHEMA_v1.json'));
+const phase4CoverageDecl=(phase4Schema.controllerGeneratedOutputs??[]).find(x=>x.path==='automationOutputs.phase4Coverage');
+need(sameSet(phase4CoverageDecl?.consumers??[],['phase-5']),'Phase 4 coverage declares a downstream consumer that current routing does not supply');
+
 const phase5Schema=json(path.join(authorityRoot,'phases','phase-5','PHASE_05_SCHEMA_v1.json'));
 const reproductionAllowed=phase5Schema.actions?.['step-3']?.fields?.find(f=>f.name==='targetDesigns')?.itemFieldAllowedValues?.reproductionType??[];
 need(sameSet(reproductionAllowed,['FOUNDRY_TEST','MEDUSA_PROPERTY','ANVIL_WORKFLOW','NOT_APPLICABLE']),'Phase 5 reproductionType values must match literal candidate-reproduction adapters');
@@ -275,6 +279,7 @@ process.stdout.write(JSON.stringify({
     'agent-operable controller-validation trigger and canonical routing',
     'assignment-v2/legacy-controller separation',
     'connector-operable Phase-9 rerun execution and durable evidence ingestion dispatch',
+    'controller-generated output consumer declarations versus actual downstream routing',
     'literal Phase-5 adapter and harness capability alignment',
     'capability permission versus implementation-status accuracy',
     'exact Audit-Controller ref propagation into successor wakes',
