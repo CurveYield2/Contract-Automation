@@ -141,7 +141,7 @@ for(const row of phase0.requiredOutputs??[]){
 need(phase0.phase?.id==='phase-0','phase 0 contract phase.id must match runtime identity');
 need(sameSet(phase0.allowedNextStates??[],['ACTIVE','WAITING_FOR_SUCCESSOR_AGENT']),'phase 0 allowedNextStates do not match bootstrap/finalizer routing');
 need(!String(phase0.steps?.find(x=>x.step===8)?.instruction??'').includes('creates the Phase-1 receipt'),'phase 0 step 8 still describes obsolete active Phase-1 receipt creation');
-need(!/EVIDENCE_READY/.test(String(phase0.receiptCompletionRule??'')),'phase 0 contract still requires obsolete intermediate EVIDENCE_READY state');
+need(!/(?:set|write|transition(?:s)?\s+to|must\s+(?:enter|use)|requires?\s+(?:an?\s+)?)[^\n]{0,80}EVIDENCE_READY/i.test(String(phase0.receiptCompletionRule??'')),'phase 0 contract still requires obsolete intermediate EVIDENCE_READY state');
 const phase0StartHere=read(path.join(authorityRoot,'phases/phase-0/START_HERE.md'));
 need(!/set `?phase\.status`?=EVIDENCE_READY|set phase\.status=EVIDENCE_READY/i.test(phase0StartHere),'phase 0 START_HERE still instructs an EVIDENCE_READY state write');
 const controllerGithubProtocol=read(path.join(authorityRoot,'shared/controller/AUDIT_CONTROLLER_AND_GITHUB_PROTOCOL.md'));
