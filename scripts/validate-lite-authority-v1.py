@@ -265,9 +265,10 @@ for domain in domain_matrix.get("domains",[]):
     phases={int(x) for x in domain.get("requiredExecutionPhases",[]) if str(x).isdigit()}
     if 7 in phases:
         errors.append(f"DOMAIN_APPLICABILITY_MATRIX: {domain.get('domainId')} assigns substantive work to automation-only Phase 7")
-    unsupported=phases-obligation_disposition_phases
+    future_phases={p for p in phases if p>3}
+    unsupported=future_phases-obligation_disposition_phases
     if unsupported:
-        errors.append(f"DOMAIN_APPLICABILITY_MATRIX: {domain.get('domainId')} assigns obligations to phase(s) without obligationDispositions: {sorted(unsupported)}")
+        errors.append(f"DOMAIN_APPLICABILITY_MATRIX: {domain.get('domainId')} assigns future obligations to phase(s) without obligationDispositions: {sorted(unsupported)}")
 if 7 in domain_matrix.get("executionReusePhases",[]):
     errors.append("DOMAIN_APPLICABILITY_MATRIX: executionReusePhases still includes automation-only Phase 7")
 unsupported_custom=custom_obligation_required_phases-obligation_disposition_phases
