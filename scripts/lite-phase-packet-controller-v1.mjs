@@ -81,6 +81,7 @@ function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRe
 function uniqueExisting(root,rels){return [...new Set(rels.filter(Boolean))].filter(rel=>Boolean(maybeFile(root,rel)));}
 function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const derived=(phase,name)=>path.posix.join(campaignPath,`derived/phase-${phase}/${name}`);
+  const buildIdentity=path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
   const deploy=path.posix.join(campaignPath,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
   const targets=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
   const remediation=path.posix.join(campaignPath,'work/phase-09/PHASE9_REMEDIATION_DELTA_LEDGER.md');
@@ -93,8 +94,8 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const p8Remediation=derived(8,'PHASE9_REMEDIATION_INPUT_v1.json');
   if(target===4) return uniqueExisting(root,[p2,p3]);
   if(target===5) return uniqueExisting(root,[p2,p3,p4]);
-  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,deploy,targets]);
-  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,deploy,targets]);
+  if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,buildIdentity,deploy,targets]);
+  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,buildIdentity,deploy,targets]);
   if(target===9) return uniqueExisting(root,[p8Remediation,remediation]);
   if(target===10) return uniqueExisting(root,[finalIndex]);
   return uniqueExisting(root,immediate);
