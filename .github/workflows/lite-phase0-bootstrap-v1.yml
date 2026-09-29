@@ -42,8 +42,17 @@ jobs:
       audit_controller_ref: ${{ inputs.audit_controller_ref }}
     secrets: inherit
 
-  finalize-and-launch-reviewer1:
+  randomized-simulation:
     needs: intelligence
+    uses: ./.github/workflows/lite-phase0-randomized-simulation-v1.yml
+    with:
+      campaign_id: ${{ inputs.campaign_id }}
+      campaign_path: ${{ inputs.campaign_path }}
+      audit_controller_ref: ${{ inputs.audit_controller_ref }}
+    secrets: inherit
+
+  finalize-and-launch-reviewer1:
+    needs: randomized-simulation
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:

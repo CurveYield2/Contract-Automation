@@ -140,8 +140,12 @@ Completion requires every material deploy/config action to be present or explici
 `;
 }
 
-export function renderTargetedTestMatrixV1({targetDesigns=[],executionResults={}}={}){
+export function renderTargetedTestMatrixV1({targetDesigns=[],executionResults={},baselineRows=[]}={}){
   const rows=[];
+  for(const b of arr(baselineRows)){
+    if(!b||typeof b!=='object') continue;
+    rows.push(`| ${md(b.targetId??b.candidateKey??'PHASE0-BASELINE')} | ${md(b.candidateOrProperty??b.description??'Phase-0 randomized baseline')} | ${md(b.setup??'Phase-0 Anvil baseline')} | ${md(b.transactionSequence??'SEE_PHASE0_RUN_INDEX')} | ${md(b.expectedSecureOutcome??'INVESTIGATIVE_BASELINE_NO_SECURITY_CONCLUSION')} | ${md(b.oracle??'MECHANICAL_EXECUTION_AND_ACCOUNTING_TELEMETRY')} | ${md(b.requestBindingStatus??'PHASE0_CONTROLLER_GENERATED')} | ${md(b.simulationResult??b.reproductionStatus??'UNRESOLVED')} | ${md(b.fuzzVariablesAndBounds??'SEE_PHASE0_SIMULATION_POLICY')} | ${md(b.result??b.oracleOutcome??b.reproductionStatus??'UNRESOLVED')} | ${md(b.evidenceRefs??b.executionEvidenceRefs??'NO_MACHINE_EVIDENCE')} |`);
+  }
   for(const [i,t] of arr(targetDesigns).entries()){
     if(!t||typeof t!=='object') continue;
     const key=t.candidateKey??`TARGET-${i+1}`;
@@ -151,7 +155,7 @@ export function renderTargetedTestMatrixV1({targetDesigns=[],executionResults={}
   if(!rows.length) rows.push('| NO_TARGET | NO_CANDIDATE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NO_CANDIDATE | NO_MACHINE_EVIDENCE |');
   return `# Lite Candidate Target Matrix
 
-> **CONTROLLER-POPULATED:** Seeded from accepted Phase-2–5 canonical data and finalized from Phase-5 boundary machine execution. The Phase-6 reviewer consumes the completed matrix and records only semantic interpretation/disposition in the Phase-6 work form. Do not duplicate campaign identity or controller bookkeeping here.
+> **CONTROLLER-POPULATED:** Seeded with Phase-0 broad randomized baseline evidence, then extended from accepted Phase-2–5 canonical data and finalized from Phase-5 boundary machine execution. The Phase-6 reviewer consumes the completed matrix and records only semantic interpretation/disposition in the Phase-6 work form. Phase-0 baseline rows are investigative context, not pre-decided findings. Do not duplicate campaign identity or controller bookkeeping here.
 
 | Target ID | Candidate / property / hypothesis | Exact setup and attacker/actor | AI-guided attacker/exploit sequence | Expected secure outcome | Exploit/failure oracle | Request/target structural binding | Attacker/exploit simulation result | AI-guided targeted fuzz variables/bounds | Result | Evidence |
 |---|---|---|---|---|---|---|---|---|---|---|
