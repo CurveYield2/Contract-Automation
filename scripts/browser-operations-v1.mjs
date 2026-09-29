@@ -69,28 +69,51 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
     throw new Error('chatgpt.ensure_thinking_effort currently requires level=high');
   }
 
-  const exactHigh = async () => {
-    const candidate = page.getByText('High', { exact: true }).first();
-    return await candidate.isVisible().catch(() => false) ? candidate : null;
-  };
+  const highSelectors = [
+    '[role="menuitemradio"]:has-text("High")',
+    '[role="option"]:has-text("High")',
+    '[role="radio"]:has-text("High")',
+    '[role="menuitem"]:has-text("High")',
+    'button:has-text("High")',
+    'label:has-text("High")'
+  ];
+
+  const visibleHighChoice = async () => firstVisible(page, highSelectors, 650);
+
   const selectedHigh = async () => {
     const selectors = [
+      '[role="menuitemradio"][aria-checked="true"]:has-text("High")',
+      '[role="radio"][aria-checked="true"]:has-text("High")',
+      '[role="option"][aria-selected="true"]:has-text("High")',
       '[aria-checked="true"]:has-text("High")',
       '[aria-selected="true"]:has-text("High")',
       '[aria-pressed="true"]:has-text("High")',
       '[data-state="checked"]:has-text("High")',
       '[data-state="active"]:has-text("High")'
     ];
-    const selected = await firstVisible(page, selectors, 500);
-    if (selected) return true;
-    const controls = page.locator('button, [role="button"]');
-    const count = Math.min(await controls.count().catch(() => 0), 80);
-    for (let i = 0; i < count; i += 1) {
-      const control = controls.nth(i);
-      if (!await control.isVisible().catch(() => false)) continue;
-      const text = (await control.innerText().catch(() => '')).trim();
-      const label = (await control.getAttribute('aria-label').catch(() => '') || '').trim();
-      if (/^High$/i.test(text) || /(?:thinking|reasoning)[^\n]*\bHigh\b/i.test(text + ' ' + label)) return true;
+    if (await firstVisible(page, selectors, 450)) return true;
+
+    // After selection, current ChatGPT variants may collapse the menu and show
+    // the effort as a compact "High" control beside the composer/model button.
+    const openPicker = await firstVisible(page, [
+      '[role="menu"]:visible',
+      '[role="listbox"]:visible',
+      '[data-radix-menu-content]:visible'
+    ], 150);
+    if (!openPicker) {
+      const controls = page.locator('button, [role="button"]');
+      const count = Math.min(await controls.count().catch(() => 0), 100);
+      for (let i = 0; i < count; i += 1) {
+        const control = controls.nth(i);
+        if (!await control.isVisible().catch(() => false)) continue;
+        const text = (await control.innerText().catch(() => '')).trim();
+        const attrs = [
+          await control.getAttribute('aria-label').catch(() => ''),
+          await control.getAttribute('title').catch(() => ''),
+          await control.getAttribute('data-testid').catch(() => '')
+        ].filter(Boolean).join(' ');
+        if (/^High$/i.test(text) || /(?:thinking|reasoning|effort)[^\n]*\bHigh\b/i.test(text + ' ' + attrs)) return true;
+      }
     }
     return false;
   };
@@ -98,49 +121,90 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
   if (await selectedHigh()) return { level: 'high', changed: false, verified: true };
 
   const openerSelectors = [
-    'button[aria-label*="thinking"]',
-    'button[aria-label*="Thinking"]',
-    'button[aria-label*="reasoning"]',
-    'button[aria-label*="Reasoning"]',
-    'button[data-testid*="thinking"]',
-    'button[data-testid*="model"]',
+    'button[aria-label*="thinking" i]',
+    'button[aria-label*="reasoning" i]',
+    'button[aria-label*="effort" i]',
+    'button[data-testid*="thinking" i]',
+    'button[data-testid*="model" i]',
+    'button[aria-label*="model" i]',
+    'button[aria-haspopup="menu"]:has-text("GPT")',
+    'button:has-text("GPT-5.6")',
+    'button:has-text("GPT-5")',
     'button:has-text("Thinking")',
+    'button:has-text("Think")',
     'button:has-text("Reasoning")',
     'button:has-text("Instant")',
-    'button:has-text("Medium")',
-    'button[aria-label*="model"]',
-    'button[aria-label*="Model"]'
+    'button:has-text("Medium")'
   ];
 
-  const tryChooseHigh = async () => {
-    const high = await exactHigh();
+  const chooseHigh = async () => {
+    const high = await visibleHighChoice();
     if (!high) return false;
     await high.click();
-    await page.waitForTimeout(600);
-    return await selectedHigh();
+    await page.waitForTimeout(700);
+    if (await selectedHigh()) return true;
+
+    // Some menu implementations keep the picker open after the click. In that
+    // case verify selection state on the option or its nearest interactive row.
+    const candidates = [
+      high,
+      high.locator('xpath=ancestor-or-self::*[@role="menuitemradio" or @role="radio" or @role="option" or @role="menuitem"][1]'),
+      high.locator('xpath=ancestor-or-self::*[@data-state][1]')
+    ];
+    for (const candidate of candidates) {
+      for (const [name, expected] of [['aria-checked','true'],['aria-selected','true'],['aria-pressed','true'],['data-state','checked'],['data-state','active']]) {
+        const value = await candidate.getAttribute(name).catch(() => null);
+        if (value === expected) return true;
+      }
+    }
+    return false;
   };
 
-  for (let depth = 0; depth < 2; depth += 1) {
-    if (await tryChooseHigh()) return { level: 'high', changed: true, verified: true };
+  const submenuLabels = ['Thinking', 'Think', 'Reasoning', 'Thinking time', 'Reasoning effort'];
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (await chooseHigh()) return { level: 'high', changed: true, verified: true };
 
-    const opener = await firstVisible(page, openerSelectors, 1000);
-    if (!opener) break;
-    await opener.click();
-    await page.waitForTimeout(450);
-
-    if (await tryChooseHigh()) return { level: 'high', changed: true, verified: true };
-
-    const thinking = page.getByText('Thinking', { exact: true }).first();
-    if (await thinking.isVisible().catch(() => false)) {
-      await thinking.click();
-      await page.waitForTimeout(450);
-      if (await tryChooseHigh()) return { level: 'high', changed: true, verified: true };
+    const opener = await firstVisible(page, openerSelectors, 1200);
+    if (opener) {
+      await opener.click();
+      await page.waitForTimeout(550);
+      if (await chooseHigh()) return { level: 'high', changed: true, verified: true };
     }
+
+    let openedSubmenu = false;
+    for (const label of submenuLabels) {
+      const submenu = page.getByText(label, { exact: true }).first();
+      if (await submenu.isVisible().catch(() => false)) {
+        await submenu.click();
+        await page.waitForTimeout(500);
+        openedSubmenu = true;
+        if (await chooseHigh()) return { level: 'high', changed: true, verified: true };
+      }
+    }
+    if (!opener && !openedSubmenu) break;
   }
 
-  throw new Error('ChatGPT High thinking-effort control could not be selected and verified');
+  const diagnostic = [];
+  const controls = page.locator('button, [role="button"], [role="menuitem"], [role="menuitemradio"], [role="option"], [role="radio"]');
+  const count = Math.min(await controls.count().catch(() => 0), 120);
+  for (let i = 0; i < count && diagnostic.length < 40; i += 1) {
+    const control = controls.nth(i);
+    if (!await control.isVisible().catch(() => false)) continue;
+    const text = (await control.innerText().catch(() => '')).trim().replace(/\s+/g, ' ').slice(0, 140);
+    const label = (await control.getAttribute('aria-label').catch(() => '') || '').trim().slice(0, 140);
+    const role = (await control.getAttribute('role').catch(() => '') || '').trim();
+    if (text || label) diagnostic.push({ role, text, label });
+  }
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const relevantText = bodyText.split(/\n+/).map(x => x.trim()).filter(x => /High|Think|Reason|GPT-5|Instant|Medium/i.test(x)).slice(0, 40);
+  const error = new Error(
+    'ChatGPT High thinking-effort control could not be selected and verified; visibleControls=' +
+    JSON.stringify(diagnostic) + '; relevantText=' + JSON.stringify(relevantText)
+  );
+  error.code = 'THINKING_EFFORT_UI_CHANGED';
+  error.retryable = true;
+  throw error;
 }
-
 async function ensureSidebarOpen(page) {
   const open = await firstVisible(page, [
     'button[data-testid="open-sidebar-button"]',
