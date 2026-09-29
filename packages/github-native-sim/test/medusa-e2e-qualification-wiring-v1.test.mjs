@@ -14,3 +14,10 @@ test('trusted-main qualification runs the real Medusa pass/fail/no-tests smoke g
   assert.match(workflow, /medusaSmokeNoTests/);
   assert.match(workflow, /rawEvidencePreserved/);
 });
+
+
+test('workflow-call qualification cannot be cancelled by an unrelated main push qualification', async () => {
+  const workflow = await fs.readFile(workflowUrl, 'utf8');
+  assert.match(workflow, /github\.event_name == 'workflow_call' && github\.run_id/);
+  assert.match(workflow, /cancel-in-progress: true/);
+});
