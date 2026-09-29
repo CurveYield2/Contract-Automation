@@ -63,6 +63,11 @@ const phase5={schemaVersion:'curveyield-lite-phase0-phase5-simulation-baseline-i
 }}}};
 const phase6Rows=(summary.baselineTargetDispositions??[]).map(r=>({...r,
   executionEvidenceRefs:(r.executionEvidenceRefs??[]).map(ref=>ref==='NO_MEDUSA_OUTPUT'||ref==='NO_CONFIG'?ref:(ref.startsWith('evidence/')?ref:'evidence/phase0/simulations/'+ref)),
+  requestBindingEvidenceRef:(()=>{const ref=r.requestBindingEvidenceRef??'NO_BINDING_EVIDENCE';return ref==='NO_CONFIG'||ref==='NO_BINDING_EVIDENCE'||ref.startsWith('evidence/')?ref:'evidence/phase0/simulations/'+ref;})(),
+  semanticHarnessBindingAssessment:'<REQUIRED>',
+  securityInterpretation:'<REQUIRED>',
+  limitations:'<REQUIRED>',
+  recommendedPhase8Disposition:'<REQUIRED>',
   automationOwnedFields:['candidateKey','executionEvidenceRefs','oracleOutcome','reproductionStatus','requestBindingStatus','requestBindingEvidenceRef']
 }));
 const phase6={schemaVersion:'curveyield-lite-phase0-phase6-simulation-baseline-input-v1',data:{automationInputs:{phase0BaselineTargetDispositions:phase6Rows,phase0SimulationLimitations:summary.limitations??[],phase0SimulationRunIndexRef:runIndexRef}},baselineMatrixRows:baselineRows};
