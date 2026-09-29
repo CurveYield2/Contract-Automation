@@ -82,12 +82,26 @@ test('controller architecture forbids active receipt bookkeeping before packet v
   assert.match(phase0,/curveyield-audit-campaign-directory-entry-v2/);
 });
 
-test('watchdog uses packet submission as the assignment-v2 phase-completion trigger',()=>{
+test('assignment-v2 controller validation is reviewer-request driven and not circularly packet-triggered',()=>{
+  const workflow=read('.github/workflows/lite-phase-work-packet-controller-v1.yml');
   const watchdog=read('.github/workflows/browser-agent-watchdog.yml');
-  assert.match(watchdog,/curveyield-audit-campaign-directory-entry-v2/);
-  assert.match(watchdog,/currentAssignment\.packetPath/);
-  assert.match(watchdog,/packet_status.*SUBMITTED/);
-  assert.match(watchdog,/lite-phase-work-packet-controller-v1\.yml/);
+  const successor=read('scripts/prepare-lite-assignment-successor-v2.mjs');
+  assert.match(workflow,/\.agent-upload\/lite-phase-boundary\/\*\.json/);
+  assert.match(workflow,/curveyield-lite-phase-boundary-request-v1/);
+  assert.match(workflow,/Resolve canonical campaign routing/);
+  assert.match(workflow,/--campaign-id/);
+  assert.doesNotMatch(watchdog,/packet_status.*SUBMITTED[\s\S]{0,500}lite-phase-work-packet-controller-v1\.yml/);
+  assert.match(successor,/\.agent-upload\/lite-phase-boundary\//);
+  assert.match(successor,/curveyield-lite-phase-boundary-request-v1/);
+});
+
+test('downstream routing preserves all declared Phase-7 and Phase-10 input views',()=>{
+  const controller=read('scripts/lite-phase-packet-controller-v1.mjs');
+  assert.match(controller,/const p7=derived\(7,'PHASE8_MARKER_INPUT_v1\.json'\)/);
+  assert.match(controller,/target===8[^\n]*\[[^\]]*p7/);
+  assert.match(controller,/const p8Final=derived\(8,'PHASE10_INPUT_v1\.json'\)/);
+  assert.match(controller,/const p9Final=derived\(9,'PHASE10_REMEDIATION_INPUT_v1\.json'\)/);
+  assert.match(controller,/target===10[^\n]*\[[^\]]*p8Final[^\]]*p9Final[^\]]*finalIndex/);
 });
 
 test('fresh assignment wake names schema form report and packet instead of an active receipt',()=>{

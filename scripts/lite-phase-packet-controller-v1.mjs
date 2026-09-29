@@ -117,13 +117,16 @@ function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
   const p4=derived(4,'PHASE5_INPUT_v1.json');
   const p5=derived(5,'PHASE6_INPUT_v1.json');
   const p6=derived(6,'PHASE8_INPUT_v1.json');
+  const p7=derived(7,'PHASE8_MARKER_INPUT_v1.json');
   const p8Remediation=derived(8,'PHASE9_REMEDIATION_INPUT_v1.json');
+  const p8Final=derived(8,'PHASE10_INPUT_v1.json');
+  const p9Final=derived(9,'PHASE10_REMEDIATION_INPUT_v1.json');
   if(target===4) return uniqueExisting(root,[p2,p3]);
   if(target===5) return uniqueExisting(root,[p2,p3,p4]);
   if(target===6) return uniqueExisting(root,[p2,p3,p4,p5,buildIdentity,deploy,targets]);
-  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,buildIdentity,deploy,targets]);
+  if(target===8) return uniqueExisting(root,[p2,p3,p4,p5,p6,p7,buildIdentity,deploy,targets]);
   if(target===9) return uniqueExisting(root,[p8Remediation,remediation]);
-  if(target===10) return uniqueExisting(root,[finalIndex]);
+  if(target===10) return uniqueExisting(root,[p8Final,p9Final,finalIndex]);
   return uniqueExisting(root,immediate);
 }
 function phaseOutput(canonical,step,field){return canonical?.actions?.[step]?.outputs?.[field];}
@@ -314,13 +317,16 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
 
 
 const a=parse(process.argv);
-for(const k of ['controller-root','campaign-path','campaign-directory-path','phase-sequence']) if(a[k]===undefined) throw new Error('missing --'+k);
+for(const k of ['controller-root','campaign-id','campaign-path','campaign-directory-path','phase-sequence']) if(a[k]===undefined) throw new Error('missing --'+k);
 const root=path.resolve(a['controller-root']);
+const expectedCampaignId=a['campaign-id'];
 const campaignPath=a['campaign-path']; const campaignRoot=repoFile(root,campaignPath);
 const sequence=Number(a['phase-sequence']);
 const directoryRel=a['campaign-directory-path']; const directoryFile=requiredFile(root,directoryRel,'campaign directory entry');
 const directory=readJson(directoryFile);
 if(directory.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2') throw new Error('packet controller requires Audit Campaign Directory v2');
+if(directory.campaignId!==expectedCampaignId) throw new Error('campaign-id does not match Audit Campaign Directory');
+if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does not match Audit Campaign Directory workspacePath');
 const assignment=directory.currentAssignment;
 if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current assignment does not match submitted phase');
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'predecessor sealed receipt'));

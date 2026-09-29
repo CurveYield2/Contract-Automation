@@ -44,6 +44,7 @@ jobs:
           node --check scripts/prepare-lite-receipt-successor-v1.mjs
           node --check scripts/prepare-lite-assignment-successor-v2.mjs
           node --check scripts/lib/lite-phase-work-v1.mjs
+          node --check scripts/validate-lite-authority-automation-sync-v1.mjs
           python3 -m py_compile scripts/audit-source-initialization/write-phase0-receipt-v1.py
           bash -n scripts/audit-source-initialization/run-v1.sh
           test ! -e scripts/audit-source-initialization/write-state-v1.py
@@ -85,6 +86,7 @@ jobs:
           npm test
           npm run check
           python3 ../scripts/validate-lite-authority-v1.py "Audit Skill - Current Authority"
+          node ../scripts/validate-lite-authority-automation-sync-v1.mjs --controller-root . --automation-root ..
           test -d "Audit Campaign Directory"
           test ! -e ".deep-assurance"
           if git grep -FI -- '.deep-assurance'; then

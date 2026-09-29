@@ -71,9 +71,24 @@ export function createLitePhaseReceiptV1(input){return {schemaVersion:'curveyiel
 }
 
 function run(f){
-  const out=execFileSync(process.execPath,['scripts/lite-phase-packet-controller-v1.mjs','--controller-root',f.root,'--campaign-path',f.campaign,'--campaign-directory-path',f.dirRel,'--phase-sequence','1'],{encoding:'utf8'});
+  const out=execFileSync(process.execPath,['scripts/lite-phase-packet-controller-v1.mjs','--controller-root',f.root,'--campaign-id','demo-r1','--campaign-path',f.campaign,'--campaign-directory-path',f.dirRel,'--phase-sequence','1'],{encoding:'utf8'});
   return JSON.parse(out.trim());
 }
+
+test('controller rejects a campaign id that does not match the canonical directory entry',()=>{
+  const f=fixture();
+  assert.throws(
+    ()=>execFileSync(process.execPath,[
+      'scripts/lite-phase-packet-controller-v1.mjs',
+      '--controller-root',f.root,
+      '--campaign-id','other-r1',
+      '--campaign-path',f.campaign,
+      '--campaign-directory-path',f.dirRel,
+      '--phase-sequence','1'
+    ],{encoding:'utf8',stdio:'pipe'}),
+    /campaign-id does not match Audit Campaign Directory/
+  );
+});
 
 test('incomplete semantic work causes exact rework while controller creates the packet and does zero bookkeeping',()=>{
   const f=fixture();
