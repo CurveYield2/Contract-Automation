@@ -71,52 +71,66 @@ function structuralInputs(si){
   return {privilegeCandidates:privileges,authorityTransitions:privileges,upgradePaths,callbackSurfaces};
 }
 
-function domainSignals(si){
-  const funcs=(si?.functions??[]).map(f=>String(f.signature??'').toLowerCase());
-  const ext=(si?.externalInterfaces??[]).map(e=>[e.dependencyOrInterface,e.selectorOrSignature,e.interactionKind].join(' ').toLowerCase());
-  const calls=(si?.callGraph??[]).map(c=>[c.callKind,c.target,c.targetFunctionOrSelector].join(' ').toLowerCase());
-  const flows=(si?.valueFlowCandidates??[]).map(f=>[f.assetOrValueExpression,f.mechanism,f.counterpartyExpression].join(' ').toLowerCase());
-  const top=si?.protocolTopology??{};
-  const all=[...funcs,...ext,...calls,...flows].join('\n');
-  return {funcs,ext,calls,flows,all,top};
+function domainClassificationCorpus(si,matrix){
+  const sources=matrix?.machineClassification?.corpusSources??[];
+  return sources.map(source=>JSON.stringify(getByPath(si,source)??null)).join('\n').toLowerCase();
 }
-function hasAny(all,words){return words.some(w=>all.includes(w));}
+function evaluateDomainMatcher(si,corpus,matcher){
+  if(!matcher||typeof matcher!=='object') return {supported:false,matched:false,facts:[]};
+  if(matcher.kind==='arrayNonEmpty'){
+    const value=getByPath(si,matcher.path);
+    return {
+      supported:typeof matcher.path==='string'&&matcher.path.length>0,
+      matched:Array.isArray(value)&&value.length>0,
+      facts:Array.isArray(value)&&value.length>0?['arrayNonEmpty:'+matcher.path]:[]
+    };
+  }
+  if(matcher.kind==='textContainsAny'){
+    const terms=Array.isArray(matcher.terms)?matcher.terms.filter(x=>typeof x==='string'&&x.trim()):[];
+    const matched=terms.filter(term=>corpus.includes(term.toLowerCase()));
+    return {
+      supported:terms.length>0,
+      matched:matched.length>0,
+      facts:matched.map(term=>'textContains:'+term)
+    };
+  }
+  return {supported:false,matched:false,facts:[]};
+}
 
 function classifyDomains(si,matrix){
-  const s=domainSignals(si);
+  const corpus=domainClassificationCorpus(si,matrix);
   const complete=si?.completion?.status==='PASS'||si?.completion?.status==='COMPLETE'||si?.completion?.noFillSentinelsRemaining===true;
   const limitations=(si?.limitations??[]).filter(x=>x&&x.reason&&!matchesAny(x.reason,['none','not applicable']));
-  const uncertain=!complete||limitations.length>0;
-  const checks={
-    'DOMAIN-UPGRADE':()=>Boolean((s.top.upgradeabilityEdges??[]).length)||hasAny(s.all,['delegatecall','callcode','upgradeto','upgrade','reinitialize','changeadmin','beacon','facet']),
-    'DOMAIN-DEPENDENCY':()=>Boolean((s.top.dependencyEdges??[]).length)||Boolean(s.ext.length),
-    'DOMAIN-CROSSCHAIN':()=>Boolean((s.top.crossChainEdges??[]).length)||hasAny(s.all,['bridge','messenger','crosschain','cross-chain','remote chain','chainid','domain separator']),
-    'DOMAIN-VAULT':()=>hasAny(s.all,['deposit(','withdraw(','redeem(','mint(','totalassets','converttoassets','converttoshares','pricepershare','share']),
-    'DOMAIN-ORACLE':()=>hasAny(s.all,['oracle','pricefeed','aggregator','twap','get_dy','quote(','pricepershare','share rate','exchangerate']),
-    'DOMAIN-LENDING':()=>hasAny(s.all,['borrow(','repay(','liquidat','collateral','debt','health factor','ltv']),
-    'DOMAIN-AMM':()=>hasAny(s.all,['swap(','addliquidity','remove_liquidity','removeliquidity','pool','hook','slippage','minout']),
-    'DOMAIN-SIGNATURE':()=>hasAny(s.all,['ecrecover','permit(','permit2','nonce','domainseparator','useroperation','erc1271','signature']),
-    'DOMAIN-STAKING':()=>hasAny(s.all,['stake(','unstake(','getreward','claim(','rewardrate','rewardpertoken','emission','gauge','checkpoint']),
-    'DOMAIN-OFFCHAIN':()=>Boolean((s.top.offchainAutomationEdges??[]).length)||hasAny(s.all,['keeper','checkupkeep','automation','harvest(','rebalance(','checkpoint('])
-  };
   return (matrix?.domains??[]).map(d=>{
-    const triggered=Boolean(checks[d.domainId]?.());
+    const matchers=Array.isArray(d.machineMatchers)?d.machineMatchers:[];
+    const results=matchers.map(m=>evaluateDomainMatcher(si,corpus,m));
+    const triggered=results.some(r=>r.matched);
+    const matcherCoverageComplete=matchers.length>0&&results.every(r=>r.supported);
+    const uncertain=!complete||limitations.length>0||!matcherCoverageComplete;
     const classification=triggered?'TRIGGERED':(uncertain?'UNCERTAIN_INCLUDE':'NOT_TRIGGERED');
+    const matchedFacts=results.flatMap(r=>r.facts);
     const triggerFacts=triggered
-      ? ['STRUCTURED_SOURCE_INTELLIGENCE_TRIGGER_MATCH']
+      ? matchedFacts
       : classification==='UNCERTAIN_INCLUDE'
-        ? ['NO_POSITIVE_STRUCTURED_TRIGGER_FOUND_BUT_SOURCE_INTELLIGENCE_HAS_LIMITATIONS']
-        : ['COMPLETE_SOURCE_INTELLIGENCE_CONTAINS_NO_POSITIVE_TRIGGER_CLASS'];
+        ? [
+            ...(!complete?['SOURCE_INTELLIGENCE_INCOMPLETE']:[]),
+            ...(limitations.length?['SOURCE_INTELLIGENCE_LIMITATIONS_PRESENT']:[]),
+            ...(!matcherCoverageComplete?['MACHINE_MATCHER_COVERAGE_INCOMPLETE']:[])
+          ]
+        : ['COMPLETE_SOURCE_INTELLIGENCE_AND_MATRIX_MATCHERS_FOUND_NO_POSITIVE_TRIGGER'];
     return {
       domainId:d.domainId,
       triggerFacts,
       classification,
-      rationale:triggered?'Deterministic structured Source Intelligence trigger matched.':classification==='UNCERTAIN_INCLUDE'?'No positive trigger matched, but negative evidence is not complete enough to exclude applicability.':'Complete exact-source-bound Source Intelligence contains no structured positive trigger for this domain.',
+      rationale:triggered
+        ? 'Deterministic machine matcher(s) from DOMAIN_APPLICABILITY_MATRIX matched accepted Source Intelligence.'
+        : classification==='UNCERTAIN_INCLUDE'
+          ? 'No positive matrix matcher matched, but exact negative exclusion is not machine-complete; fail-closed specialist coverage remains active.'
+          : 'Complete accepted Source Intelligence and complete matrix machine matchers found no positive trigger.',
       requiredPhase4Method:(d.methodResources??[])[0]??'DOMAIN_METHOD_RESOURCE'
     };
   });
 }
-
 function domainObligations(matrix,assessments){
   const byId=new Map((matrix?.domains??[]).map(d=>[d.domainId,d]));
   const out=[];
