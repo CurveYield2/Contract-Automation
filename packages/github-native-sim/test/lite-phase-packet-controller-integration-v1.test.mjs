@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {refreshControllerPrefillDigest} from '../../../scripts/lib/lite-phase-prefill-v1.mjs';
 
 const mkdir=p=>fs.mkdirSync(p,{recursive:true});
 const writeJson=(p,v)=>{mkdir(path.dirname(p));fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n');};
@@ -58,11 +59,13 @@ export function createLitePhaseReceiptV1(input){return {schemaVersion:'curveyiel
   const formRel=campaign+'/work/phase-01/PHASE_01_WORK_FORM_v1.json';
   const reportRel=campaign+'/work/phase-01/PHASE_01_FINAL_REPORT_v1.md';
   const packetRel=campaign+'/submissions/PHASE_01_WORK_PACKET_v1.json';
-  writeJson(path.join(root,formRel),{schemaVersion:'curveyield-lite-phase-work-form-v1',phase:1,actions:{'step-1':{section:'Step 1 Input — Analyze',outputs:{analysis:'<REQUIRED>'}}}});
+  const initialForm={schemaVersion:'curveyield-lite-phase-work-form-v1',phase:1,automationInputs:{predecessorReceiptPath:predecessorRel,derivedInputPaths:[],controllerOwnedAutomationInputs:['predecessorReceiptPath','derivedInputPaths']},actions:{'step-1':{section:'Step 1 Input — Analyze',outputs:{analysis:'<REQUIRED>'}}}};
+  const prefillDigest=refreshControllerPrefillDigest(initialForm);
+  writeJson(path.join(root,formRel),initialForm);
   // Packet and final report are intentionally absent: controller automation owns both.
   writeJson(path.join(root,dirRel),{
     schemaVersion:'curveyield-audit-campaign-directory-entry-v2',campaignId:'demo-r1',campaignGenerationId:'demo-r1-g1',campaignName:'Demo',workspacePath:campaign,mode:'LITE',sourceSha256:source,lastSealedReceiptPath:predecessorRel,campaignStatus:'ACTIVE',
-    currentAssignment:{phaseSequence:1,phaseId:'phase-1',reviewer:'reviewer-1',status:'ACTIVE',workSchemaPath:authority+'/phases/phase-1/PHASE_01_SCHEMA_v1.json',workFormPath:formRel,finalReportPath:reportRel,packetPath:packetRel,predecessorReceiptPath:predecessorRel,derivedInputPaths:[]},updatedAt:'2026-09-28T00:00:00Z'
+    currentAssignment:{phaseSequence:1,phaseId:'phase-1',reviewer:'reviewer-1',status:'ACTIVE',workSchemaPath:authority+'/phases/phase-1/PHASE_01_SCHEMA_v1.json',workFormPath:formRel,finalReportPath:reportRel,packetPath:packetRel,predecessorReceiptPath:predecessorRel,derivedInputPaths:[],controllerPrefillDigestSha256:prefillDigest},updatedAt:'2026-09-28T00:00:00Z'
   });
   return {root,campaign,dirRel,formRel,reportRel,packetRel};
 }
@@ -112,4 +115,18 @@ test('repaired semantic work PASS auto-regenerates packet/report, bookkeeps once
   assert.match(fs.readFileSync(path.join(f.root,f.reportRel),'utf8'),/CONTROLLER-GENERATED/);
   const graph=readJson(path.join(f.root,f.campaign,'controller/SECURITY_TRACEABILITY_GRAPH_v1.json'));
   assert.equal(graph.controllerImports.length,1);
+});
+
+
+test('assignment-backed digest rejects tampered controller input even if reviewer recomputes local digest',()=>{
+  const f=fixture();
+  const form=readJson(path.join(f.root,f.formRel));
+  form.automationInputs.derivedInputPaths=['campaigns/demo/derived/forged.json'];
+  refreshControllerPrefillDigest(form);
+  form.actions['step-1'].outputs.analysis='Complete semantic work.';
+  writeJson(path.join(f.root,f.formRel),form);
+  const result=run(f);
+  assert.equal(result.status,'NEEDS_REWORK');
+  assert.match(result.feedbackText,/controller-prefill digest does not match the controller-owned assignment digest|Controller-prefilled\/read-only fields were modified/);
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v1.json')),false);
 });
