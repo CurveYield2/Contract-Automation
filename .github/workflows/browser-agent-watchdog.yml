@@ -803,25 +803,9 @@ jobs:
                     gate_expected_phase="$assignment_phase"
                   fi
 
-                  if [ -n "$packet_path" ]; then
-                    encoded_packet="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/contents/$packet_path?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
-                    if [ -n "$encoded_packet" ]; then
-                      printf '%s' "$encoded_packet" | base64 -d > /tmp/lite-phase-work-packet.json
-                      packet_status="$(jq -r '.status // empty' /tmp/lite-phase-work-packet.json)"
-                      if [ "$packet_status" = "SUBMITTED" ]; then
-                        echo "Phase $assignment_seq work packet is submitted; dispatching schema validation/controller transaction."
-                        GH_TOKEN="$GH_TOKEN" gh workflow run lite-phase-work-packet-controller-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
-                          -f campaign_id="$campaign_id" \
-                          -f campaign_path="$campaign_root" \
-                          -f campaign_directory_path="$gate_path" \
-                          -f phase_sequence="$assignment_seq" \
-                          -f audit_controller_ref="$gate_ref" || true
-                        jq '.lastDecision="PHASE_WORK_PACKET_CONTROLLER_DISPATCHED"' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
-                        mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
-                        persist_state || true
-                      fi
-                    fi
-                  fi
+                  # Assignment-v2 controller validation is reviewer-request driven.
+                  # The controller owns packet creation, so the watchdog must never wait
+                  # for or manufacture a SUBMITTED packet as a validation trigger.
                 else
                   directory_status="$(jq -r '.status // empty' /tmp/audit-campaign-directory.json)"
                   current_receipt_path="$(jq -r '.currentReceiptPath // empty' /tmp/audit-campaign-directory.json)"
