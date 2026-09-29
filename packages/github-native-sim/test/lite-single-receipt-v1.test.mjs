@@ -40,7 +40,7 @@ test('fresh successor orchestration prefers assignment-v2 and retains legacy rec
   const w=read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
   assert.match(assignment,/Phase schema:/);
   assert.match(assignment,/Phase work form:/);
-  assert.match(assignment,/Phase packet submission path:/);
+  assert.match(assignment,/Controller-owned phase packet path:/);
   assert.match(legacy,/buildWakeMessageFromReceiptsV1/);
   assert.match(w,/curveyield-audit-campaign-directory-entry-v2/);
   assert.match(w,/prepare-lite-assignment-successor-v2\.mjs/);
