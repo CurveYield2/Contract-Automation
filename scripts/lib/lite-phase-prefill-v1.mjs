@@ -554,15 +554,29 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
 
   if(sequence===5){
     form.actions['step-1'].outputs.economicReviewRecords=economicScaffold(si??{},form.actions['step-1'].outputs.economicReviewRecords);
+    const phase0Baseline=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0/PHASE5_SIMULATION_BASELINE_INPUT_v1.json')));
+    const baselineInput=phase0Baseline?.data?.automationInputs?.phase0BaselineSimulation;
+    if(baselineInput!==undefined){
+      form.automationInputs.phase0BaselineSimulation=baselineInput;
+      form.automationInputs.controllerOwnedAutomationInputs=uniq([...(form.automationInputs.controllerOwnedAutomationInputs??[]),'phase0BaselineSimulation']);
+    }
   }
 
   if(sequence===6){
     const deployRows=deployAssessmentScaffold(root,campaignPath);
-    const targetRows=targetDispositionScaffold(prefillContext.targetDesigns??[],prefillContext.phase5ExecutionResults??{});
+    const phase0Baseline=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0/PHASE6_SIMULATION_BASELINE_INPUT_v1.json')));
+    const baselineRows=phase0Baseline?.data?.automationInputs?.phase0BaselineTargetDispositions??[];
+    const phase5Rows=targetDispositionScaffold(prefillContext.targetDesigns??[],prefillContext.phase5ExecutionResults??{});
+    const targetRows=[...(Array.isArray(baselineRows)?baselineRows:[]),...(Array.isArray(phase5Rows)?phase5Rows.filter(x=>typeof x==='object'):[])];
     form.actions['step-1'].outputs.deploymentAssessments=deployRows;
-    form.actions['step-2'].outputs.targetDispositions=targetRows;
+    form.actions['step-2'].outputs.targetDispositions=targetRows.length?targetRows:['NONE_IDENTIFIED'];
+    if(phase0Baseline?.data?.automationInputs){
+      form.automationInputs.phase0SimulationRunIndexRef=phase0Baseline.data.automationInputs.phase0SimulationRunIndexRef;
+      form.automationInputs.controllerOwnedAutomationInputs=uniq([...(form.automationInputs.controllerOwnedAutomationInputs??[]),'phase0SimulationRunIndexRef']);
+    }
     if(form.actions['step-3']){
-      form.actions['step-3'].outputs.typedExecutionLimitations=machineLimitations(deployRows,targetRows);
+      const phase0Limitations=phase0Baseline?.data?.automationInputs?.phase0SimulationLimitations??[];
+      form.actions['step-3'].outputs.typedExecutionLimitations=[...machineLimitations(deployRows,targetRows),...(Array.isArray(phase0Limitations)?phase0Limitations:[])];
       const schema=readJsonIf(repoFile(root,path.posix.join(authorityRoot,'phases/phase-6/PHASE_06_SCHEMA_v1.json')))??{};
       form.actions['step-3'].outputs.fullOnlyOmissions=schema.controllerOwnedDefaults?.fullOnlyOmissions??['NONE_IDENTIFIED'];
       form.automationInputs.controllerOwnedOutputPaths=[
