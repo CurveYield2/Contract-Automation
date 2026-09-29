@@ -192,7 +192,7 @@ ${rows.join('\n')}
 `;
 }
 
-export function renderFinalEvidenceIndexV1({identity={},milestones=[],findings=[],obligations=[],omissions=[]}={}){
+export function renderFinalEvidenceIndexV1({identity={},milestones=[],findings=[],obligations=[],limitations=[],omissions=[]}={}){
   const milestoneRows=arr(milestones).map(m=>`| ${md(m.milestone)} | ${md(m.requiredEvidence)} | ${md(m.reference)} | ${md(m.sourceIdentity)} | ${md(m.status)} | ${md(m.limitation)} |`);
   const findingRows=[
     ...arr(findings).map(f=>`| ${md(f.id)} | ${md(f.disposition)} | ${md(f.severityOrStatus)} | ${md(f.evidence)} | ${md(f.remediationStatus)} | ${md(f.residualLimitation)} |`),
@@ -200,6 +200,7 @@ export function renderFinalEvidenceIndexV1({identity={},milestones=[],findings=[
   ];
   if(!milestoneRows.length) milestoneRows.push('| NONE | NONE_IDENTIFIED | NONE_IDENTIFIED | NONE_IDENTIFIED | UNRESOLVED | NONE_IDENTIFIED |');
   if(!findingRows.length) findingRows.push('| NONE | NONE_IDENTIFIED | NONE_IDENTIFIED | NONE_IDENTIFIED | NOT_APPLICABLE | NONE_IDENTIFIED |');
+  const limitationText=arr(limitations).length?arr(limitations).map(x=>`- ${md(x)}`).join('\n'):'- NONE_IDENTIFIED';
   const omissionText=arr(omissions).length?arr(omissions).map(x=>`- ${md(x)}`).join('\n'):'- NONE_IDENTIFIED';
 
   return `# Lite Final Evidence Index
@@ -226,6 +227,10 @@ ${milestoneRows.join('\n')}
 | ID | Final disposition | Severity/status | Decisive evidence | Remediation status | Residual limitation |
 |---|---|---|---|---|---|
 ${findingRows.join('\n')}
+
+## Carried limitations and unresolved questions
+
+${limitationText}
 
 ## Full-only omitted work
 
