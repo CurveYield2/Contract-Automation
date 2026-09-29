@@ -240,9 +240,14 @@ function pickFn(target,rng,actionClass){
   const fallback=pool.length?pool:(accounting.length?accounting:other);return fallback[ri(rng,fallback.length)];
 }
 function buildBurstSchedule(targets,calls,rng){
-  const out=[];let accountingRemaining=Math.round(calls*PHASE0_ACCOUNTING_ACTION_WEIGHT_V1),otherRemaining=calls-accountingRemaining,previous=-1;
+  const out=[];
   const accountingTargets=targets.map((t,i)=>({t,i})).filter(x=>x.t.functions.some(f=>f.accounting));
   const otherTargets=targets.map((t,i)=>({t,i})).filter(x=>x.t.functions.some(f=>!f.accounting));
+  let accountingRemaining=accountingTargets.length?Math.round(calls*PHASE0_ACCOUNTING_ACTION_WEIGHT_V1):0;
+  let otherRemaining=otherTargets.length?(calls-accountingRemaining):0;
+  if(accountingTargets.length&&!otherTargets.length){accountingRemaining=calls;otherRemaining=0;}
+  if(!accountingTargets.length&&otherTargets.length){accountingRemaining=0;otherRemaining=calls;}
+  let previous=-1;
   while(accountingRemaining+otherRemaining>0){
     let actionClass;
     if(accountingRemaining===0) actionClass='OTHER_STATE_CHANGE';
@@ -267,7 +272,9 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
     const runId=`abi-telemetry-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
     const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(`${runId}-phase0-v1`);
     const schedule=buildBurstSchedule(targets,PHASE0_TELEMETRY_CALLS_PER_RUN_V1,rng);
-    const stats={calls:0,accountingActions:0,otherActions:0,successes:0,reverts:0,errors:0,byContract:{},byFunction:{},burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))};
+    const accountingFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.accounting).length,0);
+    const otherFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>!x.accounting).length,0);
+    const stats={calls:0,accountingActions:0,otherActions:0,accountingFunctionCount,otherFunctionCount,weightingLimitation:accountingFunctionCount===0?'NO_ACCOUNTING_STATE_CHANGE_FUNCTIONS_DETECTED':null,successes:0,reverts:0,errors:0,byContract:{},byFunction:{},burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))};
     try{
       for(const burst of schedule){
         const target=targets[burst.targetIndex];
@@ -377,7 +384,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const medusa=targets.length?await runMedusa({projectRoot:staged.projectRoot,anvilUrl:anvil.url,blockNumber:baselineBlock,ethers,targets,outRoot:outputRoot}):{schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_EXECUTABLE_TARGETS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0};
     const telemetry=targets.length?await runTelemetry({provider,ethers,targets,actors,outRoot:outputRoot,baselineSnapshot}):[];
     const runIndex={schemaVersion:'curveyield-phase0-simulation-run-index-v1',purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',sourceIdentity:{campaignId:receipt.campaign.campaignId,sourceSha256:receipt.source.sha256},fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash,upstreamRpcExposed:false},deployment:{detectedScripts:detected,attempts:deployment.attempts,limitations:[...deployment.limitations,...fallback.limitations],deployedContracts:deployed},policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},runs:[{runId:medusa.runId,type:'MEDUSA_ANVIL_FORK',status:medusa.status,summaryRef:'runs/medusa-anvil-fork-001/RUN_SUMMARY_v1.json'},...telemetry.map(x=>({runId:x.runId,type:'ABI_ACCOUNTING_TELEMETRY',status:x.status,summaryRef:`runs/${x.runId}/RUN_SUMMARY_v1.json`,rawTranscriptRef:x.rawTranscriptRef}))]};
-    const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v1',campaignId:receipt.campaign.campaignId,status:medusa.status==='PASS'&&telemetry.length===PHASE0_TELEMETRY_RUNS_V1&&telemetry.every(x=>x.status==='PASS')?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',medusa,telemetry:telemetry.map(x=>({runId:x.runId,calls:x.calls,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,burstSchedule:x.burstSchedule})),deployment,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:[...deployment.limitations,...fallback.limitations]};
+    const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v1',campaignId:receipt.campaign.campaignId,status:medusa.status==='PASS'&&telemetry.length===PHASE0_TELEMETRY_RUNS_V1&&telemetry.every(x=>x.status==='PASS')?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',medusa,telemetry:telemetry.map(x=>({runId:x.runId,calls:x.calls,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,burstSchedule:x.burstSchedule})),deployment,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:[...deployment.limitations,...fallback.limitations]};
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
     const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deployment.attempts,deployedContracts:deployed,gaps:[...deployment.limitations,...fallback.limitations],status:deployment.status};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deployEvidence,null,2)+'\n');await provider.destroy();
