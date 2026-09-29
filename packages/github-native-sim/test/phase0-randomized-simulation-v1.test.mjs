@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildBurstSchedule,medusaWrappers,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1} from '../src/phase0-randomized-simulation-v1.mjs';
+import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1} from '../src/phase0-randomized-simulation-v1.mjs';
 
 function rngSeq(values){let i=0;return()=>values[(i++)%values.length];}
 function fn(accounting,name='f'){
@@ -56,4 +56,14 @@ test('Medusa wrapper population gives accounting actions at least 80 percent tar
   const plan=medusaWrappers(fakeEthers,targets);
   assert.ok(plan.rows.length>0);
   assert.ok(plan.accountingWrapperShare>=0.8);
+});
+
+
+test('Phase-0 chain admission reads discovered target chain IDs from readiness',()=>{
+  const readiness={deploymentAndConfiguration:{discoveredChainIds:[
+    {chainId:8453,path:'deploy.mjs',line:1},
+    {chainId:8453,path:'hardhat.config.cjs',line:2}
+  ]}};
+  assert.deepEqual(phase0DiscoveredTargetChainIdsV1(readiness),[8453]);
+  assert.deepEqual(phase0DiscoveredTargetChainIdsV1({}),[]);
 });
