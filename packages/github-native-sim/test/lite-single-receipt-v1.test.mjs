@@ -55,13 +55,15 @@ test('browser wake activates assignment-v2 without active phase receipt mutation
   assert.match(w,/Audit Campaign Directory\/campaigns/);
 });
 
-test('watchdog dispatches current packet controller for assignment-v2 and retains legacy receipt gate',()=>{
+test('watchdog monitors assignment-v2 without circular packet dispatch and retains only the legacy receipt gate',()=>{
   const w=read('.github/workflows/browser-agent-watchdog.yml');
+  const boundary=read('.github/workflows/lite-phase-work-packet-controller-v1.yml');
   assert.match(w,/curveyield-audit-campaign-directory-entry-v2/);
   assert.match(w,/currentAssignment\.packetPath/);
-  assert.match(w,/packet_status.*SUBMITTED/);
-  assert.match(w,/lite-phase-work-packet-controller-v1\.yml/);
+  assert.doesNotMatch(w,/packet_status.*SUBMITTED[\s\S]{0,500}lite-phase-work-packet-controller-v1\.yml/);
   assert.match(w,/lite-phase-receipt-controller-v1\.yml/);
+  assert.match(boundary,/\.agent-upload\/lite-phase-boundary\/\*\.json/);
+  assert.match(boundary,/curveyield-lite-phase-boundary-request-v1/);
 });
 
 test('Phase 0 intelligence generates substantive audit surface rather than receipt substitutes',()=>{
