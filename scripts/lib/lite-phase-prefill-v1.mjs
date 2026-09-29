@@ -821,14 +821,22 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
 }
 
 export function resolveTargetExecutionRequestRef({root,campaignPath,target}){
-  if(target?.executionMethod==='NOT_APPLICABLE')return null;
-  const explicitRef=typeof target?.executionRequestRef==='string'&&!target.executionRequestRef.startsWith('<')?target.executionRequestRef:null;
+  if(String(target?.executionMethod??'').toUpperCase()==='NOT_APPLICABLE')return null;
+  const rawExplicit=typeof target?.executionRequestRef==='string'&&!target.executionRequestRef.startsWith('<')
+    ? target.executionRequestRef
+    : null;
+  const explicitRef=rawExplicit
+    ? (rawExplicit.startsWith(campaignPath+'/')?rawExplicit:path.posix.join(campaignPath,rawExplicit))
+    : null;
   const safe=String(target?.candidateKey??'target').replace(/[^A-Za-z0-9._-]+/g,'_');
   const candidates=[
     explicitRef,
     path.posix.join(campaignPath,'work/phase-05/execution-requests',safe+'.json'),
     path.posix.join(campaignPath,'evidence/phase5-target-requests',safe+'.json')
   ].filter(Boolean);
-  for(const rel of candidates) if(fs.existsSync(repoFile(root,rel))) return path.posix.relative(campaignPath,rel);
+  for(const repoRel of candidates){
+    if(repoRel.startsWith('/')||repoRel.split('/').includes('..')) continue;
+    if(fs.existsSync(repoFile(root,repoRel))) return path.posix.relative(campaignPath,repoRel);
+  }
   return null;
 }
