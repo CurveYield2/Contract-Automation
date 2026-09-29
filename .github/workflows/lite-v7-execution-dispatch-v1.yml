@@ -103,9 +103,17 @@ jobs:
             echo "attempt=$attempt"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Select working Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
       - name: Verify exact Phase-9 campaign/request binding
         env:
-          GH_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
           REQUEST_PATH: ${{ steps.request.outputs.request_path }}
           CONTROLLER_REF: ${{ steps.request.outputs.controller_ref }}
