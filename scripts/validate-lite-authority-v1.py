@@ -66,6 +66,9 @@ packet_template=pkg/"shared/controller/PHASE_WORK_PACKET_TEMPLATE_v1.json"
 if not packet_template.exists():
     errors.append("shared/controller/PHASE_WORK_PACKET_TEMPLATE_v1.json missing")
 
+obligation_disposition_phases=set()
+custom_obligation_required_phases=set()
+
 for phase in range(1,11):
     phase_dir=pkg/f"phases/phase-{phase}"
     expected_schema=phase_dir/f"PHASE_{phase:02d}_SCHEMA_v1.json"
@@ -104,6 +107,17 @@ for phase in range(1,11):
     actions=schema.get("actions",{})
     steps=contract.get("steps",[])
     controller_generated_paths={x.get("path") for x in schema.get("controllerGeneratedOutputs",[]) if isinstance(x,dict) and x.get("path")}
+    obligation_fields=[]
+    for action_key,action in actions.items():
+        for field in action.get("fields",[]):
+            if field.get("name")=="obligationDispositions":
+                obligation_fields.append((action_key,field))
+                obligation_disposition_phases.add(phase)
+            if field.get("name")=="customValidationObligations":
+                allowed=field.get("itemFieldAllowedValues",{}).get("requiredPhase",[])
+                custom_obligation_required_phases.update(int(x) for x in allowed if str(x).isdigit())
+    if obligation_fields and "expectedDueObligationIds" not in {x.get("name") for x in schema.get("controllerAutomationInputs",[]) if isinstance(x,dict)}:
+        errors.append(f"phase-{phase}: obligationDispositions requires controllerAutomationInputs.expectedDueObligationIds")
     controller_inputs=schema.get("controllerAutomationInputs",[])
     input_names=[x.get("name") for x in controller_inputs if isinstance(x,dict)]
     if len(input_names)!=len(set(input_names)):
@@ -203,6 +217,10 @@ for phase in range(1,11):
         for output_path in paths:
             if output_path.startswith("actions.") and output_path not in valid_output_paths:
                 errors.append(f"phase-{phase}: {mapping_name} references undeclared output {output_path}")
+            if mapping_name=="obligationRecordPaths" and output_path:
+                leaf=output_path.rsplit(".",1)[-1]
+                if leaf not in {"obligationDispositions","customValidationObligations"}:
+                    errors.append(f"phase-{phase}: obligationRecordPaths contains non-obligation output {output_path}")
     for spec in schema.get("derivedOutputs",[]):
         for selector in spec.get("selectors",[]):
             if selector in {"actions","automationOutputs"}:
@@ -244,10 +262,17 @@ for required_output in {
 
 domain_matrix=json.loads((pkg/"shared/controller/DOMAIN_APPLICABILITY_MATRIX.json").read_text())
 for domain in domain_matrix.get("domains",[]):
-    if 7 in domain.get("requiredExecutionPhases",[]):
+    phases={int(x) for x in domain.get("requiredExecutionPhases",[]) if str(x).isdigit()}
+    if 7 in phases:
         errors.append(f"DOMAIN_APPLICABILITY_MATRIX: {domain.get('domainId')} assigns substantive work to automation-only Phase 7")
+    unsupported=phases-obligation_disposition_phases
+    if unsupported:
+        errors.append(f"DOMAIN_APPLICABILITY_MATRIX: {domain.get('domainId')} assigns obligations to phase(s) without obligationDispositions: {sorted(unsupported)}")
 if 7 in domain_matrix.get("executionReusePhases",[]):
     errors.append("DOMAIN_APPLICABILITY_MATRIX: executionReusePhases still includes automation-only Phase 7")
+unsupported_custom=custom_obligation_required_phases-obligation_disposition_phases
+if unsupported_custom:
+    errors.append(f"customValidationObligations allows unsupported disposition phase(s): {sorted(unsupported_custom)}")
 
 phase7=json.loads((pkg/"phases/phase-7/PHASE_CONTRACT.json").read_text())
 auth=phase7.get("authorization",{})
