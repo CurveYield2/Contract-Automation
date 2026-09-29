@@ -141,8 +141,24 @@ const phase5Text=JSON.stringify(phase5Schema);
 if(phase5Text.includes('MEDUSA_PROPERTY')){
   need(boundaryArtifacts.includes('MEDUSA_PROPERTY'),'authority allows MEDUSA_PROPERTY but boundary automation does not support it');
 }
-need(/Medusa fuzz\/property execution \| permitted/.test(capabilityMap),'capability map must explicitly permit Medusa execution');
-need(!/(?:do not|must not|never|prohibit(?:ed|s)?|forbid(?:den|s)?)\b[^\n]{0,160}\bMedusa\b/i.test(capabilityMap),'capability map contains a Medusa execution prohibition');
+const permittedLiteCapabilities=[
+  'Medusa fuzz/property execution',
+  'Broad/stateful random discovery',
+  'Chaos testing',
+  'Mutation testing',
+  'Differential/reference testing',
+  'Corpus/deep testing',
+  'Exhaustive known-attack testing',
+  'Coverage-closure testing'
+];
+for(const capability of permittedLiteCapabilities){
+  need(capabilityMap.includes('| '+capability+' |'),'capability map must explicitly include permitted Lite capability: '+capability);
+}
+const prohibitedCapabilityLine=capabilityMap.split(/\r?\n/).find(line=>
+  /^(?:Do not|Never|Must not|Forbidden|Prohibited)/i.test(line.trim()) &&
+  /Medusa|random discovery|chaos|mutation|differential|corpus|exhaustive known-attack|coverage-closure/i.test(line)
+);
+need(!prohibitedCapabilityLine,'capability map contains a Lite execution prohibition: '+prohibitedCapabilityLine);
 
 process.stdout.write(JSON.stringify({
   status:'PASS',
