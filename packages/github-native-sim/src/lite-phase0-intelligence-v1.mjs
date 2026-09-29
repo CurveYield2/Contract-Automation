@@ -410,58 +410,19 @@ function sanitizedMachineEnv(environment=process.env){
 
 async function executeSourceKnownLocalSetup({projectRoot,projectReadiness}){
   const scripts=projectReadiness?.testingAndToolingReadiness?.packageScripts??{};
-  const names=Object.keys(scripts).filter((name)=>{
-    const semantic=/(deploy|deployment|simulate|simulation|integration)/i.test(name);
-    const local=/(local|test|dev|anvil|hardhat|sim)/i.test(name);
-    return semantic&&local;
-  }).sort().slice(0,8);
-  const attempts=[];
-  const gaps=[];
-  for(const [i,name] of names.entries()){
-    const result=await runProcess({
-      command:'timeout',
-      args:['180s','npm','run',name,'--if-present'],
-      cwd:projectRoot,
-      env:sanitizedMachineEnv(process.env)
-    });
-    attempts.push({
-      script:name,
-      command:`npm run ${name} --if-present`,
-      exitCode:result.exitCode,
-      status:result.exitCode===0?'PASS':'BLOCKED_SOURCE_SETUP_FAILED',
-      resultSummary:(String(result.stdout??'')+'\n'+String(result.stderr??'')).trim().slice(-6000)||`exit ${result.exitCode}`,
-      evidenceRef:`evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json#attempts/${i}`
-    });
-  }
-  if(names.length===0){
-    gaps.push({
-      id:'P0-GAP-DEPLOY-001',
-      value:'No deterministic local/test/dev/anvil/hardhat deployment or simulation npm script was discovered.',
-      recoveryAttempt:'Phase-0 automation completed source/build/readiness discovery; unsafe generic production deployment commands were not executed.',
-      securityEffect:'REQUIRES_PHASE6_INTERPRETATION',
-      candidateOrObligation:'PENDING_PHASE6_INTERPRETATION',
-      disposition:'BLOCKED_NO_ADMITTED_LOCAL_EXECUTION'
-    });
-  }
-  for(const [i,a] of attempts.entries()){
-    if(a.status!=='PASS') gaps.push({
-      id:`P0-GAP-DEPLOY-${String(i+2).padStart(3,'0')}`,
-      value:`Source-known local setup command failed: ${a.script}`,
-      recoveryAttempt:'Executed once in scrubbed deterministic Phase-0 environment with a 180-second cap.',
-      securityEffect:'REQUIRES_PHASE6_INTERPRETATION',
-      candidateOrObligation:'PENDING_PHASE6_INTERPRETATION',
-      disposition:a.status
-    });
-  }
+  const discovered=Object.entries(scripts)
+    .filter(([name,cmd])=>/(deploy|deployment|simulate|simulation|integration)/i.test(name+' '+String(cmd)))
+    .map(([name,command])=>({script:name,command:String(command),status:'DEFERRED_TO_ANVIL_FRAMEWORK_ADAPTER'}));
   return {
-    schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v1',
-    policy:'SOURCE_KNOWN_LOCAL_ONLY_NO_PRODUCTION_SECRETS_NO_GENERIC_PRODUCTION_DEPLOY',
-    attempts,
-    gaps,
-    status:gaps.length?'COMPLETE_WITH_TYPED_GAPS':'PASS'
+    schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',
+    policy:'DISCOVERY_ONLY_UNTIL_PHASE0_ANVIL_SIMULATION_WORKFLOW',
+    attempts:[],
+    discoveredDeploymentOrSimulationScripts:discovered,
+    gaps:[],
+    status:'PENDING_ANVIL_SIMULATION',
+    note:'Phase-0 intelligence does not execute arbitrary npm deployment scripts. The dedicated randomized-simulation workflow binds supported Foundry/Hardhat deployment entrypoints to the local Anvil RPC without source mutation, then overwrites this provisional evidence with actual execution results.'
   };
 }
-
 async function buildContextReviewPacket({projectRoot,sourceIntelligence,projectReadiness,slither}){
   const sourceEntries=[];
   for(const item of sourceIntelligence.sourceFiles??[]){
