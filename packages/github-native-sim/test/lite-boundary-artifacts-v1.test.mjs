@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   renderDeployConfigMatrixV1,
   renderTargetedTestMatrixV1,
   renderRemediationDeltaLedgerV1,
   renderFinalEvidenceIndexV1,
-  executePhase5TargetsV1
+  executePhase5TargetsV1,
+  validateTargetExecutionRequestBindingV1
 } from '../src/lite-boundary-artifacts-v1.mjs';
 
 test('deploy/config matrix preserves task format without repeated campaign bookkeeping',()=>{
@@ -76,4 +80,89 @@ test('final evidence index accepts candidate disposition rows alongside findings
   assert.match(text,/CAND-001/);
   assert.match(text,/REJECTED/);
   assert.match(text,/FIND-001/);
+});
+
+
+test('Phase5 target request binding accepts exact campaign source candidate reproduction and observation identity',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'lite-target-binding-'));
+  const campaign='campaigns/demo';
+  const rel='work/phase-05/execution-requests/CAND-001.json';
+  const abs=path.join(root,campaign,...rel.split('/'));
+  fs.mkdirSync(path.dirname(abs),{recursive:true});
+  const source='a'.repeat(64);
+  fs.writeFileSync(abs,JSON.stringify({
+    campaignId:'demo-r1',
+    phaseId:'build-and-test',
+    source:{archiveSha256:source},
+    configuration:{v26:{reproduction:{
+      candidateId:'CAND-001',
+      reproductionType:'FOUNDRY_TEST',
+      expectedObservation:{componentStatus:'FAILED'}
+    }}}
+  }));
+  const target={
+    candidateKey:'CAND-001',
+    executionMethod:'V7_REQUEST',
+    executionRequestRef:rel,
+    reproductionType:'FOUNDRY_TEST',
+    expectedMachineObservation:{componentStatus:'FAILED'}
+  };
+  const result=validateTargetExecutionRequestBindingV1({
+    controllerRoot:root,campaignPath:campaign,target,
+    expectedCampaignId:'demo-r1',expectedSourceSha256:source
+  });
+  assert.equal(result.status,'PASS_STRUCTURAL_BINDING_REQUIRES_PHASE6_SEMANTIC_HARNESS_REVIEW');
+  assert.equal(result.requestRef,rel);
+});
+
+test('Phase5 target request binding fails closed on candidate or observation drift',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'lite-target-binding-drift-'));
+  const campaign='campaigns/demo';
+  const rel='work/phase-05/execution-requests/CAND-001.json';
+  const abs=path.join(root,campaign,...rel.split('/'));
+  fs.mkdirSync(path.dirname(abs),{recursive:true});
+  const source='b'.repeat(64);
+  fs.writeFileSync(abs,JSON.stringify({
+    campaignId:'demo-r1',
+    phaseId:'build-and-test',
+    source:{archiveSha256:source},
+    configuration:{v26:{reproduction:{
+      candidateId:'CAND-OTHER',
+      reproductionType:'FOUNDRY_TEST',
+      expectedObservation:{componentStatus:'COMPLETED'}
+    }}}
+  }));
+  const target={
+    candidateKey:'CAND-001',
+    executionMethod:'V7_REQUEST',
+    executionRequestRef:rel,
+    reproductionType:'FOUNDRY_TEST',
+    expectedMachineObservation:{componentStatus:'FAILED'}
+  };
+  const result=validateTargetExecutionRequestBindingV1({
+    controllerRoot:root,campaignPath:campaign,target,
+    expectedCampaignId:'demo-r1',expectedSourceSha256:source
+  });
+  assert.equal(result.status,'FAIL_STRUCTURAL_REQUEST_TARGET_BINDING');
+  assert.ok(result.reasons.includes('reproduction candidateId mismatch'));
+  assert.ok(result.reasons.includes('expected machine observation mismatch'));
+});
+
+test('target matrix exposes structural request binding separately from semantic execution interpretation',()=>{
+  const text=renderTargetedTestMatrixV1({
+    targetDesigns:[{
+      candidateKey:'CAND-001',setup:'attacker',prerequisites:'funded',
+      transactionSequence:'deposit -> withdraw',oracle:'balance invariant',
+      fuzzVariablesAndBounds:'amount 0..max',expectedSecurityProperty:'no extraction',
+      requestBindingStatus:'PASS_STRUCTURAL_BINDING_REQUIRES_PHASE6_SEMANTIC_HARNESS_REVIEW'
+    }],
+    executionResults:{'CAND-001':{
+      status:'PASS',
+      requestBindingStatus:'PASS_STRUCTURAL_BINDING_REQUIRES_PHASE6_SEMANTIC_HARNESS_REVIEW',
+      evidenceRef:'evidence/phase5-boundary/CAND-001/raw-result.json',
+      rawResult:{analysis:{nativeFuzz:{componentStatus:'COMPLETED'}}}
+    }}
+  });
+  assert.match(text,/Request\/target structural binding/);
+  assert.match(text,/PASS_STRUCTURAL_BINDING_REQUIRES_PHASE6_SEMANTIC_HARNESS_REVIEW/);
 });
