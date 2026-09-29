@@ -317,6 +317,137 @@ function machineLimitations(deployRows,targetRows){
   }
   return out.length?uniq(out):['NONE_IDENTIFIED'];
 }
+function reviewerForRequiredPhase(phase){
+  const n=Number(phase);
+  if(n===1)return'reviewer-1';
+  if(n>=2&&n<=5)return'reviewer-2';
+  if(n===6)return'reviewer-3L';
+  if(n>=8&&n<=10)return'reviewer-4';
+  return n===7?'phase7-automation':'UNRESOLVED_REVIEWER';
+}
+function evidenceList(value){
+  if(Array.isArray(value)) return value.filter(x=>typeof x==='string'&&x&&!x.startsWith('<')&&x!=='NONE_IDENTIFIED');
+  if(typeof value==='string'&&value&&!value.startsWith('<')&&value!=='NONE_IDENTIFIED') return [value];
+  return [];
+}
+function obligationIdFor(item,originPhase,index){
+  const raw=String(item?.obligationId??item?.tempKey??('AUTO-'+String(index+1).padStart(3,'0'))).trim();
+  if(raw.startsWith('OBL-')) return raw;
+  return 'OBL-P'+String(originPhase)+'-'+safeSegment(raw,'AUTO-'+String(index+1).padStart(3,'0'));
+}
+export function normalizeFormalObligationsIntoLedger({ledger,items=[],originPhase,canonicalRel,now}){
+  ledger.obligations??=[];
+  const byId=new Map(ledger.obligations.map((o,i)=>[String(o?.obligationId??''),i]).filter(([id])=>id));
+  let created=0;
+  (Array.isArray(items)?items:[items]).forEach((item,index)=>{
+    if(!item||typeof item!=='object'||Array.isArray(item))return;
+    if(item.requiredPhase===undefined||!item.requiredAction||!item.completionCondition)return;
+    let requiredPhase=String(item.requiredPhase);
+    if(requiredPhase==='7') requiredPhase='6';
+    const obligationId=obligationIdFor(item,originPhase,index);
+    const existingIndex=byId.get(obligationId);
+    if(existingIndex!==undefined){
+      const existing=ledger.obligations[existingIndex];
+      existing.originatingFactIds=uniq([...(existing.originatingFactIds??[]),...(item.originFactKeys??item.originatingFactIds??[])]);
+      existing.originatingEvidenceRefs=uniq([...(existing.originatingEvidenceRefs??[]),canonicalRel,...(item.originatingEvidenceRefs??[])]);
+      existing.requiredPhase=existing.requiredPhase??requiredPhase;
+      existing.requiredReviewer=existing.requiredReviewer??reviewerForRequiredPhase(existing.requiredPhase);
+      existing.requiredAction=existing.requiredAction??item.requiredAction;
+      existing.completionCondition=existing.completionCondition??item.completionCondition;
+      existing.updatedAt=now;
+      return;
+    }
+    ledger.obligations.push({
+      obligationId,
+      originPhase:String(originPhase),
+      originatingFactIds:uniq([...(item.originFactKeys??item.originatingFactIds??[])]),
+      originatingEvidenceRefs:uniq([canonicalRel,...(item.originatingEvidenceRefs??[])]),
+      requiredPhase,
+      requiredReviewer:reviewerForRequiredPhase(requiredPhase),
+      requiredAction:item.requiredAction,
+      completionCondition:item.completionCondition,
+      mandatory:item.mandatory!==false,
+      status:'OPEN',
+      statusReason:null,
+      closureEvidenceRefs:[],
+      supersedesOrReplaces:[],
+      createdAt:now,
+      updatedAt:now
+    });
+    byId.set(obligationId,ledger.obligations.length-1);
+    created++;
+  });
+  return created;
+}
+export function applyObligationDispositionsToLedger({ledger,canonical,sequence,canonicalRel,now}){
+  ledger.obligations??=[];
+  const byId=new Map(ledger.obligations.map(o=>[String(o?.obligationId??''),o]).filter(([id])=>id));
+  const rows=[];
+  for(const action of Object.values(canonical?.actions??{})){
+    const value=action?.outputs?.obligationDispositions;
+    if(Array.isArray(value)) rows.push(...value.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)));
+  }
+  for(const row of rows){
+    const id=String(row.obligationId??'').trim();
+    const obligation=byId.get(id);
+    if(!obligation) throw new Error('Obligation disposition references unknown obligation '+id);
+    const disposition=String(row.disposition??'').toUpperCase();
+    const carry=String(row.carryForwardPhaseOrNone??'NONE_IDENTIFIED');
+    const refs=uniq([canonicalRel,...evidenceList(row.evidenceRefs)]);
+    obligation.statusReason=String(row.rationale??'');
+    obligation.updatedAt=now;
+    if(disposition==='SATISFIED'){
+      obligation.status='SATISFIED';
+      obligation.closureEvidenceRefs=refs;
+    }else if(disposition==='NOT_APPLICABLE'){
+      obligation.status='NOT_APPLICABLE';
+      obligation.closureEvidenceRefs=refs;
+    }else if(disposition==='CARRY_FORWARD'){
+      obligation.status='OPEN';
+      obligation.requiredPhase=carry;
+      obligation.requiredReviewer=reviewerForRequiredPhase(carry);
+      obligation.closureEvidenceRefs=[];
+    }else if(disposition==='BLOCKED_CARRIED'){
+      obligation.status='BLOCKED_CARRIED';
+      obligation.requiredPhase=carry;
+      obligation.requiredReviewer=reviewerForRequiredPhase(carry);
+      obligation.closureEvidenceRefs=refs;
+    }else{
+      throw new Error('Unsupported obligation disposition '+disposition+' for '+id);
+    }
+  }
+  ledger.phaseCheckpoints??=[];
+  const checkpoint={
+    phaseId:'phase-'+sequence,
+    status:'DISPOSITIONS_APPLIED',
+    dispositionCount:rows.length,
+    openOrBlockedAfterPhase:(ledger.obligations??[]).filter(o=>['OPEN','IN_PROGRESS','BLOCKED_CARRIED'].includes(String(o.status??'OPEN').toUpperCase())).length,
+    recordedAt:now
+  };
+  const i=ledger.phaseCheckpoints.findIndex(x=>x?.phaseId===checkpoint.phaseId);
+  if(i>=0)ledger.phaseCheckpoints[i]=checkpoint;else ledger.phaseCheckpoints.push(checkpoint);
+  return rows.length;
+}
+export function dueObligationScaffold({root,campaignPath,sequence}){
+  const ledger=readJsonIf(repoFile(root,path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json')))??{};
+  const active=new Set(['OPEN','IN_PROGRESS','BLOCKED_CARRIED']);
+  const due=(ledger.obligations??[]).filter(o=>active.has(String(o?.status??'OPEN').toUpperCase())&&String(o?.requiredPhase??'')===String(sequence));
+  due.sort((a,b)=>String(a.obligationId??'').localeCompare(String(b.obligationId??'')));
+  for(const o of due){
+    if(!o?.obligationId||!o?.requiredAction||!o?.completionCondition) throw new Error('Malformed due obligation at phase '+sequence);
+  }
+  const rows=due.map(o=>({
+    obligationId:o.obligationId,
+    requiredAction:o.requiredAction,
+    completionCondition:o.completionCondition,
+    disposition:'<REQUIRED>',
+    rationale:'<REQUIRED>',
+    evidenceRefs:'<REQUIRED>',
+    carryForwardPhaseOrNone:'<REQUIRED>',
+    automationOwnedFields:['obligationId','requiredAction','completionCondition']
+  }));
+  return {rows:rows.length?rows:['NONE_IDENTIFIED'],expectedIds:due.map(o=>o.obligationId)};
+}
 
 export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,sequence,form,derivedInputPaths=[],predecessorReceiptPath,prefillContext={}}){
   form.automationInputs={
@@ -459,6 +590,19 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
         };
       });
     }
+  }
+
+  // Any phase exposing obligationDispositions consumes the canonical due-obligation set.
+  for(const action of Object.values(form.actions??{})){
+    if(!action?.outputs||!Object.prototype.hasOwnProperty.call(action.outputs,'obligationDispositions')) continue;
+    const due=dueObligationScaffold({root,campaignPath,sequence});
+    action.outputs.obligationDispositions=due.rows;
+    form.automationInputs.expectedDueObligationIds=due.expectedIds;
+    form.automationInputs.controllerOwnedAutomationInputs=uniq([
+      ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
+      'expectedDueObligationIds'
+    ]);
+    break;
   }
 
   refreshControllerPrefillDigest(form);
@@ -626,6 +770,26 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
   if(sequence===4){
     const c=phase4CoverageFromForm(form);
     if(!(c.unreviewedRequiredSurfaces.length===1&&c.unreviewedRequiredSurfaces[0]==='NONE_IDENTIFIED')) deficiencies.push('Phase 4 required review scaffolds were removed or omitted: '+c.unreviewedRequiredSurfaces.join(', '));
+  }
+  if(Array.isArray(form?.automationInputs?.expectedDueObligationIds)){
+    const expected=[...form.automationInputs.expectedDueObligationIds].sort();
+    const actual=[];
+    for(const action of Object.values(form?.actions??{})){
+      const rows=action?.outputs?.obligationDispositions;
+      if(!Array.isArray(rows))continue;
+      for(const row of rows) if(row&&typeof row==='object'&&!Array.isArray(row)&&row.obligationId) actual.push(String(row.obligationId));
+    }
+    actual.sort();
+    if(JSON.stringify(actual)!==JSON.stringify(expected)) deficiencies.push('Due-obligation disposition rows do not exactly match controller-prefilled obligations. Expected '+expected.join(', ')+'; got '+actual.join(', ')+'.');
+    for(const action of Object.values(form?.actions??{})){
+      for(const row of action?.outputs?.obligationDispositions??[]){
+        if(!row||typeof row!=='object'||Array.isArray(row))continue;
+        const d=String(row.disposition??'');
+        const carry=String(row.carryForwardPhaseOrNone??'');
+        if(['CARRY_FORWARD','BLOCKED_CARRIED'].includes(d)&&(!carry||carry==='NONE_IDENTIFIED'||Number(carry)<=Number(sequence))) deficiencies.push('Obligation '+String(row.obligationId??'UNRESOLVED')+' requires a later carryForwardPhaseOrNone for disposition '+d+'.');
+        if(['SATISFIED','NOT_APPLICABLE'].includes(d)&&carry!=='NONE_IDENTIFIED') deficiencies.push('Obligation '+String(row.obligationId??'UNRESOLVED')+' must use carryForwardPhaseOrNone=NONE_IDENTIFIED for terminal disposition '+d+'.');
+      }
+    }
   }
   return deficiencies;
 }
