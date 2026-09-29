@@ -160,6 +160,24 @@ const prohibitedCapabilityLine=capabilityMap.split(/\r?\n/).find(line=>
 );
 need(!prohibitedCapabilityLine,'capability map contains a Lite execution prohibition: '+prohibitedCapabilityLine);
 
+const prohibitedExecutionTerms=/Medusa|random discovery|stateful random|chaos|mutation|differential\/reference|differential testing|reference testing|corpus\/deep|corpus testing|deep testing|exhaustive known-attack|coverage-closure/i;
+const prohibitionLanguage=/\b(?:do not|must not|never|forbid(?:den|s)?|prohibit(?:ed|s)?|disallow(?:ed|s)?|not request|not execute|not run)\b/i;
+const authorityProhibitionHits=[];
+function scanAuthority(dir){
+  for(const ent of fs.readdirSync(dir,{withFileTypes:true})){
+    const file=path.join(dir,ent.name);
+    if(ent.isDirectory()){scanAuthority(file);continue;}
+    if(!ent.isFile()||!/\.(?:md|json|txt|ya?ml)$/i.test(ent.name)) continue;
+    read(file).split(/\r?\n/).forEach((line,index)=>{
+      if(prohibitedExecutionTerms.test(line)&&prohibitionLanguage.test(line)){
+        authorityProhibitionHits.push(path.relative(authorityRoot,file).split(path.sep).join('/')+':'+(index+1)+': '+line.trim());
+      }
+    });
+  }
+}
+scanAuthority(authorityRoot);
+need(authorityProhibitionHits.length===0,'Lite authority still contains execution prohibitions: '+authorityProhibitionHits.join(' | '));
+
 process.stdout.write(JSON.stringify({
   status:'PASS',
   authorityRoot:authorityRel,
