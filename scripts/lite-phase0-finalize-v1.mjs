@@ -37,7 +37,12 @@ const evidence={
   bundle:required(path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json'),'Source Intelligence bundle'),
   readiness:required(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'project readiness'),
   deployConfigExecution:required(path.join(campaignRoot,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),'Phase-0 deploy/config execution evidence'),
+  randomizedSimulation:required(path.join(campaignRoot,'evidence/phase0/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),'Phase-0 randomized simulation summary'),
+  simulationRunIndex:required(path.join(campaignRoot,'evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.json'),'Phase-0 simulation run index'),
+  phase5SimulationInput:required(path.join(campaignRoot,'derived/phase-0/PHASE5_SIMULATION_BASELINE_INPUT_v1.json'),'Phase-5 simulation baseline input'),
+  phase6SimulationInput:required(path.join(campaignRoot,'derived/phase-0/PHASE6_SIMULATION_BASELINE_INPUT_v1.json'),'Phase-6 simulation baseline input'),
   deployConfigMatrix:required(path.join(campaignRoot,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md'),'Phase-6 deploy/config matrix'),
+  targetedTestMatrix:required(path.join(campaignRoot,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md'),'Phase-6 targeted-test matrix'),
   auditSurface:required(path.join(campaignRoot,'evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json'),'Phase-0 audit surface'),
   graph:required(path.join(campaignRoot,'controller/SECURITY_TRACEABILITY_GRAPH_v1.json'),'traceability graph'),
   ledger:required(path.join(campaignRoot,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),'obligation ledger'),
@@ -50,11 +55,39 @@ if(build.source?.archiveSha256Observed!==sourceSha && build.source?.archiveSha25
 const bundle=read(evidence.bundle);
 if(bundle.identity?.sourceDigestSha256!==sourceSha) throw new Error('Source Intelligence bundle does not bind canonical source SHA');
 
+const simulation=read(evidence.randomizedSimulation);
+const runIndex=read(evidence.simulationRunIndex);
+if(simulation.code!=='PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED'){
+  const medusa=simulation.medusa??{};
+  if(medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS'){
+    if(medusa.status!=='PASS') throw new Error('Phase-0 Medusa simulation did not PASS on the admitted Ethereum path: '+String(medusa.status??'MISSING'));
+    if(Number(medusa.observedCalls??0)<100001) throw new Error('Phase-0 Medusa simulation did not exceed 100,000 randomized ABI calls');
+  }
+}
+if(runIndex.policy?.realAbiCallsOnly!==true||runIndex.policy?.rawRandomBytes!==false) throw new Error('Phase-0 randomized simulation policy must require real ABI calls and forbid raw random calldata');
+if(Number(runIndex.policy?.accountingActionWeight??0)<0.8) throw new Error('Phase-0 randomized simulation accounting/state-change action weight must be at least 80%');
+if(runIndex.policy?.crossContractBursts!==true) throw new Error('Phase-0 ABI telemetry must use randomized cross-contract bursts');
+for(const run of runIndex.runs??[]){
+  if(run.type!=='ABI_ACCOUNTING_TELEMETRY') continue;
+  const ref=run.rawTranscriptRef;
+  if(typeof ref!=='string'||!ref.startsWith('runs/')) throw new Error('Phase-0 ABI telemetry run is missing raw transcript reference: '+String(run.runId));
+  required(path.join(campaignRoot,'evidence/phase0/simulations',...ref.split('/')),'raw Phase-0 simulation transcript '+String(run.runId));
+}
+const phase5Input=read(evidence.phase5SimulationInput);
+const phase6Input=read(evidence.phase6SimulationInput);
+if(!phase5Input?.data?.automationInputs?.phase0BaselineSimulation) throw new Error('Phase-5 simulation baseline input is malformed');
+if(!Array.isArray(phase6Input?.data?.automationInputs?.phase0BaselineTargetDispositions)) throw new Error('Phase-6 simulation baseline target dispositions are malformed');
+
 const now=new Date().toISOString();
 const refs=Object.entries(evidence).map(([role,file])=>({role,path:rel(campaignRoot,file),sha256:digestFile(file)}));
 receipt.evidence=refs.reduce((rows,row)=>upsert(rows,row),receipt.evidence??[]);
 receipt.outputs=upsert(receipt.outputs??[],{role:'PHASE0_AUDIT_SURFACE',path:'evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json',sha256:digestFile(evidence.auditSurface)});
 receipt.outputs=upsert(receipt.outputs,{role:'PRECOMPUTED_DEPLOY_CONFIG_EVIDENCE',path:'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md',sha256:digestFile(evidence.deployConfigMatrix)});
+receipt.outputs=upsert(receipt.outputs,{role:'PHASE0_RANDOMIZED_SIMULATION',path:'evidence/phase0/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json',sha256:digestFile(evidence.randomizedSimulation)});
+receipt.outputs=upsert(receipt.outputs,{role:'PHASE0_SIMULATION_RUN_INDEX',path:'evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.json',sha256:digestFile(evidence.simulationRunIndex)});
+receipt.outputs=upsert(receipt.outputs,{role:'PHASE5_SIMULATION_BASELINE_INPUT',path:'derived/phase-0/PHASE5_SIMULATION_BASELINE_INPUT_v1.json',sha256:digestFile(evidence.phase5SimulationInput)});
+receipt.outputs=upsert(receipt.outputs,{role:'PHASE6_SIMULATION_BASELINE_INPUT',path:'derived/phase-0/PHASE6_SIMULATION_BASELINE_INPUT_v1.json',sha256:digestFile(evidence.phase6SimulationInput)});
+receipt.outputs=upsert(receipt.outputs,{role:'PRECOMPUTED_TARGETED_TEST_EVIDENCE',path:'work/phase-06/LITE_TARGETED_TEST_MATRIX.md',sha256:digestFile(evidence.targetedTestMatrix)});
 receipt.globalControls={
   securityTraceabilityGraph:'controller/SECURITY_TRACEABILITY_GRAPH_v1.json',
   carriedForwardObligationLedger:'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json',
