@@ -76,6 +76,8 @@ if(sequence===8){
 }
 const directoryFile=requiredFile(root,receipt.campaign.campaignDirectoryEntryPath,'campaign directory entry');
 const directory=read(directoryFile);
+if(directory.schemaVersion==='curveyield-audit-campaign-directory-entry-v2') throw new Error('legacy receipt controller is prohibited for current assignment-v2 Lite campaigns; use lite-phase-work-packet-controller-v1.yml');
+if(directory.schemaVersion!=='curveyield-audit-campaign-directory-entry-v1') throw new Error('legacy receipt controller requires Audit Campaign Directory v1');
 let freshSuccessorRequired=false,sameReviewerAdvanced=false,nextReceiptPath=null;
 if(sequence===6){
   const markerPath=phaseReceiptPath(campaignPath,7,1);
