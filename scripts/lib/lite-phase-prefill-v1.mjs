@@ -132,7 +132,7 @@ function classifyDomains(si,matrix){
     };
   });
 }
-function domainObligations(matrix,assessments){
+function domainObligations(matrix,assessments,{originPhase=3}={}){
   const byId=new Map((matrix?.domains??[]).map(d=>[d.domainId,d]));
   const out=[];
   let n=1;
@@ -140,6 +140,9 @@ function domainObligations(matrix,assessments){
     if(!['TRIGGERED','UNCERTAIN_INCLUDE'].includes(a.classification)) continue;
     const d=byId.get(a.domainId);
     for(const phase of d?.requiredExecutionPhases??[]){
+      // Current-phase domain modeling is performed directly by the active
+      // Phase-3 action. Only future-phase work becomes a carried obligation.
+      if(Number(phase)<=Number(originPhase)) continue;
       out.push({
         tempKey:'AUTO-DOM-'+String(n++).padStart(3,'0'),
         originFactKeys:[a.domainId],
