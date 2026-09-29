@@ -13,7 +13,8 @@ import {
 import {
   buildControllerPacket,renderControllerPhaseReport,validatePhaseScaffold,
   phase4CoverageFromForm,materializeValidatedFindings,resolveTargetExecutionRequestRef,
-  populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest
+  populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
+  normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -49,9 +50,16 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now}){
   const invalid=readJson(requiredFile(root,invalidRel,'invalidation matrix'));
   assignCanonicalIds(canonical,graph,schema.phase);
   graph.controllerImports??=[]; ledger.controllerImports??=[]; invalid.controllerImports??=[];
-  graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:importedRecords(canonical,schema.bookkeepingMappings?.graphRecordPaths),importedAt:now});
-  ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:importedRecords(canonical,schema.bookkeepingMappings?.obligationRecordPaths),importedAt:now});
-  invalid.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:importedRecords(canonical,schema.bookkeepingMappings?.invalidationRecordPaths),importedAt:now});
+  const graphRecords=importedRecords(canonical,schema.bookkeepingMappings?.graphRecordPaths);
+  const obligationRecords=importedRecords(canonical,schema.bookkeepingMappings?.obligationRecordPaths);
+  const invalidationRecords=importedRecords(canonical,schema.bookkeepingMappings?.invalidationRecordPaths);
+  graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:graphRecords,importedAt:now});
+  ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:obligationRecords,importedAt:now});
+  invalid.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:invalidationRecords,importedAt:now});
+
+  for(const record of obligationRecords){
+    normalizeFormalObligationsIntoLedger({ledger,items:record.value,originPhase:schema.phase,canonicalRel,now});
+  }
 
   const identityComparison=canonical?.automationInputs?.identityComparison;
   if(identityComparison){
@@ -65,9 +73,11 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now}){
     if(registry){
       graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry',value:{path:domainRegistryPath,decisions:registry.decisions??[]}}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
       ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry.generatedObligations',value:registry.generatedObligations??[]}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
+      normalizeFormalObligationsIntoLedger({ledger,items:registry.generatedObligations??[],originPhase:schema.phase,canonicalRel,now});
     }
   }
 
+  applyObligationDispositionsToLedger({ledger,canonical,sequence:schema.phase,canonicalRel,now});
   writeJson(repoFile(root,graphRel),graph);writeJson(repoFile(root,ledgerRel),ledger);writeJson(repoFile(root,invalidRel),invalid);
   return {graphRel,ledgerRel,invalidRel};
 }
