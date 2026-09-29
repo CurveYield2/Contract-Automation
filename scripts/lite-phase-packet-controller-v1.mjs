@@ -12,7 +12,8 @@ import {
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
   buildControllerPacket,renderControllerPhaseReport,validatePhaseScaffold,
-  phase4CoverageFromForm,materializeValidatedFindings,resolveTargetExecutionRequestRef
+  phase4CoverageFromForm,materializeValidatedFindings,resolveTargetExecutionRequestRef,
+  populatePhase9RerunEvidenceRefs
 } from './lib/lite-phase-prefill-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
@@ -234,6 +235,10 @@ let deficiencies=ensurePacketShape({packet,directory,assignment});
 let form=null;
 try{
   form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
+  if(sequence===9){
+    deficiencies.push(...populatePhase9RerunEvidenceRefs({root,campaignPath,form}));
+    writeJson(repoFile(root,assignment.workFormPath),form);
+  }
   deficiencies.push(...validateWorkForm(schema,form));
   deficiencies.push(...validatePhaseScaffold(sequence,form));
 }catch(e){deficiencies.push(String(e.message||e));}
