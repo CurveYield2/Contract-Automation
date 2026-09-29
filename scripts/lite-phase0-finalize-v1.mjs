@@ -67,6 +67,10 @@ if(simulation.code!=='PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED'){
 if(runIndex.policy?.realAbiCallsOnly!==true||runIndex.policy?.rawRandomBytes!==false) throw new Error('Phase-0 randomized simulation policy must require real ABI calls and forbid raw random calldata');
 if(Number(runIndex.policy?.accountingActionWeight??0)<0.8) throw new Error('Phase-0 randomized simulation accounting/state-change action weight must be at least 80%');
 if(runIndex.policy?.crossContractBursts!==true) throw new Error('Phase-0 ABI telemetry must use randomized cross-contract bursts');
+for(const t of simulation.telemetry??[]){
+  if(Number(t.accountingFunctionCount??0)>0 && Number(t.accountingActionShare??0)<0.79) throw new Error('Phase-0 ABI telemetry materially missed the 80% accounting/state-change action target in '+String(t.runId));
+  if(Number(t.accountingFunctionCount??0)===0 && t.weightingLimitation!=='NO_ACCOUNTING_STATE_CHANGE_FUNCTIONS_DETECTED') throw new Error('Phase-0 ABI telemetry without accounting functions must carry the typed weighting limitation');
+}
 for(const run of runIndex.runs??[]){
   if(run.type!=='ABI_ACCOUNTING_TELEMETRY') continue;
   const ref=run.rawTranscriptRef;
