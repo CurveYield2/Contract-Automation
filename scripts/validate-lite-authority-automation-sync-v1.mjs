@@ -139,9 +139,10 @@ need(legacyReceiptController.includes("legacy receipt controller is prohibited f
 const phase5Schema=json(path.join(authorityRoot,'phases','phase-5','PHASE_05_SCHEMA_v1.json'));
 const phase5Text=JSON.stringify(phase5Schema);
 if(phase5Text.includes('MEDUSA_PROPERTY')){
-  need(boundaryArtifacts.includes('MEDUSA_PROPERTY'),'authority allows retained MEDUSA_PROPERTY but boundary automation does not support it');
-  need(capabilityMap.includes('candidate-specific `MEDUSA_PROPERTY` execution'),'capability map contradicts retained candidate-specific MEDUSA_PROPERTY execution');
+  need(boundaryArtifacts.includes('MEDUSA_PROPERTY'),'authority allows MEDUSA_PROPERTY but boundary automation does not support it');
 }
+need(/Medusa fuzz\/property execution \| permitted/.test(capabilityMap),'capability map must explicitly permit Medusa execution');
+need(!/(?:do not|must not|never|prohibit(?:ed|s)?|forbid(?:den|s)?)\b[^\n]{0,160}\bMedusa\b/i.test(capabilityMap),'capability map contains a Medusa execution prohibition');
 
 process.stdout.write(JSON.stringify({
   status:'PASS',
