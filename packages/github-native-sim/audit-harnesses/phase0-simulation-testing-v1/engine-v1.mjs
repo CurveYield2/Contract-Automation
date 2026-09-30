@@ -650,6 +650,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   const build=await buildProject({projectRoot:staged.projectRoot,request:pseudo}),ethers=await import('ethers');
   await fs.rm(outputRoot,{recursive:true,force:true});await fs.mkdir(path.join(outputRoot,'runs'),{recursive:true});
   let anvil;
+  let deploymentEvidence=null;
   try{
     const detected=await detectDeploymentScripts(staged.projectRoot);
     const sourceKnownCompilation=build.system==='embedded-profile-native'
@@ -685,6 +686,16 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
     const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows],targets=targetObjects(ethers,artifacts,deployed);
     const deploymentCombined={detectedScripts:detected,attempts:[...deployment.attempts,...sourcePlan.attempts],limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
+    // Persist deployment diagnostics before any expensive randomized stage.
+    deploymentEvidence={...deploymentCombined,packageDependencyInstall,policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS'};
+    await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deploymentEvidence,null,2)+'\n');
+    const completeBeforeTesting=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;
+    if(!completeBeforeTesting){
+      const error=new Error('Deployment graph is incomplete; randomized stages are blocked. Inspect retained PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json for native script failures.');
+      error.code='PHASE0_DEPLOYMENT_INCOMPLETE';
+      await provider.destroy();
+      throw error;
+    }
     const baselineBlock=Number(await provider.getBlockNumber()),baselineHash=(await provider.getBlock(baselineBlock))?.hash??null,baselineSnapshot=await provider.send('evm_snapshot',[]);
     const deploymentComplete=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;
     if(!deploymentComplete)console.log(`[phase0-deployment] incomplete; planned=${sourcePlan.planned}; deployed=${sourcePlan.rows.length}; unresolved=${sourcePlan.unresolvedSteps}; missingCompiledTargets=${sourceKnownCompilation.missingTargets?.length??0}; mutableTargets=${targets.length}; continuing all executable randomized stages on the successfully deployed target subset`);
@@ -733,6 +744,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       limitations:[typed],
       medusa:{status:'BLOCKED',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0},
       telemetry:[],
+      deployment:deploymentEvidence,
       baselineTargetDispositions:[{
         candidateKey:'PHASE0-BASELINE-RANDOMIZED-SIMULATION',
         executionEvidenceRefs:['evidence/phase0/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'],
@@ -753,6 +765,6 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     await fs.mkdir(outputRoot,{recursive:true});
     await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(limitation,null,2)+'\n');
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');
-    return{summary:limitation,runIndex,deployEvidence:null};
+    return{summary:limitation,runIndex,deployEvidence:deploymentEvidence};
   }finally{if(anvil)await anvil.close().catch(()=>{});}
 }
