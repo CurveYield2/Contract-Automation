@@ -63,3 +63,14 @@ test('reusable Phase-0 intelligence materializes its request from inputs even wh
   assert.match(workflow,/if \[ -s \.phase0-request\.json \]; then/);
   assert.doesNotMatch(workflow,/if \[ "\$GITHUB_EVENT_NAME" = "workflow_call" \]; then/);
 });
+
+
+test('Phase-0 readiness preserves contract deployment inventory instead of bytecode-size-only deployability',()=>{
+  const intelligence=read('packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs');
+  assert.match(intelligence,/contractDeploymentInventory/);
+  assert.match(intelligence,/constructorInputs/);
+  assert.match(intelligence,/linkReferences/);
+  assert.match(intelligence,/mutableDeployableContractCount/);
+  assert.match(intelligence,/DEPLOYABLE_WITH_CONSTRUCTOR_ARGS/);
+  assert.match(intelligence,/DEPLOYABLE_AFTER_LIBRARY_LINK/);
+});
