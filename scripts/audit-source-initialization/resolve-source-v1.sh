@@ -71,10 +71,22 @@ print(parts[0],parts[1],parts[3],"/".join(parts[4:]))
 PY
 )
       test -n "$gh_owner" && test -n "$gh_repo" && test -n "$gh_ref" && test -n "$gh_path"
+      gh_path_url="$(python3 - "$gh_path" <<'PY'
+import sys
+from urllib.parse import quote
+print(quote(sys.argv[1], safe='/'))
+PY
+)"
+      gh_ref_url="$(python3 - "$gh_ref" <<'PY'
+import sys
+from urllib.parse import quote
+print(quote(sys.argv[1], safe=''))
+PY
+)"
       blob_meta="$work/github-contents.json"
       curl --fail --silent --show-error --location --retry 4 --retry-all-errors --connect-timeout 20 \
         -H "Authorization: Bearer $github_token" -H 'Accept: application/vnd.github+json' \
-        -o "$blob_meta" "https://api.github.com/repos/$gh_owner/$gh_repo/contents/$gh_path?ref=$gh_ref"
+        -o "$blob_meta" "https://api.github.com/repos/$gh_owner/$gh_repo/contents/$gh_path_url?ref=$gh_ref_url"
       blob_sha="$(python3 - "$blob_meta" <<'PY'
 import json,sys
 with open(sys.argv[1],encoding='utf-8') as f:
