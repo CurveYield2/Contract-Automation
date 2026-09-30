@@ -604,7 +604,8 @@ function renderMedusaRouter(ethers,targets){
     const names=x.types.map((t,i)=>`${t} a${i}`),args=x.types.map((_,i)=>`a${i}`),selector=ethers.id(x.selected.signature).slice(0,10),payable=x.selected.fragment.stateMutability==='payable'?' payable':'';
     const value=x.selected.fragment.stateMutability==='payable'?'msg.value':'0';
     const encodedArgs=args.length?`,`+args.join(','):'';
-    body.push(`  function ${x.wrapperName}(${names.join(', ')}) external${payable} { (bool ok, bytes memory data)=address(${x.target.address}).call{value:${value}}(abi.encodeWithSelector(bytes4(${selector})${encodedArgs})); emit Phase0Call(address(${x.target.address}),bytes4(${selector}),ok,data); }`);
+    const targetAddress=ethers.getAddress(x.target.address);
+    body.push(`  function ${x.wrapperName}(${names.join(', ')}) external${payable} { (bool ok, bytes memory data)=address(${targetAddress}).call{value:${value}}(abi.encodeWithSelector(bytes4(${selector})${encodedArgs})); emit Phase0Call(address(${targetAddress}),bytes4(${selector}),ok,data); }`);
   }
   return{...plan,source:`// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.20;\ncontract Phase0MedusaRouterV1 {\n  event Phase0Call(address indexed target, bytes4 indexed selector, bool success, bytes data);\n${body.join('\n')}\n}\n`};
 }
