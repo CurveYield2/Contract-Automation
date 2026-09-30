@@ -1,6 +1,12 @@
 # Phase-0 Simulation Testing Fork Handoff v1
 
-Updated 2026-09-30 21:44 UTC. This replaces the original pre-repair handoff in place at the user's request.
+Updated 2026-09-30 22:01 UTC. This replaces the original pre-repair handoff in place at the user's request.
+
+## Current active continuation
+
+The user reauthorized finishing the process. PR #461 is active at https://github.com/CurveYield2/Contract-Automation/pull/461 on branch repair/phase0-completed-stages-v1, head 632702df6ff0345a039cbcc05e4ef299aa62c335. A GitHub regression first failed because completed-stage validation was absent (run 36782082076). Implementation is now under GitHub regression/qualification checks. No simulation stage has been rerun.
+
+The PR promotes the validated isolated repairs, adds source-bound completed-stage import with original ZIP digest/workflow/source/build/compiler-inventory/fork/deployment/raw-transcript validation, preserves separate attempt provenance and raw artifacts, and adds a resume option to the existing bootstrap/recovery path. Resume checks admitted canonical qualification and rejects executable code drift; it skips source intelligence regeneration and all completed simulation execution. Canonical finalizer gates are strengthened to four complete telemetry shards and exact source binding. These changes are not yet merged or admitted. Next action: inspect both checks on this exact head; repair any evidenced failure, merge only a passing head, wait for canonical main live qualification, then perform the required controller rebind before dispatching the existing campaign with completed-stage manifest.
 
 ## Resume here
 
@@ -8,7 +14,7 @@ The isolated deployment, Medusa, and ABI telemetry stages have succeeded. **Do n
 
 This is not a completed Phase 0 campaign. At this update, the controller receipt remains ACTIVE, validation PENDING, sealedAt null, and P0_TO_P1 handoff NOT_READY. Canonical promotion, qualification/rebind, finalization, and the Phase 1 browser-agent wake remain unfinished.
 
-The user asked for this handoff so a successor can continue. No further simulation or workflow was launched while writing it.
+The user asked for this handoff so a successor can continue. No simulation stage was relaunched. GitHub regression/qualification checks are now running for PR #461.
 
 ## User instructions that remain binding
 
