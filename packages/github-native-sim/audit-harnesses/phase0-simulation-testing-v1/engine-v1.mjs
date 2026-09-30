@@ -594,11 +594,16 @@ async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoo
   const dir=path.join(outRoot,'runs','medusa-anvil-fork-001');await fs.mkdir(dir,{recursive:true});
   const router=renderMedusaRouter(ethers,targets);
   if(!router.rows.length){const s={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_ROUTABLE_ABI_FUNCTIONS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,observedCalls:0,limitations:router.omitted};await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(s,null,2)+'\n');return s;}
-  const sourceRoot=(targets.map(t=>t.artifact.sourceName.split('/')[0]).find(x=>['contracts','src'].includes(x)))??'contracts';
-  const harnessRel=`${sourceRoot}/Phase0MedusaRouterV1.sol`,harnessAbs=path.join(projectRoot,...harnessRel.split('/'));await fs.mkdir(path.dirname(harnessAbs),{recursive:true});await fs.writeFile(harnessAbs,router.source);
+  // Compile only the ABI router: production targets are already exactly compiled and deployed on Anvil.
+  const medusaProject=path.join(dir,'router-project');
+  await fs.mkdir(path.join(medusaProject,'src'),{recursive:true});
+  const harnessAbs=path.join(medusaProject,'src','Phase0MedusaRouterV1.sol');
+  await fs.writeFile(harnessAbs,router.source);
+  await fs.writeFile(path.join(medusaProject,'foundry.toml'),'[profile.default]\nsrc = "src"\nout = "out"\nlibs = []\nsolc_version = "0.8.28"\nevm_version = "cancun"\noptimizer = true\noptimizer_runs = 200\n');
+
   const corpusRel='.curveyield-phase0-medusa-corpus-v1';
-  const cfg={fuzzing:{workers:10,workerResetLimit:50,timeout:0,testLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,shrinkLimit:5000,callSequenceLength:100,coverageEnabled:true,corpusDirectory:corpusRel,coverageFormats:['lcov'],revertReporterEnabled:true,targetContracts:['Phase0MedusaRouterV1'],predeployedContracts:{},targetContractsBalances:[],constructorArgs:{},senderAddresses:['0x0000000000000000000000000000000000010000','0x0000000000000000000000000000000000020000','0x0000000000000000000000000000000000030000','0x0000000000000000000000000000000000040000'],testing:{stopOnFailedTest:false,stopOnNoTests:false,testAllContracts:false,testViewMethods:false,assertionTesting:{enabled:false},propertyTesting:{enabled:false,testPrefixes:['property_']},optimizationTesting:{enabled:false,testPrefixes:['optimize_']},targetFunctionSignatures:router.rows.map(x=>`Phase0MedusaRouterV1.${x.wrapperName}(${x.selected.fragment.inputs.map(p=>p.type).join(',')})`),excludeFunctionSignatures:[]},chainConfig:{cheatCodes:{cheatCodesEnabled:true,enableFFI:false},forkConfig:{forkModeEnabled:true,rpcUrl:anvilUrl,rpcBlock:blockNumber,poolSize:24}}},compilation:{platform:'crytic-compile',platformConfig:{target:'.',args:[]}},slither:{useSlither:false},logging:{level:'info',logDirectory:'',noColor:true}};
-  const cfgPath=path.join(projectRoot,'.curveyield-phase0-medusa-v1.json');await fs.writeFile(cfgPath,JSON.stringify(cfg,null,2)+'\n');
+  const cfg={fuzzing:{workers:10,workerResetLimit:50,timeout:0,testLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,shrinkLimit:5000,callSequenceLength:100,coverageEnabled:true,corpusDirectory:corpusRel,coverageFormats:['lcov'],revertReporterEnabled:true,targetContracts:['Phase0MedusaRouterV1'],predeployedContracts:{},targetContractsBalances:[],constructorArgs:{},senderAddresses:['0x0000000000000000000000000000000000010000','0x0000000000000000000000000000000000020000','0x0000000000000000000000000000000000030000','0x0000000000000000000000000000000000040000'],testing:{stopOnFailedTest:false,stopOnNoTests:false,testAllContracts:false,testViewMethods:false,assertionTesting:{enabled:false},propertyTesting:{enabled:false,testPrefixes:['property_']},optimizationTesting:{enabled:false,testPrefixes:['optimize_']},targetFunctionSignatures:router.rows.map(x=>`Phase0MedusaRouterV1.${x.wrapperName}(${x.selected.fragment.inputs.map(p=>p.type).join(',')})`),excludeFunctionSignatures:[]},chainConfig:{cheatCodes:{cheatCodesEnabled:true,enableFFI:false},forkConfig:{forkModeEnabled:true,rpcUrl:anvilUrl,rpcBlock:blockNumber,poolSize:24}}},compilation:{platform:'crytic-compile',platformConfig:{target:'.',args:['--foundry-compile-all']}},slither:{useSlither:false},logging:{level:'info',logDirectory:'',noColor:true}};
+  const cfgPath=path.join(medusaProject,'medusa.json');await fs.writeFile(cfgPath,JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_CONFIG_v1.json'),JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_ROUTER_v1.sol'),router.source);
   const medusaStartedAt=Date.now();
@@ -610,13 +615,13 @@ async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoo
   heartbeat.unref?.();
   let r;
   try{
-    r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:projectRoot,env:scrubbedEnv()});
+    r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv()});
   }finally{
     clearInterval(heartbeat);
   }
   console.log(`[phase0-medusa] exited; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; exitCode=${r?.exitCode??-1}`);
   const raw=`${r.stdout??''}\n${r.stderr??''}`;await fs.writeFile(path.join(dir,'MEDUSA_RAW_OUTPUT_v1.log'),raw);
-  const corpusSource=path.join(projectRoot,corpusRel),corpusDest=path.join(dir,'corpus');
+  const corpusSource=path.join(medusaProject,corpusRel),corpusDest=path.join(dir,'corpus');
   const corpusIndex=[];
   if(fss.existsSync(corpusSource)){
     await fs.rm(corpusDest,{recursive:true,force:true});
