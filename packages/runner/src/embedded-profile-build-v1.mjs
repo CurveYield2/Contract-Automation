@@ -32,6 +32,10 @@ const FULL_OUTPUT_SELECTION = Object.freeze([
 function sha256(value){
   return createHash('sha256').update(value).digest('hex');
 }
+function normalizedSolcVersion(value){
+  const text=String(value??'');
+  return text.match(/\b\d+\.\d+\.\d+\b/)?.[0]??text;
+}
 
 async function exists(file,fsApi=fs){
   try{return (await fsApi.stat(file)).isFile();}catch{return false;}
@@ -156,13 +160,13 @@ export async function compileRepoEmbeddedProfiles({
       const unitArtifacts=contractArtifactMap(output).all.map(artifact=>({
         ...artifact,
         profile:profileName,
-        compilerVersion:String(solc.version()),
+        compilerVersion:normalizedSolcVersion(solc.version()),
         compilationUnitId:unitId
       }));
       unit={
         unitId,
         profile:profileName,
-        compilerVersion:String(solc.version()),
+        compilerVersion:normalizedSolcVersion(solc.version()),
         compilerPackage:profile.solc,
         settings:normalizeSettings(input.settings),
         compilerInputSha256:sha256(inputBytes),
