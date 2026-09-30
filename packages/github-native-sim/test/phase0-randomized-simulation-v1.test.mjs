@@ -212,10 +212,27 @@ test('Phase-0 source-known bindings parse multiline envAddress defaults with tra
   assert.equal(bindings.get('DAO'),'0x7142b1Cc5F91A736A62e77581F406338328F05bC');
 });
 
-test('Phase-0 skips expensive fuzzing and telemetry when deployment graph is incomplete',()=>{
+test('Phase-0 continues Medusa and telemetry on every executable deployed subset even when deployment graph is incomplete',()=>{
   const here=path.dirname(fileURLToPath(import.meta.url));
   const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  assert.match(source,/const deploymentReady=sourcePlan\.unresolvedSteps===0/);
-  assert.match(source,/BLOCKED_INCOMPLETE_DEPLOYMENT/);
-  assert.match(source,/skipping Medusa\/telemetry until deployment is complete/);
+  assert.match(source,/continuing all executable randomized stages on the successfully deployed target subset/);
+  assert.match(source,/if\(targets\.length\)[\s\S]*?runMedusa/);
+  assert.match(source,/if\(targets\.length\)[\s\S]*?runTelemetry/);
+  assert.match(source,/MEDUSA_EXECUTION_FAILURE/);
+  assert.match(source,/ABI_TELEMETRY_EXECUTION_FAILURE/);
+  assert.doesNotMatch(source,/BLOCKED_INCOMPLETE_DEPLOYMENT/);
+});
+
+test('Phase-0 rebind workflow assesses completeness non-fatally and enforces only after evidence publication',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const workflow=fs.readFileSync(path.resolve(here,'../../../.github/workflows/lite-phase0-simulation-rebind-v1.yml'),'utf8');
+  const assess=workflow.indexOf('Assess corrected simulation completeness without stopping remaining work');
+  const write=workflow.indexOf('Write supplemental rebind evidence without touching sealed Phase-0 outputs');
+  const publish=workflow.indexOf('Publish supplemental evidence');
+  const enforce=workflow.indexOf('Enforce rebind completion after all executable stages');
+  assert.ok(assess>=0);
+  assert.ok(write>assess);
+  assert.ok(publish>write);
+  assert.ok(enforce>publish);
+  assert.match(workflow,/echo "complete=\$complete" >> "\$GITHUB_OUTPUT"/);
 });
