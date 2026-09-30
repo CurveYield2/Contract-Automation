@@ -1,0 +1,72 @@
+name: Browser Agent Chat Watchdog Cancel v1
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'process/browser-agent-chat-watchdog/cancel/*.json'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cancel_watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Resolve and cancel requested watchdog run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          request_path="$(
+            git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" |
+            grep -E '^process/browser-agent-chat-watchdog/cancel/[^/]+\.json$' |
+            tail -n 1
+          )"
+
+          if [ -z "$request_path" ] || [ ! -f "$request_path" ]; then
+            echo "::error::No watchdog cancel request JSON found in triggering commit."
+            exit 2
+          fi
+
+          run_id="$(jq -r '.run_id // empty' "$request_path")"
+          if ! [[ "$run_id" =~ ^[0-9]+$ ]]; then
+            echo "::error::run_id must be a numeric GitHub Actions run id."
+            exit 2
+          fi
+
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id")"
+          workflow_path="$(jq -r '.path // empty' <<<"$run_json")"
+          status="$(jq -r '.status // empty' <<<"$run_json")"
+
+          if [ "$workflow_path" != ".github/workflows/browser-agent-chat-watchdog-v3.yml" ]; then
+            echo "::error::Refusing to cancel run $run_id because it is not Browser Agent Chat Watchdog v3."
+            exit 3
+          fi
+
+          case "$status" in
+            completed)
+              echo "Run $run_id is already completed; nothing to cancel."
+              exit 0
+              ;;
+            queued|in_progress|waiting|requested|pending)
+              ;;
+            *)
+              echo "::warning::Run $run_id has status '$status'; attempting cancellation."
+              ;;
+          esac
+
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/cancel" >/dev/null
+          echo "Cancellation requested for Browser Agent Chat Watchdog v3 run $run_id." >> "$GITHUB_STEP_SUMMARY"
