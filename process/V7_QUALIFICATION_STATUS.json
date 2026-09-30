@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-v7-current-qualification-status-v1",
   "status": "PASS",
-  "qualifiedCommit": "870a8251848e63a86c8b688c3b40711abbf36bcc",
-  "workflowRunId": "36708935697",
-  "qualifiedAt": "2026-09-30T11:31:33.145Z",
+  "qualifiedCommit": "c09bad940cdbbccfa2dabf46a876dfc8bf64e518",
+  "workflowRunId": "36709998537",
+  "qualifiedAt": "2026-09-30T11:41:48.206Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
@@ -42,13 +42,13 @@
   },
   "controllerQualification": {
     "schemaVersion": "v26-controller-qualification-v1",
-    "controllerCommit": "afd4fa00730a182c8030d9028a923c92adeafb69",
+    "controllerCommit": "8996357a77549977c7994b496acedb24d03c8b1b",
     "controllerRef": "main",
     "status": "PASS",
-    "qualificationRunId": "36708935697",
-    "qualifiedAt": "2026-09-30T11:31:13Z",
-    "runnerQualifiedCommit": "870a8251848e63a86c8b688c3b40711abbf36bcc",
-    "runnerQualificationRunId": "36708935697",
+    "qualificationRunId": "36709998537",
+    "qualifiedAt": "2026-09-30T11:41:28Z",
+    "runnerQualifiedCommit": "c09bad940cdbbccfa2dabf46a876dfc8bf64e518",
+    "runnerQualificationRunId": "36709998537",
     "testedSchemas": [
       "audit-v7-sequential-review-state-v3",
       "v26-phase-contract-v1",
