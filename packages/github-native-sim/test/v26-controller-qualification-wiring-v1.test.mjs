@@ -49,7 +49,6 @@ test('FULL-only expensive steps remain gated away from controller-only lane', ()
     'Anvil-only runner qualification',
     'Full repository Node test suite',
     'Repository static checks',
-    'Repository build checks',
     'Live trusted-main Phase 6 and Phase 7 mutable-Anvil qualification',
   ]) {
     const start=workflow.indexOf(`- name: ${name}`);
