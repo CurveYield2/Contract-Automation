@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.agent-upload/lite-phase-boundary/*.json'
+      - 'process/agent-upload/lite-phase-boundary/*.json'
   workflow_dispatch:
     inputs:
       campaign_id:
@@ -67,7 +67,7 @@ jobs:
           else
             mapfile -t request_paths < <(
               gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status != "removed") | .filename' |
-              grep -E '^\.agent-upload/lite-phase-boundary/[^/]+\.json$' || true
+              grep -E '^\process/agent-upload/lite-phase-boundary/[^/]+\.json$' || true
             )
             [ "${#request_paths[@]}" -eq 1 ] || { echo "::error::Expected exactly one changed Lite phase-boundary request; found ${#request_paths[@]}."; exit 1; }
             request_path="${request_paths[0]}"

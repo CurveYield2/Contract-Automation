@@ -37,7 +37,7 @@ const lines=[
   'Controller-owned phase final report path: '+(assignment.finalReportPath??'NONE_AUTOMATION_ONLY'),
   'Controller-owned phase packet path: '+assignment.packetPath,
   'Automation-derived input files: '+(assignment.derivedInputPaths.length?assignment.derivedInputPaths.join(', '):'NONE'),
-  'Controller validation request path: .agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json in CurveYield2/Contract-Automation main',
+  'Controller validation request path: process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json in CurveYield2/Contract-Automation main',
   'Controller validation request schema: {"schemaVersion":"curveyield-lite-phase-boundary-request-v1","campaignId":"'+directory.campaignId+'","phaseSequence":'+assignment.phaseSequence+',"auditControllerRef":"'+controllerRef+'","attempt":<increment on each validation request>}',
   'Use the GitHub connector app. Perform only the assigned phase. Every agent action must fill its schema-defined Step X Input fields while the action is performed. Preserve controller-prefilled/read-only data. Do not create or edit the Phase Work Packet or phase final report and do not perform controller bookkeeping. At phase end invoke controller validation by creating/updating the request path above; on rework increment attempt and update the same request. Repair only exact substantive deficiencies and wait for CONTROLLER_PHASE_PASS before advancing or retiring.'
 ];

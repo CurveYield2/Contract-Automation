@@ -176,7 +176,7 @@ need(phase0Projector.includes('PHASE5_SIMULATION_BASELINE_INPUT_v1.json')&&phase
 need(prefillSource.includes('phase0BaselineSimulation')&&prefillSource.includes('phase0BaselineTargetDispositions'),'Phase 5/6 controller prefill does not consume Phase 0 simulation inputs');
 need(packetController.includes('baselineMatrixRows'),'Phase 5 boundary does not preserve Phase 0 baseline rows in the Phase 6 target matrix');
 
-need(boundaryWorkflow.includes(".agent-upload/lite-phase-boundary/*.json"),'phase-boundary controller lacks an agent-operable request trigger');
+need(boundaryWorkflow.includes("process/agent-upload/lite-phase-boundary/*.json"),'phase-boundary controller lacks an agent-operable request trigger');
 need(boundaryWorkflow.includes('curveyield-lite-phase-boundary-request-v1'),'phase-boundary controller does not validate the request schema');
 need(boundaryWorkflow.includes('Resolve canonical campaign routing'),'phase-boundary controller does not derive canonical campaign routing');
 need(boundaryWorkflow.includes('--campaign-id'),'phase-boundary workflow does not bind campaign ID into controller validation');
@@ -190,14 +190,14 @@ need(packetController.includes("const p9Final=derived(9,'PHASE10_REMEDIATION_INP
 need(/target===10[^\n]*\[[^\]]*p8Final[^\]]*p9Final[^\]]*finalIndex/.test(packetController),'Phase 10 routing omits produced Phase8/9 views or final index');
 
 need(!/packet_status.*SUBMITTED[\s\S]{0,500}lite-phase-work-packet-controller-v1\.yml/.test(watchdog),'watchdog still contains circular SUBMITTED-packet validation dispatch');
-need(successorWake.includes('.agent-upload/lite-phase-boundary/'),'fresh reviewer wake omits controller-validation request path');
+need(successorWake.includes('process/agent-upload/lite-phase-boundary/'),'fresh reviewer wake omits controller-validation request path');
 need(successorWake.includes('curveyield-lite-phase-boundary-request-v1'),'fresh reviewer wake omits controller-validation request schema');
 need(successorWake.includes("'audit-controller-ref'"),'fresh reviewer wake generator does not require exact Audit-Controller ref');
 need(successorWake.includes("controllerRef=a['audit-controller-ref']"),'fresh reviewer wake generator does not bind URLs/request schema to exact Audit-Controller ref');
 need(!successorWake.includes('auditControllerRef":"main'),'fresh reviewer wake hardcodes auditControllerRef=main');
 need(orchestrator.includes('--audit-controller-ref "$AUDIT_CONTROLLER_REF"'),'Lite orchestrator does not pass exact Audit-Controller ref to successor wake generator');
 need(legacyReceiptController.includes("legacy receipt controller is prohibited for current assignment-v2 Lite campaigns"),'legacy receipt controller is not fenced off from current assignment-v2 campaigns');
-need(phase9ExecutionDispatch.includes(".agent-upload/lite-v7-execution/*.json"),'Phase 9 V7 execution lacks a connector-operable request-file trigger');
+need(phase9ExecutionDispatch.includes("process/agent-upload/lite-v7-execution/*.json"),'Phase 9 V7 execution lacks a connector-operable request-file trigger');
 need(phase9ExecutionDispatch.includes('curveyield-lite-v7-execution-dispatch-v1'),'Phase 9 V7 execution trigger does not validate its dispatch schema');
 need(phase9ExecutionDispatch.includes('.currentAssignment.phaseSequence')&&phase9ExecutionDispatch.includes('= "9"'),'Phase 9 V7 execution trigger does not bind dispatch to current Phase-9 assignment');
 need(phase9ExecutionDispatch.includes('gh workflow run audit-controller-execution.yml'),'Phase 9 V7 execution trigger does not launch the qualified V7 execution lane');
