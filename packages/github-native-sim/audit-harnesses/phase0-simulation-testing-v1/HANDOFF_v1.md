@@ -1,6 +1,6 @@
 # Phase-0 Simulation Testing Fork Handoff v1
 
-Updated 2026-09-30 22:06 UTC. This replaces the original pre-repair handoff in place at the user's request.
+Updated 2026-09-30 22:08 UTC. This replaces the original pre-repair handoff in place at the user's request.
 
 ## Current active continuation
 
@@ -9,9 +9,7 @@ https://github.com/CurveYield2/Contract-Automation/pull/461
 Exact tested head: a3f75505907fa8b7ac227e9ffc4cdd8d0998a829.
 Latest GitHub regression 36783161610 and PR qualification 36783161634 both passed. The full runner suite reported 438 tests, 437 pass, zero failures (one existing skip); controller suite 395 pass, zero failures. The missing-validator regression previously failed in 36782082076.
 
-Canonical main qualification is now running:
-https://github.com/CurveYield2/Contract-Automation/actions/runs/36783414101
-Do not bind to that candidate until it succeeds and the canonical status file records it.
+Canonical main qualification 36783414101 succeeded, head 061d5570f058a4019d990ae50edc3d25e7a20270. Canonical status records this exact qualifiedCommit/run, all required capabilities, repeated-lifecycle-v1 recipe, Phase6 PASS and Phase7 PASS.
 
 The completed-stage manifest now exists in Audit-Controller main:
 campaigns/CurveYield DEX v16 Source r1/evidence/phase0/COMPLETED_SIMULATION_STAGES_v1.json
@@ -20,7 +18,7 @@ It references the original successful Medusa and telemetry artifact IDs/hashes; 
 
 The merged implementation promotes the isolated repairs and adds universal completed-stage import. It verifies original ZIP digest, workflow commit/success, exact source archive, accepted build/compiler inventory, fork, deployment mapping, and raw telemetry hashes/counters. It preserves separate attempt provenance and original raw ZIPs. Resume in the existing bootstrap/recovery workflow rejects executable code drift and requires the controller pin to match canonical qualification. It skips completed source intelligence and simulation execution. Finalizer gates require four complete telemetry shards and exact source binding, while preserving the explicit no-executable-target disposition for packages without mutable targets.
 
-Exact next action: wait for canonical main qualification 36783414101, verify status/run/head/capabilities/recipes/live checks, then complete the protocol's failing-test-first controller pin rebind. Only after that, dispatch the existing campaign through recovery with completed_stages_manifest=evidence/phase0/COMPLETED_SIMULATION_STAGES_v1.json. Verify import, evidence projection, finalizer sealing, orchestrator and actual browser wake. Medusa must not be rerun.
+Controller rebind is now active: Audit-Controller PR #108 / repair/phase0-qualified-rebind-v1, red-test head e1f5ee53dee7c739ef9deba9b15833121200678c. Matching public verification PR #462 / same branch, head 94e7971bcb8b9b7c78426bd549cd1c241b57be90. This verification PR must not merge. Exact next action: obtain the expected stale-pin test failure, update only the two qualification binding fields and current synthetic fixtures, trigger the same public regression again, verify full npm test/check PASS and exact cloned controller commit, then merge the exact tested controller head. Only after that, dispatch the existing campaign through recovery with completed_stages_manifest=evidence/phase0/COMPLETED_SIMULATION_STAGES_v1.json. Verify import, evidence projection, finalizer sealing, orchestrator and actual browser wake. Medusa must not be rerun.
 
 Branch disposition: repair/phase0-completed-stages-v1 implementation is merged through PR #461; its code is durable on main. repair/phase0-medusa-only-v1 is superseded for implementation by PR #461; its successful execution identity and unique stage controls remain explicitly documented here and in retained artifacts, not an instruction to merge the entire debugging branch.
 
