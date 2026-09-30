@@ -187,9 +187,18 @@ async function discoverDeployments({provider,artifacts,startBlock,endBlock}){
   }
   return rows;
 }
-function constructorInputs(abi){return (abi??[]).find(x=>x.type==='constructor')?.inputs??[];}
+function normalizedAbi(abi){
+  if(Array.isArray(abi)) return abi;
+  if(Array.isArray(abi?.abi)) return abi.abi;
+  if(abi&&typeof abi==='object'){
+    const values=Object.values(abi);
+    if(values.length&&values.every(x=>x&&typeof x==='object'&&typeof x.type==='string')) return values;
+  }
+  return [];
+}
+function constructorInputs(abi){return normalizedAbi(abi).find(x=>x.type==='constructor')?.inputs??[];}
 function mutableFunctions(ethers,a){
-  const iface=new ethers.Interface(a.abi??[]);
+  const iface=new ethers.Interface(normalizedAbi(a.abi));
   return iface.fragments.filter(x=>x.type==='function'&&!['view','pure'].includes(x.stateMutability)&&x.name).map(f=>({fragment:f,signature:f.format('sighash'),accounting:ACCOUNTING_MUTATION_RE.test(f.name)}));
 }
 function deployableZeroArg(a){return a?.bytecode&&a.bytecode!=='0x'&&!String(a.bytecode).includes('__$')&&constructorInputs(a.abi).length===0;}
@@ -199,7 +208,7 @@ async function fallbackDeploy({provider,ethers,artifacts,existing,max=8}){
   const ranked=artifacts.filter(deployableZeroArg).filter(a=>!existingQualified.has(`${a.sourceName}:${a.contractName}`)).map(a=>({a,score:mutableFunctions(ethers,a).length+(ACCOUNTING_MUTATION_RE.test(a.contractName)?20:0)})).filter(x=>x.score>0).sort((x,y)=>y.score-x.score).slice(0,max);
   for(const {a} of ranked){
     try{
-      const f=new ethers.ContractFactory(a.abi,a.bytecode,signer),c=await f.deploy();await c.waitForDeployment();const receipt=await c.deploymentTransaction().wait();
+      const f=new ethers.ContractFactory(normalizedAbi(a.abi),a.bytecode,signer),c=await f.deploy();await c.waitForDeployment();const receipt=await c.deploymentTransaction().wait();
       rows.push({address:await c.getAddress(),transactionHash:receipt.hash,blockNumber:receipt.blockNumber,qualifiedName:`${a.sourceName}:${a.contractName}`,contractName:a.contractName,sourceName:a.sourceName,mappingStatus:'AUTOMATION_FALLBACK_DEPLOYMENT'});
     }catch(error){limitations.push({type:'FALLBACK_DEPLOYMENT_FAILED',qualifiedName:`${a.sourceName}:${a.contractName}`,message:String(error?.shortMessage??error?.message??error).slice(0,1600)});}
   }
@@ -227,7 +236,7 @@ function randomValue(param,rng,ctx){
 }
 function simpleView(f){return (f.outputs??[]).length>0&&(f.outputs??[]).every(x=>/^(?:u?int\d*|address|bool|bytes\d*|string)$/.test(x.type));}
 function probePlan(ethers,abi){
-  const iface=new ethers.Interface(abi),zero=[],address=[];
+  const iface=new ethers.Interface(normalizedAbi(abi)),zero=[],address=[];
   for(const f of iface.fragments.filter(x=>x.type==='function'&&['view','pure'].includes(x.stateMutability)&&simpleView(x)&&ACCOUNTING_VIEW_RE.test(x.name))){
     if(f.inputs.length===0&&zero.length<14)zero.push(f);else if(f.inputs.length===1&&f.inputs[0].type==='address'&&address.length<8)address.push(f);
   }
@@ -237,7 +246,7 @@ async function safeStatic(contract,f,args){try{return{ok:true,value:normalize(aw
 async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
   const out={native:{sender:(await provider.getBalance(sender)).toString(),target:(await provider.getBalance(target.address)).toString()},views:{},systemNative:{}};
   for(const t of systemTargets)out.systemNative[t.address]=(await provider.getBalance(t.address)).toString();
-  const c=new ethers.Contract(target.address,target.artifact.abi,provider);
+  const c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),provider);
   for(const f of plan.zero)out.views[f.format('sighash')]=await safeStatic(c,f,[]);
   for(const f of plan.address){const s=f.format('sighash');out.views[`${s}::sender`]=await safeStatic(c,f,[sender]);out.views[`${s}::target`]=await safeStatic(c,f,[target.address]);}
   return out;
@@ -303,7 +312,7 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
       for(const burst of schedule){
         const target=targets[burst.targetIndex];
         for(let k=0;k<burst.count;k++){
-          const selected=pickFn(target,rng,burst.actionClass),f=selected.fragment,sender=actors[ri(rng,actors.length)],iface=new ethers.Interface(target.artifact.abi);
+          const selected=pickFn(target,rng,burst.actionClass),f=selected.fragment,sender=actors[ri(rng,actors.length)],iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
           let args=[],argError=null;try{args=f.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));}catch(e){argError=e;}
           const before=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
           const rec={schemaVersion:'curveyield-phase0-raw-simulation-call-v1',runId,callIndex:stats.calls+1,target:{qualifiedName:target.qualifiedName,address:target.address},sender,functionSignature:selected.signature,actionClass:selected.accounting?'ACCOUNTING_STATE_CHANGE':'OTHER_STATE_CHANGE',decodedInputs:argError?null:normalize(args),abiGenerated:true,rawRandomBytes:false,beforeAccounting:before,transaction:null,error:null,afterAccounting:null,accountingDeltas:{}};
@@ -312,7 +321,7 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
           if(argError){rec.error={name:'ABI_ARGUMENT_GENERATION_LIMITATION',message:String(argError.message??argError)};stats.errors++;}
           else{
             try{
-              const signer=await provider.getSigner(sender),c=new ethers.Contract(target.address,target.artifact.abi,signer),fn=c.getFunction(selected.signature),overrides=f.stateMutability==='payable'?{value:BigInt(ri(rng,1000000))}:{};
+              const signer=await provider.getSigner(sender),c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),signer),fn=c.getFunction(selected.signature),overrides=f.stateMutability==='payable'?{value:BigInt(ri(rng,1000000))}:{};
               const tx=await fn.send(...args,overrides),receipt=await tx.wait();
               rec.transaction={hash:receipt.hash,blockNumber:receipt.blockNumber,status:receipt.status,gasUsed:receipt.gasUsed?.toString()??null,value:overrides.value?.toString()??'0',logs:(receipt.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))};stats.successes++;
             }catch(e){rec.error=errorInfo(e,iface);if(e?.code==='CALL_EXCEPTION'||/revert/i.test(String(e?.shortMessage??e?.message??'')))stats.reverts++;else stats.errors++;}
