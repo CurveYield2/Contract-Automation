@@ -171,3 +171,21 @@ test('Phase-0 randomized simulation compiles declared deployment-entry artifacts
   assert.match(source,/sourceKnownCompiledTargets/);
   assert.match(source,/sourceKnownMissingTargets/);
 });
+
+
+test('Phase-0 canonicalizes enum ABI parameters before ethers Interface parsing',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  assert.match(source,/internalBase\.startsWith\('enum '\)/);
+  assert.match(source,/next\.type=\`uint8\$\{arraySuffix\}\`/);
+  assert.match(source,/rows\.map\(canonicalAbiFragment\)/);
+});
+
+test('Phase-0 Medusa execution emits a heartbeat at least every five minutes',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  assert.match(source,/progress heartbeat every 300s/);
+  assert.match(source,/setInterval\([\s\S]*?,300000\)/);
+  assert.match(source,/\[phase0-medusa\] heartbeat:/);
+  assert.match(source,/clearInterval\(heartbeat\)/);
+});
