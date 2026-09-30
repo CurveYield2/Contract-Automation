@@ -13,9 +13,14 @@ on:
         required: false
         default: main
         type: string
+      completed_stages_manifest:
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   phase0-randomized-simulation:
@@ -38,6 +43,7 @@ jobs:
         run: npm ci --force
 
       - name: Install retained audit toolchain
+        if: inputs.completed_stages_manifest == ''
         uses: ./.github/actions/setup-v7-toolchain
 
       - name: Select Audit-Controller credential
@@ -62,7 +68,19 @@ jobs:
           git fetch origin "$AUDIT_CONTROLLER_REF"
           git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
 
+      - name: Import verified completed simulation stages without rerunning them
+        if: inputs.completed_stages_manifest != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMPLETED_STAGES_MANIFEST: ${{ inputs.completed_stages_manifest }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/run-phase0-randomized-simulation-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --output .phase0-randomized-output --completed-stages-manifest "$COMPLETED_STAGES_MANIFEST" | tee /tmp/phase0-randomized.json
+
       - name: Run Anvil baseline, deployment simulation, Medusa and ABI telemetry
+        if: inputs.completed_stages_manifest == ''
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
         shell: bash
@@ -98,6 +116,7 @@ jobs:
           path: .phase0-randomized-output
           if-no-files-found: warn
           retention-days: 14
+          include-hidden-files: true
 
       - name: Require complete randomized simulation evidence
         shell: bash
@@ -108,12 +127,13 @@ jobs:
           jq -e '
             .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE" and
             ((.deployment.coverage.sourcePlanUnresolved // 0)|tonumber)==0 and
+            ((.deployment.coverage.sourceKnownMissingTargets // 0)|tonumber)==0 and
             (
               (((.deployment.coverage.mutableTargets // 0)|tonumber)>0 and
                .medusa.status=="PASS" and
                (.medusa.observedCalls|tonumber)>=100001 and
-               (.telemetry|length)>=1 and
-               all(.telemetry[]; .status=="PASS"))
+               (.telemetry|length)==4 and
+               all(.telemetry[]; .status=="PASS" and (.calls|tonumber)==1200 and (.errors|tonumber)==0))
               or
               (((.deployment.coverage.mutableTargets // 0)|tonumber)==0 and
                ((.deployment.coverage.sourcePlanPlanned // 0)|tonumber)==0 and

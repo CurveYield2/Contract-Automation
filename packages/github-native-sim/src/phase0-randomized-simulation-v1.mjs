@@ -76,6 +76,10 @@ async function rpc(url,method,params=[]){
 async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
   let identityProxy;
   try{
+    const ethers=await import('ethers');
+    const ephemeralWallet=ethers.Wallet.createRandom();
+    const ephemeralMnemonic=ephemeralWallet.mnemonic?.phrase;
+    if(!ephemeralMnemonic)throw new Error('Unable to generate ephemeral Anvil mnemonic');
     identityProxy=await startRpcIdentityProxy({upstreamUrl:forkUrl,chainId:1});
     const normalizedChainId=Number(BigInt(await rpc(identityProxy.url,'eth_chainId',[])));
     if(normalizedChainId!==1){
@@ -87,7 +91,7 @@ async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
     try{if(observation?.chainId)upstreamChainId=Number(BigInt(observation.chainId));}catch{}
     const port=8545,url='http://127.0.0.1:8545';
     const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
-    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--auto-impersonate','--silent'];
+    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--auto-impersonate','--silent'];
     const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
     let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
     const started=Date.now();
@@ -97,8 +101,16 @@ async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
       await sleep(100);
     }
     if(Date.now()-started>=30000){child.kill('SIGKILL');throw new Error('Anvil RPC readiness timeout');}
+    const accounts=await rpc(url,'eth_accounts',[]);
+    const account0=String(accounts?.[0]??'').toLowerCase();
+    if(account0!==ephemeralWallet.address.toLowerCase()){
+      child.kill('SIGKILL');
+      const e=new Error(`Ephemeral Anvil signer mismatch: rpc=${account0} derived=${ephemeralWallet.address.toLowerCase()}`);
+      e.code='ANVIL_EPHEMERAL_SIGNER_MISMATCH';throw e;
+    }
     return{
       url,upstreamChainId,identityNormalized:true,child,
+      localSigner:{address:account0,privateKey:ephemeralWallet.privateKey},
       async close(){
         if(child.exitCode===null){
           child.kill('SIGTERM');
@@ -131,6 +143,27 @@ function detectHardhatScripts(files,configText){
     unsafe:hasLocalhostNetwork?[]:scripts.map(rel=>({framework:'HARDHAT',path:rel,entry:rel,reason:'Hardhat localhost network is not mechanically proven to bind to a local RPC URL.'}))
   };
 }
+async function installPackageRuntimeDependenciesV1(projectRoot){
+  const pkgPath=path.join(projectRoot,'package.json');
+  const lockPath=path.join(projectRoot,'package-lock.json');
+  const pkgStat=await fs.stat(pkgPath).catch(()=>null);
+  if(!pkgStat)return{status:'NOT_APPLICABLE',manager:null,reason:'NO_PACKAGE_JSON'};
+  const lockStat=await fs.stat(lockPath).catch(()=>null);
+  if(!lockStat)return{status:'BLOCKED',manager:'npm',reason:'PACKAGE_LOCK_REQUIRED_FOR_SIMULATION_TESTING'};
+  const r=await runProcess({
+    command:'timeout',
+    args:['240s','npm','ci','--ignore-scripts','--audit=false','--fund=false'],
+    cwd:projectRoot,
+    env:scrubbedEnv()
+  });
+  if(r.exitCode!==0){
+    const e=new Error(`Locked package dependency install failed: ${String(r.stderr||r.stdout||'').slice(-3000)}`);
+    e.code='SIMULATION_TESTING_PACKAGE_DEPENDENCY_INSTALL_FAILED';
+    e.install={manager:'npm',exitCode:r.exitCode,stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)};
+    throw e;
+  }
+  return{status:'PASS',manager:'npm',lockfile:'package-lock.json',ignoreScripts:true,exitCode:r.exitCode};
+}
 async function detectDeploymentScripts(projectRoot){
   const files=await walk(projectRoot),texts=new Map();
   for(const rel of files.filter(f=>f.endsWith('.sol'))){try{texts.set(rel,await fs.readFile(path.join(projectRoot,...rel.split('/')),'utf8'));}catch{}}
@@ -142,11 +175,75 @@ async function detectDeploymentScripts(projectRoot){
   const genericPackageScripts=[];
   try{
     const pkg=JSON.parse(await fs.readFile(path.join(projectRoot,'package.json'),'utf8'));
-    for(const [name,cmd] of Object.entries(pkg.scripts??{}))if(DEPLOY_SCRIPT_RE.test(name)&&!String(cmd).includes('hardhat'))genericPackageScripts.push({name,command:String(cmd)});
+    for(const [name,cmd0] of Object.entries(pkg.scripts??{})){
+      const cmd=String(cmd0);
+      if(!DEPLOY_SCRIPT_RE.test(name)||cmd.includes('hardhat'))continue;
+      if(/dry[-_ ]?run/i.test(name)||/(?:^|\s)--dry-run(?:\s|$)/i.test(cmd)){
+        genericPackageScripts.push({name,command:cmd,safe:false,reason:'Dry-run package script is not an executable deployment path.'});
+        continue;
+      }
+      const nodeMatch=cmd.match(/^\s*node\s+([^\s]+)([\s\S]*)$/);
+      if(!nodeMatch){genericPackageScripts.push({name,command:cmd,safe:false,reason:'Package deployment command is not a directly resolvable local Node entrypoint.'});continue;}
+      const entry=nodeMatch[1].replace(/^["']|["']$/g,'');
+      const normalized=path.posix.normalize(entry.replaceAll('\\\\','/'));
+      if(normalized==='..'||normalized.startsWith('../')||path.isAbsolute(entry)){
+        genericPackageScripts.push({name,command:cmd,safe:false,reason:'Package deployment entrypoint escapes the staged project root.'});continue;
+      }
+      const absolute=path.join(projectRoot,...normalized.split('/'));
+      let source='';
+      try{source=await fs.readFile(absolute,'utf8');}catch{
+        genericPackageScripts.push({name,command:cmd,entry:normalized,safe:false,reason:'Package deployment entrypoint could not be read.'});continue;
+      }
+      const rpcEnv=/process\.env\.(?:RPC_URL|ETH_RPC_URL|LOCALHOST_RPC_URL)\b/.test(source);
+      const keyEnv=/process\.env\.(?:DEPLOYER_PRIVATE_KEY|PRIVATE_KEY|BASE_DEPLOYER_PRIVATE_KEY)\b/.test(source);
+      genericPackageScripts.push({
+        name,command:cmd,entry:normalized,argsText:String(nodeMatch[2]??'').trim(),safe:rpcEnv,
+        consumesRpcOverride:rpcEnv,consumesPrivateKey:keyEnv,
+        reason:rpcEnv?null:'Package deployment entrypoint does not mechanically consume a local RPC override.'
+      });
+    }
   }catch{}
   return{foundry,hardhat,unsafeHardhat,genericPackageScripts};
 }
-async function executeDeploymentScripts({projectRoot,anvilUrl,account0,detected}){
+function canonicalEthereumExecutionOverrides(source){
+  const text=String(source??''),env={};
+  const adaptations=[];
+  const MAINNET_WETH='0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+  const PERMIT2='0x000000000022D473030F116dDEE9F6B43aC78BA3';
+  const networkEnvRe=/networkAddress\s*\(\s*network\s*,\s*["']([^"']+)["']\s*,\s*["']([^"']+)["']\s*\)/g;
+  for(const match of text.matchAll(networkEnvRe)){
+    const key=match[1],envName=match[2];
+    if(key==='weth'){env[envName]=MAINNET_WETH;adaptations.push({type:'CANONICAL_ETHEREUM_WETH',env:envName,value:MAINNET_WETH});}
+    else if(key==='permit2'){env[envName]=PERMIT2;adaptations.push({type:'CANONICAL_ETHEREUM_PERMIT2',env:envName,value:PERMIT2});}
+    else if(key==='defaultPayoutToken'){
+      env[envName]=MAINNET_WETH;
+      adaptations.push({type:'CANONICAL_ETHEREUM_ERC20_PAYOUT_SUBSTITUTE',env:envName,value:MAINNET_WETH,basis:'LOCAL_SIMULATION_REQUIRES_ERC20_CODE_ON_ETHEREUM_FORK'});
+    }
+  }
+  // Match the environment key consumed by the package, rather than its local variable name.
+  for(const [names,value,type] of [
+    [['MAX_FEE_PER_GAS_WEI','MAX_FEE_PER_GAS'],'1000000000000','LOCAL_SIMULATION_GAS_CAP'],
+    [['MAX_PRIORITY_FEE_PER_GAS_WEI','MAX_PRIORITY_FEE_PER_GAS'],'1000000000','LOCAL_SIMULATION_PRIORITY_FEE']
+  ]){
+    for(const name of names){
+      const consumedKeys=[...text.matchAll(/(?:envBigInt|envInt|envNumber)\s*\(\s*["']([^"']+)["']|process\.env\.([A-Z_]+)\b/g)].map(match=>match[1]??match[2]);
+      if(consumedKeys.includes(name)){env[name]=value;adaptations.push({type,env:name,value});}
+    }
+  }
+  return{env,adaptations};
+}
+async function runDeploymentScriptV1(options){
+  const startedAt=Date.now();
+  console.log('[phase0-deployment] native script started; timeout=900s; heartbeat every 300s');
+  const heartbeat=setInterval(()=>console.log(`[phase0-deployment] native script still running; elapsed=${Math.floor((Date.now()-startedAt)/1000)}s`),300000);
+  heartbeat.unref?.();
+  try{
+    const result=await runProcess(options);
+    console.log(`[phase0-deployment] native script exited; elapsed=${Math.floor((Date.now()-startedAt)/1000)}s; exitCode=${result.exitCode}`);
+    return result;
+  }finally{clearInterval(heartbeat);}
+}
+async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSigner,detected}){
   const attempts=[],limitations=[];
   let help='';
   if(detected.foundry.length){const h=await runProcess({command:'forge',args:['script','--help'],cwd:projectRoot,env:scrubbedEnv()});help=`${h.stdout}\n${h.stderr}`;}
@@ -158,19 +255,121 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,detected}
       limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'FOUNDRY',path:item.path,reason:'Installed forge script adapter does not expose --unlocked; Phase-0 will not inject or invent a private key.'});continue;
     }
     const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
-    const r=await runProcess({command:'timeout',args:['240s','forge',...args],cwd:projectRoot,env:scrubbedEnv({ETH_RPC_URL:anvilUrl})});
+    const r=await runDeploymentScriptV1({command:'timeout',args:['900s','forge',...args],cwd:projectRoot,env:scrubbedEnv({ETH_RPC_URL:anvilUrl})});
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     attempts.push({framework:'FOUNDRY',path:item.path,entry:item.entry,command:['forge',...args].join(' '),exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
   }
   for(const item of detected.unsafeHardhat??[]) limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'HARDHAT',path:item.path,reason:item.reason});
   for(const item of detected.hardhat){
     const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
-    const r=await runProcess({command:'timeout',args:['240s','npx','hardhat','run',item.path,'--network','localhost'],cwd:projectRoot,env:scrubbedEnv({ETH_RPC_URL:anvilUrl,RPC_URL:anvilUrl,LOCALHOST_RPC_URL:anvilUrl,HARDHAT_NETWORK:'localhost'})});
+    const r=await runDeploymentScriptV1({command:'timeout',args:['900s','npx','hardhat','run',item.path,'--network','localhost'],cwd:projectRoot,env:scrubbedEnv({ETH_RPC_URL:anvilUrl,RPC_URL:anvilUrl,LOCALHOST_RPC_URL:anvilUrl,HARDHAT_NETWORK:'localhost'})});
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     attempts.push({framework:'HARDHAT',path:item.path,entry:item.entry,command:`npx hardhat run ${item.path} --network localhost`,exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
   }
-  for(const item of detected.genericPackageScripts)limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'GENERIC_NPM',script:item.name,command:item.command,reason:'Generic package deployment command has no mechanically proven Anvil RPC override; it was not executed.'});
+  for(const item of detected.genericPackageScripts){
+    if(!item.safe){
+      limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'GENERIC_NODE',script:item.name,command:item.command,reason:item.reason});
+      continue;
+    }
+    if(!localSigner?.privateKey||String(account0).toLowerCase()!==String(localSigner.address??'').toLowerCase()){
+      limitations.push({type:'ANVIL_LOCAL_SIGNER_IDENTITY_MISMATCH',framework:'GENERIC_NODE',script:item.name,observedAccount0:account0,expectedAccount0:localSigner?.address??null});
+      continue;
+    }
+    const sourcePath=path.join(projectRoot,...item.entry.split('/'));
+    let source=await fs.readFile(sourcePath,'utf8');
+    const adaptedRel=path.posix.join(path.posix.dirname(item.entry),'.phase0-anvil-'+path.posix.basename(item.entry));
+    const adaptedPath=path.join(projectRoot,...adaptedRel.split('/'));
+    let adaptation='NONE';
+    if(/\bconst\s+network\s*=\s*resolveNetwork\(NETWORK_NAME\)\s*;/.test(source)){
+      source=source.replace(
+        /\bconst\s+network\s*=\s*resolveNetwork\(NETWORK_NAME\)\s*;/,
+        'const network = { ...resolveNetwork(NETWORK_NAME), chainId: Number(process.env.PHASE0_LOCAL_CHAIN_ID || 1) };'
+      );
+      adaptation='LOCAL_CHAIN_ID_OVERRIDE';
+    }else if(/\blet\s+network\s*=\s*resolveNetwork\(NETWORK_NAME\)\s*;/.test(source)){
+      source=source.replace(
+        /\blet\s+network\s*=\s*resolveNetwork\(NETWORK_NAME\)\s*;/,
+        'let network = { ...resolveNetwork(NETWORK_NAME), chainId: Number(process.env.PHASE0_LOCAL_CHAIN_ID || 1) };'
+      );
+      adaptation='LOCAL_CHAIN_ID_OVERRIDE';
+    }else if(/\bnetwork\.chainId\b/.test(source)){
+      limitations.push({type:'DEPLOYMENT_SCRIPT_CHAIN_ID_ADAPTER_UNSUPPORTED',framework:'GENERIC_NODE',script:item.name,path:item.entry,reason:'Entrypoint consumes network.chainId but the resolved-network assignment is not in an admitted mechanical form.'});
+      continue;
+    }
+    await fs.writeFile(adaptedPath,source);
+    const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
+    const executionOverrides=canonicalEthereumExecutionOverrides(source);
+    const env=scrubbedEnv({
+      RPC_URL:anvilUrl,ETH_RPC_URL:anvilUrl,LOCALHOST_RPC_URL:anvilUrl,
+      PHASE0_LOCAL_CHAIN_ID:'1',
+      DEPLOYER_PRIVATE_KEY:localSigner.privateKey,
+      PRIVATE_KEY:localSigner.privateKey,
+      BASE_DEPLOYER_PRIVATE_KEY:localSigner.privateKey,
+      ...executionOverrides.env
+    });
+    const args=['900s','node',adaptedRel];
+    if(item.argsText)args.push(...item.argsText.split(/\s+/).filter(Boolean));
+    const r=await runDeploymentScriptV1({command:'timeout',args,cwd:projectRoot,env});
+    const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
+    attempts.push({
+      framework:'GENERIC_NODE',script:item.name,path:item.entry,adaptedPath:adaptedRel,
+      adaptation,executionOverrides:executionOverrides.adaptations,localChainId:1,localSigner:localSigner.address,command:['node',adaptedRel,...args.slice(3)].join(' '),
+      exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],
+      stdout:String(r.stdout??'').slice(-24000),stderr:String(r.stderr??'').slice(-24000)
+    });
+  }
   return{attempts,limitations,status:attempts.some(x=>x.status==='PASS')?'PASS':(attempts.length?'COMPLETE_WITH_FAILURES':'NO_SAFE_SCRIPT_ADAPTER')};
+}
+async function reportedPackageDeployments({projectRoot,attempts,artifacts}){
+  const rows=[],limitations=[],seen=new Set();
+  const artifactByName=new Map();
+  for(const artifact of artifacts??[]){
+    const list=artifactByName.get(artifact.contractName)??[];
+    list.push(artifact);artifactByName.set(artifact.contractName,list);
+  }
+  for(const attempt of attempts??[]){
+    if(attempt.framework!=='GENERIC_NODE'||attempt.status!=='PASS')continue;
+    const text=`${attempt.stdout??''}\n${attempt.stderr??''}`;
+    const candidates=[];
+    for(const match of text.matchAll(/(?:^|\n)\s*(?:Report|Deployment report|Report written)\s*:\s*(.+?\.json)\s*(?:\n|$)/gi))candidates.push(match[1].trim());
+    for(const raw of candidates){
+      const absolute=path.isAbsolute(raw)?path.normalize(raw):path.resolve(projectRoot,raw);
+      const relative=path.relative(projectRoot,absolute);
+      if(relative.startsWith('..')||path.isAbsolute(relative)){
+        limitations.push({type:'PACKAGE_DEPLOYMENT_REPORT_OUTSIDE_PROJECT',script:attempt.script,reportedPath:raw});
+        continue;
+      }
+      let report;
+      try{report=JSON.parse(await fs.readFile(absolute,'utf8'));}catch(error){
+        limitations.push({type:'PACKAGE_DEPLOYMENT_REPORT_UNREADABLE',script:attempt.script,reportedPath:relative,message:String(error?.message??error).slice(0,800)});
+        continue;
+      }
+      const deployments=report?.deployments;
+      if(!deployments||typeof deployments!=='object'||Array.isArray(deployments)){
+        limitations.push({type:'PACKAGE_DEPLOYMENT_REPORT_UNSUPPORTED_SHAPE',script:attempt.script,reportedPath:relative});
+        continue;
+      }
+      for(const [contractName,entry] of Object.entries(deployments)){
+        const address=entry?.address;
+        if(typeof address!=='string'||!/^0x[a-fA-F0-9]{40}$/.test(address))continue;
+        const sourceName=typeof entry?.sourceName==='string'?entry.sourceName:null;
+        const matches=(artifactByName.get(contractName)??[]).filter(a=>!sourceName||a.sourceName===sourceName);
+        const artifact=matches.length===1?matches[0]:null;
+        const key=address.toLowerCase();if(seen.has(key))continue;seen.add(key);
+        rows.push({
+          address,
+          transactionHash:entry?.transactionHash??null,
+          blockNumber:null,
+          qualifiedName:artifact?`${artifact.sourceName}:${artifact.contractName}`:null,
+          contractName:artifact?.contractName??contractName,
+          sourceName:artifact?.sourceName??sourceName,
+          mappingStatus:artifact?'PACKAGE_DEPLOYMENT_REPORT':'PACKAGE_DEPLOYMENT_REPORT_UNMAPPED_ARTIFACT',
+          deploymentReportRef:relative
+        });
+      }
+    }
+  }
+  return{rows,limitations};
 }
 function deployedBytecodePrefix(a){return String(a?.bytecode??'').replace(/^0x/,'').toLowerCase();}
 async function discoverDeployments({provider,artifacts,startBlock,endBlock}){
@@ -264,11 +463,19 @@ function probePlan(ethers,abi){
 }
 async function safeStatic(contract,f,args){try{return{ok:true,value:normalize(await contract.getFunction(f.format('sighash')).staticCall(...args))};}catch(e){return{ok:false,error:String(e?.shortMessage??e?.message??e).slice(0,800)};}}
 async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
-  const out={native:{sender:(await provider.getBalance(sender)).toString(),target:(await provider.getBalance(target.address)).toString()},views:{},systemNative:{}};
-  for(const t of systemTargets)out.systemNative[t.address]=(await provider.getBalance(t.address)).toString();
+  const out={native:{},views:{},systemNative:{}};
   const c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),provider);
-  for(const f of plan.zero)out.views[f.format('sighash')]=await safeStatic(c,f,[]);
-  for(const f of plan.address){const s=f.format('sighash');out.views[`${s}::sender`]=await safeStatic(c,f,[sender]);out.views[`${s}::target`]=await safeStatic(c,f,[target.address]);}
+  // These reads share one stable pre/post state; batching preserves all observations without serial RPC latency.
+  await Promise.all([
+    (async()=>{out.native.sender=(await provider.getBalance(sender)).toString();})(),
+    (async()=>{out.native.target=(await provider.getBalance(target.address)).toString();})(),
+    ...systemTargets.map(async t=>{out.systemNative[t.address]=(await provider.getBalance(t.address)).toString();}),
+    ...plan.zero.map(async f=>{out.views[f.format('sighash')]=await safeStatic(c,f,[]);}),
+    ...plan.address.flatMap(f=>{const s=f.format('sighash');return[
+      (async()=>{out.views[`${s}::sender`]=await safeStatic(c,f,[sender]);})(),
+      (async()=>{out.views[`${s}::target`]=await safeStatic(c,f,[target.address]);})()
+    ];})
+  ]);
   return out;
 }
 function flattenNumbers(v,p='',o={}){
@@ -397,7 +604,8 @@ function renderMedusaRouter(ethers,targets){
     const names=x.types.map((t,i)=>`${t} a${i}`),args=x.types.map((_,i)=>`a${i}`),selector=ethers.id(x.selected.signature).slice(0,10),payable=x.selected.fragment.stateMutability==='payable'?' payable':'';
     const value=x.selected.fragment.stateMutability==='payable'?'msg.value':'0';
     const encodedArgs=args.length?`,`+args.join(','):'';
-    body.push(`  function ${x.wrapperName}(${names.join(', ')}) external${payable} { (bool ok, bytes memory data)=address(${x.target.address}).call{value:${value}}(abi.encodeWithSelector(bytes4(${selector})${encodedArgs})); emit Phase0Call(address(${x.target.address}),bytes4(${selector}),ok,data); }`);
+    const targetAddress=ethers.getAddress(x.target.address);
+    body.push(`  function ${x.wrapperName}(${names.join(', ')}) external${payable} { (bool ok, bytes memory data)=address(${targetAddress}).call{value:${value}}(abi.encodeWithSelector(bytes4(${selector})${encodedArgs})); emit Phase0Call(address(${targetAddress}),bytes4(${selector}),ok,data); }`);
   }
   return{...plan,source:`// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.20;\ncontract Phase0MedusaRouterV1 {\n  event Phase0Call(address indexed target, bytes4 indexed selector, bool success, bytes data);\n${body.join('\n')}\n}\n`};
 }
@@ -406,11 +614,16 @@ async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoo
   const dir=path.join(outRoot,'runs','medusa-anvil-fork-001');await fs.mkdir(dir,{recursive:true});
   const router=renderMedusaRouter(ethers,targets);
   if(!router.rows.length){const s={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_ROUTABLE_ABI_FUNCTIONS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,observedCalls:0,limitations:router.omitted};await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(s,null,2)+'\n');return s;}
-  const sourceRoot=(targets.map(t=>t.artifact.sourceName.split('/')[0]).find(x=>['contracts','src'].includes(x)))??'contracts';
-  const harnessRel=`${sourceRoot}/Phase0MedusaRouterV1.sol`,harnessAbs=path.join(projectRoot,...harnessRel.split('/'));await fs.mkdir(path.dirname(harnessAbs),{recursive:true});await fs.writeFile(harnessAbs,router.source);
+  // Compile only the ABI router: production targets are already exactly compiled and deployed on Anvil.
+  const medusaProject=path.join(dir,'router-project');
+  await fs.mkdir(path.join(medusaProject,'src'),{recursive:true});
+  const harnessAbs=path.join(medusaProject,'src','Phase0MedusaRouterV1.sol');
+  await fs.writeFile(harnessAbs,router.source);
+  await fs.writeFile(path.join(medusaProject,'foundry.toml'),'[profile.default]\nsrc = "src"\nout = "out"\nlibs = []\nsolc_version = "0.8.28"\nevm_version = "cancun"\noptimizer = true\noptimizer_runs = 200\n');
+
   const corpusRel='.curveyield-phase0-medusa-corpus-v1';
-  const cfg={fuzzing:{workers:10,workerResetLimit:50,timeout:0,testLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,shrinkLimit:5000,callSequenceLength:100,coverageEnabled:true,corpusDirectory:corpusRel,coverageFormats:['lcov'],revertReporterEnabled:true,targetContracts:['Phase0MedusaRouterV1'],predeployedContracts:{},targetContractsBalances:[],constructorArgs:{},senderAddresses:['0x0000000000000000000000000000000000010000','0x0000000000000000000000000000000000020000','0x0000000000000000000000000000000000030000','0x0000000000000000000000000000000000040000'],testing:{stopOnFailedTest:false,stopOnNoTests:false,testAllContracts:false,testViewMethods:false,assertionTesting:{enabled:false},propertyTesting:{enabled:false,testPrefixes:['property_']},optimizationTesting:{enabled:false,testPrefixes:['optimize_']},targetFunctionSignatures:router.rows.map(x=>`Phase0MedusaRouterV1.${x.wrapperName}(${x.selected.fragment.inputs.map(p=>p.type).join(',')})`),excludeFunctionSignatures:[]},chainConfig:{cheatCodes:{cheatCodesEnabled:true,enableFFI:false},forkConfig:{forkModeEnabled:true,rpcUrl:anvilUrl,rpcBlock:blockNumber,poolSize:24}}},compilation:{platform:'crytic-compile',platformConfig:{target:'.',args:[]}},slither:{useSlither:false},logging:{level:'info',logDirectory:'',noColor:true}};
-  const cfgPath=path.join(projectRoot,'.curveyield-phase0-medusa-v1.json');await fs.writeFile(cfgPath,JSON.stringify(cfg,null,2)+'\n');
+  const cfg={fuzzing:{workers:10,workerResetLimit:50,timeout:0,testLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,shrinkLimit:5000,callSequenceLength:100,coverageEnabled:true,corpusDirectory:corpusRel,coverageFormats:['lcov'],revertReporterEnabled:true,targetContracts:['Phase0MedusaRouterV1'],predeployedContracts:{},targetContractsBalances:[],constructorArgs:{},senderAddresses:['0x0000000000000000000000000000000000010000','0x0000000000000000000000000000000000020000','0x0000000000000000000000000000000000030000','0x0000000000000000000000000000000000040000'],testing:{stopOnFailedTest:false,stopOnNoTests:false,testAllContracts:false,testViewMethods:false,assertionTesting:{enabled:false},propertyTesting:{enabled:false,testPrefixes:['property_']},optimizationTesting:{enabled:false,testPrefixes:['optimize_']},targetFunctionSignatures:router.rows.map(x=>`Phase0MedusaRouterV1.${x.wrapperName}(${x.selected.fragment.inputs.map(p=>p.type).join(',')})`),excludeFunctionSignatures:[]},chainConfig:{cheatCodes:{cheatCodesEnabled:true,enableFFI:false},forkConfig:{forkModeEnabled:true,rpcUrl:anvilUrl,rpcBlock:blockNumber,poolSize:24}}},compilation:{platform:'crytic-compile',platformConfig:{target:'.',args:['--foundry-compile-all']}},slither:{useSlither:false},logging:{level:'info',logDirectory:'',noColor:true}};
+  const cfgPath=path.join(medusaProject,'medusa.json');await fs.writeFile(cfgPath,JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_CONFIG_v1.json'),JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_ROUTER_v1.sol'),router.source);
   const medusaStartedAt=Date.now();
@@ -422,13 +635,13 @@ async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoo
   heartbeat.unref?.();
   let r;
   try{
-    r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:projectRoot,env:scrubbedEnv()});
+    r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv()});
   }finally{
     clearInterval(heartbeat);
   }
   console.log(`[phase0-medusa] exited; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; exitCode=${r?.exitCode??-1}`);
   const raw=`${r.stdout??''}\n${r.stderr??''}`;await fs.writeFile(path.join(dir,'MEDUSA_RAW_OUTPUT_v1.log'),raw);
-  const corpusSource=path.join(projectRoot,corpusRel),corpusDest=path.join(dir,'corpus');
+  const corpusSource=path.join(medusaProject,corpusRel),corpusDest=path.join(dir,'corpus');
   const corpusIndex=[];
   if(fss.existsSync(corpusSource)){
     await fs.rm(corpusDest,{recursive:true,force:true});
@@ -458,9 +671,11 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   const archivePath=receipt.source.archivePath,archiveSha256=receipt.source.sha256,workspace=path.join(path.dirname(outputRoot),'.phase0-simulation-work');
   const staged=await stageExactArchiveSource({checkoutRoot:controllerRoot,workspaceRoot:workspace,archivePath,archiveSha256,projectPath:buildIdentity.discovery.projectPath});
   const cfg=buildIdentity.configurationDetection,pseudo={requestId:`phase0-sim-${receipt.campaign.campaignId}`,requestDigest:sha256(JSON.stringify(buildIdentity)),campaignId:receipt.campaign.campaignId,assignmentId:'phase0-simulation',phaseId:'phase-0',profileId:'github-native-compile-v2',source:{repository:'CurveYield2/Audit-Controller',commit:receipt.source.archiveCommit,projectPath:buildIdentity.discovery.projectPath,archivePath,archiveSha256},configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}};
+  const packageDependencyInstall=await installPackageRuntimeDependenciesV1(staged.projectRoot);
   const build=await buildProject({projectRoot:staged.projectRoot,request:pseudo}),ethers=await import('ethers');
   await fs.rm(outputRoot,{recursive:true,force:true});await fs.mkdir(path.join(outputRoot,'runs'),{recursive:true});
   let anvil;
+  let deploymentEvidence=null;
   try{
     const detected=await detectDeploymentScripts(staged.projectRoot);
     const sourceKnownCompilation=build.system==='embedded-profile-native'
@@ -480,15 +695,34 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     for(const artifact of [...(build.artifacts??[]),...(sourceKnownCompilation.artifacts??[])])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
     const artifacts=[...artifactByQualified.values()];
     anvil=await startAnvil({forkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
-    const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
-    const deployment=await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],detected});
-    const scriptEnd=Number(await provider.getBlockNumber()),scriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
-    const sourcePlan=scriptDeployments.length?{status:'SKIPPED_FRAMEWORK_SCRIPT_SUCCEEDED',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0}:await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
+    const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true,cacheTimeout:-1}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
+    const deployment=await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],localSigner:anvil.localSigner,detected});
+    const scriptEnd=Number(await provider.getBlockNumber());
+    const discoveredScriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
+    const reported=await reportedPackageDeployments({projectRoot:staged.projectRoot,attempts:deployment.attempts,artifacts});
+    const deploymentRowsByAddress=new Map();
+    for(const row of [...discoveredScriptDeployments,...reported.rows])deploymentRowsByAddress.set(String(row.address).toLowerCase(),row);
+    const scriptDeployments=[...deploymentRowsByAddress.values()];
+    const expectedNativeNames=new Set(build.deploymentOrder??[]);
+    const observedNativeNames=new Set(scriptDeployments.map(x=>x.contractName).filter(Boolean));
+    const nativeScriptComplete=deployment.status==='PASS'&&[...expectedNativeNames].every(name=>observedNativeNames.has(name));
+    const sourcePlan=nativeScriptComplete
+      ? {status:'SKIPPED_PACKAGE_DEPLOYMENT_SCRIPT_COMPLETE',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0}
+      : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
     const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows],targets=targetObjects(ethers,artifacts,deployed);
-    const deploymentCombined={detectedScripts:detected,attempts:[...deployment.attempts,...sourcePlan.attempts],limitations:[...deployment.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
+    const deploymentCombined={detectedScripts:detected,attempts:[...deployment.attempts,...sourcePlan.attempts],limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
+    // Persist deployment diagnostics before any expensive randomized stage.
+    deploymentEvidence={...deploymentCombined,packageDependencyInstall,policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS'};
+    await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deploymentEvidence,null,2)+'\n');
+    const completeBeforeTesting=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;
+    if(!completeBeforeTesting){
+      const error=new Error('Deployment graph is incomplete; randomized stages are blocked. Inspect retained PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json for native script failures.');
+      error.code='PHASE0_DEPLOYMENT_INCOMPLETE';
+      await provider.destroy();
+      throw error;
+    }
     const baselineBlock=Number(await provider.getBlockNumber()),baselineHash=(await provider.getBlock(baselineBlock))?.hash??null,baselineSnapshot=await provider.send('evm_snapshot',[]);
-    const deploymentComplete=sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0;
-    if(!deploymentComplete)console.log(`[phase0-deployment] incomplete; planned=${sourcePlan.planned}; deployed=${sourcePlan.rows.length}; unresolved=${sourcePlan.unresolvedSteps}; missingCompiledTargets=${sourceKnownCompilation.missingTargets?.length??0}; mutableTargets=${targets.length}; continuing all executable randomized stages on the successfully deployed target subset`);
+    const deploymentComplete=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;
     let medusa;
     let medusaExecutionFailure=null;
     if(targets.length){
@@ -502,6 +736,11 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     }else{
       medusa={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_EXECUTABLE_TARGETS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0};
     }
+    if(targets.length&&medusa.status!=='PASS'){
+      const error=new Error('Medusa did not complete; telemetry is blocked. Inspect retained Medusa raw output.');
+      error.code='PHASE0_MEDUSA_INCOMPLETE';error.medusa=medusa;
+      await provider.destroy();throw error;
+    }
     let telemetry=[];
     let telemetryExecutionFailure=null;
     if(targets.length){
@@ -514,12 +753,11 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     }
     const runIndex={schemaVersion:'curveyield-phase0-simulation-run-index-v1',purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',sourceIdentity:{campaignId:receipt.campaign.campaignId,sourceSha256:receipt.source.sha256},targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash,upstreamRpcExposed:false,identityNormalized:anvil.identityNormalized===true,observedUpstreamChainId:anvil.upstreamChainId},deployment:deploymentCombined,policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},runs:[{runId:medusa.runId,type:'MEDUSA_ANVIL_FORK',status:medusa.status,summaryRef:'runs/medusa-anvil-fork-001/RUN_SUMMARY_v1.json'},...telemetry.map(x=>({runId:x.runId,type:'ABI_ACCOUNTING_TELEMETRY',status:x.status,summaryRef:`runs/${x.runId}/RUN_SUMMARY_v1.json`,rawTranscriptRef:x.rawTranscriptRef}))]};
     const simulationLimitations=[...deploymentCombined.limitations,...(telemetry.filter(x=>x.weightingLimitation).map(x=>({type:x.weightingLimitation,runId:x.runId})))];
-    if(!deploymentComplete)simulationLimitations.push({type:'INCOMPLETE_DEPLOYMENT_GRAPH_CONTINUED_WITH_EXECUTABLE_SUBSET',planned:sourcePlan.planned,deployed:sourcePlan.rows.length,unresolved:sourcePlan.unresolvedSteps,mutableTargets:targets.length});
     if(medusaExecutionFailure)simulationLimitations.push(medusaExecutionFailure);
     if(telemetryExecutionFailure)simulationLimitations.push(telemetryExecutionFailure);
-    if(medusa.status!=='PASS'&&medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS')simulationLimitations.push({type:'MEDUSA_BASELINE_'+String(medusa.status),runId:medusa.runId});const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v1',campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},status:medusa.status==='PASS'&&telemetry.length===PHASE0_TELEMETRY_RUNS_V1&&telemetry.every(x=>x.status==='PASS')?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',medusa,telemetry:telemetry.map(x=>({runId:x.runId,calls:x.calls,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
+    if(medusa.status!=='PASS'&&medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS')simulationLimitations.push({type:'MEDUSA_BASELINE_'+String(medusa.status),runId:medusa.runId});const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v1',campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode:'ALL_PHASE0_STAGES',status:medusa.status==='PASS'&&telemetry.length===PHASE0_TELEMETRY_RUNS_V1&&telemetry.every(x=>x.status==='PASS')?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
-    const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
+    const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',packageDependencyInstall,fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deployEvidence,null,2)+'\n');await provider.destroy();
     return{summary,runIndex,deployEvidence};
   }catch(error){
@@ -532,8 +770,9 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       targetEvmChainIds:targetChainIds,
       executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},
       limitations:[typed],
-      medusa:{status:'BLOCKED',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0},
+      medusa:error.medusa??{status:'BLOCKED',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0},
       telemetry:[],
+      deployment:deploymentEvidence,
       baselineTargetDispositions:[{
         candidateKey:'PHASE0-BASELINE-RANDOMIZED-SIMULATION',
         executionEvidenceRefs:['evidence/phase0/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'],
@@ -554,6 +793,6 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     await fs.mkdir(outputRoot,{recursive:true});
     await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(limitation,null,2)+'\n');
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');
-    return{summary:limitation,runIndex,deployEvidence:null};
+    return{summary:limitation,runIndex,deployEvidence:deploymentEvidence};
   }finally{if(anvil)await anvil.close().catch(()=>{});}
 }
