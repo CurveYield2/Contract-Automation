@@ -58,3 +58,14 @@ test('gas overrides bind to consumed environment keys, including WEI suffix',()=
   assert.deepEqual(legacy.env,{MAX_FEE_PER_GAS:'1000000000000',MAX_PRIORITY_FEE_PER_GAS:'1000000000'});
   assert.deepEqual(overrides('const MAX_FEE_PER_GAS=1;').env,{});
 });
+
+test('summary telemetry projection preserves terminal status used by completeness gate',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'./engine-v1.mjs'),'utf8');
+  const prefix='telemetry:telemetry.map(x=>(';
+  const start=source.indexOf(prefix)+prefix.length;
+  const end=source.indexOf(')),deployment:',start);
+  const project=new Function('x','return ('+source.slice(start,end)+')');
+  assert.equal(project({runId:'shard',status:'PASS',calls:1200}).status,'PASS');
+  assert.equal(project({runId:'shard',status:'FAILED',calls:1200}).status,'FAILED');
+});
