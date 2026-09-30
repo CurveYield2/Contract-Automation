@@ -13,6 +13,7 @@ function parseArgs(argv){const o={};for(let i=0;i<argv.length;i++){const t=argv[
 function sha256(bytes){return createHash('sha256').update(bytes).digest('hex');}
 function safeRel(v,label){if(typeof v!=='string'||!v||v.startsWith('/')||v.includes('\\')||v.split('/').some(p=>!p||p==='.'||p==='..'))throw new Error(`${label} must be a safe repository-relative path`);return v;}
 function cleanText(v){return String(v??'').replace(/\u001b\[[0-9;]*m/g,'');}
+function slitherCompilerVersion(v){const m=String(v??'').match(/^(\d+\.\d+\.\d+)/);return m?m[1]:String(v??'');}
 async function exists(file){try{return(await fs.stat(file)).isFile();}catch{return false;}}
 async function isDir(file){try{return(await fs.stat(file)).isDirectory();}catch{return false;}}
 function archiveEntryIsSymlink(entry){const attrs=Number(entry?.vars?.externalFileAttributes??0);const unix=(attrs>>>16)&0xffff;return(unix&0o170000)===0o120000;}
@@ -220,7 +221,7 @@ async function writeCryticCompileExport({projectRoot,build,outDir}){
     compilation_units[buildUnit.unitId]={
       compiler:{
         compiler:'solc',
-        version:String(buildUnit.compilerVersion??''),
+        version:slitherCompilerVersion(buildUnit.compilerVersion),
         optimized:buildUnit.settings?.optimizer?.enabled!==false
       },
       source_units,
@@ -244,7 +245,7 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
   const compilationUnits=Array.isArray(build?.compilationUnits)?build.compilationUnits.filter(Boolean):[];
   if(compilationUnits.length<=1){
     const exportInfo=await writeCryticCompileExport({projectRoot,build,outDir:path.join(projectRoot,'.audit-slither-export')});
-    const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies'],cwd:projectRoot});
+    const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies','--fail-none'],cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
     return{exportInfo,raw,parsed,success:parsed?.success===true};
   }
@@ -269,7 +270,7 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
     });
     totalSourceUnits+=exportInfo.sourceUnitCount??0;
     totalContracts+=exportInfo.contractCount??0;
-    const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies'],cwd:projectRoot});
+    const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies','--fail-none'],cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
     unitResults.push({
       unitId,
