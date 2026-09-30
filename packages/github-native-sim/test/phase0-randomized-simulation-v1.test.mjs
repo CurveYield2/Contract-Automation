@@ -212,15 +212,13 @@ test('Phase-0 source-known bindings parse multiline envAddress defaults with tra
   assert.equal(bindings.get('DAO'),'0x7142b1Cc5F91A736A62e77581F406338328F05bC');
 });
 
-test('Phase-0 continues Medusa and telemetry on every executable deployed subset even when deployment graph is incomplete',()=>{
-  const here=path.dirname(fileURLToPath(import.meta.url));
-  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  assert.match(source,/continuing all executable randomized stages on the successfully deployed target subset/);
-  assert.match(source,/if\(targets\.length\)[\s\S]*?runMedusa/);
-  assert.match(source,/if\(targets\.length\)[\s\S]*?runTelemetry/);
-  assert.match(source,/MEDUSA_EXECUTION_FAILURE/);
-  assert.match(source,/ABI_TELEMETRY_EXECUTION_FAILURE/);
-  assert.doesNotMatch(source,/BLOCKED_INCOMPLETE_DEPLOYMENT/);
+test('Phase-0 incomplete deployment is preserved and blocks randomized execution',()=>{
+  const source=fs.readFileSync(new URL('../src/phase0-randomized-simulation-v1.mjs',import.meta.url),'utf8');
+  const start=source.indexOf('// Persist deployment diagnostics before');
+  const end=source.indexOf('medusa=await runMedusa');
+  assert.ok(start>0&&end>start);
+  assert.match(source.slice(start,end),/PHASE0_DEPLOYMENT_INCOMPLETE/);
+  assert.match(source.slice(start,end),/throw error/);
 });
 
 test('Phase-0 rebind workflow assesses completeness non-fatally and enforces only after evidence publication',()=>{
@@ -245,4 +243,79 @@ test('Phase-0 randomized simulation reuses exact embedded-profile build artifact
   assert.match(source,/EXACT_EMBEDDED_PROFILE_BUILD_FROM_PHASE0_BUILD_DISPATCH/);
   assert.match(source,/compilerProfiles:build\.compilerProfiles/);
   assert.match(source,/artifacts:build\.artifacts/);
+});
+
+test('gas overrides bind to consumed environment keys, including WEI suffix',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const body=source.slice(source.indexOf('function canonicalEthereumExecutionOverrides'),source.indexOf('async function executeDeploymentScripts'));
+  const overrides=new Function(body+';return canonicalEthereumExecutionOverrides;')();
+  const result=overrides('const MAX_FEE_PER_GAS=envBigInt("MAX_FEE_PER_GAS_WEI",1); const MAX_PRIORITY_FEE_PER_GAS=envBigInt("MAX_PRIORITY_FEE_PER_GAS_WEI",2);');
+  assert.deepEqual(result.env,{MAX_FEE_PER_GAS_WEI:'1000000000000',MAX_PRIORITY_FEE_PER_GAS_WEI:'1000000000'});
+  assert.deepEqual(result.adaptations.map(x=>x.env),Object.keys(result.env));
+  const legacy=overrides('const fee=process.env.MAX_FEE_PER_GAS; const tip=envBigInt("MAX_PRIORITY_FEE_PER_GAS",2);');
+  assert.deepEqual(legacy.env,{MAX_FEE_PER_GAS:'1000000000000',MAX_PRIORITY_FEE_PER_GAS:'1000000000'});
+  assert.deepEqual(overrides('const MAX_FEE_PER_GAS=1;').env,{});
+});
+
+test('summary telemetry projection preserves terminal status used by completeness gate',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const prefix='telemetry:telemetry.map(x=>(';
+  const start=source.indexOf(prefix)+prefix.length;
+  const end=source.indexOf(')),deployment:',start);
+  const project=new Function('x','return ('+source.slice(start,end)+')');
+  assert.equal(project({runId:'shard',status:'PASS',calls:1200}).status,'PASS');
+  assert.equal(project({runId:'shard',status:'FAILED',calls:1200}).status,'FAILED');
+});
+
+test('package deployment report wins over bytecode discovery at the same address',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const merge=source.match(/for\(const row of \[\.\.\.[^\]]+\]\)deploymentRowsByAddress\.set\(String\(row\.address\)\.toLowerCase\(\),row\);/)[0];
+  const reported={rows:[{address:'0xabc',contractName:'LinkedLibrary',mappingStatus:'PACKAGE_DEPLOYMENT_REPORT'}]};
+  const discoveredScriptDeployments=[{address:'0xabc',contractName:null,mappingStatus:'UNMAPPED_CREATION'},{address:'0xdef',contractName:'Extra'}];
+  const deploymentRowsByAddress=new Map();
+  new Function('reported','discoveredScriptDeployments','deploymentRowsByAddress',merge)(reported,discoveredScriptDeployments,deploymentRowsByAddress);
+  assert.equal(deploymentRowsByAddress.get('0xabc').contractName,'LinkedLibrary');
+  assert.equal(deploymentRowsByAddress.get('0xdef').contractName,'Extra');
+});
+
+test('incomplete deployment persists evidence before stopping',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const s=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const start=s.indexOf('// Persist deployment diagnostics before');
+  const end=s.indexOf('medusa=await runMedusa');
+  assert.ok(start>0&&end>start);
+  assert.match(s.slice(start,end),/PHASE0_DEPLOYMENT_INCOMPLETE/);
+  assert.match(s.slice(start,end),/throw error/);
+});
+test('Medusa compiles its standalone router without invoking production framework',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const s=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const run=s.slice(s.indexOf('async function runMedusa('),s.indexOf('function baselineTargetRows'));
+  assert.match(run,/router-project/);
+  assert.match(run,/foundry.toml/);
+  assert.match(run,/cwd:medusaProject/);
+  assert.doesNotMatch(run,/cwd:projectRoot/);
+});
+test('batched accounting snapshots preserve all observations',async()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const s=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const body=s.slice(s.indexOf('async function snapshot('),s.indexOf('function flattenNumbers'));
+  const snap=new Function('normalizedAbi','safeStatic',body+';return snapshot;')(x=>x,async(_c,f,args)=>f.format()+args.join(','));
+  const result=await snap({provider:{getBalance:async a=>BigInt(a)},ethers:{Contract:class{}},target:{address:'2',artifact:{abi:[]}},sender:'1',plan:{zero:[{format:()=> 'totalSupply()'}],address:[{format:()=> 'balanceOf(address)'}]},systemTargets:[{address:'2'},{address:'3'}]});
+  assert.deepEqual(result.native,{sender:'1',target:'2'});
+  assert.deepEqual(result.systemNative,{'2':'2','3':'3'});
+  assert.equal(Object.keys(result.views).length,3);
+});
+
+test('native deployment budget includes production compilation and broadcasts with bounded heartbeats',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const s=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const run=s.slice(s.indexOf('async function executeDeploymentScripts'),s.indexOf('async function reportedPackageDeployments'));
+  assert.equal((run.match(/900s/g)??[]).length,3);
+  assert.doesNotMatch(run,/240s/);
+  assert.match(s,/native script still running; elapsed=/);
+  assert.match(s,/clearInterval\(heartbeat\)/);
 });

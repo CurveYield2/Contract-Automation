@@ -27,6 +27,10 @@ try{
 }
 await fs.rm(path.join(simEvidence,'runs'),{recursive:true,force:true});
 await fs.cp(path.join(src,'runs'),path.join(simEvidence,'runs'),{recursive:true}).catch(()=>{});
+if(summary.executionMode==='REUSED_COMPLETED_STAGES'){
+  await fs.rm(path.join(simEvidence,'retained-attempts'),{recursive:true,force:true});
+  await fs.cp(path.join(src,'retained-attempts'),path.join(simEvidence,'retained-attempts'),{recursive:true});
+}
 
 const summaryRef='evidence/phase0/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json';
 const runIndexRef='evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.json';
@@ -49,7 +53,7 @@ const baselineRows=[
   {
     targetId:'PHASE0-BASELINE-ABI-TELEMETRY',candidateKey:'PHASE0-BASELINE-ABI-TELEMETRY',
     candidateOrProperty:'Telemetry-rich randomized source-contract interaction baseline',
-    setup:'Same canonical Ethereum Anvil execution baseline; independent stateful shards reset to the common baseline',
+    setup:summary.executionMode==='REUSED_COMPLETED_STAGES'?'Separate retained Ethereum Anvil telemetry attempt; shards reset to that attempt baseline. Medusa keeps its own original fork and deployment addresses.':'Same canonical Ethereum Anvil execution baseline; independent stateful shards reset to the common baseline',
     transactionSequence:'Randomized cross-contract bursts that repeatedly revisit contracts rather than exhausting one contract at a time',
     expectedSecureOutcome:'INVESTIGATIVE_BASELINE_NO_PREDECIDED_SECURITY_CONCLUSION',
     oracle:'Per-call pre/post accounting state, deltas, receipts/logs, success/revert/error telemetry',

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import path from 'node:path';
+import {importCompletedPhase0StagesV1} from '../packages/github-native-sim/src/phase0-completed-stages-v1.mjs';
 import {runPhase0RandomizedSimulationV1} from '../packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs';
 
 function args(argv){
@@ -12,8 +13,9 @@ function args(argv){
   return out;
 }
 const a=args(process.argv);
-for(const k of ['controller-root','campaign-path','output','fork-url'])if(!a[k])throw new Error('missing --'+k);
-const result=await runPhase0RandomizedSimulationV1({
+for(const k of ['controller-root','campaign-path','output'])if(!a[k])throw new Error('missing --'+k);
+if(!a['completed-stages-manifest']&&!a['fork-url'])throw new Error('missing --fork-url');
+const result=a['completed-stages-manifest'] ? await importCompletedPhase0StagesV1({controllerRoot:path.resolve(a['controller-root']),campaignPath:a['campaign-path'],manifestPath:a['completed-stages-manifest'],outputRoot:path.resolve(a.output),repository:process.env.GITHUB_REPOSITORY,githubToken:process.env.GH_TOKEN}) : await runPhase0RandomizedSimulationV1({
   controllerRoot:path.resolve(a['controller-root']),
   campaignPath:a['campaign-path'],
   outputRoot:path.resolve(a.output),
