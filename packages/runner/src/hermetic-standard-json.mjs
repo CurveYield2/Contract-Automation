@@ -136,6 +136,156 @@ async function collectHermeticSources(projectRoot, vendorRootAdapter, fsApi = fs
   };
 }
 
+
+async function collectHermeticSourcesFromNamedSeeds(projectRoot, vendorRootAdapter, sourceNames, fsApi = fs) {
+  const workspaceRoot = path.resolve(projectRoot, vendorRootAdapter.workspaceRelativeToProject ?? '.');
+  const allowedRoots = [projectRoot, workspaceRoot];
+  const queue = [...new Set(sourceNames)].map((sourceName) => {
+    if (typeof sourceName !== 'string' || sourceName.length === 0 || path.isAbsolute(sourceName) || sourceName.includes('\\\\')) {
+      throw new Error(`Invalid hermetic deployment source entry: ${sourceName}`);
+    }
+    const normalized = path.posix.normalize(sourceName);
+    return { sourceName: normalized, absolute: path.resolve(projectRoot, ...normalized.split('/')) };
+  });
+  const records = new Map();
+
+  while (queue.length > 0) {
+    const next = queue.shift();
+    const absolute = await withinAnyAllowedRoot(next.absolute, allowedRoots, fsApi);
+    const bytes = await fsApi.readFile(absolute);
+    const content = bytes.toString('utf8');
+    const digest = sha256(bytes);
+    const existing = records.get(next.sourceName);
+    if (existing) {
+      if (existing.sha256 !== digest) throw new Error(`Hermetic source-name collision: ${next.sourceName}`);
+      continue;
+    }
+    const record = {
+      sourceName: next.sourceName,
+      absolute,
+      sha256: digest,
+      byteLength: bytes.length,
+      content
+    };
+    records.set(next.sourceName, record);
+    for (const importPath of importedPaths(content)) {
+      queue.push(await resolveImport({ importer: record, importPath, projectRoot, fsApi }));
+    }
+  }
+
+  const ordered = [...records.values()].sort((left, right) => left.sourceName.localeCompare(right.sourceName));
+  return {
+    sources: Object.fromEntries(ordered.map((item) => [item.sourceName, item.content])),
+    manifest: ordered.map((item) => ({
+      sourceName: item.sourceName,
+      sha256: item.sha256,
+      byteLength: item.byteLength,
+      origin: item.absolute.startsWith(projectRoot + path.sep) ? 'PROJECT_OR_LOCKED_PACKAGE' : 'FROZEN_VENDOR_ROOT'
+    }))
+  };
+}
+
+export async function compileHermeticDeploymentEntriesV1({
+  projectRoot,
+  request,
+  groups,
+  fsApi = fs,
+  materializeVendorAdapter = materializeFrozenVendorRootAdapter
+}) {
+  if (!shouldUseHermeticStandardJson(request)) throw new Error('Archive is not admitted for hermetic deployment-entry compilation');
+  if (!Array.isArray(groups) || groups.length === 0) {
+    return {
+      schemaVersion: 'runner-owned-hermetic-deployment-entry-compilation-v1',
+      status: 'NO_DECLARED_DEPLOYMENT_COMPILE_GROUPS',
+      artifacts: [],
+      selectedTargets: [],
+      missingTargets: [],
+      diagnostics: []
+    };
+  }
+  const normalizedGroups = groups.map((group, groupIndex) => ({
+    groupIndex,
+    entryFiles: [...new Set((group?.entryFiles ?? []).map((x) => path.posix.normalize(String(x))))],
+    contractNames: [...new Set((group?.contractNames ?? []).map(String))]
+  })).filter((group) => group.entryFiles.length && group.contractNames.length);
+  if (!normalizedGroups.length) throw new Error('Deployment compile groups contain no usable entries');
+
+  const vendorRootAdapter = await materializeVendorAdapter(projectRoot, { fsApi });
+  if (vendorRootAdapter.status !== 'materialized') throw new Error('Frozen vendor-root adapter is required for deployment-entry compilation');
+  const sourceNames = [...new Set(normalizedGroups.flatMap((group) => group.entryFiles))];
+  const collected = await collectHermeticSourcesFromNamedSeeds(projectRoot, vendorRootAdapter, sourceNames, fsApi);
+  const compiler = request.configuration.compilers.find((item) => item?.language === 'solidity');
+  if (!compiler?.version) throw new Error('Exact Solidity compiler version is required for deployment-entry compilation');
+  const input = buildCompilerInput(collected.sources, {
+    optimizer: request.configuration.optimizer,
+    evmVersion: request.configuration.evmVersion,
+    viaIR: request.configuration.viaIR
+  });
+  const solc = await loadSolcVersion(compiler.version);
+  const outputText = solc.compile(JSON.stringify(input));
+  const output = JSON.parse(outputText);
+  const diagnostics = (output.errors ?? []).map((item) => ({
+    severity: item.severity,
+    type: item.type,
+    component: item.component,
+    errorCode: item.errorCode,
+    message: item.message,
+    formattedMessage: item.formattedMessage,
+    sourceLocation: item.sourceLocation
+  }));
+  if (diagnostics.some((item) => item.severity === 'error')) {
+    const error = new Error('Hermetic deployment-entry Solidity compilation failed');
+    error.code = 'hermetic_deployment_entry_compilation_failed';
+    error.result = { diagnostics };
+    throw error;
+  }
+
+  const allArtifacts = contractArtifactMap(output).all;
+  const selectedTargets = [];
+  const selectedArtifacts = [];
+  const selectedKeys = new Set();
+  const missingTargets = [];
+  for (const group of normalizedGroups) {
+    for (const contractName of group.contractNames) {
+      const direct = allArtifacts.filter((artifact) =>
+        artifact.contractName === contractName && group.entryFiles.includes(artifact.sourceName)
+      );
+      let artifact = direct.length === 1 ? direct[0] : null;
+      if (!artifact && direct.length === 0) {
+        const byName = allArtifacts.filter((candidate) => candidate.contractName === contractName);
+        if (byName.length === 1) artifact = byName[0];
+      }
+      if (!artifact) {
+        missingTargets.push({
+          groupIndex: group.groupIndex,
+          contractName,
+          entryFiles: group.entryFiles,
+          reason: direct.length > 1 ? 'MULTIPLE_DIRECT_ENTRY_ARTIFACTS' : 'NO_UNIQUE_DEPLOYMENT_ARTIFACT'
+        });
+        continue;
+      }
+      const key = `${artifact.sourceName}:${artifact.contractName}`;
+      selectedTargets.push({ groupIndex: group.groupIndex, contractName, sourceName: artifact.sourceName, qualifiedName: key });
+      if (!selectedKeys.has(key)) {
+        selectedKeys.add(key);
+        selectedArtifacts.push(artifact);
+      }
+    }
+  }
+  return {
+    schemaVersion: 'runner-owned-hermetic-deployment-entry-compilation-v1',
+    status: missingTargets.length ? 'COMPLETE_WITH_MISSING_TARGETS' : 'PASS',
+    compilerVersion: compiler.version,
+    sourceEntryCount: sourceNames.length,
+    collectedSourceCount: collected.manifest.length,
+    artifactCount: selectedArtifacts.length,
+    artifacts: selectedArtifacts,
+    selectedTargets,
+    missingTargets,
+    diagnostics
+  };
+}
+
 async function dependencySbom(projectRoot, fsApi = fs) {
   const lockfile = path.join(projectRoot, 'package-lock.json');
   const bytes = await fsApi.readFile(lockfile);
