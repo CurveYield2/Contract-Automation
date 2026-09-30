@@ -65,20 +65,33 @@ async function sources(projectRoot) {
   out.sort((a,b)=>a.path.localeCompare(b.path));
   return out.map((x,i)=>({...x,sourceId:`SRC-${pad(i+1)}`}));
 }
-function astIndex(sourceAsts, byPath) {
+function astIndex(sourceAsts, byPath, compilationUnits=[]) {
   const nodes=new Map(), contracts=new Map(), functions=new Map();
-  for (const [sourceName,ast] of Object.entries(sourceAsts ?? {}).sort(([a],[b])=>a.localeCompare(b))) {
-    const source=byPath.get(sourceName);
-    walk(ast,(node,ctx)=>{
-      if (Number.isInteger(node.id)) nodes.set(node.id,{node,sourceName,source});
-      if (node.nodeType==='ContractDefinition') contracts.set(`${sourceName}:${node.name}`,{node,sourceName,source});
-      if (node.nodeType==='FunctionDefinition' && ctx.contract) {
-        const key=`${sourceName}:${ctx.contract.name}`;
-        const list=functions.get(key)??[]; list.push({node,sourceName,source}); functions.set(key,list);
-      }
-    });
+  const units=(Array.isArray(compilationUnits)&&compilationUnits.length)
+    ? compilationUnits.map((unit,index)=>({unitId:unit.unitId??`unit-${index+1}`,sourceAsts:unit.sourceAsts??{}}))
+    : [{unitId:'default',sourceAsts:sourceAsts??{}}];
+  for(const unit of units){
+    for (const [sourceName,ast] of Object.entries(unit.sourceAsts ?? {}).sort(([a],[b])=>a.localeCompare(b))) {
+      const source=byPath.get(sourceName);
+      walk(ast,(node,ctx)=>{
+        if (Number.isInteger(node.id)) nodes.set(`${unit.unitId}:${node.id}`,{node,sourceName,source,unitId:unit.unitId});
+        if (node.nodeType==='ContractDefinition') {
+          const qualifiedName=`${sourceName}:${node.name}`;
+          contracts.set(`${unit.unitId}|${qualifiedName}`,{node,sourceName,source,unitId:unit.unitId,qualifiedName});
+          if(unit.unitId==='default')contracts.set(qualifiedName,{node,sourceName,source,unitId:unit.unitId,qualifiedName});
+        }
+        if (node.nodeType==='FunctionDefinition' && ctx.contract) {
+          const qualifiedName=`${sourceName}:${ctx.contract.name}`;
+          const key=`${unit.unitId}|${qualifiedName}`;
+          const list=functions.get(key)??[]; list.push({node,sourceName,source,unitId:unit.unitId}); functions.set(key,list);
+          if(unit.unitId==='default'){
+            const legacy=functions.get(qualifiedName)??[];legacy.push({node,sourceName,source,unitId:unit.unitId});functions.set(qualifiedName,legacy);
+          }
+        }
+      });
+    }
   }
-  return {nodes,contracts,functions};
+  return {nodes,contracts,functions,units};
 }
 function modifierName(m) { return m?.modifierName?.name ?? m?.modifierName?.namePath ?? m?.modifierName?.memberName ?? 'UNKNOWN_MODIFIER'; }
 
@@ -90,7 +103,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
   if (!raw.length) throw new Error('no admitted Solidity/Vyper source files found');
   const byPath=new Map(raw.map(x=>[x.path,x]));
   const sourceFiles=raw.map(({content,...x})=>({...x,scopeStatus:'IN_SCOPE_ADMITTED_SOURCE',basis:'EXACT_ADMITTED_CHECKOUT_OR_ARCHIVE'}));
-  const ast=astIndex(build.sourceAsts ?? {},byPath);
+  const ast=astIndex(build.sourceAsts ?? {},byPath,build.compilationUnits??[]);
   const artifacts=[...(build.artifacts??[])].sort((a,b)=>`${a.sourceName}:${a.contractName}`.localeCompare(`${b.sourceName}:${b.contractName}`));
 
   const compilerArtifacts=[],contracts=[],functions=[],storageLayout=[],inheritanceGraph=[],privilegeCandidates=[],eventsAndErrors=[],sourceAnchors=[];
