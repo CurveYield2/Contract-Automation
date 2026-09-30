@@ -6,7 +6,6 @@ import {fileURLToPath} from 'node:url';
 import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1} from '../src/phase0-randomized-simulation-v1.mjs';
 import {extractSourceKnownDeployPlanV1,extractSourceKnownBindingsV1} from '../src/source-known-deployment-plan-v1.mjs';
 import {contractArtifactMap} from '../../runner/src/compiler.mjs';
-import {extractSourceKnownDeployPlanV1,extractSourceKnownBindingsV1} from '../src/source-known-deployment-plan-v1.mjs';
 
 function rngSeq(values){let i=0;return()=>values[(i++)%values.length];}
 function fn(accounting,name='f'){
