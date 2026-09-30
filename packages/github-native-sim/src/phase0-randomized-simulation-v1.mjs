@@ -157,6 +157,10 @@ async function detectDeploymentScripts(projectRoot){
     for(const [name,cmd0] of Object.entries(pkg.scripts??{})){
       const cmd=String(cmd0);
       if(!DEPLOY_SCRIPT_RE.test(name)||cmd.includes('hardhat'))continue;
+      if(/dry[-_ ]?run/i.test(name)||/(?:^|\s)--dry-run(?:\s|$)/i.test(cmd)){
+        genericPackageScripts.push({name,command:cmd,safe:false,reason:'Dry-run package script is not an executable deployment path.'});
+        continue;
+      }
       const nodeMatch=cmd.match(/^\s*node\s+([^\s]+)([\s\S]*)$/);
       if(!nodeMatch){genericPackageScripts.push({name,command:cmd,safe:false,reason:'Package deployment command is not a directly resolvable local Node entrypoint.'});continue;}
       const entry=nodeMatch[1].replace(/^["']|["']$/g,'');
@@ -254,6 +258,57 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSign
     });
   }
   return{attempts,limitations,status:attempts.some(x=>x.status==='PASS')?'PASS':(attempts.length?'COMPLETE_WITH_FAILURES':'NO_SAFE_SCRIPT_ADAPTER')};
+}
+async function reportedPackageDeployments({projectRoot,attempts,artifacts}){
+  const rows=[],limitations=[],seen=new Set();
+  const artifactByName=new Map();
+  for(const artifact of artifacts??[]){
+    const list=artifactByName.get(artifact.contractName)??[];
+    list.push(artifact);artifactByName.set(artifact.contractName,list);
+  }
+  for(const attempt of attempts??[]){
+    if(attempt.framework!=='GENERIC_NODE'||attempt.status!=='PASS')continue;
+    const text=`${attempt.stdout??''}\n${attempt.stderr??''}`;
+    const candidates=[];
+    for(const match of text.matchAll(/(?:^|\n)\s*(?:Report|Deployment report|Report written)\s*:\s*(.+?\.json)\s*(?:\n|$)/gi))candidates.push(match[1].trim());
+    for(const raw of candidates){
+      const absolute=path.isAbsolute(raw)?path.normalize(raw):path.resolve(projectRoot,raw);
+      const relative=path.relative(projectRoot,absolute);
+      if(relative.startsWith('..')||path.isAbsolute(relative)){
+        limitations.push({type:'PACKAGE_DEPLOYMENT_REPORT_OUTSIDE_PROJECT',script:attempt.script,reportedPath:raw});
+        continue;
+      }
+      let report;
+      try{report=JSON.parse(await fs.readFile(absolute,'utf8'));}catch(error){
+        limitations.push({type:'PACKAGE_DEPLOYMENT_REPORT_UNREADABLE',script:attempt.script,reportedPath:relative,message:String(error?.message??error).slice(0,800)});
+        continue;
+      }
+      const deployments=report?.deployments;
+      if(!deployments||typeof deployments!=='object'||Array.isArray(deployments)){
+        limitations.push({type:'PACKAGE_DEPLOYMENT_REPORT_UNSUPPORTED_SHAPE',script:attempt.script,reportedPath:relative});
+        continue;
+      }
+      for(const [contractName,entry] of Object.entries(deployments)){
+        const address=entry?.address;
+        if(typeof address!=='string'||!/^0x[a-fA-F0-9]{40}$/.test(address))continue;
+        const sourceName=typeof entry?.sourceName==='string'?entry.sourceName:null;
+        const matches=(artifactByName.get(contractName)??[]).filter(a=>!sourceName||a.sourceName===sourceName);
+        const artifact=matches.length===1?matches[0]:null;
+        const key=address.toLowerCase();if(seen.has(key))continue;seen.add(key);
+        rows.push({
+          address,
+          transactionHash:entry?.transactionHash??null,
+          blockNumber:null,
+          qualifiedName:artifact?`${artifact.sourceName}:${artifact.contractName}`:null,
+          contractName:artifact?.contractName??contractName,
+          sourceName:artifact?.sourceName??sourceName,
+          mappingStatus:artifact?'PACKAGE_DEPLOYMENT_REPORT':'PACKAGE_DEPLOYMENT_REPORT_UNMAPPED_ARTIFACT',
+          deploymentReportRef:relative
+        });
+      }
+    }
+  }
+  return{rows,limitations};
 }
 function deployedBytecodePrefix(a){return String(a?.bytecode??'').replace(/^0x/,'').toLowerCase();}
 async function discoverDeployments({provider,artifacts,startBlock,endBlock}){
@@ -565,12 +620,22 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     anvil=await startAnvil({forkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
     const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
     const deployment=await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],localSigner:anvil.localSigner,detected});
-    const scriptEnd=Number(await provider.getBlockNumber()),scriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
-    const sourcePlan=scriptDeployments.length?{status:'SKIPPED_FRAMEWORK_SCRIPT_SUCCEEDED',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0}:await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
+    const scriptEnd=Number(await provider.getBlockNumber());
+    const discoveredScriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
+    const reported=await reportedPackageDeployments({projectRoot:staged.projectRoot,attempts:deployment.attempts,artifacts});
+    const deploymentRowsByAddress=new Map();
+    for(const row of [...reported.rows,...discoveredScriptDeployments])deploymentRowsByAddress.set(String(row.address).toLowerCase(),row);
+    const scriptDeployments=[...deploymentRowsByAddress.values()];
+    const expectedNativeNames=new Set(build.deploymentOrder??[]);
+    const observedNativeNames=new Set(scriptDeployments.map(x=>x.contractName).filter(Boolean));
+    const nativeScriptComplete=deployment.status==='PASS'&&[...expectedNativeNames].every(name=>observedNativeNames.has(name));
+    const sourcePlan=nativeScriptComplete
+      ? {status:'SKIPPED_PACKAGE_DEPLOYMENT_SCRIPT_COMPLETE',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0}
+      : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
     const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows],targets=targetObjects(ethers,artifacts,deployed);
-    const deploymentCombined={detectedScripts:detected,attempts:[...deployment.attempts,...sourcePlan.attempts],limitations:[...deployment.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
+    const deploymentCombined={detectedScripts:detected,attempts:[...deployment.attempts,...sourcePlan.attempts],limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
     const baselineBlock=Number(await provider.getBlockNumber()),baselineHash=(await provider.getBlock(baselineBlock))?.hash??null,baselineSnapshot=await provider.send('evm_snapshot',[]);
-    const deploymentComplete=sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0;
+    const deploymentComplete=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;
     if(!deploymentComplete)console.log(`[phase0-deployment] incomplete; planned=${sourcePlan.planned}; deployed=${sourcePlan.rows.length}; unresolved=${sourcePlan.unresolvedSteps}; missingCompiledTargets=${sourceKnownCompilation.missingTargets?.length??0}; mutableTargets=${targets.length}; continuing all executable randomized stages on the successfully deployed target subset`);
     let medusa;
     let medusaExecutionFailure=null;
