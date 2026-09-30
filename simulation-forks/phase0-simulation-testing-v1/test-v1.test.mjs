@@ -18,7 +18,7 @@ test('simulation testing fork prefers redirectable package deployment before par
 
 test('simulation testing fork derives and verifies signer from its Anvil instance',()=>{
   const here=path.dirname(fileURLToPath(import.meta.url));
-  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-simulation-testing-v1.mjs'),'utf8');
+  const source=fs.readFileSync(path.resolve(here,'./engine-v1.mjs'),'utf8');
   assert.match(source,/Wallet\.createRandom\(\)/);
   assert.match(source,/--mnemonic',ephemeralMnemonic/);
   assert.match(source,/eth_accounts/);
@@ -26,12 +26,12 @@ test('simulation testing fork derives and verifies signer from its Anvil instanc
   assert.doesNotMatch(source,/ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80/);
 });
 
-test('simulation testing test workflow is isolated from canonical Phase-0 workflow',()=>{
+test('simulation testing workflow is isolated from canonical Phase-0 workflow',()=>{
   const here=path.dirname(fileURLToPath(import.meta.url));
-  const nativeWorkflow=fs.readFileSync(path.resolve(here,'../../.github/workflows/lite-phase0-randomized-simulation-simulation-testing-dispatch-v1.yml'),'utf8');
+  const testingWorkflow=fs.readFileSync(path.resolve(here,'../../.github/workflows/lite-phase0-simulation-testing-v1.yml'),'utf8');
   const canonicalWorkflow=fs.readFileSync(path.resolve(here,'../../.github/workflows/lite-phase0-randomized-simulation-v1.yml'),'utf8');
-  assert.match(nativeWorkflow,/workflow_dispatch:/);
-  assert.match(nativeWorkflow,/run-phase0-randomized-simulation-simulation-testing-v1\.mjs/);
+  assert.match(testingWorkflow,/workflow_dispatch:/);
+  assert.match(testingWorkflow,/phase0-simulation-testing-v1/);
   assert.doesNotMatch(canonicalWorkflow,/workflow_dispatch:/);
   assert.doesNotMatch(canonicalWorkflow,/simulation-testing/);
 });
