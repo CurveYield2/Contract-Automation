@@ -37,13 +37,6 @@ test('canonical V7 execution workflow scopes private controller auth and archive
   assert.doesNotMatch(workflow, /RPC_ETHEREUM:\s*\$\{\{/);
 });
 
-test('generic PreflightSim bridge remains a separate workflow', () => {
-  const genericPath = path.join(repoRoot, '.github/workflows/github-bridge.yml');
-  const generic = fs.readFileSync(genericPath, 'utf8');
-  assert.match(generic, /PreflightSim|preflight/i);
-  assert.doesNotMatch(generic, /AUDIT_CONTROLLER_GITHUB_TOKEN/);
-  assert.doesNotMatch(generic, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01/);
-});
 
 
 test('controller operations reuse only exact successful canonical controller qualification and fall back to inline verify', () => {

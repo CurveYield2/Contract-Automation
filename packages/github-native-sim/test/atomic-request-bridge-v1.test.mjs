@@ -96,12 +96,6 @@ test('controller operation pointer is exact, minimal, and bound to one private r
   }), /repository/);
 });
 
-test('canonical V7 atomic request bridge does not modify the generic PreflightSim issue bridge', () => {
-  const genericPath = path.join(repoRoot, '.github/workflows/github-bridge.yml');
-  const generic = fs.readFileSync(genericPath, 'utf8');
-  assert.match(generic, /PreflightSim GitHub Issue Bridge/);
-  assert.doesNotMatch(generic, /github-native-sim\/requests/);
-});
 
 
 test('V7 resolve command remains lightweight before execution dependencies are installed', () => {

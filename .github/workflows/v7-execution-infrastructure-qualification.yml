@@ -277,9 +277,6 @@ jobs:
         if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: npm run lint
 
-      - name: Repository build checks
-        if: env.V7_QUALIFICATION_LANE == 'FULL'
-        run: npm run build
 
       - name: Select working Audit-Controller credential
         if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
@@ -488,7 +485,7 @@ jobs:
             recipes,
             controllerQualification,
             dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true' && fs.existsSync('package-lock.json'),
-            testMatrix:{githubNative:'PASS',anvilRunner:'PASS',fullNodeSuite:'PASS',staticChecks:'PASS',buildChecks:'PASS',toolchainVerification:'PASS'},
+            testMatrix:{githubNative:'PASS',anvilRunner:'PASS',fullNodeSuite:'PASS',staticChecks:'PASS',toolchainVerification:'PASS'},
             phase6,
             phase6MedusaSmoke,
             fixture:{chain:'ethereum',block:25817400,expectedBlockHash},

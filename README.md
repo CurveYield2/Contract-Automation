@@ -41,7 +41,6 @@ Archive files are provenance/recovery material only and are never active V7 inst
 ```bash
 npm test
 npm run lint
-npm run build
 ```
 
-The full runner integration requires installed npm dependencies and the approved runner-managed RPC secret. See `docs/setup.md`.
+The full runner integration requires installed npm dependencies and the approved runner-managed RPC secret.

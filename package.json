@@ -8,13 +8,11 @@
     "node": ">=22"
   },
   "workspaces": [
-    "packages/*",
-    "apps/*"
+    "packages/*"
   ],
   "scripts": {
     "test": "node --test",
     "lint": "node scripts/check.mjs",
-    "build": "node scripts/build.mjs",
     "runner": "node packages/runner/src/cli.mjs",
     "integration:local": "node packages/runner/src/integration-local.mjs",
     "v7": "node packages/github-native-sim/src/v7-cli.mjs",
@@ -23,10 +21,7 @@
     "v7:harness:init": "node packages/github-native-sim/src/v7-cli.mjs harness:init",
     "v7:harness:validate": "node packages/github-native-sim/src/v7-cli.mjs harness:validate",
     "v7:toolchain:verify": "node packages/github-native-sim/src/v7-cli.mjs toolchain:verify",
-    "v7:manifest": "node packages/github-native-sim/src/v7-cli.mjs manifest",
-    "cfbuild": "npm test && npm run lint && npm run build",
-    "cfdeploy": "wrangler r2 bucket create curveyield-preflight || true && wrangler deploy --config apps/api/wrangler.toml",
-    "deploy": "wrangler r2 bucket create curveyield-preflight || true && wrangler deploy --config apps/api/wrangler.toml"
+    "v7:manifest": "node packages/github-native-sim/src/v7-cli.mjs manifest"
   },
   "dependencies": {
     "@foundry-rs/anvil": "1.7.1",
@@ -35,8 +30,5 @@
     "solc": "0.8.30",
     "tar": "7.4.3",
     "unzipper": "0.12.3"
-  },
-  "devDependencies": {
-    "wrangler": "4.116.0"
   }
 }

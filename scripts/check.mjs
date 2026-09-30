@@ -17,6 +17,28 @@ try {
 }
 try { await fs.access(canonicalAgentUpload); }
 catch { throw new Error('missing canonical process/agent-upload inbox'); }
+const retiredPreflightSimPaths = [
+  'apps/web',
+  'apps/api',
+  '.github/workflows/deploy.yml',
+  '.github/workflows/simulate.yml',
+  '.github/workflows/github-bridge.yml',
+  '.github/ISSUE_TEMPLATE/preflightsim-job.md',
+  'scripts/build.mjs',
+  'scripts/release.test.mjs',
+  'packages/github-bridge',
+  'docs/setup.md',
+  'docs/plans/preflightsim-lite-plan.md',
+  'docs/specs/preflightsim-lite-spec.md',
+];
+for (const relative of retiredPreflightSimPaths) {
+  try {
+    await fs.access(path.join(root, relative));
+    throw new Error(`retired PreflightSim web/API path must remain absent: ${relative}`);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+}
 const files = [];
 async function walk(directory) {
   for (const entry of await fs.readdir(directory, { withFileTypes: true })) {

@@ -21,10 +21,3 @@ test('canonical V7 execution workflow uses shared toolchain setup, canonical req
   assert.match(workflow, /if-no-files-found:\s*warn/);
 });
 
-test('generic PreflightSim bridge remains separate from V7 private credentials', () => {
-  const genericPath = path.join(repoRoot, '.github/workflows/github-bridge.yml');
-  const generic = fs.readFileSync(genericPath, 'utf8');
-  assert.match(generic, /PreflightSim|preflight/i);
-  assert.doesNotMatch(generic, /AUDIT_CONTROLLER_GITHUB_TOKEN/);
-  assert.doesNotMatch(generic, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01/);
-});
