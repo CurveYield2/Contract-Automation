@@ -1,6 +1,6 @@
 # Phase-0 Simulation Testing Fork Handoff v1
 
-Updated 2026-09-30 22:08 UTC. This replaces the original pre-repair handoff in place at the user's request.
+Updated 2026-09-30 22:12 UTC. This replaces the original pre-repair handoff in place at the user's request.
 
 ## Current active continuation
 
@@ -18,7 +18,9 @@ It references the original successful Medusa and telemetry artifact IDs/hashes; 
 
 The merged implementation promotes the isolated repairs and adds universal completed-stage import. It verifies original ZIP digest, workflow commit/success, exact source archive, accepted build/compiler inventory, fork, deployment mapping, and raw telemetry hashes/counters. It preserves separate attempt provenance and original raw ZIPs. Resume in the existing bootstrap/recovery workflow rejects executable code drift and requires the controller pin to match canonical qualification. It skips completed source intelligence and simulation execution. Finalizer gates require four complete telemetry shards and exact source binding, while preserving the explicit no-executable-target disposition for packages without mutable targets.
 
-Controller rebind is now active: Audit-Controller PR #108 / repair/phase0-qualified-rebind-v1, red-test head e1f5ee53dee7c739ef9deba9b15833121200678c. Matching public verification PR #462 / same branch, head 94e7971bcb8b9b7c78426bd549cd1c241b57be90. This verification PR must not merge. Exact next action: obtain the expected stale-pin test failure, update only the two qualification binding fields and current synthetic fixtures, trigger the same public regression again, verify full npm test/check PASS and exact cloned controller commit, then merge the exact tested controller head. Only after that, dispatch the existing campaign through recovery with completed_stages_manifest=evidence/phase0/COMPLETED_SIMULATION_STAGES_v1.json. Verify import, evidence projection, finalizer sealing, orchestrator and actual browser wake. Medusa must not be rerun.
+Controller rebind completed and main pin verified: Audit-Controller PR #108 merged at 7a31fa8652d556ef49b1ca5cdb9da8a60e9228df. Required stale-pin regression failed in run 36783712665. Repaired exact controller head 80bb0e0dec487bf5302d5df6928be96db8db4360 passed full controller npm test (395 pass, zero failures), npm run check and authority synchronization in run 36783903999, and was merged with that exact head guard. Public execution-only PR #462 closed without merging, with recorded disposition. Current admitted qualified runner is 061d5570f058a4019d990ae50edc3d25e7a20270 / 36783414101.
+
+Exact next action: dispatch the existing campaign through recovery with completed_stages_manifest=evidence/phase0/COMPLETED_SIMULATION_STAGES_v1.json. Verify import, evidence projection, finalizer sealing, orchestrator and actual browser wake. Medusa must not be rerun.
 
 Branch disposition: repair/phase0-completed-stages-v1 implementation is merged through PR #461; its code is durable on main. repair/phase0-medusa-only-v1 is superseded for implementation by PR #461; its successful execution identity and unique stage controls remain explicitly documented here and in retained artifacts, not an instruction to merge the entire debugging branch.
 
