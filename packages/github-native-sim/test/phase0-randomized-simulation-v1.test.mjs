@@ -236,3 +236,13 @@ test('Phase-0 rebind workflow assesses completeness non-fatally and enforces onl
   assert.ok(enforce>publish);
   assert.match(workflow,/echo "complete=\$complete" >> "\$GITHUB_OUTPUT"/);
 });
+
+
+test('Phase-0 randomized simulation reuses exact embedded-profile build artifacts instead of recompiling with one flattened profile',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  assert.match(source,/build\.system==='embedded-profile-native'/);
+  assert.match(source,/EXACT_EMBEDDED_PROFILE_BUILD_FROM_PHASE0_BUILD_DISPATCH/);
+  assert.match(source,/compilerProfiles:build\.compilerProfiles/);
+  assert.match(source,/artifacts:build\.artifacts/);
+});
