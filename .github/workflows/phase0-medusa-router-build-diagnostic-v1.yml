@@ -1,0 +1,48 @@
+name: Phase 0 Medusa Router Build Diagnostic v1
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/phase0-medusa-router-build-diagnostic-v1.yml']
+  workflow_dispatch:
+    inputs:
+      simulation_run_id:
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  router-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --force
+      - uses: ./.github/actions/setup-v7-toolchain
+      - name: Fetch retained isolated Medusa router
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIMULATION_RUN_ID: ${{ inputs.simulation_run_id || '36716905834' }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SIMULATION_RUN_ID" --jq '.path' | grep -Fx '.github/workflows/lite-phase0-simulation-testing-v1.yml'
+          gh run download "$SIMULATION_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "phase0-simulation-testing-curveyield-dex-v16-source-r1-$SIMULATION_RUN_ID" --dir .medusa-router-diagnostic
+          project=.medusa-router-diagnostic/runs/medusa-anvil-fork-001/router-project
+          mkdir -p "$project/src"
+          cp .medusa-router-diagnostic/runs/medusa-anvil-fork-001/MEDUSA_ROUTER_v1.sol "$project/src/Phase0MedusaRouterV1.sol"
+      - name: Compile retained router with full Forge diagnostics
+        run: |
+          set -euo pipefail
+          project="$GITHUB_WORKSPACE/.medusa-router-diagnostic/runs/medusa-anvil-fork-001/router-project"
+          forge build --root "$project" --build-info --force 2>&1 | tee .medusa-router-diagnostic/FORGE_BUILD_RAW_v1.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: medusa-router-build-diagnostic-v1
+          path: .medusa-router-diagnostic
+          include-hidden-files: true
