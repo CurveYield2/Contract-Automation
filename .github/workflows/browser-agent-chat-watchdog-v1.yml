@@ -64,8 +64,19 @@ jobs:
         shell: bash
         run: bash scripts/browser-agent-chat-watchdog-v1.sh
 
+      - name: Detect encrypted ChatGPT session state
+        if: always()
+        id: session_state_1
+        shell: bash
+        run: |
+          if [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Save refreshed encrypted ChatGPT session state
-        if: always() && hashFiles('/tmp/curveyield-browser-agent/session-state-v1.enc.json') != ''
+        if: always() && steps.session_state_1.outputs.present == 'true'
         uses: actions/cache/save@v4
         with:
           path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
@@ -118,8 +129,19 @@ jobs:
         shell: bash
         run: bash scripts/browser-agent-chat-watchdog-v1.sh
 
+      - name: Detect encrypted ChatGPT session state
+        if: always()
+        id: session_state_2
+        shell: bash
+        run: |
+          if [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Save refreshed encrypted ChatGPT session state
-        if: always() && hashFiles('/tmp/curveyield-browser-agent/session-state-v1.enc.json') != ''
+        if: always() && steps.session_state_2.outputs.present == 'true'
         uses: actions/cache/save@v4
         with:
           path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
@@ -168,8 +190,19 @@ jobs:
         shell: bash
         run: bash scripts/browser-agent-chat-watchdog-v1.sh
 
+      - name: Detect encrypted ChatGPT session state
+        if: always()
+        id: session_state_3
+        shell: bash
+        run: |
+          if [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Save refreshed encrypted ChatGPT session state
-        if: always() && hashFiles('/tmp/curveyield-browser-agent/session-state-v1.enc.json') != ''
+        if: always() && steps.session_state_3.outputs.present == 'true'
         uses: actions/cache/save@v4
         with:
           path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
