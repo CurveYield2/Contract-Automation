@@ -5,6 +5,7 @@ import {spawn} from 'node:child_process';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {createHash} from 'node:crypto';
 import {buildProject} from '../../runner/src/build-dispatch.mjs';
+import {startRpcIdentityProxy} from '../../runner/src/rpc-identity-proxy-v1.mjs';
 import {stageExactArchiveSource,runProcess} from './execution.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
@@ -72,25 +73,44 @@ async function rpc(url,method,params=[]){
   return body.result;
 }
 async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
-  const chainIdHex=await rpc(forkUrl,'eth_chainId',[]);
-  const upstreamChainId=Number(BigInt(chainIdHex));
-  if(upstreamChainId!==1){
-    const e=new Error(`Phase-0 authoritative Anvil/Medusa baseline currently requires Ethereum chainId=1; upstream returned ${upstreamChainId}`);
-    e.code='PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED';throw e;
+  let identityProxy;
+  try{
+    identityProxy=await startRpcIdentityProxy({upstreamUrl:forkUrl,chainId:1});
+    const normalizedChainId=Number(BigInt(await rpc(identityProxy.url,'eth_chainId',[])));
+    if(normalizedChainId!==1){
+      const e=new Error(`Phase-0 Ethereum RPC identity normalization failed; observed chainId=${normalizedChainId}`);
+      e.code='PHASE0_ETHEREUM_IDENTITY_NORMALIZATION_FAILURE';throw e;
+    }
+    const observation=identityProxy.getUpstreamIdentityObservation?.();
+    let upstreamChainId=null;
+    try{if(observation?.chainId)upstreamChainId=Number(BigInt(observation.chainId));}catch{}
+    const port=8545,url='http://127.0.0.1:8545';
+    const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
+    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--auto-impersonate','--silent'];
+    const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
+    let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
+    const started=Date.now();
+    while(Date.now()-started<30000){
+      if(child.exitCode!==null)throw new Error(`Anvil exited before readiness: ${stderr}`);
+      try{if(await rpc(url,'eth_chainId',[]))break;}catch{}
+      await sleep(100);
+    }
+    if(Date.now()-started>=30000){child.kill('SIGKILL');throw new Error('Anvil RPC readiness timeout');}
+    return{
+      url,upstreamChainId,identityNormalized:true,child,
+      async close(){
+        if(child.exitCode===null){
+          child.kill('SIGTERM');
+          await Promise.race([new Promise(r=>child.once('exit',r)),sleep(2000)]);
+          if(child.exitCode===null)child.kill('SIGKILL');
+        }
+        await identityProxy.close().catch(()=>{});
+      }
+    };
+  }catch(error){
+    if(identityProxy)await identityProxy.close().catch(()=>{});
+    throw error;
   }
-  const port=8545,url='http://127.0.0.1:8545';
-  const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
-  const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',forkUrl,'--accounts','20','--auto-impersonate','--silent'];
-  const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
-  let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
-  const started=Date.now();
-  while(Date.now()-started<30000){
-    if(child.exitCode!==null)throw new Error(`Anvil exited before readiness: ${stderr}`);
-    try{if(await rpc(url,'eth_chainId',[]))break;}catch{}
-    await sleep(100);
-  }
-  if(Date.now()-started>=30000){child.kill('SIGKILL');throw new Error('Anvil RPC readiness timeout');}
-  return{url,upstreamChainId,child,async close(){if(child.exitCode===null){child.kill('SIGTERM');await Promise.race([new Promise(r=>child.once('exit',r)),sleep(2000)]);if(child.exitCode===null)child.kill('SIGKILL');}}};
 }
 function detectFoundryScripts(files,texts){
   const out=[];
@@ -400,7 +420,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const baselineBlock=Number(await provider.getBlockNumber()),baselineHash=(await provider.getBlock(baselineBlock))?.hash??null,baselineSnapshot=await provider.send('evm_snapshot',[]);
     const medusa=targets.length?await runMedusa({projectRoot:staged.projectRoot,anvilUrl:anvil.url,blockNumber:baselineBlock,ethers,targets,outRoot:outputRoot}):{schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_EXECUTABLE_TARGETS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0};
     const telemetry=targets.length?await runTelemetry({provider,ethers,targets,actors,outRoot:outputRoot,baselineSnapshot}):[];
-    const runIndex={schemaVersion:'curveyield-phase0-simulation-run-index-v1',purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',sourceIdentity:{campaignId:receipt.campaign.campaignId,sourceSha256:receipt.source.sha256},targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash,upstreamRpcExposed:false},deployment:{detectedScripts:detected,attempts:deployment.attempts,limitations:[...deployment.limitations,...fallback.limitations],deployedContracts:deployed},policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},runs:[{runId:medusa.runId,type:'MEDUSA_ANVIL_FORK',status:medusa.status,summaryRef:'runs/medusa-anvil-fork-001/RUN_SUMMARY_v1.json'},...telemetry.map(x=>({runId:x.runId,type:'ABI_ACCOUNTING_TELEMETRY',status:x.status,summaryRef:`runs/${x.runId}/RUN_SUMMARY_v1.json`,rawTranscriptRef:x.rawTranscriptRef}))]};
+    const runIndex={schemaVersion:'curveyield-phase0-simulation-run-index-v1',purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',sourceIdentity:{campaignId:receipt.campaign.campaignId,sourceSha256:receipt.source.sha256},targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash,upstreamRpcExposed:false,identityNormalized:anvil.identityNormalized===true,observedUpstreamChainId:anvil.upstreamChainId},deployment:{detectedScripts:detected,attempts:deployment.attempts,limitations:[...deployment.limitations,...fallback.limitations],deployedContracts:deployed},policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},runs:[{runId:medusa.runId,type:'MEDUSA_ANVIL_FORK',status:medusa.status,summaryRef:'runs/medusa-anvil-fork-001/RUN_SUMMARY_v1.json'},...telemetry.map(x=>({runId:x.runId,type:'ABI_ACCOUNTING_TELEMETRY',status:x.status,summaryRef:`runs/${x.runId}/RUN_SUMMARY_v1.json`,rawTranscriptRef:x.rawTranscriptRef}))]};
     const simulationLimitations=[...deployment.limitations,...fallback.limitations,...(telemetry.filter(x=>x.weightingLimitation).map(x=>({type:x.weightingLimitation,runId:x.runId})))];if(medusa.status!=='PASS'&&medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS')simulationLimitations.push({type:'MEDUSA_BASELINE_'+String(medusa.status),runId:medusa.runId});const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v1',campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},status:medusa.status==='PASS'&&telemetry.length===PHASE0_TELEMETRY_RUNS_V1&&telemetry.every(x=>x.status==='PASS')?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',medusa,telemetry:telemetry.map(x=>({runId:x.runId,calls:x.calls,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,burstSchedule:x.burstSchedule})),deployment,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
     const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deployment.attempts,deployedContracts:deployed,gaps:[...deployment.limitations,...fallback.limitations],status:deployment.status};
