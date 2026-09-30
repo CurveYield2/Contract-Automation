@@ -12,17 +12,7 @@ const root=path.resolve(a['controller-root']),campaignPath=a['campaign-path'],ca
 const summary=await readJson(path.join(src,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'));
 const runIndex=await readJson(path.join(src,'PHASE0_SIMULATION_RUN_INDEX_v1.json'));
 const deployPath=path.join(src,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json');
-const nonEthereum=summary.code==='PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED';
-const deploy=await readJson(deployPath).catch(()=>nonEthereum
-  ? {
-      schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',
-      policy:'NOT_EXECUTED_CHAIN_FIDELITY_LIMITATION',
-      status:'NOT_APPLICABLE_NON_ETHEREUM',
-      attempts:[],
-      deployedContracts:[],
-      gaps:summary.limitations??[{type:'NON_ETHEREUM_FORK_NOT_ADMITTED'}]
-    }
-  : {schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',status:'BLOCKED',gaps:[{type:'NO_DEPLOYMENT_EVIDENCE'}],attempts:[],deployedContracts:[]});
+const deploy=await readJson(deployPath).catch(()=>({schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',status:'BLOCKED',gaps:[{type:'NO_DEPLOYMENT_EVIDENCE'}],attempts:[],deployedContracts:[]}));
 
 const phase0Evidence=path.join(campaignRoot,'evidence/phase0');
 const simEvidence=path.join(phase0Evidence,'simulations');
@@ -43,26 +33,11 @@ const runIndexRef='evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.js
 const deployRef='evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json';
 const telemetryRows=summary.telemetry??[];
 const observedAccountingShare=telemetryRows.length?Math.round(((telemetryRows[0]?.accountingActionShare??0)*1000))/10:null;
-const baselineRows=nonEthereum
-  ? [{
-      targetId:'PHASE0-BASELINE-RANDOMIZED-SIMULATION',
-      candidateKey:'PHASE0-BASELINE-RANDOMIZED-SIMULATION',
-      candidateOrProperty:'Phase-0 randomized simulation chain-fidelity limitation',
-      setup:'NOT_EXECUTED: discovered target chain is outside the admitted Ethereum Anvil-to-Medusa profile',
-      transactionSequence:'NOT_EXECUTED_CHAIN_FIDELITY_LIMITATION',
-      expectedSecureOutcome:'LATER_REVIEWER_MUST_INTERPRET_TYPED_EXECUTION_LIMITATION',
-      oracle:'Typed chain-fidelity limitation; no randomized execution result exists',
-      requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',
-      simulationResult:'NOT_APPLICABLE_NON_ETHEREUM',
-      fuzzVariablesAndBounds:'N/A — randomized execution was not admitted for this target chain',
-      result:'NOT_EXECUTED_CHAIN_FIDELITY_LIMITATION',
-      evidenceRefs:[summaryRef,runIndexRef]
-    }]
-  : [
+const baselineRows=[
   {
     targetId:'PHASE0-BASELINE-MEDUSA',candidateKey:'PHASE0-BASELINE-MEDUSA',
     candidateOrProperty:'Broad randomized stateful ABI execution from the deployment-prepared Anvil state',
-    setup:'Ethereum Anvil fork after supported source deployment-script simulation and deterministic fallback deployment',
+    setup:'Canonical Ethereum Anvil execution baseline after supported source deployment-script simulation and deterministic fallback deployment; original target EVM chain IDs remain provenance metadata',
     transactionSequence:'Medusa internal randomized sequence; configured call limit '+String(summary.medusa?.configuredCallLimit??'UNRESOLVED')+'; observed '+String(summary.medusa?.observedCalls??0),
     expectedSecureOutcome:'INVESTIGATIVE_BASELINE_NO_PREDECIDED_SECURITY_CONCLUSION',
     oracle:'Mechanical completion, coverage/revert telemetry, later-reviewer investigation',
@@ -74,7 +49,7 @@ const baselineRows=nonEthereum
   {
     targetId:'PHASE0-BASELINE-ABI-TELEMETRY',candidateKey:'PHASE0-BASELINE-ABI-TELEMETRY',
     candidateOrProperty:'Telemetry-rich randomized source-contract interaction baseline',
-    setup:'Same deployment-prepared Anvil state; independent stateful shards reset to the common baseline',
+    setup:'Same canonical Ethereum Anvil execution baseline; independent stateful shards reset to the common baseline',
     transactionSequence:'Randomized cross-contract bursts that repeatedly revisit contracts rather than exhausting one contract at a time',
     expectedSecureOutcome:'INVESTIGATIVE_BASELINE_NO_PREDECIDED_SECURITY_CONCLUSION',
     oracle:'Per-call pre/post accounting state, deltas, receipts/logs, success/revert/error telemetry',
