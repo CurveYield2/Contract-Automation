@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1} from '../src/phase0-randomized-simulation-v1.mjs';
+import {extractSourceKnownDeployPlanV1,extractSourceKnownBindingsV1} from '../src/source-known-deployment-plan-v1.mjs';
 
 function rngSeq(values){let i=0;return()=>values[(i++)%values.length];}
 function fn(accounting,name='f'){
@@ -91,4 +92,42 @@ test('Phase-0 artifact ABI normalization accepts array, nested abi array, and nu
   assert.match(source,/Array\.isArray\(abi\?\.abi\)/);
   assert.match(source,/Object\.values\(abi\)/);
   assert.doesNotMatch(source,/new ethers\.Interface\(a\.abi\?\?\[\]\)/);
+});
+
+
+test('Phase-0 source-known adapter extracts constructor-bearing deployment order without executing the source script',()=>{
+  const source=[
+    'const DAO = envAddress("DAO", "0x1111111111111111111111111111111111111111");',
+    'const PAUSE = Number(envBigInt("PAUSE", 365n * 24n * 60n * 60n));',
+    'const first = await deploy("First", [account.address]);',
+    'const second = await deploy("Second", [first, DAO, PAUSE, "Phase0"]);',
+    'await deploy("QueryLibrary", [], { library: true });'
+  ].join('\n');
+  const plan=extractSourceKnownDeployPlanV1(source);
+  assert.equal(plan.length,3);
+  assert.deepEqual(plan.map(x=>[x.binding,x.contractName,x.library]),[
+    ['first','First',false],
+    ['second','Second',false],
+    [null,'QueryLibrary',true]
+  ]);
+  assert.deepEqual(plan[1].argExpressions,['first','DAO','PAUSE','"Phase0"']);
+  const bindings=extractSourceKnownBindingsV1(source);
+  assert.equal(bindings.get('DAO'),'0x1111111111111111111111111111111111111111');
+  assert.equal(bindings.get('PAUSE'),31536000n);
+});
+
+test('Phase-0 fallback consumes source-known deployment plans and no longer caps zero-arg coverage at eight contracts',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  assert.match(source,/deploySourceKnownPlanV1/);
+  assert.match(source,/sourcePlanUnresolved/);
+  assert.doesNotMatch(source,/slice\(0,max\)/);
+  assert.doesNotMatch(source,/max=8/);
+});
+
+test('compiler artifacts preserve library link references required by constructor graph fallback',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../../runner/src/compiler.mjs'),'utf8');
+  assert.match(source,/evm\.bytecode\.linkReferences/);
+  assert.match(source,/linkReferences:\s*artifact\?\.evm\?\.bytecode\?\.linkReferences/);
 });

@@ -43,8 +43,10 @@ test('buildCompilerInput requests deployment, inspection, and gas evidence artif
     'userdoc',
     'evm.bytecode.object',
     'evm.bytecode.sourceMap',
+    'evm.bytecode.linkReferences',
     'evm.deployedBytecode.object',
     'evm.deployedBytecode.sourceMap',
+    'evm.deployedBytecode.linkReferences',
     'evm.methodIdentifiers',
     'evm.gasEstimates'
   ]);
@@ -53,7 +55,7 @@ test('buildCompilerInput requests deployment, inspection, and gas evidence artif
 test('contractArtifactMap preserves compiler gas estimates and rejects duplicate names unless source is specified', () => {
   const output = {
     contracts: {
-      'A.sol': { Vault: { abi: [], evm: { bytecode: { object: '01' }, deployedBytecode: { object: '02' }, gasEstimates: { creation: { totalCost: '123' } } } } },
+      'A.sol': { Vault: { abi: [], evm: { bytecode: { object: '01', linkReferences: { 'Lib.sol': { Lib: [{ start: 1, length: 20 }] } } }, deployedBytecode: { object: '02', linkReferences: {} }, gasEstimates: { creation: { totalCost: '123' } } } } },
       'B.sol': { Vault: { abi: [], evm: { bytecode: { object: '03' }, deployedBytecode: { object: '04' } } } }
     }
   };
@@ -61,6 +63,7 @@ test('contractArtifactMap preserves compiler gas estimates and rejects duplicate
   assert.throws(() => map.get('Vault'));
   assert.equal(map.get('Vault', 'A.sol').bytecode, '0x01');
   assert.equal(map.get('Vault', 'A.sol').gasEstimates.creation.totalCost, '123');
+  assert.deepEqual(map.get('Vault', 'A.sol').linkReferences, { 'Lib.sol': { Lib: [{ start: 1, length: 20 }] } });
 });
 
 test('collectSoliditySources only includes .sol files and preserves relative names', async () => {

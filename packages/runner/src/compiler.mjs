@@ -10,8 +10,10 @@ const OUTPUT_SELECTION = [
   'userdoc',
   'evm.bytecode.object',
   'evm.bytecode.sourceMap',
+  'evm.bytecode.linkReferences',
   'evm.deployedBytecode.object',
   'evm.deployedBytecode.sourceMap',
+  'evm.deployedBytecode.linkReferences',
   'evm.methodIdentifiers',
   'evm.gasEstimates'
 ];
@@ -88,7 +90,9 @@ function normalizeArtifact(sourceName, contractName, artifact) {
     bytecode: bytecodeObject ? `0x${bytecodeObject.replace(/^0x/, '')}` : '0x',
     deployedBytecode: deployedObject ? `0x${deployedObject.replace(/^0x/, '')}` : '0x',
     bytecodeSourceMap: artifact?.evm?.bytecode?.sourceMap ?? '',
-    deployedBytecodeSourceMap: artifact?.evm?.deployedBytecode?.sourceMap ?? ''
+    linkReferences: artifact?.evm?.bytecode?.linkReferences ?? {},
+    deployedBytecodeSourceMap: artifact?.evm?.deployedBytecode?.sourceMap ?? '',
+    deployedLinkReferences: artifact?.evm?.deployedBytecode?.linkReferences ?? {}
   };
 }
 

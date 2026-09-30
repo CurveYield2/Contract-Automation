@@ -72,6 +72,35 @@ jobs:
           rm -rf .phase0-randomized-output
           node scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --output .phase0-randomized-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-randomized.json
 
+      - name: Require complete randomized simulation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary=.phase0-randomized-output/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
+          index=.phase0-randomized-output/PHASE0_SIMULATION_RUN_INDEX_v1.json
+          jq -e '
+            .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE" and
+            ((.deployment.coverage.sourcePlanUnresolved // 0)|tonumber)==0 and
+            (
+              (((.deployment.coverage.mutableTargets // 0)|tonumber)>0 and
+               .medusa.status=="PASS" and
+               (.medusa.observedCalls|tonumber)>=100001 and
+               (.telemetry|length)>=1 and
+               all(.telemetry[]; .status=="PASS"))
+              or
+              (((.deployment.coverage.mutableTargets // 0)|tonumber)==0 and
+               ((.deployment.coverage.sourcePlanPlanned // 0)|tonumber)==0 and
+               ((.deployment.coverage.zeroArgFallbackCandidates // 0)|tonumber)==0)
+            )
+          ' "$summary" >/dev/null
+          jq -e '
+            .policy.realAbiCallsOnly==true and
+            .policy.rawRandomBytes==false and
+            .policy.crossContractBursts==true and
+            (.policy.accountingActionWeight|tonumber)>=0.8 and
+            .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE"
+          ' "$index" >/dev/null
+
       - name: Project outputs into exact later-phase formats
         shell: bash
         run: |

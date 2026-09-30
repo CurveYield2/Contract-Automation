@@ -132,6 +132,8 @@ jobs:
           jq . "$index"
           jq -e '
             .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE" and
+            ((.deployment.coverage.sourcePlanUnresolved // 0)|tonumber)==0 and
+            ((.deployment.coverage.mutableTargets // 0)|tonumber)>=1 and
             .medusa.status=="PASS" and
             (.medusa.observedCalls|tonumber)>=100001 and
             (.telemetry|length)>=1 and
