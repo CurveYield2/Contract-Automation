@@ -28,7 +28,9 @@ The primary Base deployment entrypoint passed using the documented canonical Eth
 
 ## Current next step
 
-Run the four ABI telemetry shards on the existing campaign, requiring 1,200 calls per shard and all four terminal PASS results. The hosted runner must recreate the exact source fork deployment; the verified Medusa stage is rechecked as a short prerequisite. No new campaign or source archive is introduced.
+[Telemetry-only attempt 36729459569](https://github.com/CurveYield2/Contract-Automation/actions/runs/36729459569) is active.
+
+Run the four ABI telemetry shards on the existing campaign, requiring 1,200 calls per shard and all four terminal PASS results. The hosted runner must recreate the exact source fork deployment. Following the user's instruction, Medusa is not rerun: its completed result remains separate evidence, and the telemetry-only summary must explicitly show zero new Medusa calls. The initial telemetry attempt that would have repeated Medusa (36728672500) was cancelled before starting the replacement. No new campaign or source archive is introduced.
 
 Canonical Phase-0 promotion, qualification/rebind, receipt sealing, and browser-agent launch have not been performed. They remain later steps after the isolated simulation evidence is complete.
 
