@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "curveyield-phase0-simulation-testing-request-v1",
+  "campaign_id": "curveyield-dex-v16-source-r1",
+  "campaign_path": "campaigns/CurveYield DEX v16 Source r1",
+  "audit_controller_ref": "main",
+  "cancel_run_id": 36713156727
+}
