@@ -71,10 +71,32 @@ print(parts[0],parts[1],parts[3],"/".join(parts[4:]))
 PY
 )
       test -n "$gh_owner" && test -n "$gh_repo" && test -n "$gh_ref" && test -n "$gh_path"
-      blob_sha="$(GH_TOKEN="$github_token" gh api "repos/$gh_owner/$gh_repo/contents/$gh_path?ref=$gh_ref" --jq '.sha')"
+      blob_meta="$work/github-contents.json"
+      curl --fail --silent --show-error --location --retry 4 --retry-all-errors --connect-timeout 20 \
+        -H "Authorization: Bearer $github_token" -H 'Accept: application/vnd.github+json' \
+        -o "$blob_meta" "https://api.github.com/repos/$gh_owner/$gh_repo/contents/$gh_path?ref=$gh_ref"
+      blob_sha="$(python3 - "$blob_meta" <<'PY'
+import json,sys
+with open(sys.argv[1],encoding='utf-8') as f:
+    obj=json.load(f)
+print(obj.get('sha',''))
+PY
+)"
       [[ "$blob_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::GitHub contents API did not return a committed blob SHA." >&2; return 1; }
-      GH_TOKEN="$github_token" gh api "repos/$gh_owner/$gh_repo/git/blobs/$blob_sha" --jq '.content' \
-        | tr -d '\n' | base64 -d > "$work/source.download"
+      blob_json="$work/github-blob.json"
+      curl --fail --silent --show-error --location --retry 4 --retry-all-errors --connect-timeout 20 \
+        -H "Authorization: Bearer $github_token" -H 'Accept: application/vnd.github+json' \
+        -o "$blob_json" "https://api.github.com/repos/$gh_owner/$gh_repo/git/blobs/$blob_sha"
+      python3 - "$blob_json" "$work/source.download" <<'PY'
+import base64,json,sys
+src,dst=sys.argv[1:3]
+with open(src,encoding='utf-8') as f:
+    obj=json.load(f)
+if obj.get('encoding')!='base64' or not isinstance(obj.get('content'),str):
+    raise SystemExit('GitHub blob API did not return base64 content')
+with open(dst,'wb') as f:
+    f.write(base64.b64decode(obj['content'],validate=False))
+PY
       download_url="https://api.github.com/repos/$gh_owner/$gh_repo/git/blobs/$blob_sha"
     else
       download_url="$source_url"
