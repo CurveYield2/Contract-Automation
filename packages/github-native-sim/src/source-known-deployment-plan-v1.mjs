@@ -177,9 +177,48 @@ function safeNumericExpression(expr){
   }catch{}
   return null;
 }
+function extractAssignedStatementsV1(text){
+  const source=String(text??''),rows=[];
+  for(const match of source.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=/g)){
+    const name=match[1],start=(match.index??0)+match[0].length;
+    let quote=null,escaped=false,round=0,square=0,curly=0,end=source.length;
+    for(let i=start;i<source.length;i++){
+      const ch=source[i];
+      if(quote){
+        if(escaped){escaped=false;continue;}
+        if(ch==='\\'){escaped=true;continue;}
+        if(ch===quote)quote=null;
+        continue;
+      }
+      if(ch==='"'||ch==="'"){quote=ch;continue;}
+      if(ch==='(')round++; else if(ch===')')round=Math.max(0,round-1);
+      else if(ch==='[')square++; else if(ch===']')square=Math.max(0,square-1);
+      else if(ch==='{')curly++; else if(ch==='}')curly=Math.max(0,curly-1);
+      else if(ch===';'&&round===0&&square===0&&curly===0){end=i;break;}
+    }
+    rows.push({name,expression:source.slice(start,end).trim()});
+  }
+  return rows;
+}
+export function extractPredictedDeploymentBindingsV1(text,predictedByContract){
+  const bindings=new Map();
+  for(const row of extractAssignedStatementsV1(text)){
+    const match=row.expression.match(/report\.predictedDeployments\.find\([\s\S]*?entry\.name\s*===\s*["']([^"']+)["'][\s\S]*?\)\.expectedAddress/);
+    if(!match)continue;
+    const predicted=predictedByContract.get(match[1]);
+    if(predicted)bindings.set(row.name,predicted);
+  }
+  return bindings;
+}
+function defaultNetworkNameV1(deployText){
+  const row=extractAssignedStatementsV1(deployText).find(x=>x.name==='NETWORK_NAME');
+  if(!row)return null;
+  const literals=[...row.expression.matchAll(/["']([^"']+)["']/g)].map(x=>x[1]);
+  return literals.at(-1)??null;
+}
 export function extractNetworkAddressBindingsV1(deployText,networksText){
   const deploy=String(deployText??''),networks=String(networksText??''),bindings=new Map();
-  const networkName=deploy.match(/\bconst\s+NETWORK_NAME\s*=\s*[\s\S]{0,320}?\|\|\s*["']([^"']+)["']\s*;/)?.[1]??null;
+  const networkName=defaultNetworkNameV1(deploy);
   if(!networkName)return bindings;
   const networksDecl=networks.match(/\bexport\s+const\s+NETWORKS\s*=\s*\{/);
   if(!networksDecl)return bindings;
@@ -320,9 +359,8 @@ export async function deploySourceKnownPlanV1({projectRoot,provider,ethers,artif
   const bindings=extractSourceKnownBindingsV1(chosen.text);
   const networkBindings=await sourceKnownNetworkBindings(projectRoot,chosen.rel,chosen.text);
   for(const [name,value] of networkBindings)if(!bindings.has(name))bindings.set(name,value);
-  for(const match of chosen.text.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*[\s\S]{0,800}?report\.predictedDeployments\.find\([\s\S]{0,240}?entry\.name\s*===\s*["']([^"']+)["'][\s\S]{0,240}?\)\.expectedAddress\s*;/g)){
-    const predicted=predictedByContract.get(match[2]);if(predicted)bindings.set(match[1],predicted);
-  }
+  const predictedBindings=extractPredictedDeploymentBindingsV1(chosen.text,predictedByContract);
+  for(const [name,value] of predictedBindings)if(!bindings.has(name))bindings.set(name,value);
 
   const rows=[],attempts=[],limitations=[],libraries=new Map();
   for(const [ordinal,step] of chosen.steps.entries()){
