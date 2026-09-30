@@ -1,4 +1,5 @@
 {
   "schema_version": "chat-watchdog-cache-cleanup-v1",
-  "scope": "failed-fork-only"
+  "scope": "failed-fork-only",
+  "retry": 1
 }
