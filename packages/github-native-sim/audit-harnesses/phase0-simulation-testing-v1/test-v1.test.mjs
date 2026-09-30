@@ -81,3 +81,32 @@ test('package deployment report wins over bytecode discovery at the same address
   assert.equal(deploymentRowsByAddress.get('0xabc').contractName,'LinkedLibrary');
   assert.equal(deploymentRowsByAddress.get('0xdef').contractName,'Extra');
 });
+
+test('incomplete deployment persists evidence before stopping',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const s=fs.readFileSync(path.resolve(here,'./engine-v1.mjs'),'utf8');
+  const start=s.indexOf('// Persist deployment diagnostics before');
+  const end=s.indexOf('medusa=await runMedusa');
+  assert.ok(start>0&&end>start);
+  assert.match(s.slice(start,end),/PHASE0_DEPLOYMENT_INCOMPLETE/);
+  assert.match(s.slice(start,end),/throw error/);
+});
+test('Medusa compiles its standalone router without invoking production framework',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const s=fs.readFileSync(path.resolve(here,'./engine-v1.mjs'),'utf8');
+  const run=s.slice(s.indexOf('async function runMedusa('),s.indexOf('function baselineTargetRows'));
+  assert.match(run,/router-project/);
+  assert.match(run,/foundry.toml/);
+  assert.match(run,/cwd:medusaProject/);
+  assert.doesNotMatch(run,/cwd:projectRoot/);
+});
+test('batched accounting snapshots preserve all observations',async()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const s=fs.readFileSync(path.resolve(here,'./engine-v1.mjs'),'utf8');
+  const body=s.slice(s.indexOf('async function snapshot('),s.indexOf('function flattenNumbers'));
+  const snap=new Function('normalizedAbi','safeStatic',body+';return snapshot;')(x=>x,async(_c,f,args)=>f.format()+args.join(','));
+  const result=await snap({provider:{getBalance:async a=>BigInt(a)},ethers:{Contract:class{}},target:{address:'2',artifact:{abi:[]}},sender:'1',plan:{zero:[{format:()=> 'totalSupply()'}],address:[{format:()=> 'balanceOf(address)'}]},systemTargets:[{address:'2'},{address:'3'}]});
+  assert.deepEqual(result.native,{sender:'1',target:'2'});
+  assert.deepEqual(result.systemNative,{'2':'2','3':'3'});
+  assert.equal(Object.keys(result.views).length,3);
+});
