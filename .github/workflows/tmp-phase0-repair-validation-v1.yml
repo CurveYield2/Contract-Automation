@@ -1,0 +1,26 @@
+name: Temporary Phase0 Repair Validation v1
+on:
+  push:
+    branches:
+      - repair/phase0-deployable-inventory-rebind-v1
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm ci --force
+      - name: Focused Phase-0 regression tests
+        run: node --test packages/github-native-sim/test/phase0-randomized-simulation-v1.test.mjs packages/github-native-sim/test/lite-phase0-automation-v1.test.mjs
+      - name: Full repository tests
+        run: npm test
+      - name: Lint
+        run: npm run lint
