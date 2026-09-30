@@ -87,7 +87,7 @@ async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
     try{if(observation?.chainId)upstreamChainId=Number(BigInt(observation.chainId));}catch{}
     const port=8545,url='http://127.0.0.1:8545';
     const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
-    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--auto-impersonate','--silent'];
+    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic','test test test test test test test test test test test junk','--auto-impersonate','--silent'];
     const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
     let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
     const started=Date.now();
@@ -142,7 +142,29 @@ async function detectDeploymentScripts(projectRoot){
   const genericPackageScripts=[];
   try{
     const pkg=JSON.parse(await fs.readFile(path.join(projectRoot,'package.json'),'utf8'));
-    for(const [name,cmd] of Object.entries(pkg.scripts??{}))if(DEPLOY_SCRIPT_RE.test(name)&&!String(cmd).includes('hardhat'))genericPackageScripts.push({name,command:String(cmd)});
+    for(const [name,cmd0] of Object.entries(pkg.scripts??{})){
+      const cmd=String(cmd0);
+      if(!DEPLOY_SCRIPT_RE.test(name)||cmd.includes('hardhat'))continue;
+      const nodeMatch=cmd.match(/^\s*node\s+([^\s]+)([\s\S]*)$/);
+      if(!nodeMatch){genericPackageScripts.push({name,command:cmd,safe:false,reason:'Package deployment command is not a directly resolvable local Node entrypoint.'});continue;}
+      const entry=nodeMatch[1].replace(/^["']|["']$/g,'');
+      const normalized=path.posix.normalize(entry.replaceAll('\\\\','/'));
+      if(normalized==='..'||normalized.startsWith('../')||path.isAbsolute(entry)){
+        genericPackageScripts.push({name,command:cmd,safe:false,reason:'Package deployment entrypoint escapes the staged project root.'});continue;
+      }
+      const absolute=path.join(projectRoot,...normalized.split('/'));
+      let source='';
+      try{source=await fs.readFile(absolute,'utf8');}catch{
+        genericPackageScripts.push({name,command:cmd,entry:normalized,safe:false,reason:'Package deployment entrypoint could not be read.'});continue;
+      }
+      const rpcEnv=/process\.env\.(?:RPC_URL|ETH_RPC_URL|LOCALHOST_RPC_URL)\b/.test(source);
+      const keyEnv=/process\.env\.(?:DEPLOYER_PRIVATE_KEY|PRIVATE_KEY|BASE_DEPLOYER_PRIVATE_KEY)\b/.test(source);
+      genericPackageScripts.push({
+        name,command:cmd,entry:normalized,argsText:String(nodeMatch[2]??'').trim(),safe:rpcEnv,
+        consumesRpcOverride:rpcEnv,consumesPrivateKey:keyEnv,
+        reason:rpcEnv?null:'Package deployment entrypoint does not mechanically consume a local RPC override.'
+      });
+    }
   }catch{}
   return{foundry,hardhat,unsafeHardhat,genericPackageScripts};
 }
@@ -169,7 +191,58 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,detected}
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     attempts.push({framework:'HARDHAT',path:item.path,entry:item.entry,command:`npx hardhat run ${item.path} --network localhost`,exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
   }
-  for(const item of detected.genericPackageScripts)limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'GENERIC_NPM',script:item.name,command:item.command,reason:'Generic package deployment command has no mechanically proven Anvil RPC override; it was not executed.'});
+  const ANVIL_ACCOUNT0='0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266';
+  const ANVIL_PRIVATE_KEY0='0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+  for(const item of detected.genericPackageScripts){
+    if(!item.safe){
+      limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'GENERIC_NODE',script:item.name,command:item.command,reason:item.reason});
+      continue;
+    }
+    if(String(account0).toLowerCase()!==ANVIL_ACCOUNT0){
+      limitations.push({type:'ANVIL_LOCAL_SIGNER_IDENTITY_MISMATCH',framework:'GENERIC_NODE',script:item.name,observedAccount0:account0,expectedAccount0:ANVIL_ACCOUNT0});
+      continue;
+    }
+    const sourcePath=path.join(projectRoot,...item.entry.split('/'));
+    let source=await fs.readFile(sourcePath,'utf8');
+    const adaptedRel=path.posix.join(path.posix.dirname(item.entry),'.phase0-anvil-'+path.posix.basename(item.entry));
+    const adaptedPath=path.join(projectRoot,...adaptedRel.split('/'));
+    let adaptation='NONE';
+    if(/\bconst\s+network\s*=\s*resolveNetwork\(NETWORK_NAME\)\s*;/.test(source)){
+      source=source.replace(
+        /\bconst\s+network\s*=\s*resolveNetwork\(NETWORK_NAME\)\s*;/,
+        'const network = { ...resolveNetwork(NETWORK_NAME), chainId: Number(process.env.PHASE0_LOCAL_CHAIN_ID || 1) };'
+      );
+      adaptation='LOCAL_CHAIN_ID_OVERRIDE';
+    }else if(/\blet\s+network\s*=\s*resolveNetwork\(NETWORK_NAME\)\s*;/.test(source)){
+      source=source.replace(
+        /\blet\s+network\s*=\s*resolveNetwork\(NETWORK_NAME\)\s*;/,
+        'let network = { ...resolveNetwork(NETWORK_NAME), chainId: Number(process.env.PHASE0_LOCAL_CHAIN_ID || 1) };'
+      );
+      adaptation='LOCAL_CHAIN_ID_OVERRIDE';
+    }else if(/\bnetwork\.chainId\b/.test(source)){
+      limitations.push({type:'DEPLOYMENT_SCRIPT_CHAIN_ID_ADAPTER_UNSUPPORTED',framework:'GENERIC_NODE',script:item.name,path:item.entry,reason:'Entrypoint consumes network.chainId but the resolved-network assignment is not in an admitted mechanical form.'});
+      continue;
+    }
+    await fs.writeFile(adaptedPath,source);
+    const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
+    const env=scrubbedEnv({
+      RPC_URL:anvilUrl,ETH_RPC_URL:anvilUrl,LOCALHOST_RPC_URL:anvilUrl,
+      PHASE0_LOCAL_CHAIN_ID:'1',
+      DEPLOYER_PRIVATE_KEY:ANVIL_PRIVATE_KEY0,
+      PRIVATE_KEY:ANVIL_PRIVATE_KEY0,
+      BASE_DEPLOYER_PRIVATE_KEY:ANVIL_PRIVATE_KEY0
+    });
+    const args=['240s','node',adaptedRel];
+    if(item.argsText)args.push(...item.argsText.split(/\s+/).filter(Boolean));
+    const r=await runProcess({command:'timeout',args,cwd:projectRoot,env});
+    const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
+    attempts.push({
+      framework:'GENERIC_NODE',script:item.name,path:item.entry,adaptedPath:adaptedRel,
+      adaptation,localChainId:1,localSigner:ANVIL_ACCOUNT0,command:['node',adaptedRel,...args.slice(3)].join(' '),
+      exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],
+      stdout:String(r.stdout??'').slice(-24000),stderr:String(r.stderr??'').slice(-24000)
+    });
+  }
   return{attempts,limitations,status:attempts.some(x=>x.status==='PASS')?'PASS':(attempts.length?'COMPLETE_WITH_FAILURES':'NO_SAFE_SCRIPT_ADAPTER')};
 }
 function deployedBytecodePrefix(a){return String(a?.bytecode??'').replace(/^0x/,'').toLowerCase();}
