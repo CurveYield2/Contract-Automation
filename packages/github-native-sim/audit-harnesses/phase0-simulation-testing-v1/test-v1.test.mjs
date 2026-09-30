@@ -110,3 +110,13 @@ test('batched accounting snapshots preserve all observations',async()=>{
   assert.deepEqual(result.systemNative,{'2':'2','3':'3'});
   assert.equal(Object.keys(result.views).length,3);
 });
+
+test('native deployment budget includes production compilation and broadcasts with bounded heartbeats',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const s=fs.readFileSync(path.resolve(here,'./engine-v1.mjs'),'utf8');
+  const run=s.slice(s.indexOf('async function executeDeploymentScripts'),s.indexOf('async function reportedPackageDeployments'));
+  assert.equal((run.match(/900s/g)??[]).length,3);
+  assert.doesNotMatch(run,/240s/);
+  assert.match(s,/native script still running; elapsed=/);
+  assert.match(s,/clearInterval\(heartbeat\)/);
+});
