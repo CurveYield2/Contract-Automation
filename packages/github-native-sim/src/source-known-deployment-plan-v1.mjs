@@ -113,8 +113,14 @@ function safeNumericExpression(expr){
 export function extractSourceKnownBindingsV1(text){
   const bindings=new Map(),source=String(text);
   for(const match of source.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*envAddress\s*\(\s*["'][^"']+["']\s*,\s*["'](0x[a-fA-F0-9]{40})["']\s*\)/g))bindings.set(match[1],match[2]);
-  for(const match of source.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:Number\s*\(\s*)?envBigInt\s*\(\s*["'][^"']+["']\s*,\s*([0-9_n+\-*/%()\s]+)\s*\)\s*\)?/g)){
-    const value=safeNumericExpression(match[2]);if(value!==null)bindings.set(match[1],value);
+  for(const match of source.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:Number\s*\(\s*)?envBigInt\s*\(/g)){
+    const open=(match.index??0)+match[0].lastIndexOf('(');
+    const call=balanced(source,open,'(',')');
+    if(!call)continue;
+    const args=splitTopLevelCsv(call.body);
+    if(args.length<2)continue;
+    const value=safeNumericExpression(args.slice(1).join(','));
+    if(value!==null)bindings.set(match[1],value);
   }
   for(const match of source.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*([0-9_n+\-*/%()\s]+)\s*;/g)){
     if(bindings.has(match[1]))continue;const value=safeNumericExpression(match[2]);if(value!==null)bindings.set(match[1],value);
