@@ -12,7 +12,7 @@ function read(relative) {
 }
 
 test('browser agent runtime is isolated from the root contract dependency graph', () => {
-  const runtime = JSON.parse(read('tools/browser-agent-runtime/package.json'));
+  const runtime = JSON.parse(read('.github/actions/setup-browser-agent-runtime/package.json'));
   const rootPackage = JSON.parse(read('package.json'));
 
   assert.deepEqual(runtime.dependencies, {
@@ -23,17 +23,18 @@ test('browser agent runtime is isolated from the root contract dependency graph'
   assert.equal(rootPackage.dependencies?.['@browserbasehq/sdk'], undefined);
   assert.equal(rootPackage.devDependencies?.['playwright-core'], undefined);
   assert.equal(rootPackage.devDependencies?.['@browserbasehq/sdk'], undefined);
+  assert.equal(fs.existsSync(path.join(root, 'tools', 'browser-agent-runtime')), false, 'old tools browser runtime path stays retired');
 });
 
 test('shared browser runtime setup caches only isolated node_modules and installs only on cache miss', () => {
   const action = read('.github/actions/setup-browser-agent-runtime/action.yml');
-  assert.match(action, /path:\s*tools\/browser-agent-runtime\/node_modules/);
-  assert.match(action, /hashFiles\('tools\/browser-agent-runtime\/package\.json'\)/);
+  assert.match(action, /path:\s*\.github\/actions\/setup-browser-agent-runtime\/node_modules/);
+  assert.match(action, /hashFiles\('\.github\/actions\/setup-browser-agent-runtime\/package\.json'\)/);
   assert.match(action, /if:\s*steps\.cache\.outputs\.cache-hit != 'true'/);
   assert.match(action, /npm install/);
-  assert.match(action, /--prefix "\$GITHUB_WORKSPACE\/tools\/browser-agent-runtime"/);
+  assert.match(action, /--prefix "\$GITHUB_WORKSPACE\/\.github\/actions\/setup-browser-agent-runtime"/);
   assert.match(action, /--package-lock=false/);
-  assert.match(action, /BROWSER_AGENT_RUNTIME_ROOT=\$GITHUB_WORKSPACE\/tools\/browser-agent-runtime/);
+  assert.match(action, /BROWSER_AGENT_RUNTIME_ROOT=\$GITHUB_WORKSPACE\/\.github\/actions\/setup-browser-agent-runtime/);
   assert.doesNotMatch(action, /npm install --no-save/);
 });
 

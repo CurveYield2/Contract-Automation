@@ -328,15 +328,15 @@ Both existing workflows reuse:
 
 The shared action restores or installs only:
 
-`tools/browser-agent-runtime/node_modules`
+`.github/actions/setup-browser-agent-runtime/node_modules`
 
 using exact direct pins from:
 
-`tools/browser-agent-runtime/package.json`
+`.github/actions/setup-browser-agent-runtime/package.json`
 
 The runtime is intentionally outside the repository's `packages/*` and `apps/*` workspaces, so browser automation does not pull or mutate the contract runner dependency graph.
 
-On a cache hit, no npm install runs. On a cache miss, npm is scoped with `--prefix tools/browser-agent-runtime`; the root Foundry/Forge/solc/ethers dependencies are never part of the browser-runtime install.
+On a cache hit, no npm install runs. On a cache miss, npm is scoped with `--prefix .github/actions/setup-browser-agent-runtime`; the root Foundry/Forge/solc/ethers dependencies are never part of the browser-runtime install.
 
 The wake script resolves `playwright-core` and `@browserbasehq/sdk` from `BROWSER_AGENT_RUNTIME_ROOT`. The root package remains free of those browser-only dependencies.
 
