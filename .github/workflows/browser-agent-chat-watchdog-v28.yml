@@ -1,0 +1,440 @@
+name: Browser Agent Chat Watchdog v28
+
+on:
+  schedule:
+    - cron: '2-59/5 * * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - 'process/browser-agent-chat-watchdog/requests/*.json'
+
+permissions:
+  contents: write
+
+env:
+  CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+  CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
+  BROWSER_HEADLESS: 'false'
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+      has_targets: ${{ steps.targets.outputs.has_targets }}
+    steps:
+      - name: Checkout triggering revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Resolve active chat watchdogs
+        id: targets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "push" ]; then
+            request_path="$(
+              git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" |
+              grep -E '^process/browser-agent-chat-watchdog/requests/[^/]+\.json$' |
+              tail -n 1
+            )"
+            [ -n "$request_path" ] && [ -f "$request_path" ] || {
+              echo "::error::No watchdog request JSON found."
+              exit 2
+            }
+
+            chat_url="$(jq -r '.chat_url // empty' "$request_path")"
+            [[ "$chat_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ ]] || {
+              echo "::error::Invalid chat_url."
+              exit 2
+            }
+
+            safe_id="$(basename "$request_path" .json | tr -c 'A-Za-z0-9._-' '_')"
+            api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-chat-watchdog/active/$safe_id.json"
+            existing_json="$(gh api "$api?ref=main" 2>/dev/null || true)"
+            existing_sha="$(jq -r '.sha // empty' <<<"$existing_json" 2>/dev/null || true)"
+            existing_chat=''
+
+            if [ -n "$existing_sha" ]; then
+              existing_chat="$(
+                jq -r '.content // empty' <<<"$existing_json" |
+                tr -d '\n' |
+                base64 -d 2>/dev/null |
+                jq -r '.chatUrl // empty' 2>/dev/null || true
+              )"
+            fi
+
+            if [ -z "$existing_sha" ] || [ "$existing_chat" != "$chat_url" ]; then
+              deadline_epoch="$(( $(date -u +%s) + 43200 ))"
+              jq -n                 --arg id "$safe_id"                 --arg chat "$chat_url"                 --argjson deadline "$deadline_epoch"                 '{
+                  schemaVersion:"curveyield-browser-agent-chat-watchdog-state-v28",
+                  id:$id,
+                  status:"ACTIVE",
+                  chatUrl:$chat,
+                  deadlineEpoch:$deadline,
+                  pokeCount:0
+                }' > /tmp/state.json
+
+              content="$(base64 -w0 /tmp/state.json)"
+              if [ -n "$existing_sha" ]; then
+                gh api --method PUT "$api"                   -f message="chore(chat-watchdog): retarget $safe_id"                   -f content="$content" -f sha="$existing_sha" -f branch=main >/dev/null
+              else
+                gh api --method PUT "$api"                   -f message="chore(chat-watchdog): arm $safe_id"                   -f content="$content" -f branch=main >/dev/null
+              fi
+            fi
+
+            jq -cn --arg id "$safe_id" '[$id]' > /tmp/targets.json
+          else
+            api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-chat-watchdog/active?ref=main"
+            if gh api "$api" --jq '.[]? | select(.type=="file" and (.name|endswith(".json"))) | .name' > /tmp/files.txt 2>/dev/null; then
+              sed -n 's/\.json$//p' /tmp/files.txt | LC_ALL=C sort -u |
+                jq -R -s 'split("\n") | map(select(length>0))' > /tmp/targets.json
+            else
+              printf '[]\n' > /tmp/targets.json
+            fi
+          fi
+
+          count="$(jq 'length' /tmp/targets.json)"
+          if [ "$count" -eq 0 ]; then
+            echo 'targets=["__NONE__"]' >> "$GITHUB_OUTPUT"
+            echo 'has_targets=false' >> "$GITHUB_OUTPUT"
+          else
+            echo "targets=$(jq -c . /tmp/targets.json)" >> "$GITHUB_OUTPUT"
+            echo 'has_targets=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  supervise:
+    needs: discover
+    if: needs.discover.outputs.has_targets == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        id: ${{ fromJSON(needs.discover.outputs.targets) }}
+    concurrency:
+      group: browser-agent-chat-watchdog-v28-${{ matrix.id }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Restore known-good ChatGPT browser state
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-36335218452-1-0
+
+      - name: Set up isolated browser-agent runtime
+        uses: ./.github/actions/setup-browser-agent-runtime
+
+      - name: Check supplied existing chat and wake if idle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WATCHDOG_ID: ${{ matrix.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-chat-watchdog/active/$WATCHDOG_ID.json"
+          encoded="$(gh api "$api?ref=main" --jq '.content' 2>/dev/null || true)"
+          [ -n "$encoded" ] || exit 0
+          printf '%s' "$encoded" | base64 -d > /tmp/state.json
+
+          export CHAT_URL="$(jq -r '.chatUrl' /tmp/state.json)"
+          deadline_epoch="$(jq -r '.deadlineEpoch' /tmp/state.json)"
+          now_epoch="$(date -u +%s)"
+
+          if [ "$now_epoch" -ge "$deadline_epoch" ]; then
+            sha="$(gh api "$api?ref=main" --jq '.sha')"
+            gh api --method DELETE "$api"               -f message="chore(chat-watchdog): expire $WATCHDOG_ID"               -f sha="$sha" -f branch=main >/dev/null
+            echo "Watchdog $WATCHDOG_ID expired after 12 hours."
+            exit 0
+          fi
+
+          export WAKE_MESSAGE='GET BACK TO WORK'
+          export WAKE_RESULT_PATH='/tmp/wake.json'
+
+          xvfb-run -a node --input-type=module <<'NODE'
+          import fs from 'node:fs/promises';
+          import path from 'node:path';
+          import { createRequire } from 'node:module';
+          import { pathToFileURL } from 'node:url';
+          import {
+            deriveSessionStateKeyB64,
+            loadEncryptedSessionState,
+            validateStorageState,
+          } from './scripts/browser-session-state-v1.mjs';
+
+          const env = process.env;
+          const chatUrl = env.CHAT_URL;
+          const wakeMessage = env.WAKE_MESSAGE;
+          const resultPath = env.WAKE_RESULT_PATH;
+          const sessionPath = '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
+          const keyB64 = deriveSessionStateKeyB64({
+            keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
+            bootstrapStateB64: env.CHATGPT_STORAGE_STATE_B64,
+          });
+
+          const runtimeRoot = env.BROWSER_AGENT_RUNTIME_ROOT;
+          const runtimeRequire = createRequire(path.join(runtimeRoot, 'package.json'));
+          const playwrightMod = await import(pathToFileURL(runtimeRequire.resolve('playwright-core')).href);
+          const chromium = playwrightMod.chromium || playwrightMod.default?.chromium;
+          if (!chromium) throw new Error('playwright-core chromium unavailable');
+
+          let storage = await loadEncryptedSessionState({
+            encryptedSessionPath: sessionPath,
+            keyB64,
+          });
+          let source = storage ? 'encrypted-cache' : '';
+
+          if (!storage && env.CHATGPT_STORAGE_STATE_B64) {
+            const bootstrap = JSON.parse(
+              Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'),
+            );
+            if (!validateStorageState(bootstrap)) {
+              throw new Error('CHATGPT_STORAGE_STATE_B64 is invalid');
+            }
+            storage = bootstrap;
+            source = 'bootstrap-secret';
+          }
+          if (!storage) throw new Error('No ChatGPT session state is available');
+
+          console.log('[chat-watchdog-v22] Using ' + source + ' session state');
+
+          const browser = await chromium.launch({
+            headless: env.BROWSER_HEADLESS !== 'false',
+            channel: 'chrome',
+          });
+          const context = await browser.newContext({ storageState: storage });
+          const page = await context.newPage();
+
+          async function firstVisible(selectors) {
+            for (const selector of selectors) {
+              const locator = page.locator(selector).first();
+              try {
+                if (await locator.isVisible({ timeout: 700 })) return locator;
+              } catch {}
+            }
+            return null;
+          }
+
+          async function composer() {
+            return firstVisible([
+              '#prompt-textarea',
+              'textarea[placeholder*="Message"]',
+              '[contenteditable="true"][data-lexical-editor="true"]',
+              '[contenteditable="true"]',
+            ]);
+          }
+
+          async function composerText(locator) {
+            const tag = await locator.evaluate(el => el.tagName.toLowerCase());
+            if (tag === 'textarea' || tag === 'input') {
+              return (await locator.inputValue().catch(() => '')).trim();
+            }
+            return (await locator.innerText().catch(() => '')).trim();
+          }
+
+          async function generating() {
+            return !!(await firstVisible([
+              'button[data-testid="stop-button"]',
+              'button[aria-label*="Stop"]',
+              'button:has-text("Stop generating")',
+            ]));
+          }
+
+          async function pageState() {
+            const body = await page.locator('body').innerText().catch(() => '');
+            const title = await page.title().catch(() => '');
+            const comp = await composer();
+            return {
+              composerVisible: !!comp,
+              generating: await generating(),
+              humanChallenge:
+                /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(body) ||
+                /Just a moment|Cloudflare/i.test(title),
+              loginPrompt: /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(body),
+              conversationUnavailable:
+                /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(body),
+              url: page.url(),
+            };
+          }
+
+          async function waitUsable(timeoutMs = 60000) {
+            const deadline = Date.now() + timeoutMs;
+            let state = await pageState();
+            while (Date.now() < deadline) {
+              if (
+                state.composerVisible &&
+                !state.humanChallenge &&
+                !state.loginPrompt &&
+                !state.conversationUnavailable
+              ) return state;
+              if (state.loginPrompt || state.conversationUnavailable) return state;
+              await page.waitForTimeout(1000);
+              state = await pageState();
+            }
+            return state;
+          }
+
+          async function exactWakeCount() {
+            const matches = page.getByText(wakeMessage, { exact: true });
+            return matches.count().catch(() => 0);
+          }
+
+          try {
+            await page.goto(chatUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+            const before = await waitUsable();
+
+            if (
+              before.humanChallenge ||
+              before.loginPrompt ||
+              before.conversationUnavailable ||
+              !before.composerVisible
+            ) {
+              throw new Error('Supplied existing chat is not usable');
+            }
+
+            if (before.generating) {
+              const result = {
+                ok: true,
+                posted: false,
+                skipped: 'PRODUCTIVE_GENERATING',
+                before,
+              };
+              await fs.writeFile(resultPath, JSON.stringify(result, null, 2) + '\n');
+              console.log(JSON.stringify(result));
+              process.exit(0);
+            }
+
+            const beforeWakeCount = await exactWakeCount();
+            const comp = await composer();
+            await comp.click();
+
+            const tag = await comp.evaluate(el => el.tagName.toLowerCase());
+            if (tag === 'textarea' || tag === 'input') {
+              await comp.fill(wakeMessage);
+            } else {
+              await comp.press('Control+A').catch(() => {});
+              await comp.press('Meta+A').catch(() => {});
+              await comp.press('Backspace').catch(() => {});
+              await page.keyboard.insertText(wakeMessage);
+            }
+
+            const typed = await composerText(comp);
+            if (typed !== wakeMessage) {
+              throw new Error('Wake text was not entered into the composer');
+            }
+
+            console.log('[chat-watchdog-v22] Wake text entered; submitting with Enter');
+            await comp.press('Enter');
+
+            const submitDeadline = Date.now() + 15000;
+            let sent = false;
+            let sawGenerating = false;
+            let finalComposerText = typed;
+            let afterWakeCount = beforeWakeCount;
+
+            while (Date.now() < submitDeadline) {
+              await page.waitForTimeout(250);
+              const currentComp = await composer();
+              finalComposerText = currentComp ? await composerText(currentComp) : '';
+              sawGenerating = sawGenerating || await generating();
+              afterWakeCount = await exactWakeCount();
+
+              if (
+                finalComposerText === '' &&
+                (afterWakeCount > beforeWakeCount || sawGenerating)
+              ) {
+                sent = true;
+                break;
+              }
+            }
+
+            if (!sent) {
+              const sendButton = page.locator('button[data-testid="send-button"]').first();
+              if (
+                finalComposerText === wakeMessage &&
+                await sendButton.isVisible({ timeout: 1000 }).catch(() => false)
+              ) {
+                console.log('[chat-watchdog-v22] Enter did not submit; clicking exact send-button');
+                await sendButton.click();
+                const fallbackDeadline = Date.now() + 10000;
+                while (Date.now() < fallbackDeadline) {
+                  await page.waitForTimeout(250);
+                  const currentComp = await composer();
+                  finalComposerText = currentComp ? await composerText(currentComp) : '';
+                  sawGenerating = sawGenerating || await generating();
+                  afterWakeCount = await exactWakeCount();
+                  if (
+                    finalComposerText === '' &&
+                    (afterWakeCount > beforeWakeCount || sawGenerating)
+                  ) {
+                    sent = true;
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (!sent) {
+              throw new Error(
+                'GET BACK TO WORK was not verified as submitted: composer="' +
+                finalComposerText +
+                '", exactTextCountBefore=' + beforeWakeCount +
+                ', exactTextCountAfter=' + afterWakeCount +
+                ', sawGenerating=' + sawGenerating,
+              );
+            }
+
+            const result = {
+              ok: true,
+              posted: true,
+              chatUrl: page.url(),
+              composerCleared: finalComposerText === '',
+              exactTextCountBefore: beforeWakeCount,
+              exactTextCountAfter: afterWakeCount,
+              sawGenerating,
+            };
+            await fs.writeFile(resultPath, JSON.stringify(result, null, 2) + '\n');
+            console.log(JSON.stringify(result));
+          } finally {
+            await browser.close().catch(() => {});
+          }
+          NODE
+
+          skipped="$(jq -r '.skipped // empty' /tmp/wake.json)"
+          posted="$(jq -r '.posted // false' /tmp/wake.json)"
+
+          if [ "$skipped" = "PRODUCTIVE_GENERATING" ]; then
+            echo "Watchdog $WATCHDOG_ID: agent is actively generating; no message sent."
+          elif [ "$posted" = true ]; then
+            echo "Watchdog $WATCHDOG_ID: GET BACK TO WORK verified as submitted in existing chat."
+            jq '.pokeCount=((.pokeCount // 0)+1)' /tmp/state.json > /tmp/state-next.json
+            sha="$(gh api "$api?ref=main" --jq '.sha')"
+            content="$(base64 -w0 /tmp/state-next.json)"
+            gh api --method PUT "$api"               -f message="chore(chat-watchdog): poke $WATCHDOG_ID"               -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+          else
+            echo "::error::Wake was neither skipped nor verified as submitted."
+            exit 1
+          fi
