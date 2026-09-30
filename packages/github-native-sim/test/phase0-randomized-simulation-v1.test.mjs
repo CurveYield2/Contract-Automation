@@ -81,3 +81,14 @@ test('Phase-0 canonical Ethereum baseline uses the qualified RPC identity proxy 
   assert.doesNotMatch(source,/if\(upstreamChainId!==1\)/);
   assert.match(source,/identityNormalized:anvil\.identityNormalized===true/);
 });
+
+
+test('Phase-0 artifact ABI normalization accepts array, nested abi array, and numeric-key object forms',async()=>{
+  const sourcePath=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../src/phase0-randomized-simulation-v1.mjs');
+  const source=fs.readFileSync(sourcePath,'utf8');
+  assert.match(source,/function normalizedAbi\(abi\)/);
+  assert.match(source,/Array\.isArray\(abi\)/);
+  assert.match(source,/Array\.isArray\(abi\?\.abi\)/);
+  assert.match(source,/Object\.values\(abi\)/);
+  assert.doesNotMatch(source,/new ethers\.Interface\(a\.abi\?\?\[\]\)/);
+});
