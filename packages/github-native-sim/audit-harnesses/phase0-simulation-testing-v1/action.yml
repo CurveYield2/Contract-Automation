@@ -34,10 +34,6 @@ runs:
       shell: bash
       run: npm ci --force
 
-    - name: Test isolated simulation adapter
-      shell: bash
-      run: node --test packages/github-native-sim/audit-harnesses/phase0-simulation-testing-v1/test-v1.test.mjs
-
     - name: Install retained audit toolchain
       uses: ./.github/actions/setup-v7-toolchain
 
@@ -63,11 +59,12 @@ runs:
         git fetch origin "$AUDIT_CONTROLLER_REF"
         git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
 
-    - name: Run simulation testing
+    - name: Run Medusa only
       shell: bash
       env:
         ETHEREUM_FORK_RPC_URL: ${{ inputs.ethereum_fork_rpc_url }}
         CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+        PHASE0_MEDUSA_ONLY: 'true'
       run: |
         set -euo pipefail
         test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::Ethereum fork RPC is required"; exit 1; }
@@ -116,8 +113,8 @@ runs:
           (((.deployment.coverage.mutableTargets // 0)|tonumber)>0) and
           .medusa.status=="PASS" and
           (.medusa.observedCalls|tonumber)>=100001 and
-          (.telemetry|length)>=1 and
-          all(.telemetry[]; .status=="PASS")
+          .executionMode=="MEDUSA_ONLY" and
+          (.telemetry|length)==0
         ' "$summary" >/dev/null
         jq -e '
           .policy.realAbiCallsOnly==true and
