@@ -67,7 +67,7 @@ jobs:
           else
             mapfile -t changed < <(
               gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status != "removed") | .filename' |
-              grep -E '^\process/agent-upload/lite-v7-execution/[^/]+\.json$' || true
+              grep -E '^process/agent-upload/lite-v7-execution/[^/]+\.json$' || true
             )
             [ "${#changed[@]}" -eq 1 ] || { echo "::error::Expected exactly one changed Lite V7 execution dispatch request; found ${#changed[@]}."; exit 1; }
             encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/${changed[0]}?ref=$GITHUB_SHA" --jq '.content')"

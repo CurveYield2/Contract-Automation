@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
           mapfile -t changed < <(
             gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status!="removed") | .filename' |
-            grep -E '^\process/agent-upload/phase0-simulation-rebind/[^/]+\.json$' || true
+            grep -E '^process/agent-upload/phase0-simulation-rebind/[^/]+\.json$' || true
           )
           [ "${#changed[@]}" -eq 1 ] || { echo "::error::Expected exactly one Phase-0 simulation rebind request; found ${#changed[@]}."; exit 1; }
           jq -e '

@@ -7,6 +7,16 @@ import { V7_POLICY } from '../packages/github-native-sim/src/v7-policy.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const excluded = new Set(['node_modules', '.git', 'dist']);
+const legacyAgentUpload = path.join(root, '.agent-upload');
+const canonicalAgentUpload = path.join(root, 'process', 'agent-upload');
+try {
+  await fs.access(legacyAgentUpload);
+  throw new Error('legacy root .agent-upload inbox must remain retired; use process/agent-upload');
+} catch (error) {
+  if (error?.code !== 'ENOENT') throw error;
+}
+try { await fs.access(canonicalAgentUpload); }
+catch { throw new Error('missing canonical process/agent-upload inbox'); }
 const files = [];
 async function walk(directory) {
   for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
