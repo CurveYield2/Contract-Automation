@@ -1,0 +1,182 @@
+name: Lite Phase 0 Randomized Simulation Native Test v1
+
+on:
+  workflow_call:
+    inputs:
+      campaign_id:
+        required: true
+        type: string
+      campaign_path:
+        required: true
+        type: string
+      audit_controller_ref:
+        required: false
+        default: main
+        type: string
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        description: Exact existing Audit-Controller campaign ID
+        required: true
+        type: string
+      campaign_path:
+        description: Exact existing campaign workspace path
+        required: true
+        type: string
+      audit_controller_ref:
+        description: Audit-Controller ref containing the campaign
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  phase0-randomized-simulation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install trusted runner dependencies
+        run: npm ci --force
+
+      - name: Install retained audit toolchain
+        uses: ./.github/actions/setup-v7-toolchain
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Checkout exact campaign
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          rm -rf .audit-controller
+          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
+          cd .audit-controller
+          git fetch origin "$AUDIT_CONTROLLER_REF"
+          git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
+
+      - name: Run Anvil baseline, deployment simulation, Medusa and ABI telemetry
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::SIM_ARCHIVE_PRIMARY_ETHEREUM_01 is required for the default Ethereum Phase-0 fork"; exit 1; }
+          rm -rf .phase0-randomized-native-test-output
+          node scripts/run-phase0-randomized-simulation-native-test-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --output .phase0-randomized-native-test-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-randomized.json
+
+      - name: Report randomized simulation diagnostics
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          summary=.phase0-randomized-native-test-output/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
+          if [ ! -f "$summary" ]; then
+            echo "::warning::Phase-0 randomized simulation summary was not produced"
+            exit 0
+          fi
+          echo "---- deployment coverage ----"
+          jq '.deployment.coverage // {}' "$summary" || true
+          echo "---- deployment failures / limitations ----"
+          jq '[.deployment.limitations[]? | select(.type | test("SOURCE_PLAN_(DEPLOYMENT_FAILED|CONSTRUCTOR_ARGUMENT_UNRESOLVED|ARTIFACT_RESOLUTION_FAILED)"))] | .[:40]' "$summary" || true
+          echo "---- failed deployment attempts ----"
+          jq '[.deployment.attempts[]? | select(.status != "PASS")] | .[:40]' "$summary" || true
+          echo "---- Medusa ----"
+          jq '.medusa // {}' "$summary" || true
+
+      - name: Retain raw randomized simulation output
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase0-randomized-native-test-${{ inputs.campaign_id }}-${{ github.run_id }}
+          path: .phase0-randomized-native-test-output
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Require complete randomized simulation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary=.phase0-randomized-native-test-output/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
+          index=.phase0-randomized-native-test-output/PHASE0_SIMULATION_RUN_INDEX_v1.json
+          jq -e '
+            .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE" and
+            ((.deployment.coverage.sourcePlanUnresolved // 0)|tonumber)==0 and
+            (
+              (((.deployment.coverage.mutableTargets // 0)|tonumber)>0 and
+               .medusa.status=="PASS" and
+               (.medusa.observedCalls|tonumber)>=100001 and
+               (.telemetry|length)>=1 and
+               all(.telemetry[]; .status=="PASS"))
+              or
+              (((.deployment.coverage.mutableTargets // 0)|tonumber)==0 and
+               ((.deployment.coverage.sourcePlanPlanned // 0)|tonumber)==0 and
+               ((.deployment.coverage.zeroArgFallbackCandidates // 0)|tonumber)==0)
+            )
+          ' "$summary" >/dev/null
+          jq -e '
+            .policy.realAbiCallsOnly==true and
+            .policy.rawRandomBytes==false and
+            .policy.crossContractBursts==true and
+            (.policy.accountingActionWeight|tonumber)>=0.8 and
+            .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE"
+          ' "$index" >/dev/null
+
+      - name: Project outputs into exact later-phase formats
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/write-phase0-simulation-outputs-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --simulation-output .phase0-randomized-native-test-output
+
+      - name: Publish Phase-0 simulation evidence
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git config user.name 'CurveYield Phase0 Simulation Automation'
+          git config user.email 'phase0-simulation@users.noreply.github.com'
+          git add -- "$CAMPAIGN_PATH/evidence/phase0" "$CAMPAIGN_PATH/derived/phase-0" "$CAMPAIGN_PATH/work/phase-06"
+          if git diff --cached --quiet; then
+            echo "::error::Phase-0 randomized simulation produced no durable outputs"
+            exit 1
+          fi
+          git commit -m "audit(phase0): add randomized simulation baseline ${{ inputs.campaign_id }}"
+          git push origin "HEAD:$AUDIT_CONTROLLER_REF"
+
+      - name: Summarize
+        shell: bash
+        run: |
+          {
+            echo "## Phase-0 randomized simulation"
+            echo "- State engine: Anvil Ethereum fork"
+            echo "- Deployment scripts: framework-native Anvil adapters only; no source mutation"
+            echo "- Medusa: Anvil-forked baseline, >100K call requirement"
+            echo "- ABI telemetry: real ABI calls, randomized cross-contract bursts, 80% accounting/state-change action target"
+            echo "- Raw telemetry: one JSONL transcript per ABI shard"
+            echo "- Later consumers: Phase 5 design + Phase 6 interpretation"
+          } >> "$GITHUB_STEP_SUMMARY"
