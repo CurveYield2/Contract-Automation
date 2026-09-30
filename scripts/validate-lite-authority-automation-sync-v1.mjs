@@ -167,7 +167,8 @@ need(phase0Simulation.includes('buildBurstSchedule')&&phase0Simulation.includes(
 need(phase0Simulation.includes('beforeAccounting')&&phase0Simulation.includes('afterAccounting')&&phase0Simulation.includes('accountingDeltas'),'Phase 0 raw telemetry lacks pre/post accounting evidence');
 need(phase0Simulation.includes('RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),'Phase 0 raw per-run transcript is missing');
 need(phase0Simulation.includes('forkModeEnabled:true')&&phase0Simulation.includes('rpcUrl:anvilUrl'),'Medusa is not forked from the Anvil RPC state');
-need(phase0Simulation.includes('PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED'),'non-Ethereum Anvil-to-Medusa chain limitation is not typed');
+need(phase0Simulation.includes('ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE'),'Phase 0 does not normalize all EVM packages onto the canonical Ethereum Anvil baseline');
+need(!phase0Simulation.includes("if(targetChainIds.some(id=>id!==1))"),'Phase 0 still suppresses randomized execution for non-Ethereum EVM target chain IDs');
 need(phase0Simulation.includes('DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE'),'deployment-script adapter does not preserve typed unsafe-binding limitations');
 need(phase0SimulationWorkflow.includes('SIM_ARCHIVE_PRIMARY_ETHEREUM_01'),'Phase 0 simulation workflow is not bound to the canonical Ethereum fork RPC');
 need(phase0Bootstrap.includes('needs: randomized-simulation'),'Phase 0 finalization is not gated on randomized simulation');
@@ -300,7 +301,7 @@ process.stdout.write(JSON.stringify({
     'controller-prefill declarations versus automation production/protection',
     'derived-output declarations versus controller generation/routing',
     'Phase-0 required outputs/state transitions versus current automation producers/finalizer',
-    'Phase-0 Anvil deployment simulation, >100K Medusa baseline, ABI telemetry and raw transcript contract',
+    'Phase-0 Anvil deployment simulation, universal EVM normalization, >100K Medusa baseline, ABI telemetry and raw transcript contract',
     'Phase-0 simulation projection into Phase 5 design and Phase 6 interpretation',
     'assignment-v2 campaign discovery versus shared controller protocol',
     'agent-operable controller-validation trigger and canonical routing',
