@@ -554,7 +554,9 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
 
   if(sequence===5){
     form.actions['step-1'].outputs.economicReviewRecords=economicScaffold(si??{},form.actions['step-1'].outputs.economicReviewRecords);
-    const phase0Baseline=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0/PHASE5_SIMULATION_BASELINE_INPUT_v1.json')));
+    const phase0Baseline=
+      readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0-rebind/PHASE5_SIMULATION_BASELINE_INPUT_v1.json'))) ??
+      readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0/PHASE5_SIMULATION_BASELINE_INPUT_v1.json')));
     const baselineInput=phase0Baseline?.data?.automationInputs?.phase0BaselineSimulation;
     if(baselineInput!==undefined){
       form.automationInputs.phase0BaselineSimulation=baselineInput;
@@ -564,7 +566,9 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
 
   if(sequence===6){
     const deployRows=deployAssessmentScaffold(root,campaignPath);
-    const phase0Baseline=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0/PHASE6_SIMULATION_BASELINE_INPUT_v1.json')));
+    const phase0Baseline=
+      readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0-rebind/PHASE6_SIMULATION_BASELINE_INPUT_v1.json'))) ??
+      readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0/PHASE6_SIMULATION_BASELINE_INPUT_v1.json')));
     const baselineRows=phase0Baseline?.data?.automationInputs?.phase0BaselineTargetDispositions??[];
     const phase5Rows=targetDispositionScaffold(prefillContext.targetDesigns??[],prefillContext.phase5ExecutionResults??{});
     const targetRows=[...(Array.isArray(baselineRows)?baselineRows:[]),...(Array.isArray(phase5Rows)?phase5Rows.filter(x=>typeof x==='object'):[])];
