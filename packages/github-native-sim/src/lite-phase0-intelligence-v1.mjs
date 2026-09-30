@@ -221,7 +221,7 @@ async function writeCryticCompileExport({projectRoot,build,outDir}){
     compilation_units[buildUnit.unitId]={
       compiler:{
         compiler:'solc',
-        version:String(buildUnit.compilerVersion??''),
+        version:slitherCompilerVersion(buildUnit.compilerVersion),
         optimized:buildUnit.settings?.optimizer?.enabled!==false
       },
       source_units,
