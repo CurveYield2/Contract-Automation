@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1} from '../src/phase0-randomized-simulation-v1.mjs';
-import {extractSourceKnownDeployPlanV1,extractSourceKnownBindingsV1} from '../src/source-known-deployment-plan-v1.mjs';
+import {extractSourceKnownDeployPlanV1,extractSourceKnownBindingsV1,extractSourceKnownCompileGroupsV1} from '../src/source-known-deployment-plan-v1.mjs';
 
 function rngSeq(values){let i=0;return()=>values[(i++)%values.length];}
 function fn(accounting,name='f'){
@@ -130,4 +130,44 @@ test('compiler artifacts preserve library link references required by constructo
   const source=fs.readFileSync(path.resolve(here,'../../runner/src/compiler.mjs'),'utf8');
   assert.match(source,/evm\.bytecode\.linkReferences/);
   assert.match(source,/linkReferences:\s*artifact\?\.evm\?\.bytecode\?\.linkReferences/);
+});
+
+
+test('Phase-0 source-known compile groups preserve deployment entries separately from requested contract names',()=>{
+  const source=`
+    const coreEntries = [
+      "contracts/Foo.sol",
+      "../../vendor/pkg/contracts/Vault.sol",
+      "contracts/UnusedButRequiredSource.sol",
+    ];
+    const hooksEntries = ["contracts/Hook.sol"];
+    function compileAll() {
+      const groups = [
+        [coreEntries, ["Foo", "Vault"]],
+        [hooksEntries, ["Hook"]],
+      ];
+      return groups;
+    }
+  `;
+  const groups=extractSourceKnownCompileGroupsV1(source);
+  assert.equal(groups.length,2);
+  assert.deepEqual(groups[0].entryFiles,[
+    'contracts/Foo.sol',
+    '../../vendor/pkg/contracts/Vault.sol',
+    'contracts/UnusedButRequiredSource.sol'
+  ]);
+  assert.deepEqual(groups[0].contractNames,['Foo','Vault']);
+  assert.deepEqual(groups[1].entryFiles,['contracts/Hook.sol']);
+  assert.deepEqual(groups[1].contractNames,['Hook']);
+});
+
+test('Phase-0 randomized simulation compiles declared deployment-entry artifacts before starting Anvil',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const compileAt=source.indexOf('compileSourceKnownDeploymentArtifactsV1');
+  const anvilAt=source.indexOf('anvil=await startAnvil');
+  assert.ok(compileAt>=0);
+  assert.ok(anvilAt>compileAt);
+  assert.match(source,/sourceKnownCompiledTargets/);
+  assert.match(source,/sourceKnownMissingTargets/);
 });

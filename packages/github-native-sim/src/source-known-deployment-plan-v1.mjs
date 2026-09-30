@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {compileHermeticDeploymentEntriesV1} from '../../runner/src/hermetic-standard-json.mjs';
 
 function normalizedAbi(abi){
   if(Array.isArray(abi))return abi;
@@ -10,7 +11,7 @@ function normalizedAbi(abi){
   }
   return[];
 }
-function artifactAccessor(artifacts=[]){
+function artifactAccessor(artifacts=[],preferredEntriesByName=new Map()){
   const byName=new Map();
   for(const artifact of artifacts){
     if(!artifact?.contractName)continue;
@@ -20,8 +21,13 @@ function artifactAccessor(artifacts=[]){
   return{
     get(name){
       const rows=byName.get(name)??[];
-      if(rows.length!==1)throw new Error('artifact name is missing or ambiguous: '+name);
-      return rows[0];
+      const preferred=preferredEntriesByName.get(name)??new Set();
+      const direct=rows.filter((artifact)=>preferred.has(path.posix.normalize(String(artifact.sourceName??''))));
+      if(direct.length===1)return direct[0];
+      if(rows.length===0)throw new Error('artifact missing: '+name);
+      if(direct.length>1)throw new Error('artifact source mapping remains ambiguous: '+name+' -> '+direct.map(x=>x.sourceName).join(', '));
+      if(rows.length===1)return rows[0];
+      throw new Error('artifact name is ambiguous without a declared deployment source: '+name+' -> '+rows.map(x=>x.sourceName).join(', '));
     }
   };
 }
@@ -99,6 +105,48 @@ export function extractSourceKnownDeployPlanV1(text){
   }
   return rows.sort((a,b)=>a.index-b.index);
 }
+function parseQuotedArrayBody(body){
+  const values=[];
+  for(const part of splitTopLevelCsv(body)){
+    const trimmed=part.trim();
+    const quoted=readQuoted(trimmed,0);
+    if(quoted&&quoted.end===trimmed.length)values.push(quoted.value);
+  }
+  return values;
+}
+export function extractSourceKnownCompileGroupsV1(text){
+  const source=String(text),entryArrays=new Map(),groups=[];
+  for(const match of source.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*Entries)\s*=\s*\[/g)){
+    const open=(match.index??0)+match[0].lastIndexOf('[');
+    const array=balanced(source,open,'[',']');
+    if(array)entryArrays.set(match[1],parseQuotedArrayBody(array.body));
+  }
+  for(const match of source.matchAll(/\[\s*([A-Za-z_$][A-Za-z0-9_$]*Entries)\s*,\s*\[/g)){
+    const entryVar=match[1],entryFiles=entryArrays.get(entryVar);
+    if(!entryFiles?.length)continue;
+    const secondOpen=(match.index??0)+match[0].lastIndexOf('[');
+    const names=balanced(source,secondOpen,'[',']');
+    if(!names)continue;
+    const contractNames=parseQuotedArrayBody(names.body);
+    if(contractNames.length)groups.push({entryVariable:entryVar,entryFiles,contractNames});
+  }
+  const seen=new Set();
+  return groups.filter((group)=>{
+    const key=group.entryVariable+'|'+group.entryFiles.join('|')+'|'+group.contractNames.join('|');
+    if(seen.has(key))return false;seen.add(key);return true;
+  });
+}
+function preferredEntriesByName(groups){
+  const map=new Map();
+  for(const group of groups??[]){
+    for(const name of group.contractNames??[]){
+      const set=map.get(name)??new Set();
+      for(const entry of group.entryFiles??[])set.add(path.posix.normalize(String(entry)));
+      map.set(name,set);
+    }
+  }
+  return map;
+}
 function safeNumericExpression(expr){
   const text=String(expr).trim().replaceAll('_','');
   if(!text||/[A-MO-Za-mo-z_$.[\]{}'",?:]/.test(text))return null;
@@ -150,6 +198,34 @@ function sourcePlanPaths(detected){
   }
   return[...out];
 }
+async function sourcePlanCandidates(projectRoot,detected){
+  const candidates=[];
+  for(const rel of sourcePlanPaths(detected)){
+    const abs=path.join(projectRoot,...rel.split('/'));let text='';
+    try{text=await fs.readFile(abs,'utf8');}catch{continue;}
+    const steps=extractSourceKnownDeployPlanV1(text);
+    if(steps.length)candidates.push({rel,text,steps,compileGroups:extractSourceKnownCompileGroupsV1(text),score:steps.length*100+(/deploy/i.test(rel)?10:0)});
+  }
+  candidates.sort((a,b)=>b.score-a.score||a.rel.localeCompare(b.rel));
+  return candidates;
+}
+export async function compileSourceKnownDeploymentArtifactsV1({projectRoot,detected,request}){
+  const candidates=await sourcePlanCandidates(projectRoot,detected);
+  if(!candidates.length)return{status:'NO_SOURCE_KNOWN_DEPLOYMENT_PLAN',planPath:null,groups:[],artifacts:[],selectedTargets:[],missingTargets:[],limitations:[]};
+  const chosen=candidates[0];
+  if(!chosen.compileGroups.length){
+    return{status:'NO_DECLARED_DEPLOYMENT_COMPILE_GROUPS',planPath:chosen.rel,groups:[],artifacts:[],selectedTargets:[],missingTargets:[],limitations:[{type:'SOURCE_PLAN_COMPILE_GROUPS_NOT_FOUND',planPath:chosen.rel}]};
+  }
+  try{
+    const result=await compileHermeticDeploymentEntriesV1({projectRoot,request,groups:chosen.compileGroups});
+    return{...result,planPath:chosen.rel,groups:chosen.compileGroups,limitations:(result.missingTargets??[]).map((row)=>({type:'SOURCE_PLAN_DEPLOYMENT_ARTIFACT_NOT_COMPILED',planPath:chosen.rel,...row}))};
+  }catch(error){
+    return{
+      status:'DEPLOYMENT_ENTRY_COMPILATION_FAILED',planPath:chosen.rel,groups:chosen.compileGroups,artifacts:[],selectedTargets:[],missingTargets:[],
+      limitations:[{type:'SOURCE_PLAN_DEPLOYMENT_ENTRY_COMPILATION_FAILED',planPath:chosen.rel,code:error?.code??null,message:String(error?.message??error).slice(0,3000)}]
+    };
+  }
+}
 function linkedBytecode(artifact,libraries){
   let linked=String(artifact?.bytecode??'0x').replace(/^0x/,'');
   for(const libs of Object.values(artifact?.linkReferences??{})){
@@ -167,17 +243,10 @@ function linkedBytecode(artifact,libraries){
   return'0x'+linked;
 }
 export async function deploySourceKnownPlanV1({projectRoot,provider,ethers,artifacts,detected}){
-  const candidates=[];
-  for(const rel of sourcePlanPaths(detected)){
-    const abs=path.join(projectRoot,...rel.split('/'));let text='';
-    try{text=await fs.readFile(abs,'utf8');}catch{continue;}
-    const steps=extractSourceKnownDeployPlanV1(text);
-    if(steps.length)candidates.push({rel,text,steps,score:steps.length*100+(/deploy/i.test(rel)?10:0)});
-  }
-  candidates.sort((a,b)=>b.score-a.score||a.rel.localeCompare(b.rel));
+  const candidates=await sourcePlanCandidates(projectRoot,detected);
   if(!candidates.length)return{status:'NO_SOURCE_KNOWN_DEPLOYMENT_PLAN',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0};
 
-  const chosen=candidates[0],accessor=artifactAccessor(artifacts),signer=await provider.getSigner(0),accountAddress=await signer.getAddress(),startNonce=await provider.getTransactionCount(accountAddress);
+  const chosen=candidates[0],accessor=artifactAccessor(artifacts,preferredEntriesByName(chosen.compileGroups)),signer=await provider.getSigner(0),accountAddress=await signer.getAddress(),startNonce=await provider.getTransactionCount(accountAddress);
   const predictedByContract=new Map(chosen.steps.map((step,index)=>[step.contractName,ethers.getCreateAddress({from:accountAddress,nonce:startNonce+index})]));
   const bindings=extractSourceKnownBindingsV1(chosen.text);
   for(const match of chosen.text.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*report\.predictedDeployments\.find\([\s\S]{0,240}?entry\.name\s*===\s*["']([^"']+)["'][\s\S]{0,240}?\)\.expectedAddress\s*;/g)){
