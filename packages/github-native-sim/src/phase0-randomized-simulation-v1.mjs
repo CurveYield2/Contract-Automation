@@ -76,6 +76,10 @@ async function rpc(url,method,params=[]){
 async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
   let identityProxy;
   try{
+    const ethers=await import('ethers');
+    const ephemeralWallet=ethers.Wallet.createRandom();
+    const ephemeralMnemonic=ephemeralWallet.mnemonic?.phrase;
+    if(!ephemeralMnemonic)throw new Error('Unable to generate ephemeral Anvil mnemonic');
     identityProxy=await startRpcIdentityProxy({upstreamUrl:forkUrl,chainId:1});
     const normalizedChainId=Number(BigInt(await rpc(identityProxy.url,'eth_chainId',[])));
     if(normalizedChainId!==1){
@@ -87,7 +91,7 @@ async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
     try{if(observation?.chainId)upstreamChainId=Number(BigInt(observation.chainId));}catch{}
     const port=8545,url='http://127.0.0.1:8545';
     const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
-    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic','test test test test test test test test test test test junk','--auto-impersonate','--silent'];
+    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--auto-impersonate','--silent'];
     const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
     let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
     const started=Date.now();
@@ -97,8 +101,16 @@ async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
       await sleep(100);
     }
     if(Date.now()-started>=30000){child.kill('SIGKILL');throw new Error('Anvil RPC readiness timeout');}
+    const accounts=await rpc(url,'eth_accounts',[]);
+    const account0=String(accounts?.[0]??'').toLowerCase();
+    if(account0!==ephemeralWallet.address.toLowerCase()){
+      child.kill('SIGKILL');
+      const e=new Error(`Ephemeral Anvil signer mismatch: rpc=${account0} derived=${ephemeralWallet.address.toLowerCase()}`);
+      e.code='ANVIL_EPHEMERAL_SIGNER_MISMATCH';throw e;
+    }
     return{
       url,upstreamChainId,identityNormalized:true,child,
+      localSigner:{address:account0,privateKey:ephemeralWallet.privateKey},
       async close(){
         if(child.exitCode===null){
           child.kill('SIGTERM');
@@ -168,7 +180,7 @@ async function detectDeploymentScripts(projectRoot){
   }catch{}
   return{foundry,hardhat,unsafeHardhat,genericPackageScripts};
 }
-async function executeDeploymentScripts({projectRoot,anvilUrl,account0,detected}){
+async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSigner,detected}){
   const attempts=[],limitations=[];
   let help='';
   if(detected.foundry.length){const h=await runProcess({command:'forge',args:['script','--help'],cwd:projectRoot,env:scrubbedEnv()});help=`${h.stdout}\n${h.stderr}`;}
@@ -191,15 +203,13 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,detected}
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     attempts.push({framework:'HARDHAT',path:item.path,entry:item.entry,command:`npx hardhat run ${item.path} --network localhost`,exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
   }
-  const ANVIL_ACCOUNT0='0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266';
-  const ANVIL_PRIVATE_KEY0='0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
   for(const item of detected.genericPackageScripts){
     if(!item.safe){
       limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'GENERIC_NODE',script:item.name,command:item.command,reason:item.reason});
       continue;
     }
-    if(String(account0).toLowerCase()!==ANVIL_ACCOUNT0){
-      limitations.push({type:'ANVIL_LOCAL_SIGNER_IDENTITY_MISMATCH',framework:'GENERIC_NODE',script:item.name,observedAccount0:account0,expectedAccount0:ANVIL_ACCOUNT0});
+    if(!localSigner?.privateKey||String(account0).toLowerCase()!==String(localSigner.address??'').toLowerCase()){
+      limitations.push({type:'ANVIL_LOCAL_SIGNER_IDENTITY_MISMATCH',framework:'GENERIC_NODE',script:item.name,observedAccount0:account0,expectedAccount0:localSigner?.address??null});
       continue;
     }
     const sourcePath=path.join(projectRoot,...item.entry.split('/'));
@@ -228,9 +238,9 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,detected}
     const env=scrubbedEnv({
       RPC_URL:anvilUrl,ETH_RPC_URL:anvilUrl,LOCALHOST_RPC_URL:anvilUrl,
       PHASE0_LOCAL_CHAIN_ID:'1',
-      DEPLOYER_PRIVATE_KEY:ANVIL_PRIVATE_KEY0,
-      PRIVATE_KEY:ANVIL_PRIVATE_KEY0,
-      BASE_DEPLOYER_PRIVATE_KEY:ANVIL_PRIVATE_KEY0
+      DEPLOYER_PRIVATE_KEY:localSigner.privateKey,
+      PRIVATE_KEY:localSigner.privateKey,
+      BASE_DEPLOYER_PRIVATE_KEY:localSigner.privateKey
     });
     const args=['240s','node',adaptedRel];
     if(item.argsText)args.push(...item.argsText.split(/\s+/).filter(Boolean));
@@ -238,7 +248,7 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,detected}
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     attempts.push({
       framework:'GENERIC_NODE',script:item.name,path:item.entry,adaptedPath:adaptedRel,
-      adaptation,localChainId:1,localSigner:ANVIL_ACCOUNT0,command:['node',adaptedRel,...args.slice(3)].join(' '),
+      adaptation,localChainId:1,localSigner:localSigner.address,command:['node',adaptedRel,...args.slice(3)].join(' '),
       exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],
       stdout:String(r.stdout??'').slice(-24000),stderr:String(r.stderr??'').slice(-24000)
     });
@@ -554,7 +564,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const artifacts=[...artifactByQualified.values()];
     anvil=await startAnvil({forkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
     const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
-    const deployment=await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],detected});
+    const deployment=await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],localSigner:anvil.localSigner,detected});
     const scriptEnd=Number(await provider.getBlockNumber()),scriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
     const sourcePlan=scriptDeployments.length?{status:'SKIPPED_FRAMEWORK_SCRIPT_SUCCEEDED',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0}:await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
     const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows],targets=targetObjects(ethers,artifacts,deployed);
