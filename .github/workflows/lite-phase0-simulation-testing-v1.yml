@@ -1,6 +1,9 @@
 name: Lite Phase 0 Simulation Testing v1
 
 on:
+  push:
+    paths:
+      - 'simulation-forks/phase0-simulation-testing-v1/requests/*.json'
   workflow_dispatch:
     inputs:
       campaign_id:
@@ -30,14 +33,40 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 2
 
-      - name: Run isolated simulation testing fork
+      - name: Resolve Simulation Testing request
+        id: request
+        shell: bash
+        env:
+          DISPATCH_CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          DISPATCH_CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+          DISPATCH_AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            campaign_id="$DISPATCH_CAMPAIGN_ID"
+            campaign_path="$DISPATCH_CAMPAIGN_PATH"
+            audit_controller_ref="${DISPATCH_AUDIT_CONTROLLER_REF:-main}"
+          else
+            request="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep '^simulation-forks/phase0-simulation-testing-v1/requests/.*\.json | tail -n 1)"
+            test -n "$request" || { echo "::error::No Simulation Testing request file found in trigger commit"; exit 1; }
+            campaign_id="$(jq -r '.campaign_id' "$request")"
+            campaign_path="$(jq -r '.campaign_path' "$request")"
+            audit_controller_ref="$(jq -r '.audit_controller_ref // "main"' "$request")"
+          fi
+          test -n "$campaign_id"
+          test -n "$campaign_path"
+          echo "campaign_id=$campaign_id" >> "$GITHUB_OUTPUT"
+          echo "campaign_path=$campaign_path" >> "$GITHUB_OUTPUT"
+          echo "audit_controller_ref=$audit_controller_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Run isolated Simulation Testing fork
         uses: ./simulation-forks/phase0-simulation-testing-v1
         with:
-          campaign_id: ${{ inputs.campaign_id }}
-          campaign_path: ${{ inputs.campaign_path }}
-          audit_controller_ref: ${{ inputs.audit_controller_ref }}
+          campaign_id: ${{ steps.request.outputs.campaign_id }}
+          campaign_path: ${{ steps.request.outputs.campaign_path }}
+          audit_controller_ref: ${{ steps.request.outputs.audit_controller_ref }}
           audit_controller_token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           fallback_token: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           ethereum_fork_rpc_url: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
