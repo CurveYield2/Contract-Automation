@@ -72,6 +72,33 @@ jobs:
           rm -rf .phase0-randomized-output
           node scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --output .phase0-randomized-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-randomized.json
 
+      - name: Report randomized simulation diagnostics
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          summary=.phase0-randomized-output/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
+          if [ ! -f "$summary" ]; then
+            echo "::warning::Phase-0 randomized simulation summary was not produced"
+            exit 0
+          fi
+          echo "---- deployment coverage ----"
+          jq '.deployment.coverage // {}' "$summary" || true
+          echo "---- deployment failures / limitations ----"
+          jq '[.deployment.limitations[]? | select(.type | test("SOURCE_PLAN_(DEPLOYMENT_FAILED|CONSTRUCTOR_ARGUMENT_UNRESOLVED|ARTIFACT_RESOLUTION_FAILED)"))] | .[:40]' "$summary" || true
+          echo "---- failed deployment attempts ----"
+          jq '[.deployment.attempts[]? | select(.status != "PASS")] | .[:40]' "$summary" || true
+          echo "---- Medusa ----"
+          jq '.medusa // {}' "$summary" || true
+
+      - name: Retain raw randomized simulation output
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase0-randomized-${{ inputs.campaign_id }}-${{ github.run_id }}
+          path: .phase0-randomized-output
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Require complete randomized simulation evidence
         shell: bash
         run: |
