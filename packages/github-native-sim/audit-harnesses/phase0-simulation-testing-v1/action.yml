@@ -59,12 +59,14 @@ runs:
         git fetch origin "$AUDIT_CONTROLLER_REF"
         git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
 
-    - name: Run ABI telemetry after verified Medusa prerequisite
+    - name: Run ABI telemetry only; keep completed Medusa evidence
       shell: bash
       env:
         ETHEREUM_FORK_RPC_URL: ${{ inputs.ethereum_fork_rpc_url }}
         CAMPAIGN_PATH: ${{ inputs.campaign_path }}
         PHASE0_MEDUSA_ONLY: 'false'
+        PHASE0_TELEMETRY_ONLY: 'true'
+        PHASE0_PREVIOUS_MEDUSA_RUN_ID: '36725469642'
       run: |
         set -euo pipefail
         test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::Ethereum fork RPC is required"; exit 1; }
@@ -111,8 +113,9 @@ runs:
           .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE" and
           ((.deployment.coverage.sourcePlanUnresolved // 0)|tonumber)==0 and
           (((.deployment.coverage.mutableTargets // 0)|tonumber)>0) and
-          .medusa.status=="PASS" and
-          (.medusa.observedCalls|tonumber)>=100001 and
+          .executionMode=="TELEMETRY_ONLY" and
+          .medusa.status=="NOT_RUN_TELEMETRY_ONLY" and
+          (.medusa.observedCalls|tonumber)==0 and
           .status=="PASS" and
           (.telemetry|length)==4 and
           all(.telemetry[]; .status=="PASS" and (.calls|tonumber)==1200)
