@@ -184,6 +184,31 @@ async function detectDeploymentScripts(projectRoot){
   }catch{}
   return{foundry,hardhat,unsafeHardhat,genericPackageScripts};
 }
+function canonicalEthereumExecutionOverrides(source){
+  const text=String(source??''),env={};
+  const adaptations=[];
+  const MAINNET_WETH='0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
+  const PERMIT2='0x000000000022D473030F116dDEE9F6B43aC78BA3';
+  const networkEnvRe=/networkAddress\s*\(\s*network\s*,\s*["']([^"']+)["']\s*,\s*["']([^"']+)["']\s*\)/g;
+  for(const match of text.matchAll(networkEnvRe)){
+    const key=match[1],envName=match[2];
+    if(key==='weth'){env[envName]=MAINNET_WETH;adaptations.push({type:'CANONICAL_ETHEREUM_WETH',env:envName,value:MAINNET_WETH});}
+    else if(key==='permit2'){env[envName]=PERMIT2;adaptations.push({type:'CANONICAL_ETHEREUM_PERMIT2',env:envName,value:PERMIT2});}
+    else if(key==='defaultPayoutToken'){
+      env[envName]=MAINNET_WETH;
+      adaptations.push({type:'CANONICAL_ETHEREUM_ERC20_PAYOUT_SUBSTITUTE',env:envName,value:MAINNET_WETH,basis:'LOCAL_SIMULATION_REQUIRES_ERC20_CODE_ON_ETHEREUM_FORK'});
+    }
+  }
+  if(/\bMAX_FEE_PER_GAS\b/.test(text)){
+    env.MAX_FEE_PER_GAS='1000000000000';
+    adaptations.push({type:'LOCAL_SIMULATION_GAS_CAP',env:'MAX_FEE_PER_GAS',value:env.MAX_FEE_PER_GAS});
+  }
+  if(/\bMAX_PRIORITY_FEE_PER_GAS\b/.test(text)){
+    env.MAX_PRIORITY_FEE_PER_GAS='1000000000';
+    adaptations.push({type:'LOCAL_SIMULATION_PRIORITY_FEE',env:'MAX_PRIORITY_FEE_PER_GAS',value:env.MAX_PRIORITY_FEE_PER_GAS});
+  }
+  return{env,adaptations};
+}
 async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSigner,detected}){
   const attempts=[],limitations=[];
   let help='';
@@ -239,12 +264,14 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSign
     }
     await fs.writeFile(adaptedPath,source);
     const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
+    const executionOverrides=canonicalEthereumExecutionOverrides(source);
     const env=scrubbedEnv({
       RPC_URL:anvilUrl,ETH_RPC_URL:anvilUrl,LOCALHOST_RPC_URL:anvilUrl,
       PHASE0_LOCAL_CHAIN_ID:'1',
       DEPLOYER_PRIVATE_KEY:localSigner.privateKey,
       PRIVATE_KEY:localSigner.privateKey,
-      BASE_DEPLOYER_PRIVATE_KEY:localSigner.privateKey
+      BASE_DEPLOYER_PRIVATE_KEY:localSigner.privateKey,
+      ...executionOverrides.env
     });
     const args=['240s','node',adaptedRel];
     if(item.argsText)args.push(...item.argsText.split(/\s+/).filter(Boolean));
@@ -252,7 +279,7 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSign
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     attempts.push({
       framework:'GENERIC_NODE',script:item.name,path:item.entry,adaptedPath:adaptedRel,
-      adaptation,localChainId:1,localSigner:localSigner.address,command:['node',adaptedRel,...args.slice(3)].join(' '),
+      adaptation,executionOverrides:executionOverrides.adaptations,localChainId:1,localSigner:localSigner.address,command:['node',adaptedRel,...args.slice(3)].join(' '),
       exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],
       stdout:String(r.stdout??'').slice(-24000),stderr:String(r.stderr??'').slice(-24000)
     });
