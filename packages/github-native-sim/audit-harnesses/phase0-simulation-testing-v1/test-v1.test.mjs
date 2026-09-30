@@ -45,3 +45,16 @@ test('simulation testing installs staged package dependencies from package-lock 
   assert.match(source,/npm','ci','--ignore-scripts','--audit=false','--fund=false/);
   assert.match(source,/SIMULATION_TESTING_PACKAGE_DEPENDENCY_INSTALL_FAILED/);
 });
+
+test('gas overrides bind to consumed environment keys, including WEI suffix',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'./engine-v1.mjs'),'utf8');
+  const body=source.slice(source.indexOf('function canonicalEthereumExecutionOverrides'),source.indexOf('async function executeDeploymentScripts'));
+  const overrides=new Function(body+';return canonicalEthereumExecutionOverrides;')();
+  const result=overrides('const MAX_FEE_PER_GAS=envBigInt("MAX_FEE_PER_GAS_WEI",1); const MAX_PRIORITY_FEE_PER_GAS=envBigInt("MAX_PRIORITY_FEE_PER_GAS_WEI",2);');
+  assert.deepEqual(result.env,{MAX_FEE_PER_GAS_WEI:'1000000000000',MAX_PRIORITY_FEE_PER_GAS_WEI:'1000000000'});
+  assert.deepEqual(result.adaptations.map(x=>x.env),Object.keys(result.env));
+  const legacy=overrides('const fee=process.env.MAX_FEE_PER_GAS; const tip=envBigInt("MAX_PRIORITY_FEE_PER_GAS",2);');
+  assert.deepEqual(legacy.env,{MAX_FEE_PER_GAS:'1000000000000',MAX_PRIORITY_FEE_PER_GAS:'1000000000'});
+  assert.deepEqual(overrides('const MAX_FEE_PER_GAS=1;').env,{});
+});
