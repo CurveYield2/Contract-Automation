@@ -58,18 +58,12 @@ if(bundle.identity?.sourceDigestSha256!==sourceSha) throw new Error('Source Inte
 const simulation=read(evidence.randomizedSimulation);
 const runIndex=read(evidence.simulationRunIndex);
 const deployExecution=read(evidence.deployConfigExecution);
-if(simulation.code==='PHASE0_NON_ETHEREUM_FORK_UNSUPPORTED'){
-  if(simulation.status!=='COMPLETE_WITH_TYPED_LIMITATIONS') throw new Error('Non-Ethereum Phase-0 simulation must seal only as COMPLETE_WITH_TYPED_LIMITATIONS');
-  if(deployExecution.status!=='NOT_APPLICABLE_NON_ETHEREUM') throw new Error('Non-Ethereum Phase-0 path must materialize deploy/config evidence as NOT_APPLICABLE_NON_ETHEREUM');
-  if((runIndex.runs??[]).length!==0) throw new Error('Non-Ethereum Phase-0 limitation path must not claim randomized simulation runs');
-  if(simulation.medusa?.status!=='NOT_APPLICABLE_NON_ETHEREUM') throw new Error('Non-Ethereum Phase-0 path must mark Medusa NOT_APPLICABLE_NON_ETHEREUM');
-}else{
-  const medusa=simulation.medusa??{};
-  if(medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS'){
-    if(medusa.status!=='PASS') throw new Error('Phase-0 Medusa simulation did not PASS on the admitted Ethereum path: '+String(medusa.status??'MISSING'));
-    if(Number(medusa.observedCalls??0)<100001) throw new Error('Phase-0 Medusa simulation did not exceed 100,000 randomized ABI calls');
-  }
+const medusa=simulation.medusa??{};
+if(medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS'){
+  if(medusa.status!=='PASS') throw new Error('Phase-0 Medusa simulation did not PASS on the canonical Ethereum Anvil execution baseline: '+String(medusa.status??'MISSING'));
+  if(Number(medusa.observedCalls??0)<100001) throw new Error('Phase-0 Medusa simulation did not exceed 100,000 randomized ABI calls');
 }
+if(runIndex.executionNormalization?.policy!=='ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE') throw new Error('Phase-0 simulation must normalize EVM packages onto the canonical Ethereum Anvil baseline');
 if(runIndex.policy?.realAbiCallsOnly!==true||runIndex.policy?.rawRandomBytes!==false) throw new Error('Phase-0 randomized simulation policy must require real ABI calls and forbid raw random calldata');
 if(Number(runIndex.policy?.accountingActionWeight??0)<0.8) throw new Error('Phase-0 randomized simulation accounting/state-change action weight must be at least 80%');
 if(runIndex.policy?.crossContractBursts!==true) throw new Error('Phase-0 ABI telemetry must use randomized cross-contract bursts');
