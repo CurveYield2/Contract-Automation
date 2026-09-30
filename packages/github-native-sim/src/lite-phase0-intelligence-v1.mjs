@@ -142,60 +142,103 @@ function sourceIsDependency(sourceName){
   return !String(sourceName).replaceAll('\\\\','/').startsWith('contracts/');
 }
 async function writeCryticCompileExport({projectRoot,build,outDir}){
-  const asts=build?.sourceAsts??{};
-  if(!asts||Object.keys(asts).length===0)throw new Error('Slither exact-build export requires compiler ASTs');
-  const artifacts=Array.isArray(build?.artifacts)?build.artifacts:[];
-  if(artifacts.length===0)throw new Error('Slither exact-build export requires compiler artifacts');
-  const bySource=new Map();
-  for(const sourceName of Object.keys(asts).sort()){
-    const absolute=await resolveCompiledSourceFile(projectRoot,sourceName);
-    const filename={absolute,relative:sourceName,short:sourceName,used:sourceName};
-    bySource.set(sourceName,{ast:asts[sourceName],contracts:{},filename});
-  }
-  for(const artifact of artifacts){
-    const sourceName=artifact.sourceName;
-    if(!bySource.has(sourceName)){
-      const absolute=await resolveCompiledSourceFile(projectRoot,sourceName);
-      bySource.set(sourceName,{ast:null,contracts:{},filename:{absolute,relative:sourceName,short:sourceName,used:sourceName}});
+  const buildUnits=(Array.isArray(build?.compilationUnits)&&build.compilationUnits.length)
+    ? build.compilationUnits.map((unit,index)=>({
+        unitId:unit.unitId??`unit-${index+1}`,
+        compilerVersion:unit.compilerVersion??build.compilerVersion??'',
+        settings:unit.settings??{},
+        sourceAsts:unit.sourceAsts??{},
+        sourceContents:unit.sourceContents??{},
+        artifacts:Array.isArray(unit.artifacts)?unit.artifacts:[]
+      }))
+    : [{
+        unitId:'phase0',
+        compilerVersion:build?.compilerVersion??'',
+        settings:{optimizer:{enabled:true}},
+        sourceAsts:build?.sourceAsts??{},
+        sourceContents:{},
+        artifacts:Array.isArray(build?.artifacts)?build.artifacts:[]
+      }];
+  if(!buildUnits.some(unit=>Object.keys(unit.sourceAsts).length))throw new Error('Slither exact-build export requires compiler ASTs');
+  if(!buildUnits.some(unit=>unit.artifacts.length))throw new Error('Slither exact-build export requires compiler artifacts');
+
+  await fs.rm(outDir,{recursive:true,force:true});
+  await fs.mkdir(outDir,{recursive:true});
+  const compilation_units={};
+  let sourceUnitCount=0,contractCount=0;
+
+  for(const buildUnit of buildUnits){
+    const bySource=new Map();
+    const sourceNames=[...new Set([
+      ...Object.keys(buildUnit.sourceAsts??{}),
+      ...Object.keys(buildUnit.sourceContents??{}),
+      ...buildUnit.artifacts.map(artifact=>artifact.sourceName).filter(Boolean)
+    ])].sort();
+    for(const sourceName of sourceNames){
+      let absolute;
+      if(Object.prototype.hasOwnProperty.call(buildUnit.sourceContents??{},sourceName)){
+        const safeName=sourceName.split('/').map(part=>part==='..'?'__parent__':part.replace(/[^A-Za-z0-9._@+-]/g,'_')).join('/');
+        absolute=path.join(outDir,'materialized',buildUnit.unitId,...safeName.split('/'));
+        await fs.mkdir(path.dirname(absolute),{recursive:true});
+        await fs.writeFile(absolute,String(buildUnit.sourceContents[sourceName]));
+      }else{
+        absolute=await resolveCompiledSourceFile(projectRoot,sourceName);
+      }
+      const filename={absolute,relative:sourceName,short:sourceName,used:sourceName};
+      bySource.set(sourceName,{ast:buildUnit.sourceAsts?.[sourceName]??null,contracts:{},filename});
     }
-    const unit=bySource.get(sourceName);
-    unit.contracts[artifact.contractName]={
-      abi:artifact.abi??[],
-      bin:String(artifact.bytecode??'0x').replace(/^0x/,''),
-      'bin-runtime':String(artifact.deployedBytecode??'0x').replace(/^0x/,''),
-      srcmap:artifact.bytecodeSourceMap??'',
-      'srcmap-runtime':artifact.deployedBytecodeSourceMap??'',
-      filenames:unit.filename,
-      libraries:{},
-      is_dependency:sourceIsDependency(sourceName),
-      userdoc:artifact.userdoc??{},
-      devdoc:artifact.devdoc??{}
+
+    for(const artifact of buildUnit.artifacts){
+      const sourceName=artifact.sourceName;
+      if(!bySource.has(sourceName)){
+        const absolute=await resolveCompiledSourceFile(projectRoot,sourceName);
+        bySource.set(sourceName,{ast:null,contracts:{},filename:{absolute,relative:sourceName,short:sourceName,used:sourceName}});
+      }
+      const sourceUnit=bySource.get(sourceName);
+      sourceUnit.contracts[artifact.contractName]={
+        abi:artifact.abi??[],
+        bin:String(artifact.bytecode??'0x').replace(/^0x/,''),
+        'bin-runtime':String(artifact.deployedBytecode??'0x').replace(/^0x/,''),
+        srcmap:artifact.bytecodeSourceMap??'',
+        'srcmap-runtime':artifact.deployedBytecodeSourceMap??'',
+        filenames:sourceUnit.filename,
+        libraries:{},
+        is_dependency:sourceIsDependency(sourceName),
+        userdoc:artifact.userdoc??{},
+        devdoc:artifact.devdoc??{}
+      };
+      contractCount++;
+    }
+
+    const source_units={};
+    const filenames=[];
+    for(const [sourceName,sourceUnit] of [...bySource.entries()].sort(([a],[b])=>a.localeCompare(b))){
+      source_units[sourceName]={ast:sourceUnit.ast,contracts:sourceUnit.contracts};
+      filenames.push(sourceUnit.filename);
+      sourceUnitCount++;
+    }
+    compilation_units[buildUnit.unitId]={
+      compiler:{
+        compiler:'solc',
+        version:String(buildUnit.compilerVersion??''),
+        optimized:buildUnit.settings?.optimizer?.enabled!==false
+      },
+      source_units,
+      filenames
     };
   }
-  const source_units={};
-  const filenames=[];
-  for(const [sourceName,unit] of [...bySource.entries()].sort(([a],[b])=>a.localeCompare(b))){
-    source_units[sourceName]={ast:unit.ast,contracts:unit.contracts};
-    filenames.push(unit.filename);
-  }
+
   const payload={
-    compilation_units:{
-      phase0:{
-        compiler:{compiler:'solc',version:String(build.compilerVersion??''),optimized:true},
-        source_units,
-        filenames
-      }
-    },
+    compilation_units,
     package:null,
     working_dir:projectRoot,
     type:10,
     unit_tests:[],
     crytic_version:'0.0.2'
   };
-  await fs.mkdir(outDir,{recursive:true});
   const exportPath=path.join(outDir,'phase0_export.json');
   await fs.writeFile(exportPath,JSON.stringify(payload));
-  return{exportPath,sourceUnitCount:Object.keys(source_units).length,contractCount:artifacts.length};
+  return{exportPath,sourceUnitCount,contractCount,compilationUnitCount:Object.keys(compilation_units).length};
 }
 async function runSlitherExport({projectRoot,build,sourceCommit}){
   const exportInfo=await writeCryticCompileExport({projectRoot,build,outDir:path.join(projectRoot,'.audit-slither-export')});
@@ -545,10 +588,11 @@ async function main(){
   };
 
   const build=await buildProject({projectRoot:detected.absolute,request:pseudo});
+  const effectiveCfg={...cfg,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
   const slither=await slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit});
   const sbom=await generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build});
   const sourceIntelligence=await generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}});
-  const projectReadiness=await scanProjectReadiness({projectRoot:detected.absolute,build,cfg});
+  const projectReadiness=await scanProjectReadiness({projectRoot:detected.absolute,build,cfg:effectiveCfg});
   const deployConfigExecution=await executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness});
 
   if(!slitherSucceeded(slither))throw new Error('Slither terminal result is not successful');
@@ -559,8 +603,8 @@ async function main(){
     requestId:request.requestId,campaignId:request.campaignId,
     source:{...request.source,checkoutCommit:checkout.commit,archiveSha256Observed:observed},
     discovery:{projectPath:detected.relativePath,topCandidates:detected.candidates,archiveEntryCount:extraction.entryCount,archiveExtractedBytes:extraction.extractedBytes},
-    configurationDetection:cfg,
-    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
+    configurationDetection:effectiveCfg,
+    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??1,embeddedBuildContract:build.embeddedBuildContract??null,sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
     status:'PASS'
   };
 
