@@ -59,12 +59,12 @@ runs:
         git fetch origin "$AUDIT_CONTROLLER_REF"
         git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
 
-    - name: Run Medusa only
+    - name: Run ABI telemetry after verified Medusa prerequisite
       shell: bash
       env:
         ETHEREUM_FORK_RPC_URL: ${{ inputs.ethereum_fork_rpc_url }}
         CAMPAIGN_PATH: ${{ inputs.campaign_path }}
-        PHASE0_MEDUSA_ONLY: 'true'
+        PHASE0_MEDUSA_ONLY: 'false'
       run: |
         set -euo pipefail
         test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::Ethereum fork RPC is required"; exit 1; }
@@ -113,8 +113,9 @@ runs:
           (((.deployment.coverage.mutableTargets // 0)|tonumber)>0) and
           .medusa.status=="PASS" and
           (.medusa.observedCalls|tonumber)>=100001 and
-          .executionMode=="MEDUSA_ONLY" and
-          (.telemetry|length)==0
+          .status=="PASS" and
+          (.telemetry|length)==4 and
+          all(.telemetry[]; .status=="PASS" and (.calls|tonumber)==1200)
         ' "$summary" >/dev/null
         jq -e '
           .policy.realAbiCallsOnly==true and
