@@ -24,5 +24,8 @@ process.stdout.write(JSON.stringify({
   medusaStatus:result.summary?.medusa?.status??null,
   medusaObservedCalls:result.summary?.medusa?.observedCalls??0,
   telemetryRuns:result.summary?.telemetry?.length??0,
-  deploymentStatus:result.deployEvidence?.status??null
+  deploymentStatus:result.deployEvidence?.status??null,
+  code:result.summary?.code??null,
+  message:result.summary?.message??null,
+  targetEvmChainIds:result.summary?.targetEvmChainIds??result.runIndex?.targetEvmChainIds??[]
 },null,2)+'\n');
