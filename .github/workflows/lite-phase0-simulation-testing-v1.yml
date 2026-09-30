@@ -22,6 +22,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   simulation-testing:
@@ -48,20 +49,37 @@ jobs:
             campaign_id="$DISPATCH_CAMPAIGN_ID"
             campaign_path="$DISPATCH_CAMPAIGN_PATH"
             audit_controller_ref="${DISPATCH_AUDIT_CONTROLLER_REF:-main}"
+            cancel_run_id=""
           else
             request="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -E '^packages/github-native-sim/audit-harnesses/phase0-simulation-testing-v1/requests/.*[.]json$' | tail -n 1)"
             test -n "$request" || { echo "::error::No Simulation Testing request file found in trigger commit"; exit 1; }
             campaign_id="$(jq -r '.campaign_id' "$request")"
             campaign_path="$(jq -r '.campaign_path' "$request")"
             audit_controller_ref="$(jq -r '.audit_controller_ref // "main"' "$request")"
+            cancel_run_id="$(jq -r '.cancel_run_id // empty' "$request")"
           fi
           test -n "$campaign_id"
           test -n "$campaign_path"
           echo "campaign_id=$campaign_id" >> "$GITHUB_OUTPUT"
           echo "campaign_path=$campaign_path" >> "$GITHUB_OUTPUT"
           echo "audit_controller_ref=$audit_controller_ref" >> "$GITHUB_OUTPUT"
+          [[ "$cancel_run_id" =~ ^[0-9]*$ ]] || { echo "::error::Invalid cancellation run ID"; exit 1; }
+          echo "cancel_run_id=$cancel_run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Cancel exact isolated simulation attempt
+        if: steps.request.outputs.cancel_run_id != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANCEL_RUN_ID: ${{ steps.request.outputs.cancel_run_id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANCEL_RUN_ID" > /tmp/cancel-target.json
+          jq -e '.path==".github/workflows/lite-phase0-simulation-testing-v1.yml" and .status!="completed"' /tmp/cancel-target.json >/dev/null
+          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$CANCEL_RUN_ID/cancel"
 
       - name: Run isolated Simulation Testing fork
+        if: steps.request.outputs.cancel_run_id == ''
         uses: ./packages/github-native-sim/audit-harnesses/phase0-simulation-testing-v1
         with:
           campaign_id: ${{ steps.request.outputs.campaign_id }}
