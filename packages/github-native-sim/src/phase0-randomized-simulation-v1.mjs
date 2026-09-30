@@ -328,6 +328,13 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
     const accountingFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.accounting).length,0);
     const otherFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>!x.accounting).length,0);
     const stats={calls:0,accountingActions:0,otherActions:0,accountingFunctionCount,otherFunctionCount,weightingLimitation:accountingFunctionCount===0?'NO_ACCOUNTING_STATE_CHANGE_FUNCTIONS_DETECTED':null,successes:0,reverts:0,errors:0,byContract:{},byFunction:{},burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))};
+    const telemetryStartedAt=Date.now();
+    console.log(`[phase0-telemetry] ${runId} started; targetCalls=${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; heartbeat every 300s`);
+    const telemetryHeartbeat=setInterval(()=>{
+      const elapsedSeconds=Math.floor((Date.now()-telemetryStartedAt)/1000);
+      console.log(`[phase0-telemetry] heartbeat: run=${runId}; elapsed=${elapsedSeconds}s; calls=${stats.calls}/${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; successes=${stats.successes}; reverts=${stats.reverts}; errors=${stats.errors}`);
+    },300000);
+    telemetryHeartbeat.unref?.();
     try{
       for(const burst of schedule){
         const target=targets[burst.targetIndex];
@@ -350,7 +357,8 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
           await h.write(JSON.stringify(rec)+'\n');
         }
       }
-    }finally{await h.close();}
+    }finally{clearInterval(telemetryHeartbeat);await h.close();}
+    console.log(`[phase0-telemetry] ${runId} completed; elapsed=${Math.floor((Date.now()-telemetryStartedAt)/1000)}s; calls=${stats.calls}; successes=${stats.successes}; reverts=${stats.reverts}; errors=${stats.errors}`);
     const bytes=await fs.readFile(file),summary={schemaVersion:'curveyield-phase0-abi-telemetry-run-v1',runId,purpose:'INVESTIGATIVE_TELEMETRY_FOR_LATER_REVIEWERS_NOT_MANUAL_REVERIFICATION',...stats,accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,interleavedCrossContractBursts:true,rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,status:stats.calls===PHASE0_TELEMETRY_CALLS_PER_RUN_V1?'PASS':'INCOMPLETE'};
     await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');summaries.push(summary);
   }
