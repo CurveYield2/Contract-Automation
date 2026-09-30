@@ -1,0 +1,199 @@
+name: Lite Phase 0 Simulation Rebind v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.agent-upload/phase0-simulation-rebind/*.json'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: phase0-simulation-rebind-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  rebind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve one rebind request
+        id: request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t changed < <(
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status!="removed") | .filename' |
+            grep -E '^\.agent-upload/phase0-simulation-rebind/[^/]+\.json$' || true
+          )
+          [ "${#changed[@]}" -eq 1 ] || { echo "::error::Expected exactly one Phase-0 simulation rebind request; found ${#changed[@]}."; exit 1; }
+          jq -e '
+            .schemaVersion=="curveyield-phase0-simulation-rebind-request-v1" and
+            (.campaignId|type=="string" and length>0) and
+            (.campaignPath|type=="string" and startswith("campaigns/")) and
+            (.sourceSha256|type=="string" and test("^[0-9a-f]{64}$"))
+          ' "${changed[0]}" >/dev/null
+          echo "campaign_id=$(jq -r '.campaignId' "${changed[0]}")" >> "$GITHUB_OUTPUT"
+          echo "campaign_path=$(jq -r '.campaignPath' "${changed[0]}")" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(jq -r '.sourceSha256' "${changed[0]}")" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install trusted runner dependencies
+        run: npm ci --force
+
+      - name: Install retained audit toolchain
+        uses: ./.github/actions/setup-v7-toolchain
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Checkout current Audit-Controller main
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          rm -rf .audit-controller
+          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none
+          cd .audit-controller
+          git checkout main
+          git pull --ff-only origin main
+
+      - name: Validate sealed campaign and preserve current handoff
+        env:
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+          CAMPAIGN_PATH: ${{ steps.request.outputs.campaign_path }}
+          SOURCE_SHA: ${{ steps.request.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          root=pathlib.Path('.audit-controller')
+          campaign=pathlib.Path(os.environ['CAMPAIGN_PATH'])
+          receipt=json.loads((root/campaign/'receipts/PHASE_00_RECEIPT_v1.json').read_text())
+          assert receipt['phase']['status']=='SEALED'
+          assert receipt['validation']['status']=='PASS'
+          assert receipt['campaign']['campaignId']==os.environ['CAMPAIGN_ID']
+          assert receipt['source']['sha256']==os.environ['SOURCE_SHA']
+          slug=re.sub(r'-r[0-9]+$','',os.environ['CAMPAIGN_ID'])
+          directory=json.loads((root/'Audit Campaign Directory/campaigns'/f'{slug}.json').read_text())
+          assert directory['campaignId']==os.environ['CAMPAIGN_ID']
+          assert directory['workspacePath']==os.environ['CAMPAIGN_PATH']
+          assert directory['sourceSha256']==os.environ['SOURCE_SHA']
+          assert int(directory['currentAssignment']['phaseSequence'])>=1
+          before={
+            'campaignStatus':directory['campaignStatus'],
+            'currentAssignment':directory['currentAssignment'],
+            'lastSealedReceiptPath':directory['lastSealedReceiptPath']
+          }
+          pathlib.Path('/tmp/pre-rebind-assignment.json').write_text(json.dumps(before,sort_keys=True,indent=2))
+          PY
+
+      - name: Execute corrected randomized simulation on canonical Ethereum Anvil baseline
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::SIM_ARCHIVE_PRIMARY_ETHEREUM_01 is required"; exit 1; }
+          rm -rf .phase0-rebind-output
+          node scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ steps.request.outputs.campaign_path }}"             --output .phase0-rebind-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-rebind-run.json
+
+      - name: Require complete corrected simulation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary=.phase0-rebind-output/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
+          index=.phase0-rebind-output/PHASE0_SIMULATION_RUN_INDEX_v1.json
+          jq -e '
+            .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE" and
+            .medusa.status=="PASS" and
+            (.medusa.observedCalls|tonumber)>=100001 and
+            (.telemetry|length)>=1 and
+            all(.telemetry[]; .status=="PASS")
+          ' "$summary" >/dev/null
+          jq -e '
+            .policy.realAbiCallsOnly==true and
+            .policy.rawRandomBytes==false and
+            .policy.crossContractBursts==true and
+            (.policy.accountingActionWeight|tonumber)>=0.8 and
+            .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE"
+          ' "$index" >/dev/null
+
+      - name: Write supplemental rebind evidence without touching sealed Phase-0 outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/write-phase0-simulation-rebind-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ steps.request.outputs.campaign_path }}"             --simulation-output .phase0-rebind-output             --contract-automation-sha "$GITHUB_SHA"
+
+      - name: Verify Phase-1 handoff is unchanged
+        env:
+          CAMPAIGN_ID: ${{ steps.request.outputs.campaign_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, os, re
+          root=pathlib.Path('.audit-controller')
+          slug=re.sub(r'-r[0-9]+$','',os.environ['CAMPAIGN_ID'])
+          directory=json.loads((root/'Audit Campaign Directory/campaigns'/f'{slug}.json').read_text())
+          before=json.loads(pathlib.Path('/tmp/pre-rebind-assignment.json').read_text())
+          after={
+            'campaignStatus':directory['campaignStatus'],
+            'currentAssignment':directory['currentAssignment'],
+            'lastSealedReceiptPath':directory['lastSealedReceiptPath']
+          }
+          assert after==before, 'Phase-0 simulation rebind changed the active handoff/assignment'
+          PY
+
+      - name: Publish supplemental evidence
+        env:
+          CAMPAIGN_PATH: ${{ steps.request.outputs.campaign_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git config user.name 'CurveYield Phase0 Simulation Rebind'
+          git config user.email 'phase0-rebind@users.noreply.github.com'
+          git add --             "$CAMPAIGN_PATH/evidence/phase0/rebinds/randomized-simulation-v1"             "$CAMPAIGN_PATH/derived/phase-0-rebind"             "$CAMPAIGN_PATH/controller/PHASE0_SIMULATION_REBIND_v1.json"             "$CAMPAIGN_PATH/work/phase-06/LITE_TARGETED_TEST_MATRIX_PHASE0_REBIND_v1.md"
+          if git diff --cached --quiet; then
+            echo "::error::No Phase-0 simulation rebind evidence was produced"
+            exit 1
+          fi
+          git commit -m "audit(phase0): rebind randomized simulation evidence ${{ steps.request.outputs.campaign_id }}"
+          git push origin HEAD:main
+
+      - name: Summarize
+        shell: bash
+        run: |
+          {
+            echo "## Phase-0 randomized simulation rebind"
+            echo "- Existing sealed Phase-0 receipt preserved"
+            echo "- Existing current assignment/handoff preserved"
+            echo "- Target EVM chain metadata preserved"
+            echo "- Execution normalized to canonical Ethereum Anvil baseline"
+            echo "- Medusa >100K observed calls required"
+            echo "- ABI telemetry + raw accounting transcripts required"
+            echo "- Replacement Phase-5/6 prefills written under derived/phase-0-rebind"
+          } >> "$GITHUB_STEP_SUMMARY"
