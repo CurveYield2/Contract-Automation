@@ -1,6 +1,0 @@
-{
-  "schema_version": "curveyield-browser-agent-chat-watchdog-request-v3",
-  "chat_url": "https://chatgpt.com/c/6abc690a-baac-83e8-b655-626c7c3e350a",
-  "interval_seconds": 60,
-  "exit_after_first_poke": true
-}
