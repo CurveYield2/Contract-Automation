@@ -34,6 +34,10 @@ runs:
       shell: bash
       run: npm ci --force
 
+    - name: Test isolated simulation adapter
+      shell: bash
+      run: node --test packages/github-native-sim/audit-harnesses/phase0-simulation-testing-v1/test-v1.test.mjs
+
     - name: Install retained audit toolchain
       uses: ./.github/actions/setup-v7-toolchain
 
@@ -98,6 +102,7 @@ runs:
         path: .simulation-testing-output
         if-no-files-found: warn
         retention-days: 14
+        include-hidden-files: true
 
     - name: Require complete simulation testing evidence
       shell: bash
