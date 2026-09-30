@@ -107,7 +107,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
   const artifacts=[...(build.artifacts??[])].sort((a,b)=>`${a.sourceName}:${a.contractName}`.localeCompare(`${b.sourceName}:${b.contractName}`));
 
   const compilerArtifacts=[],contracts=[],functions=[],storageLayout=[],inheritanceGraph=[],privilegeCandidates=[],eventsAndErrors=[],sourceAnchors=[];
-  const contractByAstId=new Map(), contractByQualified=new Map(), functionByAstId=new Map(), functionMetaById=new Map();
+  const contractByAstId=new Map(), contractByQualified=new Map(), contractByQualifiedUnit=new Map(), functionByAstId=new Map(), functionMetaById=new Map();
 
   for (const [i,a] of artifacts.entries()) {
     const qualifiedName=`${a.sourceName}:${a.contractName}`, artifactId=`ART-${pad(i+1)}`;
@@ -121,16 +121,18 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
       preliminaryDeploymentGasEstimate:{acceptanceClass:'PRELIMINARY_NOT_PHASE7_ACCEPTED',estimate:a.gasEstimates?.creation?.totalCost??null},
       basis:'ADMITTED_COMPILER_OUTPUT'
     });
-    const astContract=ast.contracts.get(qualifiedName), contractId=`CONTRACT-${pad(i+1)}`;
+    const unitId=a.compilationUnitId??'default';
+    const astContract=ast.contracts.get(`${unitId}|${qualifiedName}`)??ast.contracts.get(qualifiedName), contractId=`CONTRACT-${pad(i+1)}`;
     contractByQualified.set(qualifiedName,contractId);
-    if (Number.isInteger(astContract?.node?.id)) contractByAstId.set(astContract.node.id,contractId);
+    contractByQualifiedUnit.set(`${unitId}|${qualifiedName}`,contractId);
+    if (Number.isInteger(astContract?.node?.id)) contractByAstId.set(`${unitId}:${astContract.node.id}`,contractId);
     const cLoc=loc(source,astContract?.node?.src);
     contracts.push({contractId,qualifiedName,sourceId,language:lang,contractKind:astContract?.node?.contractKind??(lang==='VYPER'?'contract':'UNKNOWN'),
       deployability:(astContract?.node?.abstract===true||['interface','library'].includes(astContract?.node?.contractKind))?'NOT_DIRECTLY_DEPLOYABLE':(String(a.bytecode??'0x')==='0x'?'NO_CREATION_BYTECODE':'DEPLOYABLE'),
       artifactId,sourceLocation:cLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',confidenceClass:'COMPILER_FACT',basis:cLoc?'SOLIDITY_AST_AND_COMPILER_ARTIFACT':'COMPILER_ARTIFACT'});
     if (cLoc) sourceAnchors.push({anchorId:`ANCHOR-${pad(sourceAnchors.length+1,4)}`,sourceId,symbolId:contractId,startLine:cLoc.startLine,endLine:cLoc.endLine,sourceDigestSha256:source.sha256,basis:'SOLIDITY_AST_SRC'});
 
-    const astFns=ast.functions.get(qualifiedName)??[];
+    const astFns=ast.functions.get(`${unitId}|${qualifiedName}`)??ast.functions.get(qualifiedName)??[];
     for (const abi of a.abi??[]) {
       if (abi.type==='function') {
         const sig=signature(abi), selector=a.methodIdentifiers?.[sig]??null;
@@ -141,7 +143,7 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
           stateMutability:abi.stateMutability??fn?.node?.stateMutability??null,payable:(abi.stateMutability??fn?.node?.stateMutability)==='payable',modifiers,
           sourceLocation:fLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',confidenceClass:'COMPILER_FACT',basis:fLoc?'ABI_METHOD_IDENTIFIERS_AND_SOLIDITY_AST':'ABI_AND_METHOD_IDENTIFIERS'});
         functionMetaById.set(id,{functionId:id,contractId,signature:sig,qualifiedContract:qualifiedName,sourceName:a.sourceName,contractName:a.contractName});
-        if(Number.isInteger(fn?.node?.id)) functionByAstId.set(fn.node.id,{functionId:id,contractId,signature:sig,qualifiedContract:qualifiedName,sourceName:a.sourceName,contractName:a.contractName});
+        if(Number.isInteger(fn?.node?.id)) functionByAstId.set(`${unitId}:${fn.node.id}`,{functionId:id,contractId,signature:sig,qualifiedContract:qualifiedName,sourceName:a.sourceName,contractName:a.contractName,unitId});
         if (fLoc) sourceAnchors.push({anchorId:`ANCHOR-${pad(sourceAnchors.length+1,4)}`,sourceId,symbolId:id,startLine:fLoc.startLine,endLine:fLoc.endLine,sourceDigestSha256:source.sha256,basis:'SOLIDITY_AST_SRC'});
         for (const m of fn?.node?.modifiers??[]) privilegeCandidates.push({candidateId:`PRIV-${pad(privilegeCandidates.length+1,4)}`,contractId,functionId:id,candidateKind:'MODIFIER_INVOCATION',
           modifierOrGuard:modifierName(m),authorityExpression:modifierName(m),sourceLocation:loc(source,m.src)?.label??fLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',
@@ -152,16 +154,19 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
       }
     }
     for (const item of a.storageLayout?.storage??[]) {
-      const node=Number.isInteger(item.astId)?ast.nodes.get(item.astId):null, sLoc=loc(byPath.get(node?.sourceName??a.sourceName),node?.node?.src);
+      const node=Number.isInteger(item.astId)?ast.nodes.get(`${unitId}:${item.astId}`):null, sLoc=loc(byPath.get(node?.sourceName??a.sourceName),node?.node?.src);
       storageLayout.push({storageId:`STORE-${pad(storageLayout.length+1,4)}`,contractId,label:item.label??null,slot:String(item.slot??''),offset:String(item.offset??''),
         type:a.storageLayout?.types?.[item.type]?.label??item.type??null,sourceLocation:sLoc?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',status:'CURRENT',confidenceClass:'COMPILER_FACT',basis:'COMPILER_STORAGE_LAYOUT'});
     }
   }
 
-  for (const [qualifiedName,entry] of ast.contracts.entries()) {
-    const derived=contractByQualified.get(qualifiedName); if (!derived) continue;
+  const inheritanceSeen=new Set();
+  for (const entry of ast.contracts.values()) {
+    const entryKey=`${entry.unitId}|${entry.qualifiedName}`;
+    if(inheritanceSeen.has(entryKey))continue;inheritanceSeen.add(entryKey);
+    const derived=contractByQualifiedUnit.get(entryKey)??contractByQualified.get(entry.qualifiedName); if (!derived) continue;
     for (const base of entry.node?.baseContracts??[]) {
-      const baseId=base?.baseName?.referencedDeclaration, baseContractId=contractByAstId.get(baseId); if (!baseContractId) continue;
+      const baseId=base?.baseName?.referencedDeclaration, baseContractId=contractByAstId.get(`${entry.unitId}:${baseId}`); if (!baseContractId) continue;
       inheritanceGraph.push({edgeId:`INHERIT-${pad(inheritanceGraph.length+1,4)}`,derivedContractId:derived,baseContractId,
         linearizedOrder:(entry.node.linearizedBaseContracts??[]).indexOf(baseId),sourceLocation:loc(entry.source,base.src)?.label??'UNSUPPORTED_AST_SOURCE_LOCATION',
         confidenceClass:'COMPILER_FACT',basis:'SOLIDITY_AST_BASE_CONTRACT'});
