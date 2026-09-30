@@ -35,3 +35,13 @@ test('simulation testing workflow is isolated from canonical Phase-0 workflow',(
   assert.doesNotMatch(canonicalWorkflow,/workflow_dispatch:/);
   assert.doesNotMatch(canonicalWorkflow,/simulation-testing/);
 });
+
+
+test('simulation testing installs staged package dependencies from package-lock without package scripts',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'./engine-v1.mjs'),'utf8');
+  assert.match(source,/installPackageRuntimeDependenciesV1/);
+  assert.match(source,/package-lock\.json/);
+  assert.match(source,/npm','ci','--ignore-scripts','--audit=false','--fund=false/);
+  assert.match(source,/SIMULATION_TESTING_PACKAGE_DEPENDENCY_INSTALL_FAILED/);
+});
