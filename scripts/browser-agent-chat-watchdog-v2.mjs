@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -49,6 +50,34 @@ function unwrapRuntimeModule(mod) {
   return { ...mod, ...first, ...second };
 }
 
+function sha(text = '') {
+  return crypto.createHash('sha256').update(text).digest('hex');
+}
+
+async function conversationFingerprint(page) {
+  const selectors = [
+    '[data-testid^="conversation-turn-"]',
+    '[data-message-author-role]',
+    'main article',
+  ];
+  for (const selector of selectors) {
+    const loc = page.locator(selector);
+    const count = await loc.count().catch(() => 0);
+    if (count > 0) {
+      const texts = [];
+      for (let i = 0; i < count; i += 1) {
+        texts.push((await loc.nth(i).innerText().catch(() => '')).trim());
+      }
+      return {
+        selector,
+        count,
+        hash: sha(texts.join('\n---TURN---\n')),
+      };
+    }
+  }
+  return { selector: '', count: 0, hash: sha('') };
+}
+
 async function firstVisible(page, selectors) {
   for (const selector of selectors) {
     const locator = page.locator(selector).first();
@@ -72,6 +101,7 @@ async function snapshot(page) {
     '[contenteditable="true"]',
   ]);
 
+  const fingerprint = await conversationFingerprint(page);
   const bodyText = await page.locator('body').innerText().catch(() => '');
   const title = await page.title().catch(() => '');
   const currentUrl = page.url();
@@ -95,6 +125,9 @@ async function snapshot(page) {
     loginPrompt,
     humanChallenge,
     chatViewable,
+    turnSelector: fingerprint.selector,
+    turnCount: fingerprint.count,
+    transcriptHash: fingerprint.hash,
     url: currentUrl,
   };
 }
@@ -215,6 +248,8 @@ const intervalMs = intervalSeconds * 1000;
 
 let pokeCount = 0;
 let lastActiveAt = Date.now();
+let previousTurnCount = 0;
+let previousTranscriptHash = '';
 let cycle = 0;
 
 try {
@@ -232,6 +267,10 @@ try {
   await persistSession(context).catch((error) => {
     console.warn('[chat-watchdog-v2] Session persistence warning: ' + error.message);
   });
+
+  previousTurnCount = state.turnCount;
+  previousTranscriptHash = state.transcriptHash;
+  console.log('[chat-watchdog-v2] fingerprint selector=' + (state.turnSelector || 'none') + ' turns=' + state.turnCount);
 
   if (state.generating) {
     lastActiveAt = Date.now();
@@ -263,9 +302,19 @@ try {
       continue;
     }
 
-    if (state.generating) {
+    const advanced =
+      state.turnCount > previousTurnCount ||
+      (state.transcriptHash && state.transcriptHash !== previousTranscriptHash);
+
+    if (state.generating || advanced) {
       lastActiveAt = Date.now();
-      console.log('Cycle ' + cycle + ': agent is actively generating; no interruption.');
+      previousTurnCount = state.turnCount;
+      previousTranscriptHash = state.transcriptHash;
+      console.log(
+        'Cycle ' + cycle + ': agent is active (' +
+        (state.generating ? 'GENERATING' : 'CONVERSATION_ADVANCED') +
+        '); no interruption.',
+      );
       continue;
     }
 
@@ -281,6 +330,8 @@ try {
       if (result.posted) {
         pokeCount += 1;
         lastActiveAt = Date.now();
+        previousTurnCount = result.after.turnCount;
+        previousTranscriptHash = result.after.transcriptHash;
         await persistSession(context).catch((error) => {
           console.warn('[chat-watchdog-v2] Session persistence warning after poke: ' + error.message);
         });
@@ -310,6 +361,8 @@ if (env.GITHUB_OUTPUT) {
     'deadline_epoch=' + overallDeadlineEpoch,
     'poke_count=' + pokeCount,
     'ended_epoch=' + endedEpoch,
+    'turn_count=' + previousTurnCount,
+    'turn_hash=' + previousTranscriptHash,
   ].join('\n') + '\n';
   await fs.appendFile(env.GITHUB_OUTPUT, lines);
 }
