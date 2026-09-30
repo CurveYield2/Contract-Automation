@@ -179,7 +179,16 @@ function safeNumericExpression(expr){
 }
 export function extractSourceKnownBindingsV1(text){
   const bindings=new Map(),source=String(text);
-  for(const match of source.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*envAddress\s*\(\s*["'][^"']+["']\s*,\s*["'](0x[a-fA-F0-9]{40})["']\s*\)/g))bindings.set(match[1],match[2]);
+  for(const match of source.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*envAddress\s*\(/g)){
+    const open=(match.index??0)+match[0].lastIndexOf('(');
+    const call=balanced(source,open,'(',')');
+    if(!call)continue;
+    const args=splitTopLevelCsv(call.body);
+    if(args.length<2)continue;
+    const value=String(args[1]).trim().replace(/,$/,'');
+    const quoted=value.match(/^["'](0x[a-fA-F0-9]{40})["']$/);
+    if(quoted)bindings.set(match[1],quoted[1]);
+  }
   for(const match of source.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:Number\s*\(\s*)?envBigInt\s*\(/g)){
     const open=(match.index??0)+match[0].lastIndexOf('(');
     const call=balanced(source,open,'(',')');
@@ -293,9 +302,16 @@ export async function deploySourceKnownPlanV1({projectRoot,provider,ethers,artif
       if(step.binding)bindings.set(step.binding,address);
       if(step.library)libraries.set(step.contractName,address);
     }catch(error){
-      const message=String(error?.shortMessage??error?.message??error).slice(0,2000);
-      attempts.push({framework:'SOURCE_KNOWN_PLAN',path:chosen.rel,contractName:step.contractName,status:'FAILED',message});
-      limitations.push({type:'SOURCE_PLAN_DEPLOYMENT_FAILED',contractName:step.contractName,planPath:chosen.rel,message});
+      const rawData=error?.data??error?.info?.error?.data??null;
+      const diagnostic={
+        message:String(error?.shortMessage??error?.message??error).slice(0,2000),
+        code:error?.code??null,
+        reason:error?.reason??null,
+        rawData:typeof rawData==='string'?rawData.slice(0,4096):rawData,
+        rpcMessage:String(error?.info?.error?.message??'').slice(0,2000)||null
+      };
+      attempts.push({framework:'SOURCE_KNOWN_PLAN',path:chosen.rel,contractName:step.contractName,status:'FAILED',diagnostic});
+      limitations.push({type:'SOURCE_PLAN_DEPLOYMENT_FAILED',contractName:step.contractName,planPath:chosen.rel,...diagnostic});
     }
   }
   const unresolvedSteps=chosen.steps.length-rows.length;
