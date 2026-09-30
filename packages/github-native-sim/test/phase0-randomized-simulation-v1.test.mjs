@@ -246,3 +246,35 @@ test('Phase-0 randomized simulation reuses exact embedded-profile build artifact
   assert.match(source,/compilerProfiles:build\.compilerProfiles/);
   assert.match(source,/artifacts:build\.artifacts/);
 });
+
+
+test('Phase-0 prefers a directly redirectable package deployment script before parser fallback', async () => {
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  assert.match(source,/GENERIC_NODE/);
+  assert.ok(source.includes("process\\.env\\.(?:RPC_URL|ETH_RPC_URL|LOCALHOST_RPC_URL)"));
+  assert.match(source,/PHASE0_LOCAL_CHAIN_ID:'1'/);
+  assert.match(source,/SKIPPED_PACKAGE_DEPLOYMENT_SCRIPT_COMPLETE/);
+  assert.match(source,/reportedPackageDeployments/);
+  assert.match(source,/PACKAGE_DEPLOYMENT_REPORT/);
+  assert.ok(source.includes("dry[-_ ]?run"));
+});
+
+test('Phase-0 derives and verifies the signer from the Anvil instance instead of embedding a fixed key', async () => {
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  assert.match(source,/Wallet\.createRandom\(\)/);
+  assert.match(source,/--mnemonic',ephemeralMnemonic/);
+  assert.match(source,/eth_accounts/);
+  assert.match(source,/ANVIL_EPHEMERAL_SIGNER_MISMATCH/);
+  assert.doesNotMatch(source,/ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80/);
+});
+
+test('original randomized-simulation workflow remains callable and is directly dispatchable', async () => {
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const workflow=fs.readFileSync(path.resolve(here,'../../../.github/workflows/lite-phase0-randomized-simulation-v1.yml'),'utf8');
+  assert.match(workflow,/workflow_call:/);
+  assert.match(workflow,/workflow_dispatch:/);
+  assert.match(workflow,/campaign_id:/);
+  assert.match(workflow,/campaign_path:/);
+});
