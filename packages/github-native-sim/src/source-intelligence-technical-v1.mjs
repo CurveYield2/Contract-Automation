@@ -206,57 +206,62 @@ export async function generateSourceIntelligenceTechnicalBundleV1({projectRoot,r
     if(valueDedup.has(key))return; valueDedup.add(key); valueFlowCandidates.push({...item,valueFlowCandidateId:`VALUE-${pad(valueFlowCandidates.length+1,4)}`});
   }
 
-  for (const [sourceName,rootAst] of Object.entries(build.sourceAsts??{}).sort(([a],[b])=>a.localeCompare(b))) {
-    const source=byPath.get(sourceName);
-    walk(rootAst,(node,ctx)=>{
-      if(!ctx?.fn||!ctx?.contract)return;
-      const callerContractId=contractByAstId.get(ctx.contract.id)??contractByQualified.get(`${sourceName}:${ctx.contract.name}`)??null;
-      const caller=functionByAstId.get(ctx.fn.id)??null;
-      if(!callerContractId||!caller)return;
-      const callLoc=loc(source,node.src)?.label??'UNSUPPORTED_AST_SOURCE_LOCATION';
+  const traversalUnits=(Array.isArray(build.compilationUnits)&&build.compilationUnits.length)
+    ? build.compilationUnits.map((unit,index)=>({unitId:unit.unitId??`unit-${index+1}`,sourceAsts:unit.sourceAsts??{}}))
+    : [{unitId:'default',sourceAsts:build.sourceAsts??{}}];
+  for(const unit of traversalUnits){
+    for (const [sourceName,rootAst] of Object.entries(unit.sourceAsts??{}).sort(([a],[b])=>a.localeCompare(b))) {
+      const source=byPath.get(sourceName);
+      walk(rootAst,(node,ctx)=>{
+        if(!ctx?.fn||!ctx?.contract)return;
+        const callerContractId=contractByAstId.get(`${unit.unitId}:${ctx.contract.id}`)??contractByQualifiedUnit.get(`${unit.unitId}|${sourceName}:${ctx.contract.name}`)??contractByQualified.get(`${sourceName}:${ctx.contract.name}`)??null;
+        const caller=functionByAstId.get(`${unit.unitId}:${ctx.fn.id}`)??null;
+        if(!callerContractId||!caller)return;
+        const callLoc=loc(source,node.src)?.label??'UNSUPPORTED_AST_SOURCE_LOCATION';
 
-      if(node.nodeType==='FunctionCall'){
-        const expr=unwrapExpression(node.expression);
-        const ref=expressionRef(node.expression);
-        const target=functionByAstId.get(ref)??null;
-        const member=expressionMember(node.expression);
-        const interfaceType=expressionType(node.expression);
-        const isMember=expr?.nodeType==='MemberAccess';
-        const sameContract=target?.contractId===callerContractId;
-        const callClass=target ? (sameContract?'INTERNAL_OR_SELF':'CROSS_CONTRACT_OR_INHERITED') : (isMember?'UNRESOLVED_MEMBER_CALL':'UNRESOLVED_CALL');
-        pushCall({
-          callerContractId,callerFunctionId:caller.functionId,targetContractId:target?.contractId??null,targetFunctionId:target?.functionId??null,
-          memberOrName:member,callClass,interfaceOrType:interfaceType,sourceLocation:callLoc,confidenceClass:target?'SOLIDITY_AST_REFERENCED_DECLARATION':'SOLIDITY_AST_CALL_SYNTAX',
-          basis:target?'FUNCTION_CALL_REFERENCED_DECLARATION':'FUNCTION_CALL_EXPRESSION'
-        });
-        if(isMember && (!target || !sameContract)){
-          pushExternal({callerContractId,callerFunctionId:caller.functionId,targetContractId:target?.contractId??null,targetFunctionId:target?.functionId??null,
-            interfaceOrType:interfaceType,memberOrName:member,sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',
-            basis:'MEMBER_ACCESS_FUNCTION_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
-        }
-        if(['transfer','transferFrom','safeTransfer','safeTransferFrom','send'].includes(member)){
-          pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'TOKEN_OR_NATIVE_TRANSFER_CALL',memberOrName:member,interfaceOrType:interfaceType,
-            sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'TRANSFER_LIKE_MEMBER_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
-        }
-        if(member==='approve'||member==='safeApprove'||member==='forceApprove'){
-          pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'TOKEN_APPROVAL_CALL',memberOrName:member,interfaceOrType:interfaceType,
-            sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'APPROVAL_LIKE_MEMBER_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
-        }
-        if(member==='call'||member==='delegatecall'||member==='staticcall'){
-          pushExternal({callerContractId,callerFunctionId:caller.functionId,targetContractId:null,targetFunctionId:null,interfaceOrType,
-            memberOrName:member,sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'LOW_LEVEL_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
-          if(member==='call'){
-            pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'LOW_LEVEL_CALL_POTENTIAL_VALUE_TRANSFER',memberOrName:member,interfaceOrType,
-              sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'LOW_LEVEL_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+        if(node.nodeType==='FunctionCall'){
+          const expr=unwrapExpression(node.expression);
+          const ref=expressionRef(node.expression);
+          const target=Number.isInteger(ref)?(functionByAstId.get(`${unit.unitId}:${ref}`)??null):null;
+          const member=expressionMember(node.expression);
+          const interfaceType=expressionType(node.expression);
+          const isMember=expr?.nodeType==='MemberAccess';
+          const sameContract=target?.contractId===callerContractId;
+          const callClass=target ? (sameContract?'INTERNAL_OR_SELF':'CROSS_CONTRACT_OR_INHERITED') : (isMember?'UNRESOLVED_MEMBER_CALL':'UNRESOLVED_CALL');
+          pushCall({
+            callerContractId,callerFunctionId:caller.functionId,targetContractId:target?.contractId??null,targetFunctionId:target?.functionId??null,
+            memberOrName:member,callClass,interfaceOrType:interfaceType,sourceLocation:callLoc,confidenceClass:target?'SOLIDITY_AST_REFERENCED_DECLARATION':'SOLIDITY_AST_CALL_SYNTAX',
+            basis:target?'FUNCTION_CALL_REFERENCED_DECLARATION':'FUNCTION_CALL_EXPRESSION'
+          });
+          if(isMember && (!target || !sameContract)){
+            pushExternal({callerContractId,callerFunctionId:caller.functionId,targetContractId:target?.contractId??null,targetFunctionId:target?.functionId??null,
+              interfaceOrType:interfaceType,memberOrName:member,sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',
+              basis:'MEMBER_ACCESS_FUNCTION_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
           }
+          if(['transfer','transferFrom','safeTransfer','safeTransferFrom','send'].includes(member)){
+            pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'TOKEN_OR_NATIVE_TRANSFER_CALL',memberOrName:member,interfaceOrType:interfaceType,
+              sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'TRANSFER_LIKE_MEMBER_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+          }
+          if(member==='approve'||member==='safeApprove'||member==='forceApprove'){
+            pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'TOKEN_APPROVAL_CALL',memberOrName:member,interfaceOrType:interfaceType,
+              sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'APPROVAL_LIKE_MEMBER_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+          }
+          if(member==='call'||member==='delegatecall'||member==='staticcall'){
+            pushExternal({callerContractId,callerFunctionId:caller.functionId,targetContractId:null,targetFunctionId:null,interfaceOrType,
+              memberOrName:member,sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'LOW_LEVEL_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+            if(member==='call'){
+              pushValue({callerContractId,callerFunctionId:caller.functionId,flowKind:'LOW_LEVEL_CALL_POTENTIAL_VALUE_TRANSFER',memberOrName:member,interfaceOrType,
+                sourceLocation:callLoc,status:'CANDIDATE',confidenceClass:'SOLIDITY_AST_CALL_SYNTAX',basis:'LOW_LEVEL_CALL',securityInterpretation:'DEFER_TO_REVIEWER'});
+            }
+          }
+        } else if(node.nodeType==='NewExpression'){
+          const ref=Number.isInteger(node?.typeName?.referencedDeclaration)?node.typeName.referencedDeclaration:null;
+          const targetContractId=Number.isInteger(ref)?(contractByAstId.get(`${unit.unitId}:${ref}`)??null):null;
+          pushCall({callerContractId,callerFunctionId:caller.functionId,targetContractId,targetFunctionId:null,memberOrName:'new',
+            callClass:'CONTRACT_CREATION',interfaceOrType:node?.typeDescriptions?.typeString??null,sourceLocation:callLoc,confidenceClass:'SOLIDITY_AST_CREATION_SYNTAX',basis:'NEW_EXPRESSION'});
         }
-      } else if(node.nodeType==='NewExpression'){
-        const ref=Number.isInteger(node?.typeName?.referencedDeclaration)?node.typeName.referencedDeclaration:null;
-        const targetContractId=contractByAstId.get(ref)??null;
-        pushCall({callerContractId,callerFunctionId:caller.functionId,targetContractId,targetFunctionId:null,memberOrName:'new',
-          callClass:'CONTRACT_CREATION',interfaceOrType:node?.typeDescriptions?.typeString??null,sourceLocation:callLoc,confidenceClass:'SOLIDITY_AST_CREATION_SYNTAX',basis:'NEW_EXPRESSION'});
-      }
-    });
+      });
+    }
   }
 
   const dependencyEdges=[];
