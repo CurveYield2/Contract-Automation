@@ -155,3 +155,33 @@ test('compile execution attaches the technical bundle after build and neutral Sl
   assert.deepEqual(result.sourceIntelligenceTechnicalBundle, sentinel);
   assert.equal(result.status, 'completed');
 });
+
+
+test('technical generator records low-level call interface type without undefined shorthand', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lite-si-lowlevel-'));
+  await fs.mkdir(path.join(root, 'contracts'), { recursive: true });
+  const source = 'pragma solidity 0.8.30; contract Caller { function ping(address target) external { target.call(""); } }\n';
+  await fs.writeFile(path.join(root,'contracts','Caller.sol'), source);
+  const build = {
+    status:'completed',system:'solc-standard-json',
+    sourceAsts:{'contracts/Caller.sol':{nodeType:'SourceUnit',src:`0:${source.length}:0`,nodes:[{
+      id:1,nodeType:'ContractDefinition',name:'Caller',contractKind:'contract',abstract:false,src:`23:${source.length-23}:0`,baseContracts:[],linearizedBaseContracts:[1],
+      nodes:[{id:2,nodeType:'FunctionDefinition',name:'ping',visibility:'external',stateMutability:'nonpayable',src:'41:55:0',
+        parameters:{parameters:[{id:3,nodeType:'VariableDeclaration',name:'target',src:'55:14:0'}]},modifiers:[],
+        body:{nodeType:'Block',src:'79:17:0',statements:[{nodeType:'ExpressionStatement',src:'81:13:0',expression:{
+          nodeType:'FunctionCall',src:'81:13:0',expression:{nodeType:'MemberAccess',memberName:'call',src:'81:11:0',
+            expression:{nodeType:'Identifier',name:'target',src:'81:6:0',typeDescriptions:{typeString:'address'}}},arguments:[]}}]}}
+      }]
+    }]}},
+    artifacts:[{sourceName:'contracts/Caller.sol',contractName:'Caller',abi:[{type:'function',name:'ping',inputs:[{name:'target',type:'address'}],outputs:[],stateMutability:'nonpayable'}],
+      metadata:'{}',storageLayout:{storage:[],types:{}},methodIdentifiers:{'ping(address)':'773acdef'},bytecode:'0x6000',deployedBytecode:'0x6001'}]
+  };
+  const analysis={slither:{backend:'slither',version:'0.11.6',status:'completed',detectors:[]}};
+  const result=await generateSourceIntelligenceTechnicalBundleV1({projectRoot:root,request:request(),build,analysis});
+  assert.equal(result.externalInterfaces.length,1);
+  assert.equal(result.externalInterfaces[0].memberOrName,'call');
+  assert.equal(result.externalInterfaces[0].interfaceOrType,'address');
+  assert.equal(result.valueFlowCandidates.length,1);
+  assert.equal(result.valueFlowCandidates[0].interfaceOrType,'address');
+  await fs.rm(root,{recursive:true,force:true});
+});
