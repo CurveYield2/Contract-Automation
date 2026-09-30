@@ -1,10 +1,10 @@
 {
-  "schemaVersion": "curveyield-browser-agent-chat-watchdog-state-v32",
+  "schemaVersion": "curveyield-browser-agent-chat-watchdog-state-v33",
   "id": "chat-6abc99ab-b170-83e8-be0a-c8bb7b5f15fc-resume-existing-v3_",
   "status": "ACTIVE",
   "chatUrl": "https://chatgpt.com/c/6abc99ab-b170-83e8-be0a-c8bb7b5f15fc",
   "idleMessage": "GET BACK TO WORK",
-  "deadlineEpoch": 1790806762,
+  "deadlineEpoch": 1790806961,
   "observation": {
     "assistantCount": 0,
     "lastAssistantHash": ""
