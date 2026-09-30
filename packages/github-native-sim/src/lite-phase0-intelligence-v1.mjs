@@ -241,14 +241,69 @@ async function writeCryticCompileExport({projectRoot,build,outDir}){
   return{exportPath,sourceUnitCount,contractCount,compilationUnitCount:Object.keys(compilation_units).length};
 }
 async function runSlitherExport({projectRoot,build,sourceCommit}){
-  const exportInfo=await writeCryticCompileExport({projectRoot,build,outDir:path.join(projectRoot,'.audit-slither-export')});
-  const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies'],cwd:projectRoot});
-  const parsed=parseSlitherJson(raw.stdout);
+  const compilationUnits=Array.isArray(build?.compilationUnits)?build.compilationUnits.filter(Boolean):[];
+  if(compilationUnits.length<=1){
+    const exportInfo=await writeCryticCompileExport({projectRoot,build,outDir:path.join(projectRoot,'.audit-slither-export')});
+    const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies'],cwd:projectRoot});
+    const parsed=parseSlitherJson(raw.stdout);
+    return{exportInfo,raw,parsed,success:parsed?.success===true};
+  }
+
+  const unitResults=[];
+  const detectors=[];
+  const detectorSeen=new Set();
+  let totalSourceUnits=0,totalContracts=0;
+  for(const [index,unit] of compilationUnits.entries()){
+    const unitId=String(unit.unitId??`unit-${index+1}`).replace(/[^A-Za-z0-9._-]+/g,'_');
+    const unitBuild={
+      ...build,
+      compilationUnits:[unit],
+      sourceAsts:unit.sourceAsts??{},
+      artifacts:Array.isArray(unit.artifacts)?unit.artifacts:[],
+      compilerVersion:unit.compilerVersion??build.compilerVersion
+    };
+    const exportInfo=await writeCryticCompileExport({
+      projectRoot,
+      build:unitBuild,
+      outDir:path.join(projectRoot,'.audit-slither-export',unitId)
+    });
+    totalSourceUnits+=exportInfo.sourceUnitCount??0;
+    totalContracts+=exportInfo.contractCount??0;
+    const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies'],cwd:projectRoot});
+    const parsed=parseSlitherJson(raw.stdout);
+    unitResults.push({
+      unitId,
+      compilerVersion:unit.compilerVersion??null,
+      exportInfo,
+      exitCode:raw.exitCode,
+      signal:raw.signal??null,
+      stdout:cleanText(raw.stdout),
+      stderr:cleanText(raw.stderr),
+      parsedSuccess:parsed?.success??false,
+      findingCount:parsed?.detectors?.length??0
+    });
+    if(parsed?.success!==true){
+      return{
+        exportInfo:{mode:'PER_COMPILATION_UNIT',compilationUnitCount:compilationUnits.length,sourceUnitCount:totalSourceUnits,contractCount:totalContracts,unitResults},
+        raw:{exitCode:raw.exitCode,signal:raw.signal??null,stdout:raw.stdout,stderr:raw.stderr},
+        parsed,
+        success:false,
+        unitResults
+      };
+    }
+    for(const detector of parsed.detectors??[]){
+      const key=JSON.stringify(detector);
+      if(detectorSeen.has(key))continue;
+      detectorSeen.add(key);
+      detectors.push(detector);
+    }
+  }
   return{
-    exportInfo,
-    raw,
-    parsed,
-    success:parsed?.success===true
+    exportInfo:{mode:'PER_COMPILATION_UNIT',compilationUnitCount:compilationUnits.length,sourceUnitCount:totalSourceUnits,contractCount:totalContracts,unitResults},
+    raw:{exitCode:0,signal:null,stdout:'',stderr:''},
+    parsed:{success:true,detectors},
+    success:true,
+    unitResults
   };
 }
 
