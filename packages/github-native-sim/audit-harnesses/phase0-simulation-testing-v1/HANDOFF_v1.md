@@ -1,34 +1,37 @@
 # Phase-0 Simulation Testing Fork Handoff v1
 
-Updated 2026-09-30 22:12 UTC. This replaces the original pre-repair handoff in place at the user's request.
+Updated 2026-09-30 22:14 UTC. This replaces the original pre-repair handoff in place at the user's request.
 
 ## Current active continuation
 
-PR #461 is merged at 061d5570f058a4019d990ae50edc3d25e7a20270:
-https://github.com/CurveYield2/Contract-Automation/pull/461
-Exact tested head: a3f75505907fa8b7ac227e9ffc4cdd8d0998a829.
-Latest GitHub regression 36783161610 and PR qualification 36783161634 both passed. The full runner suite reported 438 tests, 437 pass, zero failures (one existing skip); controller suite 395 pass, zero failures. The missing-validator regression previously failed in 36782082076.
+**Phase 0 is SEALED with validation PASS**, verified in the controller receipt. Sealed at 2026-09-30T22:13:01.715Z. Existing campaign/generation/source preserved; no Medusa or telemetry stage was rerun.
 
-Canonical main qualification 36783414101 succeeded, head 061d5570f058a4019d990ae50edc3d25e7a20270. Canonical status records this exact qualifiedCommit/run, all required capabilities, repeated-lifecycle-v1 recipe, Phase6 PASS and Phase7 PASS.
+Completed:
+- Canonical repairs merged through Contract-Automation PR #461, merge 061d5570f058a4019d990ae50edc3d25e7a20270.
+- Exact-head regression 36783161610 and PR qualification 36783161634 PASS.
+- Canonical main qualification 36783414101 PASS, required capabilities/recipe and live Phase6/Phase7 PASS.
+- Controller rebind PR #108 merged at 7a31fa8652d556ef49b1ca5cdb9da8a60e9228df; main pin verified as 061d5570f058a4019d990ae50edc3d25e7a20270 / 36783414101. Stale-pin red regression 36783712665; exact repaired controller head 80bb0e0dec487bf5302d5df6928be96db8db4360 passed full controller npm test/check and authority synchronization in 36783903999.
+- Execution-only verification PR #462 closed without merging, with recorded disposition.
+- Resume request v8, commit aeded3250ecabf3727338ff283df72c7aaf368f2, used campaign-relative manifest evidence/phase0/COMPLETED_SIMULATION_STAGES_v1.json.
+- Recovery dispatch 36784140403 PASS.
+- Existing bootstrap 36784152692 PASS. Resume qualification passed; qualification/intelligence jobs skipped because the admitted exact-source evidence was reused. Completed-stage import, projection, evidence publication, finalizer sealing and orchestrator dispatch all succeeded.
+- Import preserved original Medusa 130487 calls and four 1200-call telemetry shards, validated raw artifacts, and retained independent fork/deployment provenance in the campaign.
+- Orchestrator 36784264268 PASS; Phase1 work form/assignment and browser registration prepared.
 
-The completed-stage manifest now exists in Audit-Controller main:
-campaigns/CurveYield DEX v16 Source r1/evidence/phase0/COMPLETED_SIMULATION_STAGES_v1.json
-Commit: 557bcd7a68e5feaaa91246b7ebde4cf1a7d637fc.
-It references the original successful Medusa and telemetry artifact IDs/hashes; it is a resume input, not an acceptance receipt.
+**Only remaining requested action:** observe Browser Agent Wake run 36784293965 until it actually posts the reviewer-1 Phase1 wake, arms its watchdog and activates the assignment. Do not rerun bootstrap or simulations now that Phase0 is sealed. If wake fails, use the existing wake recovery/retry path and preserve the sealed campaign.
 
-The merged implementation promotes the isolated repairs and adds universal completed-stage import. It verifies original ZIP digest, workflow commit/success, exact source archive, accepted build/compiler inventory, fork, deployment mapping, and raw telemetry hashes/counters. It preserves separate attempt provenance and original raw ZIPs. Resume in the existing bootstrap/recovery workflow rejects executable code drift and requires the controller pin to match canonical qualification. It skips completed source intelligence and simulation execution. Finalizer gates require four complete telemetry shards and exact source binding, while preserving the explicit no-executable-target disposition for packages without mutable targets.
+Current directory: assignment-v2, WAITING_FOR_SUCCESSOR_AGENT, reviewer-1, phase-1.
+Wake run: https://github.com/CurveYield2/Contract-Automation/actions/runs/36784293965
+Bootstrap: https://github.com/CurveYield2/Contract-Automation/actions/runs/36784152692
+Orchestrator: https://github.com/CurveYield2/Contract-Automation/actions/runs/36784264268
 
-Controller rebind completed and main pin verified: Audit-Controller PR #108 merged at 7a31fa8652d556ef49b1ca5cdb9da8a60e9228df. Required stale-pin regression failed in run 36783712665. Repaired exact controller head 80bb0e0dec487bf5302d5df6928be96db8db4360 passed full controller npm test (395 pass, zero failures), npm run check and authority synchronization in run 36783903999, and was merged with that exact head guard. Public execution-only PR #462 closed without merging, with recorded disposition. Current admitted qualified runner is 061d5570f058a4019d990ae50edc3d25e7a20270 / 36783414101.
-
-Exact next action: dispatch the existing campaign through recovery with completed_stages_manifest=evidence/phase0/COMPLETED_SIMULATION_STAGES_v1.json. Verify import, evidence projection, finalizer sealing, orchestrator and actual browser wake. Medusa must not be rerun.
-
-Branch disposition: repair/phase0-completed-stages-v1 implementation is merged through PR #461; its code is durable on main. repair/phase0-medusa-only-v1 is superseded for implementation by PR #461; its successful execution identity and unique stage controls remain explicitly documented here and in retained artifacts, not an instruction to merge the entire debugging branch.
+The detailed earlier repair/promotion instructions below are historical continuation context and are superseded by this completed-state record.
 
 ## Resume here
 
 The isolated deployment, Medusa, and ABI telemetry stages have succeeded. **Do not rerun Medusa.** The next work is to promote the universal infrastructure repairs and integrate the retained stage evidence into the existing campaign, preserving separate execution provenance.
 
-This is not a completed Phase 0 campaign. At this update, the controller receipt remains ACTIVE, validation PENDING, sealedAt null, and P0_TO_P1 handoff NOT_READY. Canonical promotion, qualification/rebind, finalization, and the Phase 1 browser-agent wake remain unfinished.
+Phase 0 is now sealed with validation PASS. Promotion, qualification/rebind and finalization are complete. Only actual Phase1 browser wake verification remains.
 
 The user asked for this handoff so a successor can continue. No simulation stage was relaunched. GitHub regression/qualification checks are now running for PR #461.
 
