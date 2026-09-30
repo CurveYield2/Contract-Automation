@@ -199,3 +199,23 @@ test('Phase-0 telemetry emits five-minute progress heartbeats with live call cou
   assert.match(source,/calls=\$\{stats\.calls\}\/\$\{PHASE0_TELEMETRY_CALLS_PER_RUN_V1\}/);
   assert.match(source,/clearInterval\(telemetryHeartbeat\)/);
 });
+
+
+test('Phase-0 source-known bindings parse multiline envAddress defaults with trailing commas',()=>{
+  const source=`
+    const DAO = envAddress(
+      "CURVEYIELD_DAO",
+      "0x7142b1Cc5F91A736A62e77581F406338328F05bC",
+    );
+  `;
+  const bindings=extractSourceKnownBindingsV1(source);
+  assert.equal(bindings.get('DAO'),'0x7142b1Cc5F91A736A62e77581F406338328F05bC');
+});
+
+test('Phase-0 skips expensive fuzzing and telemetry when deployment graph is incomplete',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  assert.match(source,/const deploymentReady=sourcePlan\.unresolvedSteps===0/);
+  assert.match(source,/BLOCKED_INCOMPLETE_DEPLOYMENT/);
+  assert.match(source,/skipping Medusa\/telemetry until deployment is complete/);
+});
