@@ -120,16 +120,19 @@ jobs:
           rm -rf .phase0-rebind-output
           node scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ steps.request.outputs.campaign_path }}"             --output .phase0-rebind-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-rebind-run.json
 
-      - name: Require complete corrected simulation evidence
+      - name: Assess corrected simulation completeness without stopping remaining work
+        id: assessment
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
           summary=.phase0-rebind-output/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
           index=.phase0-rebind-output/PHASE0_SIMULATION_RUN_INDEX_v1.json
           echo "---- Phase-0 simulation summary ----"
-          jq . "$summary"
+          jq . "$summary" || true
           echo "---- Phase-0 simulation run index ----"
-          jq . "$index"
+          jq . "$index" || true
+
+          complete=true
           jq -e '
             .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE" and
             ((.deployment.coverage.sourcePlanUnresolved // 0)|tonumber)==0 and
@@ -138,15 +141,19 @@ jobs:
             (.medusa.observedCalls|tonumber)>=100001 and
             (.telemetry|length)>=1 and
             all(.telemetry[]; .status=="PASS")
-          ' "$summary" >/dev/null
+          ' "$summary" >/dev/null || complete=false
           jq -e '
             .policy.realAbiCallsOnly==true and
             .policy.rawRandomBytes==false and
             .policy.crossContractBursts==true and
             (.policy.accountingActionWeight|tonumber)>=0.8 and
             .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE"
-          ' "$index" >/dev/null
+          ' "$index" >/dev/null || complete=false
 
+          echo "complete=$complete" >> "$GITHUB_OUTPUT"
+          if [ "$complete" != "true" ]; then
+            echo "::warning::Phase-0 rebind evidence is incomplete. Remaining evidence publication and handoff-preservation checks will continue; the run will be marked incomplete only after those executable stages finish."
+          fi
       - name: Write supplemental rebind evidence without touching sealed Phase-0 outputs
         shell: bash
         run: |
@@ -191,6 +198,7 @@ jobs:
           git push origin HEAD:main
 
       - name: Summarize
+        if: ${{ always() }}
         shell: bash
         run: |
           {
@@ -199,7 +207,18 @@ jobs:
             echo "- Existing current assignment/handoff preserved"
             echo "- Target EVM chain metadata preserved"
             echo "- Execution normalized to canonical Ethereum Anvil baseline"
-            echo "- Medusa >100K observed calls required"
-            echo "- ABI telemetry + raw accounting transcripts required"
-            echo "- Replacement Phase-5/6 prefills written under derived/phase-0-rebind"
+            echo "- Medusa >100K observed calls required for complete rebind"
+            echo "- ABI telemetry + raw accounting transcripts attempted for every executable target subset"
+            echo "- Partial failures are preserved as typed evidence instead of suppressing later executable stages"
+            echo "- Replacement Phase-5/6 prefills written under derived/phase-0-rebind when generated"
+            echo "- Complete rebind: ${{ steps.assessment.outputs.complete }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce rebind completion after all executable stages
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [ "${{ steps.assessment.outputs.complete }}" != "true" ]; then
+            echo "::error::Phase-0 simulation rebind remains incomplete after all executable stages were attempted and partial evidence was preserved."
+            exit 1
+          fi
