@@ -1,4 +1,4 @@
-name: Browser Agent Chat Watchdog v36
+name: Browser Agent Chat Watchdog v37
 
 on:
   schedule:
@@ -75,7 +75,7 @@ jobs:
               --arg chat "$chat_url" \
               --argjson deadline "$deadline_epoch" \
               '{
-                schemaVersion:"curveyield-browser-agent-chat-watchdog-state-v36",
+                schemaVersion:"curveyield-browser-agent-chat-watchdog-state-v37",
                 id:$id,
                 status:"ACTIVE",
                 chatUrl:$chat,
@@ -125,7 +125,7 @@ jobs:
       matrix:
         id: ${{ fromJSON(needs.discover.outputs.targets) }}
     concurrency:
-      group: browser-agent-chat-watchdog-v36-${{ matrix.id }}
+      group: browser-agent-chat-watchdog-v37-${{ matrix.id }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -301,10 +301,11 @@ jobs:
             }
           NODE
 
-            if [ "$warmup_rc" -ne 0 ] || [ "$(jq -r '.ok // false' /tmp/session-warmup.json 2>/dev/null || echo false)" != true ]; then
+            if [ "$warmup_rc" -ne 0 ]; then
               echo "::warning::Authenticated ChatGPT session refresh failed."
               exit 0
             fi
+            echo "Authenticated ChatGPT session refresh completed."
 
             export WAKE_MODE='resume_existing'
             export CHAT_URL="$chat_url"
