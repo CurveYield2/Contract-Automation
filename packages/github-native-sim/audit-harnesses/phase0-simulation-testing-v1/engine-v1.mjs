@@ -452,11 +452,19 @@ function probePlan(ethers,abi){
 }
 async function safeStatic(contract,f,args){try{return{ok:true,value:normalize(await contract.getFunction(f.format('sighash')).staticCall(...args))};}catch(e){return{ok:false,error:String(e?.shortMessage??e?.message??e).slice(0,800)};}}
 async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
-  const out={native:{sender:(await provider.getBalance(sender)).toString(),target:(await provider.getBalance(target.address)).toString()},views:{},systemNative:{}};
-  for(const t of systemTargets)out.systemNative[t.address]=(await provider.getBalance(t.address)).toString();
+  const out={native:{},views:{},systemNative:{}};
   const c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),provider);
-  for(const f of plan.zero)out.views[f.format('sighash')]=await safeStatic(c,f,[]);
-  for(const f of plan.address){const s=f.format('sighash');out.views[`${s}::sender`]=await safeStatic(c,f,[sender]);out.views[`${s}::target`]=await safeStatic(c,f,[target.address]);}
+  // These reads share one stable pre/post state; batching preserves all observations without serial RPC latency.
+  await Promise.all([
+    (async()=>{out.native.sender=(await provider.getBalance(sender)).toString();})(),
+    (async()=>{out.native.target=(await provider.getBalance(target.address)).toString();})(),
+    ...systemTargets.map(async t=>{out.systemNative[t.address]=(await provider.getBalance(t.address)).toString();}),
+    ...plan.zero.map(async f=>{out.views[f.format('sighash')]=await safeStatic(c,f,[]);}),
+    ...plan.address.flatMap(f=>{const s=f.format('sighash');return[
+      (async()=>{out.views[`${s}::sender`]=await safeStatic(c,f,[sender]);})(),
+      (async()=>{out.views[`${s}::target`]=await safeStatic(c,f,[target.address]);})()
+    ];})
+  ]);
   return out;
 }
 function flattenNumbers(v,p='',o={}){
@@ -675,7 +683,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     for(const artifact of [...(build.artifacts??[]),...(sourceKnownCompilation.artifacts??[])])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
     const artifacts=[...artifactByQualified.values()];
     anvil=await startAnvil({forkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
-    const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
+    const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true,cacheTimeout:-1}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
     const deployment=await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],localSigner:anvil.localSigner,detected});
     const scriptEnd=Number(await provider.getBlockNumber());
     const discoveredScriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
