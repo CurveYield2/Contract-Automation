@@ -28,7 +28,7 @@ jobs:
             [ -n "$id" ] || continue
             case "$key" in
               "$prefix"*)
-                gh cache delete "$id" --repo "$GITHUB_REPOSITORY" --confirm
+                gh cache delete "$id" --repo "$GITHUB_REPOSITORY"
                 deleted=$((deleted+1))
                 ;;
             esac
