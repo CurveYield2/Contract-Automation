@@ -270,14 +270,17 @@ function linkedBytecode(artifact,libraries){
   if(linked.includes('__$'))throw new Error('unlinked library placeholder remains for '+artifact.contractName);
   return'0x'+linked;
 }
-export async function deploySourceKnownPlanV1({projectRoot,provider,ethers,artifacts,detected}){
+export async function deploySourceKnownPlanV1({projectRoot,provider,ethers,artifacts,detected,deploymentOrder=[]}){
   const candidates=await sourcePlanCandidates(projectRoot,detected);
   if(!candidates.length)return{status:'NO_SOURCE_KNOWN_DEPLOYMENT_PLAN',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0};
 
-  const chosen=candidates[0],accessor=artifactAccessor(artifacts,preferredEntriesByName(chosen.compileGroups)),signer=await provider.getSigner(0),accountAddress=await signer.getAddress(),startNonce=await provider.getTransactionCount(accountAddress);
+  const rawChosen=candidates[0];
+  const allowedOrder=Array.isArray(deploymentOrder)&&deploymentOrder.length?new Set(deploymentOrder.map(String)):null;
+  const chosen={...rawChosen,steps:allowedOrder?rawChosen.steps.filter(step=>allowedOrder.has(String(step.contractName))):rawChosen.steps};
+  const accessor=artifactAccessor(artifacts,preferredEntriesByName(chosen.compileGroups)),signer=await provider.getSigner(0),accountAddress=await signer.getAddress(),startNonce=await provider.getTransactionCount(accountAddress);
   const predictedByContract=new Map(chosen.steps.map((step,index)=>[step.contractName,ethers.getCreateAddress({from:accountAddress,nonce:startNonce+index})]));
   const bindings=extractSourceKnownBindingsV1(chosen.text);
-  for(const match of chosen.text.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*report\.predictedDeployments\.find\([\s\S]{0,240}?entry\.name\s*===\s*["']([^"']+)["'][\s\S]{0,240}?\)\.expectedAddress\s*;/g)){
+  for(const match of chosen.text.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*[\s\S]{0,800}?report\.predictedDeployments\.find\([\s\S]{0,240}?entry\.name\s*===\s*["']([^"']+)["'][\s\S]{0,240}?\)\.expectedAddress\s*;/g)){
     const predicted=predictedByContract.get(match[2]);if(predicted)bindings.set(match[1],predicted);
   }
 
