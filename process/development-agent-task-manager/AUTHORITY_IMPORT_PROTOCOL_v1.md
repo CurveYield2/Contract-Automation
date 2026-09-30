@@ -12,7 +12,7 @@ This extends the existing `.github/workflows/agent-zip-import-v1.yml` importer. 
 
 Create one request JSON per imported authority object under:
 
-`.agent-upload/requests/<REQUEST_ID>.json`
+`process/agent-upload/requests/<REQUEST_ID>.json`
 
 Use schema:
 

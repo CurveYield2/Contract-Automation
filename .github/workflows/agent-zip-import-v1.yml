@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.agent-upload/requests/*.json'
+      - 'process/agent-upload/requests/*.json'
 
 permissions:
   contents: write
@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           mapfile -t requests < <(
             gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" \
-              --jq '.files[]? | select(.status!="removed") | .filename | select(startswith(".agent-upload/requests/") and endswith(".json"))'
+              --jq '.files[]? | select(.status!="removed") | .filename | select(startswith("process/agent-upload/requests/") and endswith(".json"))'
           )
           [ "${#requests[@]}" -eq 1 ] || {
             echo "::error::Exactly one import request file must be created or changed per triggering commit."

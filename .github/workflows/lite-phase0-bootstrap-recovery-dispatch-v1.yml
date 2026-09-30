@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.agent-upload/lite-phase0-bootstrap-recovery/*.json'
+      - 'process/agent-upload/lite-phase0-bootstrap-recovery/*.json'
 
 permissions:
   contents: read
@@ -34,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t requests < <(
-            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA"               --jq '.files[]? | select(.status!="removed") | .filename | select(startswith(".agent-upload/lite-phase0-bootstrap-recovery/") and endswith(".json"))'
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA"               --jq '.files[]? | select(.status!="removed") | .filename | select(startswith("process/agent-upload/lite-phase0-bootstrap-recovery/") and endswith(".json"))'
           )
           [ "${#requests[@]}" -eq 1 ] || { echo "::error::Exactly one Phase-0 recovery request must change per trigger."; exit 1; }
           req="${requests[0]}"
