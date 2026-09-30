@@ -1,14 +1,3 @@
-# PreflightSim Lite
-
-PreflightSim Lite is a Cloudflare Pages/Worker and GitHub Actions service for Solidity compilation and stateful, single-chain live-RPC fork simulation. Submitted projects are treated as source data. Their scripts are never executed.
-
-## Interfaces
-
-- Human and browser-agent UI: `https://preflightsim.curveyield.online/`
-- Minimal agent UI: `https://preflightsim.curveyield.online/agent/`
-- REST API: `https://api.preflightsim.curveyield.online/api/v1/`
-- Private Custom GPT Action: `integrations/custom-gpt/`
-- Ordinary-chat GitHub issue bridge: `integrations/github-bridge/`
 
 ## V7 canonical operations
 
