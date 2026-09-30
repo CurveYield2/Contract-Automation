@@ -220,13 +220,15 @@ function canonicalEthereumExecutionOverrides(source){
       adaptations.push({type:'CANONICAL_ETHEREUM_ERC20_PAYOUT_SUBSTITUTE',env:envName,value:MAINNET_WETH,basis:'LOCAL_SIMULATION_REQUIRES_ERC20_CODE_ON_ETHEREUM_FORK'});
     }
   }
-  if(/\bMAX_FEE_PER_GAS\b/.test(text)){
-    env.MAX_FEE_PER_GAS='1000000000000';
-    adaptations.push({type:'LOCAL_SIMULATION_GAS_CAP',env:'MAX_FEE_PER_GAS',value:env.MAX_FEE_PER_GAS});
-  }
-  if(/\bMAX_PRIORITY_FEE_PER_GAS\b/.test(text)){
-    env.MAX_PRIORITY_FEE_PER_GAS='1000000000';
-    adaptations.push({type:'LOCAL_SIMULATION_PRIORITY_FEE',env:'MAX_PRIORITY_FEE_PER_GAS',value:env.MAX_PRIORITY_FEE_PER_GAS});
+  // Match the environment key consumed by the package, rather than its local variable name.
+  for(const [names,value,type] of [
+    [['MAX_FEE_PER_GAS_WEI','MAX_FEE_PER_GAS'],'1000000000000','LOCAL_SIMULATION_GAS_CAP'],
+    [['MAX_PRIORITY_FEE_PER_GAS_WEI','MAX_PRIORITY_FEE_PER_GAS'],'1000000000','LOCAL_SIMULATION_PRIORITY_FEE']
+  ]){
+    for(const name of names){
+      const consumedKeys=[...text.matchAll(/(?:envBigInt|envInt|envNumber)\s*\(\s*["']([^"']+)["']|process\.env\.([A-Z_]+)\b/g)].map(match=>match[1]??match[2]);
+      if(consumedKeys.includes(name)){env[name]=value;adaptations.push({type,env:name,value});}
+    }
   }
   return{env,adaptations};
 }
