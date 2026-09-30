@@ -1,0 +1,269 @@
+name: Browser Agent Chat Watchdog v3
+
+on:
+  workflow_dispatch:
+    inputs:
+      chat_url:
+        description: Existing ChatGPT conversation URL to supervise
+        required: true
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - 'process/browser-agent-chat-watchdog/requests/*.json'
+
+permissions:
+  contents: read
+
+env:
+  CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+  CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
+  BROWSER_HEADLESS: 'false'
+  BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+  BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
+  BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
+  BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
+  BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
+
+jobs:
+  resolve_request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      chat_url: ${{ steps.resolve.outputs.chat_url }}
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Resolve requested chat URL
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_CHAT_URL: ${{ inputs.chat_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            chat_url="$DISPATCH_CHAT_URL"
+            source_desc='workflow_dispatch input'
+          else
+            request_path="$(
+              git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" |
+              grep -E '^process/browser-agent-chat-watchdog/requests/[^/]+\.json$' |
+              tail -n 1
+            )"
+            if [ -z "$request_path" ] || [ ! -f "$request_path" ]; then
+              echo "::error::No watchdog request JSON was found in triggering commit $GITHUB_SHA"
+              exit 2
+            fi
+            chat_url="$(jq -r '.chat_url // empty' "$request_path")"
+            source_desc="$request_path"
+          fi
+
+          if [[ ! "$chat_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ ]]; then
+            echo "::error::Resolved chat_url is not a valid https://chatgpt.com/c/... conversation URL"
+            exit 2
+          fi
+
+          chat_url="${chat_url%/}"
+          echo "chat_url=$chat_url" >> "$GITHUB_OUTPUT"
+          echo "Resolved watchdog target from $source_desc" >> "$GITHUB_STEP_SUMMARY"
+          echo "$chat_url" >> "$GITHUB_STEP_SUMMARY"
+
+  supervise_0_to_4h:
+    needs:
+      - resolve_request
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    outputs:
+      deadline_epoch: ${{ steps.watch.outputs.deadline_epoch }}
+      assistant_count: ${{ steps.watch.outputs.assistant_count }}
+      assistant_hash: ${{ steps.watch.outputs.assistant_hash }}
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Restore encrypted ChatGPT session state
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-chat-watchdog-${{ github.run_id }}-segment-1
+          restore-keys: |
+            chatgpt-session-state-v1-
+
+      - name: Set up isolated browser-agent runtime
+        uses: ./.github/actions/setup-browser-agent-runtime
+
+      - name: Supervise chat for first four-hour segment
+        id: watch
+        env:
+          CHAT_URL: ${{ needs.resolve_request.outputs.chat_url }}
+          WAKE_ID: chat-watchdog-${{ github.run_id }}
+          WAKE_MESSAGE: GET BACK TO WORK
+          INTERVAL_SECONDS: '300'
+          SEGMENT_SECONDS: '14400'
+        shell: bash
+        run: bash scripts/browser-agent-chat-watchdog-v1.sh
+
+      - name: Detect encrypted ChatGPT session state
+        if: always()
+        id: session_state_1
+        shell: bash
+        run: |
+          if [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save refreshed encrypted ChatGPT session state
+        if: always() && steps.session_state_1.outputs.present == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-chat-watchdog-${{ github.run_id }}-segment-1
+
+  supervise_4_to_8h:
+    needs:
+      - resolve_request
+      - supervise_0_to_4h
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    outputs:
+      deadline_epoch: ${{ steps.watch.outputs.deadline_epoch }}
+      assistant_count: ${{ steps.watch.outputs.assistant_count }}
+      assistant_hash: ${{ steps.watch.outputs.assistant_hash }}
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Restore encrypted ChatGPT session state
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-chat-watchdog-${{ github.run_id }}-segment-2
+          restore-keys: |
+            chatgpt-session-state-v1-chat-watchdog-${{ github.run_id }}-
+            chatgpt-session-state-v1-
+
+      - name: Set up isolated browser-agent runtime
+        uses: ./.github/actions/setup-browser-agent-runtime
+
+      - name: Supervise chat for second four-hour segment
+        id: watch
+        env:
+          CHAT_URL: ${{ needs.resolve_request.outputs.chat_url }}
+          WAKE_ID: chat-watchdog-${{ github.run_id }}
+          WAKE_MESSAGE: GET BACK TO WORK
+          INTERVAL_SECONDS: '300'
+          SEGMENT_SECONDS: '14400'
+          OVERALL_DEADLINE_EPOCH: ${{ needs.supervise_0_to_4h.outputs.deadline_epoch }}
+          PREVIOUS_ASSISTANT_COUNT: ${{ needs.supervise_0_to_4h.outputs.assistant_count }}
+          PREVIOUS_ASSISTANT_HASH: ${{ needs.supervise_0_to_4h.outputs.assistant_hash }}
+        shell: bash
+        run: bash scripts/browser-agent-chat-watchdog-v1.sh
+
+      - name: Detect encrypted ChatGPT session state
+        if: always()
+        id: session_state_2
+        shell: bash
+        run: |
+          if [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save refreshed encrypted ChatGPT session state
+        if: always() && steps.session_state_2.outputs.present == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-chat-watchdog-${{ github.run_id }}-segment-2
+
+  supervise_8_to_12h:
+    needs:
+      - resolve_request
+      - supervise_4_to_8h
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Restore encrypted ChatGPT session state
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-chat-watchdog-${{ github.run_id }}-segment-3
+          restore-keys: |
+            chatgpt-session-state-v1-chat-watchdog-${{ github.run_id }}-
+            chatgpt-session-state-v1-
+
+      - name: Set up isolated browser-agent runtime
+        uses: ./.github/actions/setup-browser-agent-runtime
+
+      - name: Supervise chat until the twelve-hour deadline
+        id: watch
+        env:
+          CHAT_URL: ${{ needs.resolve_request.outputs.chat_url }}
+          WAKE_ID: chat-watchdog-${{ github.run_id }}
+          WAKE_MESSAGE: GET BACK TO WORK
+          INTERVAL_SECONDS: '300'
+          SEGMENT_SECONDS: '14400'
+          OVERALL_DEADLINE_EPOCH: ${{ needs.supervise_4_to_8h.outputs.deadline_epoch }}
+          PREVIOUS_ASSISTANT_COUNT: ${{ needs.supervise_4_to_8h.outputs.assistant_count }}
+          PREVIOUS_ASSISTANT_HASH: ${{ needs.supervise_4_to_8h.outputs.assistant_hash }}
+        shell: bash
+        run: bash scripts/browser-agent-chat-watchdog-v1.sh
+
+      - name: Detect encrypted ChatGPT session state
+        if: always()
+        id: session_state_3
+        shell: bash
+        run: |
+          if [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save refreshed encrypted ChatGPT session state
+        if: always() && steps.session_state_3.outputs.present == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: chatgpt-session-state-v1-chat-watchdog-${{ github.run_id }}-segment-3
