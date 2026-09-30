@@ -1,4 +1,4 @@
-name: Browser Agent Chat Watchdog v37
+name: Browser Agent Chat Watchdog v38
 
 on:
   schedule:
@@ -75,7 +75,7 @@ jobs:
               --arg chat "$chat_url" \
               --argjson deadline "$deadline_epoch" \
               '{
-                schemaVersion:"curveyield-browser-agent-chat-watchdog-state-v37",
+                schemaVersion:"curveyield-browser-agent-chat-watchdog-state-v38",
                 id:$id,
                 status:"ACTIVE",
                 chatUrl:$chat,
@@ -125,7 +125,7 @@ jobs:
       matrix:
         id: ${{ fromJSON(needs.discover.outputs.targets) }}
     concurrency:
-      group: browser-agent-chat-watchdog-v37-${{ matrix.id }}
+      group: browser-agent-chat-watchdog-v38-${{ matrix.id }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -194,130 +194,226 @@ jobs:
           )"
 
           if [ "$challenge" = true ]; then
-            echo "Existing-chat deep link hit browser challenge; refreshing authenticated ChatGPT session on the home page."
+            echo "Existing-chat deep link hit browser challenge; retrying in one continuous authenticated browser context."
 
-            warmup_rc=0
-            xvfb-run -a node --input-type=module <<'NODE' || warmup_rc=$?
-            import fs from 'node:fs/promises';
-            import path from 'node:path';
-            import { createRequire } from 'node:module';
-            import { pathToFileURL } from 'node:url';
-            import {
-              deriveSessionStateKeyB64,
-              loadEncryptedSessionState,
-              saveEncryptedSessionState,
-              validateStorageState,
-            } from './scripts/browser-session-state-v1.mjs';
+            fallback_rc=0
+            xvfb-run -a node --input-type=module <<'NODE' || fallback_rc=$?
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import {
+  deriveSessionStateKeyB64,
+  loadEncryptedSessionState,
+  validateStorageState,
+} from './scripts/browser-session-state-v1.mjs';
 
-            const env = process.env;
-            const encryptedSessionPath = '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
-            const keyB64 = deriveSessionStateKeyB64({
-              keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
-              bootstrapStateB64: env.CHATGPT_STORAGE_STATE_B64,
-            });
+const env = process.env;
+const chatUrl = env.CHAT_URL;
+const wakeMessage = 'GET BACK TO WORK';
+const encryptedSessionPath = '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
+const keyB64 = deriveSessionStateKeyB64({
+  keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
+  bootstrapStateB64: env.CHATGPT_STORAGE_STATE_B64,
+});
 
-            let storage = await loadEncryptedSessionState({
-              encryptedSessionPath,
-              keyB64,
-            });
+let storage = await loadEncryptedSessionState({ encryptedSessionPath, keyB64 });
+if (!storage && env.CHATGPT_STORAGE_STATE_B64) {
+  const bootstrap = JSON.parse(
+    Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'),
+  );
+  if (!validateStorageState(bootstrap)) throw new Error('CHATGPT_STORAGE_STATE_B64 is invalid');
+  storage = bootstrap;
+}
+if (!storage) throw new Error('No ChatGPT session state available');
 
-            if (!storage && env.CHATGPT_STORAGE_STATE_B64) {
-              const bootstrap = JSON.parse(
-                Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'),
-              );
-              if (!validateStorageState(bootstrap)) {
-                throw new Error('CHATGPT_STORAGE_STATE_B64 is invalid');
-              }
-              storage = bootstrap;
-            }
+const runtimeRequire = createRequire(path.join(env.BROWSER_AGENT_RUNTIME_ROOT, 'package.json'));
+const playwrightMod = await import(pathToFileURL(runtimeRequire.resolve('playwright-core')).href);
+const chromium = playwrightMod.chromium || playwrightMod.default?.chromium;
+if (!chromium) throw new Error('playwright-core chromium unavailable');
 
-            if (!storage) throw new Error('No ChatGPT session state available for warm-up');
+const browser = await chromium.launch({
+  headless: env.BROWSER_HEADLESS !== 'false',
+  channel: 'chrome',
+});
+const context = await browser.newContext({ storageState: storage });
+const page = await context.newPage();
 
-            const runtimeRequire = createRequire(
-              path.join(env.BROWSER_AGENT_RUNTIME_ROOT, 'package.json'),
-            );
-            const playwrightMod = await import(
-              pathToFileURL(runtimeRequire.resolve('playwright-core')).href,
-            );
-            const chromium =
-              playwrightMod.chromium ||
-              playwrightMod.default?.chromium;
-            if (!chromium) throw new Error('playwright-core chromium unavailable');
+async function firstVisible(selectors) {
+  for (const selector of selectors) {
+    const locator = page.locator(selector).first();
+    try {
+      if (await locator.isVisible({ timeout: 600 })) return locator;
+    } catch {}
+  }
+  return null;
+}
 
-            const browser = await chromium.launch({
-              headless: env.BROWSER_HEADLESS !== 'false',
-              channel: 'chrome',
-            });
-            const context = await browser.newContext({ storageState: storage });
-            const page = await context.newPage();
+async function getComposer() {
+  return firstVisible([
+    '#prompt-textarea',
+    'textarea[placeholder*="Message"]',
+    '[contenteditable="true"][data-lexical-editor="true"]',
+    '[contenteditable="true"]',
+  ]);
+}
 
-            try {
-              await page.goto('https://chatgpt.com/', {
-                waitUntil: 'domcontentloaded',
-                timeout: 60000,
-              });
+async function state() {
+  const body = await page.locator('body').innerText().catch(() => '');
+  const title = await page.title().catch(() => '');
+  const composer = await getComposer();
+  const stop = await firstVisible([
+    'button[data-testid="stop-button"]',
+    'button[aria-label*="Stop"]',
+    'button:has-text("Stop generating")',
+  ]);
+  return {
+    generating: !!stop,
+    composerVisible: !!composer,
+    humanChallenge:
+      /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(body) ||
+      /Just a moment|Cloudflare/i.test(title),
+    loginPrompt: /\\bLog in\\b|\\bSign up\\b|Continue with Google|Welcome back/i.test(body),
+    conversationUnavailable:
+      /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(body),
+    url: page.url(),
+  };
+}
 
-              const deadline = Date.now() + 30000;
-              let healthy = false;
-              while (Date.now() < deadline) {
-                const body = await page.locator('body').innerText().catch(() => '');
-                const title = await page.title().catch(() => '');
-                const challenged =
-                  /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(body) ||
-                  /Just a moment|Cloudflare/i.test(title);
-                const login =
-                  /\\bLog in\\b|\\bSign up\\b|Continue with Google|Welcome back/i.test(body);
+async function waitHealthy(maxMs) {
+  const deadline = Date.now() + maxMs;
+  let current = await state();
+  while (Date.now() < deadline) {
+    if (!current.humanChallenge && !current.loginPrompt) return current;
+    await page.waitForTimeout(1000);
+    current = await state();
+  }
+  return current;
+}
 
-                if (!challenged && !login) {
-                  healthy = true;
-                  break;
-                }
-                await page.waitForTimeout(1000);
-              }
+async function composerText(composer) {
+  const tag = await composer.evaluate(el => el.tagName.toLowerCase());
+  if (tag === 'textarea' || tag === 'input') return (await composer.inputValue()).trim();
+  return (await composer.innerText().catch(() => '')).trim();
+}
 
-              if (!healthy) {
-                throw new Error('ChatGPT homepage did not clear authentication/browser challenge');
-              }
+try {
+  await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  const home = await waitHealthy(30000);
+  if (home.humanChallenge || home.loginPrompt) throw new Error('ChatGPT home page did not become usable');
 
-              const refreshed = await context.storageState({
-                indexedDB: true,
-                opfs: true,
-              });
-              const persisted = await saveEncryptedSessionState({
-                encryptedSessionPath,
-                keyB64,
-                storage: refreshed,
-              });
-              if (!persisted) {
-                throw new Error('Refreshed ChatGPT session state was not persisted');
-              }
+  await page.goto(chatUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  const before = await waitHealthy(30000);
+  if (
+    before.humanChallenge ||
+    before.loginPrompt ||
+    before.conversationUnavailable ||
+    !before.composerVisible
+  ) {
+    throw new Error('Existing chat did not become usable in continuous browser context');
+  }
 
-              await fs.writeFile(
-                '/tmp/session-warmup.json',
-                JSON.stringify({ ok: true, url: page.url() }, null, 2) + '\\n',
-              );
-            } finally {
-              await browser.close().catch(() => {});
-            }
-          NODE
+  if (before.generating) {
+    await fs.writeFile(
+      '/tmp/continuous-result.json',
+      JSON.stringify({ ok:true, posted:false, generating:true, url:page.url() }, null, 2) + '\n',
+    );
+    process.exit(0);
+  }
 
-            if [ "$warmup_rc" -ne 0 ]; then
-              echo "::warning::Authenticated ChatGPT session refresh failed."
+  const composer = await getComposer();
+  const turns = page.locator('[data-testid^="conversation-turn-"]');
+  const beforeTurnCount = await turns.count().catch(() => 0);
+  const beforeWakeCount = await turns.filter({ hasText: wakeMessage }).count().catch(() => 0);
+
+  await composer.click();
+  const tag = await composer.evaluate(el => el.tagName.toLowerCase());
+  if (tag === 'textarea' || tag === 'input') {
+    await composer.fill(wakeMessage);
+  } else {
+    await composer.fill(wakeMessage).catch(async () => {
+      await composer.press('Control+A').catch(() => {});
+      await composer.press('Meta+A').catch(() => {});
+      await composer.press('Backspace').catch(() => {});
+      await page.keyboard.insertText(wakeMessage);
+    });
+  }
+  if ((await composerText(composer)) !== wakeMessage) throw new Error('Wake text was not entered');
+
+  const send = await firstVisible([
+    'button[data-testid="send-button"]',
+    'button[aria-label*="Send"]',
+  ]);
+  if (send) await send.click();
+  else await composer.press('Enter');
+
+  const deadline = Date.now() + 20000;
+  let verified = false;
+  let afterTurnCount = beforeTurnCount;
+  let afterWakeCount = beforeWakeCount;
+  let sawGenerating = false;
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(500);
+    const currentComposer = await getComposer();
+    const cleared = !currentComposer || (await composerText(currentComposer)) === '';
+    afterTurnCount = await turns.count().catch(() => beforeTurnCount);
+    afterWakeCount = await turns.filter({ hasText: wakeMessage }).count().catch(() => beforeWakeCount);
+    sawGenerating = sawGenerating || (await state()).generating;
+    if (
+      cleared &&
+      (afterTurnCount > beforeTurnCount || afterWakeCount > beforeWakeCount || sawGenerating)
+    ) {
+      verified = true;
+      break;
+    }
+  }
+  if (!verified) throw new Error('GET BACK TO WORK submission was not verified');
+
+  await fs.writeFile(
+    '/tmp/continuous-result.json',
+    JSON.stringify({
+      ok:true,
+      posted:true,
+      generating:false,
+      url:page.url(),
+      beforeTurnCount,
+      afterTurnCount,
+      beforeWakeCount,
+      afterWakeCount,
+      sawGenerating,
+    }, null, 2) + '\n',
+  );
+} finally {
+  await browser.close().catch(() => {});
+}
+NODE
+
+            if [ "$fallback_rc" -ne 0 ] || [ "$(jq -r '.ok // false' /tmp/continuous-result.json 2>/dev/null || echo false)" != true ]; then
+              echo "::warning::Continuous existing-chat browser fallback failed."
               exit 0
             fi
-            echo "Authenticated ChatGPT session refresh completed."
 
-            export WAKE_MODE='resume_existing'
-            export CHAT_URL="$chat_url"
-            export WAKE_ACTION='observe'
-            export WAKE_RESULT_PATH='/tmp/observe.json'
+            fallback_posted="$(jq -r '.posted // false' /tmp/continuous-result.json)"
+            fallback_generating="$(jq -r '.generating // false' /tmp/continuous-result.json)"
 
-            retry_rc=0
-            xvfb-run -a node scripts/browser-agent-wake.mjs || retry_rc=$?
-            if [ "$retry_rc" -ne 0 ]; then
-              echo "::warning::Existing-chat observation still failed after authenticated-session refresh."
+            if [ "$fallback_posted" = true ]; then
+              jq '.pokeCount=((.pokeCount // 0)+1)' /tmp/state.json > /tmp/state-next.json
+              sha="$(gh api "$api?ref=main" --jq '.sha')"
+              body="$(base64 -w0 /tmp/state-next.json)"
+              gh api --method PUT "$api" \
+                -f message="chore(chat-watchdog): poke $WATCHDOG_ID" \
+                -f content="$body" -f sha="$sha" -f branch=main >/dev/null
+              echo "Watchdog $WATCHDOG_ID: GET BACK TO WORK verified in the supplied existing chat."
               exit 0
             fi
+
+            if [ "$fallback_generating" = true ]; then
+              echo "Watchdog $WATCHDOG_ID: agent is actively generating; no message sent."
+              exit 0
+            fi
+
+            echo "::warning::Continuous browser fallback returned no action."
+            exit 0
           elif [ "$observe_rc" -ne 0 ]; then
             echo "::warning::Observation failed; next scheduled sweep will retry."
             exit 0
