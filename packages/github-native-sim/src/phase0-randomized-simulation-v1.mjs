@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 import {buildProject} from '../../runner/src/build-dispatch.mjs';
 import {startRpcIdentityProxy} from '../../runner/src/rpc-identity-proxy-v1.mjs';
 import {stageExactArchiveSource,runProcess} from './execution.mjs';
+import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
 export const PHASE0_MEDUSA_MIN_CALLS_V1=100001;
@@ -202,10 +203,10 @@ function mutableFunctions(ethers,a){
   return iface.fragments.filter(x=>x.type==='function'&&!['view','pure'].includes(x.stateMutability)&&x.name).map(f=>({fragment:f,signature:f.format('sighash'),accounting:ACCOUNTING_MUTATION_RE.test(f.name)}));
 }
 function deployableZeroArg(a){return a?.bytecode&&a.bytecode!=='0x'&&!String(a.bytecode).includes('__$')&&constructorInputs(a.abi).length===0;}
-async function fallbackDeploy({provider,ethers,artifacts,existing,max=8}){
+async function fallbackDeploy({provider,ethers,artifacts,existing}){
   const existingQualified=new Set(existing.filter(x=>x.qualifiedName).map(x=>x.qualifiedName));
   const signer=await provider.getSigner(0),rows=[],limitations=[];
-  const ranked=artifacts.filter(deployableZeroArg).filter(a=>!existingQualified.has(`${a.sourceName}:${a.contractName}`)).map(a=>({a,score:mutableFunctions(ethers,a).length+(ACCOUNTING_MUTATION_RE.test(a.contractName)?20:0)})).filter(x=>x.score>0).sort((x,y)=>y.score-x.score).slice(0,max);
+  const ranked=artifacts.filter(deployableZeroArg).filter(a=>!existingQualified.has(`${a.sourceName}:${a.contractName}`)).map(a=>({a,score:mutableFunctions(ethers,a).length+(ACCOUNTING_MUTATION_RE.test(a.contractName)?20:0)})).filter(x=>x.score>0).sort((x,y)=>y.score-x.score||(`${x.a.sourceName}:${x.a.contractName}`).localeCompare(`${y.a.sourceName}:${y.a.contractName}`));
   for(const {a} of ranked){
     try{
       const f=new ethers.ContractFactory(normalizedAbi(a.abi),a.bytecode,signer),c=await f.deploy();await c.waitForDeployment();const receipt=await c.deploymentTransaction().wait();
