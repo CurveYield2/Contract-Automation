@@ -126,6 +126,10 @@ jobs:
           set -euo pipefail
           summary=.phase0-rebind-output/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
           index=.phase0-rebind-output/PHASE0_SIMULATION_RUN_INDEX_v1.json
+          echo "---- Phase-0 simulation summary ----"
+          jq . "$summary"
+          echo "---- Phase-0 simulation run index ----"
+          jq . "$index"
           jq -e '
             .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE" and
             .medusa.status=="PASS" and
