@@ -62,7 +62,7 @@ test('watchdog monitors assignment-v2 without circular packet dispatch and retai
   assert.match(w,/currentAssignment\.packetPath/);
   assert.doesNotMatch(w,/packet_status.*SUBMITTED[\s\S]{0,500}lite-phase-work-packet-controller-v1\.yml/);
   assert.match(w,/lite-phase-receipt-controller-v1\.yml/);
-  assert.match(boundary,/\.agent-upload\/lite-phase-boundary\/\*\.json/);
+  assert.match(boundary,/process\/agent-upload\/lite-phase-boundary\/\*\.json/);
   assert.match(boundary,/curveyield-lite-phase-boundary-request-v1/);
 });
 

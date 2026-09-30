@@ -86,12 +86,12 @@ test('assignment-v2 controller validation is reviewer-request driven and not cir
   const workflow=read('.github/workflows/lite-phase-work-packet-controller-v1.yml');
   const watchdog=read('.github/workflows/browser-agent-watchdog.yml');
   const successor=read('scripts/prepare-lite-assignment-successor-v2.mjs');
-  assert.match(workflow,/\.agent-upload\/lite-phase-boundary\/\*\.json/);
+  assert.match(workflow,/process\/agent-upload\/lite-phase-boundary\/\*\.json/);
   assert.match(workflow,/curveyield-lite-phase-boundary-request-v1/);
   assert.match(workflow,/Resolve canonical campaign routing/);
   assert.match(workflow,/--campaign-id/);
   assert.doesNotMatch(watchdog,/packet_status.*SUBMITTED[\s\S]{0,500}lite-phase-work-packet-controller-v1\.yml/);
-  assert.match(successor,/\.agent-upload\/lite-phase-boundary\//);
+  assert.match(successor,/process\/agent-upload\/lite-phase-boundary\//);
   assert.match(successor,/curveyield-lite-phase-boundary-request-v1/);
 });
 
