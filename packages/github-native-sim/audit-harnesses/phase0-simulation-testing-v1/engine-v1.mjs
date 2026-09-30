@@ -232,6 +232,17 @@ function canonicalEthereumExecutionOverrides(source){
   }
   return{env,adaptations};
 }
+async function runDeploymentScriptV1(options){
+  const startedAt=Date.now();
+  console.log('[phase0-deployment] native script started; timeout=900s; heartbeat every 300s');
+  const heartbeat=setInterval(()=>console.log(`[phase0-deployment] native script still running; elapsed=${Math.floor((Date.now()-startedAt)/1000)}s`),300000);
+  heartbeat.unref?.();
+  try{
+    const result=await runProcess(options);
+    console.log(`[phase0-deployment] native script exited; elapsed=${Math.floor((Date.now()-startedAt)/1000)}s; exitCode=${result.exitCode}`);
+    return result;
+  }finally{clearInterval(heartbeat);}
+}
 async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSigner,detected}){
   const attempts=[],limitations=[];
   let help='';
@@ -244,14 +255,14 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSign
       limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'FOUNDRY',path:item.path,reason:'Installed forge script adapter does not expose --unlocked; Phase-0 will not inject or invent a private key.'});continue;
     }
     const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
-    const r=await runProcess({command:'timeout',args:['240s','forge',...args],cwd:projectRoot,env:scrubbedEnv({ETH_RPC_URL:anvilUrl})});
+    const r=await runDeploymentScriptV1({command:'timeout',args:['900s','forge',...args],cwd:projectRoot,env:scrubbedEnv({ETH_RPC_URL:anvilUrl})});
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     attempts.push({framework:'FOUNDRY',path:item.path,entry:item.entry,command:['forge',...args].join(' '),exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
   }
   for(const item of detected.unsafeHardhat??[]) limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'HARDHAT',path:item.path,reason:item.reason});
   for(const item of detected.hardhat){
     const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
-    const r=await runProcess({command:'timeout',args:['240s','npx','hardhat','run',item.path,'--network','localhost'],cwd:projectRoot,env:scrubbedEnv({ETH_RPC_URL:anvilUrl,RPC_URL:anvilUrl,LOCALHOST_RPC_URL:anvilUrl,HARDHAT_NETWORK:'localhost'})});
+    const r=await runDeploymentScriptV1({command:'timeout',args:['900s','npx','hardhat','run',item.path,'--network','localhost'],cwd:projectRoot,env:scrubbedEnv({ETH_RPC_URL:anvilUrl,RPC_URL:anvilUrl,LOCALHOST_RPC_URL:anvilUrl,HARDHAT_NETWORK:'localhost'})});
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     attempts.push({framework:'HARDHAT',path:item.path,entry:item.entry,command:`npx hardhat run ${item.path} --network localhost`,exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
   }
@@ -296,9 +307,9 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSign
       BASE_DEPLOYER_PRIVATE_KEY:localSigner.privateKey,
       ...executionOverrides.env
     });
-    const args=['240s','node',adaptedRel];
+    const args=['900s','node',adaptedRel];
     if(item.argsText)args.push(...item.argsText.split(/\s+/).filter(Boolean));
-    const r=await runProcess({command:'timeout',args,cwd:projectRoot,env});
+    const r=await runDeploymentScriptV1({command:'timeout',args,cwd:projectRoot,env});
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     attempts.push({
       framework:'GENERIC_NODE',script:item.name,path:item.entry,adaptedPath:adaptedRel,
