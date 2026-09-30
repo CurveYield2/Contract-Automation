@@ -69,3 +69,15 @@ test('summary telemetry projection preserves terminal status used by completenes
   assert.equal(project({runId:'shard',status:'PASS',calls:1200}).status,'PASS');
   assert.equal(project({runId:'shard',status:'FAILED',calls:1200}).status,'FAILED');
 });
+
+test('package deployment report wins over bytecode discovery at the same address',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'./engine-v1.mjs'),'utf8');
+  const merge=source.match(/for\(const row of \[\.\.\.[^\]]+\]\)deploymentRowsByAddress\.set\(String\(row\.address\)\.toLowerCase\(\),row\);/)[0];
+  const reported={rows:[{address:'0xabc',contractName:'LinkedLibrary',mappingStatus:'PACKAGE_DEPLOYMENT_REPORT'}]};
+  const discoveredScriptDeployments=[{address:'0xabc',contractName:null,mappingStatus:'UNMAPPED_CREATION'},{address:'0xdef',contractName:'Extra'}];
+  const deploymentRowsByAddress=new Map();
+  new Function('reported','discoveredScriptDeployments','deploymentRowsByAddress',merge)(reported,discoveredScriptDeployments,deploymentRowsByAddress);
+  assert.equal(deploymentRowsByAddress.get('0xabc').contractName,'LinkedLibrary');
+  assert.equal(deploymentRowsByAddress.get('0xdef').contractName,'Extra');
+});
