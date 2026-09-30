@@ -5,6 +5,8 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1} from '../src/phase0-randomized-simulation-v1.mjs';
 import {extractSourceKnownDeployPlanV1,extractSourceKnownBindingsV1} from '../src/source-known-deployment-plan-v1.mjs';
+import {contractArtifactMap} from '../../runner/src/compiler.mjs';
+import {extractSourceKnownDeployPlanV1,extractSourceKnownBindingsV1} from '../src/source-known-deployment-plan-v1.mjs';
 
 function rngSeq(values){let i=0;return()=>values[(i++)%values.length];}
 function fn(accounting,name='f'){
@@ -130,4 +132,56 @@ test('compiler artifacts preserve library link references required by constructo
   const source=fs.readFileSync(path.resolve(here,'../../runner/src/compiler.mjs'),'utf8');
   assert.match(source,/evm\.bytecode\.linkReferences/);
   assert.match(source,/linkReferences:\s*artifact\?\.evm\?\.bytecode\?\.linkReferences/);
+});
+
+
+test('compiler artifact normalization preserves link references needed for constructor deployment fallback',()=>{
+  const output={contracts:{'LibUser.sol':{LibUser:{
+    abi:[{type:'constructor',inputs:[]}],
+    evm:{
+      bytecode:{object:'6000',sourceMap:'',linkReferences:{'Math.sol':{MathLib:[{start:1,length:20}]}}},
+      deployedBytecode:{object:'6000',sourceMap:'',linkReferences:{}},
+      methodIdentifiers:{},
+      gasEstimates:{creation:{totalCost:'123'}}
+    }
+  }}}};
+  const artifact=contractArtifactMap(output).get('LibUser','LibUser.sol');
+  assert.deepEqual(artifact.linkReferences,{'Math.sol':{MathLib:[{start:1,length:20}]}});
+});
+
+test('source-known deployment plan extracts constructor-bearing deploy order and library markers',()=>{
+  const source=`
+    const predictedVault = report.predictedDeployments.find((entry) => entry.name === "Vault").expectedAddress;
+    const bootstrapAuthorizer = await deploy("CurveYieldBootstrapAuthorizer", [account.address]);
+    const protocolFeeController = await deploy("ProtocolFeeController", [predictedVault, PROTOCOL_SWAP_FEE_PERCENTAGE, PROTOCOL_YIELD_FEE_PERCENTAGE]);
+    await deploy("ObservationQueryProcessor", [], { library: true });
+    const wrapper = await deploy("CurveYieldPoolFactoryWrapper", [account.address, poolFeePolicyRegistry, protocolFeeController]);
+  `;
+  const plan=extractSourceKnownDeployPlanV1(source);
+  assert.equal(plan.length,4);
+  assert.equal(plan[0].contractName,'CurveYieldBootstrapAuthorizer');
+  assert.deepEqual(plan[1].argExpressions,['predictedVault','PROTOCOL_SWAP_FEE_PERCENTAGE','PROTOCOL_YIELD_FEE_PERCENTAGE']);
+  assert.equal(plan[2].library,true);
+  assert.equal(plan[3].binding,'wrapper');
+});
+
+test('source-known binding extraction keeps deployment-script default addresses and bigint constants without secrets',()=>{
+  const source=`
+    const DAO = envAddress("CURVEYIELD_DAO", "0x7142b1Cc5F91A736A62e77581F406338328F05bC");
+    const PROTOCOL_SWAP_FEE_PERCENTAGE = envBigInt("PROTOCOL_SWAP_FEE_PERCENTAGE", 300_000_000_000_000_000n);
+    const FACTORY_PAUSE_WINDOW_SECONDS = Number(envBigInt("FACTORY_PAUSE_WINDOW_SECONDS", 365n * 24n * 60n * 60n));
+  `;
+  const bindings=extractSourceKnownBindingsV1(source);
+  assert.equal(bindings.get('DAO'),'0x7142b1Cc5F91A736A62e77581F406338328F05bC');
+  assert.equal(bindings.get('PROTOCOL_SWAP_FEE_PERCENTAGE'),300000000000000000n);
+  assert.equal(bindings.get('FACTORY_PAUSE_WINDOW_SECONDS'),31536000n);
+});
+
+test('Phase-0 simulator no longer caps zero-arg fallback at eight contracts and wires source-known plan first',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  assert.match(source,/deploySourceKnownPlanV1/);
+  assert.match(source,/sourcePlan\.rows/);
+  assert.doesNotMatch(source,/slice\(0,max\)/);
+  assert.doesNotMatch(source,/max=8/);
 });
