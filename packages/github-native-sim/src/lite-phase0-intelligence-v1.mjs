@@ -141,6 +141,10 @@ async function resolveCompiledSourceFile(projectRoot, sourceName){
 function sourceIsDependency(sourceName){
   return !String(sourceName).replaceAll('\\\\','/').startsWith('contracts/');
 }
+function slitherCompilerVersion(version){
+  const match=String(version??'').match(/(?:^|[^0-9])(\d+\.\d+\.\d+)(?:[^0-9]|$)/);
+  return match?.[1]??String(version??'');
+}
 async function writeCryticCompileExport({projectRoot,build,outDir}){
   const buildUnits=(Array.isArray(build?.compilationUnits)&&build.compilationUnits.length)
     ? build.compilationUnits.map((unit,index)=>({
@@ -220,7 +224,7 @@ async function writeCryticCompileExport({projectRoot,build,outDir}){
     compilation_units[buildUnit.unitId]={
       compiler:{
         compiler:'solc',
-        version:String(buildUnit.compilerVersion??''),
+        version:slitherCompilerVersion(buildUnit.compilerVersion),
         optimized:buildUnit.settings?.optimizer?.enabled!==false
       },
       source_units,
@@ -232,7 +236,7 @@ async function writeCryticCompileExport({projectRoot,build,outDir}){
     compilation_units,
     package:null,
     working_dir:projectRoot,
-    type:10,
+    type:100,
     unit_tests:[],
     crytic_version:'0.0.2'
   };
@@ -244,9 +248,15 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
   const compilationUnits=Array.isArray(build?.compilationUnits)?build.compilationUnits.filter(Boolean):[];
   if(compilationUnits.length<=1){
     const exportInfo=await writeCryticCompileExport({projectRoot,build,outDir:path.join(projectRoot,'.audit-slither-export')});
+    const preflight=await runProcess({
+      command:'python3',
+      args:['-c',"import sys,traceback; from crytic_compile import CryticCompile; p=sys.argv[1];\ntry:\n c=CryticCompile(p); print('CRYTIC_PREFLIGHT_OK', len(c.compilation_units))\nexcept Exception:\n traceback.print_exc(); sys.exit(2)",exportInfo.exportPath],
+      cwd:projectRoot
+    });
+    if(preflight.exitCode!==0)return{exportInfo,raw:preflight,parsed:null,success:false,preflight};
     const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies'],cwd:projectRoot});
     const parsed=parseSlitherJson(raw.stdout);
-    return{exportInfo,raw,parsed,success:parsed?.success===true};
+    return{exportInfo,raw,parsed,success:parsed?.success===true,preflight};
   }
 
   const unitResults=[];
@@ -269,12 +279,23 @@ async function runSlitherExport({projectRoot,build,sourceCommit}){
     });
     totalSourceUnits+=exportInfo.sourceUnitCount??0;
     totalContracts+=exportInfo.contractCount??0;
-    const raw=await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies'],cwd:projectRoot});
-    const parsed=parseSlitherJson(raw.stdout);
+    const preflight=await runProcess({
+      command:'python3',
+      args:['-c',"import sys,traceback; from crytic_compile import CryticCompile; p=sys.argv[1];\ntry:\n c=CryticCompile(p); print('CRYTIC_PREFLIGHT_OK', len(c.compilation_units))\nexcept Exception:\n traceback.print_exc(); sys.exit(2)",exportInfo.exportPath],
+      cwd:projectRoot
+    });
+    const raw=preflight.exitCode===0
+      ? await runProcess({command:'slither',args:[exportInfo.exportPath,'--json','-','--exclude-dependencies'],cwd:projectRoot})
+      : preflight;
+    const parsed=preflight.exitCode===0?parseSlitherJson(raw.stdout):null;
     unitResults.push({
       unitId,
       compilerVersion:unit.compilerVersion??null,
+      slitherCompilerVersion:slitherCompilerVersion(unit.compilerVersion),
       exportInfo,
+      preflightExitCode:preflight.exitCode,
+      preflightStdout:cleanText(preflight.stdout),
+      preflightStderr:cleanText(preflight.stderr),
       exitCode:raw.exitCode,
       signal:raw.signal??null,
       stdout:cleanText(raw.stdout),
