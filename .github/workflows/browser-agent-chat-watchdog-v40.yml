@@ -1,4 +1,4 @@
-name: Browser Agent Chat Watchdog v39
+name: Browser Agent Chat Watchdog v40
 
 on:
   schedule:
@@ -75,7 +75,7 @@ jobs:
               --arg chat "$chat_url" \
               --argjson deadline "$deadline_epoch" \
               '{
-                schemaVersion:"curveyield-browser-agent-chat-watchdog-state-v39",
+                schemaVersion:"curveyield-browser-agent-chat-watchdog-state-v40",
                 id:$id,
                 status:"ACTIVE",
                 chatUrl:$chat,
@@ -125,7 +125,7 @@ jobs:
       matrix:
         id: ${{ fromJSON(needs.discover.outputs.targets) }}
     concurrency:
-      group: browser-agent-chat-watchdog-v39-${{ matrix.id }}
+      group: browser-agent-chat-watchdog-v40-${{ matrix.id }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -146,7 +146,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
-          key: chatgpt-session-state-v1-36335218452-1-0
+          key: chatgpt-session-state-v1-36333533014-1-curveyield-dex-fresh-ultralite-audit-r1-phase0-source-fanout-36333508468
 
       - name: Set up isolated browser-agent runtime
         uses: ./.github/actions/setup-browser-agent-runtime
