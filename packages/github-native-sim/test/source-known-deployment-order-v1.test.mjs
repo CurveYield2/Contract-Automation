@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {deploySourceKnownPlanV1} from '../src/source-known-deployment-plan-v1.mjs';
+import {deploySourceKnownPlanV1,extractNetworkAddressBindingsV1} from '../src/source-known-deployment-plan-v1.mjs';
 
 function addressFor(n){
   return '0x'+BigInt(n+1).toString(16).padStart(40,'0');
@@ -64,4 +64,36 @@ test('source-known fallback honors authoritative deployment order and resolves t
   }finally{
     await fs.rm(root,{recursive:true,force:true});
   }
+});
+
+
+test('source-known resolver derives v16 networkAddress bindings from the deploy script default network',()=>{
+  const deploy=`
+    const NETWORK_NAME = argValue("--network") || process.env.CURVEYIELD_NETWORK || "base";
+    const network = resolveNetwork(NETWORK_NAME);
+    let DAO = networkAddress(network, "dao", "CURVEYIELD_DAO");
+    let DEFAULT_PAYOUT_TOKEN = networkAddress(network, "defaultPayoutToken", "CURVEYIELD_DEFAULT_PAYOUT_TOKEN");
+    const WETH = networkAddress(network, "weth", "WETH");
+    const PERMIT2 = networkAddress(network, "permit2", "PERMIT2");
+  `;
+  const networks=`
+    export const NETWORKS = {
+      base: {
+        name: 'Base',
+        weth: '0x4200000000000000000000000000000000000006',
+        permit2: '0x000000000022D473030F116dDEE9F6B43aC78BA3',
+        dao: '0x7142b1Cc5F91A736A62e77581F406338328F05bC',
+        defaultPayoutToken: '0xd7bb4c715d66a3ac3742ab9d2e2f5274da17ce22',
+      },
+      katana: {
+        weth: '0x4200000000000000000000000000000000000006',
+        dao: { create: 'aragon' },
+      },
+    };
+  `;
+  const bindings=extractNetworkAddressBindingsV1(deploy,networks);
+  assert.equal(bindings.get('DAO'),'0x7142b1Cc5F91A736A62e77581F406338328F05bC');
+  assert.equal(bindings.get('DEFAULT_PAYOUT_TOKEN'),'0xd7bb4c715d66a3ac3742ab9d2e2f5274da17ce22');
+  assert.equal(bindings.get('WETH'),'0x4200000000000000000000000000000000000006');
+  assert.equal(bindings.get('PERMIT2'),'0x000000000022D473030F116dDEE9F6B43aC78BA3');
 });

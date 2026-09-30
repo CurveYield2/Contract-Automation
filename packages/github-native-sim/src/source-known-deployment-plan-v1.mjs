@@ -177,6 +177,44 @@ function safeNumericExpression(expr){
   }catch{}
   return null;
 }
+export function extractNetworkAddressBindingsV1(deployText,networksText){
+  const deploy=String(deployText??''),networks=String(networksText??''),bindings=new Map();
+  const networkName=deploy.match(/\bconst\s+NETWORK_NAME\s*=\s*[\s\S]{0,320}?\|\|\s*["']([^"']+)["']\s*;/)?.[1]??null;
+  if(!networkName)return bindings;
+  const networksDecl=networks.match(/\bexport\s+const\s+NETWORKS\s*=\s*\{/);
+  if(!networksDecl)return bindings;
+  const outerOpen=(networksDecl.index??0)+networksDecl[0].lastIndexOf('{');
+  const outer=balanced(networks,outerOpen,'{','}');
+  if(!outer)return bindings;
+  const escaped=networkName.replace(/[.*+?^$\{\}()|[\]\\]/g,'\\$&');
+  const entryRe=new RegExp('(?:^|\\n)\\s*'+escaped+'\\s*:\\s*\\{');
+  const entry=entryRe.exec(outer.body);
+  if(!entry)return bindings;
+  const entryOpen=outerOpen+1+(entry.index??0)+entry[0].lastIndexOf('{');
+  const block=balanced(networks,entryOpen,'{','}');
+  if(!block)return bindings;
+  const defaults=new Map();
+  for(const match of block.body.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*["'](0x[a-fA-F0-9]{40})["']/g))defaults.set(match[1],match[2]);
+  for(const match of deploy.matchAll(/\b(?:const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*networkAddress\s*\(\s*network\s*,\s*["']([^"']+)["']\s*,\s*["'][^"']+["']\s*\)/g)){
+    const value=defaults.get(match[2]);
+    if(value)bindings.set(match[1],value);
+  }
+  return bindings;
+}
+async function sourceKnownNetworkBindings(projectRoot,planPath,planText){
+  const importMatch=String(planText).match(/\bfrom\s+["']([^"']*networks\.mjs)["']/);
+  if(!importMatch)return new Map();
+  const relativeImport=importMatch[1];
+  if(relativeImport.startsWith('/')||relativeImport.includes('\\\\'))return new Map();
+  const networkPath=path.posix.normalize(path.posix.join(path.posix.dirname(planPath),relativeImport));
+  if(networkPath==='..'||networkPath.startsWith('../'))return new Map();
+  try{
+    const networksText=await fs.readFile(path.join(projectRoot,...networkPath.split('/')),'utf8');
+    return extractNetworkAddressBindingsV1(planText,networksText);
+  }catch{
+    return new Map();
+  }
+}
 export function extractSourceKnownBindingsV1(text){
   const bindings=new Map(),source=String(text);
   for(const match of source.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*envAddress\s*\(/g)){
@@ -280,6 +318,8 @@ export async function deploySourceKnownPlanV1({projectRoot,provider,ethers,artif
   const accessor=artifactAccessor(artifacts,preferredEntriesByName(chosen.compileGroups)),signer=await provider.getSigner(0),accountAddress=await signer.getAddress(),startNonce=await provider.getTransactionCount(accountAddress);
   const predictedByContract=new Map(chosen.steps.map((step,index)=>[step.contractName,ethers.getCreateAddress({from:accountAddress,nonce:startNonce+index})]));
   const bindings=extractSourceKnownBindingsV1(chosen.text);
+  const networkBindings=await sourceKnownNetworkBindings(projectRoot,chosen.rel,chosen.text);
+  for(const [name,value] of networkBindings)if(!bindings.has(name))bindings.set(name,value);
   for(const match of chosen.text.matchAll(/\bconst\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*[\s\S]{0,800}?report\.predictedDeployments\.find\([\s\S]{0,240}?entry\.name\s*===\s*["']([^"']+)["'][\s\S]{0,240}?\)\.expectedAddress\s*;/g)){
     const predicted=predictedByContract.get(match[2]);if(predicted)bindings.set(match[1],predicted);
   }
