@@ -463,7 +463,19 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   let anvil;
   try{
     const detected=await detectDeploymentScripts(staged.projectRoot);
-    const sourceKnownCompilation=await compileSourceKnownDeploymentArtifactsV1({projectRoot:staged.projectRoot,detected,request:pseudo});
+    const sourceKnownCompilation=build.system==='embedded-profile-native'
+      ? {
+          status:'PASS',
+          planPath:build.embeddedBuildContract?.deploymentSetModule??'tooling/lib/deploymentSet.mjs',
+          groups:build.compileGroups??[],
+          artifacts:build.artifacts??[],
+          selectedTargets:(build.artifacts??[]).map((artifact,index)=>({groupIndex:null,contractName:artifact.contractName,sourceName:artifact.sourceName,qualifiedName:`${artifact.sourceName}:${artifact.contractName}`,profile:artifact.profile??null,compilationUnitId:artifact.compilationUnitId??null,index})),
+          missingTargets:[],
+          limitations:[],
+          compilerProfiles:build.compilerProfiles??[],
+          reuseBasis:'EXACT_EMBEDDED_PROFILE_BUILD_FROM_PHASE0_BUILD_DISPATCH'
+        }
+      : await compileSourceKnownDeploymentArtifactsV1({projectRoot:staged.projectRoot,detected,request:pseudo});
     const artifactByQualified=new Map();
     for(const artifact of [...(build.artifacts??[]),...(sourceKnownCompilation.artifacts??[])])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
     const artifacts=[...artifactByQualified.values()];
