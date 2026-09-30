@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1} from '../src/phase0-randomized-simulation-v1.mjs';
 
 function rngSeq(values){let i=0;return()=>values[(i++)%values.length];}
@@ -66,4 +69,15 @@ test('Phase-0 chain admission reads discovered target chain IDs from readiness',
   ]}};
   assert.deepEqual(phase0DiscoveredTargetChainIdsV1(readiness),[8453]);
   assert.deepEqual(phase0DiscoveredTargetChainIdsV1({}),[]);
+});
+
+
+test('Phase-0 canonical Ethereum baseline uses the qualified RPC identity proxy instead of rejecting virtualized upstream chain IDs',()=>{
+  const here=path.dirname(fileURLToPath(import.meta.url));
+  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  assert.match(source,/startRpcIdentityProxy/);
+  assert.match(source,/upstreamUrl:forkUrl,chainId:1/);
+  assert.match(source,/--fork-url',identityProxy\.url/);
+  assert.doesNotMatch(source,/if\(upstreamChainId!==1\)/);
+  assert.match(source,/identityNormalized:anvil\.identityNormalized===true/);
 });
