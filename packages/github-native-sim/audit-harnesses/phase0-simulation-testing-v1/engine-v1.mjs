@@ -725,6 +725,11 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     }else{
       medusa={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_EXECUTABLE_TARGETS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0};
     }
+    if(targets.length&&medusa.status!=='PASS'){
+      const error=new Error('Medusa did not complete; telemetry is blocked. Inspect retained Medusa raw output.');
+      error.code='PHASE0_MEDUSA_INCOMPLETE';error.medusa=medusa;
+      await provider.destroy();throw error;
+    }
     let telemetry=[];
     let telemetryExecutionFailure=null;
     if(targets.length){
@@ -755,7 +760,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       targetEvmChainIds:targetChainIds,
       executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},
       limitations:[typed],
-      medusa:{status:'BLOCKED',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0},
+      medusa:error.medusa??{status:'BLOCKED',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0},
       telemetry:[],
       deployment:deploymentEvidence,
       baselineTargetDispositions:[{
