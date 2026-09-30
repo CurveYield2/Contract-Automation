@@ -588,10 +588,11 @@ async function main(){
   };
 
   const build=await buildProject({projectRoot:detected.absolute,request:pseudo});
+  const effectiveCfg={...cfg,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
   const slither=await slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit});
   const sbom=await generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build});
   const sourceIntelligence=await generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}});
-  const projectReadiness=await scanProjectReadiness({projectRoot:detected.absolute,build,cfg});
+  const projectReadiness=await scanProjectReadiness({projectRoot:detected.absolute,build,cfg:effectiveCfg});
   const deployConfigExecution=await executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness});
 
   if(!slitherSucceeded(slither))throw new Error('Slither terminal result is not successful');
@@ -602,8 +603,8 @@ async function main(){
     requestId:request.requestId,campaignId:request.campaignId,
     source:{...request.source,checkoutCommit:checkout.commit,archiveSha256Observed:observed},
     discovery:{projectPath:detected.relativePath,topCandidates:detected.candidates,archiveEntryCount:extraction.entryCount,archiveExtractedBytes:extraction.extractedBytes},
-    configurationDetection:cfg,
-    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
+    configurationDetection:effectiveCfg,
+    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??1,embeddedBuildContract:build.embeddedBuildContract??null,sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
     status:'PASS'
   };
 
