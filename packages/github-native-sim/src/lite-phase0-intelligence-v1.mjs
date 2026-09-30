@@ -353,11 +353,73 @@ async function scanProjectReadiness({projectRoot,build,cfg}){
   let packageJson=null;
   const packageText=await readSmallText(path.join(projectRoot,'package.json'));
   if(packageText){try{packageJson=JSON.parse(packageText);}catch{}}
-  const artifactSizes=(build.artifacts??[]).map(a=>({
-    qualifiedName:`${a.sourceName}:${a.contractName}`,
-    creationBytecodeBytes:Math.floor(String(a.bytecode??'0x').replace(/^0x/,'').length/2),
-    deployedBytecodeBytes:Math.floor(String(a.deployedBytecode??'0x').replace(/^0x/,'').length/2),
-    preliminaryDeploymentGasEstimate:a.gasEstimates?.creation?.totalCost??null
+  const contractMeta=new Map();
+  function visitContractMeta(node,sourceName){
+    if(!node||typeof node!=='object')return;
+    if(node.nodeType==='ContractDefinition')contractMeta.set(`${sourceName}:${node.name}`,{contractKind:node.contractKind??'UNKNOWN',abstract:node.abstract===true});
+    for(const value of Object.values(node)){
+      if(Array.isArray(value))for(const child of value)visitContractMeta(child,sourceName);
+      else if(value&&typeof value==='object')visitContractMeta(value,sourceName);
+    }
+  }
+  for(const [sourceName,ast] of Object.entries(build.sourceAsts??{}))visitContractMeta(ast,sourceName);
+
+  function normalizedArtifactAbi(abi){
+    if(Array.isArray(abi))return abi;
+    if(Array.isArray(abi?.abi))return abi.abi;
+    if(abi&&typeof abi==='object'){
+      const values=Object.values(abi);
+      if(values.length&&values.every(x=>x&&typeof x==='object'&&typeof x.type==='string'))return values;
+    }
+    return [];
+  }
+  function flattenLinkReferences(refs={}){
+    const out=[];
+    for(const [sourceName,libs] of Object.entries(refs??{})){
+      for(const [libraryName,positions] of Object.entries(libs??{})){
+        out.push({sourceName,libraryName,positions:(positions??[]).map(x=>({start:Number(x.start),length:Number(x.length)}))});
+      }
+    }
+    return out;
+  }
+
+  const contractDeploymentInventory=(build.artifacts??[]).map(a=>{
+    const qualifiedName=`${a.sourceName}:${a.contractName}`;
+    const meta=contractMeta.get(qualifiedName)??{};
+    const abi=normalizedArtifactAbi(a.abi);
+    const constructorInputs=(abi.find(x=>x?.type==='constructor')?.inputs??[]).map(x=>({
+      name:x.name??'',type:x.type??null,internalType:x.internalType??null,components:x.components??null
+    }));
+    const mutableFunctions=abi.filter(x=>x?.type==='function'&&!['view','pure'].includes(x.stateMutability));
+    const accountingMutableFunctions=mutableFunctions.filter(x=>/^(?:deposit|mint|stake|supply|lend|borrow|repay|withdraw|redeem|unstake|unsupply|transfer|transferFrom|burn|swap|addLiquidity|removeLiquidity|join|exit|claim|harvest|collect|distribute|accrue|settle|liquidate|donate|sync|skim)/i.test(String(x.name??'')));
+    const creationBytecodeBytes=Math.floor(String(a.bytecode??'0x').replace(/^0x/,'').length/2);
+    const deployedBytecodeBytes=Math.floor(String(a.deployedBytecode??'0x').replace(/^0x/,'').length/2);
+    const linkReferences=flattenLinkReferences(a.linkReferences??{});
+    let deployabilityStatus='DEPLOYABLE';
+    if(meta.abstract===true)deployabilityStatus='NOT_DIRECTLY_DEPLOYABLE_ABSTRACT';
+    else if(meta.contractKind==='interface')deployabilityStatus='NOT_DIRECTLY_DEPLOYABLE_INTERFACE';
+    else if((a.bytecode??'0x')==='0x'||creationBytecodeBytes===0)deployabilityStatus='NO_CREATION_BYTECODE';
+    else if(meta.contractKind==='library')deployabilityStatus='DEPLOYABLE_LIBRARY';
+    else if(linkReferences.length)deployabilityStatus='DEPLOYABLE_AFTER_LIBRARY_LINK';
+    else if(constructorInputs.length===0)deployabilityStatus='DEPLOYABLE_ZERO_ARG';
+    else deployabilityStatus='DEPLOYABLE_WITH_CONSTRUCTOR_ARGS';
+    return{
+      qualifiedName,sourceName:a.sourceName,contractName:a.contractName,
+      sourceClass:(String(a.sourceName).startsWith('@')||String(a.sourceName).includes('/vendor/'))?'DEPENDENCY_OR_VENDOR':'PROJECT_OR_ADMITTED_SOURCE',
+      contractKind:meta.contractKind??'UNKNOWN',abstract:meta.abstract===true,
+      deployabilityStatus,constructorInputs,linkReferences,
+      mutableFunctionCount:mutableFunctions.length,
+      accountingMutableFunctionCount:accountingMutableFunctions.length,
+      creationBytecodeBytes,deployedBytecodeBytes,
+      preliminaryDeploymentGasEstimate:a.gasEstimates?.creation?.totalCost??null
+    };
+  }).sort((a,b)=>a.qualifiedName.localeCompare(b.qualifiedName));
+
+  const artifactSizes=contractDeploymentInventory.map(x=>({
+    qualifiedName:x.qualifiedName,
+    creationBytecodeBytes:x.creationBytecodeBytes,
+    deployedBytecodeBytes:x.deployedBytecodeBytes,
+    preliminaryDeploymentGasEstimate:x.preliminaryDeploymentGasEstimate
   })).sort((a,b)=>b.deployedBytecodeBytes-a.deployedBytecodeBytes||a.qualifiedName.localeCompare(b.qualifiedName));
   const deployabilityRisks=artifactSizes.filter(x=>x.deployedBytecodeBytes>24576).map(x=>({...x,limitBytes:24576,status:'EIP170_RUNTIME_LIMIT_EXCEEDED'}));
   return{
@@ -369,6 +431,9 @@ async function scanProjectReadiness({projectRoot,build,cfg}){
       roleMentions,
       oracleMentions,
       proxyAndUpgradeabilityMentions:proxyMentions,
+      contractDeploymentInventory,
+      deployableContractCount:contractDeploymentInventory.filter(x=>x.deployabilityStatus.startsWith('DEPLOYABLE')).length,
+      mutableDeployableContractCount:contractDeploymentInventory.filter(x=>x.deployabilityStatus.startsWith('DEPLOYABLE')&&x.mutableFunctionCount>0).length,
       status:'MECHANICAL_INVENTORY_COMPLETE'
     },
     documentationInventory:{
