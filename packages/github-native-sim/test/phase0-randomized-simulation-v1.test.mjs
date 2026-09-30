@@ -252,12 +252,12 @@ test('Phase-0 prefers a directly redirectable package deployment script before p
   const here=path.dirname(fileURLToPath(import.meta.url));
   const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
   assert.match(source,/GENERIC_NODE/);
-  assert.match(source,/process\.env\.\(\?:RPC_URL\|ETH_RPC_URL\|LOCALHOST_RPC_URL\)/);
+  assert.ok(source.includes("process\\.env\\.(?:RPC_URL|ETH_RPC_URL|LOCALHOST_RPC_URL)"));
   assert.match(source,/PHASE0_LOCAL_CHAIN_ID:'1'/);
   assert.match(source,/SKIPPED_PACKAGE_DEPLOYMENT_SCRIPT_COMPLETE/);
   assert.match(source,/reportedPackageDeployments/);
   assert.match(source,/PACKAGE_DEPLOYMENT_REPORT/);
-  assert.match(source,/dry\[-_ \]\?run/);
+  assert.ok(source.includes("dry[-_ ]?run"));
 });
 
 test('Phase-0 derives and verifies the signer from the Anvil instance instead of embedding a fixed key', async () => {
