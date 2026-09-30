@@ -2,14 +2,33 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {compileHermeticDeploymentEntriesV1} from '../../runner/src/hermetic-standard-json.mjs';
 
+function canonicalAbiParam(param={}){
+  const next={...param},originalType=String(param.type??''),internalType=String(param.internalType??'');
+  const arraySuffix=originalType.match(/(?:\\[[0-9]*\\])+$/)?.[0]??'';
+  const baseType=arraySuffix?originalType.slice(0,-arraySuffix.length):originalType;
+  const internalBase=internalType.replace(/(?:\\[[0-9]*\\])+$/,'');
+  if(internalBase.startsWith('enum ')&&!/^u?int(?:[0-9]+)?$/.test(baseType)) next.type=`uint8${arraySuffix}`;
+  else if((internalBase.startsWith('contract ')||internalBase.startsWith('interface '))&&baseType!=='address') next.type=`address${arraySuffix}`;
+  else if(internalBase.startsWith('struct ')&&baseType!=='tuple') next.type=`tuple${arraySuffix}`;
+  if(Array.isArray(param.components))next.components=param.components.map(canonicalAbiParam);
+  return next;
+}
+function canonicalAbiFragment(fragment){
+  if(!fragment||typeof fragment!=='object')return fragment;
+  const next={...fragment};
+  if(Array.isArray(fragment.inputs))next.inputs=fragment.inputs.map(canonicalAbiParam);
+  if(Array.isArray(fragment.outputs))next.outputs=fragment.outputs.map(canonicalAbiParam);
+  return next;
+}
 function normalizedAbi(abi){
-  if(Array.isArray(abi))return abi;
-  if(Array.isArray(abi?.abi))return abi.abi;
-  if(abi&&typeof abi==='object'){
+  let rows=[];
+  if(Array.isArray(abi))rows=abi;
+  else if(Array.isArray(abi?.abi))rows=abi.abi;
+  else if(abi&&typeof abi==='object'){
     const values=Object.values(abi);
-    if(values.length&&values.every(x=>x&&typeof x==='object'&&typeof x.type==='string'))return values;
+    if(values.length&&values.every(x=>x&&typeof x==='object'&&typeof x.type==='string'))rows=values;
   }
-  return[];
+  return rows.map(canonicalAbiFragment);
 }
 function artifactAccessor(artifacts=[],preferredEntriesByName=new Map()){
   const byName=new Map();

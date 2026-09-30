@@ -188,14 +188,33 @@ async function discoverDeployments({provider,artifacts,startBlock,endBlock}){
   }
   return rows;
 }
+function canonicalAbiParam(param={}){
+  const next={...param},originalType=String(param.type??''),internalType=String(param.internalType??'');
+  const arraySuffix=originalType.match(/(?:\\[[0-9]*\\])+$/)?.[0]??'';
+  const baseType=arraySuffix?originalType.slice(0,-arraySuffix.length):originalType;
+  const internalBase=internalType.replace(/(?:\\[[0-9]*\\])+$/,'');
+  if(internalBase.startsWith('enum ')&&!/^u?int(?:[0-9]+)?$/.test(baseType)) next.type=`uint8${arraySuffix}`;
+  else if((internalBase.startsWith('contract ')||internalBase.startsWith('interface '))&&baseType!=='address') next.type=`address${arraySuffix}`;
+  else if(internalBase.startsWith('struct ')&&baseType!=='tuple') next.type=`tuple${arraySuffix}`;
+  if(Array.isArray(param.components))next.components=param.components.map(canonicalAbiParam);
+  return next;
+}
+function canonicalAbiFragment(fragment){
+  if(!fragment||typeof fragment!=='object')return fragment;
+  const next={...fragment};
+  if(Array.isArray(fragment.inputs))next.inputs=fragment.inputs.map(canonicalAbiParam);
+  if(Array.isArray(fragment.outputs))next.outputs=fragment.outputs.map(canonicalAbiParam);
+  return next;
+}
 function normalizedAbi(abi){
-  if(Array.isArray(abi)) return abi;
-  if(Array.isArray(abi?.abi)) return abi.abi;
-  if(abi&&typeof abi==='object'){
+  let rows=[];
+  if(Array.isArray(abi)) rows=abi;
+  else if(Array.isArray(abi?.abi)) rows=abi.abi;
+  else if(abi&&typeof abi==='object'){
     const values=Object.values(abi);
-    if(values.length&&values.every(x=>x&&typeof x==='object'&&typeof x.type==='string')) return values;
+    if(values.length&&values.every(x=>x&&typeof x==='object'&&typeof x.type==='string')) rows=values;
   }
-  return [];
+  return rows.map(canonicalAbiFragment);
 }
 function constructorInputs(abi){return normalizedAbi(abi).find(x=>x.type==='constructor')?.inputs??[];}
 function mutableFunctions(ethers,a){
@@ -386,7 +405,20 @@ async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoo
   const cfgPath=path.join(projectRoot,'.curveyield-phase0-medusa-v1.json');await fs.writeFile(cfgPath,JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_CONFIG_v1.json'),JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_ROUTER_v1.sol'),router.source);
-  const r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:projectRoot,env:scrubbedEnv()});
+  const medusaStartedAt=Date.now();
+  console.log('[phase0-medusa] started; timeout=1800s; progress heartbeat every 300s');
+  const heartbeat=setInterval(()=>{
+    const elapsedSeconds=Math.floor((Date.now()-medusaStartedAt)/1000);
+    console.log(`[phase0-medusa] heartbeat: fuzz process still running; elapsed=${elapsedSeconds}s; configuredCallLimit=${PHASE0_MEDUSA_CALL_LIMIT_V1}`);
+  },300000);
+  heartbeat.unref?.();
+  let r;
+  try{
+    r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:projectRoot,env:scrubbedEnv()});
+  }finally{
+    clearInterval(heartbeat);
+  }
+  console.log(`[phase0-medusa] exited; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; exitCode=${r?.exitCode??-1}`);
   const raw=`${r.stdout??''}\n${r.stderr??''}`;await fs.writeFile(path.join(dir,'MEDUSA_RAW_OUTPUT_v1.log'),raw);
   const corpusSource=path.join(projectRoot,corpusRel),corpusDest=path.join(dir,'corpus');
   const corpusIndex=[];
