@@ -675,7 +675,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const discoveredScriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
     const reported=await reportedPackageDeployments({projectRoot:staged.projectRoot,attempts:deployment.attempts,artifacts});
     const deploymentRowsByAddress=new Map();
-    for(const row of [...reported.rows,...discoveredScriptDeployments])deploymentRowsByAddress.set(String(row.address).toLowerCase(),row);
+    for(const row of [...discoveredScriptDeployments,...reported.rows])deploymentRowsByAddress.set(String(row.address).toLowerCase(),row);
     const scriptDeployments=[...deploymentRowsByAddress.values()];
     const expectedNativeNames=new Set(build.deploymentOrder??[]);
     const observedNativeNames=new Set(scriptDeployments.map(x=>x.contractName).filter(Boolean));
