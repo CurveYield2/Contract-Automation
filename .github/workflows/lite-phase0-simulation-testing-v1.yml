@@ -1,0 +1,43 @@
+name: Lite Phase 0 Simulation Testing v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      campaign_id:
+        description: Exact existing Audit-Controller campaign ID
+        required: true
+        type: string
+      campaign_path:
+        description: Exact existing Audit-Controller campaign path
+        required: true
+        type: string
+      audit_controller_ref:
+        description: Audit-Controller ref containing the campaign
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  simulation-testing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Run isolated simulation testing fork
+        uses: ./simulation-forks/phase0-simulation-testing-v1
+        with:
+          campaign_id: ${{ inputs.campaign_id }}
+          campaign_path: ${{ inputs.campaign_path }}
+          audit_controller_ref: ${{ inputs.audit_controller_ref }}
+          audit_controller_token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          fallback_token: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          ethereum_fork_rpc_url: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
