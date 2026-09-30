@@ -1,7 +1,7 @@
 name: Phase 0 Medusa Router Build Diagnostic v1
 on:
   push:
-    branches: [main]
+    branches: [repair/phase0-medusa-only-v1]
     paths: ['.github/workflows/phase0-medusa-router-build-diagnostic-v1.yml']
   workflow_dispatch:
     inputs:
@@ -35,11 +35,28 @@ jobs:
           project=.medusa-router-diagnostic/runs/medusa-anvil-fork-001/router-project
           mkdir -p "$project/src"
           cp .medusa-router-diagnostic/runs/medusa-anvil-fork-001/MEDUSA_ROUTER_v1.sol "$project/src/Phase0MedusaRouterV1.sol"
+      - name: Apply checksum repair to retained generated router
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import {getAddress} from 'ethers';
+          const file='.medusa-router-diagnostic/runs/medusa-anvil-fork-001/router-project/src/Phase0MedusaRouterV1.sol';
+          fs.writeFileSync(file,fs.readFileSync(file,'utf8').replace(/address\((0x[0-9a-fA-F]{40})\)/g,(_,address)=>'address('+getAddress(address)+')'));
+          NODE
       - name: Compile retained router with full Forge diagnostics
         run: |
           set -euo pipefail
           project="$GITHUB_WORKSPACE/.medusa-router-diagnostic/runs/medusa-anvil-fork-001/router-project"
           forge build --root "$project" --build-info --force 2>&1 | tee .medusa-router-diagnostic/FORGE_BUILD_RAW_v1.log
+          test -d "$project/out/build-info"
+          test -f "$project/out/Phase0MedusaRouterV1.sol/Phase0MedusaRouterV1.json"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const a=JSON.parse(fs.readFileSync('.medusa-router-diagnostic/runs/medusa-anvil-fork-001/router-project/out/Phase0MedusaRouterV1.sol/Phase0MedusaRouterV1.json','utf8'));
+          if(!a.bytecode?.object||a.bytecode.object==='0x')throw Error('Router bytecode was not compiled');
+          console.log(JSON.stringify({status:'PASS',creationBytes:(a.bytecode.object.length-2)/2,runtimeBytes:(a.deployedBytecode.object.length-2)/2}));
+          NODE
       - uses: actions/upload-artifact@v4
         if: always()
         with:
