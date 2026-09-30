@@ -18,7 +18,7 @@ Medusa has **not yet completed a successful fuzz run**. Phase 0 is not complete 
 
 ## Remaining Medusa work
 
-The generated router exceeds Ethereum's 24,576-byte deployed code limit. Check the Medusa deployment behavior and repair router sizing if necessary; do not relax production-contract limits. Then run Medusa against the correctly deployed source stack and require more than 100,000 observed ABI calls with retained raw evidence.
+The generated router exceeds Ethereum's 24,576-byte deployed code limit. Medusa v1.5.1 permits oversized test routers by default, so this is not presently a blocker and no size-setting change is needed. Production artifacts already passed the source package's EIP-170/EIP-3860 checks. Then run Medusa against the correctly deployed source stack and require more than 100,000 observed ABI calls with retained raw evidence.
 
 Compilation success is not fuzzing success. No successful Medusa result is claimed.
 
@@ -30,4 +30,4 @@ Canonical Phase-0 simulation files and the source archive have not been promoted
 
 ## Next action
 
-Continue focused Medusa repair and execution. Report the actual observed call count and terminal status before moving to the next step.
+[Medusa-only run 36725469642](https://github.com/CurveYield2/Contract-Automation/actions/runs/36725469642) is now running on `repair/phase0-medusa-only-v1`. It executes the required exact build, local fork deployment, and Medusa; telemetry is disabled for this attempt. No broad regression workflow was triggered by this branch request. Report the actual observed call count and terminal status before moving to the next step.
