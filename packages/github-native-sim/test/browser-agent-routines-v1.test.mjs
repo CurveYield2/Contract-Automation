@@ -395,3 +395,21 @@ test('High effort uses the observed Power slider and verifies the spoken label',
   }), error => error.code === 'THINKING_EFFORT_UI_CHANGED');
   assert.deepEqual(unknownRange.keys, []);
 });
+
+test('only durable server chat URLs can activate a reviewer', async () => {
+  const vm = await import('node:vm');
+  const source = read('scripts/browser-agent-wake.mjs');
+  const start = source.indexOf('function durableChatUrl(value)');
+  const end = source.indexOf('class BrowserAgentError', start);
+  assert.ok(start >= 0 && end > start);
+  const valid = vm.runInNewContext(source.slice(start, end) + '; durableChatUrl', { URL });
+  assert.equal(valid('https://chatgpt.com/c/ef676bc7-8c95-4fad-9262-bf4765c664dd'), true);
+  assert.equal(valid('https://chatgpt.com/c/local-chatgpt%3Aef676bc7-8c95-4fad-9262-bf4765c664dd'), false);
+  assert.equal(valid('https://chatgpt.com/c/local-chatgpt'), false);
+  assert.equal(valid('https://chatgpt.com/'), false);
+  assert.equal(valid('https://example.com/c/ef676bc7'), false);
+  assert.equal(valid('not a URL'), false);
+  assert.match(source, /ok: chatUrlVerified/);
+  assert.match(source, /CHAT_URL_NOT_DURABLE/);
+  assert.match(source, /waitForURL\(url => durableChatUrl\(url\.toString\(\)\), \{ timeout: 60000 \}\)/);
+});
