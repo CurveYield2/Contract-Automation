@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-original-phase0-resume-test-request-v2",
+  "wake_id": "original-phase0-resume-current-chat-test-v2",
+  "campaign_id": "original-phase0-browser-resume-test-v1",
+  "phase_id": "phase-0",
+  "chat_url": "https://chatgpt.com/c/6abe90a0-fd68-83e8-8026-8af0171605fc",
+  "wake_message": "[ORIGINAL_PHASE0_BROWSER_RESUME_TEST_v2]\nThis message was sent by the restored original CurveYield Phase-0 browser wake using resume_existing against this exact chat URL. Reply only with: ORIGINAL_PHASE0_BROWSER_RESUME_TEST_ACK_v2"
+}
