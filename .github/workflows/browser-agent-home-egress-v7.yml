@@ -1,0 +1,206 @@
+name: Original Phase0 Home-Egress Browser v7
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Browser wake mode
+        required: true
+        default: resume_existing
+        type: choice
+        options:
+          - resume_existing
+          - create_fresh
+      chat_url:
+        description: Existing ChatGPT conversation URL for resume_existing
+        required: false
+        default: https://chatgpt.com/c/6abe90a0-fd68-83e8-8026-8af0171605fc
+        type: string
+      wake_message:
+        description: Message to send after backend health passes
+        required: true
+        default: "[HOME_EGRESS_PLAYWRIGHT_WAKE_v7] Assistant: when you personally receive this as a new user message, reply exactly HOME_EGRESS_PLAYWRIGHT_WAKE_PERSONALLY_SEEN_v7"
+        type: string
+      interactive_view:
+        description: Start private reverse-VNC tunnel for manual login/challenge approval
+        required: true
+        default: true
+        type: boolean
+      manual_challenge_wait_minutes:
+        description: Maximum time to wait for manual verification
+        required: true
+        default: "15"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: original-phase0-home-egress-browser-v7
+  cancel-in-progress: false
+
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
+      HOME_PROXY_TAILSCALE_HOST: ${{ secrets.HOME_PROXY_TAILSCALE_HOST }}
+      HOME_PROXY_SSH_USER: ${{ secrets.HOME_PROXY_SSH_USER }}
+      HOME_PROXY_SSH_PRIVATE_KEY: ${{ secrets.HOME_PROXY_SSH_PRIVATE_KEY }}
+      HOME_PROXY_SSH_PORT: ${{ vars.HOME_PROXY_SSH_PORT || '22' }}
+      PLAYWRIGHT_PROXY_SERVER: socks5://127.0.0.1:1080
+      HOME_VNC_PORT: "5901"
+      DISPLAY: ":99"
+      BROWSER_HEADLESS: "false"
+      CHATGPT_SESSION_STATE_PATH: /tmp/curveyield-browser-agent-v7/session-state-v1.enc.json
+      CHATGPT_SESSION_STATE_UPDATED_MARKER: /tmp/curveyield-browser-agent-v7/session-state-updated
+      WAKE_RESULT_PATH: /tmp/browser-agent-home-egress-v7-result.json
+
+    steps:
+      - name: Checkout trusted browser package
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Connect runner to home tailnet
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          ping: ${{ secrets.HOME_PROXY_TAILSCALE_HOST }}
+
+      - name: Set up isolated Playwright runtime
+        uses: ./packages/browser-agent-original-phase0-v7/runtime-v7
+
+      - name: Restore encrypted browser session state
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/curveyield-browser-agent-v7/session-state-v1.enc.json
+          key: chatgpt-home-egress-session-v7-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            chatgpt-home-egress-session-v7-
+
+      - name: Install private VNC helper
+        if: inputs.interactive_view
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y x11vnc
+
+      - name: Start X display and optional VNC server
+        shell: bash
+        env:
+          INTERACTIVE_VIEW: ${{ inputs.interactive_view }}
+        run: |
+          set -euo pipefail
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension RANDR >/tmp/xvfb-v7.log 2>&1 &
+          echo $! >/tmp/xvfb-v7.pid
+          for i in {1..30}; do
+            xdpyinfo -display :99 >/dev/null 2>&1 && break
+            sleep 1
+          done
+          xdpyinfo -display :99 >/dev/null 2>&1 || {
+            echo "::error::Xvfb display did not become ready."
+            cat /tmp/xvfb-v7.log || true
+            exit 1
+          }
+          if [ "$INTERACTIVE_VIEW" = "true" ]; then
+            x11vnc -display :99 -rfbport 5900 -localhost -nopw -forever -shared -quiet >/tmp/x11vnc-v7.log 2>&1 &
+            echo $! >/tmp/x11vnc-v7.pid
+          fi
+
+      - name: Establish private home SOCKS and VNC tunnel
+        shell: bash
+        env:
+          INTERACTIVE_VIEW: ${{ inputs.interactive_view }}
+        run: |
+          set -euo pipefail
+          test -n "$HOME_PROXY_TAILSCALE_HOST" || { echo "::error::HOME_PROXY_TAILSCALE_HOST secret is missing."; exit 1; }
+          test -n "$HOME_PROXY_SSH_USER" || { echo "::error::HOME_PROXY_SSH_USER secret is missing."; exit 1; }
+          test -n "$HOME_PROXY_SSH_PRIVATE_KEY" || { echo "::error::HOME_PROXY_SSH_PRIVATE_KEY secret is missing."; exit 1; }
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$HOME_PROXY_SSH_PRIVATE_KEY" > "$HOME/.ssh/home-proxy-v7"
+          chmod 600 "$HOME/.ssh/home-proxy-v7"
+          ssh-keyscan -p "$HOME_PROXY_SSH_PORT" -H "$HOME_PROXY_TAILSCALE_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+          chmod 600 "$HOME/.ssh/known_hosts"
+          if [ "$INTERACTIVE_VIEW" = "true" ]; then
+            ssh -i "$HOME/.ssh/home-proxy-v7" -p "$HOME_PROXY_SSH_PORT" -N -T -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -D 127.0.0.1:1080 -R "127.0.0.1:$HOME_VNC_PORT:127.0.0.1:5900" "$HOME_PROXY_SSH_USER@$HOME_PROXY_TAILSCALE_HOST" >/tmp/home-proxy-ssh-v7.log 2>&1 &
+          else
+            ssh -i "$HOME/.ssh/home-proxy-v7" -p "$HOME_PROXY_SSH_PORT" -N -T -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes -D 127.0.0.1:1080 "$HOME_PROXY_SSH_USER@$HOME_PROXY_TAILSCALE_HOST" >/tmp/home-proxy-ssh-v7.log 2>&1 &
+          fi
+          echo $! >/tmp/home-proxy-ssh-v7.pid
+          for i in {1..30}; do
+            nc -z 127.0.0.1 1080 >/dev/null 2>&1 && break
+            sleep 1
+          done
+          nc -z 127.0.0.1 1080 >/dev/null 2>&1 || {
+            echo "::error::SOCKS tunnel did not become ready."
+            cat /tmp/home-proxy-ssh-v7.log || true
+            exit 1
+          }
+          kill -0 "$(cat /tmp/home-proxy-ssh-v7.pid)" || {
+            echo "::error::SSH tunnel exited unexpectedly."
+            cat /tmp/home-proxy-ssh-v7.log || true
+            exit 1
+          }
+
+      - name: Verify Chrome egress changes without logging IPs
+        shell: bash
+        run: |
+          set -euo pipefail
+          direct="$(curl -fsS --max-time 15 https://api.ipify.org)"
+          proxied="$(curl -fsS --max-time 20 --socks5-hostname 127.0.0.1:1080 https://api.ipify.org)"
+          test -n "$direct"
+          test -n "$proxied"
+          if [ "$direct" = "$proxied" ]; then
+            echo "::error::Proxy egress matches the GitHub runner egress; home routing is not active."
+            exit 1
+          fi
+          echo "HOME_EGRESS_DIFFERENT_FROM_RUNNER=true"
+
+      - name: Run Playwright through home egress
+        shell: bash
+        env:
+          WAKE_ACTION: wake
+          WAKE_MODE: ${{ inputs.mode }}
+          CHAT_URL: ${{ inputs.chat_url }}
+          WAKE_MESSAGE: ${{ inputs.wake_message }}
+          WAKE_ID: home-egress-playwright-v7-${{ github.run_id }}
+          INTERACTIVE_VIEW_ENABLED: ${{ inputs.interactive_view }}
+          MANUAL_CHALLENGE_WAIT_MINUTES: ${{ inputs.manual_challenge_wait_minutes }}
+        run: |
+          set -euo pipefail
+          export MANUAL_CHALLENGE_WAIT_MS=$((MANUAL_CHALLENGE_WAIT_MINUTES * 60000))
+          if [ "$INTERACTIVE_VIEW_ENABLED" = "true" ]; then
+            echo "Private browser view is available only on the home PC at 127.0.0.1:$HOME_VNC_PORT while this job is running."
+          fi
+          node packages/browser-agent-original-phase0-v7/browser-agent-wake-v7.mjs
+          test -s "$WAKE_RESULT_PATH"
+          cat "$WAKE_RESULT_PATH"
+          jq -e '.ok==true and .provider=="github-playwright" and (.posted==true or .skipped=="PRODUCTIVE_GENERATING")' "$WAKE_RESULT_PATH" >/dev/null
+
+      - name: Save refreshed encrypted browser session state
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/curveyield-browser-agent-v7/session-state-v1.enc.json
+          key: chatgpt-home-egress-session-v7-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Cleanup private tunnels
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          [ -f /tmp/home-proxy-ssh-v7.pid ] && kill "$(cat /tmp/home-proxy-ssh-v7.pid)" 2>/dev/null
+          [ -f /tmp/x11vnc-v7.pid ] && kill "$(cat /tmp/x11vnc-v7.pid)" 2>/dev/null
+          [ -f /tmp/xvfb-v7.pid ] && kill "$(cat /tmp/xvfb-v7.pid)" 2>/dev/null
+          rm -f "$HOME/.ssh/home-proxy-v7"
