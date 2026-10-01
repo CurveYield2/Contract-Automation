@@ -118,6 +118,35 @@ async function snapshot(page) {
   };
 }
 
+
+async function waitForChatIdle(page, timeoutMs) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const stop = await firstVisible(page, [
+      'button[data-testid="stop-button"]',
+      'button[aria-label="Stop"]',
+      'button[aria-label*="Stop"]',
+      'button:has-text("Stop generating")'
+    ]);
+    if (!stop) {
+      await page.waitForTimeout(750);
+      const confirm = await firstVisible(page, [
+        'button[data-testid="stop-button"]',
+        'button[aria-label="Stop"]',
+        'button[aria-label*="Stop"]',
+        'button:has-text("Stop generating")'
+      ]);
+      if (!confirm) {
+        console.log('[github-playwright-v10] chat-idle=' + JSON.stringify({ idle: true, waitedMs: Date.now() - started }));
+        return true;
+      }
+    }
+    console.log('[github-playwright-v10] chat-busy-wait=' + JSON.stringify({ waitedMs: Date.now() - started }));
+    await page.waitForTimeout(3000);
+  }
+  throw new Error('Chat remained busy/generating beyond idle wait timeout');
+}
+
 async function ensureComposer(page) {
   const selectors = [
     '#prompt-textarea',
@@ -446,10 +475,11 @@ async function runWithPage(providerName, connect) {
       return result;
     }
     if (before.generating && !bool(env.FORCE_WAKE)) {
-      const sessionStatePersisted = await persistHealthySession(providerName, context, before);
-      const result = { ok: true, provider: providerName, action, wakeId, skipped: 'PRODUCTIVE_GENERATING', sessionStatePersisted, ...before };
-      await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
-      return result;
+      const requestedIdleWait = Number.parseInt(env.IDLE_WAIT_MS || '600000', 10);
+      const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
+      console.log('[github-playwright-v10] Chat is currently generating; waiting for idle before wake send.');
+      await waitForChatIdle(page, idleWaitMs);
+      await waitForBackendHealth(page);
     }
 
     if (action === 'wake_and_wait' && mode === 'resume_existing' && !before.chatViewable) {
