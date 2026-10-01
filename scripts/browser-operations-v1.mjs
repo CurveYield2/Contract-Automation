@@ -342,6 +342,16 @@ async function findProjectsSectionAddControl(page) {
 }
 
 async function createProject(page, projectName) {
+  const projectNetworkFailures = [];
+  const recordResponse = response => {
+    try {
+      const url = new URL(response.url());
+      if (url.hostname === 'chatgpt.com' && response.status() >= 400) {
+        projectNetworkFailures.push({ status: response.status(), path: url.pathname.replace(/[a-f0-9]{8}-[a-f0-9-]{12,}/gi, '<id>') });
+      }
+    } catch {}
+  };
+  page.on('response', recordResponse);
   await ensureSidebarOpen(page);
 
   let trigger = await findNewProjectControl(page);
@@ -411,7 +421,7 @@ async function createProject(page, projectName) {
   if (!submit) throw new Error('ChatGPT project-create submit control not found');
   await submit.click();
 
-  const deadline = Date.now() + 15000;
+  const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
     const entry = await findProjectEntry(page, projectName);
     if (entry) return entry;
@@ -421,7 +431,12 @@ async function createProject(page, projectName) {
     }
     await page.waitForTimeout(500);
   }
-  throw new Error('ChatGPT project creation could not be verified');
+  const alerts = await page.locator('[role="alert"]').allTextContents().catch(() => []);
+  throw new Error('ChatGPT project creation could not be verified; url=' + page.url() +
+    '; formStillVisible=' + await input.isVisible().catch(() => false) +
+    '; alerts=' + JSON.stringify(alerts.map(text => text.slice(0, 250))) +
+    '; failedResponses=' + JSON.stringify(projectNetworkFailures.slice(-10)));
+
 }
 
 async function ensureProject(page, { projectName }) {
