@@ -3,9 +3,9 @@
   "action": "wake",
   "mode": "resume_existing",
   "chat_url": "https://chatgpt.com/c/6abe90a0-fd68-83e8-8026-8af0171605fc",
-  "wake_message": "[HOME_EXIT_PLAYWRIGHT_WAKE_v10_VERIFY2] Assistant: when you personally receive this as a new user message in this exact conversation, reply exactly HOME_EXIT_PLAYWRIGHT_WAKE_PERSONALLY_SEEN_v10_VERIFY2",
+  "wake_message": "[HOME_EXIT_PLAYWRIGHT_WAKE_v10_VERIFY3] Assistant: when you personally receive this as a new user message in this exact conversation, reply exactly HOME_EXIT_PLAYWRIGHT_WAKE_PERSONALLY_SEEN_v10_VERIFY3",
   "home_exit_node": "100.112.238.56",
   "interactive_view": true,
   "manual_challenge_wait_minutes": 15,
-  "requested_at": "2026-10-01T23:17:00Z"
+  "requested_at": "2026-10-01T23:36:00Z"
 }
