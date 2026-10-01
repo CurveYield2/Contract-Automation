@@ -45,6 +45,12 @@ on:
         default: "15"
         type: string
 
+  push:
+    branches:
+      - main
+    paths:
+      - 'process/browser-agent-home-exit-v10/current-request-v10.json'
+
 permissions:
   contents: read
 
@@ -72,6 +78,41 @@ jobs:
           ref: main
           persist-credentials: false
           fetch-depth: 1
+
+
+      - name: Resolve browser request
+        id: request
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_ACTION: ${{ inputs.action }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_CHAT_URL: ${{ inputs.chat_url }}
+          INPUT_WAKE_MESSAGE: ${{ inputs.wake_message }}
+          INPUT_HOME_EXIT_NODE: ${{ inputs.home_exit_node }}
+          INPUT_INTERACTIVE_VIEW: ${{ inputs.interactive_view }}
+          INPUT_MANUAL_WAIT: ${{ inputs.manual_challenge_wait_minutes }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ]; then
+            request="process/browser-agent-home-exit-v10/current-request-v10.json"
+            test -s "$request"
+            echo "action=$(jq -r '.action // "observe"' "$request")" >> "$GITHUB_OUTPUT"
+            echo "mode=$(jq -r '.mode // "create_fresh"' "$request")" >> "$GITHUB_OUTPUT"
+            echo "chat_url=$(jq -r '.chat_url // ""' "$request")" >> "$GITHUB_OUTPUT"
+            echo "wake_message=$(jq -r '.wake_message // ""' "$request")" >> "$GITHUB_OUTPUT"
+            echo "home_exit_node=$(jq -r '.home_exit_node' "$request")" >> "$GITHUB_OUTPUT"
+            echo "interactive_view=$(jq -r '.interactive_view // true' "$request")" >> "$GITHUB_OUTPUT"
+            echo "manual_wait=$(jq -r '.manual_challenge_wait_minutes // 15' "$request")" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=$INPUT_ACTION" >> "$GITHUB_OUTPUT"
+            echo "mode=$INPUT_MODE" >> "$GITHUB_OUTPUT"
+            echo "chat_url=$INPUT_CHAT_URL" >> "$GITHUB_OUTPUT"
+            echo "wake_message=$INPUT_WAKE_MESSAGE" >> "$GITHUB_OUTPUT"
+            echo "home_exit_node=$INPUT_HOME_EXIT_NODE" >> "$GITHUB_OUTPUT"
+            echo "interactive_view=$INPUT_INTERACTIVE_VIEW" >> "$GITHUB_OUTPUT"
+            echo "manual_wait=$INPUT_MANUAL_WAIT" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -110,12 +151,12 @@ jobs:
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          ping: ${{ inputs.home_exit_node }}
+          ping: ${{ steps.request.outputs.home_exit_node }}
 
       - name: Start visible Chrome display and private tailnet VNC
         shell: bash
         env:
-          INTERACTIVE_VIEW: ${{ inputs.interactive_view }}
+          INTERACTIVE_VIEW: ${{ steps.request.outputs.interactive_view }}
         run: |
           set -euo pipefail
           Xvfb :99 -screen 0 1920x1080x24 -ac +extension RANDR >/tmp/xvfb-v8.log 2>&1 &
@@ -144,7 +185,7 @@ jobs:
       - name: Route browser phase through home exit node
         shell: bash
         env:
-          HOME_EXIT_NODE: ${{ inputs.home_exit_node }}
+          HOME_EXIT_NODE: ${{ steps.request.outputs.home_exit_node }}
         run: |
           set -euo pipefail
           tailscale status
@@ -173,13 +214,13 @@ jobs:
         id: browser
         shell: bash
         env:
-          WAKE_ACTION: ${{ inputs.action }}
-          WAKE_MODE: ${{ inputs.mode }}
-          CHAT_URL: ${{ inputs.chat_url }}
-          WAKE_MESSAGE: ${{ inputs.wake_message }}
+          WAKE_ACTION: ${{ steps.request.outputs.action }}
+          WAKE_MODE: ${{ steps.request.outputs.mode }}
+          CHAT_URL: ${{ steps.request.outputs.chat_url }}
+          WAKE_MESSAGE: ${{ steps.request.outputs.wake_message }}
           WAKE_ID: home-exit-playwright-v10-${{ github.run_id }}
-          INTERACTIVE_VIEW_ENABLED: ${{ inputs.interactive_view }}
-          MANUAL_CHALLENGE_WAIT_MINUTES: ${{ inputs.manual_challenge_wait_minutes }}
+          INTERACTIVE_VIEW_ENABLED: ${{ steps.request.outputs.interactive_view }}
+          MANUAL_CHALLENGE_WAIT_MINUTES: ${{ steps.request.outputs.manual_wait }}
         run: |
           set -euo pipefail
           export MANUAL_CHALLENGE_WAIT_MS=$((MANUAL_CHALLENGE_WAIT_MINUTES * 60000))
