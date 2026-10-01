@@ -2,7 +2,7 @@
   "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
   "campaignId": "curveyield-dex-v16-source-r1",
   "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/c/local-chatgpt%3Aef676bc7-8c95-4fad-9262-bf4765c664dd",
+  "chatUrl": "",
   "browserRoutine": "audit-lite-reviewer-v1",
   "chatgptProject": {
     "name": "",
@@ -10,7 +10,7 @@
   },
   "activeChat": {
     "name": "",
-    "url": "https://chatgpt.com/c/local-chatgpt%3Aef676bc7-8c95-4fad-9262-bf4765c664dd"
+    "url": ""
   },
   "wakeMessage": "Campaign type: LITE\nCampaign name: CurveYield DEX v16 Source r1\nCampaign folder URL: https://github.com/CurveYield2/Audit-Controller/tree/main/campaigns/CurveYield%20DEX%20v16%20Source%20r1\nCampaign ID / generation: curveyield-dex-v16-source-r1 / curveyield-dex-v16-source-r1-g1-20260930T044939Z\nIncoming reviewer: reviewer-1\nAssigned phase: phase-1\nCurrent authority: https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority\nPredecessor sealed receipt: campaigns/CurveYield DEX v16 Source r1/receipts/PHASE_00_RECEIPT_v1.json\nPhase schema: Audit Skill - Current Authority/Audit_Litemode_v10.3/phases/phase-1/PHASE_01_SCHEMA_v1.json\nPhase work form: campaigns/CurveYield DEX v16 Source r1/work/phase-01/PHASE_01_WORK_FORM_v1.json\nController-owned phase final report path: campaigns/CurveYield DEX v16 Source r1/work/phase-01/PHASE_01_FINAL_REPORT_v1.md\nController-owned phase packet path: campaigns/CurveYield DEX v16 Source r1/submissions/PHASE_01_WORK_PACKET_v1.json\nAutomation-derived input files: campaigns/CurveYield DEX v16 Source r1/evidence/phase0/PHASE0_AUDIT_SURFACE_v1.json, campaigns/CurveYield DEX v16 Source r1/evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json\nController validation request path: process/agent-upload/lite-phase-boundary/curveyield-dex-v16-source-r1-phase-1.json in CurveYield2/Contract-Automation main\nController validation request schema: {\"schemaVersion\":\"curveyield-lite-phase-boundary-request-v1\",\"campaignId\":\"curveyield-dex-v16-source-r1\",\"phaseSequence\":1,\"auditControllerRef\":\"main\",\"attempt\":<increment on each validation request>}\nUse the GitHub connector app. Perform only the assigned phase. Every agent action must fill its schema-defined Step X Input fields while the action is performed. Preserve controller-prefilled/read-only data. Do not create or edit the Phase Work Packet or phase final report and do not perform controller bookkeeping. At phase end invoke controller validation by creating/updating the request path above; on rework increment attempt and update the same request. Repair only exact substantive deficiencies and wait for CONTROLLER_PHASE_PASS before advancing or retiring.",
   "thinkingEffort": "high",
@@ -40,5 +40,11 @@
       ]
     }
   },
-  "updatedAt": "2026-10-01T14:37:50Z"
+  "updatedAt": "2026-10-01T14:52:08Z",
+  "repairPreviousChat": {
+    "name": "",
+    "url": "https://chatgpt.com/c/local-chatgpt%3Aef676bc7-8c95-4fad-9262-bf4765c664dd",
+    "retiredAt": "2026-10-01T14:52:08Z",
+    "reason": "CONFIRMED_REVIEWER_REPAIR"
+  }
 }
