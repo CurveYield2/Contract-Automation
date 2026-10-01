@@ -80,7 +80,47 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
 
   const visibleHighChoice = async () => firstVisible(page, highSelectors, 650);
 
+  // The current picker exposes a Power menu row with a keyboard-controlled
+  // reasoning slider. Verify both its numeric endpoint and spoken High label.
+  const powerRow = () => page.locator('[data-reasoning-slider="true"][role="menuitem"][aria-label="Power"]').first();
+  const sliderHigh = async () => {
+    const row = powerRow();
+    if (!await row.isVisible().catch(() => false)) return false;
+    const slider = row.locator('[role="slider"]').first();
+    const current = await slider.getAttribute('aria-valuenow').catch(() => null);
+    const max = await slider.getAttribute('aria-valuemax').catch(() => null);
+    if (current === null || max === null || current !== max) return false;
+    const describedBy = await row.getAttribute('aria-describedby').catch(() => '');
+    for (const id of String(describedBy || '').split(/\\s+/).filter(Boolean)) {
+      if (!/^[A-Za-z0-9_-]+$/.test(id)) continue;
+      const label = await page.locator('[id="' + id + '"]').innerText().catch(() => '');
+      if (/^High(?:,|$)/i.test(label.trim())) return true;
+    }
+    return false;
+  };
+  const chooseSliderHigh = async () => {
+    const row = powerRow();
+    if (!await row.isVisible().catch(() => false)) return false;
+    const slider = row.locator('[role="slider"]').first();
+    const min = Number(await slider.getAttribute('aria-valuemin'));
+    const max = Number(await slider.getAttribute('aria-valuemax'));
+    let current = Number(await slider.getAttribute('aria-valuenow'));
+    // Admit only the observed three-position Low/Medium/High widget.
+    if (min !== 0 || max !== 2 || !Number.isInteger(current) || current < min || current > max) return false;
+    for (let step = current; step < max; step += 1) {
+      await row.press('ArrowRight');
+      await page.waitForTimeout(200);
+      const next = Number(await slider.getAttribute('aria-valuenow'));
+      if (next !== current + 1) return false;
+      current = next;
+    }
+    const verified = await sliderHigh();
+    if (verified) await row.press('Escape');
+    return verified;
+  };
+
   const selectedHigh = async () => {
+    if (await sliderHigh()) return true;
     const selectors = [
       '[role="menuitemradio"][aria-checked="true"]:has-text("High")',
       '[role="radio"][aria-checked="true"]:has-text("High")',
@@ -138,6 +178,7 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
   ];
 
   const chooseHigh = async () => {
+    if (await chooseSliderHigh()) return true;
     const high = await visibleHighChoice();
     if (!high) return false;
     await high.click();
@@ -206,11 +247,9 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
       value: el.getAttribute('aria-valuenow') || el.getAttribute('value'),
       valueText: el.getAttribute('aria-valuetext'),
     }))).catch(() => []);
-  const mediumStructure = await page.getByText('Medium, 2 of 3.', { exact: true }).first()
-    .evaluate(el => el.parentElement.outerHTML.slice(0, 5000)).catch(() => '');
   const error = new Error(
     'ChatGPT High thinking-effort control could not be selected and verified; effortWidget=' +
-    JSON.stringify(effortWidget) + '; mediumStructure=' + mediumStructure + '; visibleControls=' +
+    JSON.stringify(effortWidget) + '; visibleControls=' +
     JSON.stringify(diagnostic) + '; relevantText=' + JSON.stringify(relevantText)
   );
   error.code = 'THINKING_EFFORT_UI_CHANGED';
