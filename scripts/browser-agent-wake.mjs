@@ -407,7 +407,9 @@ async function runWithPage(providerName, connect) {
 }
 
 async function localProvider(chromium) {
-  let storage = await loadEncryptedSessionState({
+  // Explicit bootstrap mode honors the operator's saved login snapshot and
+  // does not silently prefer a rolling cache from another browser session.
+  let storage = env.CHATGPT_SESSION_STATE_SOURCE === 'bootstrap-secret' ? null : await loadEncryptedSessionState({
     encryptedSessionPath,
     keyB64: sessionStateKeyB64,
   });
