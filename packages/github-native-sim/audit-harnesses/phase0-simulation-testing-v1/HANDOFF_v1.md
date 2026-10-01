@@ -1,24 +1,36 @@
 # Phase-0 Simulation Testing Fork Handoff v1
 
-Updated 2026-09-30 22:18 UTC. This replaces the original handoff in place. This is the authoritative current continuation state; previous promotion/rebind instructions are completed.
+Updated 2026-10-01. Same handoff updated in place at the user's explicit request.
 
-## Current result and sole blocker
+## Current result and exact continuation
 
-**Phase 0 is SEALED, validation PASS, failures empty**, sealed at 2026-09-30T22:13:01.715Z. Universal infrastructure repairs, qualification, controller rebind, completed-stage import and finalization are complete. **Medusa and telemetry were reused; neither campaign simulation stage was rerun.**
+Phase0 remains SEALED/PASS with failures empty. No campaign Medusa, telemetry, compilation or bootstrap stage was rerun during this browser recovery.
 
-**The requested end-to-end goal is not yet complete: Phase1 browser wake is blocked by ChatGPT's human verification challenge.** The existing automatic fresh-runner retry budget was exhausted, without posting the wake message. Do not describe successful retry-dispatch workflow conclusions as successful agent wakes.
+The user instructed direct use of CHATGPT_STORAGE_STATE_B64, then instructed using a GitHub workflow through the connector instead of requiring browser GitHub sign-in. This was executed.
 
-Wake attempts:
-- 36784293965: delivery ok=false, BROWSER_CHALLENGE; dispatched retry.
-- 36784378674 and 36784492313: subsequent automatic retries.
-- Final retry 36784611271, job 110122907340: FAILED, attempt 3/3 exhausted at 22:17:39 UTC. Log explicitly records ok=false, BROWSER_CHALLENGE, composer absent, page title "Just a moment...", humanChallenge=true.
-- Browserless fallback has no BROWSERLESS_TOKEN; Browserbase fallback has no configured credentials/context.
-- Fresh controller directory verification: campaignStatus and currentAssignment.status are WAITING_FOR_SUCCESSOR_AGENT; phase-1, reviewer-1.
-- Fresh registration verification: activeChat.url and chatUrl are empty. Watchdog is configured enabled, but actual arming/agent activation has not occurred.
+Completed browser recovery:
+- .github/workflows/browser-session-bootstrap-recovery-v1.yml handles strictly bounded requests under process/agent-upload/browser-session-bootstrap-recovery/. Request v1 cleared 17 main-branch encrypted ChatGPT session caches and verified remaining=0 in recovery run 36874109649. Dependency/runtime/Medusa caches were untouched.
+- Wake and watchdog now set CHATGPT_SESSION_STATE_SOURCE=bootstrap-secret. Runtime skips the encrypted cache in this explicit mode and loads the user's existing secret directly; malformed/missing bootstrap state fails rather than silently replacing it with cache. Default rolling-cache support remains available when the explicit override is absent.
+- Real wake logs verified Using bootstrap-secret session state. The user's existing login snapshot works; no regeneration or human verification was required on the successful sign-in attempts.
+- Current thinking-effort UI is a Power menuitem with data-reasoning-slider=true, range 0..2 and aria-describedby High label. Keyboard ArrowRight selection and independent numeric/label verification implemented. Behavioral regression verifies successful High and rejects wrong label/unknown range.
+- Original wake run 36784611271 attempt5, job110421435702, observed posted=true and verified High. It projected directory ACTIVE and armed the watchdog, but captured a TEMPORARY local-chatgpt URL. This is not sufficient evidence of a functioning Phase1 agent.
+- Watchdog run 36878716142, using bootstrap-secret, reopened that temporary route as the homepage. No assistant activity or Phase1 work-form edits were observed. Previous claims of full browser completion are superseded by this finding.
+- Runtime now waits up to60 seconds for a durable server chat URL and returns CHAT_URL_NOT_DURABLE without provider failover/duplicate posting if only a temporary route appears. Temporary/local/off-origin URLs are rejected by the behavioral regression.
+- Recovery request v3 dispatched existing resume-first Browser Agent Reviewer Repair v1, run36879726397. It preserved the sealed Phase0/work form, retired the invalid watchdog/binding, and dispatched replacement wake36879761640 with the standard campaign project routine.
+- First replacement attempt, job110428238747, failed BEFORE posting: current Add new project button was overlapped by sidebar layers. Exact aria-label selector plus standard keyboard Enter activation implemented in commit260983ad2aa9770c26d30e7400dbcd1fc31e28ae. Only that failed wake job was retried.
+- Browser qualification CONTROL_LIGHT run36878294983 passed99 targeted browser tests and395 controller tests/check. Follow-up CONTROL_LIGHT qualification36879787072 and regression36879786929 passed after the durable URL regression. No blockchain qualification/simulation was repeated.
 
-Final wake failure: https://github.com/CurveYield2/Contract-Automation/actions/runs/36784611271
+**Exact next action:** observe replacement wake run36879761640's latest attempt. Verify actual saved-state source, High, posted=true AND durable chat URL, then its registration/assignment/watchdog and actual assistant activity. If a new pre-post UI defect appears, diagnose that specific defect. Do not repeat an initial message after an uncertain post and do not increase challenge retries blindly.
 
-Do not bypass the human challenge, increase retries blindly, rerun bootstrap or rerun simulations. An operator must restore an authorized usable browser/session or configure the existing supported provider. Then retry **only the existing browser wake path**, preserving the sealed receipt and assignment. Verify delivery ok=true, nonempty reviewer chat URL, directory assignment ACTIVE and actual watchdog arming before claiming completion.
+Existing helper request actions:
+- clear_main_session_cache_and_retry_failed_wake: only successful cache clearing plus a failed browser-agent-wake run can retry; no blockchain workflows.
+- observe_active_watchdog: only an existing ACTIVE matching watchdog can be swept.
+- repair_non_durable_chat: only CHAT_UNVIEWABLE plus a local-chatgpt temporary URL can invoke the existing resume-first reviewer repair. No arbitrary workflow/request shell execution.
+
+Replacement wake: https://github.com/CurveYield2/Contract-Automation/actions/runs/36879761640
+Durable Phase0 bootstrap: https://github.com/CurveYield2/Contract-Automation/actions/runs/36784152692
+
+This task is NOT yet verified fully complete. Finish the browser persistence/wake step only; do not restart Phase0 or change campaign authority/source.
 
 ## Completed canonical work
 
@@ -186,3 +198,4 @@ The original gas-env/upload repair instructions and the 4-deployed/28-unresolved
 Read both repositories' AGENTS instructions and bound campaign authority before further actions. Use GitHub connector reads/writes. Raw Actions run/jobs API reads give reliable current status; completed job logs reveal actual delivery, whereas workflow success may only mean a retry dispatch succeeded.
 
 All promotion, runner rebind and Phase0 completion work above is DONE. The only continuation is authorized browser/session recovery followed by the existing Phase1 wake and verification. Root progress reports v1/v2 are historical; this handoff is current.
+
