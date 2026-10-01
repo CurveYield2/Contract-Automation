@@ -188,8 +188,8 @@ jobs:
           HOME_EXIT_NODE: ${{ steps.request.outputs.home_exit_node }}
         run: |
           set -euo pipefail
-          timeout 10s tailscale status
-          timeout 20s sudo tailscale set --exit-node="$HOME_EXIT_NODE"
+          timeout -k 3s 10s tailscale status
+          timeout -k 5s 20s sudo tailscale set --exit-node="$HOME_EXIT_NODE"
 
           changed=false
           for i in {1..8}; do
