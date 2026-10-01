@@ -1,5 +1,0 @@
-{
-  "schemaVersion": "curveyield-original-phase0-healthy-preflight-request-v10",
-  "chat_url": "https://chatgpt.com/c/6abe90a0-fd68-83e8-8026-8af0171605fc",
-  "wake_message": "[HEALTHY_PREFLIGHT_BROWSER_WAKE_v10]\nAssistant: when you personally receive this as a new user message in this exact conversation, reply exactly: HEALTHY_PREFLIGHT_BROWSER_WAKE_PERSONALLY_SEEN_v10"
-}
