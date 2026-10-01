@@ -382,13 +382,24 @@ async function createProject(page, projectName) {
   else await trigger.click();
   await page.waitForTimeout(500);
 
-  const input = await firstVisible(page, [
+  let input = await firstVisible(page, [
     'input[placeholder*="Project name"]',
     'input[aria-label*="Project name"]',
     'input[name="name"]',
     '[role="dialog"] input'
   ], 2200);
-  if (!input) throw new Error('ChatGPT project-name input not found');
+  if (!input) {
+    const pending = page.locator('input[placeholder*="Project name"]:visible, input[aria-label*="Project name"]:visible, input[name="name"]:visible, [role="dialog"] input:visible').first();
+    await pending.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+    if (await pending.isVisible().catch(() => false)) input = pending;
+  }
+  if (!input) {
+    const fields = await page.locator('input, textarea, [role="dialog"]').evaluateAll(nodes => nodes.filter(el => el.getClientRects().length).map(el => ({
+      tag: el.tagName, type: el.getAttribute('type'), role: el.getAttribute('role'),
+      label: el.getAttribute('aria-label'), placeholder: el.getAttribute('placeholder'), name: el.getAttribute('name'),
+    }))).catch(() => []);
+    throw new Error('ChatGPT project-name input not found; visibleFieldStructure=' + JSON.stringify(fields));
+  }
   await input.fill(projectName);
 
   const submit = await firstVisible(page, [
