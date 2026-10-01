@@ -45,5 +45,7 @@
     "consecutiveUnviewable": 0
   },
   "watchdogRunId": "36877859629",
-  "watchdogSweepStartedAt": "2026-10-01T14:38:24Z"
+  "watchdogSweepStartedAt": "2026-10-01T14:38:24Z",
+  "lastDecision": "BROWSER_CHALLENGE_RETRY_LATER",
+  "lastObservationFailureAt": "2026-10-01T14:38:34Z"
 }
