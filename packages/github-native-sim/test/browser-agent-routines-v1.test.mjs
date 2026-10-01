@@ -339,3 +339,59 @@ test('fresh project routines wait for the normal ChatGPT composer before sidebar
   assert.match(block, /loadBrowserRoutine\(browserRoutineId\)/);
   assert.ok(block.indexOf('await ensureComposer(page)') < block.indexOf('loadBrowserRoutine(browserRoutineId)'));
 });
+
+test('High effort uses the observed Power slider and verifies the spoken label', async () => {
+  const { executeBrowserOperation } = await import('../../../scripts/browser-operations-v1.mjs');
+  function fixture({ max = 2, highLabel = 'High, 3 of 3.' } = {}) {
+    let value = 1;
+    const keys = [];
+    const empty = {
+      first() { return this; }, nth() { return this; }, locator() { return this; },
+      async isVisible() { return false; }, async count() { return 0; },
+      async getAttribute() { return null; }, async innerText() { return ''; },
+      async evaluateAll() { return []; },
+    };
+    const slider = {
+      first() { return this; },
+      async getAttribute(name) {
+        return ({ 'aria-valuemin': '0', 'aria-valuemax': String(max), 'aria-valuenow': String(value) })[name] ?? null;
+      },
+    };
+    const row = {
+      first() { return this; }, locator() { return slider; },
+      async isVisible() { return true; },
+      async getAttribute(name) { return name === 'aria-describedby' ? 'effort-status effort-help' : null; },
+      async press(key) { keys.push(key); if (key === 'ArrowRight') value += 1; },
+    };
+    const page = {
+      locator(selector) {
+        if (selector.startsWith('[data-reasoning-slider=')) return row;
+        if (selector === '[id="effort-status"]') return { async innerText() { return value === 2 ? highLabel : 'Medium, 2 of 3.'; } };
+        return empty;
+      },
+      getByText() { return empty; },
+      async waitForTimeout() {},
+    };
+    return { page, keys, value: () => value };
+  }
+
+  const valid = fixture();
+  assert.deepEqual(await executeBrowserOperation({
+    page: valid.page, name: 'chatgpt.ensure_thinking_effort', args: { level: 'high' },
+  }), { level: 'high', changed: true, verified: true });
+  assert.equal(valid.value(), 2);
+  assert.deepEqual(valid.keys, ['ArrowRight', 'Escape']);
+
+  // Numeric maximum alone cannot claim High on a differently labelled widget.
+  const wrongLabel = fixture({ highLabel: 'Maximum, 3 of 3.' });
+  await assert.rejects(executeBrowserOperation({
+    page: wrongLabel.page, name: 'chatgpt.ensure_thinking_effort', args: { level: 'high' },
+  }), error => error.code === 'THINKING_EFFORT_UI_CHANGED');
+
+  // Unknown slider ranges fail closed without changing a UI setting.
+  const unknownRange = fixture({ max: 4 });
+  await assert.rejects(executeBrowserOperation({
+    page: unknownRange.page, name: 'chatgpt.ensure_thinking_effort', args: { level: 'high' },
+  }), error => error.code === 'THINKING_EFFORT_UI_CHANGED');
+  assert.deepEqual(unknownRange.keys, []);
+});
