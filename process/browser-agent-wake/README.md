@@ -342,6 +342,8 @@ The wake script resolves `playwright-core` and `@browserbasehq/sdk` from `BROWSE
 
 ## Rolling GitHub-Playwright session persistence
 
+Wake and watchdog jobs currently set `CHATGPT_SESSION_STATE_SOURCE=bootstrap-secret` explicitly, so the operator-provided `CHATGPT_STORAGE_STATE_B64` is loaded directly. The runtime skips the encrypted rolling cache in this mode and logs `Using bootstrap-secret session state`. A missing or malformed saved state fails; it is not silently replaced with a cached login. The optional rolling-cache behavior below remains available when that explicit source selection is absent. Successful interactions can still save encrypted snapshots, but they do not override the explicitly selected bootstrap state.
+
 GitHub-hosted runners are ephemeral, so the local Playwright provider maintains a rolling encrypted browser-state cache instead of relying forever on the original bootstrap snapshot.
 
 No additional secret is required. By default the cache encryption key is deterministically derived inside the runner from the already-existing `CHATGPT_STORAGE_STATE_B64` bootstrap secret. The bootstrap value itself is never written to the cache or repository.
