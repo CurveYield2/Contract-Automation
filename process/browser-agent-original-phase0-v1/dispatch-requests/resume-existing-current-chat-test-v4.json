@@ -1,8 +1,0 @@
-{
-  "schemaVersion": "curveyield-original-phase0-resume-test-request-v4",
-  "wake_id": "original-phase0-resume-current-chat-test-v4",
-  "campaign_id": "original-phase0-browser-resume-test-v1",
-  "phase_id": "phase-0",
-  "chat_url": "https://chatgpt.com/c/6abe90a0-fd68-83e8-8026-8af0171605fc",
-  "wake_message": "[ORIGINAL_PHASE0_BROWSER_WAKE_DIRECT_TO_ASSISTANT_v4]\nBrowser automation test: this is a new user message injected directly into this existing ChatGPT conversation. Assistant: when you personally receive this as a new user turn, acknowledge exactly: ORIGINAL_PHASE0_BROWSER_WAKE_PERSONALLY_SEEN_v4"
-}
