@@ -62,17 +62,13 @@ function unwrapRuntimeModule(mod) {
 }
 
 async function loadModules() {
-  const [playwrightMod, browserbaseMod] = await Promise.all([
-    importBrowserRuntimeModule('playwright-core'),
-    importBrowserRuntimeModule('@browserbasehq/sdk').catch(() => ({ default: null })),
-  ]);
+  const playwrightMod = await importBrowserRuntimeModule('playwright-core');
   const playwright = unwrapRuntimeModule(playwrightMod);
-  const browserbase = unwrapRuntimeModule(browserbaseMod);
   const chromium = playwright.chromium;
   if (!chromium || typeof chromium.launch !== 'function') {
     throw new Error('playwright-core chromium launcher unavailable');
   }
-  return { chromium, Browserbase: browserbase.Browserbase || browserbase.default || null };
+  return { chromium };
 }
 
 async function firstVisible(page, selectors) {
@@ -397,38 +393,9 @@ async function localProvider(chromium) {
   return { browser, context, page, close: () => browser.close() };
 }
 
-async function browserlessProvider(chromium) {
-  if (!env.BROWSERLESS_TOKEN) throw new Error('BROWSERLESS_TOKEN missing');
-  const profile = encodeURIComponent(env.BROWSERLESS_PROFILE || 'chatgpt');
-  const ws = 'wss://production-sfo.browserless.io?token=' +
-    encodeURIComponent(env.BROWSERLESS_TOKEN) + '&profile=' + profile;
-  const browser = await chromium.connectOverCDP(ws);
-  const context = browser.contexts()[0] || await browser.newContext();
-  const page = context.pages()[0] || await context.newPage();
-  return { browser, context, page, close: () => browser.close() };
-}
-
-async function browserbaseProvider(chromium, Browserbase) {
-  if (!Browserbase) throw new Error('Browserbase SDK unavailable');
-  if (!env.BROWSERBASE_API_KEY || !env.BROWSERBASE_PROJECT_ID || !env.BROWSERBASE_CONTEXT_ID) {
-    throw new Error('Browserbase credentials/context missing');
-  }
-  const bb = new Browserbase({ apiKey: env.BROWSERBASE_API_KEY });
-  const session = await bb.sessions.create({
-    projectId: env.BROWSERBASE_PROJECT_ID,
-    browserContext: { id: env.BROWSERBASE_CONTEXT_ID, persist: true },
-  });
-  const browser = await chromium.connectOverCDP(session.connectUrl);
-  const context = browser.contexts()[0];
-  const page = context.pages()[0] || await context.newPage();
-  return { browser, context, page, close: () => browser.close() };
-}
-
-const { chromium, Browserbase } = await loadModules();
+const { chromium } = await loadModules();
 const providers = [
   ['github-playwright', () => localProvider(chromium)],
-  ['browserless', () => browserlessProvider(chromium)],
-  ['browserbase', () => browserbaseProvider(chromium, Browserbase)],
 ];
 
 const failures = [];
