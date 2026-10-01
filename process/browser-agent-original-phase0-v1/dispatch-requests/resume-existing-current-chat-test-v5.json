@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "curveyield-original-phase0-resume-test-request-v5",
+  "wake_id": "original-phase0-resume-current-chat-test-v5",
+  "campaign_id": "original-phase0-browser-resume-test-v1",
+  "phase_id": "phase-0",
+  "chat_url": "https://chatgpt.com/c/6abe90a0-fd68-83e8-8026-8af0171605fc",
+  "wake_message": "[ORIGINAL_PHASE0_BROWSER_WAKE_DIRECT_TO_ASSISTANT_v5]\nThis is the browser automation test message. Assistant: when this arrives as a new user turn in this exact conversation, respond with ORIGINAL_PHASE0_BROWSER_WAKE_PERSONALLY_SEEN_v5"
+}
