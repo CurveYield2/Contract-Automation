@@ -56,7 +56,7 @@ permissions:
 
 concurrency:
   group: original-phase0-home-exit-browser-v10
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   browser:
@@ -188,12 +188,12 @@ jobs:
           HOME_EXIT_NODE: ${{ steps.request.outputs.home_exit_node }}
         run: |
           set -euo pipefail
-          tailscale status
-          sudo tailscale set --exit-node="$HOME_EXIT_NODE"
+          timeout 10s tailscale status
+          timeout 20s sudo tailscale set --exit-node="$HOME_EXIT_NODE"
 
           changed=false
-          for i in {1..15}; do
-            current="$(curl -fsS --max-time 15 https://api.ipify.org || true)"
+          for i in {1..8}; do
+            current="$(curl -fsS --connect-timeout 3 --max-time 5 https://api.ipify.org || true)"
             if [ -n "$current" ]; then
               current_hash="$(printf '%s' "$current" | sha256sum | awk '{print $1}')"
               if [ "$current_hash" != "$DIRECT_EGRESS_HASH" ]; then
