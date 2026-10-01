@@ -39,12 +39,12 @@ jobs:
           jq -e '
             type=="object" and
             .schemaVersion=="curveyield-browser-session-bootstrap-recovery-v1" and
-            (.action=="clear_main_session_cache_and_retry_failed_wake" or .action=="observe_active_watchdog") and
+            (.action=="clear_main_session_cache_and_retry_failed_wake" or .action=="observe_active_watchdog" or .action=="repair_non_durable_chat") and
             (.campaign_id|type=="string" and test("^[A-Za-z0-9._-]+$"))
           ' "${requests[0]}" >/dev/null
           recovery_action="$(jq -r '.action' "${requests[0]}")"
           echo "RECOVERY_ACTION=$recovery_action" >> "$GITHUB_ENV"
-          if [ "$recovery_action" = "observe_active_watchdog" ]; then
+          if [ "$recovery_action" = "observe_active_watchdog" ] || [ "$recovery_action" = "repair_non_durable_chat" ]; then
             jq -e '.wake_id|type=="string" and test("^[A-Za-z0-9._-]+$")' "${requests[0]}" >/dev/null
             wake_id="$(jq -r '.wake_id' "${requests[0]}")"
             campaign_id="$(jq -r '.campaign_id' "${requests[0]}")"
@@ -54,6 +54,10 @@ jobs:
               (.chatUrl|type=="string" and startswith("https://chatgpt.com/c/"))
             ' /tmp/active-watchdog.json >/dev/null
             echo "WATCHDOG_ID=$wake_id" >> "$GITHUB_ENV"
+            if [ "$recovery_action" = "repair_non_durable_chat" ]; then
+              jq -e '.lastDecision=="CHAT_UNVIEWABLE" and (.chatUrl|startswith("https://chatgpt.com/c/local-chatgpt"))' /tmp/active-watchdog.json >/dev/null
+              echo "REPAIR_CAMPAIGN=$campaign_id" >> "$GITHUB_ENV"
+            fi
             exit 0
           fi
           jq -e '.wake_run_id|type=="number" and .>0 and floor==.' "${requests[0]}" >/dev/null
@@ -112,3 +116,13 @@ jobs:
           set -euo pipefail
           gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$WATCHDOG_ID"
           echo "- Dispatched one sweep of existing active watchdog $WATCHDOG_ID using current trusted main. No chat or campaign was initialized." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Repair confirmed temporary chat through existing reviewer recovery
+        if: env.RECOVERY_ACTION == 'repair_non_durable_chat'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run browser-agent-reviewer-repair-v1.yml --repo "$GITHUB_REPOSITORY" --ref main -f campaign_id="$REPAIR_CAMPAIGN" -f repair_mode=resume_preferred -f reason="NON_DURABLE_CHAT_URL: temporary local-chatgpt route reopened as homepage; resume current Phase1 work, preserve sealed Phase0"
+          echo "- Dispatched existing resume-first reviewer repair for confirmed temporary chat in $REPAIR_CAMPAIGN. No Phase0 work was restarted." >> "$GITHUB_STEP_SUMMARY"
