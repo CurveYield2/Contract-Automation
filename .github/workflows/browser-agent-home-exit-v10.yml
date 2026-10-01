@@ -63,7 +63,7 @@ jobs:
       BROWSER_HEADLESS: "false"
       CHATGPT_SESSION_STATE_PATH: /tmp/curveyield-browser-agent-v10/session-state-v1.enc.json
       CHATGPT_SESSION_STATE_UPDATED_MARKER: /tmp/curveyield-browser-agent-v10/session-state-updated
-      WAKE_RESULT_PATH: /tmp/browser-agent-home-exit-v8-result.json
+      WAKE_RESULT_PATH: /tmp/browser-agent-home-exit-v10-result.json
 
     steps:
       - name: Checkout trusted browser package
@@ -187,7 +187,7 @@ jobs:
             echo "Private VNC: $TAILSCALE_RUNNER_IP:5900"
           fi
 
-          node packages/browser-agent-original-phase0-v10/browser-agent-wake-v8.mjs
+          node packages/browser-agent-original-phase0-v10/browser-agent-wake-v10.mjs
           test -s "$WAKE_RESULT_PATH"
           cat "$WAKE_RESULT_PATH"
 
