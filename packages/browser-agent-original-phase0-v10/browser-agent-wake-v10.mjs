@@ -174,8 +174,31 @@ async function waitForAssistantResponse(page, before, timeoutMs) {
   return { responded: false, waitedMs: Date.now() - started, snapshot: current };
 }
 
-async function post(page, message) {
-  if (!message) throw new Error('Wake message is empty');
+async function composerDiagnostics(page) {
+  return page.evaluate(() => {
+    const buttons = [...document.querySelectorAll('button')].slice(-40).map((b, i) => ({
+      i,
+      text: (b.innerText || '').trim().slice(0, 80),
+      aria: b.getAttribute('aria-label'),
+      testid: b.getAttribute('data-testid'),
+      disabled: !!b.disabled,
+      type: b.getAttribute('type')
+    }));
+    const editables = [...document.querySelectorAll('textarea,[contenteditable="true"]')].slice(-20).map((e, i) => ({
+      i,
+      tag: e.tagName,
+      id: e.id,
+      role: e.getAttribute('role'),
+      aria: e.getAttribute('aria-label'),
+      placeholder: e.getAttribute('placeholder'),
+      testid: e.getAttribute('data-testid'),
+      text: (e.innerText || e.value || '').slice(0, 120)
+    }));
+    return { buttons, editables, url: location.href, title: document.title };
+  });
+}
+
+async function fillComposer(page, message) {
   const composer = await ensureComposer(page);
   await composer.click();
   const tag = await composer.evaluate(el => el.tagName.toLowerCase());
@@ -183,24 +206,94 @@ async function post(page, message) {
     await composer.fill(message);
   } else {
     await composer.fill(message).catch(async () => {
+      await composer.focus();
       await composer.press('Control+A').catch(()=>{});
       await composer.press('Meta+A').catch(()=>{});
       await composer.press('Backspace').catch(()=>{});
       await composer.type(message, { delay: 1 });
     });
   }
-  const send = await firstVisible(page, [
-    'button[data-testid="send-button"]',
-    'button[aria-label*="Send"]'
-  ]);
-  if (send) await send.click();
-  else await composer.press('Enter');
-  await page.waitForTimeout(1200);
-  const needle = message.slice(0, Math.min(80, message.length));
-  const visible = await page.getByText(needle, { exact: false }).count().catch(() => 0);
-  if (!visible) throw new Error('Wake message submission could not be verified');
+  return composer;
 }
 
+async function post(page, message) {
+  if (!message) throw new Error('Wake message is empty');
+
+  const marker = message.slice(0, Math.min(120, message.length));
+  let observed = null;
+  const onRequest = request => {
+    if (!/\/backend-api\/f\/conversation\/prepare/.test(request.url())) return;
+    const data = request.postData() || '';
+    observed = {
+      url: request.url(),
+      method: request.method(),
+      bodyContainsMarker: data.includes(marker),
+      postDataLength: data.length
+    };
+  };
+
+  page.on('request', onRequest);
+  try {
+    let composer = await fillComposer(page, message);
+    const diagnostics = await composerDiagnostics(page);
+    console.log('[github-playwright-v10] composer-diagnostics=' + JSON.stringify(diagnostics));
+
+    const sendSelectors = [
+      'button[data-testid="send-button"]',
+      'button[data-testid="composer-submit-button"]',
+      'button[aria-label="Send prompt"]',
+      'button[aria-label="Send"]',
+      'button[aria-label*="Send"]'
+    ];
+
+    const strategies = [
+      async () => {
+        const send = await firstVisible(page, sendSelectors);
+        if (!send) throw new Error('No visible Send button for click strategy');
+        console.log('[github-playwright-v10] send-strategy=button-click');
+        await send.click({ timeout: 5000 });
+      },
+      async () => {
+        console.log('[github-playwright-v10] send-strategy=composer-enter');
+        composer = await ensureComposer(page);
+        await composer.press('Enter');
+      },
+      async () => {
+        console.log('[github-playwright-v10] send-strategy=page-keyboard-enter');
+        await page.keyboard.press('Enter');
+      }
+    ];
+
+    for (let i = 0; i < strategies.length; i++) {
+      if (i > 0) {
+        // A failed strategy may have left the text in the composer; refill only if needed.
+        const body = await page.locator('body').innerText().catch(() => '');
+        if (!body.includes(marker)) composer = await fillComposer(page, message);
+      }
+
+      observed = null;
+      await strategies[i]().catch(error => {
+        console.log('[github-playwright-v10] send-strategy-error=' + JSON.stringify({ index: i, error: error.message }));
+      });
+
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline && !observed) {
+        await page.waitForTimeout(250);
+      }
+
+      if (observed?.method === 'POST' && observed?.bodyContainsMarker) {
+        console.log('[github-playwright-v10] send-request-observed=' + JSON.stringify(observed));
+        return observed;
+      }
+
+      console.log('[github-playwright-v10] send-strategy-no-post=' + JSON.stringify({ index: i, observed }));
+    }
+
+    throw new Error('No real conversation POST containing the wake marker was observed after all send strategies');
+  } finally {
+    page.off('request', onRequest);
+  }
+}
 
 async function backendPreflight(page) {
   return page.evaluate(async () => {
@@ -286,7 +379,7 @@ async function postWithBackendVerification(page, message) {
 
   page.on('response', onResponse);
   try {
-    await post(page, message);
+    const submittedRequest = await post(page, message);
 
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
@@ -317,7 +410,7 @@ async function postWithBackendVerification(page, message) {
       throw new Error('Wake was accepted by prepare endpoint but did not persist as a user message after reload');
     }
 
-    return { ...prepare, ...persisted };
+    return { ...prepare, ...persisted, submittedRequest };
   } finally {
     page.off('response', onResponse);
   }
