@@ -1,5 +1,0 @@
-{
-  "schemaVersion": "curveyield-send-network-diagnostic-v8",
-  "chat_url": "https://chatgpt.com/c/6abe90a0-fd68-83e8-8026-8af0171605fc",
-  "wake_message": "[SEND_NETWORK_DIAG_WAKE_v8]\\nAssistant: if this arrives as a real new user message, reply exactly SEND_NETWORK_DIAG_PERSONALLY_SEEN_v8"
-}
