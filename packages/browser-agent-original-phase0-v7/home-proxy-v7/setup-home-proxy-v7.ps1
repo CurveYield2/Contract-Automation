@@ -74,7 +74,7 @@ $keyPath = Join-Path $KeyDirectory 'github-runner-home-egress-v7'
 $pubPath = "$keyPath.pub"
 if (-not (Test-Path -LiteralPath $keyPath)) {
   Write-Host '[v7] Generating dedicated GitHub-runner SSH key...'
-  & ssh-keygen.exe -q -t ed25519 -N '""' -C 'curveyield-browser-home-egress-v7' -f $keyPath
+  & ssh-keygen.exe -q -t ed25519 -N "" -C 'curveyield-browser-home-egress-v7' -f $keyPath
   if ($LASTEXITCODE -ne 0) { throw 'ssh-keygen failed.' }
 }
 
