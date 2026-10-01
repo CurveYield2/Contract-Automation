@@ -1,4 +1,4 @@
-name: Original Phase0 Resume Test Dispatch v4
+name: Original Phase0 Resume Test Dispatch v5
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 2
 
-      - name: Dispatch strict original Phase0 wake v3
+      - name: Dispatch original Phase0 wake v4
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -34,7 +34,7 @@ jobs:
           chat_url="$(jq -r '.chat_url' "$request")"
           wake_message_b64="$(jq -r '.wake_message | @base64' "$request")"
 
-          gh workflow run browser-agent-original-phase0-wake-v3.yml \
+          gh workflow run browser-agent-original-phase0-wake-v4.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main \
             -f wake_id="$wake_id" \
