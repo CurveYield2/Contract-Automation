@@ -70,6 +70,7 @@ jobs:
     env:
       WAKE_ID: ${{ matrix.wake_id }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      CHATGPT_SESSION_STATE_SOURCE: bootstrap-secret
       CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
       BROWSER_HEADLESS: 'false'
       BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
