@@ -1,0 +1,41 @@
+name: Original Known-Good Create-Fresh Smoke v11
+on:
+  push:
+    paths:
+      - 'process/browser-agent-original-phase0-v1/create-fresh-smoke/*-v*.json'
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      BROWSER_HEADLESS: "false"
+      WAKE_ACTION: wake
+      WAKE_MODE: create_fresh
+      WAKE_ID: original-known-good-create-fresh-v11
+      WAKE_RESULT_PATH: /tmp/create-fresh-v11.json
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: ./packages/browser-agent-original-phase0-v5/setup-runtime-v5
+      - name: Run exact historical create-fresh path
+        shell: bash
+        run: |
+          set -euo pipefail
+          request="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -E '^process/browser-agent-original-phase0-v1/create-fresh-smoke/.*-v[0-9]+[.]json$' | tail -n1)"
+          export WAKE_MESSAGE="$(jq -r '.wake_message' "$request")"
+          xvfb-run -a node packages/browser-agent-original-phase0-v5/browser-agent-wake-v5.mjs
+      - name: Require real generation and durable chat URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat "$WAKE_RESULT_PATH"
+          jq -e '.ok==true and .posted==true and .after.generating==true and (.chatUrl|test("^https://chatgpt.com/c/[A-Za-z0-9_-]+$"))' "$WAKE_RESULT_PATH" >/dev/null
