@@ -52,3 +52,14 @@ On 2026-10-01, loading ChatGPT on a GitHub runner caused Cloudflare to issue fre
 Do not rewrite the browser send logic again unless a new defect is independently demonstrated. The September-27 implementation is already proven.
 
 The remaining requirement is an execution/session environment that ChatGPT accepts for authenticated backend requests. Once the backend preflight no longer returns `cf-mitigated: challenge`, the preserved v5 send path is the baseline to retest.
+
+## Folder layout
+
+The restored known-good browser package is intentionally self-contained here:
+
+- `browser-agent-wake-v5.mjs` — exact known-good browser implementation.
+- `browser-session-state-v1.mjs` — exact known-good session helper.
+- `runtime-v5/package.json` — exact known-good browser runtime manifest.
+- `runtime-v5/action.yml` — known-good runtime setup action with only path relocation into this package.
+
+The deleted top-level `tools/browser-agent-runtime/` folder is intentionally not recreated.
