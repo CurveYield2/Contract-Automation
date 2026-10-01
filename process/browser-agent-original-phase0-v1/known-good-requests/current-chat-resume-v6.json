@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "curveyield-original-phase0-known-good-resume-request-v6",
+  "wake_id": "original-phase0-known-good-resume-current-chat-v6",
+  "chat_url": "https://chatgpt.com/c/6abe90a0-fd68-83e8-8026-8af0171605fc",
+  "wake_message": "[KNOWN_GOOD_BROWSER_RESUME_WAKE_v6]\nThis message is being sent by the exact browser code revision that successfully created the historical Calculate equation chat. Assistant: when you personally receive this as a new user message in this conversation, reply exactly: KNOWN_GOOD_BROWSER_RESUME_PERSONALLY_SEEN_v6"
+}
