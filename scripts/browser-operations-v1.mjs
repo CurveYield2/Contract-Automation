@@ -91,7 +91,7 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
     const max = await slider.getAttribute('aria-valuemax').catch(() => null);
     if (current === null || max === null || current !== max) return false;
     const describedBy = await row.getAttribute('aria-describedby').catch(() => '');
-    for (const id of String(describedBy || '').split(/\\s+/).filter(Boolean)) {
+    for (const id of String(describedBy || '').split(/\s+/).filter(Boolean)) {
       if (!/^[A-Za-z0-9_-]+$/.test(id)) continue;
       const label = await page.locator('[id="' + id + '"]').innerText().catch(() => '');
       if (/^High(?:,|$)/i.test(label.trim())) return true;
