@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "curveyield-original-phase0-browser-deployment-v1",
+  "baselineCommit": "c2b9a732ff686f621c8d97a5d564bc8d2ed1b75f",
+  "cutoffReason": "Immediate parent of 71a57a10c86409ae53bf1405443232b961ad04d9, the commit that introduced rolling encrypted browser-session persistence.",
+  "preservedBehavior": [
+    "Direct CHATGPT_STORAGE_STATE_B64 bootstrap into GitHub-hosted Playwright",
+    "create_fresh and resume_existing modes",
+    "browserless and browserbase fallbacks",
+    "activity-aware watchdog",
+    "registration-backed fresh-chat URL persistence"
+  ],
+  "intentionallyExcluded": [
+    "rolling encrypted session-state cache",
+    "browser project/routine engine",
+    "ChatGPT Project creation or renaming",
+    "reviewer repair/replacement machinery",
+    "reasoning-slider automation",
+    "durable-URL recovery patches",
+    "later browser bootstrap/retry layers"
+  ],
+  "isolationChanges": [
+    "Workflow names changed to browser-agent-original-phase0-*-v1",
+    "Browser script/runtime paths moved under packages/browser-agent-original-phase0-v1",
+    "Watchdog/registration state moved under process/browser-agent-original-phase0-v1",
+    "Self-dispatch references point only to the isolated v1 workflows"
+  ],
+  "sourceBlobs": {
+    "wakeWorkflow": {
+      "path": ".github/workflows/browser-agent-wake.yml",
+      "sha": "23199b010d816cee4be6678cce0d521cb06c0b8c"
+    },
+    "watchdogWorkflow": {
+      "path": ".github/workflows/browser-agent-watchdog.yml",
+      "sha": "5a0009d829e9f66c88d94c1401236291e8511f0b"
+    },
+    "wakeScript": {
+      "path": "scripts/browser-agent-wake.mjs",
+      "sha": "616923d0d5baebe8878e1fa7d106ebded28222c0"
+    },
+    "setupAction": {
+      "path": ".github/actions/setup-browser-agent-runtime/action.yml",
+      "sha": "24c98950b82a3da3c1d08b0a2dae91b69feecf26"
+    },
+    "runtimePackage": {
+      "path": "tools/browser-agent-runtime/package.json",
+      "sha": "96622939cbfe1dd68c7311fb99e31ecaaa322ea2"
+    },
+    "controllerTokenSelector": {
+      "path": "scripts/select-audit-controller-token.sh",
+      "sha": "e5289c1e088d7e895ea9d70f1e2f46583acf7293"
+    },
+    "registrationTemplate": {
+      "path": "process/browser-agent-wake/REGISTRATION_TEMPLATE_v1.json",
+      "sha": "d5823a04e7675d7d835e97066d99f3eff7f3ed7a"
+    }
+  }
+}
