@@ -120,6 +120,7 @@ jobs:
       WAKE_MODE: ${{ inputs.mode }}
       CHAT_URL: ${{ inputs.chat_url }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      CHATGPT_SESSION_STATE_SOURCE: bootstrap-secret
       CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
       BROWSER_HEADLESS: 'false'
       BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
