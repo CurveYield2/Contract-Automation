@@ -1,0 +1,56 @@
+name: Original Phase0 Resume Test Dispatch v4
+
+on:
+  push:
+    paths:
+      - 'process/browser-agent-original-phase0-v1/dispatch-requests/*.json'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trigger commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Dispatch strict original Phase0 wake v3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          request="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -E '^process/browser-agent-original-phase0-v1/dispatch-requests/.*[.]json$' | tail -n1)"
+          test -n "$request"
+          wake_id="$(jq -r '.wake_id' "$request")"
+          campaign_id="$(jq -r '.campaign_id' "$request")"
+          phase_id="$(jq -r '.phase_id' "$request")"
+          chat_url="$(jq -r '.chat_url' "$request")"
+          wake_message_b64="$(jq -r '.wake_message | @base64' "$request")"
+
+          gh workflow run browser-agent-original-phase0-wake-v3.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f wake_id="$wake_id" \
+            -f campaign_id="$campaign_id" \
+            -f phase_id="$phase_id" \
+            -f mode=resume_existing \
+            -f chat_url="$chat_url" \
+            -f wake_message_b64="$wake_message_b64" \
+            -f watchdog_enabled=false \
+            -f watchdog_message_b64="" \
+            -f gate_mode=LITE \
+            -f gate_repository=CurveYield2/Audit-Controller \
+            -f gate_ref=main \
+            -f gate_state_path="" \
+            -f gate_expected_phase_id="$phase_id" \
+            -f gate_expected_milestone_id=P0_BOOTSTRAP \
+            -f gate_active_pointer_path="" \
+            -f gate_stop_states_csv=WAITING_FOR_HUMAN_RESPONSE,WAITING_FOR_SUCCESSOR_AGENT,CLOSED,STOPPED_BY_HUMAN \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
