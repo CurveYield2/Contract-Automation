@@ -1,0 +1,85 @@
+name: Package Browser Home-Exit v9
+
+on:
+  push:
+    paths:
+      - 'process/browser-agent-home-exit-v9/package-request-v9.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Write setup instructions v9
+        shell: bash
+        run: |
+          cat > SETUP_INSTRUCTIONS_v9.md <<'EOF'
+          # CurveYield Browser Home-Exit v9 — OAuth Setup
+
+          ## Tailscale
+
+          v9 uses the current Tailscale OAuth client flow. No Auth Keys page is required.
+
+          1. Open Tailscale Admin Console -> Access controls -> Tags.
+          2. Create tag named `ci` (becomes `tag:ci`).
+          3. Open Admin Console -> Trust credentials.
+          4. Select + Credential and create an OAuth client.
+          5. Grant writable Keys -> Auth Keys scope.
+          6. Associate the OAuth client with `tag:ci`.
+          7. Create the credential and copy Client ID and Client secret.
+
+          ## GitHub secrets
+
+          In CurveYield2/Contract-Automation -> Settings -> Secrets and variables -> Actions:
+
+          - TS_OAUTH_CLIENT_ID = Tailscale OAuth Client ID
+          - TS_OAUTH_SECRET = Tailscale OAuth Client secret
+
+          ## Windows exit node
+
+          Keep Tailscale running and advertise/approve this PC as an exit node.
+          Current Tailscale IP observed: 100.112.238.56
+
+          ## First run
+
+          Run `Original Phase0 Home-Exit Browser v9`:
+
+          - action: observe
+          - mode: create_fresh
+          - home_exit_node: 100.112.238.56
+          - interactive_view: true
+          - manual_challenge_wait_minutes: 15
+
+          This sends no message.
+
+          If the run prints TAILSCALE_VNC=<ip>:5900, connect a VNC viewer from the Windows PC to that private Tailscale address to complete normal ChatGPT login or verification.
+
+          ## Resume test
+
+          After observe succeeds:
+
+          - action: wake
+          - mode: resume_existing
+          - chat_url: https://chatgpt.com/c/6abe90a0-fd68-83e8-8026-8af0171605fc
+          - interactive_view: true
+          EOF
+
+      - name: Upload exact v9 bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: CurveYield_Browser_Home_Exit_v9
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            SETUP_INSTRUCTIONS_v9.md
+            .github/workflows/browser-agent-home-exit-v9.yml
+            packages/browser-agent-original-phase0-v9/**
