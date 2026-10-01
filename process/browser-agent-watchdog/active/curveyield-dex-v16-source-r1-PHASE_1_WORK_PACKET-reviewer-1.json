@@ -43,5 +43,7 @@
     "unviewableThreshold": 2,
     "consecutiveIdlePokes": 0,
     "consecutiveUnviewable": 0
-  }
+  },
+  "watchdogRunId": "36877859629",
+  "watchdogSweepStartedAt": "2026-10-01T14:38:24Z"
 }
