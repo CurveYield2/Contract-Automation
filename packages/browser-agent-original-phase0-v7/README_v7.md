@@ -66,3 +66,13 @@ The cache never contains plaintext storage state.
 v7 refuses to send until ordinary ChatGPT backend probes are healthy and not marked `cf-mitigated: challenge`.
 
 After Send, v7 also requires the real ChatGPT `/backend-api/f/conversation/prepare` response to succeed. A local UI bubble, `Unknown error / Retry`, or `local-chatgpt:` route cannot be reported as successful delivery.
+
+
+## Recommended first run
+
+1. Dispatch v7 with `action=observe`, `mode=create_fresh`, and `interactive_view=true`.
+2. If ChatGPT asks for normal login or browser verification, open the private VNC view at `127.0.0.1:5901` on the home PC and complete it personally.
+3. v7 waits until ChatGPT backend probes are healthy, then stores the refreshed browser state encrypted in the v7 Actions cache.
+4. Dispatch again with `action=wake`, `mode=resume_existing`, and the target chat URL.
+
+This gives a clean way to refresh login/challenge state without accidentally posting a test message.
