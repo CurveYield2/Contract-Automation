@@ -274,6 +274,7 @@ async function ensureSidebarOpen(page) {
 
 async function findNewProjectControl(page) {
   const direct = await firstVisible(page, [
+    'button[aria-label="Add new project"]',
     'button[aria-label*="New project"]',
     'a[aria-label*="New project"]',
     '[role="button"][aria-label*="New project"]',
@@ -374,7 +375,11 @@ async function createProject(page, projectName) {
     );
   }
 
-  await trigger.click();
+  const triggerLabel = await trigger.getAttribute('aria-label').catch(() => '');
+  // Current sidebar paints overlapping section layers above the add button.
+  // Its standard keyboard activation remains available and avoids misclicks.
+  if (triggerLabel === 'Add new project') await trigger.press('Enter');
+  else await trigger.click();
   await page.waitForTimeout(500);
 
   const input = await firstVisible(page, [
