@@ -1,0 +1,88 @@
+name: Browser Session Bootstrap Recovery v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/agent-upload/browser-session-bootstrap-recovery/*.json'
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: browser-session-bootstrap-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact recovery request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate one request and failed browser wake
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t requests < <(
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status!="removed") | .filename | select(startswith("process/agent-upload/browser-session-bootstrap-recovery/") and endswith(".json"))'
+          )
+          [ "${#requests[@]}" -eq 1 ] || { echo "::error::Exactly one recovery request must change."; exit 1; }
+          jq -e '
+            type=="object" and
+            .schemaVersion=="curveyield-browser-session-bootstrap-recovery-v1" and
+            .action=="clear_main_session_cache_and_retry_failed_wake" and
+            (.wake_run_id|type=="number" and .>0 and floor==.) and
+            (.campaign_id|type=="string" and test("^[A-Za-z0-9._-]+$"))
+          ' "${requests[0]}" >/dev/null
+          wake_run="$(jq -r '.wake_run_id' "${requests[0]}")"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$wake_run" > /tmp/wake-run.json
+          jq -e '
+            .path==".github/workflows/browser-agent-wake.yml" and
+            .head_branch=="main" and .event=="workflow_dispatch" and
+            .status=="completed" and .conclusion=="failure"
+          ' /tmp/wake-run.json >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$wake_run/jobs" > /tmp/wake-jobs.json
+          jq -e '[.jobs[] | select(.name=="wake" and .conclusion=="failure")] | length==1' /tmp/wake-jobs.json >/dev/null
+          # A concurrent browser job could repopulate the rolling cache. Fail
+          # closed instead of deleting again or repeatedly launching the wake.
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?status=in_progress&per_page=100" > /tmp/active-runs.json
+          jq -e '[.workflow_runs[] | select(.name | test("^Browser Agent (Wake|Watchdog|Chat Watchdog)"))] | length==0' /tmp/active-runs.json >/dev/null
+          echo "WAKE_RUN_ID=$wake_run" >> "$GITHUB_ENV"
+
+      - name: Clear only main-branch encrypted ChatGPT session caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cache_api="repos/$GITHUB_REPOSITORY/actions/caches?ref=refs/heads/main&key=chatgpt-session-state-v1-&per_page=100"
+          gh api --paginate "$cache_api" --jq '.actions_caches[] | select(.ref=="refs/heads/main" and (.key|startswith("chatgpt-session-state-v1-"))) | .id' > /tmp/session-cache-ids.txt
+          count=0
+          while IFS= read -r cache_id; do
+            [[ "$cache_id" =~ ^[0-9]+$ ]] || { echo "::error::Invalid cache identifier."; exit 1; }
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/caches/$cache_id"
+            count=$((count + 1))
+          done < /tmp/session-cache-ids.txt
+          gh api --paginate "$cache_api" --jq '.actions_caches[] | select(.ref=="refs/heads/main" and (.key|startswith("chatgpt-session-state-v1-"))) | .id' > /tmp/remaining-session-cache-ids.txt
+          [ ! -s /tmp/remaining-session-cache-ids.txt ] || { echo "::error::Session caches remain; wake not retried."; exit 1; }
+          echo "[browser-session-recovery] deleted=$count; remaining=0; bootstrap secret will be the cold-start source"
+          echo "- Deleted $count main-branch encrypted ChatGPT session caches; dependency/runtime/Medusa caches untouched." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retry only the failed browser wake
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run rerun "$WAKE_RUN_ID" --failed --repo "$GITHUB_REPOSITORY"
+          echo "- Retried only failed jobs in browser wake run $WAKE_RUN_ID. No Phase0/bootstrap/simulation workflow was dispatched." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Verify the wake log reports Using bootstrap-secret session state; dispatch alone is not successful delivery." >> "$GITHUB_STEP_SUMMARY"
