@@ -252,16 +252,36 @@ async function waitForBackendHealth(page) {
   }
 }
 
+async function persistedWakeVisible(page, message) {
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const users = page.locator('[data-message-author-role="user"]');
+    const count = await users.count().catch(() => 0);
+    for (let i = Math.max(0, count - 5); i < count; i++) {
+      const text = await users.nth(i).innerText().catch(() => '');
+      if (text.includes(message)) return { persisted: true, userCount: count };
+    }
+    await page.waitForTimeout(1000);
+  }
+  return { persisted: false, userCount: await page.locator('[data-message-author-role="user"]').count().catch(() => 0) };
+}
+
 async function postWithBackendVerification(page, message) {
   let prepare = null;
+  const marker = message.slice(0, Math.min(120, message.length));
+
   const onResponse = async (response) => {
-    if (/\/backend-api\/f\/conversation\/prepare/.test(response.url())) {
-      prepare = {
-        status: response.status(),
-        cfMitigated: await response.headerValue('cf-mitigated').catch(() => null),
-        server: await response.headerValue('server').catch(() => null)
-      };
-    }
+    if (!/\/backend-api\/f\/conversation\/prepare/.test(response.url())) return;
+    const request = response.request();
+    const method = request.method();
+    const postData = request.postData() || '';
+    prepare = {
+      status: response.status(),
+      method,
+      bodyContainsMarker: postData.includes(marker),
+      cfMitigated: await response.headerValue('cf-mitigated').catch(() => null),
+      server: await response.headerValue('server').catch(() => null)
+    };
   };
 
   page.on('response', onResponse);
@@ -275,12 +295,29 @@ async function postWithBackendVerification(page, message) {
     }
 
     if (!prepare) throw new Error('No ChatGPT conversation prepare response was observed after Send');
-    if (prepare.status < 200 || prepare.status >= 300 || prepare.cfMitigated === 'challenge') {
-      throw new Error('ChatGPT conversation prepare was rejected: ' + JSON.stringify(prepare));
+    if (
+      prepare.status < 200 ||
+      prepare.status >= 300 ||
+      prepare.cfMitigated === 'challenge' ||
+      prepare.method !== 'POST' ||
+      !prepare.bodyContainsMarker
+    ) {
+      throw new Error('ChatGPT conversation prepare did not prove wake delivery: ' + JSON.stringify(prepare));
     }
 
     console.log('[github-playwright-v10] conversation-prepare=' + JSON.stringify(prepare));
-    return prepare;
+
+    await page.waitForTimeout(2500);
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+    await waitForBackendHealth(page);
+
+    const persisted = await persistedWakeVisible(page, message);
+    console.log('[github-playwright-v10] persisted-wake=' + JSON.stringify(persisted));
+    if (!persisted.persisted) {
+      throw new Error('Wake was accepted by prepare endpoint but did not persist as a user message after reload');
+    }
+
+    return { ...prepare, ...persisted };
   } finally {
     page.off('response', onResponse);
   }
