@@ -131,7 +131,17 @@ async function snapshot(page) {
     !conversationUnavailable &&
     !loginPrompt &&
     !humanChallenge;
+  const mainDiagnostics = await page.locator('main, [role="main"]').first().evaluate(el => ({
+    tag: el.tagName,
+    controls: [...el.querySelectorAll('button,[role="button"],[role="status"],h1,h2')].slice(0,25).map(node => ({
+      tag: node.tagName, role: node.getAttribute('role'), label: node.getAttribute('aria-label'),
+      testId: node.getAttribute('data-testid'), text: node.getAttribute('role') === 'status' ? node.textContent.trim().slice(0,120) : null,
+    })),
+  })).catch(() => null);
   return {
+    pageTitle: title,
+    mainDiagnostics,
+    loadingText: /loading|opening chat|reconnecting|synchroniz/i.test(bodyText),
     generating: !!stop,
     composerVisible: !!composer,
     conversationUnavailable,
