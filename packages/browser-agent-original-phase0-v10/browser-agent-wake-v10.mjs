@@ -249,6 +249,11 @@ async function post(page, message) {
   if (!message) throw new Error('Wake message is empty');
 
   const marker = message.slice(0, Math.min(120, message.length));
+  const requestedIdleWait = Number.parseInt(env.IDLE_WAIT_MS || '600000', 10);
+  const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
+
+  // Final race guard: do not even fill the composer while this conversation is generating.
+  await waitForChatIdle(page, idleWaitMs);
   let observed = null;
 
   const onRequest = request => {
@@ -322,6 +327,8 @@ async function post(page, message) {
 
     for (let i = 0; i < strategies.length; i++) {
       observed = null;
+
+      await waitForChatIdle(page, idleWaitMs);
 
       // Ensure the exact wake text is still in the composer before each retry.
       const currentComposer = await ensureComposer(page).catch(() => null);
