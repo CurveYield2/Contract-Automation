@@ -197,8 +197,20 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
   }
   const bodyText = await page.locator('body').innerText().catch(() => '');
   const relevantText = bodyText.split(/\n+/).map(x => x.trim()).filter(x => /High|Think|Reason|GPT-5|Instant|Medium/i.test(x)).slice(0, 40);
+  // Capture only effort-widget structure, never authentication/session data.
+  const effortWidget = await page.locator('[role="slider"], input[type="range"], [aria-valuetext], [aria-label*="effort" i]')
+    .evaluateAll(elements => elements.filter(el => el.getClientRects().length).map(el => ({
+      tag: el.tagName, role: el.getAttribute('role'), label: el.getAttribute('aria-label'),
+      min: el.getAttribute('aria-valuemin') || el.getAttribute('min'),
+      max: el.getAttribute('aria-valuemax') || el.getAttribute('max'),
+      value: el.getAttribute('aria-valuenow') || el.getAttribute('value'),
+      valueText: el.getAttribute('aria-valuetext'),
+    }))).catch(() => []);
+  const mediumStructure = await page.getByText('Medium, 2 of 3.', { exact: true }).first()
+    .evaluate(el => el.parentElement.outerHTML.slice(0, 5000)).catch(() => '');
   const error = new Error(
-    'ChatGPT High thinking-effort control could not be selected and verified; visibleControls=' +
+    'ChatGPT High thinking-effort control could not be selected and verified; effortWidget=' +
+    JSON.stringify(effortWidget) + '; mediumStructure=' + mediumStructure + '; visibleControls=' +
     JSON.stringify(diagnostic) + '; relevantText=' + JSON.stringify(relevantText)
   );
   error.code = 'THINKING_EFFORT_UI_CHANGED';
