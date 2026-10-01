@@ -250,13 +250,16 @@ async function post(page, message) {
 
   const marker = message.slice(0, Math.min(120, message.length));
   let observed = null;
+
   const onRequest = request => {
-    if (!/\/backend-api\/f\/conversation\/prepare/.test(request.url())) return;
+    const method = request.method();
+    if (!['POST','PUT','PATCH'].includes(method)) return;
     const data = request.postData() || '';
+    if (!data.includes(marker)) return;
     observed = {
       url: request.url(),
-      method: request.method(),
-      bodyContainsMarker: data.includes(marker),
+      method,
+      bodyContainsMarker: true,
       postDataLength: data.length
     };
   };
@@ -278,13 +281,37 @@ async function post(page, message) {
     const strategies = [
       async () => {
         const send = await firstVisible(page, sendSelectors);
-        if (!send) throw new Error('No visible Send button for click strategy');
+        if (!send) throw new Error('No visible Send button for normal click');
         console.log('[github-playwright-v10] send-strategy=button-click');
-        await send.click({ timeout: 5000 });
+        await send.click({ timeout: 4000 });
       },
       async () => {
-        console.log('[github-playwright-v10] send-strategy=composer-enter');
+        const send = await firstVisible(page, sendSelectors);
+        if (!send) throw new Error('No visible Send button for force click');
+        console.log('[github-playwright-v10] send-strategy=button-force-click');
+        await send.click({ force: true, timeout: 4000 });
+      },
+      async () => {
+        const send = await firstVisible(page, sendSelectors);
+        if (!send) throw new Error('No visible Send button for DOM click');
+        console.log('[github-playwright-v10] send-strategy=button-dom-click');
+        await send.evaluate(el => el.click());
+      },
+      async () => {
         composer = await ensureComposer(page);
+        console.log('[github-playwright-v10] send-strategy=form-request-submit');
+        const submitted = await composer.evaluate(el => {
+          const form = el.closest('form');
+          if (!form) return false;
+          if (typeof form.requestSubmit === 'function') form.requestSubmit();
+          else form.submit();
+          return true;
+        });
+        if (!submitted) throw new Error('Composer has no containing form');
+      },
+      async () => {
+        composer = await ensureComposer(page);
+        console.log('[github-playwright-v10] send-strategy=composer-enter');
         await composer.press('Enter');
       },
       async () => {
@@ -294,31 +321,33 @@ async function post(page, message) {
     ];
 
     for (let i = 0; i < strategies.length; i++) {
-      if (i > 0) {
-        // A failed strategy may have left the text in the composer; refill only if needed.
-        const body = await page.locator('body').innerText().catch(() => '');
-        if (!body.includes(marker)) composer = await fillComposer(page, message);
+      observed = null;
+
+      // Ensure the exact wake text is still in the composer before each retry.
+      const currentComposer = await ensureComposer(page).catch(() => null);
+      if (currentComposer) {
+        const currentText = await currentComposer.evaluate(el => (el.innerText || el.value || '')).catch(() => '');
+        if (!currentText.includes(marker)) composer = await fillComposer(page, message);
       }
 
-      observed = null;
       await strategies[i]().catch(error => {
         console.log('[github-playwright-v10] send-strategy-error=' + JSON.stringify({ index: i, error: error.message }));
       });
 
-      const deadline = Date.now() + 8000;
+      const deadline = Date.now() + 7000;
       while (Date.now() < deadline && !observed) {
-        await page.waitForTimeout(250);
+        await page.waitForTimeout(200);
       }
 
-      if (observed?.method === 'POST' && observed?.bodyContainsMarker) {
+      if (observed) {
         console.log('[github-playwright-v10] send-request-observed=' + JSON.stringify(observed));
         return observed;
       }
 
-      console.log('[github-playwright-v10] send-strategy-no-post=' + JSON.stringify({ index: i, observed }));
+      console.log('[github-playwright-v10] send-strategy-no-post=' + JSON.stringify({ index: i }));
     }
 
-    throw new Error('No real conversation POST containing the wake marker was observed after all send strategies');
+    throw new Error('No real ChatGPT write request containing the wake marker was observed after all send strategies');
   } finally {
     page.off('request', onRequest);
   }
@@ -389,18 +418,21 @@ async function persistedWakeVisible(page, message) {
 }
 
 async function postWithBackendVerification(page, message) {
-  let prepare = null;
   const marker = message.slice(0, Math.min(120, message.length));
+  let accepted = null;
 
-  const onResponse = async (response) => {
-    if (!/\/backend-api\/f\/conversation\/prepare/.test(response.url())) return;
+  const onResponse = async response => {
     const request = response.request();
     const method = request.method();
+    if (!['POST','PUT','PATCH'].includes(method)) return;
     const postData = request.postData() || '';
-    prepare = {
+    if (!postData.includes(marker)) return;
+
+    accepted = {
+      url: response.url(),
       status: response.status(),
       method,
-      bodyContainsMarker: postData.includes(marker),
+      bodyContainsMarker: true,
       cfMitigated: await response.headerValue('cf-mitigated').catch(() => null),
       server: await response.headerValue('server').catch(() => null)
     };
@@ -412,22 +444,23 @@ async function postWithBackendVerification(page, message) {
 
     const deadline = Date.now() + 20000;
     while (Date.now() < deadline) {
-      if (prepare) break;
+      if (accepted) break;
       await page.waitForTimeout(250);
     }
 
-    if (!prepare) throw new Error('No ChatGPT conversation prepare response was observed after Send');
+    if (!accepted) {
+      throw new Error('Wake write request was observed but no corresponding response was observed');
+    }
     if (
-      prepare.status < 200 ||
-      prepare.status >= 300 ||
-      prepare.cfMitigated === 'challenge' ||
-      prepare.method !== 'POST' ||
-      !prepare.bodyContainsMarker
+      accepted.status < 200 ||
+      accepted.status >= 300 ||
+      accepted.cfMitigated === 'challenge' ||
+      !accepted.bodyContainsMarker
     ) {
-      throw new Error('ChatGPT conversation prepare did not prove wake delivery: ' + JSON.stringify(prepare));
+      throw new Error('ChatGPT wake write was rejected: ' + JSON.stringify(accepted));
     }
 
-    console.log('[github-playwright-v10] conversation-prepare=' + JSON.stringify(prepare));
+    console.log('[github-playwright-v10] wake-write-response=' + JSON.stringify(accepted));
 
     await page.waitForTimeout(2500);
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -436,15 +469,14 @@ async function postWithBackendVerification(page, message) {
     const persisted = await persistedWakeVisible(page, message);
     console.log('[github-playwright-v10] persisted-wake=' + JSON.stringify(persisted));
     if (!persisted.persisted) {
-      throw new Error('Wake was accepted by prepare endpoint but did not persist as a user message after reload');
+      throw new Error('Wake write returned success but did not persist as a user message after reload');
     }
 
-    return { ...prepare, ...persisted, submittedRequest };
+    return { ...accepted, ...persisted, submittedRequest };
   } finally {
     page.off('response', onResponse);
   }
 }
-
 
 
 async function runWithPage(providerName, connect) {
