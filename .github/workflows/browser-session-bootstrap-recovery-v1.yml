@@ -39,10 +39,24 @@ jobs:
           jq -e '
             type=="object" and
             .schemaVersion=="curveyield-browser-session-bootstrap-recovery-v1" and
-            .action=="clear_main_session_cache_and_retry_failed_wake" and
-            (.wake_run_id|type=="number" and .>0 and floor==.) and
+            (.action=="clear_main_session_cache_and_retry_failed_wake" or .action=="observe_active_watchdog") and
             (.campaign_id|type=="string" and test("^[A-Za-z0-9._-]+$"))
           ' "${requests[0]}" >/dev/null
+          recovery_action="$(jq -r '.action' "${requests[0]}")"
+          echo "RECOVERY_ACTION=$recovery_action" >> "$GITHUB_ENV"
+          if [ "$recovery_action" = "observe_active_watchdog" ]; then
+            jq -e '.wake_id|type=="string" and test("^[A-Za-z0-9._-]+$")' "${requests[0]}" >/dev/null
+            wake_id="$(jq -r '.wake_id' "${requests[0]}")"
+            campaign_id="$(jq -r '.campaign_id' "${requests[0]}")"
+            gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active/$wake_id.json?ref=main" --jq '.content' | base64 -d > /tmp/active-watchdog.json
+            jq -e --arg id "$wake_id" --arg campaign "$campaign_id" '
+              .status=="ACTIVE" and .wakeId==$id and .campaignId==$campaign and
+              (.chatUrl|type=="string" and startswith("https://chatgpt.com/c/"))
+            ' /tmp/active-watchdog.json >/dev/null
+            echo "WATCHDOG_ID=$wake_id" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          jq -e '.wake_run_id|type=="number" and .>0 and floor==.' "${requests[0]}" >/dev/null
           wake_run="$(jq -r '.wake_run_id' "${requests[0]}")"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$wake_run" > /tmp/wake-run.json
           jq -e '
@@ -59,6 +73,7 @@ jobs:
           echo "WAKE_RUN_ID=$wake_run" >> "$GITHUB_ENV"
 
       - name: Clear only main-branch encrypted ChatGPT session caches
+        if: env.RECOVERY_ACTION == 'clear_main_session_cache_and_retry_failed_wake'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -78,6 +93,7 @@ jobs:
           echo "- Deleted $count main-branch encrypted ChatGPT session caches; dependency/runtime/Medusa caches untouched." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Retry only the failed browser wake
+        if: env.RECOVERY_ACTION == 'clear_main_session_cache_and_retry_failed_wake'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -86,3 +102,13 @@ jobs:
           gh run rerun "$WAKE_RUN_ID" --failed --repo "$GITHUB_REPOSITORY"
           echo "- Retried only failed jobs in browser wake run $WAKE_RUN_ID. No Phase0/bootstrap/simulation workflow was dispatched." >> "$GITHUB_STEP_SUMMARY"
           echo "- Verify the wake log reports Using bootstrap-secret session state; dispatch alone is not successful delivery." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Observe the existing active watchdog with current saved-state settings
+        if: env.RECOVERY_ACTION == 'observe_active_watchdog'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$WATCHDOG_ID"
+          echo "- Dispatched one sweep of existing active watchdog $WATCHDOG_ID using current trusted main. No chat or campaign was initialized." >> "$GITHUB_STEP_SUMMARY"
