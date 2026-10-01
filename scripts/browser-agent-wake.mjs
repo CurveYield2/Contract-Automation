@@ -31,6 +31,15 @@ function sha(text='') {
 }
 function bool(v) { return String(v || '').toLowerCase() === 'true'; }
 
+function durableChatUrl(value) {
+  try {
+    const url = new URL(String(value));
+    return url.origin === 'https://chatgpt.com'
+      && /^\/c\/[A-Za-z0-9_-]+$/.test(url.pathname)
+      && !/^\/c\/local[-_:]/i.test(url.pathname);
+  } catch { return false; }
+}
+
 class BrowserAgentError extends Error {
   constructor(code, message, retryable = false) {
     super(message);
@@ -373,9 +382,10 @@ async function runWithPage(providerName, connect) {
         after = await snapshot(page);
       }
 
-      if (mode === 'create_fresh' && !/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(after.url)) {
-        await page.waitForURL(/https:\/\/chatgpt\.com\/c\//, { timeout: 15000 }).catch(()=>{});
-        after.url = page.url();
+      if (mode === 'create_fresh' && !durableChatUrl(after.url)) {
+        // A local-chatgpt temporary route is not a reopenable reviewer chat.
+        await page.waitForURL(url => durableChatUrl(url.toString()), { timeout: 60000 }).catch(() => {});
+        after = await snapshot(page);
       }
 
       if (routine) {
@@ -397,8 +407,14 @@ async function runWithPage(providerName, connect) {
 
     const renameResult = [...routineAfter].reverse().find((entry) => entry.operation === 'chatgpt.rename_current_chat')?.result || null;
     const sessionStatePersisted = await persistHealthySession(providerName, context, after);
+    const chatUrlVerified = durableChatUrl(after.url);
     const result = {
-      ok: true, provider: providerName, action, wakeId, posted: true, before, after, sessionStatePersisted,
+      // A posted message with no durable conversation cannot activate a reviewer.
+      // Return normally so the provider loop never posts it again elsewhere.
+      ok: chatUrlVerified, provider: providerName, action, wakeId, posted: true, before, after, sessionStatePersisted,
+      chatUrlVerified,
+      ...(!chatUrlVerified ? { failures: [{ provider: providerName, code: 'CHAT_URL_NOT_DURABLE', retryable: false,
+        error: 'Message submission was observed but no durable reviewer chat URL appeared within 60 seconds; do not repeat the initial message blindly.' }] } : {}),
       chatUrl: after.url,
       browserRoutineId: browserRoutineId || null,
       projectName: projectName || null,
