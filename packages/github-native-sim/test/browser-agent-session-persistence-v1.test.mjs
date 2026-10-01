@@ -161,3 +161,13 @@ test('browser session persistence changes remain in the control-light qualificat
   ]);
   assert.equal(result.lane, 'CONTROL_LIGHT');
 });
+
+test('operator-selected saved login state bypasses rolling cache in wake and watchdog', async () => {
+  const runtime = await fs.readFile(path.join(root, 'scripts/browser-agent-wake.mjs'), 'utf8');
+  assert.match(runtime, /env\.CHATGPT_SESSION_STATE_SOURCE === 'bootstrap-secret' \? null : await loadEncryptedSessionState/);
+  for (const relative of ['.github/workflows/browser-agent-wake.yml', '.github/workflows/browser-agent-watchdog.yml']) {
+    const workflow = await fs.readFile(path.join(root, relative), 'utf8');
+    assert.match(workflow, /CHATGPT_SESSION_STATE_SOURCE: bootstrap-secret/);
+    assert.match(workflow, /CHATGPT_STORAGE_STATE_B64: \$\{\{ secrets\.CHATGPT_STORAGE_STATE_B64 \}\}/);
+  }
+});
