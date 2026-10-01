@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "curveyield-self-hosted-browser-request-v6",
+  "action": "authenticate_and_send",
+  "chat_url": "https://chatgpt.com/c/6abe90a0-fd68-83e8-8026-8af0171605fc",
+  "wake_message": "[SELF_HOSTED_PLAYWRIGHT_WAKE_v6]\\nAssistant: when you personally receive this as a new user message in this exact conversation, reply exactly: SELF_HOSTED_PLAYWRIGHT_WAKE_PERSONALLY_SEEN_v6",
+  "manual_auth_wait_seconds": 900,
+  "poll_ms": 5000,
+  "keep_browser_open_after_success": false
+}
