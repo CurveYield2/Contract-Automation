@@ -294,3 +294,32 @@ test('task-lock policy is not injected into audit-specific browser workflows', (
     assert.doesNotMatch(body, /TASK_LOCK_PROTOCOL_v1\.md|task_lock_scope=development_upgrade_only/, name);
   }
 });
+
+
+test('initial development-agent launch retries retryable browser challenges on bounded fresh runners', () => {
+  assert.match(workflow, /runner_retry_attempt:/);
+  assert.match(workflow, /Internal fresh-runner browser retry attempt counter/);
+  assert.match(workflow, /retryable=.*select\(\.provider=="github-playwright" and \.retryable==true\)/);
+  assert.match(workflow, /max=3/);
+  assert.match(workflow, /gh workflow run development-agent-task-manager\.yml/);
+  assert.match(workflow, /--field runner_retry_attempt="\$next"/);
+  assert.match(workflow, /Fresh-runner development-agent retry \$next\/\$max dispatched/);
+  assert.match(workflow, /if: steps\.initial_agent\.outputs\.created == 'true'/);
+});
+
+test('fresh-runner retry preserves the exact development task and Project continuity inputs', () => {
+  for (const field of [
+    'manager_id="$MANAGER_ID"',
+    'specification_path="$SPEC_PATH"',
+    'skill_path="$SKILL_PATH"',
+    'authority_ref="$AUTHORITY_REF"',
+    'target_repository="$TARGET_REPOSITORY"',
+    'target_branch="$TARGET_BRANCH"',
+    'base_ref="$BASE_REF"',
+    'continuity_mode="$TASK_MANAGER_CONTINUITY_MODE"',
+  ]) {
+    assert.match(workflow, new RegExp(field.replace(/[.*+?^$\{\}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(workflow, /BROWSER_ROUTINE_ID='development-agent-project-create-v1'/);
+  assert.match(workflow, /CHATGPT_PROJECT_NAME="\$TASK_MANAGER_PROJECT_NAME"/);
+});
