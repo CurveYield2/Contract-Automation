@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "curveyield-browser-routine-v1",
+  "id": "audit-lite-reviewer-phase1-v1",
+  "description": "Initialize the campaign ChatGPT Project for Phase 1, capture its durable share link through the normal Share project UI, create the first reviewer chat inside it, then rename the durable conversation after the wake message.",
+  "stages": {
+    "before_message": [
+      {
+        "operation": "chatgpt.ensure_chat_mode"
+      },
+      {
+        "operation": "chatgpt.ensure_project",
+        "args": {
+          "projectName": "{{projectName}}"
+        }
+      },
+      {
+        "operation": "chatgpt.capture_project_share_link",
+        "args": {
+          "projectName": "{{projectName}}"
+        }
+      },
+      {
+        "operation": "chatgpt.start_project_chat",
+        "args": {
+          "projectName": "{{projectName}}"
+        }
+      }
+    ],
+    "after_message": [
+      {
+        "operation": "chatgpt.rename_current_chat",
+        "args": {
+          "chatName": "{{chatName}}"
+        }
+      }
+    ]
+  }
+}
