@@ -120,7 +120,7 @@ jobs:
       WAKE_MODE: ${{ inputs.mode }}
       CHAT_URL: ${{ inputs.chat_url }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
-      CHATGPT_SESSION_STATE_SOURCE: bootstrap-secret
+      # Prefer the restored encrypted rolling session; CHATGPT_STORAGE_STATE_B64 remains the bootstrap fallback.
       CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
       BROWSER_HEADLESS: 'false'
       DISPLAY: ':99'
