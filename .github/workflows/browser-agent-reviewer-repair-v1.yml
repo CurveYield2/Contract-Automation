@@ -119,6 +119,7 @@ jobs:
             report_path="$(jq -r '.currentAssignment.finalReportPath // empty' /tmp/campaign-directory.json)"
             packet_path="$(jq -r '.currentAssignment.packetPath // empty' /tmp/campaign-directory.json)"
             receipt_path="$(jq -r '.currentAssignment.predecessorReceiptPath // .lastSealedReceiptPath // empty' /tmp/campaign-directory.json)"
+            derived_inputs="$(jq -r '.currentAssignment.derivedInputPaths // [] | .[]' /tmp/campaign-directory.json)"
             assignment_status="$(jq -r '.currentAssignment.status // empty' /tmp/campaign-directory.json)"
             [ -n "$reviewer" ] && [ -n "$phase_id" ] && [ -n "$schema_path" ] && [ -n "$form_path" ] && [ -n "$packet_path" ]
             feedback=""
@@ -130,25 +131,51 @@ jobs:
               fi
             fi
             [ -n "$project_name" ] || project_name="$campaign_name"
+            encode_path() { printf '%s' "$1" | sed 's/ /%20/g'; }
+            campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(encode_path "$workspace")"
+            authority_url="https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority"
+            validation_url="https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase-work-packet-controller-v1.yml"
+            schema_url="https://github.com/$gate_repo/blob/$gate_ref/$(encode_path "$schema_path")"
+            form_url="https://github.com/$gate_repo/blob/$gate_ref/$(encode_path "$form_path")"
+            report_url="https://github.com/$gate_repo/blob/$gate_ref/$(encode_path "$report_path")"
+            packet_url="https://github.com/$gate_repo/blob/$gate_ref/$(encode_path "$packet_path")"
+            receipt_url="https://github.com/$gate_repo/blob/$gate_ref/$(encode_path "$receipt_path")"
+            phase_sequence="${phase_id#phase-}"
+            validation_request_path="process/agent-upload/lite-phase-boundary/$CAMPAIGN_ID-phase-$phase_sequence.json"
             {
               printf '%s\n' \
-                "Campaign type: LITE" \
-                "Campaign name: $campaign_name" \
-                "Campaign ID: $CAMPAIGN_ID" \
-                "Incoming reviewer: $reviewer" \
+                "LITE audit: $campaign_name" \
+                "Reviewer: $reviewer" \
                 "Current phase: $phase_id" \
-                "Phase schema: $schema_path" \
-                "Phase work form: $form_path" \
-                "Phase final report: $report_path" \
-                "Phase packet: $packet_path" \
-                "Last sealed predecessor receipt: $receipt_path" \
-                "Current authority: https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority" \
+                "Campaign: $campaign_url" \
+                "Current Audit Skill Authority: $authority_url" \
+                "Finalized controller validation: $validation_url" \
                 "" \
-                "You are a repair/replacement reviewer taking over because the prior reviewer stopped during this same assignment." \
-                "Resume from the latest durable schema-governed work form and substantive evidence. Do not restart completed work and do not reconstruct controller bookkeeping." \
-                "If packet validation previously failed, repair only the exact missing fields before resubmitting." \
+                "The Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority." \
+                "" \
+                "Resume $phase_id from the latest durable state. Do not restart completed work or redo sealed earlier phases." \
+                "" \
+                "Phase schema: $schema_url" \
+                "Assigned work form: $form_url" \
+                "Controller-owned final report: $report_url" \
+                "Controller-owned Phase Work Packet: $packet_url" \
+                "Sealed predecessor receipt: $receipt_url"
+              input_index=0
+              while IFS= read -r input_path; do
+                [ -n "$input_path" ] || continue
+                input_index=$((input_index + 1))
+                printf 'Phase input %s: https://github.com/%s/blob/%s/%s\n' "$input_index" "$gate_repo" "$gate_ref" "$(encode_path "$input_path")"
+              done <<< "$derived_inputs"
+              printf '%s\n' \
+                "" \
+                "Complete only $phase_id. Fill every required reviewer-owned Step X Input field while performing the work. Preserve controller-prefilled/read-only data. Do not perform controller bookkeeping and do not create or edit controller-owned reports, packets, receipts, routing, or handoff state." \
+                "" \
+                "At phase end you MUST invoke the finalized controller validation above by creating/updating $validation_request_path in CurveYield2/Contract-Automation main using the current lite phase-boundary request schema." \
+                "You are not finished until validation returns CONTROLLER_PHASE_PASS. If validation reports any deficiency, repair exactly the reported substantive deficiency, resubmit validation, and repeat until CONTROLLER_PHASE_PASS. Do not advance, retire, or hand off before PASS." \
+                "" \
                 "Repair reason: $reason"
-              [ -z "$feedback" ] || printf '%s\n' "$feedback"
+              [ -z "$feedback" ] || { printf '%s\n' "Current controller deficiencies:"; printf '%s\n' "$feedback"; }
+              printf '%s\n' "Begin immediately."
             } > /tmp/replacement-wake.txt
           else
             directory_status="$(jq -r '.status' /tmp/campaign-directory.json)"
