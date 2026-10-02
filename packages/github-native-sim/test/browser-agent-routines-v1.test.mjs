@@ -624,3 +624,29 @@ test('Project-create retries remain human-interaction-only', () => {
   assert.doesNotMatch(block, /\.fill\(/);
   assert.doesNotMatch(block, /dispatchEvent/);
 });
+
+
+test('shared visible browser runtime waits for normal verification before Project routines', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /async function backendPreflight\(page\)/);
+  assert.match(source, /async function waitForBackendHealth\(page, reason = 'browser preflight'\)/);
+  assert.match(source, /MANUAL_CHALLENGE_WAIT_MS/);
+  assert.match(source, /INTERACTIVE_VIEW_ENABLED/);
+  assert.match(source, /Browser verification is pending/);
+  assert.match(source, /await waitForBackendHealth\(page, 'initial browser session'\)/);
+  assert.match(source, /error\?\.code !== 'BROWSER_CHALLENGE'/);
+  assert.match(source, /pre-message routine verification/);
+  assert.match(source, /post-verification reload/);
+  assert.match(source, /runBrowserRoutineStage/);
+});
+
+test('browser verification wait does not replace human Project interaction primitives', () => {
+  const operations = read('scripts/browser-operations-v1.mjs');
+  const start = operations.indexOf('async function createProject(page, projectName)');
+  const end = operations.indexOf('\nfunction validProjectUrl', start);
+  const block = operations.slice(start, end);
+  assert.match(block, /humanPointerClick\(page, trigger/);
+  assert.match(block, /humanTypeInto\(page, input/);
+  assert.match(block, /humanPointerClick\(page, submit/);
+  assert.doesNotMatch(block, /dispatchEvent|requestSubmit|form\.submit|force:\s*true/);
+});
