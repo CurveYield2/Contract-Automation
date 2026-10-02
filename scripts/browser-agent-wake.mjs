@@ -613,7 +613,11 @@ async function runWithPage(providerName, connect) {
           phaseId: env.PHASE_ID || ''
         },
       });
-      const projectResult = [...routineBefore].reverse().find((entry) => entry?.result?.projectUrl)?.result;
+      const capturedShare = routineBefore.find((entry) => entry.operation === 'chatgpt.capture_project_share_link')?.result;
+      const openedProject = routineBefore.find((entry) => entry.operation === 'chatgpt.open_project_url')?.result;
+      const namedProject = routineBefore.find((entry) => entry.operation === 'chatgpt.open_project_by_name')?.result;
+      const projectResult = capturedShare || openedProject || namedProject ||
+        [...routineBefore].reverse().find((entry) => entry?.result?.projectUrl)?.result;
       projectUrl = projectResult?.projectUrl || projectUrl || '';
 
       if (browserRoutineId === 'audit-lite-reviewer-project-create-v1') {
