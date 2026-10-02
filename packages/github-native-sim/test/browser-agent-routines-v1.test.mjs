@@ -102,17 +102,23 @@ test('assignment-v2 campaigns resolve active phase from Audit Campaign Directory
   assert.doesNotMatch(repair, /nextMilestone\.phaseRange/);
 });
 
-test('long Phase-0 wake submission requires a real write response and durable DOM persistence', () => {
+test('long wake submission is duplicate-safe when ChatGPT transport no longer exposes the message body', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   const postStart = source.indexOf('async function post(page, message)');
   const postEnd = source.indexOf('async function runWithPage', postStart);
   const postBlock = source.slice(postStart, postEnd);
   assert.match(postBlock, /send-request-observed/);
+  assert.match(postBlock, /send-dom-persisted-without-body-marker/);
+  assert.match(postBlock, /wakeMarkerVisible/);
+  assert.match(postBlock, /likelyConversationWrite/);
+  assert.match(postBlock, /composer-diagnostics/);
+  assert.match(postBlock, /SEND_NOT_OBSERVED/);
   assert.match(postBlock, /postWithBackendVerification/);
   assert.match(postBlock, /WRITE_RESPONSE_MISSING/);
   assert.match(postBlock, /WRITE_REJECTED/);
   assert.match(postBlock, /DURABILITY_NOT_OBSERVED/);
   assert.match(postBlock, /persistedWakeVisible/);
+  assert.match(postBlock, /responseCandidates/);
   assert.match(postBlock, /postSendChallenge/);
   assert.match(postBlock, /post-send health/);
 });
@@ -174,7 +180,7 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.match(workflow, /activeChat=.*chatName/);
 });
 
-test('Lite browser orchestration launches assignment-v2 reviewers without preparing an active receipt', () => {
+test('Lite browser orchestration launches assignment-v2 reviewers with the shared project routine context', () => {
   const workflow = read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
   assert.match(workflow, /Resolve campaign directory entry/);
   assert.match(workflow, /Audit Campaign Directory\/campaigns/);
@@ -182,6 +188,9 @@ test('Lite browser orchestration launches assignment-v2 reviewers without prepar
   assert.match(workflow, /curveyield-audit-campaign-directory-entry-v2/);
   assert.match(workflow, /Publish legacy successor receipt preparation when applicable/);
   assert.match(workflow, /gh workflow run browser-agent-wake\.yml/);
+  assert.match(workflow, /audit-lite-reviewer-v1/);
+  assert.match(workflow, /routineId:\$routine,projectName:\$project,chatName:\$chat/);
+  assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
   assert.doesNotMatch(workflow, /CAMPAIGN_STATE_v1|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE|web-bootstrap-agent/);
   assert.doesNotMatch(workflow, /SUCCESSOR_HANDOFF\.json|WAKE_UP_MESSAGE\.md|START_HERE_SUCCESSOR\.md/);
 });

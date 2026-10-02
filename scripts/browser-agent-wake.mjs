@@ -297,6 +297,50 @@ async function waitForBackendHealth(page) {
   }
 }
 
+async function composerDiagnostics(page) {
+  return page.evaluate(() => {
+    const buttons = [...document.querySelectorAll('button')].slice(-50).map((b, i) => ({
+      i,
+      text: (b.innerText || '').trim().slice(0, 80),
+      aria: b.getAttribute('aria-label'),
+      testid: b.getAttribute('data-testid'),
+      disabled: !!b.disabled,
+      type: b.getAttribute('type')
+    }));
+    const editables = [...document.querySelectorAll('textarea,[contenteditable="true"]')].slice(-20).map((e, i) => ({
+      i,
+      tag: e.tagName,
+      id: e.id,
+      role: e.getAttribute('role'),
+      aria: e.getAttribute('aria-label'),
+      placeholder: e.getAttribute('placeholder'),
+      testid: e.getAttribute('data-testid'),
+      textLength: String(e.innerText || e.value || '').length
+    }));
+    return { buttons, editables, url: location.href, title: document.title };
+  });
+}
+
+async function wakeMarkerVisible(page, marker) {
+  const users = page.locator('[data-message-author-role="user"]');
+  const count = await users.count().catch(() => 0);
+  for (let i = Math.max(0, count - 8); i < count; i += 1) {
+    const text = await users.nth(i).innerText().catch(() => '');
+    if (text.includes(marker)) return { visible: true, userCount: count };
+  }
+  return { visible: false, userCount: count };
+}
+
+function likelyConversationWrite(url) {
+  try {
+    const u = new URL(url);
+    return /\/backend-api\/(?:f\/)?conversation(?:[/?]|$)/.test(u.pathname + u.search) ||
+      /\/backend-api\/.*messages?(?:[/?]|$)/.test(u.pathname + u.search);
+  } catch {
+    return false;
+  }
+}
+
 async function fillComposer(page, message) {
   const composer = await ensureComposer(page);
   await composer.click();
@@ -312,6 +356,10 @@ async function fillComposer(page, message) {
       await composer.type(message, { delay: 1 });
     });
   }
+  const filledText = await composer.evaluate(el => (el.innerText || el.value || '')).catch(() => '');
+  if (!filledText.includes(message.slice(0, Math.min(120, message.length)))) {
+    throw new BrowserAgentError('COMPOSER_FILL_MISMATCH', 'Composer did not retain the exact wake marker after fill', true);
+  }
   return composer;
 }
 
@@ -321,17 +369,25 @@ async function post(page, message) {
   const requestedIdleWait = Number.parseInt(env.IDLE_WAIT_MS || '600000', 10);
   const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
   await waitForChatIdle(page, idleWaitMs);
+
   let observed = null;
+  const candidateRequests = [];
   const onRequest = request => {
     const method = request.method();
     if (!['POST','PUT','PATCH'].includes(method)) return;
     const data = request.postData() || '';
+    if (likelyConversationWrite(request.url())) {
+      candidateRequests.push({ url: request.url(), method, postDataLength: data.length });
+    }
     if (!data.includes(marker)) return;
     observed = { url: request.url(), method, bodyContainsMarker: true, postDataLength: data.length };
   };
   page.on('request', onRequest);
+
   try {
     let composer = await fillComposer(page, message);
+    console.log('[github-playwright] composer-diagnostics=' + JSON.stringify(await composerDiagnostics(page)));
+
     const sendSelectors = [
       'button[data-testid="send-button"]',
       'button[data-testid="composer-submit-button"]',
@@ -374,26 +430,62 @@ async function post(page, message) {
         await page.keyboard.press('Enter');
       }
     ];
+
     for (let i = 0; i < strategies.length; i += 1) {
       observed = null;
+      candidateRequests.length = 0;
       await waitForChatIdle(page, idleWaitMs);
+
       const currentComposer = await ensureComposer(page).catch(() => null);
       if (currentComposer) {
         const currentText = await currentComposer.evaluate(el => (el.innerText || el.value || '')).catch(() => '');
         if (!currentText.includes(marker)) composer = await fillComposer(page, message);
       }
+
       await strategies[i]().catch(error => {
         console.log('[github-playwright] send-strategy-error=' + JSON.stringify({ index: i, error: error.message }));
       });
+
       const deadline = Date.now() + 7000;
-      while (Date.now() < deadline && !observed) await page.waitForTimeout(200);
+      let dom = { visible: false, userCount: 0 };
+      while (Date.now() < deadline) {
+        if (observed) break;
+        dom = await wakeMarkerVisible(page, marker);
+        if (dom.visible) break;
+        await page.waitForTimeout(200);
+      }
+
       if (observed) {
         console.log('[github-playwright] send-request-observed=' + JSON.stringify(observed));
-        return observed;
+        return { ...observed, domMarkerObserved: dom.visible };
       }
-      console.log('[github-playwright] send-strategy-no-post=' + JSON.stringify({ index: i }));
+
+      dom = await wakeMarkerVisible(page, marker);
+      if (dom.visible) {
+        const fallback = {
+          url: candidateRequests.at(-1)?.url || null,
+          method: candidateRequests.at(-1)?.method || null,
+          bodyContainsMarker: false,
+          domMarkerObserved: true,
+          candidateRequests: [...candidateRequests],
+          userCount: dom.userCount
+        };
+        console.log('[github-playwright] send-dom-persisted-without-body-marker=' + JSON.stringify(fallback));
+        return fallback;
+      }
+
+      console.log('[github-playwright] send-strategy-no-post=' + JSON.stringify({
+        index: i,
+        candidateRequests,
+        diagnostics: await composerDiagnostics(page)
+      }));
     }
-    throw new Error('No real ChatGPT write request containing the wake marker was observed after all send strategies');
+
+    throw new BrowserAgentError(
+      'SEND_NOT_OBSERVED',
+      'No ChatGPT conversation write or durable user-message marker was observed after all send strategies',
+      true
+    );
   } finally {
     page.off('request', onRequest);
   }
@@ -403,50 +495,68 @@ async function persistedWakeVisible(page, message) {
   const marker = message.slice(0, Math.min(120, message.length));
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
-    const users = page.locator('[data-message-author-role="user"]');
-    const count = await users.count().catch(() => 0);
-    for (let i = Math.max(0, count - 8); i < count; i += 1) {
-      const text = await users.nth(i).innerText().catch(() => '');
-      if (text.includes(marker)) return { persisted: true, userCount: count };
-    }
+    const state = await wakeMarkerVisible(page, marker);
+    if (state.visible) return { persisted: true, userCount: state.userCount };
     await page.waitForTimeout(1000);
   }
-  return { persisted: false, userCount: await page.locator('[data-message-author-role="user"]').count().catch(() => 0) };
+  const state = await wakeMarkerVisible(page, marker);
+  return { persisted: false, userCount: state.userCount };
 }
 
 async function postWithBackendVerification(page, message) {
   const marker = message.slice(0, Math.min(120, message.length));
-  let accepted = null;
+  let acceptedExact = null;
+  const acceptedCandidates = [];
+
   const onResponse = async response => {
     const request = response.request();
     const method = request.method();
     if (!['POST','PUT','PATCH'].includes(method)) return;
     const postData = request.postData() || '';
-    if (!postData.includes(marker)) return;
-    accepted = {
+    const info = {
       url: response.url(),
       status: response.status(),
       method,
-      bodyContainsMarker: true,
+      bodyContainsMarker: postData.includes(marker),
       cfMitigated: await response.headerValue('cf-mitigated').catch(() => null),
       server: await response.headerValue('server').catch(() => null)
     };
+    if (info.bodyContainsMarker) acceptedExact = info;
+    if (likelyConversationWrite(response.url())) acceptedCandidates.push(info);
   };
+
   page.on('response', onResponse);
   try {
     const submittedRequest = await post(page, message);
     const deadline = Date.now() + 20000;
-    while (Date.now() < deadline && !accepted) await page.waitForTimeout(250);
-    if (!accepted) {
-      throw new BrowserAgentError('WRITE_RESPONSE_MISSING', 'Wake write request was observed but no corresponding response was observed', false);
+    while (Date.now() < deadline && !acceptedExact) {
+      const candidateAccepted = submittedRequest.domMarkerObserved &&
+        acceptedCandidates.find(item => item.status >= 200 && item.status < 300 && item.cfMitigated !== 'challenge');
+      if (candidateAccepted) break;
+      await page.waitForTimeout(250);
     }
-    if (accepted.status < 200 || accepted.status >= 300 || accepted.cfMitigated === 'challenge' || !accepted.bodyContainsMarker) {
+
+    const accepted = acceptedExact ||
+      (submittedRequest.domMarkerObserved
+        ? acceptedCandidates.find(item => item.status >= 200 && item.status < 300 && item.cfMitigated !== 'challenge')
+        : null);
+
+    if (!accepted) {
+      throw new BrowserAgentError(
+        'WRITE_RESPONSE_MISSING',
+        'Wake submission was observed but no successful ChatGPT conversation write response was captured; candidates=' + JSON.stringify(acceptedCandidates),
+        false
+      );
+    }
+    if (accepted.status < 200 || accepted.status >= 300 || accepted.cfMitigated === 'challenge') {
       throw new BrowserAgentError('WRITE_REJECTED', 'ChatGPT wake write was rejected: ' + JSON.stringify(accepted), false);
     }
+
     const persisted = await persistedWakeVisible(page, message);
     if (!persisted.persisted) {
       throw new BrowserAgentError('DURABILITY_NOT_OBSERVED', 'Wake write returned success but the user message was not observed in the current DOM', false);
     }
+
     // VERIFY4 established the success boundary: once the exact write is
     // accepted and the wake is DOM-persisted, post-send health is telemetry only.
     // A later Cloudflare challenge must never retroactively invalidate delivery.
@@ -458,13 +568,16 @@ async function postWithBackendVerification(page, message) {
     } catch (error) {
       postSendHealth = [{ ok: false, status: 0, error: error.message }];
     }
+
     const delivery = {
       writeRequestObserved: true,
       writeAccepted: true,
+      responseBodyMarkerObserved: accepted.bodyContainsMarker,
       domPersisted: true,
       postSendChallenge,
       postSendHealth,
       response: accepted,
+      responseCandidates: acceptedCandidates,
       submittedRequest,
       ...persisted
     };

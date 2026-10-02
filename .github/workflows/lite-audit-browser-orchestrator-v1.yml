@@ -158,6 +158,12 @@ jobs:
           set -euo pipefail
           poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
           wake_id="$CAMPAIGN_ID-${{ steps.successor.outputs.boundary }}-${{ steps.successor.outputs.incoming_reviewer }}"
+          chat_name="$CAMPAIGN_NAME ${{ steps.successor.outputs.incoming_reviewer }}"
+          browser_context_b64="$(jq -cn \
+            --arg routine 'audit-lite-reviewer-v1' \
+            --arg project "$CAMPAIGN_NAME" \
+            --arg chat "$chat_name" \
+            '{routineId:$routine,projectName:$project,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"standard"}' | base64 -w0)"
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="$wake_id" \
             -f campaign_id="$CAMPAIGN_ID" \
@@ -176,7 +182,8 @@ jobs:
             -f gate_expected_milestone_id="${{ steps.successor.outputs.boundary }}" \
             -f gate_active_pointer_path="" \
             -f gate_stop_states_csv=STOPPED_BY_HUMAN \
-            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN \
+            -f browser_context_b64="$browser_context_b64"
 
       - name: Summarize
         run: |
