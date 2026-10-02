@@ -51,16 +51,33 @@ async function ensureChatMode(page) {
     '[role="tab"][aria-selected="true"]:has-text("Work")',
     'button[aria-pressed="true"]:has-text("Work")'
   ], 400);
-  if (!workSelected) return { mode: 'chat', changed: false };
+
+  const chatSelected = await firstVisible(page, [
+    '[role="tab"][aria-selected="true"]:has-text("Chat")',
+    'button[aria-pressed="true"]:has-text("Chat")'
+  ], 400);
+
+  if (chatSelected) return { mode: 'chat', changed: false };
 
   const chat = await firstVisible(page, [
     '[role="tab"]:has-text("Chat")',
     'button:has-text("Chat")'
   ], 1000);
-  if (!chat) throw new Error('ChatGPT Chat mode control not found while Work mode appears active');
-  await humanPointerClick(page, chat);
-  await page.waitForTimeout(600);
-  return { mode: 'chat', changed: true };
+
+  if (workSelected || chat) {
+    if (!chat) throw new Error('ChatGPT Chat mode control not found while Work mode appears active');
+    await humanPointerClick(page, chat, { hoverMs: 180, downMs: 65, settleMs: 650 });
+    const composer = await waitForComposer(page, 12000);
+    if (!composer) throw new Error('ChatGPT Chat mode did not expose a composer after selecting Chat');
+    return { mode: 'chat', changed: true };
+  }
+
+  // If neither segmented control is present, a composer means Chat mode is
+  // already active in the current desktop layout.
+  const composer = await waitForComposer(page, 2500);
+  if (composer) return { mode: 'chat', changed: false };
+
+  throw new Error('ChatGPT Chat mode could not be established');
 }
 
 async function ensureThinkingEffort(page, { level = 'high' } = {}) {
