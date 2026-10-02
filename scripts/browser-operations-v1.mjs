@@ -842,7 +842,7 @@ async function ensureProject(page, { projectName }) {
 
   return {
     projectName,
-    projectUrl: page.url(),
+    projectPageUrl: page.url(),
     created,
   };
 }
@@ -855,7 +855,7 @@ async function startProjectChat(page, { projectName }) {
   }
   const composer = await waitForComposer(page, 12000);
   if (!composer) throw new Error('ChatGPT composer not found');
-  return { projectName: '', projectUrl: '', ready: true };
+  return { projectName: '', projectPageUrl: '', ready: true };
 }
 
 async function openCurrentChatMenu(page) {
