@@ -252,6 +252,10 @@ test('Lite browser orchestration launches assignment-v2 reviewers with the share
   assert.match(workflow, /audit-lite-reviewer-v1/);
   assert.match(workflow, /routineId:\$routine,projectName:\$project,chatName:\$chat/);
   assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
+  assert.match(workflow, /projectCreationPolicy/);
+  assert.match(workflow, /projectCreationPolicyReason/);
+  assert.match(workflow, /browserInteractionPolicy/);
+  assert.match(workflow, /existing-registration\.json/);
   assert.doesNotMatch(workflow, /CAMPAIGN_STATE_v1|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE|web-bootstrap-agent/);
   assert.doesNotMatch(workflow, /SUCCESSOR_HANDOFF\.json|WAKE_UP_MESSAGE\.md|START_HERE_SUCCESSOR\.md/);
 });
@@ -342,15 +346,28 @@ test('fresh reviewer launch is idempotent per campaign milestone and post-delive
   assert.match(runtime, /never fail over to another browser provider for/);
 });
 
-test('repair targets the current assignment reviewer and schema-governed durable work', () => {
+test('repair targets the current assignment reviewer with the same linked wake contract as fresh reviewers', () => {
   const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
   assert.match(repair, /reviewer="\$\(jq -r '\.currentAssignment\.reviewer/);
   assert.match(repair, /phase_id="\$\(jq -r '\.currentAssignment\.phaseId/);
   assert.match(repair, /schema_path="\$\(jq -r '\.currentAssignment\.workSchemaPath/);
   assert.match(repair, /form_path="\$\(jq -r '\.currentAssignment\.workFormPath/);
   assert.match(repair, /packet_path="\$\(jq -r '\.currentAssignment\.packetPath/);
+  assert.match(repair, /derivedInputPaths/);
+  assert.match(repair, /Current phase: \$phase_id/);
+  assert.match(repair, /Campaign: \$campaign_url/);
+  assert.match(repair, /Current Audit Skill Authority: \$authority_url/);
+  assert.match(repair, /Finalized controller validation: \$validation_url/);
+  assert.match(repair, /Phase schema: \$schema_url/);
+  assert.match(repair, /Assigned work form: \$form_url/);
+  assert.match(repair, /Sealed predecessor receipt: \$receipt_url/);
+  assert.match(repair, /Phase input %s:/);
+  assert.match(repair, /ultimate authority/i);
+  assert.match(repair, /in order, precisely, with no deviation/i);
+  assert.match(repair, /CONTROLLER_PHASE_PASS/);
+  assert.match(repair, /repair exactly the reported substantive deficiency/i);
+  assert.match(repair, /resubmit validation/i);
   assert.match(repair, /controllerValidation\.deficiencies/);
-  assert.match(repair, /Resume from the latest durable schema-governed work form/);
   assert.doesNotMatch(repair, /WAKE_UP_MESSAGE\.md|nextMilestone\.reviewer/);
 });
 
