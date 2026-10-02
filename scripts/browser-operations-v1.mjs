@@ -897,8 +897,11 @@ async function startCurrentProjectChat(page, { projectName = '', projectUrl = ''
   if (newChat) {
     await humanPointerClick(page, newChat, { hoverMs: 180, downMs: 65, settleMs: 650 });
   } else {
+    // A Project landing page may itself expose a blank composer. That is safe.
+    // Never treat an already-open /c/... conversation composer as a fresh reviewer chat.
     const existingComposer = await waitForComposer(page, 1200);
-    if (!existingComposer) {
+    const alreadyInConversation = /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(page.url());
+    if (!existingComposer || alreadyInConversation) {
       const controls = await page.locator('main button, main [role="button"], [role="main"] button, [role="main"] [role="button"]')
         .evaluateAll(nodes => nodes.filter(el => el.getClientRects().length).slice(0, 50).map(el => ({
           text: String(el.innerText || '').trim().slice(0, 80),
@@ -906,12 +909,20 @@ async function startCurrentProjectChat(page, { projectName = '', projectUrl = ''
           title: el.getAttribute('title'),
           testid: el.getAttribute('data-testid')
         }))).catch(() => []);
-      throw new Error('ChatGPT Project new-chat (+) control not found; visibleMainControls=' + JSON.stringify(controls));
+      const error = new Error('ChatGPT Project new-chat (+) control not found on a safe Project landing page; url=' + page.url() + '; visibleMainControls=' + JSON.stringify(controls));
+      error.code = 'PROJECT_NEW_CHAT_CONTROL_MISSING';
+      error.retryable = true;
+      throw error;
     }
   }
 
   const composer = await waitForComposer(page, 12000);
-  if (!composer) throw new Error('ChatGPT Project chat composer not found');
+  if (!composer) {
+    const error = new Error('ChatGPT Project chat composer not found after starting a fresh Project chat');
+    error.code = 'PROJECT_CHAT_COMPOSER_MISSING';
+    error.retryable = true;
+    throw error;
+  }
   return { projectName, projectUrl: projectUrl || '', ready: true };
 }
 
