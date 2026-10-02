@@ -675,14 +675,7 @@ jobs:
           ')"
 
           if [ -z "$pr_json" ]; then
-            body="$(cat <<EOF
-          Automated finalization for managed development task `$manager_id`.
-
-          $summary
-
-          The Development Agent Task Manager verified the task lock and completion receipt before opening this PR.
-          EOF
-            )"
+            body="$(printf 'Automated finalization for managed development task %s.\n\n%s\n\nThe Development Agent Task Manager verified the task lock and completion receipt before opening this PR.\n' "$manager_id" "$summary")"
             pr_json="$(GH_TOKEN="$target_token" gh api --method POST "repos/$target_repo/pulls"               -f title="Upgrade: $manager_id" -f head="$target_branch" -f base="$base_branch" -f body="$body")"
           fi
 
