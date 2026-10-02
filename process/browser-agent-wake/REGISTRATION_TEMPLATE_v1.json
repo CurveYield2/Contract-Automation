@@ -24,7 +24,7 @@
       ]
     }
   },
-  "browserRoutine": "audit-lite-reviewer-v1",
+  "browserRoutine": "audit-lite-reviewer-project-create-v1",
   "chatgptProject": {
     "name": "REPLACE_WITH_CAMPAIGN_NAME",
     "url": ""
@@ -44,5 +44,6 @@
     "milestoneId": "P0_BOOTSTRAP",
     "workerRole": "reviewer",
     "thinkingEffort": "high"
-  }
+  },
+  "browserInteractionPolicy": "ordinary-pointer-keyboard-only"
 }
