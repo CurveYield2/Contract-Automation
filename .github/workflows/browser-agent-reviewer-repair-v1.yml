@@ -54,7 +54,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Resolve current or legacy repair mode
         id: route
@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
-          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          registration="automation/control-plane/browser-agent-wake/registrations/$safe_campaign.json"
           test -s "$registration"
           state_path="$(jq -r '.watchdog.gate.statePath // empty' "$registration")"
           test -n "$state_path"

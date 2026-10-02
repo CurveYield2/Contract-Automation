@@ -34,7 +34,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Clone current Audit-Controller authority
         env:
@@ -53,7 +53,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp scripts/sync-lite-authority-zip-v1.py .audit-controller-authority/.sync-lite-authority-zip-v1.py
+          cp automation/scripts/sync-lite-authority-zip-v1.py .audit-controller-authority/.sync-lite-authority-zip-v1.py
           cd .audit-controller-authority
           python3 .sync-lite-authority-zip-v1.py
           rm .sync-lite-authority-zip-v1.py

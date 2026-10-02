@@ -42,35 +42,35 @@ on:
       - '.github/workflows/lite-phase0-bootstrap-v1.yml'
       - '.github/workflows/lite-phase0-intelligence-v1.yml'
       - '.github/workflows/lite-audit-browser-orchestrator-v1.yml'
-      - 'scripts/audit-source-initialization/**'
-      - 'scripts/lite-phase0-finalize-v1.mjs'
-      - 'scripts/lite-phase-packet-controller-v1.mjs'
-      - 'scripts/lib/lite-phase-work-v1.mjs'
-      - 'scripts/lib/lite-phase-prefill-v1.mjs'
+      - 'automation/scripts/audit-source-initialization/**'
+      - 'automation/scripts/lite-phase0-finalize-v1.mjs'
+      - 'automation/scripts/lite-phase-packet-controller-v1.mjs'
+      - 'automation/scripts/lib/lite-phase-work-v1.mjs'
+      - 'automation/scripts/lib/lite-phase-prefill-v1.mjs'
       - '.github/workflows/lite-phase-work-packet-controller-v1.yml'
-      - 'scripts/lite-phase-packet-controller-v1.mjs'
-      - 'scripts/lib/lite-phase-work-v1.mjs'
-      - 'packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs'
-      - 'packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs'
-      - 'packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs'
-      - 'packages/github-native-sim/test/lite-boundary-artifacts-v1.test.mjs'
+      - 'automation/scripts/lite-phase-packet-controller-v1.mjs'
+      - 'automation/scripts/lib/lite-phase-work-v1.mjs'
+      - 'automation/runtime/github-native-sim/src/lite-boundary-artifacts-v1.mjs'
+      - 'automation/runtime/github-native-sim/src/lite-phase0-intelligence-v1.mjs'
+      - 'automation/runtime/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs'
+      - 'automation/runtime/github-native-sim/test/lite-boundary-artifacts-v1.test.mjs'
       - '.github/workflows/lite-phase-work-packet-controller-v1.yml'
-      - 'scripts/sync-lite-authority-zip-v1.py'
+      - 'automation/scripts/sync-lite-authority-zip-v1.py'
       - '.github/workflows/browser-agent-wake.yml'
       - '.github/workflows/browser-agent-watchdog.yml'
       - '.github/workflows/agent-zip-import-v1.yml'
       - '.github/workflows/v7-agent-qualification-bridge.yml'
-      - 'scripts/browser-agent-wake.mjs'
-      - 'scripts/select-audit-controller-token.sh'
-      - 'process/browser-agent-wake/**'
-      - 'protocol/schemas/curveyield-lite-interphase-*.schema.json'
+      - 'automation/scripts/browser-agent-wake.mjs'
+      - 'automation/scripts/select-audit-controller-token.sh'
+      - 'automation/control-plane/browser-agent-wake/**'
+      - 'automation/schemas/curveyield-lite-interphase-*.schema.json'
       - '.github/actions/setup-v7-toolchain/**'
-      - 'packages/github-native-sim/src/**'
-      - 'packages/github-native-sim/test/**'
-      - 'packages/runner/src/**'
-      - 'packages/runner/test/**'
+      - 'automation/runtime/github-native-sim/src/**'
+      - 'automation/runtime/github-native-sim/test/**'
+      - 'automation/runtime/runner/src/**'
+      - 'automation/runtime/runner/test/**'
       - 'packages/protocol/src/**'
-      - 'process/RUNNER_MANIFEST.json'
+      - 'automation/control-plane/RUNNER_MANIFEST.json'
       - 'package.json'
       - 'package-lock.json'
   pull_request:
@@ -83,27 +83,27 @@ on:
       - '.github/workflows/lite-phase0-bootstrap-v1.yml'
       - '.github/workflows/lite-phase0-intelligence-v1.yml'
       - '.github/workflows/lite-audit-browser-orchestrator-v1.yml'
-      - 'scripts/audit-source-initialization/**'
-      - 'scripts/lite-phase0-finalize-v1.mjs'
-      - 'scripts/lite-phase-packet-controller-v1.mjs'
-      - 'scripts/lib/lite-phase-work-v1.mjs'
-      - 'scripts/lib/lite-phase-prefill-v1.mjs'
+      - 'automation/scripts/audit-source-initialization/**'
+      - 'automation/scripts/lite-phase0-finalize-v1.mjs'
+      - 'automation/scripts/lite-phase-packet-controller-v1.mjs'
+      - 'automation/scripts/lib/lite-phase-work-v1.mjs'
+      - 'automation/scripts/lib/lite-phase-prefill-v1.mjs'
       - '.github/workflows/lite-phase-work-packet-controller-v1.yml'
       - '.github/workflows/browser-agent-wake.yml'
       - '.github/workflows/browser-agent-watchdog.yml'
       - '.github/workflows/agent-zip-import-v1.yml'
       - '.github/workflows/v7-agent-qualification-bridge.yml'
-      - 'scripts/browser-agent-wake.mjs'
-      - 'scripts/select-audit-controller-token.sh'
-      - 'process/browser-agent-wake/**'
-      - 'protocol/schemas/curveyield-lite-interphase-*.schema.json'
+      - 'automation/scripts/browser-agent-wake.mjs'
+      - 'automation/scripts/select-audit-controller-token.sh'
+      - 'automation/control-plane/browser-agent-wake/**'
+      - 'automation/schemas/curveyield-lite-interphase-*.schema.json'
       - '.github/actions/setup-v7-toolchain/**'
-      - 'packages/github-native-sim/src/**'
-      - 'packages/github-native-sim/test/**'
-      - 'packages/runner/src/**'
-      - 'packages/runner/test/**'
+      - 'automation/runtime/github-native-sim/src/**'
+      - 'automation/runtime/github-native-sim/test/**'
+      - 'automation/runtime/runner/src/**'
+      - 'automation/runtime/runner/test/**'
       - 'packages/protocol/src/**'
-      - 'process/RUNNER_MANIFEST.json'
+      - 'automation/control-plane/RUNNER_MANIFEST.json'
       - 'package.json'
       - 'package-lock.json'
 
@@ -164,7 +164,7 @@ jobs:
               result='{"lane":"FULL","paths":[],"reason":"MISSING_BASE_SHA"}'
             elif git fetch --no-tags --depth=1 origin "$base" >/dev/null 2>&1; then
               git diff --name-only "$base" HEAD > /tmp/v7-qualification-changed-paths.txt
-              result="$(node scripts/classify-v7-qualification-change.mjs < /tmp/v7-qualification-changed-paths.txt)"
+              result="$(node automation/scripts/classify-v7-qualification-change.mjs < /tmp/v7-qualification-changed-paths.txt)"
             else
               result='{"lane":"FULL","paths":[],"reason":"BASE_FETCH_FAILED"}'
             fi
@@ -187,7 +187,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          status_path='process/V7_QUALIFICATION_STATUS.json'
+          status_path='automation/control-plane/V7_QUALIFICATION_STATUS.json'
           test -s "$status_path"
           test "$(jq -r '.status // empty' "$status_path")" = 'PASS'
           qualified_commit="$(jq -r '.qualifiedCommit // empty' "$status_path")"
@@ -200,7 +200,7 @@ jobs:
             result='{"lane":"CONTROL_LIGHT","paths":[],"reason":"NO_RUNNER_DELTA"}'
           else
             git diff --name-only "$qualified_commit" HEAD > /tmp/controller-only-runner-delta.txt
-            result="$(node scripts/classify-v7-qualification-change.mjs < /tmp/controller-only-runner-delta.txt)"
+            result="$(node automation/scripts/classify-v7-qualification-change.mjs < /tmp/controller-only-runner-delta.txt)"
           fi
           observed_lane="$(printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).lane))")"
           if [ "$observed_lane" != 'CONTROL_LIGHT' ]; then
@@ -223,7 +223,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: v7-qualification-npm-${{ runner.os }}-${{ hashFiles('package-lock.json', 'package.json') }}
+          key: v7-qualification-npm-${{ runner.os }}-${{ hashFiles('automation/package-lock.json', 'automation/package.json') }}
           restore-keys: |
             v7-qualification-npm-${{ runner.os }}-
 
@@ -232,9 +232,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s package-lock.json
-          node -e "const p=require('./package-lock.json'); if(p.lockfileVersion!==3) process.exit(1)"
-          npm ci --force
+          test -s automation/package-lock.json
+          node -e "const p=require('./automation/package-lock.json'); if(p.lockfileVersion!==3) process.exit(1)"
+          npm --prefix automation ci --force
           echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
 
       - name: Install and verify canonical V7 toolchain
@@ -246,36 +246,36 @@ jobs:
 
       - name: Record exact toolchain verification evidence
         if: env.V7_QUALIFICATION_LANE == 'FULL'
-        run: node packages/github-native-sim/src/v7-cli.mjs toolchain:verify > .audit-evidence/v7-infrastructure-qualification/toolchain.json
+        run: node automation/runtime/github-native-sim/src/v7-cli.mjs toolchain:verify > .audit-evidence/v7-infrastructure-qualification/toolchain.json
 
       - name: Verify canonical runner manifest
         if: env.V7_QUALIFICATION_LANE == 'FULL'
-        run: npm run v7:manifest -- --check
+        run: npm --prefix automation run v7:manifest -- --check
 
       - name: V7 request and execution contract qualification
         if: env.V7_QUALIFICATION_LANE == 'FULL'
-        run: node --test packages/github-native-sim/test/*.test.mjs
+        run: node --test automation/runtime/github-native-sim/test/*.test.mjs
 
       - name: Anvil-only runner qualification
         if: env.V7_QUALIFICATION_LANE == 'FULL'
-        run: node --test packages/runner/test/anvil-*.test.mjs packages/runner/test/full-simulation-anvil-only-v1.test.mjs
+        run: node --test automation/runtime/runner/test/anvil-*.test.mjs automation/runtime/runner/test/full-simulation-anvil-only-v1.test.mjs
 
       - name: Control-plane lightweight qualification
         if: env.V7_QUALIFICATION_LANE == 'CONTROL_LIGHT' || env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
         shell: bash
         run: |
           set -euo pipefail
-          node --test packages/github-native-sim/test/browser-agent-*.test.mjs packages/github-native-sim/test/audit-controller-token-selection-v1.test.mjs packages/github-native-sim/test/atomic-request-bridge-v1.test.mjs packages/github-native-sim/test/execution-workflow-v2.test.mjs
-          node --check scripts/browser-agent-wake.mjs
-          bash -n scripts/select-audit-controller-token.sh
+          node --test automation/runtime/github-native-sim/test/browser-agent-*.test.mjs automation/runtime/github-native-sim/test/audit-controller-token-selection-v1.test.mjs automation/runtime/github-native-sim/test/atomic-request-bridge-v1.test.mjs automation/runtime/github-native-sim/test/execution-workflow-v2.test.mjs
+          node --check automation/scripts/browser-agent-wake.mjs
+          bash -n automation/scripts/select-audit-controller-token.sh
 
       - name: Full repository Node test suite
         if: env.V7_QUALIFICATION_LANE == 'FULL'
-        run: npm test
+        run: npm --prefix automation test
 
       - name: Repository static checks
         if: env.V7_QUALIFICATION_LANE == 'FULL'
-        run: npm run lint
+        run: npm --prefix automation run lint
 
 
       - name: Select working Audit-Controller credential
@@ -285,7 +285,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Checkout exact private Audit-Controller candidate
         if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
@@ -396,13 +396,13 @@ jobs:
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
           import { execFileSync } from 'node:child_process';
-          import { createPhase6MutableRpcSession } from './packages/github-native-sim/src/phase6-mutable-rpc-v1.mjs';
-          import { runMedusaEndToEndSmokeV1 } from './packages/github-native-sim/src/medusa-e2e-smoke-v1.mjs';
-          import { runPhase7ForkPreflightV2 } from './packages/github-native-sim/src/phase7-fork-preflight-v2.mjs';
-          import { V7_POLICY } from './packages/github-native-sim/src/v7-policy.mjs';
+          import { createPhase6MutableRpcSession } from './automation/runtime/github-native-sim/src/phase6-mutable-rpc-v1.mjs';
+          import { runMedusaEndToEndSmokeV1 } from './automation/runtime/github-native-sim/src/medusa-e2e-smoke-v1.mjs';
+          import { runPhase7ForkPreflightV2 } from './automation/runtime/github-native-sim/src/phase7-fork-preflight-v2.mjs';
+          import { V7_POLICY } from './automation/runtime/github-native-sim/src/v7-policy.mjs';
 
           const qualifiedCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
-          const manifest=JSON.parse(fs.readFileSync('process/RUNNER_MANIFEST.json','utf8'));
+          const manifest=JSON.parse(fs.readFileSync('automation/control-plane/RUNNER_MANIFEST.json','utf8'));
           const capabilities=Object.keys(manifest.qualifiedCapabilities?.components??{}).sort();
           const recipes=[...(manifest.qualifiedCapabilities?.recipes??[])].sort();
           const controllerQualification=fs.existsSync('.audit-evidence/v7-infrastructure-qualification/controller.json')
@@ -446,7 +446,7 @@ jobs:
           const preflight=await runPhase7ForkPreflightV2({request,environment:process.env});
           const observed=preflight.observedPinnedBlockHash?.toLowerCase()??null;
           const checks={
-            dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true' && fs.existsSync('package-lock.json'),
+            dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true' && fs.existsSync('automation/package-lock.json'),
             phase6MutableRpcPass:phase6.status==='PASS',
             phase6IdentityNormalized:phase6.runtime?.identityNormalized===true && phase6.identityNormalization?.status==='PASS',
             phase6RpcSecretNotExposed:JSON.stringify(phase6).includes(process.env.SIM_ARCHIVE_PRIMARY_ETHEREUM_01)===false,
@@ -484,7 +484,7 @@ jobs:
             capabilities,
             recipes,
             controllerQualification,
-            dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true' && fs.existsSync('package-lock.json'),
+            dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true' && fs.existsSync('automation/package-lock.json'),
             testMatrix:{githubNative:'PASS',anvilRunner:'PASS',fullNodeSuite:'PASS',staticChecks:'PASS',toolchainVerification:'PASS'},
             phase6,
             phase6MedusaSmoke,

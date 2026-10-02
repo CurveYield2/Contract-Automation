@@ -56,7 +56,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm ci --force
+          npm --prefix automation ci --force
 
       - name: Install and verify retained audit toolchain
         uses: ./.github/actions/setup-v7-toolchain
@@ -67,7 +67,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Materialize workflow-call Phase-0 request
         if: inputs.campaign_id != ''
@@ -112,7 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf .phase0-intelligence-output
-          node packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs \
+          node automation/runtime/github-native-sim/src/lite-phase0-intelligence-v1.mjs \
             --request "${{ steps.request.outputs.path }}" \
             --output .phase0-intelligence-output
 
@@ -159,7 +159,7 @@ jobs:
           # Project machine evidence into the exact canonical output paths already
           # required by the Lite Phase-0 skill. The automation adapts to the skill;
           # the skill contract is not weakened or renamed to match runner internals.
-          node ../packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
+          node ../automation/runtime/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
             --campaign-root "$campaign_path" \
             --skill-root "$skill_root" \
             --stage core
@@ -174,7 +174,7 @@ jobs:
           # Bundle acceptedCommitSha values must refer to the immutable core/overlay
           # commit, so create the bundle index only after that commit exists.
           accepted_commit="$(git rev-parse HEAD)"
-          node ../packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
+          node ../automation/runtime/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
             --campaign-root "$campaign_path" \
             --skill-root "$skill_root" \
             --stage bundle \

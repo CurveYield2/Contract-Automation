@@ -5,7 +5,7 @@ Audit V7 has one active execution workflow, one active qualification workflow, o
 
 - `.github/workflows/audit-controller-execution.yml`
 - `.github/workflows/v7-execution-infrastructure-qualification.yml`
-- `process/RUNNER_MANIFEST.json`
+- `automation/control-plane/RUNNER_MANIFEST.json`
 - `npm run v7 -- help`
 
 Common commands:

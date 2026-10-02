@@ -34,7 +34,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Checkout campaign state containing V17 remediation delta
         uses: actions/checkout@v4

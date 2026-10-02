@@ -19,7 +19,7 @@ jobs:
       - name: Checkout trusted runner
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
 
@@ -35,7 +35,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Checkout exact remediated source commit
         uses: actions/checkout@v4

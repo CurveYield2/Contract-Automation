@@ -49,7 +49,7 @@ on:
     branches:
       - main
     paths:
-      - 'process/browser-agent-home-exit-v10/current-request-v10.json'
+      - 'automation/control-plane/browser-agent-home-exit-v10/current-request-v10.json'
 
 permissions:
   contents: read
@@ -95,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "push" ]; then
-            request="process/browser-agent-home-exit-v10/current-request-v10.json"
+            request="automation/control-plane/browser-agent-home-exit-v10/current-request-v10.json"
             test -s "$request"
             echo "action=$(jq -r '.action // "observe"' "$request")" >> "$GITHUB_OUTPUT"
             echo "mode=$(jq -r '.mode // "create_fresh"' "$request")" >> "$GITHUB_OUTPUT"
@@ -120,7 +120,7 @@ jobs:
           node-version: "22"
 
       - name: Set up isolated Playwright runtime
-        uses: ./packages/browser-agent-original-phase0-v10/runtime-v10
+        uses: ./automation/runtime/browser-agent-original-phase0-v10/runtime-v10
 
       - name: Restore encrypted browser session state
         uses: actions/cache/restore@v4
@@ -228,7 +228,7 @@ jobs:
             echo "Private VNC: $TAILSCALE_RUNNER_IP:5900"
           fi
 
-          node packages/browser-agent-original-phase0-v10/browser-agent-wake-v10.mjs
+          node automation/runtime/browser-agent-original-phase0-v10/browser-agent-wake-v10.mjs
           test -s "$WAKE_RESULT_PATH"
           cat "$WAKE_RESULT_PATH"
 

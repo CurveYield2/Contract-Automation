@@ -33,35 +33,35 @@ jobs:
           fetch-depth: 1
 
       - name: Install locked Contract-Automation dependencies
-        run: npm ci --force
+        run: npm --prefix automation ci --force
 
       - name: Test Contract-Automation
         run: |
           set -euo pipefail
-          node --check scripts/lite-phase0-finalize-v1.mjs
-          node --check scripts/run-phase0-randomized-simulation-v1.mjs
-          node --check scripts/write-phase0-simulation-outputs-v1.mjs
-          node --check packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs
-          node --check scripts/lite-phase-receipt-controller-v1.mjs
-          node --check scripts/lite-phase-packet-controller-v1.mjs
-          node --check scripts/prepare-lite-receipt-successor-v1.mjs
-          node --check scripts/prepare-lite-assignment-successor-v2.mjs
-          node --check scripts/lib/lite-phase-work-v1.mjs
-          node --check scripts/validate-lite-authority-automation-sync-v1.mjs
+          node --check automation/scripts/lite-phase0-finalize-v1.mjs
+          node --check automation/scripts/run-phase0-randomized-simulation-v1.mjs
+          node --check automation/scripts/write-phase0-simulation-outputs-v1.mjs
+          node --check automation/runtime/github-native-sim/src/phase0-randomized-simulation-v1.mjs
+          node --check automation/scripts/lite-phase-receipt-controller-v1.mjs
+          node --check automation/scripts/lite-phase-packet-controller-v1.mjs
+          node --check automation/scripts/prepare-lite-receipt-successor-v1.mjs
+          node --check automation/scripts/prepare-lite-assignment-successor-v2.mjs
+          node --check automation/scripts/lib/lite-phase-work-v1.mjs
+          node --check automation/scripts/validate-lite-authority-automation-sync-v1.mjs
           ruby -e 'require "yaml"; YAML.load_file(".github/workflows/lite-phase-work-packet-controller-v1.yml"); YAML.load_file(".github/workflows/lite-v7-execution-dispatch-v1.yml"); YAML.load_file(".github/workflows/lite-phase0-randomized-simulation-v1.yml"); YAML.load_file(".github/workflows/lite-phase0-bootstrap-v1.yml")'
-          python3 -m py_compile scripts/audit-source-initialization/write-phase0-receipt-v1.py
-          bash -n scripts/audit-source-initialization/run-v1.sh
-          test ! -e scripts/audit-source-initialization/write-state-v1.py
+          python3 -m py_compile automation/scripts/audit-source-initialization/write-phase0-receipt-v1.py
+          bash -n automation/scripts/audit-source-initialization/run-v1.sh
+          test ! -e automation/scripts/audit-source-initialization/write-state-v1.py
           test ! -e .github/workflows/migrate-audit-campaign-directory-v1.yml
           test ! -e .github/workflows/migrate-lite-single-receipt-authority-v1.yml
-          node --test packages/github-native-sim/test/*.test.mjs
-          npm run lint
+          node --test automation/runtime/github-native-sim/test/*.test.mjs
+          npm --prefix automation run lint
       - name: Select Audit-Controller credential
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Clone matching Audit-Controller ref
         env:

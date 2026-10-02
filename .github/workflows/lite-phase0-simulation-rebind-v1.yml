@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'process/agent-upload/phase0-simulation-rebind/*.json'
+      - 'automation/control-plane/agent-upload/phase0-simulation-rebind/*.json'
 
 permissions:
   contents: write
@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
           mapfile -t changed < <(
             gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status!="removed") | .filename' |
-            grep -E '^process/agent-upload/phase0-simulation-rebind/[^/]+\.json$' || true
+            grep -E '^automation/control-plane/agent-upload/phase0-simulation-rebind/[^/]+\.json$' || true
           )
           [ "${#changed[@]}" -eq 1 ] || { echo "::error::Expected exactly one Phase-0 simulation rebind request; found ${#changed[@]}."; exit 1; }
           jq -e '
@@ -53,7 +53,7 @@ jobs:
           node-version: '22'
 
       - name: Install trusted runner dependencies
-        run: npm ci --force
+        run: npm --prefix automation ci --force
 
       - name: Install retained audit toolchain
         uses: ./.github/actions/setup-v7-toolchain
@@ -64,7 +64,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Checkout current Audit-Controller main
         env:
@@ -118,7 +118,7 @@ jobs:
           set -euo pipefail
           test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::SIM_ARCHIVE_PRIMARY_ETHEREUM_01 is required"; exit 1; }
           rm -rf .phase0-rebind-output
-          node scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ steps.request.outputs.campaign_path }}"             --output .phase0-rebind-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-rebind-run.json
+          node automation/scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ steps.request.outputs.campaign_path }}"             --output .phase0-rebind-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-rebind-run.json
 
       - name: Assess corrected simulation completeness without stopping remaining work
         id: assessment
@@ -158,7 +158,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/write-phase0-simulation-rebind-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ steps.request.outputs.campaign_path }}"             --simulation-output .phase0-rebind-output             --contract-automation-sha "$GITHUB_SHA"
+          node automation/scripts/write-phase0-simulation-rebind-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ steps.request.outputs.campaign_path }}"             --simulation-output .phase0-rebind-output             --contract-automation-sha "$GITHUB_SHA"
 
       - name: Verify Phase-1 handoff is unchanged
         env:

@@ -90,7 +90,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Checkout private Audit Controller for manual dispatch
         if: github.event_name == 'workflow_dispatch'
@@ -111,11 +111,11 @@ jobs:
 
       - name: Resolve and validate PR request
         if: github.event_name == 'pull_request'
-        run: npm run v7 -- resolve --mode pr --source .request-source --output .v7-request/request.json
+        run: npm --prefix automation run v7 -- resolve --mode pr --source .request-source --output .v7-request/request.json
 
       - name: Resolve and validate dispatched request
         if: github.event_name == 'workflow_dispatch'
-        run: npm run v7 -- resolve --mode dispatch --source .controller-request --request-path "${{ inputs.request_path }}" --output .v7-request/request.json
+        run: npm --prefix automation run v7 -- resolve --mode dispatch --source .controller-request --request-path "${{ inputs.request_path }}" --output .v7-request/request.json
 
       - name: Select working Audit-Controller credential for controller operation
         if: github.event_name == 'pull_request' && env.V7_REQUEST_KIND == 'controller-operation'
@@ -124,7 +124,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Select optional Audit-Controller credential for V7 execution
         if: github.event_name == 'pull_request' && env.V7_REQUEST_KIND == 'v7-execution'
@@ -133,7 +133,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'false'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       # Existing V7 technical execution lane. Controller-operation requests skip this setup.
       - name: Cache npm download cache
@@ -141,7 +141,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: v7-npm-${{ runner.os }}-${{ hashFiles('package-lock.json', 'package.json') }}
+          key: v7-npm-${{ runner.os }}-${{ hashFiles('automation/package-lock.json', 'automation/package.json') }}
           restore-keys: |
             v7-npm-${{ runner.os }}-
 
@@ -150,8 +150,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s package-lock.json
-          npm ci --force
+          test -s automation/package-lock.json
+          npm --prefix automation ci --force
           echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
 
       - name: Install and verify canonical V7 toolchain
@@ -160,14 +160,14 @@ jobs:
 
       - name: Verify canonical runner manifest
         if: env.V7_REQUEST_KIND == 'v7-execution'
-        run: npm run v7:manifest -- --check
+        run: npm --prefix automation run v7:manifest -- --check
 
       - name: Execute V7 request
         if: env.V7_REQUEST_KIND == 'v7-execution'
         env:
           AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
-        run: npm run v7:execute -- --request .v7-request/request.json
+        run: npm --prefix automation run v7:execute -- --request .v7-request/request.json
 
       - name: Checkout exact private controller for controller operation
         if: env.V7_REQUEST_KIND == 'controller-operation'
@@ -194,12 +194,12 @@ jobs:
         run: |
           set -euo pipefail
           echo "CONTROLLER_VERIFICATION_REUSED=false" >> "$GITHUB_ENV"
-          status_path='process/V7_QUALIFICATION_STATUS.json'
+          status_path='automation/control-plane/V7_QUALIFICATION_STATUS.json'
           [ -s "$status_path" ] || exit 0
 
           run_id="$(node --input-type=module <<'NODE'
           import fs from 'node:fs';
-          const status=JSON.parse(fs.readFileSync('process/V7_QUALIFICATION_STATUS.json','utf8'));
+          const status=JSON.parse(fs.readFileSync('automation/control-plane/V7_QUALIFICATION_STATUS.json','utf8'));
           const controller=status.controllerQualification;
           const exact=process.env.AUDIT_CONTROLLER_REF;
           const reusable=
@@ -746,7 +746,7 @@ jobs:
           fi
 
           safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
-          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          registration="automation/control-plane/browser-agent-wake/registrations/$safe_campaign.json"
           if [ ! -f "$registration" ]; then
             if [ "${V7_REQUEST_KIND:-}" = 'controller-operation' ] && [ "$campaign_mode" = "LITE" ] && [ -n "$campaign_path" ] && [ -n "$campaign_controller_ref" ]; then
               echo "Lite campaign $campaign_id has no browser registration; dispatching automatic registration/watchdog repair."

@@ -132,7 +132,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'false'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Set up Node.js
         if: steps.target.outputs.valid == 'true'
@@ -1076,7 +1076,7 @@ jobs:
             export WAKE_ACTION='observe'
             export WAKE_RESULT_PATH="/tmp/$safe_id-observe.json"
 
-            if ! node scripts/browser-agent-wake.mjs; then
+            if ! node automation/scripts/browser-agent-wake.mjs; then
               echo "::warning::Observation failed for $WAKE_ID; the next scheduled sweep will retry."
               jq '.lastDecision="OBSERVATION_FAILED" | .lastObservationFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
               mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
@@ -1166,7 +1166,7 @@ jobs:
               export WAKE_ACTION='wake'
               export WAKE_MESSAGE="$(jq -r '.idleMessage' /tmp/watchdog-state.json)"
               export WAKE_RESULT_PATH="/tmp/$safe_id-poke.json"
-              if node scripts/browser-agent-wake.mjs; then
+              if node automation/scripts/browser-agent-wake.mjs; then
                 next_count="$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")"
                 next_hash="$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
                 jq --argjson count "$next_count" --arg hash "$next_hash" \
