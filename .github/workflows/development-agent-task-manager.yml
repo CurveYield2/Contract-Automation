@@ -46,6 +46,12 @@ on:
         required: false
         default: main
         type: string
+      continuity_mode:
+        description: Development-agent continuity mode; Project-backed is the default
+        required: false
+        default: managed_project
+        type: choice
+        options: [managed_project, standalone]
       initial_assignment:
         description: Optional extra instruction appended to the authoritative specification
         required: false
@@ -73,16 +79,18 @@ jobs:
       TARGET_REPOSITORY: ${{ inputs.target_repository }}
       TARGET_BRANCH: ${{ inputs.target_branch }}
       BASE_REF: ${{ inputs.base_ref }}
+      CONTINUITY_MODE: ${{ inputs.continuity_mode }}
       INITIAL_ASSIGNMENT: ${{ inputs.initial_assignment }}
       TASK_LOCK_PROTOCOL_PATH: process/development-agent-task-manager/TASK_LOCK_PROTOCOL_v1.md
       TASK_LOCK_TEMPLATE_PATH: process/development-agent-task-manager/TASK_LOCK_STATE_TEMPLATE_v1.md
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      CHATGPT_SESSION_STATE_SOURCE: bootstrap-secret
+      CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
+      CHATGPT_SESSION_STATE_PATH: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+      CHATGPT_SESSION_STATE_UPDATED_MARKER: /tmp/curveyield-browser-agent/session-state-updated
       BROWSER_HEADLESS: 'false'
-      BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
-      BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
-      BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
-      BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
-      BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
+      DISPLAY: ':99'
+      HOME_EXIT_NODE: ${{ vars.BROWSER_HOME_EXIT_NODE || '100.112.238.56' }}
     steps:
       - name: Checkout trusted Contract-Automation control plane
         uses: actions/checkout@v4
@@ -119,6 +127,7 @@ jobs:
             and (.targetRepository|type=="string" and length>0)
             and (.targetBranch|type=="string" and length>0)
             and ((.baseRef // "main")|type=="string" and length>0)
+            and ((.continuityMode // "managed_project")=="managed_project" or (.continuityMode // "managed_project")=="standalone")
             and ((.initialAssignment // "")|type=="string")
           ' /tmp/task-manager-request.json >/dev/null
 
@@ -138,6 +147,7 @@ jobs:
             echo "TARGET_REPOSITORY=$(jq -r '.targetRepository' /tmp/task-manager-request.json)"
             echo "TARGET_BRANCH=$(jq -r '.targetBranch' /tmp/task-manager-request.json)"
             echo "BASE_REF=$(jq -r '.baseRef // "main"' /tmp/task-manager-request.json)"
+            echo "CONTINUITY_MODE=$(jq -r '.continuityMode // "managed_project"' /tmp/task-manager-request.json)"
             echo "TASK_MANAGER_REQUEST_PATH=$request_path"
             echo 'INITIAL_ASSIGNMENT<<__TASK_MANAGER_INITIAL_ASSIGNMENT__'
             jq -r '.initialAssignment // ""' /tmp/task-manager-request.json
@@ -155,6 +165,8 @@ jobs:
           test -n "$SKILL_PATH"
           test -n "$TARGET_REPOSITORY"
           test -n "$TARGET_BRANCH"
+          continuity_mode="${CONTINUITY_MODE:-managed_project}"
+          case "$continuity_mode" in managed_project|standalone) ;; *) echo "::error::Unsupported continuity mode: $continuity_mode"; exit 1;; esac
           safe_id="$(printf '%s' "$MANAGER_ID" | tr -c 'A-Za-z0-9._-' '_')"
           [[ "$safe_id" =~ ^[A-Za-z0-9._-]+$ ]]
           spec_b64="$(gh api "repos/$GITHUB_REPOSITORY/contents/$SPEC_PATH?ref=$AUTHORITY_REF" --jq '.content')"
@@ -193,6 +205,8 @@ jobs:
             echo "TASK_MANAGER_TASK_LOCK_PROTOCOL_SHA=$task_lock_protocol_sha"
             echo "TASK_MANAGER_TASK_LOCK_TEMPLATE_SHA=$task_lock_template_sha"
             echo "TASK_MANAGER_TASK_LOCK_STATE_PATH=$task_lock_state_path"
+            echo "TASK_MANAGER_CONTINUITY_MODE=$continuity_mode"
+            echo "TASK_MANAGER_PROJECT_NAME=Development $MANAGER_ID"
             echo "TASK_MANAGER_TARGET_HEAD=$target_head"
           } >> "$GITHUB_ENV"
 
@@ -203,6 +217,70 @@ jobs:
 
       - name: Set up isolated browser-agent runtime
         uses: ./.github/actions/setup-browser-agent-runtime
+
+      - name: Restore encrypted ChatGPT session state
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: development-chatgpt-session-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.MANAGER_ID }}
+          restore-keys: |
+            development-chatgpt-session-v1-
+            chatgpt-session-state-v1-
+
+      - name: Install private VNC helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y x11vnc
+
+      - name: Record runner egress before home exit node
+        shell: bash
+        run: |
+          set -euo pipefail
+          direct="$(curl -fsS --max-time 15 https://api.ipify.org)"
+          test -n "$direct"
+          printf '%s' "$direct" | sha256sum | awk '{print "DIRECT_EGRESS_HASH="$1}' >> "$GITHUB_ENV"
+
+      - name: Connect runner to tailnet
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          ping: ${{ env.HOME_EXIT_NODE }}
+
+      - name: Start visible Chrome display and private tailnet VNC
+        shell: bash
+        run: |
+          set -euo pipefail
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension RANDR >/tmp/xvfb-development-agent.log 2>&1 &
+          echo $! >/tmp/xvfb-development-agent.pid
+          for i in {1..20}; do
+            xdpyinfo -display :99 >/dev/null 2>&1 && break
+            sleep 1
+          done
+          xdpyinfo -display :99 >/dev/null 2>&1 || { cat /tmp/xvfb-development-agent.log || true; exit 1; }
+          ts_ip="$(tailscale ip -4 | head -n1)"
+          test -n "$ts_ip"
+          echo "TAILSCALE_RUNNER_IP=$ts_ip" >> "$GITHUB_ENV"
+          x11vnc -display :99 -rfbport 5900 -listen "$ts_ip" -nopw -forever -shared -quiet >/tmp/x11vnc-development-agent.log 2>&1 &
+          echo $! >/tmp/x11vnc-development-agent.pid
+
+      - name: Route browser phase through home exit node
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 3s 10s tailscale status
+          timeout -k 5s 20s sudo tailscale set --exit-node="$HOME_EXIT_NODE"
+          changed=false
+          for i in {1..8}; do
+            current="$(curl -fsS --connect-timeout 3 --max-time 5 https://api.ipify.org || true)"
+            if [ -n "$current" ]; then
+              current_hash="$(printf '%s' "$current" | sha256sum | awk '{print $1}')"
+              if [ "$current_hash" != "$DIRECT_EGRESS_HASH" ]; then changed=true; break; fi
+            fi
+            sleep 2
+          done
+          [ "$changed" = true ] || { echo "::error::Tailscale exit node did not change runner egress."; exit 1; }
 
       - name: Create initial fresh development agent
         shell: bash
@@ -253,8 +331,19 @@ jobs:
           export WAKE_ID="$MANAGER_ID-generation-1"
           export WAKE_MESSAGE="$(cat /tmp/task-manager-assignment.txt)"
           export WAKE_RESULT_PATH='/tmp/task-manager-start.json'
-          xvfb-run -a node scripts/browser-agent-wake.mjs
+          export CHATGPT_CHAT_NAME="$MANAGER_ID generation 1"
+          if [ "$TASK_MANAGER_CONTINUITY_MODE" = managed_project ]; then
+            export BROWSER_ROUTINE_ID='development-agent-project-create-v1'
+            export CHATGPT_PROJECT_NAME="$TASK_MANAGER_PROJECT_NAME"
+            export CHATGPT_PROJECT_URL=''
+          else
+            unset BROWSER_ROUTINE_ID CHATGPT_PROJECT_NAME CHATGPT_PROJECT_URL
+          fi
+          node scripts/browser-agent-wake.mjs
           jq -e '.ok==true and (.chatUrl|type=="string" and test("^https://chatgpt.com/c/"))' /tmp/task-manager-start.json >/dev/null
+          if [ "$TASK_MANAGER_CONTINUITY_MODE" = managed_project ]; then
+            jq -e '.projectUrl|type=="string" and test("^https://chatgpt.com/") and (test("^https://chatgpt.com/c/")|not)' /tmp/task-manager-start.json >/dev/null
+          fi
 
       - name: Persist active task-manager state
         env:
@@ -265,13 +354,23 @@ jobs:
           chat_url="$(jq -r '.chatUrl' /tmp/task-manager-start.json)"
           assistant_count="$(jq -r '.after.assistantCount // .assistantCount // 0' /tmp/task-manager-start.json)"
           assistant_hash="$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' /tmp/task-manager-start.json)"
+          project_name="$(jq -r '.projectName // empty' /tmp/task-manager-start.json)"
+          project_url="$(jq -r '.projectUrl // empty' /tmp/task-manager-start.json)"
+          if [ "$TASK_MANAGER_CONTINUITY_MODE" = managed_project ]; then
+            [ -n "$project_name" ] || project_name="$TASK_MANAGER_PROJECT_NAME"
+            [[ "$project_url" =~ ^https://chatgpt\.com/.+ ]] && ! [[ "$project_url" =~ ^https://chatgpt\.com/c/ ]] || {
+              echo "::error::Managed development task requires a persisted private Project URL."
+              exit 1
+            }
+          fi
           idle_message='[DEVELOPMENT_AGENT_WATCHDOG_V1] Re-read the existing task-lock state on the target branch, refresh current main if needed, and continue only the smallest REMAINING DELTA. Do not reopen SATISFIED work or repair PARKED OBSERVATIONS. Every meaningful action must reduce/verify REMAINING DELTA or remove ACTIVE BLOCKER. Commit durable progress, run required tests, and continue until the task-lock completion conditions and machine completion receipt are both valid.'
-          jq -n             --arg managerId "$MANAGER_ID"             --arg safeId "$TASK_MANAGER_SAFE_ID"             --arg specPath "$SPEC_PATH"             --arg specRef "$AUTHORITY_REF"             --arg specSha "$TASK_MANAGER_SPEC_SHA"             --arg skillPath "$SKILL_PATH"             --arg skillRef "$AUTHORITY_REF"             --arg skillSha "$TASK_MANAGER_SKILL_SHA"             --arg taskLockProtocolPath "$TASK_LOCK_PROTOCOL_PATH"             --arg taskLockProtocolSha "$TASK_MANAGER_TASK_LOCK_PROTOCOL_SHA"             --arg taskLockTemplatePath "$TASK_LOCK_TEMPLATE_PATH"             --arg taskLockTemplateSha "$TASK_MANAGER_TASK_LOCK_TEMPLATE_SHA"             --arg taskLockStatePath "$TASK_MANAGER_TASK_LOCK_STATE_PATH"             --arg targetRepo "$TARGET_REPOSITORY"             --arg targetBranch "$TARGET_BRANCH"             --arg targetHead "$TASK_MANAGER_TARGET_HEAD"             --arg chatUrl "$chat_url"             --arg idleMessage "$idle_message"             --argjson assistantCount "$assistant_count"             --arg assistantHash "$assistant_hash"             '{
+          jq -n             --arg managerId "$MANAGER_ID"             --arg safeId "$TASK_MANAGER_SAFE_ID"             --arg specPath "$SPEC_PATH"             --arg specRef "$AUTHORITY_REF"             --arg specSha "$TASK_MANAGER_SPEC_SHA"             --arg skillPath "$SKILL_PATH"             --arg skillRef "$AUTHORITY_REF"             --arg skillSha "$TASK_MANAGER_SKILL_SHA"             --arg taskLockProtocolPath "$TASK_LOCK_PROTOCOL_PATH"             --arg taskLockProtocolSha "$TASK_MANAGER_TASK_LOCK_PROTOCOL_SHA"             --arg taskLockTemplatePath "$TASK_LOCK_TEMPLATE_PATH"             --arg taskLockTemplateSha "$TASK_MANAGER_TASK_LOCK_TEMPLATE_SHA"             --arg taskLockStatePath "$TASK_MANAGER_TASK_LOCK_STATE_PATH"             --arg continuityMode "$TASK_MANAGER_CONTINUITY_MODE"             --arg projectName "$project_name"             --arg projectUrl "$project_url"             --arg targetRepo "$TARGET_REPOSITORY"             --arg targetBranch "$TARGET_BRANCH"             --arg targetHead "$TASK_MANAGER_TARGET_HEAD"             --arg chatUrl "$chat_url"             --arg idleMessage "$idle_message"             --argjson assistantCount "$assistant_count"             --arg assistantHash "$assistant_hash"             '{
               schemaVersion:"curveyield-development-agent-task-manager-state-v1",
               managerId:$managerId,safeId:$safeId,status:"ACTIVE",generation:1,
               specification:{path:$specPath,ref:$specRef,sha256:$specSha},
               skill:{path:$skillPath,ref:$skillRef,sha256:$skillSha},
               taskLock:{scope:"development_upgrade_only",protocol:{path:$taskLockProtocolPath,ref:"main",sha256:$taskLockProtocolSha},template:{path:$taskLockTemplatePath,ref:"main",sha256:$taskLockTemplateSha},statePath:$taskLockStatePath},
+              continuity:{mode:$continuityMode,project:{name:$projectName,url:$projectUrl}},
               target:{repository:$targetRepo,branch:$targetBranch,lastCheckpointSha:$targetHead},
               chat:{url:$chatUrl,assistantCount:$assistantCount,lastAssistantHash:$assistantHash},
               idleMessage:$idleMessage,replacementCount:0,
@@ -286,6 +385,39 @@ jobs:
           else
             gh api --method PUT "$api" -f message="chore(task-manager): start $MANAGER_ID" -f content="$content" -f branch=main >/dev/null
           fi
+
+      - name: Detect refreshed encrypted ChatGPT session state
+        if: always()
+        id: refreshed-chatgpt-session
+        shell: bash
+        run: |
+          if [ -s /tmp/curveyield-browser-agent/session-state-updated ] && [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save refreshed encrypted ChatGPT session state
+        if: always() && steps.refreshed-chatgpt-session.outputs.updated == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: development-chatgpt-session-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.MANAGER_ID }}
+
+      - name: Disable home exit node
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          sudo tailscale set --exit-node=""
+
+      - name: Cleanup browser display
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          [ -f /tmp/x11vnc-development-agent.pid ] && kill "$(cat /tmp/x11vnc-development-agent.pid)" 2>/dev/null
+          [ -f /tmp/xvfb-development-agent.pid ] && kill "$(cat /tmp/xvfb-development-agent.pid)" 2>/dev/null
 
   discover:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'sweep')
@@ -336,16 +468,17 @@ jobs:
       group: development-agent-task-manager-supervise-${{ matrix.manager_id }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 35
     env:
       SAFE_ID: ${{ matrix.manager_id }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      CHATGPT_SESSION_STATE_SOURCE: bootstrap-secret
+      CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
+      CHATGPT_SESSION_STATE_PATH: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+      CHATGPT_SESSION_STATE_UPDATED_MARKER: /tmp/curveyield-browser-agent/session-state-updated
       BROWSER_HEADLESS: 'false'
-      BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
-      BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
-      BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
-      BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
-      BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
+      DISPLAY: ':99'
+      HOME_EXIT_NODE: ${{ vars.BROWSER_HOME_EXIT_NODE || '100.112.238.56' }}
     steps:
       - name: Checkout trusted Contract-Automation control plane
         uses: actions/checkout@v4
@@ -381,6 +514,10 @@ jobs:
             and (.taskLock.template.path|type=="string" and length>0)
             and (.taskLock.template.sha256|test("^[0-9a-f]{64}$"))
             and (.taskLock.statePath|type=="string" and length>0)
+            and (.continuity.mode=="managed_project" or .continuity.mode=="standalone")
+            and (.continuity.project.name|type=="string")
+            and (.continuity.project.url|type=="string")
+            and (if .continuity.mode=="managed_project" then (.continuity.project.url|test("^https://chatgpt.com/") and (test("^https://chatgpt.com/c/")|not)) else true end)
             and (.target.repository|type=="string" and length>0)
             and (.target.branch|type=="string" and length>0)
             and (.chat.url|type=="string")
@@ -518,6 +655,76 @@ jobs:
         if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
         uses: ./.github/actions/setup-browser-agent-runtime
 
+      - name: Restore encrypted ChatGPT session state
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: development-chatgpt-session-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.SAFE_ID }}
+          restore-keys: |
+            development-chatgpt-session-v1-
+            chatgpt-session-state-v1-
+
+      - name: Install private VNC helper
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y x11vnc
+
+      - name: Record runner egress before home exit node
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          direct="$(curl -fsS --max-time 15 https://api.ipify.org)"
+          test -n "$direct"
+          printf '%s' "$direct" | sha256sum | awk '{print "DIRECT_EGRESS_HASH="$1}' >> "$GITHUB_ENV"
+
+      - name: Connect runner to tailnet
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          ping: ${{ env.HOME_EXIT_NODE }}
+
+      - name: Start visible Chrome display and private tailnet VNC
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension RANDR >/tmp/xvfb-development-agent.log 2>&1 &
+          echo $! >/tmp/xvfb-development-agent.pid
+          for i in {1..20}; do
+            xdpyinfo -display :99 >/dev/null 2>&1 && break
+            sleep 1
+          done
+          xdpyinfo -display :99 >/dev/null 2>&1 || { cat /tmp/xvfb-development-agent.log || true; exit 1; }
+          ts_ip="$(tailscale ip -4 | head -n1)"
+          test -n "$ts_ip"
+          echo "TAILSCALE_RUNNER_IP=$ts_ip" >> "$GITHUB_ENV"
+          x11vnc -display :99 -rfbport 5900 -listen "$ts_ip" -nopw -forever -shared -quiet >/tmp/x11vnc-development-agent.log 2>&1 &
+          echo $! >/tmp/x11vnc-development-agent.pid
+
+      - name: Route browser phase through home exit node
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 3s 10s tailscale status
+          timeout -k 5s 20s sudo tailscale set --exit-node="$HOME_EXIT_NODE"
+          changed=false
+          for i in {1..8}; do
+            current="$(curl -fsS --connect-timeout 3 --max-time 5 https://api.ipify.org || true)"
+            if [ -n "$current" ]; then
+              current_hash="$(printf '%s' "$current" | sha256sum | awk '{print $1}')"
+              if [ "$current_hash" != "$DIRECT_EGRESS_HASH" ]; then changed=true; break; fi
+            fi
+            sleep 2
+          done
+          [ "$changed" = true ] || { echo "::error::Tailscale exit node did not change runner egress."; exit 1; }
+
       - name: Observe worker and execute bounded recovery policy
         if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
         env:
@@ -532,6 +739,9 @@ jobs:
           previous_hash="$(jq -r '.chat.lastAssistantHash // empty' /tmp/task-manager-state.json)"
           target_repo="$(jq -r '.target.repository' /tmp/task-manager-state.json)"
           target_branch="$(jq -r '.target.branch' /tmp/task-manager-state.json)"
+          continuity_mode="$(jq -r '.continuity.mode' /tmp/task-manager-state.json)"
+          project_name="$(jq -r '.continuity.project.name // empty' /tmp/task-manager-state.json)"
+          project_url="$(jq -r '.continuity.project.url // empty' /tmp/task-manager-state.json)"
 
           export WAKE_MODE='resume_existing'
           export CHAT_URL="$chat_url"
@@ -539,7 +749,7 @@ jobs:
           export WAKE_ACTION='observe'
           export WAKE_RESULT_PATH='/tmp/task-manager-observe.json'
 
-          if ! xvfb-run -a node scripts/browser-agent-wake.mjs; then
+          if ! node scripts/browser-agent-wake.mjs; then
             echo "::warning::Browser providers could not observe the chat; preserving the current worker for the next sweep rather than guessing that the agent died."
             jq '.lastDecision="OBSERVATION_PROVIDER_FAILURE" | .updatedAt=(now|todate)' /tmp/task-manager-state.json > /tmp/task-manager-next.json
             mv /tmp/task-manager-next.json /tmp/task-manager-state.json
@@ -564,7 +774,7 @@ jobs:
                 export REFRESH_BEFORE_WAKE='false'
                 if [ "$attempt" -gt 1 ]; then export REFRESH_BEFORE_WAKE='true'; fi
                 export WAKE_RESULT_PATH="/tmp/task-manager-attempt-$attempt.json"
-                if ! xvfb-run -a node scripts/browser-agent-wake.mjs; then
+                if ! node scripts/browser-agent-wake.mjs; then
                   echo "::warning::Prompt attempt $attempt hit a browser-provider failure; preserving the worker instead of declaring it dead."
                   dead=false
                   failure_reason='PROMPT_PROVIDER_FAILURE'
@@ -659,11 +869,26 @@ jobs:
               export WAKE_ID="$manager_id-generation-$next_generation"
               export WAKE_MESSAGE="$(cat /tmp/task-manager-recovery.txt)"
               export WAKE_RESULT_PATH='/tmp/task-manager-replacement.json'
+              export CHATGPT_CHAT_NAME="$manager_id generation $next_generation"
+              if [ "$continuity_mode" = managed_project ]; then
+                export BROWSER_ROUTINE_ID='development-agent-project-open-v1'
+                export CHATGPT_PROJECT_NAME="$project_name"
+                export CHATGPT_PROJECT_URL="$project_url"
+              else
+                unset BROWSER_ROUTINE_ID CHATGPT_PROJECT_NAME CHATGPT_PROJECT_URL
+              fi
               unset REFRESH_BEFORE_WAKE RESPONSE_WAIT_MS
-              if xvfb-run -a node scripts/browser-agent-wake.mjs && jq -e '.ok==true and (.chatUrl|test("^https://chatgpt.com/c/"))' /tmp/task-manager-replacement.json >/dev/null; then
+              if node scripts/browser-agent-wake.mjs && jq -e '.ok==true and (.chatUrl|test("^https://chatgpt.com/c/"))' /tmp/task-manager-replacement.json >/dev/null; then
                 new_url="$(jq -r '.chatUrl' /tmp/task-manager-replacement.json)"
                 new_count="$(jq -r '.after.assistantCount // 0' /tmp/task-manager-replacement.json)"
                 new_hash="$(jq -r '.after.lastAssistantHash // empty' /tmp/task-manager-replacement.json)"
+                if [ "$continuity_mode" = managed_project ]; then
+                  replacement_project_url="$(jq -r '.projectUrl // empty' /tmp/task-manager-replacement.json)"
+                  [ "$replacement_project_url" = "$project_url" ] || {
+                    echo "::error::Replacement agent did not reopen the persisted managed Project URL."
+                    exit 1
+                  }
+                fi
                 jq --argjson generation "$next_generation" --arg predecessor "$predecessor" --arg reason "$failure_reason"                   --arg head "$checkpoint_sha" --arg url "$new_url" --argjson count "$new_count" --arg hash "$new_hash"                   '.generation=$generation | .replacementCount=((.replacementCount // 0)+1)
                    | .predecessorChatUrl=$predecessor | .lastReplacementReason=$reason
                    | .target.lastCheckpointSha=$head | .chat.url=$url
@@ -681,3 +906,36 @@ jobs:
           [ -n "$current_sha" ] || exit 0
           content="$(base64 -w0 /tmp/task-manager-state.json)"
           gh api --method PUT "$STATE_API" -f message="chore(task-manager): supervise $SAFE_ID" -f content="$content" -f sha="$current_sha" -f branch=main >/dev/null
+
+      - name: Detect refreshed encrypted ChatGPT session state
+        if: always() && steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        id: refreshed-chatgpt-session
+        shell: bash
+        run: |
+          if [ -s /tmp/curveyield-browser-agent/session-state-updated ] && [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save refreshed encrypted ChatGPT session state
+        if: always() && steps.refreshed-chatgpt-session.outputs.updated == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
+          key: development-chatgpt-session-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.SAFE_ID }}
+
+      - name: Disable home exit node
+        if: always() && steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        shell: bash
+        run: |
+          set +e
+          sudo tailscale set --exit-node=""
+
+      - name: Cleanup browser display
+        if: always() && steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        shell: bash
+        run: |
+          set +e
+          [ -f /tmp/x11vnc-development-agent.pid ] && kill "$(cat /tmp/x11vnc-development-agent.pid)" 2>/dev/null
+          [ -f /tmp/xvfb-development-agent.pid ] && kill "$(cat /tmp/xvfb-development-agent.pid)" 2>/dev/null
