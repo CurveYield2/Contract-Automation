@@ -70,7 +70,7 @@ jobs:
   start:
     if: (github.event_name == 'workflow_dispatch' && inputs.operation == 'start') || github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     env:
       MANAGER_ID: ${{ inputs.manager_id }}
       SPEC_PATH: ${{ inputs.specification_path }}
