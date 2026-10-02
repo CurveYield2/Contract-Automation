@@ -22,29 +22,37 @@ if(assignment.finalReportPath){
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'sealed predecessor receipt'));
 if(!['SEALED','SKIPPED'].includes(predecessor.phase?.status)) throw new Error('predecessor receipt is not sealed/skipped');
 const controllerRef=a['audit-controller-ref'];
-const authorityUrl='https://github.com/CurveYield2/Audit-Controller/tree/'+controllerRef+'/Audit%20Skill%20-%20Current%20Authority';
+const encodeRepoPath=p=>String(p).split('/').map(encodeURIComponent).join('/');
+const controllerFileUrl=p=>'https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
+const controllerTreeUrl=p=>'https://github.com/CurveYield2/Audit-Controller/tree/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
+const authorityUrl=controllerTreeUrl('Audit Skill - Current Authority');
 const validationRequestPath='process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json';
-const campaignUrl='https://github.com/CurveYield2/Audit-Controller/tree/'+controllerRef+'/'+directory.workspacePath.replaceAll(' ','%20');
+const campaignUrl=controllerTreeUrl(directory.workspacePath);
 const validationUrl='https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase-work-packet-controller-v1.yml';
+const workFormUrl=controllerFileUrl(assignment.workFormPath);
+const schemaUrl=controllerFileUrl(assignment.workSchemaPath);
+const finalReportUrl=controllerFileUrl(assignment.finalReportPath);
+const packetUrl=controllerFileUrl(assignment.packetPath);
+const predecessorUrl=controllerFileUrl(assignment.predecessorReceiptPath);
+const derivedInputLinks=(Array.isArray(assignment.derivedInputPaths)?assignment.derivedInputPaths:[]).map((p,i)=>'Phase input '+(i+1)+': '+controllerFileUrl(p));
 const lines=[
   'LITE audit: '+directory.campaignName,
-  'Reviewer / phase: '+assignment.reviewer+' / '+assignment.phaseId,
+  'Reviewer: '+assignment.reviewer,
+  'Current phase: '+assignment.phaseId,
   'Campaign: '+campaignUrl,
   'Current Audit Skill Authority: '+authorityUrl,
   'Finalized controller validation: '+validationUrl,
   '',
-  'The Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app as required by that authority.',
+  'The Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority.',
   '',
   'Start '+assignment.phaseId+' now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.',
   '',
-  'Assigned work form: '+assignment.workFormPath,
-  'Phase schema: '+assignment.workSchemaPath,
-  'Controller-owned final report: '+assignment.finalReportPath,
-  'Controller-owned Phase Work Packet: '+assignment.packetPath,
-  'Sealed predecessor receipt: '+assignment.predecessorReceiptPath,
-  ...(Array.isArray(assignment.derivedInputPaths) && assignment.derivedInputPaths.length
-    ? ['Controller-derived inputs: '+assignment.derivedInputPaths.join(', ')]
-    : []),
+  'Phase schema: '+schemaUrl,
+  'Assigned work form: '+workFormUrl,
+  'Controller-owned final report: '+finalReportUrl,
+  'Controller-owned Phase Work Packet: '+packetUrl,
+  'Sealed predecessor receipt: '+predecessorUrl,
+  ...derivedInputLinks,
   '',
   'Complete only '+assignment.phaseId+'. Fill every required reviewer-owned Step X Input field while performing the work. Preserve controller-prefilled/read-only data. Do not perform controller bookkeeping and do not create or edit controller-owned reports, packets, receipts, routing, or handoff state.',
   '',
