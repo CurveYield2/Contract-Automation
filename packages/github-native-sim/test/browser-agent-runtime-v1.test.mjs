@@ -116,7 +116,10 @@ test('browser wake allows bounded time for ChatGPT browser challenge to resolve'
 test('audit browser wake and watchdog use visible Xvfb Chrome through the private home-exit route', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /headless:\s*env\.BROWSER_HEADLESS !== 'false'/);
-  assert.match(source, /args:\s*\['--disable-quic'\]/);
+  assert.match(source, /--disable-quic/);
+  assert.match(source, /--window-size=1920,1080/);
+  assert.match(source, /viewport:\s*\{ width: 1920, height: 1080 \}/);
+  assert.match(source, /screen:\s*\{ width: 1920, height: 1080 \}/);
 
   for (const relative of [
     '.github/workflows/browser-agent-wake.yml',
