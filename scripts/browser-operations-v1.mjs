@@ -712,17 +712,18 @@ async function createProjectOnly(page, { projectName }) {
   await ensureSidebarOpen(page);
   const existing = await findProjectEntry(page, projectName);
   if (existing) {
-    const error = new Error('Phase-1 Project already exists; create operation refuses to reuse it: ' + projectName);
-    error.code = 'PROJECT_ALREADY_EXISTS';
-    error.retryable = false;
-    throw error;
+    // Recovery only: a prior Phase-1 attempt may have created the Project before
+    // failing later. Re-open that exact Project rather than ever creating a duplicate.
+    await humanPointerClick(page, existing);
+    await page.waitForTimeout(900);
+    return { projectName, projectUrl: page.url(), created: false, recoveredExisting: true };
   }
   const entry = await createProject(page, projectName);
   if (entry) {
     await humanPointerClick(page, entry);
     await page.waitForTimeout(900);
   }
-  return { projectName, projectUrl: page.url(), created: true };
+  return { projectName, projectUrl: page.url(), created: true, recoveredExisting: false };
 }
 
 async function findProjectOverflowControl(page, projectName) {
