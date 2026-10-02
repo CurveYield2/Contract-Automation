@@ -19,6 +19,10 @@ test('project creation opens the sidebar and resolves semantic New project contr
   assert.match(source, /aria-label="Open sidebar"/);
   assert.match(source, /aria-label="Toggle sidebar"/);
   assert.match(source, /async function findNewProjectControl\(page\)/);
+  assert.match(source, /async function exposeProjectsInSidebar\(page\)/);
+  assert.match(source, /Organize sidebar/);
+  assert.match(source, /menuitemcheckbox.*Projects/);
+  assert.match(source, /sidebar-projects-recovery/);
   assert.match(source, /async function findSemanticProjectAction\(page\)/);
   assert.match(source, /new\|add\|create/);
   assert.match(source, /getByText\('New project', \{ exact: true \}\)/);
