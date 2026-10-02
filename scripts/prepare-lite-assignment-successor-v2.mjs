@@ -23,23 +23,24 @@ const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'
 if(!['SEALED','SKIPPED'].includes(predecessor.phase?.status)) throw new Error('predecessor receipt is not sealed/skipped');
 const controllerRef=a['audit-controller-ref'];
 const authorityUrl='https://github.com/CurveYield2/Audit-Controller/tree/'+controllerRef+'/Audit%20Skill%20-%20Current%20Authority';
+const campaignUrl='https://github.com/CurveYield2/Audit-Controller/tree/'+controllerRef+'/'+directory.workspacePath.replaceAll(' ','%20');
+const validationPath='process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json';
+const derivedInputs=assignment.derivedInputPaths.length?assignment.derivedInputPaths.join(', '):'NONE';
 const lines=[
-  'Campaign type: LITE',
-  'Campaign name: '+directory.campaignName,
-  'Campaign folder URL: https://github.com/CurveYield2/Audit-Controller/tree/'+controllerRef+'/'+directory.workspacePath.replaceAll(' ','%20'),
-  'Campaign ID / generation: '+directory.campaignId+' / '+directory.campaignGenerationId,
-  'Incoming reviewer: '+assignment.reviewer,
-  'Assigned phase: '+assignment.phaseId,
-  'Current authority: '+authorityUrl,
-  'Predecessor sealed receipt: '+assignment.predecessorReceiptPath,
-  'Phase schema: '+assignment.workSchemaPath,
+  'Start '+assignment.phaseId+' of the LITE audit for '+directory.campaignName+' as '+assignment.reviewer+'.',
+  '',
+  'Use the GitHub connector and follow the current Audit Skill Authority exactly:',
+  authorityUrl,
+  '',
+  'Campaign: '+campaignUrl,
+  'Sealed predecessor receipt: '+assignment.predecessorReceiptPath,
   'Phase work form: '+assignment.workFormPath,
-  'Controller-owned phase final report path: '+(assignment.finalReportPath??'NONE_AUTOMATION_ONLY'),
-  'Controller-owned phase packet path: '+assignment.packetPath,
-  'Automation-derived input files: '+(assignment.derivedInputPaths.length?assignment.derivedInputPaths.join(', '):'NONE'),
-  'Controller validation request path: process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json in CurveYield2/Contract-Automation main',
-  'Controller validation request schema: {"schemaVersion":"curveyield-lite-phase-boundary-request-v1","campaignId":"'+directory.campaignId+'","phaseSequence":'+assignment.phaseSequence+',"auditControllerRef":"'+controllerRef+'","attempt":<increment on each validation request>}',
-  'Use the GitHub connector app. Perform only the assigned phase. Every agent action must fill its schema-defined Step X Input fields while the action is performed. Preserve controller-prefilled/read-only data. Do not create or edit the Phase Work Packet or phase final report and do not perform controller bookkeeping. At phase end invoke controller validation by creating/updating the request path above; on rework increment attempt and update the same request. Repair only exact substantive deficiencies and wait for CONTROLLER_PHASE_PASS before advancing or retiring.'
+  'Phase schema: '+assignment.workSchemaPath,
+  'Phase-0-derived inputs: '+derivedInputs,
+  '',
+  'Do '+assignment.phaseId+' only. Fill the work form Step X Input fields as you perform the work. Preserve controller-prefilled/read-only data. Do not rebuild Phase 0 mechanical inventories, edit the controller-owned Phase Work Packet/final report, or perform controller bookkeeping.',
+  '',
+  'When the phase work is complete, trigger controller validation by creating/updating '+validationPath+' in CurveYield2/Contract-Automation main using schema curveyield-lite-phase-boundary-request-v1 for campaign '+directory.campaignId+' and phaseSequence '+assignment.phaseSequence+'. Increment attempt only for rework. If validation returns exact deficiencies, repair only those. Continue until CONTROLLER_PHASE_PASS; do not advance or retire before that.'
 ];
 const wakeMessage=lines.join('\n');
 process.stdout.write(JSON.stringify({status:'PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,directoryPath:a['campaign-directory-path'],incomingPhaseId:assignment.phaseId,incomingPhaseSequence:assignment.phaseSequence,incomingReviewer:assignment.reviewer,wakeMessage,wakeMessageB64:Buffer.from(wakeMessage).toString('base64')})+'\n');
