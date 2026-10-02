@@ -115,12 +115,7 @@ Generic browser primitives may be reused from the current shared browser stack, 
 
 ## REMAINING DELTA
 
-1. Complete GitHub-side regression/qualification runs on the latest branch head.
-2. Diagnose and repair any remaining test, YAML, state-schema, or browser-integration failures.
-3. Verify the final PR diff contains no task-lock injection into audit-specific wakes, watchdogs/monitors, campaign orchestration, phase handoffs, or audit execution pathways.
-4. Verify Project persistence/reuse and standalone exception are covered by regression tests.
-5. Confirm current `main` again before declaring the branch ready.
-6. Leave the implementation unmerged pending explicit human merge approval.
+- None
 
 ## PARKED OBSERVATIONS
 
@@ -132,11 +127,11 @@ Generic browser primitives may be reused from the current shared browser stack, 
 
 ## ACTIVE BLOCKER
 
-None.
+None
 
 ## NEXT ACTION
 
-Inspect the corrected shared browser workflow boundaries and refactor the Development Agent Task Manager to consume those proven browser/session/Project primitives, with Project-backed continuity as the default and standalone chat as the explicit tiny-task exception.
+Human merge approval for draft PR #490. No implementation work remains on this branch.
 
 ## ANTI-DRIFT CHECK
 
