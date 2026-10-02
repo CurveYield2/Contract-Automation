@@ -14,6 +14,7 @@
   },
   "wakeMessage": "",
   "thinkingEffort": "high",
+  "browserInteractionPolicy": "ordinary-pointer-keyboard-only",
   "activeAssignment": {
     "phaseId": "phase-1",
     "milestoneId": "PHASE_1_WORK_PACKET",
@@ -40,6 +41,5 @@
         "STOPPED_BY_HUMAN"
       ]
     }
-  },
-  "browserInteractionPolicy": "ordinary-pointer-keyboard-only"
+  }
 }
