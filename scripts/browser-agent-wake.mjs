@@ -447,6 +447,9 @@ async function postWithBackendVerification(page, message) {
     if (!persisted.persisted) {
       throw new BrowserAgentError('DURABILITY_NOT_OBSERVED', 'Wake write returned success but the user message was not observed in the current DOM', false);
     }
+    // VERIFY4 established the success boundary: once the exact write is
+    // accepted and the wake is DOM-persisted, post-send health is telemetry only.
+    // A later Cloudflare challenge must never retroactively invalidate delivery.
     let postSendHealth = null;
     let postSendChallenge = false;
     try {
@@ -515,8 +518,8 @@ async function runWithPage(providerName, connect) {
 
     if (action === 'observe') {
       // A browser/security challenge or login wall is provider/session
-      // infrastructure, not an observation of the reviewer. Throw here so
-      // Surface infrastructure noise to the watchdog without misclassifying reviewer state.
+      // infrastructure, not an observation of the reviewer. Surface it to
+      // the watchdog without misclassifying reviewer state.
       if (before.humanChallenge) {
         throw new BrowserAgentError(
           'BROWSER_CHALLENGE',
