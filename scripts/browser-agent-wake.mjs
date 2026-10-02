@@ -846,6 +846,14 @@ if (action === 'observe') {
   }
 }
 
-await fs.writeFile(statePath, JSON.stringify({ ok:false, wakeId, failures }, null, 2) + '\n');
-console.error(JSON.stringify({ ok:false, wakeId, failures }));
+const failedResult = {
+  ok: false,
+  wakeId,
+  failures,
+  browserRoutineId: browserRoutineId || null,
+  projectName: projectName || null,
+  projectUrl: projectUrl || null,
+};
+await fs.writeFile(statePath, JSON.stringify(failedResult, null, 2) + '\n');
+console.error(JSON.stringify(failedResult));
 process.exit(1);
