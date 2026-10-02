@@ -49,12 +49,7 @@ The launcher is an intake/status layer around this backend.
 
 ## REMAINING DELTA
 
-1. Write the system architecture and lifecycle specification.
-2. Write the Cloudflare web/UI/API specification.
-3. Write the GitHub-only fallback specification.
-4. Define security boundaries, atomic Git write behavior, naming/versioning and failure handling.
-5. Define implementation acceptance criteria.
-6. Close this design lock once all design documents are committed.
+- None
 
 ## PARKED OBSERVATIONS
 
@@ -69,7 +64,7 @@ None
 
 ## NEXT ACTION
 
-Commit the implementation-ready launcher system specification, Cloudflare web specification, and GitHub-only fallback specification.
+Human review of the committed launcher design package. Implementation has not started.
 
 ## ANTI-DRIFT CHECK
 
