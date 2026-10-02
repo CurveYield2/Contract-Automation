@@ -214,7 +214,7 @@ test('managed Project continuity is the default with standalone as explicit exce
   assert.match(workflow, /continuity_mode:/);
   assert.match(workflow, /default: managed_project/);
   assert.match(workflow, /options: \[managed_project, standalone\]/);
-  assert.match(workflow, /CONTINUITY_MODE=.*inputs\.continuity_mode/);
+  assert.match(workflow, /CONTINUITY_MODE:.*inputs\.continuity_mode/);
   assert.match(workflow, /continuityMode \/\//);
   assert.match(workflow, /TASK_MANAGER_CONTINUITY_MODE=\$continuity_mode/);
 
