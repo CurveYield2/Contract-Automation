@@ -16,7 +16,9 @@ const wakeMessage = env.WAKE_MESSAGE || '';
 const requestedUrl = env.CHAT_URL || '';
 let browserRoutineId = env.BROWSER_ROUTINE_ID || '';
 let projectName = env.CHATGPT_PROJECT_NAME || '';
+let projectUrlInput = env.CHATGPT_PROJECT_URL || '';
 let requestedChatName = env.CHATGPT_CHAT_NAME || '';
+let requireProjectUrl = bool(env.REQUIRE_PROJECT_URL);
 const thinkingEffort = (env.CHATGPT_THINKING_EFFORT || '').trim();
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 const encryptedSessionPath = env.CHATGPT_SESSION_STATE_PATH || '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
@@ -38,6 +40,18 @@ function durableChatUrl(value) {
       && /^\/c\/[A-Za-z0-9_-]+$/.test(url.pathname)
       && !/^\/c\/local[-_:]/i.test(url.pathname);
   } catch { return false; }
+}
+
+function durableProjectShareUrl(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    return url.origin === 'https://chatgpt.com'
+      && !!url.pathname
+      && url.pathname !== '/'
+      && !/^\/c\//.test(url.pathname);
+  } catch {
+    return false;
+  }
 }
 
 class BrowserAgentError extends Error {
@@ -97,7 +111,7 @@ async function loadModules() {
 
 async function hydrateBrowserContextFromRegistration() {
   if (mode !== 'create_fresh') return false;
-  if (browserRoutineId && projectName && requestedChatName) return false;
+  if (browserRoutineId && projectName && requestedChatName && (projectUrlInput || requireProjectUrl)) return false;
   const campaignId = String(env.CAMPAIGN_ID || '').trim();
   if (!campaignId) return false;
   const safeCampaign = campaignId.replace(/[^A-Za-z0-9._-]/g, '_');
@@ -109,6 +123,7 @@ async function hydrateBrowserContextFromRegistration() {
     }
     if (!browserRoutineId) browserRoutineId = String(registration.browserRoutine || '');
     if (!projectName) projectName = String(registration.chatgptProject?.name || '');
+    if (!projectUrlInput) projectUrlInput = String(registration.chatgptProject?.url || '');
     if (!requestedChatName) {
       requestedChatName = String(
         registration.activeChat?.name ||
@@ -120,9 +135,11 @@ async function hydrateBrowserContextFromRegistration() {
     console.log('[github-playwright] browser-context-source=campaign-registration ' + JSON.stringify({
       routineId: browserRoutineId || null,
       projectName: projectName || null,
+      projectUrl: projectUrlInput || null,
+      requireProjectUrl,
       chatName: requestedChatName || null
     }));
-    return Boolean(browserRoutineId || projectName || requestedChatName);
+    return Boolean(browserRoutineId || projectName || projectUrlInput || requestedChatName);
   } catch (error) {
     console.log('[github-playwright] browser-context-registration-unavailable=' + JSON.stringify({
       campaignId,
@@ -603,10 +620,20 @@ async function runWithPage(providerName, connect) {
         page,
         routine,
         stage: 'before_message',
-        vars: { projectName, chatName: requestedChatName, campaignId: env.CAMPAIGN_ID || '', phaseId: env.PHASE_ID || '' },
+        vars: { projectName, projectUrl: projectUrlInput, chatName: requestedChatName, campaignId: env.CAMPAIGN_ID || '', phaseId: env.PHASE_ID || '' },
       });
-      const projectResult = [...routineBefore].reverse().find((entry) => entry?.result?.projectUrl)?.result;
-      projectUrl = projectResult?.projectUrl || '';
+      const projectResult =
+        routineBefore.find((entry) => entry.operation === 'chatgpt.capture_project_share_link')?.result ||
+        routineBefore.find((entry) => entry.operation === 'chatgpt.open_project_by_share_link')?.result ||
+        null;
+      projectUrl = projectResult?.projectUrl || projectUrlInput || '';
+      if (requireProjectUrl && !durableProjectShareUrl(projectUrl)) {
+        throw new BrowserAgentError(
+          'PROJECT_URL_REQUIRED',
+          'Phase 1 reviewer launch requires a captured durable ChatGPT Project share URL before wake delivery',
+          true,
+        );
+      }
     }
 
     const before = await snapshot(page);
@@ -691,7 +718,7 @@ async function runWithPage(providerName, connect) {
           page,
           routine,
           stage: 'after_message',
-          vars: { projectName, chatName: requestedChatName, campaignId: env.CAMPAIGN_ID || '', phaseId: env.PHASE_ID || '' },
+          vars: { projectName, projectUrl, chatName: requestedChatName, campaignId: env.CAMPAIGN_ID || '', phaseId: env.PHASE_ID || '' },
         });
         after = await snapshot(page);
       }
@@ -706,17 +733,21 @@ async function runWithPage(providerName, connect) {
     const renameResult = [...routineAfter].reverse().find((entry) => entry.operation === 'chatgpt.rename_current_chat')?.result || null;
     const sessionStatePersisted = await persistHealthySession(providerName, context, after);
     const chatUrlVerified = durableChatUrl(after.url);
+    const projectUrlVerified = durableProjectShareUrl(projectUrl);
+    const launchVerified = chatUrlVerified && (!requireProjectUrl || projectUrlVerified);
     const result = {
       // A posted message with no durable conversation cannot activate a reviewer.
       // Return normally so the provider loop never posts it again elsewhere.
-      ok: chatUrlVerified, provider: providerName, action, wakeId, posted: true, before, after, sessionStatePersisted,
+      ok: launchVerified, provider: providerName, action, wakeId, posted: true, before, after, sessionStatePersisted,
       chatUrlVerified,
+      projectUrlVerified,
       ...(!chatUrlVerified ? { failures: [{ provider: providerName, code: 'CHAT_URL_NOT_DURABLE', retryable: false,
         error: 'Message submission was observed but no durable reviewer chat URL appeared within 60 seconds; do not repeat the initial message blindly.' }] } : {}),
       chatUrl: after.url,
       browserRoutineId: browserRoutineId || null,
       projectName: projectName || null,
       projectUrl: projectUrl || null,
+      requireProjectUrl,
       requestedChatName: requestedChatName || null,
       chatRenamed: renameResult?.renamed ?? null,
       thinkingEffort: thinkingEffortResult,
