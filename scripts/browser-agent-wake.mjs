@@ -718,7 +718,16 @@ async function runWithPage(providerName, connect) {
         }];
         await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForTimeout(1200);
-        await waitForBackendHealth(page);
+        const recoveryHealth = await backendPreflight(page).catch(error => [{ ok: false, status: 0, error: error.message }]);
+        const recoveryHealthy = recoveryHealth.length > 0 &&
+          recoveryHealth.every(item => item?.ok === true && item?.cfMitigated !== 'challenge');
+        if (!recoveryHealthy) {
+          throw new BrowserAgentError(
+            'BROWSER_CHALLENGE',
+            'Project challenge contaminated the current browser session; retry on a clean runner: ' + JSON.stringify(recoveryHealth),
+            true,
+          );
+        }
         await ensureComposer(page);
       }
     }
