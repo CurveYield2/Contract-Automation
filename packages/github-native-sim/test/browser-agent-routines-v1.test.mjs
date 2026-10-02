@@ -594,3 +594,33 @@ test('only durable server chat URLs can activate a reviewer', async () => {
   assert.match(source, /CHAT_URL_NOT_DURABLE/);
   assert.match(source, /waitForURL\(url => durableChatUrl\(url\.toString\(\)\), \{ timeout: 60000 \}\)/);
 });
+
+
+test('Project-create pre-post UI transition failures are retryable on a fresh runner', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  assert.match(source, /function retryableProjectUiError/);
+  for (const code of [
+    'PROJECT_CREATE_CONTROL_MISSING',
+    'PROJECT_NAME_INPUT_MISSING',
+    'PROJECT_CREATE_SUBMIT_MISSING',
+    'PROJECT_CREATE_VERIFICATION_MISSING',
+  ]) {
+    assert.match(source, new RegExp(code));
+  }
+  assert.match(source, /error\.retryable = true/);
+  assert.match(source, /PROJECT_CREATE_REJECTED/);
+  assert.match(source, /error\.retryable = false/);
+});
+
+test('Project-create retries remain human-interaction-only', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  const start = source.indexOf('async function createProject(page, projectName)');
+  const end = source.indexOf('\nfunction validProjectUrl', start);
+  const block = source.slice(start, end);
+  assert.match(block, /humanPointerClick\(page, trigger/);
+  assert.match(block, /humanTypeInto\(page, input/);
+  assert.match(block, /humanPointerClick\(page, submit/);
+  assert.doesNotMatch(block, /\.click\(/);
+  assert.doesNotMatch(block, /\.fill\(/);
+  assert.doesNotMatch(block, /dispatchEvent/);
+});
