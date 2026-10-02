@@ -86,21 +86,6 @@ on:
         required: false
         default: COMPLETE,STOPPED_BY_HUMAN
         type: string
-      home_exit_node:
-        description: Windows PC Tailscale IP or MagicDNS name used as the private browser egress exit
-        required: false
-        default: 100.112.238.56
-        type: string
-      interactive_view:
-        description: Expose the runner Chrome display privately over Tailscale VNC
-        required: false
-        default: true
-        type: boolean
-      manual_challenge_wait_minutes:
-        description: Maximum wait for normal human login/verification through private VNC
-        required: false
-        default: '15'
-        type: string
       runner_retry_attempt:
         description: Internal fresh-runner retry attempt counter
         required: false
@@ -139,7 +124,9 @@ jobs:
       CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
       BROWSER_HEADLESS: 'false'
       DISPLAY: ':99'
-      INTERACTIVE_VIEW_ENABLED: ${{ inputs.interactive_view }}
+      INTERACTIVE_VIEW_ENABLED: 'true'
+      MANUAL_CHALLENGE_WAIT_MS: '900000'
+      HOME_EXIT_NODE: ${{ vars.BROWSER_HOME_EXIT_NODE || '100.112.238.56' }}
 
     steps:
       - name: Checkout trusted Contract-Automation
@@ -199,7 +186,6 @@ jobs:
         uses: ./.github/actions/setup-browser-agent-runtime
 
       - name: Install private VNC helper
-        if: inputs.interactive_view
         shell: bash
         run: |
           set -euo pipefail
@@ -219,12 +205,10 @@ jobs:
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
-          ping: ${{ inputs.home_exit_node }}
+          ping: ${{ env.HOME_EXIT_NODE }}
 
       - name: Start visible Chrome display and private tailnet VNC
         shell: bash
-        env:
-          INTERACTIVE_VIEW: ${{ inputs.interactive_view }}
         run: |
           set -euo pipefail
           Xvfb :99 -screen 0 1920x1080x24 -ac +extension RANDR >/tmp/xvfb-browser-agent.log 2>&1 &
@@ -237,16 +221,12 @@ jobs:
           ts_ip="$(tailscale ip -4 | head -n1)"
           test -n "$ts_ip"
           echo "TAILSCALE_RUNNER_IP=$ts_ip" >> "$GITHUB_ENV"
-          if [ "$INTERACTIVE_VIEW" = "true" ]; then
-            x11vnc -display :99 -rfbport 5900 -listen "$ts_ip" -nopw -forever -shared -quiet >/tmp/x11vnc-browser-agent.log 2>&1 &
-            echo $! >/tmp/x11vnc-browser-agent.pid
-            echo "TAILSCALE_VNC=$ts_ip:5900"
-          fi
+          x11vnc -display :99 -rfbport 5900 -listen "$ts_ip" -nopw -forever -shared -quiet >/tmp/x11vnc-browser-agent.log 2>&1 &
+          echo $! >/tmp/x11vnc-browser-agent.pid
+          echo "TAILSCALE_VNC=$ts_ip:5900"
 
       - name: Route browser phase through home exit node
         shell: bash
-        env:
-          HOME_EXIT_NODE: ${{ inputs.home_exit_node }}
         run: |
           set -euo pipefail
           timeout -k 3s 10s tailscale status
@@ -315,17 +295,12 @@ jobs:
 
       - name: Deliver wake through home-exit Playwright
         id: deliver
-        env:
-          MANUAL_CHALLENGE_WAIT_MINUTES: ${{ inputs.manual_challenge_wait_minutes }}
         shell: bash
         run: |
           set -euo pipefail
           export WAKE_ACTION='wake'
           export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
           export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
-
-          [[ "$MANUAL_CHALLENGE_WAIT_MINUTES" =~ ^[0-9]+$ ]] || { echo "::error::manual_challenge_wait_minutes must be numeric"; exit 1; }
-          export MANUAL_CHALLENGE_WAIT_MS=$((MANUAL_CHALLENGE_WAIT_MINUTES * 60000))
           set +e
           node scripts/browser-agent-wake.mjs
           rc=$?
