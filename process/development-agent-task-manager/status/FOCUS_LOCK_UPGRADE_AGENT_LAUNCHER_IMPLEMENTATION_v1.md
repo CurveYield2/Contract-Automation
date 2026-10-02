@@ -15,8 +15,8 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 ## CURRENT MAIN
 
 - Repository: `CurveYield2/Contract-Automation`
-- Baseline main commit: `0041e957799fbde10a22231795338354f28179aa`
-- Working branch: `upgrade-agent-launcher-implementation-v1`
+- Current main commit checked: `ebd90fc50baaf62e26560a37bfa1b40639857978`
+- Repair branch: `upgrade-agent-launcher-live-smoke-repair-v1`
 
 ## AUTHORITATIVE SPECIFICATIONS
 
@@ -38,11 +38,31 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 
 ## SATISFIED
 
-- Merged launcher design v2 into main.
-- Created dedicated implementation branch.
-- Existing Development Agent Task Manager, focus lock, Project continuity, human-style browser path and completion receipt machinery are already present.
+- Launcher design v2 merged to main.
+- Upgrade Agent Execution Authority v1 implemented.
+- Deterministic launcher admission module implemented.
+- Minimal Cloudflare launcher implemented.
+- GitHub fallback launcher implemented.
+- Development Agent Task Manager merge-to-main finalization implemented.
+- Terminal output and ChatGPT Project metadata implemented.
+- Regression tests added.
+- V7 Execution Infrastructure Qualification passed.
+- Lite Structured Phase Regression v2 passed.
+- Implementation PR #492 merged to main.
+- Live smoke request was atomically admitted.
+- Live smoke passed request intake, target-branch creation, authority/spec validation, browser runtime setup, encrypted session restore, Tailscale connection, visible Chrome/Xvfb, VNC setup, and home-exit routing.
+- Live smoke failed only at initial ChatGPT Project creation with retryable Cloudflare challenge HTTP 403 before manager state persistence.
+- Exact comparison with the successful audit browser flow identified the missing behavior: fresh-runner retries plus manual challenge-wait handling around browser delivery.
 
 ## REMAINING DELTA
+
+1. Add only the missing fresh-runner retry/manual-challenge wrapper to the Development Agent Task Manager initial Project-create path, reusing the proven audit-browser behavior.
+2. Add/adjust regression coverage for that exact retry behavior.
+3. Re-run the same live smoke request path until initial Project creation succeeds and active manager state is persisted.
+4. Continue that same smoke task through agent completion and mandatory merge-to-main finalization.
+5. Close this focus lock only after the live smoke reaches terminal COMPLETE with output + Project links.
+
+
 
 1. Add generic Upgrade Agent Execution Authority v1.
 2. Add deterministic shared launcher admission module and tests.
@@ -66,11 +86,11 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 
 ## ACTIVE BLOCKER
 
-None
+Initial managed-Project creation receives a retryable Cloudflare challenge HTTP 403. The Development Agent Task Manager currently terminates instead of using the audit browser flow's bounded fresh-runner retry/manual challenge-wait mechanism.
 
 ## NEXT ACTION
 
-Inspect the current manager completion/retirement path and existing test conventions, then implement deterministic launcher admission and mandatory merge finalization without modifying audit execution paths.
+Inspect only the existing development-manager browser-delivery block and the proven audit fresh-runner retry wrapper, then transplant the smallest equivalent retry mechanism without touching unrelated launcher, audit, or repository infrastructure.
 
 ## ANTI-DRIFT CHECK
 
