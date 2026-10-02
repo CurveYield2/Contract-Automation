@@ -27,6 +27,7 @@ const controllerFileUrl=p=>'https://github.com/CurveYield2/Audit-Controller/blob
 const controllerTreeUrl=p=>'https://github.com/CurveYield2/Audit-Controller/tree/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
 const authorityUrl=controllerTreeUrl('Audit Skill - Current Authority');
 const validationRequestPath='process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json';
+const validationSchema='curveyield-lite-phase-boundary-request-v1';
 const campaignUrl=controllerTreeUrl(directory.workspacePath);
 const validationUrl='https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase-work-packet-controller-v1.yml';
 const workFormUrl=controllerFileUrl(assignment.workFormPath);
@@ -56,7 +57,7 @@ const lines=[
   '',
   'Complete only '+assignment.phaseId+'. Fill every required reviewer-owned Step X Input field while performing the work. Preserve controller-prefilled/read-only data. Do not perform controller bookkeeping and do not create or edit controller-owned reports, packets, receipts, routing, or handoff state.',
   '',
-  'At phase end you MUST invoke the finalized controller validation above by creating/updating '+validationRequestPath+' in CurveYield2/Contract-Automation main using the current lite phase-boundary request schema.',
+  'At phase end you MUST invoke the finalized controller validation above by creating/updating '+validationRequestPath+' in CurveYield2/Contract-Automation main using schema '+validationSchema+'.',
   'You are not finished until validation returns CONTROLLER_PHASE_PASS. If validation reports any deficiency, repair exactly the reported substantive deficiency, resubmit validation, and repeat until CONTROLLER_PHASE_PASS. Do not advance, retire, or hand off before PASS.',
   '',
   'Begin immediately.'
