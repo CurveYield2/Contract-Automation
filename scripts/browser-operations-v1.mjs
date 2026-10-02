@@ -798,15 +798,22 @@ async function captureProjectShareLink(page, { projectName }) {
     origin: new URL(projectUrl).origin,
     pathname: new URL(projectUrl).pathname
   }));
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.waitForTimeout(250);
   return { projectName, projectUrl, shared: true };
 }
 
 async function openProjectByUrl(page, { projectName, projectUrl }) {
   if (!validProjectUrl(projectUrl)) {
-    const error = new Error('chatgpt.open_project_url requires a persisted ChatGPT Project URL');
-    error.code = 'PROJECT_URL_REQUIRED';
-    error.retryable = false;
-    throw error;
+    if (!projectName) {
+      const error = new Error('chatgpt.open_project_url requires a persisted ChatGPT Project URL or a recoverable projectName');
+      error.code = 'PROJECT_URL_REQUIRED';
+      error.retryable = false;
+      throw error;
+    }
+    const recovered = await openProjectEntry(page, projectName);
+    const shared = await captureProjectShareLink(page, { projectName });
+    return { ...recovered, projectUrl: shared.projectUrl, recoveredProjectUrl: true };
   }
   await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(900);
