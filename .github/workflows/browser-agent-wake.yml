@@ -86,6 +86,21 @@ on:
         required: false
         default: COMPLETE,STOPPED_BY_HUMAN
         type: string
+      home_exit_node:
+        description: Windows PC Tailscale IP or MagicDNS name used as the private browser egress exit
+        required: false
+        default: 100.112.238.56
+        type: string
+      interactive_view:
+        description: Expose the runner Chrome display privately over Tailscale VNC
+        required: false
+        default: true
+        type: boolean
+      manual_challenge_wait_minutes:
+        description: Maximum wait for normal human login/verification through private VNC
+        required: false
+        default: '15'
+        type: string
       runner_retry_attempt:
         description: Internal fresh-runner retry attempt counter
         required: false
@@ -109,8 +124,8 @@ concurrency:
 
 jobs:
   wake:
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
     env:
       WAKE_ID: ${{ inputs.wake_id }}
       CAMPAIGN_ID: ${{ inputs.campaign_id }}
@@ -123,11 +138,8 @@ jobs:
       CHATGPT_SESSION_STATE_SOURCE: bootstrap-secret
       CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
       BROWSER_HEADLESS: 'false'
-      BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
-      BROWSERLESS_PROFILE: ${{ vars.BROWSERLESS_PROFILE || 'chatgpt' }}
-      BROWSERBASE_API_KEY: ${{ secrets.BROWSERBASE_API_KEY }}
-      BROWSERBASE_PROJECT_ID: ${{ secrets.BROWSERBASE_PROJECT_ID }}
-      BROWSERBASE_CONTEXT_ID: ${{ secrets.BROWSERBASE_CONTEXT_ID }}
+      DISPLAY: ':99'
+      INTERACTIVE_VIEW_ENABLED: ${{ inputs.interactive_view }}
 
     steps:
       - name: Checkout trusted Contract-Automation
@@ -186,6 +198,71 @@ jobs:
       - name: Set up isolated browser-agent runtime
         uses: ./.github/actions/setup-browser-agent-runtime
 
+      - name: Install private VNC helper
+        if: inputs.interactive_view
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y x11vnc
+
+      - name: Record runner egress before home exit node
+        shell: bash
+        run: |
+          set -euo pipefail
+          direct="$(curl -fsS --max-time 15 https://api.ipify.org)"
+          test -n "$direct"
+          printf '%s' "$direct" | sha256sum | awk '{print "DIRECT_EGRESS_HASH="$1}' >> "$GITHUB_ENV"
+          echo "Recorded runner egress fingerprint without logging the address."
+
+      - name: Connect runner to tailnet
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          ping: ${{ inputs.home_exit_node }}
+
+      - name: Start visible Chrome display and private tailnet VNC
+        shell: bash
+        env:
+          INTERACTIVE_VIEW: ${{ inputs.interactive_view }}
+        run: |
+          set -euo pipefail
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension RANDR >/tmp/xvfb-browser-agent.log 2>&1 &
+          echo $! >/tmp/xvfb-browser-agent.pid
+          for i in {1..20}; do
+            xdpyinfo -display :99 >/dev/null 2>&1 && break
+            sleep 1
+          done
+          xdpyinfo -display :99 >/dev/null 2>&1 || { cat /tmp/xvfb-browser-agent.log || true; exit 1; }
+          ts_ip="$(tailscale ip -4 | head -n1)"
+          test -n "$ts_ip"
+          echo "TAILSCALE_RUNNER_IP=$ts_ip" >> "$GITHUB_ENV"
+          if [ "$INTERACTIVE_VIEW" = "true" ]; then
+            x11vnc -display :99 -rfbport 5900 -listen "$ts_ip" -nopw -forever -shared -quiet >/tmp/x11vnc-browser-agent.log 2>&1 &
+            echo $! >/tmp/x11vnc-browser-agent.pid
+            echo "TAILSCALE_VNC=$ts_ip:5900"
+          fi
+
+      - name: Route browser phase through home exit node
+        shell: bash
+        env:
+          HOME_EXIT_NODE: ${{ inputs.home_exit_node }}
+        run: |
+          set -euo pipefail
+          timeout -k 3s 10s tailscale status
+          timeout -k 5s 20s sudo tailscale set --exit-node="$HOME_EXIT_NODE"
+          changed=false
+          for i in {1..8}; do
+            current="$(curl -fsS --connect-timeout 3 --max-time 5 https://api.ipify.org || true)"
+            if [ -n "$current" ]; then
+              current_hash="$(printf '%s' "$current" | sha256sum | awk '{print $1}')"
+              if [ "$current_hash" != "$DIRECT_EGRESS_HASH" ]; then changed=true; break; fi
+            fi
+            sleep 2
+          done
+          [ "$changed" = true ] || { echo "::error::Tailscale exit node did not change runner egress."; exit 1; }
+          echo "HOME_EXIT_EGRESS_ACTIVE=true"
+
       - name: Decode wake messages
         env:
           WAKE_MESSAGE_B64: ${{ inputs.wake_message_b64 }}
@@ -236,8 +313,10 @@ jobs:
             echo "REPAIR_UNVIEWABLE_THRESHOLD=$(jq -r '.repair.unviewableThreshold // 2' /tmp/browser-context.json)"
           } >> "$GITHUB_ENV"
 
-      - name: Deliver wake with redundant providers
+      - name: Deliver wake through home-exit Playwright
         id: deliver
+        env:
+          MANUAL_CHALLENGE_WAIT_MINUTES: ${{ inputs.manual_challenge_wait_minutes }}
         shell: bash
         run: |
           set -euo pipefail
@@ -245,8 +324,10 @@ jobs:
           export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
           export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
 
+          [[ "$MANUAL_CHALLENGE_WAIT_MINUTES" =~ ^[0-9]+$ ]] || { echo "::error::manual_challenge_wait_minutes must be numeric"; exit 1; }
+          export MANUAL_CHALLENGE_WAIT_MS=$((MANUAL_CHALLENGE_WAIT_MINUTES * 60000))
           set +e
-          xvfb-run -a node scripts/browser-agent-wake.mjs
+          node scripts/browser-agent-wake.mjs
           rc=$?
           set -e
 
@@ -272,6 +353,14 @@ jobs:
           if [ "$ok" != true ]; then
             echo "::warning::Browser wake did not complete on this runner (retryable=$retryable code=$retry_code rc=$rc)."
           fi
+
+      - name: Disable home exit node
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          sudo tailscale set --exit-node=""
+          echo "Home exit-node routing disabled for post-browser workflow steps."
 
       - name: Dispatch fresh-runner retry for retryable pre-post failure
         id: fresh-runner-retry
@@ -581,3 +670,11 @@ jobs:
         run: |
           set -euo pipefail
           gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$WAKE_ID"
+
+      - name: Cleanup browser display
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          [ -f /tmp/x11vnc-browser-agent.pid ] && kill "$(cat /tmp/x11vnc-browser-agent.pid)" 2>/dev/null
+          [ -f /tmp/xvfb-browser-agent.pid ] && kill "$(cat /tmp/xvfb-browser-agent.pid)" 2>/dev/null

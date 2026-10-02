@@ -102,15 +102,19 @@ test('assignment-v2 campaigns resolve active phase from Audit Campaign Directory
   assert.doesNotMatch(repair, /nextMilestone\.phaseRange/);
 });
 
-test('long Phase-0 wake submission accepts independent UI proof instead of one exact rendered text node', () => {
+test('long Phase-0 wake submission requires a real write response and durable DOM persistence', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   const postStart = source.indexOf('async function post(page, message)');
   const postEnd = source.indexOf('async function runWithPage', postStart);
   const postBlock = source.slice(postStart, postEnd);
-  assert.match(postBlock, /beforeUserCount/);
-  assert.match(postBlock, /afterUserCount/);
-  assert.match(postBlock, /generating/);
-  assert.match(postBlock, /!visible && afterUserCount <= beforeUserCount && !generating/);
+  assert.match(postBlock, /send-request-observed/);
+  assert.match(postBlock, /postWithBackendVerification/);
+  assert.match(postBlock, /WRITE_RESPONSE_MISSING/);
+  assert.match(postBlock, /WRITE_REJECTED/);
+  assert.match(postBlock, /DURABILITY_NOT_OBSERVED/);
+  assert.match(postBlock, /persistedWakeVisible/);
+  assert.match(postBlock, /postSendChallenge/);
+  assert.match(postBlock, /post-send health/);
 });
 
 test('failed non-infrastructure idle pokes consume the escalation budget and can repair Phase-0', () => {
@@ -127,7 +131,7 @@ test('Audit Source Initialization contains no reviewer wake envelope', () => {
   assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
 });
 
-test('watchdog observation fails over provider-specific challenge and auth walls before classifying infrastructure noise', () => {
+test('watchdog observation classifies home-exit challenge and auth walls as infrastructure noise', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   const observeStart = source.indexOf("if (action === 'observe')");
   const providerStart = source.indexOf('const providers = [');
@@ -147,7 +151,7 @@ test('wake runtime executes browser routines around the first message and return
   assert.match(source, /CHATGPT_PROJECT_NAME/);
   assert.match(source, /CHATGPT_CHAT_NAME/);
   assert.match(source, /stage:\s*'before_message'/);
-  assert.match(source, /await post\(page, wakeMessage\)/);
+  assert.match(source, /await postWithBackendVerification\(page, wakeMessage\)/);
   assert.match(source, /stage:\s*'after_message'/);
   assert.match(source, /projectUrl:/);
   assert.match(source, /chatRenamed:/);
@@ -258,7 +262,7 @@ test('Lite monitor persists across internal phase changes and terminates only at
   assert.doesNotMatch(watchdog, /\[ "\$lite_campaign_status" = "COMPLETE" \] \|\| \[ "\$lite_phase_state" = "CLOSED" \]/);
 });
 
-test('fresh reviewer launch is idempotent per campaign milestone and post-delivery errors cannot create provider duplicates', () => {
+test('fresh reviewer launch is idempotent per campaign milestone and post-delivery bookkeeping cannot duplicate a reviewer', () => {
   const wake = read('.github/workflows/browser-agent-wake.yml');
   const runtime = read('scripts/browser-agent-wake.mjs');
   assert.match(wake, /Resolve idempotent reviewer launch/);

@@ -338,7 +338,7 @@ The runtime is intentionally outside the repository's `packages/*` and `apps/*` 
 
 On a cache hit, no npm install runs. On a cache miss, npm is scoped with `--prefix .github/actions/setup-browser-agent-runtime`; the root Foundry/Forge/solc/ethers dependencies are never part of the browser-runtime install.
 
-The wake script resolves `playwright-core` and `@browserbasehq/sdk` from `BROWSER_AGENT_RUNTIME_ROOT`. The root package remains free of those browser-only dependencies.
+The wake script resolves only `playwright-core` from `BROWSER_AGENT_RUNTIME_ROOT`. Remote Browserless/Browserbase providers are intentionally retired from the audit wake path; the root package remains free of browser-only dependencies.
 
 ## Rolling GitHub-Playwright session persistence
 
@@ -362,7 +362,7 @@ Runtime behavior:
 
 The Actions cache contains ciphertext only. Plain Playwright storage state is not written into the repository or cache. A cache miss or normal GitHub cache eviction is non-fatal because the original `CHATGPT_STORAGE_STATE_B64` secret remains the bootstrap source.
 
-This rolling cache improves session longevity but is not a credential-login mechanism. If both the rolling session and bootstrap state are no longer accepted by ChatGPT, the existing Browserless/Browserbase fallbacks remain available.
+This rolling cache improves session longevity but is not a credential-login mechanism. The audit wake/watchdog path uses the operator-provided saved ChatGPT state and the private VNC surface for normal login or verification when ChatGPT requires it; it does not fail over to Browserless or Browserbase.
 
 ## Fresh-runner retry hardening
 
@@ -375,16 +375,30 @@ Retryable pre-post states currently include:
 
 Non-retryable states include authentication-required and unavailable-chat conditions, plus any failure that occurs after message submission begins. The workflow therefore never guesses whether a possibly-posted wake should be sent again.
 
-For a retryable failure, `browser-agent-wake.yml` re-dispatches the exact original wake inputs onto a fresh GitHub-hosted runner. The default retry budget is three fresh-runner retries and is hard-capped at five. The same `wake_id` concurrency group serializes the chain, so only one attempt can execute at a time.
+For a retryable failure, `browser-agent-wake.yml` re-dispatches the exact original wake inputs onto a fresh GitHub-hosted runner. The retry budget is three fresh-runner retries. The same `wake_id` concurrency group serializes the chain, so only one attempt can execute at a time.
 
 Failed attempts do not create watchdog state, update campaign registrations, save refreshed session state, or arm follow-on observation. Those durable side effects are gated on a verified successful delivery. If the retry budget is exhausted, the final attempt fails with the structured provider failure record.
 
-## Browser-provider redundancy
+## Home-exit GitHub Playwright transport
 
-Wake delivery tries independent providers in this order and stops at the first verified success:
+Audit reviewer creation, resume wakes, and watchdog observations all use one transport:
 
-1. GitHub-hosted Chrome + Playwright using the newest encrypted rolling session state, with `CHATGPT_STORAGE_STATE_B64` as cold-start fallback;
-2. Browserless using `BROWSERLESS_TOKEN` and persisted profile `BROWSERLESS_PROFILE` (default `chatgpt`);
-3. Browserbase using `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and `BROWSERBASE_CONTEXT_ID`.
+1. GitHub-hosted Ubuntu 24.04 runs visible Chrome through Playwright;
+2. the runner joins the private tailnet with `TAILSCALE_AUTHKEY`;
+3. browser traffic is routed through the configured Windows home exit node;
+4. QUIC is disabled so ChatGPT browser traffic follows the TCP exit-node route;
+5. Xvfb provides the visible display and x11vnc exposes it only on the runner's private tailnet address for normal human login/verification when required.
 
-The wake ID is durable and the persisted registration/chat URL makes retries safe. Provider failures are retried by later scheduled watchdog sweeps rather than blocking the audit permanently.
+The workflows fingerprint direct runner egress before enabling the exit node and require the routed egress fingerprint to change before opening ChatGPT. The production audit browser path has no Browserless or Browserbase fallback.
+
+### Durable wake success
+
+A reviewer wake is successful only after all of these are observed for the exact wake marker:
+
+- a real ChatGPT write request leaves the browser;
+- the corresponding write response is 2xx and is not Cloudflare-mitigated;
+- the user message is visible in the current conversation DOM.
+
+After that point, backend health is telemetry only. In particular, a Cloudflare challenge that appears after an accepted, DOM-persisted write does **not** retroactively convert the successful delivery into a failure and does not trigger a duplicate provider/send attempt. No forced post-send reload is required for success.
+
+The wake ID, campaign/milestone concurrency key, persisted registration, and durable chat URL make pre-post fresh-runner retries duplicate-safe. Scheduled watchdog sweeps use the same home-exit route, so the transport that creates reviewer-1 after Phase 0 is also the transport that supervises that reviewer and every later controller-driven successor.

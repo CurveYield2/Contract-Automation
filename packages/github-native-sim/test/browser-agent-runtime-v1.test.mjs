@@ -16,7 +16,6 @@ test('browser agent runtime is isolated from the root contract dependency graph'
   const rootPackage = JSON.parse(read('package.json'));
 
   assert.deepEqual(runtime.dependencies, {
-    '@browserbasehq/sdk': '2.20.0',
     'playwright-core': '1.63.0',
   });
   assert.equal(rootPackage.dependencies?.['playwright-core'], undefined);
@@ -24,6 +23,17 @@ test('browser agent runtime is isolated from the root contract dependency graph'
   assert.equal(rootPackage.devDependencies?.['playwright-core'], undefined);
   assert.equal(rootPackage.devDependencies?.['@browserbasehq/sdk'], undefined);
   assert.equal(fs.existsSync(path.join(root, 'tools', 'browser-agent-runtime')), false, 'old tools browser runtime path stays retired');
+});
+
+test('isolated browser runtime package stays in the control-light qualification lane', async () => {
+  const { classifyV7QualificationChanges } = await import('../../../scripts/classify-v7-qualification-change.mjs');
+  const result = classifyV7QualificationChanges([
+    '.github/actions/setup-browser-agent-runtime/package.json',
+    '.github/workflows/browser-agent-wake.yml',
+    '.github/workflows/browser-agent-watchdog.yml',
+    'scripts/browser-agent-wake.mjs',
+  ]);
+  assert.equal(result.lane, 'CONTROL_LIGHT');
 });
 
 test('shared browser runtime setup caches only isolated node_modules and installs only on cache miss', () => {
@@ -50,14 +60,14 @@ test('wake and watchdog reuse the shared isolated browser runtime setup', () => 
   }
 });
 
-test('browser wake script resolves optional modules from the isolated runtime root', () => {
+test('browser wake script resolves Playwright from the isolated runtime root without retired remote providers', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /BROWSER_AGENT_RUNTIME_ROOT/);
   assert.match(source, /createRequire\(path\.join\(runtimeRoot, 'package\.json'\)\)/);
   assert.match(source, /runtimeRequire\.resolve\(specifier\)/);
   assert.match(source, /pathToFileURL\(resolved\)\.href/);
   assert.match(source, /importBrowserRuntimeModule\('playwright-core'\)/);
-  assert.match(source, /importBrowserRuntimeModule\('@browserbasehq\/sdk'\)/);
+  assert.doesNotMatch(source, /@browserbasehq\/sdk|browserlessProvider|browserbaseProvider/);
 });
 
 test('browser wake normalizes CommonJS and ESM runtime module shapes before using Chromium', () => {
@@ -92,26 +102,30 @@ test('browser wake allows bounded time for ChatGPT browser challenge to resolve'
 });
 
 
-test('browser-agent workflows use Xvfb for local Chrome', () => {
+test('audit browser wake and watchdog use visible Xvfb Chrome through the private home-exit route', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /headless:\s*env\.BROWSER_HEADLESS !== 'false'/);
+  assert.match(source, /args:\s*\['--disable-quic'\]/);
 
   for (const relative of [
     '.github/workflows/browser-agent-wake.yml',
     '.github/workflows/browser-agent-watchdog.yml',
-    '.github/workflows/development-agent-task-manager.yml',
   ]) {
     const workflow = read(relative);
     assert.match(workflow, /BROWSER_HEADLESS:\s*'false'/);
-    const calls = workflow.match(/node scripts\/browser-agent-wake\.mjs/g) ?? [];
-    const wrapped = workflow.match(/xvfb-run -a node scripts\/browser-agent-wake\.mjs/g) ?? [];
-    assert.ok(calls.length > 0);
-    assert.equal(wrapped.length, calls.length);
+    assert.match(workflow, /Xvfb :99/);
+    assert.match(workflow, /tailscale\/github-action@v4/);
+    assert.match(workflow, /TAILSCALE_AUTHKEY/);
+    assert.match(workflow, /tailscale set --exit-node=/);
+    assert.match(workflow, /x11vnc/);
+    assert.match(workflow, /node scripts\/browser-agent-wake\.mjs/);
+    assert.doesNotMatch(workflow, /xvfb-run -a node scripts\/browser-agent-wake\.mjs/);
+    assert.doesNotMatch(workflow, /BROWSERLESS_|BROWSERBASE_/);
   }
 });
 
 
-test('browser runtime classifies only pre-post UI failures as fresh-runner retryable', () => {
+test('browser runtime classifies only pre-post infrastructure failures as fresh-runner retryable', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /class BrowserAgentError extends Error/);
   assert.match(source, /BrowserAgentError\('BROWSER_CHALLENGE', diagnostic, true\)/);
@@ -120,6 +134,11 @@ test('browser runtime classifies only pre-post UI failures as fresh-runner retry
   assert.match(source, /BrowserAgentError\('CHAT_UNAVAILABLE', diagnostic, false\)/);
   assert.match(source, /retryable:\s*error\?\.retryable === true/);
   assert.match(source, /code:\s*error\?\.code \|\| 'PROVIDER_ERROR'/);
+  assert.match(source, /WRITE_RESPONSE_MISSING/);
+  assert.match(source, /WRITE_REJECTED/);
+  assert.match(source, /DURABILITY_NOT_OBSERVED/);
+  assert.match(source, /postSendChallenge/);
+  assert.match(source, /domPersisted:\s*true/);
 });
 
 test('wake workflow retries retryable browser failures on a bounded fresh runner and gates all durable follow-ons', () => {
