@@ -312,6 +312,80 @@ async function visibleNavigationDiagnostics(page) {
   ).catch(() => []);
 }
 
+async function exposeProjectsInSidebar(page) {
+  // 2026 web sidebar redesign can hide Projects from the top-level navigation.
+  // Recover through the visible Recents/sidebar organization controls rather than
+  // assuming Projects was removed or bypassing project creation.
+  const recents = await firstVisible(page, [
+    'button[aria-label="Recents"]',
+    'button:has-text("Recents")',
+    '[role="button"]:has-text("Recents")'
+  ], 700);
+  if (recents) {
+    await recents.click().catch(() => {});
+    await page.waitForTimeout(650);
+  }
+
+  let organize = await firstVisible(page, [
+    'button:has-text("Organize sidebar")',
+    '[role="menuitem"]:has-text("Organize sidebar")',
+    '[role="button"]:has-text("Organize sidebar")',
+    'button[aria-label*="Organize sidebar" i]'
+  ], 700);
+
+  if (!organize) {
+    // Some variants expose the organizer from an adjacent overflow button.
+    const controls = page.locator('button, [role="button"]');
+    const count = Math.min(await controls.count().catch(() => 0), 120);
+    for (let i = 0; i < count && !organize; i += 1) {
+      const control = controls.nth(i);
+      if (!await control.isVisible().catch(() => false)) continue;
+      const attrs = [
+        await control.innerText().catch(() => ''),
+        await control.getAttribute('aria-label').catch(() => ''),
+        await control.getAttribute('title').catch(() => '')
+      ].filter(Boolean).join(' ');
+      if (/organize.*sidebar/i.test(attrs)) organize = control;
+    }
+  }
+
+  if (organize) {
+    await organize.click().catch(() => {});
+    await page.waitForTimeout(600);
+  }
+
+  const projectsOption = await firstVisible(page, [
+    '[role="menuitemcheckbox"]:has-text("Projects")',
+    '[role="menuitem"]:has-text("Projects")',
+    '[role="checkbox"]:has-text("Projects")',
+    'label:has-text("Projects")',
+    'button:has-text("Projects")'
+  ], 900);
+
+  if (projectsOption) {
+    const checked = await projectsOption.getAttribute('aria-checked').catch(() => null);
+    const selected = await projectsOption.getAttribute('aria-selected').catch(() => null);
+    const state = await projectsOption.getAttribute('data-state').catch(() => null);
+    if (checked !== 'true' && selected !== 'true' && state !== 'checked') {
+      await projectsOption.click().catch(() => projectsOption.press('Enter').catch(() => {}));
+      await page.waitForTimeout(800);
+    } else {
+      await projectsOption.press('Escape').catch(() => {});
+      await page.waitForTimeout(300);
+    }
+  }
+
+  await ensureSidebarOpen(page);
+  const visible = await page.getByText('Projects', { exact: true }).first().isVisible().catch(() => false);
+  console.log('[browser-operations] sidebar-projects-recovery=' + JSON.stringify({
+    recentsVisible: Boolean(recents),
+    organizerFound: Boolean(organize),
+    projectsOptionFound: Boolean(projectsOption),
+    projectsVisible: visible
+  }));
+  return visible;
+}
+
 async function findNewProjectControl(page) {
   const direct = await firstVisible(page, [
     'button[aria-label="Add new project"]',
@@ -398,6 +472,10 @@ async function createProject(page, projectName) {
   await ensureSidebarOpen(page);
 
   let trigger = await findNewProjectControl(page);
+  if (!trigger) {
+    await exposeProjectsInSidebar(page);
+    trigger = await findNewProjectControl(page);
+  }
   if (!trigger) {
     const projects = page.getByText('Projects', { exact: true }).first();
     if (await projects.isVisible().catch(() => false)) {
