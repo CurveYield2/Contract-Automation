@@ -134,5 +134,5 @@ test('reviewer repair resumes schema-governed active work and exact deficiencies
   assert.match(repair,/currentAssignment\.workFormPath/);
   assert.match(repair,/currentAssignment\.packetPath/);
   assert.match(repair,/controllerValidation\.deficiencies/);
-  assert.match(repair,/repair only the exact missing fields/i);
+  assert.match(repair,/repair exactly the reported substantive deficiency/i);
 });
