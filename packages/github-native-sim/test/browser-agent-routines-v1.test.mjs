@@ -275,6 +275,16 @@ test('wake runtime executes browser routines around the first message and return
   assert.match(source, /chatRenamed:/);
 });
 
+test('browser wake prefers the rolling encrypted ChatGPT session and uses the bootstrap secret only as fallback', () => {
+  const workflow = read('.github/workflows/browser-agent-wake.yml');
+  const runtime = read('scripts/browser-agent-wake.mjs');
+  assert.doesNotMatch(workflow, /CHATGPT_SESSION_STATE_SOURCE:\s*bootstrap-secret/);
+  assert.match(runtime, /loadEncryptedSessionState/);
+  assert.match(runtime, /if \(!storage && env\.CHATGPT_STORAGE_STATE_B64\)/);
+  assert.match(workflow, /Restore encrypted ChatGPT session state/);
+  assert.match(workflow, /Save refreshed encrypted ChatGPT session state/);
+});
+
 test('wake workflow carries packed routine/project/chat and repair policy through fresh-runner redispatch', () => {
   const workflow = read('.github/workflows/browser-agent-wake.yml');
   assert.match(workflow, /browser_context_b64:/);
