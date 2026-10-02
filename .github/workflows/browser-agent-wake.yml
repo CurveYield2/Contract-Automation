@@ -276,17 +276,20 @@ jobs:
             type=="object"
             and ((.routineId // "")|type=="string")
             and ((.projectName // "")|type=="string")
+            and ((.projectUrl // "")|type=="string")
             and ((.chatName // "")|type=="string")
             and ((.repair // {})|type=="object")
             and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="repair_notice")
             and (((.routineId // "") | test("[\\r\\n]")) | not)
             and (((.projectName // "") | test("[\\r\\n]")) | not)
+            and (((.projectUrl // "") | test("[\\r\\n]")) | not)
             and (((.chatName // "") | test("[\\r\\n]")) | not)
           ' /tmp/browser-context.json >/dev/null
 
           {
             echo "BROWSER_ROUTINE_ID=$(jq -r '.routineId // empty' /tmp/browser-context.json)"
             echo "CHATGPT_PROJECT_NAME=$(jq -r '.projectName // empty' /tmp/browser-context.json)"
+            echo "CHATGPT_PROJECT_URL=$(jq -r '.projectUrl // empty' /tmp/browser-context.json)"
             echo "CHATGPT_CHAT_NAME=$(jq -r '.chatName // empty' /tmp/browser-context.json)"
             echo "REPAIR_ENABLED=$(jq -r '.repair.enabled // false' /tmp/browser-context.json)"
             echo "REPAIR_IDLE_POKE_THRESHOLD=$(jq -r '.repair.idlePokeThreshold // 3' /tmp/browser-context.json)"
