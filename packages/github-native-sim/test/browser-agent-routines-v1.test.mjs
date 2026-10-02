@@ -19,6 +19,11 @@ test('project creation opens the sidebar and resolves semantic New project contr
   assert.match(source, /aria-label="Open sidebar"/);
   assert.match(source, /aria-label="Toggle sidebar"/);
   assert.match(source, /async function findNewProjectControl\(page\)/);
+  assert.match(source, /await projects\.hover\(\)/);
+  assert.match(source, /projects-plus-control/);
+  assert.match(source, /looksOverflow/);
+  assert.match(source, /looksPlus/);
+  assert.doesNotMatch(source, /count > 0 && count <= 3/);
   assert.match(source, /async function exposeProjectsInSidebar\(page\)/);
   assert.match(source, /Organize sidebar/);
   assert.match(source, /menuitemcheckbox.*Projects/);
@@ -366,12 +371,15 @@ test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualifi
 });
 
 
-test('project creation can use the icon-only add control beside the Projects heading', () => {
+test('project creation hovers Projects and distinguishes the plus control from the overflow menu', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /findProjectsSectionAddControl/);
   assert.match(source, /getByText\('Projects', \{ exact: true \}\)/);
-  assert.match(source, /text === '' && box && box\.width <= 56 && box\.height <= 56/);
-  assert.match(source, /count > 0 && count <= 3/);
+  assert.match(source, /await projects\.hover\(\)/);
+  assert.match(source, /looksOverflow/);
+  assert.match(source, /looksPlus/);
+  assert.match(source, /projects-plus-control/);
+  assert.doesNotMatch(source, /count > 0 && count <= 3/);
 });
 
 
