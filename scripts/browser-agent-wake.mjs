@@ -361,18 +361,16 @@ async function fillComposer(page, message) {
     await page.waitForTimeout(150);
   }
 
-  // Keep ordinary keyboard semantics for long audit wakes without tripping
-  // Playwright's per-action timeout. Humans type long text in bursts with small
-  // pauses; preserve that shape instead of injecting the whole value at once.
-  const chunkSize = 220;
-  for (let offset = 0; offset < message.length; offset += chunkSize) {
-    const chunk = message.slice(offset, offset + chunkSize);
-    await composer.pressSequentially(chunk, { delay: 35 });
-    if (offset + chunkSize < message.length) {
-      await page.waitForTimeout(180);
-    }
-  }
-  await page.waitForTimeout(300);
+  // Long audit wakes are normally pasted by a human. Put the message on the
+  // browser clipboard, keep the visible composer focused, and issue a normal
+  // keyboard paste. Do not inject the value into the DOM.
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://chatgpt.com' });
+  await page.evaluate(async (text) => {
+    await navigator.clipboard.writeText(text);
+  }, message);
+  await page.waitForTimeout(180);
+  await composer.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
+  await page.waitForTimeout(320);
 
   const filledText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
   const marker = message.slice(0, Math.min(120, message.length));
