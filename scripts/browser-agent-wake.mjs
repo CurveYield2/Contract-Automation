@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { deriveSessionStateKeyB64, loadEncryptedSessionState, saveEncryptedSessionState, validateStorageState } from './browser-session-state-v1.mjs';
 import { loadBrowserRoutine, runBrowserRoutineStage } from './browser-routine-engine-v1.mjs';
 import { executeBrowserOperation } from './browser-operations-v1.mjs';
@@ -370,16 +371,24 @@ async function fillComposer(page, message) {
     await page.waitForTimeout(150);
   }
 
-  // Long audit wakes are normally pasted by a human. Put the message on the
-  // browser clipboard, keep the visible composer focused, and issue a normal
-  // keyboard paste. Do not inject the value into the DOM.
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://chatgpt.com' });
-  await page.evaluate(async (text) => {
-    await navigator.clipboard.writeText(text);
-  }, message);
+  const display = env.DISPLAY || ':99';
+  const clip = spawnSync('xclip', ['-selection', 'clipboard', '-in'], {
+    input: message,
+    encoding: 'utf8',
+    env: { ...process.env, DISPLAY: display },
+    timeout: 15000,
+  });
+  if (clip.error || clip.status !== 0) {
+    throw new BrowserAgentError(
+      'OS_CLIPBOARD_UNAVAILABLE',
+      'Unable to stage reviewer wake on the visible X11 clipboard: ' + (clip.error?.message || clip.stderr || 'xclip failed'),
+      true
+    );
+  }
+
   await page.waitForTimeout(180);
   await composer.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
-  await page.waitForTimeout(320);
+  await page.waitForTimeout(450);
 
   const filledText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
   const normalizedFilled = normalizeVisibleText(filledText);
@@ -388,17 +397,17 @@ async function fillComposer(page, message) {
   const minimumExpectedLength = Math.min(marker.length, Math.floor(normalizedMessage.length * 0.65));
   const prefixMatches = marker.length > 0 && normalizedFilled.includes(marker);
   const lengthLooksPlausible = normalizedFilled.length >= minimumExpectedLength;
+  console.log('[github-playwright] composer-os-paste=' + JSON.stringify({
+    normalizedFilledLength: normalizedFilled.length,
+    normalizedMessageLength: normalizedMessage.length,
+    markerLength: marker.length,
+    prefixMatches,
+    lengthLooksPlausible
+  }));
   if (!prefixMatches || !lengthLooksPlausible) {
-    console.log('[github-playwright] composer-paste-verification=' + JSON.stringify({
-      normalizedFilledLength: normalizedFilled.length,
-      normalizedMessageLength: normalizedMessage.length,
-      markerLength: marker.length,
-      prefixMatches,
-      lengthLooksPlausible
-    }));
     throw new BrowserAgentError(
       'COMPOSER_FILL_MISMATCH',
-      'Composer did not retain the normalized wake marker after clipboard paste',
+      'Composer did not retain the normalized wake marker after X11 clipboard paste',
       true
     );
   }
