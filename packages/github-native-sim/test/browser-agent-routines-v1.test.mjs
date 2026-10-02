@@ -446,12 +446,29 @@ test('reviewer repair request schema is exact and reset-only', () => {
   }
 });
 
+test('Lite browser orchestrator request bridge validates push requests and dispatches only the existing orchestrator', () => {
+  const workflow = read('.github/workflows/lite-audit-browser-orchestrator-request-v1.yml');
+  assert.match(workflow, /process\/agent-upload\/lite-browser-orchestrator\/\*\.json/);
+  assert.match(workflow, /curveyield-lite-browser-orchestrator-request-v1/);
+  assert.match(workflow, /\.action=="DISPATCH"/);
+  assert.match(workflow, /campaignPath.*startswith\("campaigns\/"\)/);
+  assert.match(workflow, /gh workflow run lite-audit-browser-orchestrator-v1\.yml/);
+  assert.match(workflow, /-f campaign_id="\$campaign_id"/);
+  assert.match(workflow, /-f campaign_name="\$campaign_name"/);
+  assert.match(workflow, /-f campaign_path="\$campaign_path"/);
+  assert.match(workflow, /-f audit_controller_ref="\$controller_ref"/);
+  assert.doesNotMatch(workflow, /browser-agent-wake\.yml/);
+  assert.doesNotMatch(workflow, /lite-phase0-bootstrap-v1\.yml/);
+});
+
 test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualification', () => {
   const paths = [
     '.github/workflows/browser-agent-wake.yml',
     '.github/workflows/browser-agent-watchdog.yml',
     '.github/workflows/browser-agent-reviewer-repair-v1.yml',
     '.github/workflows/lite-audit-browser-orchestrator-v1.yml',
+    '.github/workflows/lite-audit-browser-orchestrator-request-v1.yml',
+    'process/agent-upload/lite-browser-orchestrator/demo-v1.json',
     'scripts/browser-agent-wake.mjs',
     'scripts/browser-operations-v1.mjs',
     'scripts/browser-routine-engine-v1.mjs',
