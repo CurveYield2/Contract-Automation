@@ -17,6 +17,7 @@ const requestedUrl = env.CHAT_URL || '';
 let browserRoutineId = env.BROWSER_ROUTINE_ID || '';
 let projectName = env.CHATGPT_PROJECT_NAME || '';
 let requestedChatName = env.CHATGPT_CHAT_NAME || '';
+let projectCreationPolicy = env.PROJECT_CREATION_POLICY || '';
 const thinkingEffort = (env.CHATGPT_THINKING_EFFORT || '').trim();
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 const encryptedSessionPath = env.CHATGPT_SESSION_STATE_PATH || '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
@@ -116,6 +117,9 @@ async function hydrateBrowserContextFromRegistration() {
           ? projectName + ' ' + registration.activeAssignment.reviewer
           : '')
       );
+    }
+    if (!projectCreationPolicy) {
+      projectCreationPolicy = String(registration.projectCreationPolicy || '');
     }
     console.log('[github-playwright] browser-context-source=campaign-registration ' + JSON.stringify({
       routineId: browserRoutineId || null,
@@ -654,7 +658,29 @@ async function runWithPage(providerName, connect) {
       // ChatGPT UI has cleared any browser challenge and exposed a composer.
       await ensureComposer(page);
       routine = await loadBrowserRoutine(browserRoutineId);
-      try {
+      const skipProjectCreation =
+        browserRoutineId === 'audit-lite-reviewer-v1' &&
+        projectCreationPolicy === 'skip';
+
+      if (skipProjectCreation) {
+        console.warn('[github-playwright] project-create-policy-skip=' + JSON.stringify({
+          projectName,
+          fallback: 'normal-chat',
+        }));
+        projectUrl = '';
+        routineBefore = [{
+          operation: 'chatgpt.ensure_project',
+          result: {
+            projectName,
+            projectUrl: '',
+            created: false,
+            challenged: true,
+            fallback: 'normal-chat',
+            policy: 'skip',
+          },
+        }];
+        await ensureComposer(page);
+      } else try {
         routineBefore = await runBrowserRoutineStage({
           page,
           routine,
@@ -813,6 +839,7 @@ async function runWithPage(providerName, connect) {
       projectName: projectName || null,
       projectUrl: projectUrl || null,
       projectChallengeFallback,
+      projectCreationPolicy: projectCreationPolicy || null,
       requestedChatName: requestedChatName || null,
       chatRenamed: renameResult?.renamed ?? null,
       thinkingEffort: thinkingEffortResult,

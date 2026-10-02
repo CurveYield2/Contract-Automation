@@ -40,5 +40,7 @@
         "STOPPED_BY_HUMAN"
       ]
     }
-  }
+  },
+  "projectCreationPolicy": "skip",
+  "projectCreationPolicyReason": "Repeated cf-mitigated=challenge on normal ChatGPT Project creation POST; preserve Phase 1 reviewer continuity in normal Chat."
 }

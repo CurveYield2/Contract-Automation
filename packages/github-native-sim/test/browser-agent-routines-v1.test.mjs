@@ -178,6 +178,16 @@ test('watchdog observation classifies home-exit challenge and auth walls as infr
   assert.match(source, /failures\.find\(\(entry\) => entry\.code === 'AUTH_REQUIRED'\)/);
 });
 
+test('campaign registration can preselect normal-chat continuity after repeated Project challenges', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /projectCreationPolicy/);
+  assert.match(source, /registration\.projectCreationPolicy/);
+  assert.match(source, /projectCreationPolicy === 'skip'/);
+  assert.match(source, /project-create-policy-skip/);
+  const registration = JSON.parse(read('process/browser-agent-wake/registrations/curveyield-dex-v16-source-r2.json'));
+  assert.equal(registration.projectCreationPolicy, 'skip');
+});
+
 test('Lite reviewer wake falls back to a normal durable chat when only Project creation is Cloudflare-challenged', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /project-create-challenged-fallback/);
