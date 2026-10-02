@@ -329,12 +329,21 @@ async function composerDiagnostics(page) {
   });
 }
 
+function normalizeVisibleText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function visibleMessageMarker(message, maxLength = 160) {
+  return normalizeVisibleText(message).slice(0, maxLength);
+}
+
 async function wakeMarkerVisible(page, marker) {
+  const normalizedMarker = normalizeVisibleText(marker);
   const users = page.locator('[data-message-author-role="user"]');
   const count = await users.count().catch(() => 0);
   for (let i = Math.max(0, count - 8); i < count; i += 1) {
-    const text = await users.nth(i).innerText().catch(() => '');
-    if (text.includes(marker)) return { visible: true, userCount: count };
+    const text = normalizeVisibleText(await users.nth(i).innerText().catch(() => ''));
+    if (normalizedMarker && text.includes(normalizedMarker)) return { visible: true, userCount: count };
   }
   return { visible: false, userCount: count };
 }
@@ -373,16 +382,32 @@ async function fillComposer(page, message) {
   await page.waitForTimeout(320);
 
   const filledText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
-  const marker = message.slice(0, Math.min(120, message.length));
-  if (!filledText.includes(marker)) {
-    throw new BrowserAgentError('COMPOSER_FILL_MISMATCH', 'Composer did not retain the exact wake marker after keyboard typing', true);
+  const normalizedFilled = normalizeVisibleText(filledText);
+  const normalizedMessage = normalizeVisibleText(message);
+  const marker = visibleMessageMarker(message);
+  const minimumExpectedLength = Math.min(marker.length, Math.floor(normalizedMessage.length * 0.65));
+  const prefixMatches = marker.length > 0 && normalizedFilled.includes(marker);
+  const lengthLooksPlausible = normalizedFilled.length >= minimumExpectedLength;
+  if (!prefixMatches || !lengthLooksPlausible) {
+    console.log('[github-playwright] composer-paste-verification=' + JSON.stringify({
+      normalizedFilledLength: normalizedFilled.length,
+      normalizedMessageLength: normalizedMessage.length,
+      markerLength: marker.length,
+      prefixMatches,
+      lengthLooksPlausible
+    }));
+    throw new BrowserAgentError(
+      'COMPOSER_FILL_MISMATCH',
+      'Composer did not retain the normalized wake marker after clipboard paste',
+      true
+    );
   }
   return composer;
 }
 
 async function post(page, message) {
   if (!message) throw new Error('Wake message is empty');
-  const marker = message.slice(0, Math.min(120, message.length));
+  const marker = visibleMessageMarker(message);
   const requestedIdleWait = Number.parseInt(env.IDLE_WAIT_MS || '600000', 10);
   const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
   await waitForChatIdle(page, idleWaitMs);
@@ -460,7 +485,7 @@ async function post(page, message) {
 }
 
 async function persistedWakeVisible(page, message) {
-  const marker = message.slice(0, Math.min(120, message.length));
+  const marker = visibleMessageMarker(message);
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     const state = await wakeMarkerVisible(page, marker);
@@ -472,7 +497,7 @@ async function persistedWakeVisible(page, message) {
 }
 
 async function postWithBackendVerification(page, message) {
-  const marker = message.slice(0, Math.min(120, message.length));
+  const marker = visibleMessageMarker(message);
   let acceptedExact = null;
   const acceptedCandidates = [];
 
