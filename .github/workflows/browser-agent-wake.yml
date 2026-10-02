@@ -315,6 +315,8 @@ jobs:
 
       - name: Deliver wake through home-exit Playwright
         id: deliver
+        env:
+          MANUAL_CHALLENGE_WAIT_MINUTES: ${{ inputs.manual_challenge_wait_minutes }}
         shell: bash
         run: |
           set -euo pipefail
@@ -322,7 +324,8 @@ jobs:
           export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
           export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
 
-          export MANUAL_CHALLENGE_WAIT_MS=$(( ${{ inputs.manual_challenge_wait_minutes }} * 60000 ))
+          [[ "$MANUAL_CHALLENGE_WAIT_MINUTES" =~ ^[0-9]+$ ]] || { echo "::error::manual_challenge_wait_minutes must be numeric"; exit 1; }
+          export MANUAL_CHALLENGE_WAIT_MS=$((MANUAL_CHALLENGE_WAIT_MINUTES * 60000))
           set +e
           node scripts/browser-agent-wake.mjs
           rc=$?
