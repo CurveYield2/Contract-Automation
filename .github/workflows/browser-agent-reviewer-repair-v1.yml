@@ -103,6 +103,7 @@ jobs:
           directory_path="$(jq -r '.watchdog.gate.statePath' "$REGISTRATION")"
           milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' "$REGISTRATION")"
           project_name="$(jq -r '.chatgptProject.name // empty' "$REGISTRATION")"
+          project_url="$(jq -r '.chatgptProject.url // empty' "$REGISTRATION")"
           gh api "repos/$gate_repo/contents/$directory_path?ref=$gate_ref" --jq '.content' | base64 -d > /tmp/campaign-directory.json
           test "$(jq -r '.campaignId' /tmp/campaign-directory.json)" = "$CAMPAIGN_ID"
           directory_schema="$(jq -r '.schemaVersion // empty' /tmp/campaign-directory.json)"
@@ -203,10 +204,11 @@ jobs:
               "Repair reason: $reason" > /tmp/replacement-wake.txt
           fi
           jq -cn \
-            --arg routine 'audit-lite-reviewer-v1' \
+            --arg routine 'audit-lite-reviewer-project-open-v1' \
             --arg project "$project_name" \
+            --arg projectUrl "$project_url" \
             --arg chat "$campaign_name $reviewer replacement" \
-            '{routineId:$routine,projectName:$project,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"standard"}' \
+            '{routineId:$routine,projectName:$project,projectUrl:$projectUrl,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"standard"}' \
             > /tmp/replacement-browser-context.json
           {
             echo "gate_repo=$gate_repo"
