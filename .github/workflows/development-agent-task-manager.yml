@@ -155,13 +155,16 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Select target-repository credential
-        if: env.TARGET_REPOSITORY == 'CurveYield2/Audit-Controller'
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: |
+          set -euo pipefail
+          if [ "$TARGET_REPOSITORY" = 'CurveYield2/Audit-Controller' ]; then
+            bash scripts/select-audit-controller-token.sh
+          fi
 
       - name: Validate specification and durable branch
         env:
