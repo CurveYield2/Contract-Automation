@@ -143,7 +143,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Resolve idempotent reviewer launch
         if: inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer'
@@ -302,7 +302,7 @@ jobs:
           export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
           export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
           set +e
-          node scripts/browser-agent-wake.mjs
+          node automation/scripts/browser-agent-wake.mjs
           rc=$?
           set -e
 

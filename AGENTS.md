@@ -67,8 +67,8 @@ For Audit V7, this repository has exactly one active execution workflow, one act
 
 - execution workflow: `.github/workflows/audit-controller-execution.yml`
 - qualification workflow: `.github/workflows/v7-execution-infrastructure-qualification.yml`
-- runner manifest: `process/RUNNER_MANIFEST.json`
-- CLI: `packages/github-native-sim/src/v7-cli.mjs`
+- runner manifest: `automation/control-plane/RUNNER_MANIFEST.json`
+- CLI: `automation/runtime/github-native-sim/src/v7-cli.mjs`
 
 Agents MUST NOT choose among historical workflow/manifests or recreate version-suffixed active entrypoints.
 
@@ -114,11 +114,11 @@ Requester-controlled execution fields remain forbidden, including `rpc`, `rpcUrl
 
 The canonical entrypoint is:
 
-`packages/github-native-sim/harness-skeletons-v2/README_v2.md`
+`automation/runtime/github-native-sim/harness-skeletons-v2/README_v2.md`
 
 The canonical directory is:
 
-`packages/github-native-sim/harness-skeletons-v2/`
+`automation/runtime/github-native-sim/harness-skeletons-v2/`
 
 Before authoring or repairing a Phase-6 Medusa/Foundry harness, agents MUST open that README. If the path does not resolve on the first lookup, search this repository for `harness-skeletons-v2` or the exact skeleton filenames. While the repository is accessible, do not ask the human where the skeleton code is and do not recreate supplied skeletons from memory.
 
@@ -177,7 +177,7 @@ Infrastructure qualification is repository-level and outside individual audit ca
 
 Static/schema/unit/build qualification runs on relevant PRs. Live mutable-Anvil qualification runs only on trusted `main`/manual execution, where the approved secret is available.
 
-Phase 7 uses `packages/github-native-sim/src/phase7-fork-preflight-v2.mjs` plus standardized lifecycle recipes. Unsupported required behavior is `RECIPE_GAP`, not permission for arbitrary commands.
+Phase 7 uses `automation/runtime/github-native-sim/src/phase7-fork-preflight-v2.mjs` plus standardized lifecycle recipes. Unsupported required behavior is `RECIPE_GAP`, not permission for arbitrary commands.
 
 If infrastructure must change after campaign admission, preserve the failed attempt and return through `RUNNER_REPAIR_REBIND`; do not change target source to repair runner infrastructure.
 

@@ -40,7 +40,7 @@ jobs:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
       - name: Checkout Audit-Controller
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -56,7 +56,7 @@ jobs:
         id: advance
         run: |
           set -euo pipefail
-          node scripts/lite-phase-receipt-controller-v1.mjs \
+          node automation/scripts/lite-phase-receipt-controller-v1.mjs \
             --controller-root .audit-controller \
             --campaign-path "${{ inputs.campaign_path }}" \
             --phase-sequence "${{ inputs.phase_sequence }}" | tee /tmp/receipt-transition.json

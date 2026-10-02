@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'process/agent-upload/lite-v7-execution/*.json'
+      - 'automation/control-plane/agent-upload/lite-v7-execution/*.json'
   workflow_dispatch:
     inputs:
       campaign_id:
@@ -67,7 +67,7 @@ jobs:
           else
             mapfile -t changed < <(
               gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq '.files[]? | select(.status != "removed") | .filename' |
-              grep -E '^process/agent-upload/lite-v7-execution/[^/]+\.json$' || true
+              grep -E '^automation/control-plane/agent-upload/lite-v7-execution/[^/]+\.json$' || true
             )
             [ "${#changed[@]}" -eq 1 ] || { echo "::error::Expected exactly one changed Lite V7 execution dispatch request; found ${#changed[@]}."; exit 1; }
             encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/${changed[0]}?ref=$GITHUB_SHA" --jq '.content')"
@@ -109,7 +109,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Verify exact Phase-9 campaign/request binding
         env:

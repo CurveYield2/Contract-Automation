@@ -157,7 +157,7 @@ jobs:
         run: |
           run_id="${CANONICAL_RUN_ID:-unavailable}"
           gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed \
-            --comment "Canonical V7 qualification dispatch handled. Run ID: $run_id. See process/V7_QUALIFICATION_LAST_RUN.json for the recorded outcome."
+            --comment "Canonical V7 qualification dispatch handled. Run ID: $run_id. See automation/control-plane/V7_QUALIFICATION_LAST_RUN.json for the recorded outcome."
 
       - name: Continue queued qualification issues
         if: always()

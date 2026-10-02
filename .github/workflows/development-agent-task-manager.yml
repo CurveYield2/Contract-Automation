@@ -6,7 +6,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'process/development-agent-task-manager/requests/*.json'
+      - 'automation/control-plane/development-agent-task-manager/requests/*.json'
   workflow_dispatch:
     inputs:
       operation:
@@ -97,7 +97,7 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t request_paths < <(
-            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA"               --jq '.files[]? | select(.status!="removed") | .filename | select(startswith("process/development-agent-task-manager/requests/") and endswith(".json"))'
+            gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA"               --jq '.files[]? | select(.status!="removed") | .filename | select(startswith("automation/control-plane/development-agent-task-manager/requests/") and endswith(".json"))'
           )
           [ "${#request_paths[@]}" -eq 1 ] || {
             echo "::error::Exactly one task-manager request file must be created or changed per triggering commit."
@@ -217,7 +217,7 @@ jobs:
           - Audit-Controller must contain no GitHub Actions workflows; workflows belong in Contract-Automation.
           - Do not restart completed work. Inspect the branch and current authoritative state first.
           - Keep testing as part of implementation. Do not declare completion merely because code was written.
-          - When the specification is fully implemented and verified, write process/development-agent-task-manager/completions/$TASK_MANAGER_SAFE_ID.json on the target branch using schema curveyield-development-task-completion-v1. It must include managerId, status COMPLETE, specificationSha256, skillSha256, implementationHeadSha equal to the commit immediately before the completion-receipt commit, and tests with every entry status PASS.
+          - When the specification is fully implemented and verified, write automation/control-plane/development-agent-task-manager/completions/$TASK_MANAGER_SAFE_ID.json on the target branch using schema curveyield-development-task-completion-v1. It must include managerId, status COMPLETE, specificationSha256, skillSha256, implementationHeadSha equal to the commit immediately before the completion-receipt commit, and tests with every entry status PASS.
           - Continue until that machine-readable completion condition is genuinely satisfied.
 
           $INITIAL_ASSIGNMENT
@@ -227,7 +227,7 @@ jobs:
           export WAKE_ID="$MANAGER_ID-generation-1"
           export WAKE_MESSAGE="$(cat /tmp/task-manager-assignment.txt)"
           export WAKE_RESULT_PATH='/tmp/task-manager-start.json'
-          xvfb-run -a node scripts/browser-agent-wake.mjs
+          xvfb-run -a node automation/scripts/browser-agent-wake.mjs
           jq -e '.ok==true and (.chatUrl|type=="string" and test("^https://chatgpt.com/c/"))' /tmp/task-manager-start.json >/dev/null
 
       - name: Persist active task-manager state
@@ -396,7 +396,7 @@ jobs:
           target_branch="$(jq -r '.target.branch' /tmp/task-manager-state.json)"
           spec_sha="$(jq -r '.specification.sha256' /tmp/task-manager-state.json)"
           skill_sha="$(jq -r '.skill.sha256' /tmp/task-manager-state.json)"
-          receipt_path="process/development-agent-task-manager/completions/$SAFE_ID.json"
+          receipt_path="automation/control-plane/development-agent-task-manager/completions/$SAFE_ID.json"
           encoded="$(gh api "repos/$target_repo/contents/$receipt_path?ref=$target_branch" --jq '.content' 2>/dev/null || true)"
           if [ -z "$encoded" ]; then
             echo 'complete=false' >> "$GITHUB_OUTPUT"
@@ -479,7 +479,7 @@ jobs:
           export WAKE_ACTION='observe'
           export WAKE_RESULT_PATH='/tmp/task-manager-observe.json'
 
-          if ! xvfb-run -a node scripts/browser-agent-wake.mjs; then
+          if ! xvfb-run -a node automation/scripts/browser-agent-wake.mjs; then
             echo "::warning::Browser providers could not observe the chat; preserving the current worker for the next sweep rather than guessing that the agent died."
             jq '.lastDecision="OBSERVATION_PROVIDER_FAILURE" | .updatedAt=(now|todate)' /tmp/task-manager-state.json > /tmp/task-manager-next.json
             mv /tmp/task-manager-next.json /tmp/task-manager-state.json
@@ -504,7 +504,7 @@ jobs:
                 export REFRESH_BEFORE_WAKE='false'
                 if [ "$attempt" -gt 1 ]; then export REFRESH_BEFORE_WAKE='true'; fi
                 export WAKE_RESULT_PATH="/tmp/task-manager-attempt-$attempt.json"
-                if ! xvfb-run -a node scripts/browser-agent-wake.mjs; then
+                if ! xvfb-run -a node automation/scripts/browser-agent-wake.mjs; then
                   echo "::warning::Prompt attempt $attempt hit a browser-provider failure; preserving the worker instead of declaring it dead."
                   dead=false
                   failure_reason='PROMPT_PROVIDER_FAILURE'
@@ -576,7 +576,7 @@ jobs:
 
               The previous implementation chat is no longer functioning. Repository state is authoritative. Resume from the exact target-branch head above and continue the same development specification without repeating completed work. Inspect commits, tests, open PR/state, and current files before changing anything. Reuse existing workflows and primitives whenever possible. Never add a GitHub Actions workflow to Audit-Controller. Commit durable progress frequently.
 
-              Completion remains machine-gated by process/development-agent-task-manager/completions/$SAFE_ID.json using schema curveyield-development-task-completion-v1 with exact specification/skill digests and passing tests. Continue until that condition is genuinely satisfied.
+              Completion remains machine-gated by automation/control-plane/development-agent-task-manager/completions/$SAFE_ID.json using schema curveyield-development-task-completion-v1 with exact specification/skill digests and passing tests. Continue until that condition is genuinely satisfied.
               EOF
 
               export WAKE_MODE='create_fresh'
@@ -586,7 +586,7 @@ jobs:
               export WAKE_MESSAGE="$(cat /tmp/task-manager-recovery.txt)"
               export WAKE_RESULT_PATH='/tmp/task-manager-replacement.json'
               unset REFRESH_BEFORE_WAKE RESPONSE_WAIT_MS
-              if xvfb-run -a node scripts/browser-agent-wake.mjs && jq -e '.ok==true and (.chatUrl|test("^https://chatgpt.com/c/"))' /tmp/task-manager-replacement.json >/dev/null; then
+              if xvfb-run -a node automation/scripts/browser-agent-wake.mjs && jq -e '.ok==true and (.chatUrl|test("^https://chatgpt.com/c/"))' /tmp/task-manager-replacement.json >/dev/null; then
                 new_url="$(jq -r '.chatUrl' /tmp/task-manager-replacement.json)"
                 new_count="$(jq -r '.after.assistantCount // 0' /tmp/task-manager-replacement.json)"
                 new_hash="$(jq -r '.after.lastAssistantHash // empty' /tmp/task-manager-replacement.json)"

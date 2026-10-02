@@ -10,7 +10,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'process/agent-upload/audit-source-initialization/*.json'
+      - 'automation/control-plane/agent-upload/audit-source-initialization/*.json'
 
 permissions:
   contents: write
@@ -47,7 +47,7 @@ jobs:
           else
             mapfile -t requests < <(
               gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" \
-                --jq '.files[]? | select(.status!="removed") | .filename | select(startswith("process/agent-upload/audit-source-initialization/") and endswith(".json"))'
+                --jq '.files[]? | select(.status!="removed") | .filename | select(startswith("automation/control-plane/agent-upload/audit-source-initialization/") and endswith(".json"))'
             )
             [ "${#requests[@]}" -eq 1 ] || { echo "::error::Exactly one URL request file must change per trigger."; exit 1; }
             source_url="$(jq -r '.source_url // empty' "${requests[0]}")"
@@ -64,7 +64,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Initialize audit source and Lite campaign
         env:
@@ -74,4 +74,4 @@ jobs:
           SOURCE_URL: ${{ steps.request.outputs.source_url }}
           REQUEST_ID: ${{ steps.request.outputs.request_id }}
         shell: bash
-        run: bash scripts/audit-source-initialization/run-v1.sh
+        run: bash automation/scripts/audit-source-initialization/run-v1.sh

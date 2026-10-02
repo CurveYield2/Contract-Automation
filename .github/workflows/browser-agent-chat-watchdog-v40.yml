@@ -7,7 +7,7 @@ on:
     branches:
       - main
     paths:
-      - 'process/browser-agent-chat-watchdog/requests/*.json'
+      - 'automation/control-plane/browser-agent-chat-watchdog/requests/*.json'
 
 permissions:
   contents: write
@@ -49,7 +49,7 @@ jobs:
           if [ "$EVENT_NAME" = "push" ]; then
             request_path="$(
               git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" |
-              grep -E '^process/browser-agent-chat-watchdog/requests/[^/]+\.json$' |
+              grep -E '^automation/control-plane/browser-agent-chat-watchdog/requests/[^/]+\.json$' |
               tail -n 1
             )"
             [ -n "$request_path" ] && [ -f "$request_path" ] || {
@@ -184,7 +184,7 @@ jobs:
           export WAKE_RESULT_PATH='/tmp/observe.json'
 
           observe_rc=0
-          xvfb-run -a node scripts/browser-agent-wake.mjs || observe_rc=$?
+          xvfb-run -a node automation/scripts/browser-agent-wake.mjs || observe_rc=$?
 
           challenge="$(
             jq -r '
@@ -454,7 +454,7 @@ jobs:
             export WAKE_MESSAGE='GET BACK TO WORK'
             export WAKE_RESULT_PATH='/tmp/wake.json'
 
-            if xvfb-run -a node scripts/browser-agent-wake.mjs; then
+            if xvfb-run -a node automation/scripts/browser-agent-wake.mjs; then
               posted="$(jq -r '.posted // false' /tmp/wake.json)"
               after_challenge="$(jq -r '.after.humanChallenge // false' /tmp/wake.json)"
               after_login="$(jq -r '.after.loginPrompt // false' /tmp/wake.json)"

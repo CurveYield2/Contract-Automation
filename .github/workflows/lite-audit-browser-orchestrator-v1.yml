@@ -47,7 +47,7 @@ jobs:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Resolve campaign directory entry
         id: directory
@@ -81,13 +81,13 @@ jobs:
           set -euo pipefail
           directory_schema="$(jq -r '.schemaVersion' ".audit-controller/${{ steps.directory.outputs.path }}")"
           if [ "$directory_schema" = "curveyield-audit-campaign-directory-entry-v2" ]; then
-            node scripts/prepare-lite-assignment-successor-v2.mjs \
+            node automation/scripts/prepare-lite-assignment-successor-v2.mjs \
               --controller-root .audit-controller \
               --campaign-directory-path "${{ steps.directory.outputs.path }}" \
               --audit-controller-ref "$AUDIT_CONTROLLER_REF" | tee /tmp/lite-successor.json
             boundary="PHASE_$(jq -r '.incomingPhaseSequence' /tmp/lite-successor.json)_WORK_PACKET"
           else
-            node scripts/prepare-lite-receipt-successor-v1.mjs \
+            node automation/scripts/prepare-lite-receipt-successor-v1.mjs \
               --controller-root .audit-controller \
               --campaign-directory-path "${{ steps.directory.outputs.path }}" | tee /tmp/lite-successor.json
             boundary="$(jq -r '.boundary' /tmp/lite-successor.json)"
@@ -124,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
-          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          registration="automation/control-plane/browser-agent-wake/registrations/$safe_campaign.json"
           api="repos/$GITHUB_REPOSITORY/contents/$registration"
           jq -n \
             --arg campaignId "$CAMPAIGN_ID" \

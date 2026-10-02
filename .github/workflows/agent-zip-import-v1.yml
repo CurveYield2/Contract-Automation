@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'process/agent-upload/requests/*.json'
+      - 'automation/control-plane/agent-upload/requests/*.json'
 
 permissions:
   contents: write
@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           mapfile -t requests < <(
             gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" \
-              --jq '.files[]? | select(.status!="removed") | .filename | select(startswith("process/agent-upload/requests/") and endswith(".json"))'
+              --jq '.files[]? | select(.status!="removed") | .filename | select(startswith("automation/control-plane/agent-upload/requests/") and endswith(".json"))'
           )
           [ "${#requests[@]}" -eq 1 ] || {
             echo "::error::Exactly one import request file must be created or changed per triggering commit."
@@ -100,7 +100,7 @@ jobs:
               if [ "$format" = 'zip' ]; then [[ "$filename" == *.zip ]]; fi
               test "$target_repo" = "$GITHUB_REPOSITORY"
               test "$target_branch" = 'main'
-              [[ "$target_path" == process/development-agent-task-manager/* ]]
+              [[ "$target_path" == automation/control-plane/development-agent-task-manager/* ]]
               [[ "$target_path" != /* ]]
               [[ "$target_path" != *".."* ]]
               [[ "$target_path" != *"\\"* ]]
@@ -132,7 +132,7 @@ jobs:
           PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
-        run: bash scripts/select-audit-controller-token.sh
+        run: bash automation/scripts/select-audit-controller-token.sh
 
       - name: Download import object once
         env:
@@ -310,7 +310,7 @@ jobs:
                 workflowRunId:$runId,
                 completedAt:(now|todate)
               }' > /tmp/import-report.json
-            report_dir='process/audit-skill-authority-import/reports'
+            report_dir='automation/control-plane/audit-skill-authority-import/reports'
             report_message='chore(audit): record skill authority import'
           else
             jq -n \
@@ -332,7 +332,7 @@ jobs:
                 workflowRunId:$runId,
                 completedAt:(now|todate)
               }' > /tmp/import-report.json
-            report_dir='process/development-agent-task-manager/authority-import/reports'
+            report_dir='automation/control-plane/development-agent-task-manager/authority-import/reports'
             report_message='chore(task-manager): record authority import'
           fi
 

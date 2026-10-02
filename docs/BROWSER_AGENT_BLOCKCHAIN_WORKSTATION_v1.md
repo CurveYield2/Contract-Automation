@@ -58,7 +58,7 @@ Before changing or running anything:
 2. For GitHub Actions operation, read:
    `docs/CHATGPT_GITHUB_ACTIONS_VIA_GITHUB_APP.md`
 3. For Audit V7 execution, inspect:
-   `process/V7_QUALIFICATION_STATUS.json`
+   `automation/control-plane/V7_QUALIFICATION_STATUS.json`
 4. For Audit V7 CLI operations, use the canonical commands documented in `AGENTS.md`.
 
 Do not create duplicate workflows, duplicate runners, alternate RPC systems, or replacement V7 entrypoints merely because the existing trigger is not obvious.
@@ -124,7 +124,7 @@ Generated private audit outputs are not uploaded as public artifacts. The canoni
 
 First inspect:
 
-`process/V7_QUALIFICATION_STATUS.json`
+`automation/control-plane/V7_QUALIFICATION_STATUS.json`
 
 If the current status is `PASS`, use the admitted qualified runner identity recorded there. Do not assume a newer raw `main` commit is qualified.
 
@@ -169,7 +169,7 @@ For an Audit V7 campaign:
 
 Before authoring or repairing a Phase-6 harness, open:
 
-`packages/github-native-sim/harness-skeletons-v2/README_v2.md`
+`automation/runtime/github-native-sim/harness-skeletons-v2/README_v2.md`
 
 Then use:
 

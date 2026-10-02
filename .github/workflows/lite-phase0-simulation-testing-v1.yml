@@ -3,7 +3,7 @@ name: Lite Phase 0 Simulation Testing v1
 on:
   push:
     paths:
-      - 'packages/github-native-sim/audit-harnesses/phase0-simulation-testing-v1/requests/*.json'
+      - 'automation/runtime/github-native-sim/audit-harnesses/phase0-simulation-testing-v1/requests/*.json'
   workflow_dispatch:
     inputs:
       campaign_id:
@@ -51,7 +51,7 @@ jobs:
             audit_controller_ref="${DISPATCH_AUDIT_CONTROLLER_REF:-main}"
             cancel_run_id=""
           else
-            request="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -E '^packages/github-native-sim/audit-harnesses/phase0-simulation-testing-v1/requests/.*[.]json$' | tail -n 1)"
+            request="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -E '^automation/runtime/github-native-sim/audit-harnesses/phase0-simulation-testing-v1/requests/.*[.]json$' | tail -n 1)"
             test -n "$request" || { echo "::error::No Simulation Testing request file found in trigger commit"; exit 1; }
             campaign_id="$(jq -r '.campaign_id' "$request")"
             campaign_path="$(jq -r '.campaign_path' "$request")"
@@ -80,7 +80,7 @@ jobs:
 
       - name: Run isolated Simulation Testing fork
         if: steps.request.outputs.cancel_run_id == ''
-        uses: ./packages/github-native-sim/audit-harnesses/phase0-simulation-testing-v1
+        uses: ./automation/runtime/github-native-sim/audit-harnesses/phase0-simulation-testing-v1
         with:
           campaign_id: ${{ steps.request.outputs.campaign_id }}
           campaign_path: ${{ steps.request.outputs.campaign_path }}
