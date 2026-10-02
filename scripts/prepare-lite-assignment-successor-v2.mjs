@@ -23,23 +23,23 @@ const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'
 if(!['SEALED','SKIPPED'].includes(predecessor.phase?.status)) throw new Error('predecessor receipt is not sealed/skipped');
 const controllerRef=a['audit-controller-ref'];
 const authorityUrl='https://github.com/CurveYield2/Audit-Controller/tree/'+controllerRef+'/Audit%20Skill%20-%20Current%20Authority';
+const validationRequestPath='process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json';
+const campaignUrl='https://github.com/CurveYield2/Audit-Controller/tree/'+controllerRef+'/'+directory.workspacePath.replaceAll(' ','%20');
 const lines=[
-  'Campaign type: LITE',
-  'Campaign name: '+directory.campaignName,
-  'Campaign folder URL: https://github.com/CurveYield2/Audit-Controller/tree/'+controllerRef+'/'+directory.workspacePath.replaceAll(' ','%20'),
-  'Campaign ID / generation: '+directory.campaignId+' / '+directory.campaignGenerationId,
-  'Incoming reviewer: '+assignment.reviewer,
-  'Assigned phase: '+assignment.phaseId,
-  'Current authority: '+authorityUrl,
-  'Predecessor sealed receipt: '+assignment.predecessorReceiptPath,
-  'Phase schema: '+assignment.workSchemaPath,
-  'Phase work form: '+assignment.workFormPath,
-  'Controller-owned phase final report path: '+(assignment.finalReportPath??'NONE_AUTOMATION_ONLY'),
-  'Controller-owned phase packet path: '+assignment.packetPath,
-  'Automation-derived input files: '+(assignment.derivedInputPaths.length?assignment.derivedInputPaths.join(', '):'NONE'),
-  'Controller validation request path: process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json in CurveYield2/Contract-Automation main',
-  'Controller validation request schema: {"schemaVersion":"curveyield-lite-phase-boundary-request-v1","campaignId":"'+directory.campaignId+'","phaseSequence":'+assignment.phaseSequence+',"auditControllerRef":"'+controllerRef+'","attempt":<increment on each validation request>}',
-  'Use the GitHub connector app. Perform only the assigned phase. Every agent action must fill its schema-defined Step X Input fields while the action is performed. Preserve controller-prefilled/read-only data. Do not create or edit the Phase Work Packet or phase final report and do not perform controller bookkeeping. At phase end invoke controller validation by creating/updating the request path above; on rework increment attempt and update the same request. Repair only exact substantive deficiencies and wait for CONTROLLER_PHASE_PASS before advancing or retiring.'
+  'You are '+assignment.reviewer+' for the LITE audit "'+directory.campaignName+'".',
+  '',
+  'Start '+assignment.phaseId+' now.',
+  'Campaign: '+campaignUrl,
+  'Audit authority: '+authorityUrl,
+  'Work form: '+assignment.workFormPath,
+  '',
+  'Use the GitHub connector app and follow the current authority for this phase. Use the sealed predecessor evidence and automation-derived inputs already in the campaign; do not redo earlier phases.',
+  '',
+  'Complete only '+assignment.phaseId+' and fill the phase work form as you perform each required step. Do not edit controller-owned reports, packets, receipts, or bookkeeping.',
+  '',
+  'When the phase work is complete, request controller validation by creating/updating '+validationRequestPath+' in CurveYield2/Contract-Automation main using the current lite phase-boundary request schema. Increment attempt only on rework.',
+  '',
+  'Stay on this phase until CONTROLLER_PHASE_PASS. Begin immediately.'
 ];
 const wakeMessage=lines.join('\n');
 process.stdout.write(JSON.stringify({status:'PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,directoryPath:a['campaign-directory-path'],incomingPhaseId:assignment.phaseId,incomingPhaseSequence:assignment.phaseSequence,incomingReviewer:assignment.reviewer,wakeMessage,wakeMessageB64:Buffer.from(wakeMessage).toString('base64')})+'\n');
