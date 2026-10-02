@@ -371,7 +371,17 @@ async function staticResponse(request, env) {
   if (!env.ASSETS) return new Response('Launcher assets binding is unavailable.', { status: 503 });
   const url = new URL(request.url);
   if (url.pathname === '/') url.pathname = '/index_v1.html';
-  return env.ASSETS.fetch(new Request(url, request));
+  const asset = await env.ASSETS.fetch(new Request(url.toString(), {
+    method: 'GET',
+    headers: request.headers,
+  }));
+  const headers = new Headers(asset.headers);
+  headers.set('cache-control', url.pathname.endsWith('.html') ? 'no-store' : 'public, max-age=300');
+  headers.set('x-content-type-options', 'nosniff');
+  headers.set('referrer-policy', 'no-referrer');
+  headers.set('x-frame-options', 'DENY');
+  headers.set('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+  return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
 }
 
 export default {
