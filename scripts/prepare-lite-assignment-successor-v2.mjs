@@ -25,21 +25,33 @@ const controllerRef=a['audit-controller-ref'];
 const authorityUrl='https://github.com/CurveYield2/Audit-Controller/tree/'+controllerRef+'/Audit%20Skill%20-%20Current%20Authority';
 const validationRequestPath='process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json';
 const campaignUrl='https://github.com/CurveYield2/Audit-Controller/tree/'+controllerRef+'/'+directory.workspacePath.replaceAll(' ','%20');
+const validationUrl='https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase-work-packet-controller-v1.yml';
 const lines=[
-  'You are '+assignment.reviewer+' for the LITE audit "'+directory.campaignName+'".',
-  '',
-  'Start '+assignment.phaseId+' now.',
+  'LITE audit: '+directory.campaignName,
+  'Reviewer / phase: '+assignment.reviewer+' / '+assignment.phaseId,
   'Campaign: '+campaignUrl,
-  'Audit authority: '+authorityUrl,
-  'Work form: '+assignment.workFormPath,
+  'Current Audit Skill Authority: '+authorityUrl,
+  'Finalized controller validation: '+validationUrl,
   '',
-  'Use the GitHub connector app and follow the current authority for this phase. Use the sealed predecessor evidence and automation-derived inputs already in the campaign; do not redo earlier phases.',
+  'The Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app as required by that authority.',
   '',
-  'Complete only '+assignment.phaseId+' and fill the phase work form as you perform each required step. Do not edit controller-owned reports, packets, receipts, or bookkeeping.',
+  'Start '+assignment.phaseId+' now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.',
   '',
-  'When the phase work is complete, request controller validation by creating/updating '+validationRequestPath+' in CurveYield2/Contract-Automation main using the current lite phase-boundary request schema. Increment attempt only on rework.',
+  'Assigned work form: '+assignment.workFormPath,
+  'Phase schema: '+assignment.workSchemaPath,
+  'Controller-owned final report: '+assignment.finalReportPath,
+  'Controller-owned Phase Work Packet: '+assignment.packetPath,
+  'Sealed predecessor receipt: '+assignment.predecessorReceiptPath,
+  ...(Array.isArray(assignment.derivedInputPaths) && assignment.derivedInputPaths.length
+    ? ['Controller-derived inputs: '+assignment.derivedInputPaths.join(', ')]
+    : []),
   '',
-  'Stay on this phase until CONTROLLER_PHASE_PASS. Begin immediately.'
+  'Complete only '+assignment.phaseId+'. Fill every required reviewer-owned Step X Input field while performing the work. Preserve controller-prefilled/read-only data. Do not perform controller bookkeeping and do not create or edit controller-owned reports, packets, receipts, routing, or handoff state.',
+  '',
+  'At phase end you MUST invoke the finalized controller validation above by creating/updating '+validationRequestPath+' in CurveYield2/Contract-Automation main using the current lite phase-boundary request schema.',
+  'You are not finished until validation returns CONTROLLER_PHASE_PASS. If validation reports any deficiency, repair exactly the reported substantive deficiency, resubmit validation, and repeat until CONTROLLER_PHASE_PASS. Do not advance, retire, or hand off before PASS.',
+  '',
+  'Begin immediately.'
 ];
 const wakeMessage=lines.join('\n');
 process.stdout.write(JSON.stringify({status:'PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,directoryPath:a['campaign-directory-path'],incomingPhaseId:assignment.phaseId,incomingPhaseSequence:assignment.phaseSequence,incomingReviewer:assignment.reviewer,wakeMessage,wakeMessageB64:Buffer.from(wakeMessage).toString('base64')})+'\n');
