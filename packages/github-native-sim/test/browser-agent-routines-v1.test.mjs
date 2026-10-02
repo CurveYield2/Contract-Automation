@@ -239,6 +239,10 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.match(workflow, /RETRY_INPUTS_JSON:\s*\$\{\{ toJSON\(inputs\) \}\}/);
   assert.match(workflow, /chatgptProject=.*projectName/);
   assert.match(workflow, /activeChat=.*chatName/);
+  assert.match(workflow, /projectCreationPolicy/);
+  assert.match(workflow, /projectCreationPolicyReason/);
+  assert.match(workflow, /browserInteractionPolicy/);
+  assert.match(workflow, /existing-registration\.json/);
 });
 
 test('Lite browser orchestration launches assignment-v2 reviewers with the shared project routine context', () => {
