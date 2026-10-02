@@ -259,10 +259,15 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
 async function ensureSidebarOpen(page) {
   const open = await firstVisible(page, [
     'button[data-testid="open-sidebar-button"]',
+    'button[data-testid="sidebar-toggle-button"]',
     'button[aria-label="Open sidebar"]',
+    'button[aria-label="Toggle sidebar"]',
     'button[aria-label*="Open sidebar"]',
     'button[aria-label*="Show sidebar"]',
-    'button[title*="sidebar"]'
+    'button[aria-label*="sidebar" i]',
+    '[role="button"][aria-label*="sidebar" i]',
+    '[data-testid*="sidebar"][role="button"]',
+    'button[title*="sidebar" i]'
   ], 500);
   if (open) {
     await open.click().catch(() => {});
@@ -270,6 +275,41 @@ async function ensureSidebarOpen(page) {
     return { opened: true };
   }
   return { opened: false };
+}
+
+async function findSemanticProjectAction(page) {
+  const candidates = page.locator('button, a, [role="button"]');
+  const count = Math.min(await candidates.count().catch(() => 0), 160);
+  for (let i = 0; i < count; i += 1) {
+    const candidate = candidates.nth(i);
+    if (!await candidate.isVisible().catch(() => false)) continue;
+    const attrs = [
+      await candidate.innerText().catch(() => ''),
+      await candidate.getAttribute('aria-label').catch(() => ''),
+      await candidate.getAttribute('title').catch(() => ''),
+      await candidate.getAttribute('data-testid').catch(() => '')
+    ].filter(Boolean).join(' ').trim();
+    if (/\b(?:new|add|create)\b[^\n]{0,40}\bproject\b|\bproject\b[^\n]{0,40}\b(?:new|add|create)\b/i.test(attrs)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+async function visibleNavigationDiagnostics(page) {
+  return page.locator('button, a, [role="button"]').evaluateAll(nodes =>
+    nodes.filter(el => el.getClientRects().length).slice(0, 120).map(el => ({
+      tag: el.tagName,
+      text: String(el.innerText || '').trim().slice(0, 90),
+      aria: el.getAttribute('aria-label'),
+      title: el.getAttribute('title'),
+      testid: el.getAttribute('data-testid'),
+      href: (() => {
+        const raw = el.getAttribute('href') || '';
+        return raw.replace(/[a-f0-9]{8}-[a-f0-9-]{12,}/gi, '<id>').slice(0, 140);
+      })()
+    }))
+  ).catch(() => []);
 }
 
 async function findNewProjectControl(page) {
@@ -286,6 +326,9 @@ async function findNewProjectControl(page) {
     'button:has-text("Create project")'
   ], 700);
   if (direct) return direct;
+
+  const semantic = await findSemanticProjectAction(page);
+  if (semantic) return semantic;
 
   const text = page.getByText('New project', { exact: true }).first();
   if (await text.isVisible().catch(() => false)) return text;
@@ -377,11 +420,14 @@ async function createProject(page, projectName) {
     ], 250);
     const projectsVisible = await page.getByText('Projects', { exact: true }).first().isVisible().catch(() => false);
     const newProjectTextVisible = await page.getByText('New project', { exact: true }).first().isVisible().catch(() => false);
+    const controls = await visibleNavigationDiagnostics(page);
     throw new Error(
       'ChatGPT project creation control not found' +
       ' (sidebarToggleVisible=' + sidebarToggleVisible +
       ', projectsVisible=' + projectsVisible +
-      ', newProjectTextVisible=' + newProjectTextVisible + ')'
+      ', newProjectTextVisible=' + newProjectTextVisible +
+      ', url=' + page.url() +
+      ', visibleControls=' + JSON.stringify(controls) + ')'
     );
   }
 
