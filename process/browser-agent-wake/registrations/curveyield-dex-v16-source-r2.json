@@ -41,7 +41,5 @@
       ]
     }
   },
-  "projectCreationPolicy": "skip",
-  "projectCreationPolicyReason": "Exact desktop human-style Projects hover-plus-type-click flow still receives cf-mitigated=challenge under fresh Playwright browser identity; preserve Phase 1 continuity in normal Chat.",
   "browserInteractionPolicy": "ordinary-pointer-keyboard-only"
 }
