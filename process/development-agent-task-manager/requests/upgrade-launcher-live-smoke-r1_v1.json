@@ -9,5 +9,5 @@
   "targetBranch": "upgrade/launcher-live-smoke-r1",
   "baseRef": "main",
   "continuityMode": "managed_project",
-  "initialAssignment": "Live smoke retry after fresh-runner browser challenge handling was repaired. Continue the same task and branch; do not restart or broaden scope."
+  "initialAssignment": "Live smoke retry after transient Project-create UI failures were made fresh-runner-retryable. Continue the same task and branch; do not restart or broaden scope."
 }
