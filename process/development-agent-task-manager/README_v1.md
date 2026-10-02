@@ -93,6 +93,44 @@ Machine completion also requires the task-lock state to exist on the target bran
 
 This task lock is a **development/upgrade-agent control only**. It must not be injected into audit reviewer wakes, audit watchdogs/monitors, audit campaign orchestration, audit phase handoffs, audit-source initialization, Audit V7 execution/qualification, lite-audit workflows, or other audit-specific execution paths.
 
+## Browser continuity and Project default
+
+The Development Agent Task Manager uses the current GitHub-hosted home-exit Playwright transport used by the corrected browser automation path:
+
+- visible Chrome under Xvfb;
+- encrypted ChatGPT session-state handling;
+- Tailscale home exit-node routing;
+- private tailnet VNC support;
+- durable message-write verification through `scripts/browser-agent-wake.mjs`;
+- the shared browser operation/routine engine.
+
+The manager does not use Browserless or Browserbase fallback providers.
+
+### Managed Project mode — default
+
+`managed_project` is the default continuity mode because development agents frequently exhaust chat context before a non-trivial task is complete.
+
+The first worker:
+
+1. creates exactly one ChatGPT Project for the manager ID;
+2. obtains the Project's private Share link through the normal UI;
+3. persists that URL in durable task-manager state;
+4. creates its worker chat inside that Project.
+
+Replacement workers reopen the exact persisted Project URL and create a fresh chat inside that same Project. A dead, missing, or context-exhausted chat is replaced; the Project is not recreated.
+
+### Standalone mode — lightweight exception
+
+`standalone` skips Project creation and uses a normal ChatGPT conversation. It is intended only for clearly small tasks expected to finish with one agent and no handoff.
+
+Declarative requests may set:
+
+`"continuityMode": "standalone"`
+
+Otherwise `managed_project` is used.
+
+The browser transport is shared infrastructure only. Development wake text and task-lock instructions remain development-specific; audit reviewer wake instructions are not reused.
+
 ## Liveness and failure rule
 
 The scheduled manager checks active workers approximately every five minutes.
