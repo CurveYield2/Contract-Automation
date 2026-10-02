@@ -239,10 +239,6 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.match(workflow, /RETRY_INPUTS_JSON:\s*\$\{\{ toJSON\(inputs\) \}\}/);
   assert.match(workflow, /chatgptProject=.*projectName/);
   assert.match(workflow, /activeChat=.*chatName/);
-  assert.match(workflow, /projectCreationPolicy/);
-  assert.match(workflow, /projectCreationPolicyReason/);
-  assert.match(workflow, /browserInteractionPolicy/);
-  assert.match(workflow, /existing-registration\.json/);
 });
 
 test('Lite browser orchestration launches assignment-v2 reviewers with the shared project routine context', () => {
@@ -256,6 +252,10 @@ test('Lite browser orchestration launches assignment-v2 reviewers with the share
   assert.match(workflow, /audit-lite-reviewer-v1/);
   assert.match(workflow, /routineId:\$routine,projectName:\$project,chatName:\$chat/);
   assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
+  assert.match(workflow, /projectCreationPolicy/);
+  assert.match(workflow, /projectCreationPolicyReason/);
+  assert.match(workflow, /browserInteractionPolicy/);
+  assert.match(workflow, /existing-registration\.json/);
   assert.doesNotMatch(workflow, /CAMPAIGN_STATE_v1|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE|web-bootstrap-agent/);
   assert.doesNotMatch(workflow, /SUCCESSOR_HANDOFF\.json|WAKE_UP_MESSAGE\.md|START_HERE_SUCCESSOR\.md/);
 });
