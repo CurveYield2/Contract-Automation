@@ -19,7 +19,7 @@ test('watchdog uses the existing workflow as a five-minute scheduled sweep', () 
 });
 
 test('watchdog no longer holds a runner open between observations', () => {
-  assert.match(watchdog, /timeout-minutes:\s*15/);
+  assert.match(watchdog, /timeout-minutes:\s*35/);
   assert.match(watchdog, /for cycle in 1; do/);
   assert.doesNotMatch(watchdog, /seq 1 46/);
   assert.doesNotMatch(watchdog, /sleep 300/);
@@ -30,6 +30,18 @@ test('watchdog no longer holds a runner open between observations', () => {
 test('wake still triggers an immediate first watchdog sweep', () => {
   assert.match(wake, /Arm immediate watchdog observation/);
   assert.match(wake, /gh workflow run browser-agent-watchdog\.yml/);
+});
+
+test('scheduled watchdog browser traffic uses the same home-exit transport as initial wake delivery', () => {
+  for (const workflow of [watchdog, wake]) {
+    assert.match(workflow, /tailscale\/github-action@v4/);
+    assert.match(workflow, /TAILSCALE_AUTHKEY/);
+    assert.match(workflow, /tailscale set --exit-node=/);
+    assert.match(workflow, /Xvfb :99/);
+    assert.match(workflow, /x11vnc/);
+  }
+  assert.match(watchdog, /HOME_EXIT_NODE/);
+  assert.match(watchdog, /MANUAL_CHALLENGE_WAIT_MS/);
 });
 
 test('scheduled sweep preserves canonical gate and successor behavior', () => {
