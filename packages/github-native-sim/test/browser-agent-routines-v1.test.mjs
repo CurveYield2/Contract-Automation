@@ -413,7 +413,9 @@ test('Project creation and reviewer wake use only ordinary pointer and keyboard 
   const fillStart = wake.indexOf('async function fillComposer(page, message)');
   const fillEnd = wake.indexOf('async function persistedWakeVisible', fillStart);
   const sendBlock = wake.slice(fillStart, fillEnd);
-  assert.match(sendBlock, /pressSequentially\(message, \{ delay: 35 \}\)/);
+  assert.match(sendBlock, /const chunkSize = 220/);
+  assert.match(sendBlock, /pressSequentially\(chunk, \{ delay: 35 \}\)/);
+  assert.match(sendBlock, /await page\.waitForTimeout\(180\)/);
   assert.match(sendBlock, /humanPointerClick\(page, send/);
   assert.doesNotMatch(sendBlock, /\.fill\(/);
   assert.doesNotMatch(sendBlock, /force:\s*true/);
