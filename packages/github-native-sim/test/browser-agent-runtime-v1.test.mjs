@@ -36,6 +36,17 @@ test('isolated browser runtime package stays in the control-light qualification 
   assert.equal(result.lane, 'CONTROL_LIGHT');
 });
 
+test('browser wake stays within the GitHub workflow_dispatch input ceiling', () => {
+  const workflow = read('.github/workflows/browser-agent-wake.yml');
+  const start = workflow.indexOf('  workflow_dispatch:');
+  const end = workflow.indexOf('\npermissions:', start);
+  assert.ok(start >= 0 && end > start);
+  const dispatch = workflow.slice(start, end);
+  const inputs = [...dispatch.matchAll(/^      ([A-Za-z0-9_]+):\\s*$/gm)].map((match) => match[1]);
+  assert.ok(inputs.length <= 25, `workflow_dispatch defines ${inputs.length} inputs; GitHub permits at most 25`);
+  assert.doesNotMatch(dispatch, /home_exit_node:|interactive_view:|manual_challenge_wait_minutes:/);
+});
+
 test('shared browser runtime setup caches only isolated node_modules and installs only on cache miss', () => {
   const action = read('.github/actions/setup-browser-agent-runtime/action.yml');
   assert.match(action, /path:\s*\.github\/actions\/setup-browser-agent-runtime\/node_modules/);
