@@ -39,6 +39,28 @@ test('project creation opens the sidebar and resolves semantic New project contr
   assert.match(source, /visibleControls=/);
 });
 
+test('Phase1 captures the private Project share URL through the human overflow/share/clipboard sequence', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  assert.match(source, /findProjectOverflowControl/);
+  assert.match(source, /await entry\.hover\(\)/);
+  assert.match(source, /Share project/);
+  assert.match(source, /Share link/);
+  assert.match(source, /navigator\.clipboard\.readText\(\)/);
+  assert.match(source, /PROJECT_SHARE_URL_MISSING/);
+  assert.match(source, /project-share-url-captured/);
+});
+
+test('later and replacement reviewers open the persisted Project URL and never create a second Project', () => {
+  const openRoutine = read('process/browser-routines/audit-lite-reviewer-project-open-v1.json');
+  const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
+  assert.match(openRoutine, /chatgpt\.open_project_url/);
+  assert.match(openRoutine, /chatgpt\.start_current_project_chat/);
+  assert.doesNotMatch(openRoutine, /chatgpt\.create_project/);
+  assert.match(repair, /audit-lite-reviewer-project-open-v1/);
+  assert.match(repair, /project_url=.*chatgptProject\.url/);
+  assert.match(repair, /projectUrl:\$projectUrl/);
+});
+
 test('project creation records the exact backend response and only retries confirmed security challenges', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /\/backend-api\/projects/);
