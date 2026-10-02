@@ -98,7 +98,8 @@ async function loadModules() {
 
 async function hydrateBrowserContextFromRegistration() {
   if (mode !== 'create_fresh') return false;
-  if (browserRoutineId && projectName && requestedChatName) return false;
+  const projectUrlRequired = browserRoutineId === 'audit-lite-reviewer-project-open-v1';
+  if (browserRoutineId && projectName && requestedChatName && (!projectUrlRequired || projectUrl)) return false;
   const campaignId = String(env.CAMPAIGN_ID || '').trim();
   if (!campaignId) return false;
   const safeCampaign = campaignId.replace(/[^A-Za-z0-9._-]/g, '_');
