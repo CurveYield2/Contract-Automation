@@ -86,17 +86,13 @@ function unwrapRuntimeModule(mod) {
 }
 
 async function loadModules() {
-  const [playwrightMod, browserbaseMod] = await Promise.all([
-    importBrowserRuntimeModule('playwright-core'),
-    importBrowserRuntimeModule('@browserbasehq/sdk').catch(() => ({ default: null })),
-  ]);
+  const playwrightMod = await importBrowserRuntimeModule('playwright-core');
   const playwright = unwrapRuntimeModule(playwrightMod);
-  const browserbase = unwrapRuntimeModule(browserbaseMod);
   const chromium = playwright.chromium;
   if (!chromium || typeof chromium.launch !== 'function') {
     throw new Error('playwright-core chromium launcher unavailable');
   }
-  return { chromium, Browserbase: browserbase.Browserbase || browserbase.default || null };
+  return { chromium };
 }
 
 async function firstVisible(page, selectors) {
@@ -231,10 +227,77 @@ async function waitForAssistantResponse(page, before, timeoutMs) {
   return { responded: false, waitedMs: Date.now() - started, snapshot: current };
 }
 
-async function post(page, message) {
-  if (!message) throw new Error('Wake message is empty');
-  const userMessages = page.locator('[data-message-author-role="user"]');
-  const beforeUserCount = await userMessages.count().catch(() => 0);
+async function waitForChatIdle(page, timeoutMs) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const stop = await firstVisible(page, [
+      'button[data-testid="stop-button"]',
+      'button[aria-label="Stop"]',
+      'button[aria-label*="Stop"]',
+      'button:has-text("Stop generating")'
+    ]);
+    if (!stop) {
+      await page.waitForTimeout(750);
+      const confirm = await firstVisible(page, [
+        'button[data-testid="stop-button"]',
+        'button[aria-label="Stop"]',
+        'button[aria-label*="Stop"]',
+        'button:has-text("Stop generating")'
+      ]);
+      if (!confirm) return { idle: true, waitedMs: Date.now() - started };
+    }
+    await page.waitForTimeout(3000);
+  }
+  throw new BrowserAgentError('CHAT_BUSY_TIMEOUT', 'Chat remained busy/generating beyond idle wait timeout', false);
+}
+
+async function backendPreflight(page) {
+  return page.evaluate(async () => {
+    const targets = [
+      '/backend-api/models',
+      '/backend-api/conversations?offset=0&limit=1&order=updated'
+    ];
+    const checks = [];
+    for (const target of targets) {
+      try {
+        const response = await fetch(target, { credentials: 'include', cache: 'no-store' });
+        checks.push({
+          target,
+          status: response.status,
+          ok: response.ok,
+          cfMitigated: response.headers.get('cf-mitigated'),
+          server: response.headers.get('server')
+        });
+      } catch (error) {
+        checks.push({ target, status: 0, ok: false, error: String(error) });
+      }
+    }
+    return checks;
+  });
+}
+
+async function waitForBackendHealth(page) {
+  const requested = Number.parseInt(env.MANUAL_CHALLENGE_WAIT_MS || '0', 10);
+  const waitMs = Number.isFinite(requested) ? Math.max(0, requested) : 0;
+  const deadline = Date.now() + waitMs;
+  let last = null;
+  while (true) {
+    last = await backendPreflight(page).catch(error => [{ ok: false, status: 0, error: error.message }]);
+    const challenged = last.some(item => item?.cfMitigated === 'challenge');
+    const healthy = last.length > 0 && last.every(item => item?.ok === true && item?.cfMitigated !== 'challenge');
+    console.log('[github-playwright] backend-preflight=' + JSON.stringify({ healthy, challenged, checks: last }));
+    if (healthy) return last;
+    if (Date.now() >= deadline) {
+      throw new BrowserAgentError('BROWSER_CHALLENGE', 'ChatGPT backend preflight is not healthy: ' + JSON.stringify(last), true);
+    }
+    if (bool(env.INTERACTIVE_VIEW_ENABLED)) {
+      console.log('[github-playwright] Browser remains visible through private tailnet VNC for normal human verification.');
+    }
+    await page.waitForTimeout(5000);
+  }
+}
+
+async function fillComposer(page, message) {
   const composer = await ensureComposer(page);
   await composer.click();
   const tag = await composer.evaluate(el => el.tagName.toLowerCase());
@@ -242,36 +305,172 @@ async function post(page, message) {
     await composer.fill(message);
   } else {
     await composer.fill(message).catch(async () => {
+      await composer.focus();
       await composer.press('Control+A').catch(()=>{});
       await composer.press('Meta+A').catch(()=>{});
       await composer.press('Backspace').catch(()=>{});
       await composer.type(message, { delay: 1 });
     });
   }
-  const send = await firstVisible(page, [
-    'button[data-testid="send-button"]',
-    'button[aria-label*="Send"]'
-  ]);
-  if (send) await send.click();
-  else await composer.press('Enter');
-  await page.waitForTimeout(1800);
+  return composer;
+}
 
-  // ChatGPT may split or virtualize long multi-line user messages, so a
-  // literal 80-character getByText witness is not sufficient by itself.
-  // Accept any independent UI proof that the submission took effect.
-  const needle = message.slice(0, Math.min(80, message.length));
-  const visible = await page.getByText(needle, { exact: false }).count().catch(() => 0);
-  const afterUserCount = await userMessages.count().catch(() => beforeUserCount);
-  const generating = !!(await firstVisible(page, [
-    'button[data-testid="stop-button"]',
-    'button[aria-label*="Stop"]',
-    'button:has-text("Stop generating")'
-  ]));
-  if (!visible && afterUserCount <= beforeUserCount && !generating) {
-    throw new Error('Wake message submission could not be verified');
+async function post(page, message) {
+  if (!message) throw new Error('Wake message is empty');
+  const marker = message.slice(0, Math.min(120, message.length));
+  const requestedIdleWait = Number.parseInt(env.IDLE_WAIT_MS || '600000', 10);
+  const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
+  await waitForChatIdle(page, idleWaitMs);
+  let observed = null;
+  const onRequest = request => {
+    const method = request.method();
+    if (!['POST','PUT','PATCH'].includes(method)) return;
+    const data = request.postData() || '';
+    if (!data.includes(marker)) return;
+    observed = { url: request.url(), method, bodyContainsMarker: true, postDataLength: data.length };
+  };
+  page.on('request', onRequest);
+  try {
+    let composer = await fillComposer(page, message);
+    const sendSelectors = [
+      'button[data-testid="send-button"]',
+      'button[data-testid="composer-submit-button"]',
+      'button[aria-label="Send prompt"]',
+      'button[aria-label="Send"]',
+      'button[aria-label*="Send"]'
+    ];
+    const strategies = [
+      async () => {
+        const send = await firstVisible(page, sendSelectors);
+        if (!send) throw new Error('No visible Send button for normal click');
+        await send.click({ timeout: 4000 });
+      },
+      async () => {
+        const send = await firstVisible(page, sendSelectors);
+        if (!send) throw new Error('No visible Send button for force click');
+        await send.click({ force: true, timeout: 4000 });
+      },
+      async () => {
+        const send = await firstVisible(page, sendSelectors);
+        if (!send) throw new Error('No visible Send button for DOM click');
+        await send.evaluate(el => el.click());
+      },
+      async () => {
+        composer = await ensureComposer(page);
+        const submitted = await composer.evaluate(el => {
+          const form = el.closest('form');
+          if (!form) return false;
+          if (typeof form.requestSubmit === 'function') form.requestSubmit();
+          else form.submit();
+          return true;
+        });
+        if (!submitted) throw new Error('Composer has no containing form');
+      },
+      async () => {
+        composer = await ensureComposer(page);
+        await composer.press('Enter');
+      },
+      async () => {
+        await page.keyboard.press('Enter');
+      }
+    ];
+    for (let i = 0; i < strategies.length; i += 1) {
+      observed = null;
+      await waitForChatIdle(page, idleWaitMs);
+      const currentComposer = await ensureComposer(page).catch(() => null);
+      if (currentComposer) {
+        const currentText = await currentComposer.evaluate(el => (el.innerText || el.value || '')).catch(() => '');
+        if (!currentText.includes(marker)) composer = await fillComposer(page, message);
+      }
+      await strategies[i]().catch(error => {
+        console.log('[github-playwright] send-strategy-error=' + JSON.stringify({ index: i, error: error.message }));
+      });
+      const deadline = Date.now() + 7000;
+      while (Date.now() < deadline && !observed) await page.waitForTimeout(200);
+      if (observed) {
+        console.log('[github-playwright] send-request-observed=' + JSON.stringify(observed));
+        return observed;
+      }
+      console.log('[github-playwright] send-strategy-no-post=' + JSON.stringify({ index: i }));
+    }
+    throw new Error('No real ChatGPT write request containing the wake marker was observed after all send strategies');
+  } finally {
+    page.off('request', onRequest);
   }
 }
 
+async function persistedWakeVisible(page, message) {
+  const marker = message.slice(0, Math.min(120, message.length));
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const users = page.locator('[data-message-author-role="user"]');
+    const count = await users.count().catch(() => 0);
+    for (let i = Math.max(0, count - 8); i < count; i += 1) {
+      const text = await users.nth(i).innerText().catch(() => '');
+      if (text.includes(marker)) return { persisted: true, userCount: count };
+    }
+    await page.waitForTimeout(1000);
+  }
+  return { persisted: false, userCount: await page.locator('[data-message-author-role="user"]').count().catch(() => 0) };
+}
+
+async function postWithBackendVerification(page, message) {
+  const marker = message.slice(0, Math.min(120, message.length));
+  let accepted = null;
+  const onResponse = async response => {
+    const request = response.request();
+    const method = request.method();
+    if (!['POST','PUT','PATCH'].includes(method)) return;
+    const postData = request.postData() || '';
+    if (!postData.includes(marker)) return;
+    accepted = {
+      url: response.url(),
+      status: response.status(),
+      method,
+      bodyContainsMarker: true,
+      cfMitigated: await response.headerValue('cf-mitigated').catch(() => null),
+      server: await response.headerValue('server').catch(() => null)
+    };
+  };
+  page.on('response', onResponse);
+  try {
+    const submittedRequest = await post(page, message);
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline && !accepted) await page.waitForTimeout(250);
+    if (!accepted) {
+      throw new BrowserAgentError('WRITE_RESPONSE_MISSING', 'Wake write request was observed but no corresponding response was observed', false);
+    }
+    if (accepted.status < 200 || accepted.status >= 300 || accepted.cfMitigated === 'challenge' || !accepted.bodyContainsMarker) {
+      throw new BrowserAgentError('WRITE_REJECTED', 'ChatGPT wake write was rejected: ' + JSON.stringify(accepted), false);
+    }
+    const persisted = await persistedWakeVisible(page, message);
+    if (!persisted.persisted) {
+      throw new BrowserAgentError('DURABILITY_NOT_OBSERVED', 'Wake write returned success but the user message was not observed in the current DOM', false);
+    }
+    let postSendHealth = null;
+    let postSendChallenge = false;
+    try {
+      postSendHealth = await backendPreflight(page);
+      postSendChallenge = postSendHealth.some(item => item?.cfMitigated === 'challenge');
+    } catch (error) {
+      postSendHealth = [{ ok: false, status: 0, error: error.message }];
+    }
+    const delivery = {
+      writeRequestObserved: true,
+      writeAccepted: true,
+      domPersisted: true,
+      postSendChallenge,
+      postSendHealth,
+      response: accepted,
+      submittedRequest,
+      ...persisted
+    };
+    console.log('[github-playwright] delivery-state=' + JSON.stringify(delivery));
+    return delivery;
+  } finally {
+    page.off('response', onResponse);
+  }
+}
 
 
 async function runWithPage(providerName, connect) {
@@ -291,6 +490,8 @@ async function runWithPage(providerName, connect) {
       await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForTimeout(1500);
     }
+
+    await waitForBackendHealth(page);
 
     let routine = null;
     let routineBefore = [];
@@ -315,8 +516,7 @@ async function runWithPage(providerName, connect) {
     if (action === 'observe') {
       // A browser/security challenge or login wall is provider/session
       // infrastructure, not an observation of the reviewer. Throw here so
-      // the provider loop can try Browserless/Browserbase before the watchdog
-      // classifies the sweep as infrastructure noise.
+      // Surface infrastructure noise to the watchdog without misclassifying reviewer state.
       if (before.humanChallenge) {
         throw new BrowserAgentError(
           'BROWSER_CHALLENGE',
@@ -363,7 +563,7 @@ async function runWithPage(providerName, connect) {
       });
     }
 
-    await post(page, wakeMessage);
+    const delivery = await postWithBackendVerification(page, wakeMessage);
 
     // Once submission is verified, never fail over to another browser provider for
     // post-delivery UI bookkeeping. Doing so can create a second reviewer chat.
@@ -422,6 +622,7 @@ async function runWithPage(providerName, connect) {
       requestedChatName: requestedChatName || null,
       chatRenamed: renameResult?.renamed ?? null,
       thinkingEffort: thinkingEffortResult,
+      delivery,
       postDeliveryWarnings,
       ...(response ? { responded: response.responded, waitedMs: response.waitedMs } : {})
     };
@@ -452,44 +653,15 @@ async function localProvider(chromium) {
   }
   if (!storage) throw new Error('No usable ChatGPT storage state is available');
   console.log('[github-playwright] Using ' + source + ' session state');
-  const browser = await chromium.launch({ headless: env.BROWSER_HEADLESS !== 'false', channel: 'chrome' });
+  const browser = await chromium.launch({ headless: env.BROWSER_HEADLESS !== 'false', channel: 'chrome', args: ['--disable-quic'] });
   const context = await browser.newContext({ storageState: storage });
   const page = await context.newPage();
   return { browser, context, page, close: () => browser.close() };
 }
 
-async function browserlessProvider(chromium) {
-  if (!env.BROWSERLESS_TOKEN) throw new Error('BROWSERLESS_TOKEN missing');
-  const profile = encodeURIComponent(env.BROWSERLESS_PROFILE || 'chatgpt');
-  const ws = 'wss://production-sfo.browserless.io?token=' +
-    encodeURIComponent(env.BROWSERLESS_TOKEN) + '&profile=' + profile;
-  const browser = await chromium.connectOverCDP(ws);
-  const context = browser.contexts()[0] || await browser.newContext();
-  const page = context.pages()[0] || await context.newPage();
-  return { browser, context, page, close: () => browser.close() };
-}
-
-async function browserbaseProvider(chromium, Browserbase) {
-  if (!Browserbase) throw new Error('Browserbase SDK unavailable');
-  if (!env.BROWSERBASE_API_KEY || !env.BROWSERBASE_PROJECT_ID || !env.BROWSERBASE_CONTEXT_ID) {
-    throw new Error('Browserbase credentials/context missing');
-  }
-  const bb = new Browserbase({ apiKey: env.BROWSERBASE_API_KEY });
-  const session = await bb.sessions.create({
-    projectId: env.BROWSERBASE_PROJECT_ID,
-    browserContext: { id: env.BROWSERBASE_CONTEXT_ID, persist: true },
-  });
-  const browser = await chromium.connectOverCDP(session.connectUrl);
-  const context = browser.contexts()[0];
-  const page = context.pages()[0] || await context.newPage();
-  return { browser, context, page, close: () => browser.close() };
-}
-
-const { chromium, Browserbase } = await loadModules();
+const { chromium } = await loadModules();
 const providers = [
   ['github-playwright', () => localProvider(chromium)],
-  ['browserless', () => browserlessProvider(chromium)],
-  ['browserbase', () => browserbaseProvider(chromium, Browserbase)],
 ];
 
 const failures = [];
