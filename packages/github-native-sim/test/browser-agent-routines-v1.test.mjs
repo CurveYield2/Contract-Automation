@@ -221,9 +221,9 @@ test('V16 Phase1 registration requires the deterministic Project-create/share-li
   assert.equal(registration.projectCreationPolicy, undefined);
 });
 
-test('Phase1 wake fails closed before posting unless Project Share link capture returns a valid Project URL', () => {
+test('Project-create wakes fail closed before posting unless Share-link capture returns a valid Project URL', () => {
   const source = read('scripts/browser-agent-wake.mjs');
-  assert.match(source, /audit-lite-reviewer-project-create-v1/);
+  assert.match(source, /routineBefore\.some\(\(entry\) => entry\.operation === 'chatgpt\.capture_project_share_link'\)/);
   assert.match(source, /PROJECT_SHARE_URL_REQUIRED/);
   assert.match(source, /capture_project_share_link/);
   assert.doesNotMatch(source, /project-create-challenged-fallback/);
