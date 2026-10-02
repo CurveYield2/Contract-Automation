@@ -61,10 +61,11 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 
 ## REMAINING DELTA
 
-1. Re-trigger `upgrade-launcher-live-smoke-r1` against current `main` containing both fresh-runner retry commit `54808c01...` and transient Project-UI retry commit `1f040559...`.
-2. If Project creation succeeds, continue the same smoke task through focus-locked agent completion and mandatory merge-to-main finalization.
-3. If a new failure occurs, diagnose only that exact live failure and first verify whether current main already contains its repair before changing code.
-4. Close this focus lock only after terminal COMPLETE exposes output + ChatGPT Project links.
+1. Add the proven visible-browser backend-health preflight/manual-verification wait to the shared browser runtime without changing the human interaction primitives.
+2. Enable a bounded manual-verification wait for Development Agent Task Manager launches while keeping visible Chrome, VNC, and home-exit routing active.
+3. Add focused regression coverage for that exact wait path and preserve audit-specific wake instructions unchanged.
+4. Re-run `upgrade-launcher-live-smoke-r1`; continue through focus-locked agent completion and mandatory merge-to-main finalization.
+5. Close this focus lock only after terminal COMPLETE exposes output + ChatGPT Project links.
 
 ## PARKED OBSERVATIONS
 
@@ -76,11 +77,11 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 
 ## ACTIVE BLOCKER
 
-No presently proven code blocker. Both observed live Project-create failure modes have corresponding repairs already on current main but have not yet been jointly live-verified on this task.
+All bounded fresh-runner attempts reached ChatGPT through the intended visible/home-exit browser path but encountered the same browser verification gate during Project creation. The proven older home-exit browser keeps the visible session open and waits for normal human verification or natural recovery; the shared current runtime does not yet implement that wait.
 
 ## NEXT ACTION
 
-Re-trigger the same live smoke request once against current main. Do not modify implementation code unless the new live run proves a new unsatisfied blocker.
+Port only the visible-browser backend-health preflight/manual-verification wait into the shared runtime, enable it for development-agent launches, add focused regression coverage, and retry the same smoke task.
 
 ## ANTI-DRIFT CHECK
 
