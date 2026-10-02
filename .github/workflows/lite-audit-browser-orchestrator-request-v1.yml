@@ -1,0 +1,67 @@
+name: Lite Browser Orchestrator Request v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'process/agent-upload/lite-browser-orchestrator/*.json'
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: lite-browser-orchestrator-request
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout trusted Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Resolve and dispatch orchestrator requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t requests < <(
+            git diff --name-only "$BEFORE_SHA" "$AFTER_SHA" --               'process/agent-upload/lite-browser-orchestrator/*.json' |
+            grep -E '^process/agent-upload/lite-browser-orchestrator/[^/]+\.json$' || true
+          )
+
+          [ "${#requests[@]}" -gt 0 ] || {
+            echo "::error::No Lite browser orchestrator request file changed in this push."
+            exit 1
+          }
+
+          for request in "${requests[@]}"; do
+            test -f "$request"
+            jq -e '
+              type=="object"
+              and .schemaVersion=="curveyield-lite-browser-orchestrator-request-v1"
+              and .action=="DISPATCH"
+              and (.campaignId|type=="string" and length>0 and test("^[A-Za-z0-9._-]+$"))
+              and (.campaignName|type=="string" and length>0)
+              and (.campaignPath|type=="string" and startswith("campaigns/"))
+              and ((.auditControllerRef // "main")|type=="string" and length>0)
+            ' "$request" >/dev/null
+
+            campaign_id="$(jq -r '.campaignId' "$request")"
+            campaign_name="$(jq -r '.campaignName' "$request")"
+            campaign_path="$(jq -r '.campaignPath' "$request")"
+            controller_ref="$(jq -r '.auditControllerRef // "main"' "$request")"
+
+            gh workflow run lite-audit-browser-orchestrator-v1.yml               --repo "$GITHUB_REPOSITORY"               --ref main               -f campaign_id="$campaign_id"               -f campaign_name="$campaign_name"               -f campaign_path="$campaign_path"               -f audit_controller_ref="$controller_ref"
+
+            echo "Dispatched Lite browser orchestrator for $campaign_id from $request."
+          done
