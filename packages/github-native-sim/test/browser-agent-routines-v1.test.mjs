@@ -230,6 +230,26 @@ test('Phase1 wake fails closed before posting unless Project Share link capture 
   assert.doesNotMatch(source, /PROJECT_CREATE_CHALLENGED_FALLBACK/);
 });
 
+test('Phase1 workflow persists the captured private Project URL even if a later wake step fails', () => {
+  const workflow = read('.github/workflows/browser-agent-wake.yml');
+  const runtime = read('scripts/browser-agent-wake.mjs');
+  assert.match(workflow, /Persist captured Phase-1 Project URL/);
+  assert.match(workflow, /PROJECT_SHARE_URL_REQUIRED/);
+  assert.match(workflow, /bind Phase1 Project URL/);
+  assert.match(workflow, /chatgptProject=.*name:\$name,url:\$url/);
+  assert.match(runtime, /projectName: projectName \|\| null/);
+  assert.match(runtime, /projectUrl: projectUrl \|\| null/);
+});
+
+test('fresh Project chat creation refuses to reuse an already-open conversation composer', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  assert.match(source, /findCurrentProjectNewChatControl/);
+  assert.match(source, /alreadyInConversation/);
+  assert.match(source, /PROJECT_NEW_CHAT_CONTROL_MISSING/);
+  assert.match(source, /PROJECT_CHAT_COMPOSER_MISSING/);
+});
+
+
 test('fresh reviewer wake can recover routine/project/chat context from the durable campaign registration', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /hydrateBrowserContextFromRegistration/);
