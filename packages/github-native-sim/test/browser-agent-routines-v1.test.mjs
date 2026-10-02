@@ -19,6 +19,11 @@ test('project creation opens the sidebar and resolves semantic New project contr
   assert.match(source, /aria-label="Open sidebar"/);
   assert.match(source, /aria-label="Toggle sidebar"/);
   assert.match(source, /async function findNewProjectControl\(page\)/);
+  assert.match(source, /await projects\.hover\(\)/);
+  assert.match(source, /projects-plus-control/);
+  assert.match(source, /looksOverflow/);
+  assert.match(source, /looksPlus/);
+  assert.doesNotMatch(source, /count > 0 && count <= 3/);
   assert.match(source, /async function exposeProjectsInSidebar\(page\)/);
   assert.match(source, /Organize sidebar/);
   assert.match(source, /menuitemcheckbox.*Projects/);
