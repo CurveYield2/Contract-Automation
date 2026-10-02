@@ -96,6 +96,8 @@ jobs:
       CHATGPT_SESSION_STATE_UPDATED_MARKER: /tmp/curveyield-browser-agent/session-state-updated
       BROWSER_HEADLESS: 'false'
       DISPLAY: ':99'
+      INTERACTIVE_VIEW_ENABLED: 'true'
+      MANUAL_CHALLENGE_WAIT_MS: '900000'
       HOME_EXIT_NODE: ${{ vars.BROWSER_HOME_EXIT_NODE || '100.112.238.56' }}
     steps:
       - name: Checkout trusted Contract-Automation control plane
@@ -538,6 +540,8 @@ jobs:
       CHATGPT_SESSION_STATE_UPDATED_MARKER: /tmp/curveyield-browser-agent/session-state-updated
       BROWSER_HEADLESS: 'false'
       DISPLAY: ':99'
+      INTERACTIVE_VIEW_ENABLED: 'true'
+      MANUAL_CHALLENGE_WAIT_MS: '900000'
       HOME_EXIT_NODE: ${{ vars.BROWSER_HOME_EXIT_NODE || '100.112.238.56' }}
     steps:
       - name: Checkout trusted Contract-Automation control plane
