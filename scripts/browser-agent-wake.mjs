@@ -292,52 +292,6 @@ async function waitForChatIdle(page, timeoutMs) {
   throw new BrowserAgentError('CHAT_BUSY_TIMEOUT', 'Chat remained busy/generating beyond idle wait timeout', false);
 }
 
-async function backendPreflight(page) {
-  return page.evaluate(async () => {
-    const targets = [
-      '/backend-api/models',
-      '/backend-api/conversations?offset=0&limit=1&order=updated'
-    ];
-    const checks = [];
-    for (const target of targets) {
-      try {
-        const response = await fetch(target, { credentials: 'include', cache: 'no-store' });
-        checks.push({
-          target,
-          status: response.status,
-          ok: response.ok,
-          cfMitigated: response.headers.get('cf-mitigated'),
-          server: response.headers.get('server')
-        });
-      } catch (error) {
-        checks.push({ target, status: 0, ok: false, error: String(error) });
-      }
-    }
-    return checks;
-  });
-}
-
-async function waitForBackendHealth(page) {
-  const requested = Number.parseInt(env.MANUAL_CHALLENGE_WAIT_MS || '0', 10);
-  const waitMs = Number.isFinite(requested) ? Math.max(0, requested) : 0;
-  const deadline = Date.now() + waitMs;
-  let last = null;
-  while (true) {
-    last = await backendPreflight(page).catch(error => [{ ok: false, status: 0, error: error.message }]);
-    const challenged = last.some(item => item?.cfMitigated === 'challenge');
-    const healthy = last.length > 0 && last.every(item => item?.ok === true && item?.cfMitigated !== 'challenge');
-    console.log('[github-playwright] backend-preflight=' + JSON.stringify({ healthy, challenged, checks: last }));
-    if (healthy) return last;
-    if (Date.now() >= deadline) {
-      throw new BrowserAgentError('BROWSER_CHALLENGE', 'ChatGPT backend preflight is not healthy: ' + JSON.stringify(last), true);
-    }
-    if (bool(env.INTERACTIVE_VIEW_ENABLED)) {
-      console.log('[github-playwright] Browser remains visible through private tailnet VNC for normal human verification.');
-    }
-    await page.waitForTimeout(5000);
-  }
-}
-
 async function humanPointerClick(page, locator, { hoverMs = 220, downMs = 70, settleMs = 280 } = {}) {
   await locator.scrollIntoViewIfNeeded().catch(() => {});
   await locator.hover().catch(() => {});
