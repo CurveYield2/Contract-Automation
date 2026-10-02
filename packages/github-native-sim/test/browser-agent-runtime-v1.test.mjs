@@ -136,13 +136,15 @@ test('audit browser wake and watchdog use visible Xvfb Chrome through the privat
 });
 
 
-test('browser runtime classifies only pre-post infrastructure failures as fresh-runner retryable', () => {
+test('browser runtime classifies only pre-durable-send failures as fresh-runner retryable', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /class BrowserAgentError extends Error/);
   assert.match(source, /BrowserAgentError\('BROWSER_CHALLENGE', diagnostic, true\)/);
   assert.match(source, /BrowserAgentError\('CHATGPT_UI_UNAVAILABLE', diagnostic, true\)/);
   assert.match(source, /BrowserAgentError\('AUTH_REQUIRED', diagnostic, false\)/);
   assert.match(source, /BrowserAgentError\('CHAT_UNAVAILABLE', diagnostic, false\)/);
+  assert.match(source, /'SEND_NOT_OBSERVED'/);
+  assert.match(source, /No ChatGPT conversation write or durable user-message marker/);
   assert.match(source, /retryable:\s*error\?\.retryable === true/);
   assert.match(source, /code:\s*error\?\.code \|\| 'PROVIDER_ERROR'/);
   assert.match(source, /WRITE_RESPONSE_MISSING/);
