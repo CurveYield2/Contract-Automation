@@ -52,29 +52,16 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 - Live smoke request was atomically admitted.
 - Live smoke passed request intake, target-branch creation, authority/spec validation, browser runtime setup, encrypted session restore, Tailscale connection, visible Chrome/Xvfb, VNC setup, and home-exit routing.
 - Live smoke failed only at initial ChatGPT Project creation with retryable Cloudflare challenge HTTP 403 before manager state persistence.
-- Exact comparison with the successful audit browser flow identified the missing behavior: fresh-runner retries plus manual challenge-wait handling around browser delivery.
+- Exact comparison with the successful audit browser flow identified the browser challenge as retryable.
+- Current main already contains commit `54808c01f394f9151297f8b39cfb39de8cdded6b`, which added bounded fresh-runner retries to the Development Agent Task Manager after the failed smoke.
+- Therefore fresh-runner retry behavior is already SATISFIED and must not be reimplemented unless live verification disproves it.
 
 ## REMAINING DELTA
 
-1. Add only the missing fresh-runner retry/manual-challenge wrapper to the Development Agent Task Manager initial Project-create path, reusing the proven audit-browser behavior.
-2. Add/adjust regression coverage for that exact retry behavior.
-3. Re-run the same live smoke request path until initial Project creation succeeds and active manager state is persisted.
-4. Continue that same smoke task through agent completion and mandatory merge-to-main finalization.
-5. Close this focus lock only after the live smoke reaches terminal COMPLETE with output + Project links.
-
-
-
-1. Add generic Upgrade Agent Execution Authority v1.
-2. Add deterministic shared launcher admission module and tests.
-3. Add minimal Cloudflare Worker/static launcher implementation and tests/config/docs.
-4. Add GitHub-only launcher fallback workflow using the same admission logic.
-5. Extend the Development Agent Task Manager from verified implementation completion through PR creation/reuse, merge into target main, merge verification, and terminal output metadata.
-6. Preserve ChatGPT Project URL in terminal completed state.
-7. Make terminal completed state expose canonical output URL and merge metadata.
-8. Add regression tests for launcher admission, merge finalization, output selection, Project URL preservation, audit isolation and no parallel browser machinery.
-9. Run GitHub-side repository qualification/regression tests; diagnose/repair until green.
-10. Re-check current main before completion.
-11. Open an implementation PR; do not merge it until the implementation is verified.
+1. Re-trigger the same live smoke task against current `main` so the already-merged fresh-runner retry logic is exercised.
+2. If Project creation succeeds, continue the same smoke task through focus-locked agent completion and mandatory merge-to-main finalization.
+3. If and only if bounded fresh-runner retries are live-proven insufficient, diagnose that exact retry failure before changing code.
+4. Close this focus lock only after the live smoke reaches terminal COMPLETE with output + Project links.
 
 ## PARKED OBSERVATIONS
 
@@ -86,11 +73,11 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 
 ## ACTIVE BLOCKER
 
-Initial managed-Project creation receives a retryable Cloudflare challenge HTTP 403. The Development Agent Task Manager currently terminates instead of using the audit browser flow's bounded fresh-runner retry/manual challenge-wait mechanism.
+No code blocker is currently proven. The previous smoke failed on a retryable Cloudflare challenge, but fresh-runner retry support was subsequently merged to current `main` and has not yet been live-verified on this same task.
 
 ## NEXT ACTION
 
-Inspect only the existing development-manager browser-delivery block and the proven audit fresh-runner retry wrapper, then transplant the smallest equivalent retry mechanism without touching unrelated launcher, audit, or repository infrastructure.
+Re-trigger the existing `upgrade-launcher-live-smoke-r1` request without changing its requested end-state. Observe whether current-main fresh-runner retry logic successfully creates the managed ChatGPT Project.
 
 ## ANTI-DRIFT CHECK
 
