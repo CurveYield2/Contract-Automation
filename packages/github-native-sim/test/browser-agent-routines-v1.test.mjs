@@ -151,6 +151,17 @@ test('watchdog observation classifies home-exit challenge and auth walls as infr
   assert.match(source, /failures\.find\(\(entry\) => entry\.code === 'AUTH_REQUIRED'\)/);
 });
 
+test('fresh reviewer wake can recover routine/project/chat context from the durable campaign registration', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /hydrateBrowserContextFromRegistration/);
+  assert.match(source, /process\/browser-agent-wake\/registrations/);
+  assert.match(source, /registration\.browserRoutine/);
+  assert.match(source, /registration\.chatgptProject\?\.name/);
+  assert.match(source, /registration\.activeAssignment\?\.reviewer/);
+  assert.match(source, /browser-context-source=campaign-registration/);
+  assert.match(source, /await hydrateBrowserContextFromRegistration\(\)/);
+});
+
 test('wake runtime executes browser routines around the first message and returns project/chat metadata', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /BROWSER_ROUTINE_ID/);

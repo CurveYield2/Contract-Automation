@@ -14,9 +14,9 @@ const mode = env.WAKE_MODE || 'resume_existing';
 const wakeId = env.WAKE_ID || crypto.randomUUID();
 const wakeMessage = env.WAKE_MESSAGE || '';
 const requestedUrl = env.CHAT_URL || '';
-const browserRoutineId = env.BROWSER_ROUTINE_ID || '';
-const projectName = env.CHATGPT_PROJECT_NAME || '';
-const requestedChatName = env.CHATGPT_CHAT_NAME || '';
+let browserRoutineId = env.BROWSER_ROUTINE_ID || '';
+let projectName = env.CHATGPT_PROJECT_NAME || '';
+let requestedChatName = env.CHATGPT_CHAT_NAME || '';
 const thinkingEffort = (env.CHATGPT_THINKING_EFFORT || '').trim();
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 const encryptedSessionPath = env.CHATGPT_SESSION_STATE_PATH || '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
@@ -93,6 +93,43 @@ async function loadModules() {
     throw new Error('playwright-core chromium launcher unavailable');
   }
   return { chromium };
+}
+
+async function hydrateBrowserContextFromRegistration() {
+  if (mode !== 'create_fresh') return false;
+  if (browserRoutineId && projectName && requestedChatName) return false;
+  const campaignId = String(env.CAMPAIGN_ID || '').trim();
+  if (!campaignId) return false;
+  const safeCampaign = campaignId.replace(/[^A-Za-z0-9._-]/g, '_');
+  const registrationPath = path.resolve('process/browser-agent-wake/registrations', safeCampaign + '.json');
+  try {
+    const registration = JSON.parse(await fs.readFile(registrationPath, 'utf8'));
+    if (registration.campaignId !== campaignId) {
+      throw new Error('registration campaignId mismatch');
+    }
+    if (!browserRoutineId) browserRoutineId = String(registration.browserRoutine || '');
+    if (!projectName) projectName = String(registration.chatgptProject?.name || '');
+    if (!requestedChatName) {
+      requestedChatName = String(
+        registration.activeChat?.name ||
+        (projectName && registration.activeAssignment?.reviewer
+          ? projectName + ' ' + registration.activeAssignment.reviewer
+          : '')
+      );
+    }
+    console.log('[github-playwright] browser-context-source=campaign-registration ' + JSON.stringify({
+      routineId: browserRoutineId || null,
+      projectName: projectName || null,
+      chatName: requestedChatName || null
+    }));
+    return Boolean(browserRoutineId || projectName || requestedChatName);
+  } catch (error) {
+    console.log('[github-playwright] browser-context-registration-unavailable=' + JSON.stringify({
+      campaignId,
+      error: error.message
+    }));
+    return false;
+  }
 }
 
 async function firstVisible(page, selectors) {
@@ -774,6 +811,8 @@ async function localProvider(chromium) {
   const page = await context.newPage();
   return { browser, context, page, close: () => browser.close() };
 }
+
+await hydrateBrowserContextFromRegistration();
 
 const { chromium } = await loadModules();
 const providers = [
