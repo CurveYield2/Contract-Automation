@@ -104,15 +104,20 @@ test('downstream routing preserves all declared Phase-7 and Phase-10 input views
   assert.match(controller,/target===10[^\n]*\[[^\]]*p8Final[^\]]*p9Final[^\]]*finalIndex/);
 });
 
-test('fresh assignment wake names schema form report and packet instead of an active receipt',()=>{
+test('fresh assignment wake links phase artifacts and requires controller PASS before handoff',()=>{
   const script=read('scripts/prepare-lite-assignment-successor-v2.mjs');
   const orch=read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
+  assert.match(script,/Current phase:/);
   assert.match(script,/Phase schema:/);
-  assert.match(script,/Phase work form:/);
-  assert.match(script,/Controller-owned phase final report path:/);
-  assert.match(script,/Controller-owned phase packet path:/);
-  assert.match(script,/wait for CONTROLLER_PHASE_PASS/);
-  assert.match(script,/Do not create or edit the Phase Work Packet or phase final report/);
+  assert.match(script,/Assigned work form:/);
+  assert.match(script,/Controller-owned final report:/);
+  assert.match(script,/Controller-owned Phase Work Packet:/);
+  assert.match(script,/Sealed predecessor receipt:/);
+  assert.match(script,/Phase input /);
+  assert.match(script,/Finalized controller validation:/);
+  assert.match(script,/ultimate authority/i);
+  assert.match(script,/CONTROLLER_PHASE_PASS/);
+  assert.match(script,/resubmit validation/);
   assert.match(orch,/prepare-lite-assignment-successor-v2\.mjs/);
 });
 
