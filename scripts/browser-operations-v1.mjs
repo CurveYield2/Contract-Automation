@@ -543,7 +543,45 @@ async function createProject(page, projectName) {
     'button[type="submit"]'
   ], 1200);
   if (!submit) throw new Error('ChatGPT project-create submit control not found');
+
+  const projectCreateResponse = page.waitForResponse(response => {
+    try {
+      const url = new URL(response.url());
+      return url.origin === 'https://chatgpt.com' &&
+        url.pathname === '/backend-api/projects' &&
+        response.request().method() === 'POST';
+    } catch { return false; }
+  }, { timeout: 20000 }).catch(() => null);
+
   await submit.click();
+
+  const createResponse = await projectCreateResponse;
+  if (createResponse) {
+    const status = createResponse.status();
+    const cfMitigated = await createResponse.headerValue('cf-mitigated').catch(() => null);
+    const server = await createResponse.headerValue('server').catch(() => null);
+    const contentType = await createResponse.headerValue('content-type').catch(() => null);
+    let safeBody = '';
+    if (status >= 400) {
+      const raw = await createResponse.text().catch(() => '');
+      if (/json|text/i.test(contentType || '')) {
+        safeBody = raw.replace(/[A-Za-z0-9_-]{32,}/g, '<redacted>').slice(0, 1200);
+      }
+    }
+    const diagnostics = { status, cfMitigated, server, contentType, safeBody };
+    console.log('[browser-operations] project-create-response=' + JSON.stringify(diagnostics));
+    if (status >= 400) {
+      const error = new Error('ChatGPT project create HTTP ' + status + ': ' + JSON.stringify(diagnostics));
+      if (cfMitigated === 'challenge') {
+        error.code = 'BROWSER_CHALLENGE';
+        error.retryable = true;
+      } else {
+        error.code = 'PROJECT_CREATE_REJECTED';
+        error.retryable = false;
+      }
+      throw error;
+    }
+  }
 
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
