@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "curveyield-development-agent-task-request-v1",
+  "status": "READY",
+  "managerId": "upgrade-launcher-live-smoke-r1",
+  "specificationPath": "process/development-agent-task-manager/specifications/upgrade-launcher-live-smoke-r1_SPEC_v1.md",
+  "skillPath": "process/development-agent-task-manager/UPGRADE_AGENT_EXECUTION_AUTHORITY_v1.md",
+  "authorityRef": "main",
+  "targetRepository": "CurveYield2/Contract-Automation",
+  "targetBranch": "upgrade/launcher-live-smoke-r1",
+  "baseRef": "main",
+  "continuityMode": "managed_project"
+}
