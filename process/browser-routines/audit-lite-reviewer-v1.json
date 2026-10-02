@@ -1,23 +1,20 @@
 {
   "schemaVersion": "curveyield-browser-routine-v1",
   "id": "audit-lite-reviewer-v1",
-  "description": "Create or reuse a normal ChatGPT Project for a Lite audit campaign, create a normal Chat chat inside it, then rename the conversation to the campaign/reviewer identity after the first wake message creates the chat.",
+  "description": "Open the campaign's persisted ChatGPT Project share link, create a reviewer chat inside that same Project, then rename the durable conversation after the wake message.",
   "stages": {
     "before_message": [
       {
         "operation": "chatgpt.ensure_chat_mode"
       },
       {
-        "operation": "chatgpt.ensure_project",
+        "operation": "chatgpt.open_project_by_share_link",
         "args": {
-          "projectName": "{{projectName}}"
+          "projectUrl": "{{projectUrl}}"
         }
       },
       {
-        "operation": "chatgpt.start_project_chat",
-        "args": {
-          "projectName": "{{projectName}}"
-        }
+        "operation": "chatgpt.start_chat_in_open_project"
       }
     ],
     "after_message": [
