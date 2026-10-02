@@ -361,7 +361,17 @@ async function fillComposer(page, message) {
     await page.waitForTimeout(150);
   }
 
-  await composer.pressSequentially(message, { delay: 35 });
+  // Keep ordinary keyboard semantics for long audit wakes without tripping
+  // Playwright's per-action timeout. Humans type long text in bursts with small
+  // pauses; preserve that shape instead of injecting the whole value at once.
+  const chunkSize = 220;
+  for (let offset = 0; offset < message.length; offset += chunkSize) {
+    const chunk = message.slice(offset, offset + chunkSize);
+    await composer.pressSequentially(chunk, { delay: 35 });
+    if (offset + chunkSize < message.length) {
+      await page.waitForTimeout(180);
+    }
+  }
   await page.waitForTimeout(300);
 
   const filledText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
