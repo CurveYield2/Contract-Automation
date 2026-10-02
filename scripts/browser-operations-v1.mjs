@@ -425,36 +425,76 @@ async function findProjectsSectionAddControl(page) {
   const projects = page.getByText('Projects', { exact: true }).first();
   if (!await projects.isVisible().catch(() => false)) return null;
 
-  let region = projects;
-  for (let depth = 0; depth < 5; depth += 1) {
-    region = region.locator('xpath=..');
-    const candidates = region.locator('button, [role="button"], a');
-    const count = Math.min(await candidates.count().catch(() => 0), 8);
+  // Match the real human interaction: hover the Projects title first so the
+  // contextual + and overflow controls are revealed.
+  await projects.hover().catch(() => {});
+  await page.waitForTimeout(350);
 
-    // Prefer a semantically labelled add/create-project control.
+  let region = projects;
+  for (let depth = 0; depth < 4; depth += 1) {
+    region = region.locator('xpath=..');
+    const candidates = region.locator('button, [role="button"]');
+    const count = Math.min(await candidates.count().catch(() => 0), 10);
+
+    // Strongly prefer explicit accessible names that mean "add/create project".
     for (let i = 0; i < count; i += 1) {
       const candidate = candidates.nth(i);
       if (!await candidate.isVisible().catch(() => false)) continue;
       const label = [
         await candidate.getAttribute('aria-label').catch(() => ''),
         await candidate.getAttribute('title').catch(() => ''),
+        await candidate.getAttribute('data-testid').catch(() => ''),
       ].filter(Boolean).join(' ');
-      if (/(new|add|create).*project|project.*(new|add|create)/i.test(label)) return candidate;
+      if (/(?:add|new|create).*project|project.*(?:add|new|create)/i.test(label)) {
+        console.log('[browser-operations] projects-plus-control=' + JSON.stringify({
+          method: 'semantic',
+          aria: await candidate.getAttribute('aria-label').catch(() => null),
+          title: await candidate.getAttribute('title').catch(() => null),
+          testid: await candidate.getAttribute('data-testid').catch(() => null),
+        }));
+        return candidate;
+      }
     }
 
-    // Current ChatGPT may render the add control as an icon-only button next
-    // to the Projects heading. Only accept such a control in a very small
-    // nearest ancestor, never from the whole sidebar.
-    if (count > 0 && count <= 3) {
-      for (let i = 0; i < count; i += 1) {
-        const candidate = candidates.nth(i);
-        if (!await candidate.isVisible().catch(() => false)) continue;
-        const text = (await candidate.innerText().catch(() => '')).trim();
-        const box = await candidate.boundingBox().catch(() => null);
-        if (text === '' && box && box.width <= 56 && box.height <= 56) return candidate;
+    // If the current UI exposes icon-only controls after hover, distinguish the
+    // plus from the overflow menu instead of selecting an arbitrary empty button.
+    for (let i = 0; i < count; i += 1) {
+      const candidate = candidates.nth(i);
+      if (!await candidate.isVisible().catch(() => false)) continue;
+
+      const text = (await candidate.innerText().catch(() => '')).trim();
+      const aria = await candidate.getAttribute('aria-label').catch(() => '');
+      const title = await candidate.getAttribute('title').catch(() => '');
+      const testid = await candidate.getAttribute('data-testid').catch(() => '');
+      const html = await candidate.evaluate(el => el.outerHTML.slice(0, 900)).catch(() => '');
+      const box = await candidate.boundingBox().catch(() => null);
+
+      const looksOverflow = /more|overflow|menu|options|ellipsis|\.\.\.|⋯/i.test([text, aria, title, testid, html].join(' '));
+      const looksPlus = /add|plus|create|new|M12 5v14|M5 12h14|<line[^>]+x1=["']12["'][^>]+y1=["']5/i.test([text, aria, title, testid, html].join(' '));
+
+      if (!looksOverflow && looksPlus && box && box.width <= 56 && box.height <= 56) {
+        console.log('[browser-operations] projects-plus-control=' + JSON.stringify({
+          method: 'hover-icon',
+          aria: aria || null,
+          title: title || null,
+          testid: testid || null,
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+        }));
+        return candidate;
       }
     }
   }
+
+  const diagnostics = await projects.locator('xpath=..').locator('button, [role="button"]').evaluateAll(nodes =>
+    nodes.filter(el => el.getClientRects().length).map(el => ({
+      text: String(el.innerText || '').trim().slice(0, 50),
+      aria: el.getAttribute('aria-label'),
+      title: el.getAttribute('title'),
+      testid: el.getAttribute('data-testid')
+    })).slice(0, 12)
+  ).catch(() => []);
+  console.log('[browser-operations] projects-hover-controls=' + JSON.stringify(diagnostics));
   return null;
 }
 
