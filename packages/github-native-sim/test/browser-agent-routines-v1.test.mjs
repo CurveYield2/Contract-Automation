@@ -56,8 +56,11 @@ test('browser operation registry exposes reusable normal-ChatGPT project operati
   for (const operation of [
     'chatgpt.ensure_chat_mode',
     'chatgpt.ensure_thinking_effort',
-    'chatgpt.ensure_project',
-    'chatgpt.start_project_chat',
+    'chatgpt.create_project',
+    'chatgpt.capture_project_share_link',
+    'chatgpt.open_project_url',
+    'chatgpt.open_project_by_name',
+    'chatgpt.start_current_project_chat',
     'chatgpt.rename_current_chat',
   ]) {
     assert.match(source, new RegExp(operation.replaceAll('.', '\\.')));
@@ -72,22 +75,28 @@ test('browser operation registry exposes reusable normal-ChatGPT project operati
   assert.match(source, /Rename/);
 });
 
-test('browser routine engine is data-driven and the generic reviewer routine is the Lite project flow', () => {
+test('browser routine engine has separate deterministic Project-create and Project-open reviewer flows', () => {
   const engine = read('scripts/browser-routine-engine-v1.mjs');
-  const routine = JSON.parse(read('process/browser-routines/audit-lite-reviewer-v1.json'));
+  const create = JSON.parse(read('process/browser-routines/audit-lite-reviewer-project-create-v1.json'));
+  const open = JSON.parse(read('process/browser-routines/audit-lite-reviewer-project-open-v1.json'));
   assert.match(engine, /executeBrowserOperation/);
   assert.match(engine, /process.*browser-routines/);
   assert.match(engine, /runBrowserRoutineStage/);
-  assert.equal(routine.schemaVersion, 'curveyield-browser-routine-v1');
-  assert.equal(routine.id, 'audit-lite-reviewer-v1');
-  assert.deepEqual(routine.stages.before_message.map((step) => step.operation), [
+  assert.equal(create.schemaVersion, 'curveyield-browser-routine-v1');
+  assert.equal(create.id, 'audit-lite-reviewer-project-create-v1');
+  assert.deepEqual(create.stages.before_message.map((step) => step.operation), [
     'chatgpt.ensure_chat_mode',
-    'chatgpt.ensure_project',
-    'chatgpt.start_project_chat',
+    'chatgpt.create_project',
+    'chatgpt.capture_project_share_link',
+    'chatgpt.start_current_project_chat',
   ]);
-  assert.deepEqual(routine.stages.after_message.map((step) => step.operation), [
-    'chatgpt.rename_current_chat',
+  assert.equal(open.id, 'audit-lite-reviewer-project-open-v1');
+  assert.deepEqual(open.stages.before_message.map((step) => step.operation), [
+    'chatgpt.ensure_chat_mode',
+    'chatgpt.open_project_url',
+    'chatgpt.start_current_project_chat',
   ]);
+  assert.doesNotMatch(read('.github/workflows/lite-audit-browser-orchestrator-v1.yml'), /audit-lite-reviewer-v1/);
 });
 
 test('audit wakes enforce verified High reasoning effort and keep follow-up messages minimal', () => {
@@ -181,24 +190,22 @@ test('watchdog observation classifies home-exit challenge and auth walls as infr
   assert.match(source, /failures\.find\(\(entry\) => entry\.code === 'AUTH_REQUIRED'\)/);
 });
 
-test('V16 reviewer registration preserves ordinary pointer/keyboard interaction while skipping only the repeatedly challenged Project step', () => {
+test('V16 Phase1 registration requires the deterministic Project-create/share-link routine', () => {
   const registration = JSON.parse(read('process/browser-agent-wake/registrations/curveyield-dex-v16-source-r2.json'));
   assert.equal(registration.browserInteractionPolicy, 'ordinary-pointer-keyboard-only');
-  assert.equal(registration.projectCreationPolicy, 'skip');
-  assert.match(registration.projectCreationPolicyReason, /cf-mitigated=challenge/);
+  assert.equal(registration.browserRoutine, 'audit-lite-reviewer-project-create-v1');
+  assert.equal(registration.chatgptProject.name, 'CurveYield DEX v16 Source r2');
+  assert.equal(registration.chatgptProject.url, '');
+  assert.equal(registration.projectCreationPolicy, undefined);
 });
 
-test('Lite reviewer wake falls back to a normal durable chat when only Project creation is Cloudflare-challenged', () => {
+test('Phase1 wake fails closed before posting unless Project Share link capture returns a valid Project URL', () => {
   const source = read('scripts/browser-agent-wake.mjs');
-  assert.match(source, /project-create-challenged-fallback/);
-  assert.match(source, /browserRoutineId === 'audit-lite-reviewer-v1'/);
-  assert.match(source, /error\?\.code === 'BROWSER_CHALLENGE'/);
-  assert.match(source, /fallback: 'normal-chat'/);
-  assert.match(source, /PROJECT_CREATE_CHALLENGED_FALLBACK/);
-  assert.match(source, /projectChallengeFallback/);
-  assert.match(source, /await page\.goto\('https:\/\/chatgpt\.com\/'/);
-  assert.doesNotMatch(source, /recoveryHealth = await backendPreflight\(page\)/);
-  assert.match(source, /await ensureComposer\(page\)/);
+  assert.match(source, /audit-lite-reviewer-project-create-v1/);
+  assert.match(source, /PROJECT_SHARE_URL_REQUIRED/);
+  assert.match(source, /capture_project_share_link/);
+  assert.doesNotMatch(source, /project-create-challenged-fallback/);
+  assert.doesNotMatch(source, /PROJECT_CREATE_CHALLENGED_FALLBACK/);
 });
 
 test('fresh reviewer wake can recover routine/project/chat context from the durable campaign registration', () => {
@@ -207,6 +214,7 @@ test('fresh reviewer wake can recover routine/project/chat context from the dura
   assert.match(source, /process\/browser-agent-wake\/registrations/);
   assert.match(source, /registration\.browserRoutine/);
   assert.match(source, /registration\.chatgptProject\?\.name/);
+  assert.match(source, /registration\.chatgptProject\?\.url/);
   assert.match(source, /registration\.activeAssignment\?\.reviewer/);
   assert.match(source, /browser-context-source=campaign-registration/);
   assert.match(source, /await hydrateBrowserContextFromRegistration\(\)/);
@@ -216,6 +224,7 @@ test('wake runtime executes browser routines around the first message and return
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /BROWSER_ROUTINE_ID/);
   assert.match(source, /CHATGPT_PROJECT_NAME/);
+  assert.match(source, /CHATGPT_PROJECT_URL/);
   assert.match(source, /CHATGPT_CHAT_NAME/);
   assert.match(source, /stage:\s*'before_message'/);
   assert.match(source, /await postWithBackendVerification\(page, wakeMessage\)/);
@@ -234,6 +243,7 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.match(workflow, /base64 -d > \/tmp\/browser-context\.json/);
   assert.match(workflow, /BROWSER_ROUTINE_ID=\$\(jq -r '\.routineId \/\/ empty'/);
   assert.match(workflow, /CHATGPT_PROJECT_NAME=\$\(jq -r '\.projectName \/\/ empty'/);
+  assert.match(workflow, /CHATGPT_PROJECT_URL=\$\(jq -r '\.projectUrl \/\/ empty'/);
   assert.match(workflow, /CHATGPT_CHAT_NAME=\$\(jq -r '\.chatName \/\/ empty'/);
   assert.match(workflow, /REPAIR_ENABLED=\$\(jq -r '\.repair\.enabled \/\/ false'/);
   assert.match(workflow, /RETRY_INPUTS_JSON:\s*\$\{\{ toJSON\(inputs\) \}\}/);
@@ -249,13 +259,14 @@ test('Lite browser orchestration launches assignment-v2 reviewers with the share
   assert.match(workflow, /curveyield-audit-campaign-directory-entry-v2/);
   assert.match(workflow, /Publish legacy successor receipt preparation when applicable/);
   assert.match(workflow, /gh workflow run browser-agent-wake\.yml/);
-  assert.match(workflow, /audit-lite-reviewer-v1/);
-  assert.match(workflow, /routineId:\$routine,projectName:\$project,chatName:\$chat/);
+  assert.match(workflow, /audit-lite-reviewer-project-create-v1/);
+  assert.match(workflow, /audit-lite-reviewer-project-open-v1/);
+  assert.match(workflow, /phase_id.*phase-1/);
+  assert.match(workflow, /chatgptProject\.url/);
+  assert.match(workflow, /routineId:\$routine,projectName:\$project,projectUrl:\$projectUrl,chatName:\$chat/);
   assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
-  assert.match(workflow, /projectCreationPolicy/);
-  assert.match(workflow, /projectCreationPolicyReason/);
   assert.match(workflow, /browserInteractionPolicy/);
-  assert.match(workflow, /existing-registration\.json/);
+  assert.doesNotMatch(workflow, /projectCreationPolicy/);
   assert.doesNotMatch(workflow, /CAMPAIGN_STATE_v1|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE|web-bootstrap-agent/);
   assert.doesNotMatch(workflow, /SUCCESSOR_HANDOFF\.json|WAKE_UP_MESSAGE\.md|START_HERE_SUCCESSOR\.md/);
 });
@@ -402,7 +413,8 @@ test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualifi
     'scripts/browser-agent-wake.mjs',
     'scripts/browser-operations-v1.mjs',
     'scripts/browser-routine-engine-v1.mjs',
-    'process/browser-routines/audit-lite-reviewer-v1.json',
+    'process/browser-routines/audit-lite-reviewer-project-create-v1.json',
+    'process/browser-routines/audit-lite-reviewer-project-open-v1.json',
     'process/browser-agent-wake/REGISTRATION_TEMPLATE_v1.json',
     'protocol/schemas/curveyield-reviewer-repair-request-v1.schema.json',
     'packages/github-native-sim/test/browser-agent-routines-v1.test.mjs',
@@ -416,7 +428,7 @@ test('Project creation and reviewer wake use only ordinary pointer and keyboard 
   const wake = read('scripts/browser-agent-wake.mjs');
 
   const projectStart = operations.indexOf('async function createProject(page, projectName)');
-  const projectEnd = operations.indexOf('async function ensureProject', projectStart);
+  const projectEnd = operations.indexOf('function validProjectUrl', projectStart);
   const projectBlock = operations.slice(projectStart, projectEnd);
   assert.match(projectBlock, /humanPointerClick\(page, trigger/);
   assert.match(projectBlock, /humanTypeInto\(page, input/);
