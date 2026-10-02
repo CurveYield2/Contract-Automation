@@ -52,6 +52,11 @@ on:
         default: managed_project
         type: choice
         options: [managed_project, standalone]
+      runner_retry_attempt:
+        description: Internal fresh-runner browser retry attempt counter
+        required: false
+        default: '0'
+        type: string
       initial_assignment:
         description: Optional extra instruction appended to the authoritative specification
         required: false
@@ -80,6 +85,7 @@ jobs:
       TARGET_BRANCH: ${{ inputs.target_branch }}
       BASE_REF: ${{ inputs.base_ref }}
       CONTINUITY_MODE: ${{ inputs.continuity_mode }}
+      RUNNER_RETRY_ATTEMPT: ${{ inputs.runner_retry_attempt }}
       INITIAL_ASSIGNMENT: ${{ inputs.initial_assignment }}
       TASK_LOCK_PROTOCOL_PATH: process/development-agent-task-manager/TASK_LOCK_PROTOCOL_v1.md
       TASK_LOCK_TEMPLATE_PATH: process/development-agent-task-manager/TASK_LOCK_STATE_TEMPLATE_v1.md
@@ -296,6 +302,9 @@ jobs:
           [ "$changed" = true ] || { echo "::error::Tailscale exit node did not change runner egress."; exit 1; }
 
       - name: Create initial fresh development agent
+        id: initial_agent
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -352,13 +361,51 @@ jobs:
           else
             unset BROWSER_ROUTINE_ID CHATGPT_PROJECT_NAME CHATGPT_PROJECT_URL
           fi
+          set +e
           node scripts/browser-agent-wake.mjs
-          jq -e '.ok==true and (.chatUrl|type=="string" and test("^https://chatgpt.com/c/"))' /tmp/task-manager-start.json >/dev/null
-          if [ "$TASK_MANAGER_CONTINUITY_MODE" = managed_project ]; then
-            jq -e '.projectUrl|type=="string" and test("^https://chatgpt.com/") and (test("^https://chatgpt.com/c/")|not)' /tmp/task-manager-start.json >/dev/null
+          wake_rc=$?
+          set -e
+
+          if [ ! -s /tmp/task-manager-start.json ]; then
+            jq -n --argjson rc "$wake_rc"               '{ok:false,wakeId:"unknown",failures:[{provider:"github-playwright",code:"NO_RESULT",retryable:false,error:("browser runtime exited without a result; rc="+($rc|tostring))}]}'               > /tmp/task-manager-start.json
           fi
 
+          ok="$(jq -r '.ok // false' /tmp/task-manager-start.json)"
+          retryable="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true)] | length > 0' /tmp/task-manager-start.json)"
+          retry_code="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true) | .code][0] // empty' /tmp/task-manager-start.json)"
+
+          if [ "$ok" = true ]; then
+            jq -e '.ok==true and (.chatUrl|type=="string" and test("^https://chatgpt.com/c/"))' /tmp/task-manager-start.json >/dev/null
+            if [ "$TASK_MANAGER_CONTINUITY_MODE" = managed_project ]; then
+              jq -e '.projectUrl|type=="string" and test("^https://chatgpt.com/") and (test("^https://chatgpt.com/c/")|not)' /tmp/task-manager-start.json >/dev/null
+            fi
+            echo 'created=true' >> "$GITHUB_OUTPUT"
+            echo 'retry_dispatched=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          attempt="${RUNNER_RETRY_ATTEMPT:-0}"
+          max=3
+          [[ "$attempt" =~ ^[0-9]+$ ]] || attempt=0
+
+          if [ "$retryable" = true ] && [ "$attempt" -lt "$max" ]; then
+            next=$((attempt + 1))
+            gh workflow run development-agent-task-manager.yml               --repo "$GITHUB_REPOSITORY"               --ref main               --field operation=start               --field manager_id="$MANAGER_ID"               --field specification_path="$SPEC_PATH"               --field skill_path="$SKILL_PATH"               --field authority_ref="$AUTHORITY_REF"               --field target_repository="$TARGET_REPOSITORY"               --field target_branch="$TARGET_BRANCH"               --field base_ref="$BASE_REF"               --field continuity_mode="$TASK_MANAGER_CONTINUITY_MODE"               --field runner_retry_attempt="$next"               --field initial_assignment="$INITIAL_ASSIGNMENT"
+
+            echo 'created=false' >> "$GITHUB_OUTPUT"
+            echo 'retry_dispatched=true' >> "$GITHUB_OUTPUT"
+            echo "Fresh-runner development-agent retry $next/$max dispatched for $MANAGER_ID after $retry_code." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo 'created=false' >> "$GITHUB_OUTPUT"
+          echo 'retry_dispatched=false' >> "$GITHUB_OUTPUT"
+          jq '{ok,wakeId,failures,browserRoutineId,projectName,projectUrl}' /tmp/task-manager-start.json
+          echo "::error::Initial development agent creation failed (retryable=$retryable code=$retry_code attempt=$attempt/$max rc=$wake_rc)."
+          exit 1
+
       - name: Persist active task-manager state
+        if: steps.initial_agent.outputs.created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
