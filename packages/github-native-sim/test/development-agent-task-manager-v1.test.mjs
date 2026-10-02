@@ -181,3 +181,116 @@ test('task-manager changes stay in the control-light qualification lane', () => 
   assert.equal(result.lane, 'CONTROL_LIGHT');
   assert.equal(result.escalatedPaths, undefined);
 });
+
+
+test('development agents receive a pinned task-lock protocol and task-specific state path', () => {
+  assert.match(workflow, /TASK_LOCK_PROTOCOL_PATH: process\/development-agent-task-manager\/TASK_LOCK_PROTOCOL_v1\.md/);
+  assert.match(workflow, /TASK_LOCK_TEMPLATE_PATH: process\/development-agent-task-manager\/TASK_LOCK_STATE_TEMPLATE_v1\.md/);
+  assert.match(workflow, /task_lock_scope=development_upgrade_only/);
+  assert.match(workflow, /task_lock_state_path=\$TASK_MANAGER_TASK_LOCK_STATE_PATH/);
+  assert.match(workflow, /task_lock_state_path="process\/development-agent-task-manager\/task-locks\/\$\{safe_id\}_v1\.md"/);
+  assert.match(workflow, /taskLock:\{scope:"development_upgrade_only"/);
+});
+
+test('development task lock enforces smallest-delta behavior before implementation and during recovery', () => {
+  assert.match(workflow, /Before implementation work, read the exact task-lock protocol/);
+  assert.match(workflow, /Do not perform implementation work until that lock exists/);
+  assert.match(workflow, /eliminates or verifies a REMAINING DELTA item/);
+  assert.match(workflow, /Discovery of an adjacent problem is not authorization to repair it/);
+  assert.match(workflow, /Re-read the existing task-lock state on the target branch/);
+  assert.match(workflow, /Preserve SATISFIED entries unless live verification disproves them/);
+  assert.match(workflow, /Do not turn PARKED OBSERVATIONS into scope/);
+});
+
+test('machine completion requires a closed task-lock state', () => {
+  assert.match(workflow, /task_lock_state_path=.*\.taskLock\.statePath/);
+  assert.match(workflow, /remaining_delta=.*awk/);
+  assert.match(workflow, /active_blocker=.*awk/);
+  assert.match(workflow, /\[ "\$remaining_delta" = "- None" \]/);
+  assert.match(workflow, /\[ "\$active_blocker" = "None" \]/);
+});
+
+test('managed Project continuity is the default with standalone as explicit exception', () => {
+  assert.match(workflow, /continuity_mode:/);
+  assert.match(workflow, /default: managed_project/);
+  assert.match(workflow, /options: \[managed_project, standalone\]/);
+  assert.match(workflow, /CONTINUITY_MODE=.*inputs\.continuity_mode/);
+  assert.match(workflow, /continuityMode \/\//);
+  assert.match(workflow, /TASK_MANAGER_CONTINUITY_MODE=\$continuity_mode/);
+
+  const schema = JSON.parse(fs.readFileSync(
+    path.join(root, 'protocol/schemas/curveyield-development-agent-task-request-v1.schema.json'),
+    'utf8'
+  ));
+  assert.deepEqual(schema.properties.continuityMode.enum, ['managed_project', 'standalone']);
+  assert.equal(schema.properties.continuityMode.default, 'managed_project');
+});
+
+test('development manager uses corrected home-exit Playwright transport instead of stale fallback providers', () => {
+  assert.match(workflow, /tailscale\/github-action@v4/);
+  assert.match(workflow, /Route browser phase through home exit node/);
+  assert.match(workflow, /Xvfb :99 -screen 0 1920x1080x24/);
+  assert.match(workflow, /x11vnc -display :99/);
+  assert.match(workflow, /CHATGPT_SESSION_STATE_KEY_B64/);
+  assert.match(workflow, /actions\/cache\/restore@v4/);
+  assert.match(workflow, /actions\/cache\/save@v4/);
+  assert.match(workflow, /node scripts\/browser-agent-wake\.mjs/);
+  assert.doesNotMatch(workflow, /BROWSERLESS_TOKEN|BROWSERBASE_API_KEY|BROWSERBASE_PROJECT_ID|BROWSERBASE_CONTEXT_ID/);
+  assert.doesNotMatch(workflow, /xvfb-run -a node scripts\/browser-agent-wake\.mjs/);
+});
+
+test('managed task creates one Project then replacements reopen that exact Project', () => {
+  assert.match(workflow, /development-agent-project-create-v1/);
+  assert.match(workflow, /development-agent-project-open-v1/);
+  assert.match(workflow, /project_url=.*\.projectUrl/);
+  assert.match(workflow, /continuity:\{mode:\$continuityMode,project:\{name:\$projectName,url:\$projectUrl\}\}/);
+  assert.match(workflow, /replacement_project_url=.*\.projectUrl/);
+  assert.match(workflow, /Replacement agent did not reopen the persisted managed Project URL/);
+
+  const create = JSON.parse(fs.readFileSync(
+    path.join(root, 'process/browser-routines/development-agent-project-create-v1.json'),
+    'utf8'
+  ));
+  const open = JSON.parse(fs.readFileSync(
+    path.join(root, 'process/browser-routines/development-agent-project-open-v1.json'),
+    'utf8'
+  ));
+  assert.deepEqual(create.stages.before_message.map((step) => step.operation), [
+    'chatgpt.ensure_chat_mode',
+    'chatgpt.create_project',
+    'chatgpt.capture_project_share_link',
+    'chatgpt.start_current_project_chat',
+  ]);
+  assert.deepEqual(open.stages.before_message.map((step) => step.operation), [
+    'chatgpt.ensure_chat_mode',
+    'chatgpt.open_project_url',
+    'chatgpt.start_current_project_chat',
+  ]);
+  assert.ok(!open.stages.before_message.some((step) => step.operation === 'chatgpt.create_project'));
+});
+
+test('shared browser script uses generic Project semantics rather than audit routine IDs', () => {
+  const source = fs.readFileSync(path.join(root, 'scripts/browser-agent-wake.mjs'), 'utf8');
+  assert.match(source, /projectUrlRequired = \/project-open-v1\$\/\.test\(browserRoutineId\)/);
+  assert.match(source, /routineBefore\.some\(\(entry\) => entry\.operation === 'chatgpt\.capture_project_share_link'\)/);
+  assert.doesNotMatch(source, /browserRoutineId === 'audit-lite-reviewer-project-create-v1'/);
+  assert.doesNotMatch(source, /browserRoutineId === 'audit-lite-reviewer-project-open-v1'/);
+});
+
+test('task-lock policy is not injected into audit-specific browser workflows', () => {
+  const protocol = fs.readFileSync(
+    path.join(root, 'process/development-agent-task-manager/TASK_LOCK_PROTOCOL_v1.md'),
+    'utf8'
+  );
+  assert.match(protocol, /does \*\*not\*\* govern audit execution agents or audit campaign orchestration/);
+
+  const workflowDir = path.join(root, '.github/workflows');
+  const auditWorkflowNames = fs.readdirSync(workflowDir).filter((name) =>
+    /audit|phase0|phase9|reviewer|v7-execution/i.test(name) &&
+    name !== 'development-agent-task-manager.yml'
+  );
+  for (const name of auditWorkflowNames) {
+    const body = fs.readFileSync(path.join(workflowDir, name), 'utf8');
+    assert.doesNotMatch(body, /TASK_LOCK_PROTOCOL_v1\.md|task_lock_scope=development_upgrade_only/, name);
+  }
+});
