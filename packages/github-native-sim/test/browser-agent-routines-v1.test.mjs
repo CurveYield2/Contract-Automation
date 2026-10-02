@@ -34,6 +34,18 @@ test('project creation opens the sidebar and resolves semantic New project contr
   assert.match(source, /visibleControls=/);
 });
 
+test('project creation records the exact backend response and only retries confirmed security challenges', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  assert.match(source, /\/backend-api\/projects/);
+  assert.match(source, /project-create-response/);
+  assert.match(source, /cf-mitigated/);
+  assert.match(source, /PROJECT_CREATE_REJECTED/);
+  assert.match(source, /error\.code = 'BROWSER_CHALLENGE'/);
+  assert.match(source, /error\.retryable = true/);
+  assert.match(source, /safeBody/);
+});
+
+
 test('browser operation registry exposes reusable normal-ChatGPT project operations', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   for (const operation of [
