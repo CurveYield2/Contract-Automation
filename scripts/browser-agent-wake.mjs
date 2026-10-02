@@ -98,7 +98,7 @@ async function loadModules() {
 
 async function hydrateBrowserContextFromRegistration() {
   if (mode !== 'create_fresh') return false;
-  const projectUrlRequired = browserRoutineId === 'audit-lite-reviewer-project-open-v1';
+  const projectUrlRequired = /project-open-v1$/.test(browserRoutineId);
   if (browserRoutineId && projectName && requestedChatName && (!projectUrlRequired || projectUrl)) return false;
   const campaignId = String(env.CAMPAIGN_ID || '').trim();
   if (!campaignId) return false;
@@ -621,7 +621,7 @@ async function runWithPage(providerName, connect) {
         [...routineBefore].reverse().find((entry) => entry?.result?.projectUrl)?.result;
       projectUrl = projectResult?.projectUrl || projectUrl || '';
 
-      if (browserRoutineId === 'audit-lite-reviewer-project-create-v1') {
+      if (routineBefore.some((entry) => entry.operation === 'chatgpt.capture_project_share_link')) {
         try {
           const parsed = new URL(projectUrl);
           if (parsed.origin !== 'https://chatgpt.com' || parsed.pathname === '/' || /^\/c\//.test(parsed.pathname)) {
@@ -630,7 +630,7 @@ async function runWithPage(providerName, connect) {
         } catch {
           throw new BrowserAgentError(
             'PROJECT_SHARE_URL_REQUIRED',
-            'Phase 1 Project creation did not return a valid private ChatGPT Project share URL; reviewer wake cannot be sent.',
+            'Project creation did not return a valid private ChatGPT Project share URL; the managed wake cannot be sent.',
             true,
           );
         }
