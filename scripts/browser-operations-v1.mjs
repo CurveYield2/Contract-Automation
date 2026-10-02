@@ -256,6 +256,34 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
   error.retryable = true;
   throw error;
 }
+async function humanPointerClick(page, locator, { hoverMs = 220, downMs = 70, settleMs = 320 } = {}) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await locator.hover().catch(() => {});
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('Visible control has no clickable bounding box');
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y, { steps: 12 });
+  await page.waitForTimeout(hoverMs);
+  await page.mouse.down();
+  await page.waitForTimeout(downMs);
+  await page.mouse.up();
+  await page.waitForTimeout(settleMs);
+}
+
+async function humanTypeInto(page, locator, text, { delay = 45 } = {}) {
+  await humanPointerClick(page, locator, { hoverMs: 120, downMs: 55, settleMs: 180 });
+  const current = await locator.inputValue().catch(() => '');
+  if (current) {
+    await locator.press('Control+A').catch(async () => locator.press('Meta+A').catch(() => {}));
+    await page.waitForTimeout(120);
+    await locator.press('Backspace');
+    await page.waitForTimeout(120);
+  }
+  await locator.pressSequentially(String(text), { delay });
+  await page.waitForTimeout(280);
+}
+
 async function ensureSidebarOpen(page) {
   const open = await firstVisible(page, [
     'button[data-testid="open-sidebar-button"]',
@@ -549,12 +577,10 @@ async function createProject(page, projectName) {
     );
   }
 
-  const triggerLabel = await trigger.getAttribute('aria-label').catch(() => '');
-  // Current sidebar paints overlapping section layers above the add button.
-  // Its standard keyboard activation remains available and avoids misclicks.
-  if (triggerLabel === 'Add new project') await trigger.press('Enter');
-  else await trigger.click();
-  await page.waitForTimeout(500);
+  // Mirror the human interaction exactly: expose the visible + control, move the
+  // pointer onto it, and perform a normal pointer click. Never activate this
+  // control through keyboard, force-click, DOM click, or form submission.
+  await humanPointerClick(page, trigger, { hoverMs: 260, downMs: 80, settleMs: 520 });
 
   let input = await firstVisible(page, [
     'input[placeholder*="Project name"]',
@@ -574,7 +600,7 @@ async function createProject(page, projectName) {
     }))).catch(() => []);
     throw new Error('ChatGPT project-name input not found; visibleFieldStructure=' + JSON.stringify(fields));
   }
-  await input.fill(projectName);
+  await humanTypeInto(page, input, projectName, { delay: 55 });
 
   const submit = await firstVisible(page, [
     '[role="dialog"] button:has-text("Create project")',
@@ -593,7 +619,7 @@ async function createProject(page, projectName) {
     } catch { return false; }
   }, { timeout: 20000 }).catch(() => null);
 
-  await submit.click();
+  await humanPointerClick(page, submit, { hoverMs: 280, downMs: 75, settleMs: 420 });
 
   const createResponse = await projectCreateResponse;
   if (createResponse) {
