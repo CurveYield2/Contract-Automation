@@ -15,13 +15,19 @@ test('project creation opens the sidebar and resolves semantic New project contr
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /async function ensureSidebarOpen\(page\)/);
   assert.match(source, /open-sidebar-button/);
+  assert.match(source, /sidebar-toggle-button/);
   assert.match(source, /aria-label="Open sidebar"/);
+  assert.match(source, /aria-label="Toggle sidebar"/);
   assert.match(source, /async function findNewProjectControl\(page\)/);
+  assert.match(source, /async function findSemanticProjectAction\(page\)/);
+  assert.match(source, /new\|add\|create/);
   assert.match(source, /getByText\('New project', \{ exact: true \}\)/);
   assert.match(source, /getByText\('Projects', \{ exact: true \}\)/);
+  assert.match(source, /async function visibleNavigationDiagnostics\(page\)/);
   assert.match(source, /sidebarToggleVisible=/);
   assert.match(source, /projectsVisible=/);
   assert.match(source, /newProjectTextVisible=/);
+  assert.match(source, /visibleControls=/);
 });
 
 test('browser operation registry exposes reusable normal-ChatGPT project operations', () => {
