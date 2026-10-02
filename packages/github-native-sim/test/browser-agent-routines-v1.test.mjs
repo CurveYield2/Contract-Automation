@@ -64,6 +64,9 @@ test('browser operation registry exposes reusable normal-ChatGPT project operati
   }
   assert.match(source, /Work/);
   assert.match(source, /Chat mode control/);
+  assert.match(source, /chatSelected/);
+  assert.match(source, /humanPointerClick\(page, chat/);
+  assert.match(source, /Chat mode did not expose a composer/);
   assert.match(source, /New project/);
   assert.match(source, /New chat/);
   assert.match(source, /Rename/);
