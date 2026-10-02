@@ -375,7 +375,7 @@ Retryable pre-post states currently include:
 
 Non-retryable states include authentication-required and unavailable-chat conditions, plus any failure that occurs after message submission begins. The workflow therefore never guesses whether a possibly-posted wake should be sent again.
 
-For a retryable failure, `browser-agent-wake.yml` re-dispatches the exact original wake inputs onto a fresh GitHub-hosted runner. The default retry budget is three fresh-runner retries and is hard-capped at five. The same `wake_id` concurrency group serializes the chain, so only one attempt can execute at a time.
+For a retryable failure, `browser-agent-wake.yml` re-dispatches the exact original wake inputs onto a fresh GitHub-hosted runner. The retry budget is three fresh-runner retries. The same `wake_id` concurrency group serializes the chain, so only one attempt can execute at a time.
 
 Failed attempts do not create watchdog state, update campaign registrations, save refreshed session state, or arm follow-on observation. Those durable side effects are gated on a verified successful delivery. If the retry budget is exhausted, the final attempt fails with the structured provider failure record.
 
