@@ -197,7 +197,8 @@ test('Lite reviewer wake falls back to a normal durable chat when only Project c
   assert.match(source, /PROJECT_CREATE_CHALLENGED_FALLBACK/);
   assert.match(source, /projectChallengeFallback/);
   assert.match(source, /await page\.goto\('https:\/\/chatgpt\.com\/'/);
-  assert.match(source, /await waitForBackendHealth\(page\)/);
+  assert.match(source, /recoveryHealth = await backendPreflight\(page\)/);
+  assert.match(source, /Project challenge contaminated the current browser session/);
   assert.match(source, /await ensureComposer\(page\)/);
 });
 
