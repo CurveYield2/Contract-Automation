@@ -25,6 +25,17 @@ test('browser agent runtime is isolated from the root contract dependency graph'
   assert.equal(fs.existsSync(path.join(root, 'tools', 'browser-agent-runtime')), false, 'old tools browser runtime path stays retired');
 });
 
+test('isolated browser runtime package stays in the control-light qualification lane', async () => {
+  const { classifyV7QualificationChanges } = await import('../../../scripts/classify-v7-qualification-change.mjs');
+  const result = classifyV7QualificationChanges([
+    '.github/actions/setup-browser-agent-runtime/package.json',
+    '.github/workflows/browser-agent-wake.yml',
+    '.github/workflows/browser-agent-watchdog.yml',
+    'scripts/browser-agent-wake.mjs',
+  ]);
+  assert.equal(result.lane, 'CONTROL_LIGHT');
+});
+
 test('shared browser runtime setup caches only isolated node_modules and installs only on cache miss', () => {
   const action = read('.github/actions/setup-browser-agent-runtime/action.yml');
   assert.match(action, /path:\s*\.github\/actions\/setup-browser-agent-runtime\/node_modules/);
