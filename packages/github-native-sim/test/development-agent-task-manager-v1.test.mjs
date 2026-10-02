@@ -323,3 +323,11 @@ test('fresh-runner retry preserves the exact development task and Project contin
   assert.match(workflow, /BROWSER_ROUTINE_ID='development-agent-project-create-v1'/);
   assert.match(workflow, /CHATGPT_PROJECT_NAME="\$TASK_MANAGER_PROJECT_NAME"/);
 });
+
+
+test('development manager keeps visible browser available for normal verification waits', () => {
+  assert.equal((workflow.match(/INTERACTIVE_VIEW_ENABLED: 'true'/g) || []).length, 2);
+  assert.equal((workflow.match(/MANUAL_CHALLENGE_WAIT_MS: '900000'/g) || []).length, 2);
+  assert.match(workflow, /x11vnc -display :99/);
+  assert.match(workflow, /HOME_EXIT_NODE/);
+});
