@@ -316,6 +316,19 @@ jobs:
           ok="$(jq -r '.ok // false' "$WAKE_RESULT_PATH")"
           retryable="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true)] | length > 0' "$WAKE_RESULT_PATH")"
           retry_code="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true) | .code][0] // empty' "$WAKE_RESULT_PATH")"
+          project_url="$(jq -r '.projectUrl // empty' "$WAKE_RESULT_PATH")"
+
+          if [ "$PHASE_ID" = "phase-1" ] && [ "${BROWSER_ROUTINE_ID:-}" = "audit-lite-reviewer-project-create-v1" ]; then
+            if ! [[ "$project_url" =~ ^https://chatgpt\.com/.+ ]] || [[ "$project_url" =~ ^https://chatgpt\.com/c/ ]]; then
+              jq '.ok=false
+                  | .failures=((.failures // []) + [{provider:"github-playwright",code:"PROJECT_SHARE_URL_REQUIRED",retryable:true,error:"Phase 1 wake cannot complete without a persisted private ChatGPT Project share URL."}])' \
+                "$WAKE_RESULT_PATH" > /tmp/browser-agent-wake-result-phase1.json
+              mv /tmp/browser-agent-wake-result-phase1.json "$WAKE_RESULT_PATH"
+              ok=false
+              retryable=true
+              retry_code=PROJECT_SHARE_URL_REQUIRED
+            fi
+          fi
 
           echo "ok=$ok" >> "$GITHUB_OUTPUT"
           echo "retryable=$retryable" >> "$GITHUB_OUTPUT"
@@ -332,6 +345,28 @@ jobs:
             echo "::warning::Browser wake did not complete on this runner (retryable=$retryable code=$retry_code rc=$rc)."
           fi
 
+      - name: Persist captured Phase-1 Project URL
+        if: ${{ inputs.worker_role == 'reviewer' && inputs.phase_id == 'phase-1' && steps.deliver.outputs.project_url != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAPTURED_PROJECT_URL: ${{ steps.deliver.outputs.project_url }}
+          CAPTURED_PROJECT_NAME: ${{ steps.deliver.outputs.project_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CAPTURED_PROJECT_URL" =~ ^https://chatgpt\.com/.+ ]]
+          ! [[ "$CAPTURED_PROJECT_URL" =~ ^https://chatgpt\.com/c/ ]]
+          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
+          gh api "$api?ref=main" --jq '.content' | base64 -d > /tmp/project-registration.json
+          jq --arg name "$CAPTURED_PROJECT_NAME" --arg url "$CAPTURED_PROJECT_URL" \
+            '.chatgptProject=((.chatgptProject // {}) + {name:$name,url:$url}) | .updatedAt=(now|todate)' \
+            /tmp/project-registration.json > /tmp/project-registration-updated.json
+          sha="$(gh api "$api?ref=main" --jq '.sha')"
+          body="$(base64 -w0 /tmp/project-registration-updated.json)"
+          gh api --method PUT "$api" \
+            -f message="chore(wake): bind Phase1 Project URL for $CAMPAIGN_ID" \
+            -f content="$body" -f sha="$sha" -f branch=main >/dev/null
       - name: Disable home exit node
         if: always()
         shell: bash
