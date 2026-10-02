@@ -178,14 +178,10 @@ test('watchdog observation classifies home-exit challenge and auth walls as infr
   assert.match(source, /failures\.find\(\(entry\) => entry\.code === 'AUTH_REQUIRED'\)/);
 });
 
-test('campaign registration can preselect normal-chat continuity after repeated Project challenges', () => {
-  const source = read('scripts/browser-agent-wake.mjs');
-  assert.match(source, /projectCreationPolicy/);
-  assert.match(source, /registration\.projectCreationPolicy/);
-  assert.match(source, /projectCreationPolicy === 'skip'/);
-  assert.match(source, /project-create-policy-skip/);
+test('V16 reviewer registration re-enables Project creation under ordinary pointer/keyboard interaction policy', () => {
   const registration = JSON.parse(read('process/browser-agent-wake/registrations/curveyield-dex-v16-source-r2.json'));
-  assert.equal(registration.projectCreationPolicy, 'skip');
+  assert.equal(registration.browserInteractionPolicy, 'ordinary-pointer-keyboard-only');
+  assert.equal(registration.projectCreationPolicy, undefined);
 });
 
 test('Lite reviewer wake falls back to a normal durable chat when only Project creation is Cloudflare-challenged', () => {
@@ -197,8 +193,7 @@ test('Lite reviewer wake falls back to a normal durable chat when only Project c
   assert.match(source, /PROJECT_CREATE_CHALLENGED_FALLBACK/);
   assert.match(source, /projectChallengeFallback/);
   assert.match(source, /await page\.goto\('https:\/\/chatgpt\.com\/'/);
-  assert.match(source, /recoveryHealth = await backendPreflight\(page\)/);
-  assert.match(source, /Project challenge contaminated the current browser session/);
+  assert.doesNotMatch(source, /recoveryHealth = await backendPreflight\(page\)/);
   assert.match(source, /await ensureComposer\(page\)/);
 });
 
@@ -394,6 +389,33 @@ test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualifi
   assert.equal(classifyV7QualificationChanges(paths).lane, 'CONTROL_LIGHT');
 });
 
+
+test('Project creation and reviewer wake use only ordinary pointer and keyboard submission primitives', () => {
+  const operations = read('scripts/browser-operations-v1.mjs');
+  const wake = read('scripts/browser-agent-wake.mjs');
+
+  const projectStart = operations.indexOf('async function createProject(page, projectName)');
+  const projectEnd = operations.indexOf('async function ensureProject', projectStart);
+  const projectBlock = operations.slice(projectStart, projectEnd);
+  assert.match(projectBlock, /humanPointerClick\(page, trigger/);
+  assert.match(projectBlock, /humanTypeInto\(page, input/);
+  assert.match(projectBlock, /humanPointerClick\(page, submit/);
+  assert.doesNotMatch(projectBlock, /\.fill\(/);
+  assert.doesNotMatch(projectBlock, /\.press\('Enter'\)/);
+  assert.doesNotMatch(projectBlock, /force:\s*true/);
+  assert.doesNotMatch(projectBlock, /evaluate\([^\n]*\.click/);
+  assert.doesNotMatch(projectBlock, /requestSubmit|form\.submit/);
+
+  const fillStart = wake.indexOf('async function fillComposer(page, message)');
+  const fillEnd = wake.indexOf('async function persistedWakeVisible', fillStart);
+  const sendBlock = wake.slice(fillStart, fillEnd);
+  assert.match(sendBlock, /pressSequentially\(message, \{ delay: 35 \}\)/);
+  assert.match(sendBlock, /humanPointerClick\(page, send/);
+  assert.doesNotMatch(sendBlock, /\.fill\(/);
+  assert.doesNotMatch(sendBlock, /force:\s*true/);
+  assert.doesNotMatch(sendBlock, /requestSubmit|form\.submit/);
+  assert.doesNotMatch(sendBlock, /evaluate\([^\n]*\.click/);
+});
 
 test('project creation hovers Projects and distinguishes the plus control from the overflow menu', () => {
   const source = read('scripts/browser-operations-v1.mjs');
