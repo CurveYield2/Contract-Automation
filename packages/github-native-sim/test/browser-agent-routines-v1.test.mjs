@@ -178,6 +178,19 @@ test('watchdog observation classifies home-exit challenge and auth walls as infr
   assert.match(source, /failures\.find\(\(entry\) => entry\.code === 'AUTH_REQUIRED'\)/);
 });
 
+test('Lite reviewer wake falls back to a normal durable chat when only Project creation is Cloudflare-challenged', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /project-create-challenged-fallback/);
+  assert.match(source, /browserRoutineId === 'audit-lite-reviewer-v1'/);
+  assert.match(source, /error\?\.code === 'BROWSER_CHALLENGE'/);
+  assert.match(source, /fallback: 'normal-chat'/);
+  assert.match(source, /PROJECT_CREATE_CHALLENGED_FALLBACK/);
+  assert.match(source, /projectChallengeFallback/);
+  assert.match(source, /await page\.goto\('https:\/\/chatgpt\.com\/'/);
+  assert.match(source, /await waitForBackendHealth\(page\)/);
+  assert.match(source, /await ensureComposer\(page\)/);
+});
+
 test('fresh reviewer wake can recover routine/project/chat context from the durable campaign registration', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /hydrateBrowserContextFromRegistration/);
