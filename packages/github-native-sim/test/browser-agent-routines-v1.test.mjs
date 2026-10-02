@@ -181,10 +181,11 @@ test('watchdog observation classifies home-exit challenge and auth walls as infr
   assert.match(source, /failures\.find\(\(entry\) => entry\.code === 'AUTH_REQUIRED'\)/);
 });
 
-test('V16 reviewer registration re-enables Project creation under ordinary pointer/keyboard interaction policy', () => {
+test('V16 reviewer registration preserves ordinary pointer/keyboard interaction while skipping only the repeatedly challenged Project step', () => {
   const registration = JSON.parse(read('process/browser-agent-wake/registrations/curveyield-dex-v16-source-r2.json'));
   assert.equal(registration.browserInteractionPolicy, 'ordinary-pointer-keyboard-only');
-  assert.equal(registration.projectCreationPolicy, undefined);
+  assert.equal(registration.projectCreationPolicy, 'skip');
+  assert.match(registration.projectCreationPolicyReason, /cf-mitigated=challenge/);
 });
 
 test('Lite reviewer wake falls back to a normal durable chat when only Project creation is Cloudflare-challenged', () => {
