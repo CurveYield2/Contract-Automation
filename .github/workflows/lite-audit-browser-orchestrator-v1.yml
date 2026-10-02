@@ -128,7 +128,6 @@ jobs:
           api="repos/$GITHUB_REPOSITORY/contents/$registration"
           jq -n \
             --arg campaignId "$CAMPAIGN_ID" \
-            --arg projectName "$CAMPAIGN_NAME" \
             --arg ref "$AUDIT_CONTROLLER_REF" \
             --arg directoryPath "${{ steps.directory.outputs.path }}" \
             --arg phaseId "${{ steps.successor.outputs.incoming_phase }}" \
@@ -138,7 +137,7 @@ jobs:
               schemaVersion:"curveyield-browser-agent-wake-registration-v1",
               campaignId:$campaignId,mode:"create_fresh",chatUrl:"",
               browserRoutine:"audit-lite-reviewer-v1",
-              chatgptProject:{name:$projectName,url:""},activeChat:{name:"",url:""},wakeMessage:"",thinkingEffort:"high",
+              activeChat:{name:"",url:""},wakeMessage:"",thinkingEffort:"high",
               activeAssignment:{phaseId:$phaseId,milestoneId:$boundary,workerRole:"reviewer",reviewer:$reviewer,thinkingEffort:"high"},
               watchdog:{enabled:true,idleMessage:"GET BACK TO WORK",gate:{mode:"LITE",repository:"CurveYield2/Audit-Controller",ref:$ref,statePath:$directoryPath,expectedPhaseId:$phaseId,expectedMilestoneId:$boundary,activePointerPath:"",stopStates:["STOPPED_BY_HUMAN"],stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]}}
             }' > /tmp/registration.json
@@ -146,14 +145,6 @@ jobs:
           current="$(printf '%s' "$current_payload" | jq -r '.sha // empty')"
           if [ -n "$current" ]; then
             printf '%s' "$current_payload" | jq -r '.content' | tr -d '\n' | base64 -d > /tmp/existing-registration.json
-            jq -s '
-              .[0] as $new | .[1] as $old |
-              $new
-              + (if ($old.projectCreationPolicy? // "") != "" then {projectCreationPolicy:$old.projectCreationPolicy} else {} end)
-              + (if ($old.projectCreationPolicyReason? // "") != "" then {projectCreationPolicyReason:$old.projectCreationPolicyReason} else {} end)
-              + (if ($old.browserInteractionPolicy? // "") != "" then {browserInteractionPolicy:$old.browserInteractionPolicy} else {} end)
-            ' /tmp/registration.json /tmp/existing-registration.json > /tmp/registration-merged.json
-            mv /tmp/registration-merged.json /tmp/registration.json
           fi
           body="$(base64 -w0 /tmp/registration.json)"
           if [ -n "$current" ]; then
@@ -173,9 +164,8 @@ jobs:
           chat_name="$CAMPAIGN_NAME ${{ steps.successor.outputs.incoming_reviewer }}"
           browser_context_b64="$(jq -cn \
             --arg routine 'audit-lite-reviewer-v1' \
-            --arg project "$CAMPAIGN_NAME" \
             --arg chat "$chat_name" \
-            '{routineId:$routine,projectName:$project,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"standard"}' | base64 -w0)"
+            '{routineId:$routine,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"standard"}' | base64 -w0)"
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="$wake_id" \
             -f campaign_id="$CAMPAIGN_ID" \
