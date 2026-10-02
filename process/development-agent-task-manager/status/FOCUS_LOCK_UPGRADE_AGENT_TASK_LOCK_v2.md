@@ -96,32 +96,31 @@ Generic browser primitives may be reused from the current shared browser stack, 
 - Located the existing Development Agent Task Manager.
 - Confirmed `process/development-agent-task-manager/` is the correct home for the permanent task-lock protocol.
 - Created a dedicated implementation branch.
-- Added the permanent task-lock protocol.
-- Added the task-lock state template.
-- Began wiring task-lock metadata into the Development Agent Task Manager.
-- Confirmed the stale Development Agent Task Manager browser path still calls the shared script directly without the corrected home-exit/session-state workflow mechanics.
-- Located the corrected browser pathway on current `main`, including the deterministic Project create/open/share-link work merged in PRs #485/#486 and the home-exit Playwright transport introduced by PR #463 and subsequent repairs.
-- Recorded the explicit audit-path exclusion.
-- Set Project-backed continuity as the development-manager default, with standalone chat only as a tiny-task exception.
+- Added `TASK_LOCK_PROTOCOL_v1.md`.
+- Added `TASK_LOCK_STATE_TEMPLATE_v1.md`.
+- Wired task-lock identity and state-path requirements into initial, supervision, replacement, and completion logic.
+- Added completion gating on `REMAINING DELTA: - None` and `ACTIVE BLOCKER: None`.
+- Located the corrected browser pathway on current `main`, including home-exit Playwright and deterministic Project create/open/share-link behavior.
+- Removed audit-specific routine-ID coupling from the shared browser script while preserving the same Project semantics.
+- Added development-specific Project create/open routines that reuse the corrected generic Project operations.
+- Added `managed_project` as the default continuity mode and `standalone` as the explicit tiny-task exception.
+- Initial managed workers create one Project and require a private Project share URL before success.
+- Durable manager state persists continuity mode plus Project name/private URL.
+- Replacement workers reopen the exact persisted Project and create a fresh child chat; they do not create a second Project.
+- Replaced Development Agent Task Manager Browserless/Browserbase environment with GitHub-hosted Playwright + Xvfb + Tailscale home-exit + encrypted session-state handling.
+- Updated development-agent documentation.
+- Opened draft PR #490 for GitHub-side validation; no merge has been performed.
+- First qualification failure was diagnosed as a stale regression assertion requiring an audit routine ID in the now-generic shared script; that test was repaired.
+- Rechecked `main`; baseline remains `5a34b046e2211a4cb4a3f4065156ab91d8770c80`.
 
 ## REMAINING DELTA
 
-1. Finish task-lock integration in initial development-agent wakes.
-2. Finish task-lock integration in replacement/resume development-agent wakes.
-3. Ensure idle supervision re-anchors to the existing task lock and smallest remaining delta.
-4. Ensure machine completion requires a closed task-lock state.
-5. Replace stale Development Agent Task Manager browser startup/observe/poke/replacement callsites with the corrected browser transport.
-6. Add development-specific Project routines or genericize/reuse the corrected Project operations without using audit-specific wake text.
-7. Make Project-backed continuity the default for managed tasks.
-8. Add an explicit lightweight standalone-chat mode for genuinely tiny one-agent tasks.
-9. Persist the managed task's Project private share URL in durable manager state.
-10. Initial managed Project launch must create the Project once and capture/persist its private share URL before launch is considered successful.
-11. Replacement/successor development agents must reopen the exact saved Project URL and create a new chat inside it.
-12. Chat failure/context exhaustion must replace only the chat, never the Project.
-13. Add regression tests for task-lock enforcement, corrected browser transport, Project persistence, Project reuse, and standalone-chat exception.
-14. Verify the task-lock policy was not injected into audit-specific wakes/monitors/orchestration.
-15. Update development-agent documentation.
-16. Re-check current `main` before completion and reconcile only live changes that affect this delta.
+1. Complete GitHub-side regression/qualification runs on the latest branch head.
+2. Diagnose and repair any remaining test, YAML, state-schema, or browser-integration failures.
+3. Verify the final PR diff contains no task-lock injection into audit-specific wakes, watchdogs/monitors, campaign orchestration, phase handoffs, or audit execution pathways.
+4. Verify Project persistence/reuse and standalone exception are covered by regression tests.
+5. Confirm current `main` again before declaring the branch ready.
+6. Leave the implementation unmerged pending explicit human merge approval.
 
 ## PARKED OBSERVATIONS
 
