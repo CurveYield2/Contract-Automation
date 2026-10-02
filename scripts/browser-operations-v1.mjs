@@ -4,6 +4,18 @@ const PROJECT_LINK_PATTERNS = [
   '[role="button"]'
 ];
 
+function durableProjectShareUrl(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    if (url.origin !== 'https://chatgpt.com') return false;
+    if (!url.pathname || url.pathname === '/') return false;
+    if (/^\/c\//.test(url.pathname)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function firstVisible(page, selectors, timeout = 900) {
   for (const selector of selectors) {
     const locator = page.locator(selector).first();
@@ -680,6 +692,129 @@ async function createProject(page, projectName) {
 
 }
 
+async function findProjectOverflowControl(page, projectName) {
+  const entry = await findProjectEntry(page, projectName);
+  if (!entry) return null;
+
+  await entry.hover().catch(() => {});
+  await page.waitForTimeout(320);
+
+  let row = entry.locator('xpath=ancestor::*[self::li or @role="listitem" or @data-testid][1]');
+  if (!await row.isVisible().catch(() => false)) row = entry.locator('xpath=..');
+
+  const candidates = row.locator('button, [role="button"]');
+  const count = Math.min(await candidates.count().catch(() => 0), 12);
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const candidate = candidates.nth(i);
+    if (!await candidate.isVisible().catch(() => false)) continue;
+    const attrs = [
+      await candidate.innerText().catch(() => ''),
+      await candidate.getAttribute('aria-label').catch(() => ''),
+      await candidate.getAttribute('title').catch(() => ''),
+      await candidate.getAttribute('data-testid').catch(() => ''),
+    ].filter(Boolean).join(' ');
+    if (/more|options|menu|overflow|ellipsis|\.\.\.|⋯/i.test(attrs)) return candidate;
+  }
+
+  const visible = [];
+  for (let i = 0; i < count; i += 1) {
+    const candidate = candidates.nth(i);
+    if (!await candidate.isVisible().catch(() => false)) continue;
+    const box = await candidate.boundingBox().catch(() => null);
+    if (box && box.width <= 56 && box.height <= 56) visible.push(candidate);
+  }
+  return visible.length ? visible.at(-1) : null;
+}
+
+async function captureProjectShareLink(page, { projectName }) {
+  if (!projectName) throw new Error('chatgpt.capture_project_share_link requires projectName');
+
+  await ensureChatMode(page);
+  await ensureSidebarOpen(page);
+
+  const overflow = await findProjectOverflowControl(page, projectName);
+  if (!overflow) throw new Error('Project overflow menu control not found for ' + projectName);
+
+  await humanPointerClick(page, overflow, { hoverMs: 220, downMs: 70, settleMs: 380 });
+
+  const shareProject = await firstVisible(page, [
+    '[role="menuitem"]:has-text("Share project")',
+    'button:has-text("Share project")',
+    '[role="button"]:has-text("Share project")',
+    '[role="menuitem"]:has-text("Share")'
+  ], 1500);
+  if (!shareProject) throw new Error('Share project menu item not found for ' + projectName);
+
+  await humanPointerClick(page, shareProject, { hoverMs: 180, downMs: 65, settleMs: 450 });
+
+  const shareLink = await firstVisible(page, [
+    '[role="dialog"] button:has-text("Share link")',
+    '[role="dialog"] button:has-text("Copy link")',
+    'button:has-text("Share link")',
+    'button:has-text("Copy link")'
+  ], 2200);
+  if (!shareLink) throw new Error('Share link button not found for ' + projectName);
+
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://chatgpt.com' }).catch(() => {});
+  await humanPointerClick(page, shareLink, { hoverMs: 220, downMs: 70, settleMs: 420 });
+
+  const projectUrl = await page.evaluate(async () => (await navigator.clipboard.readText()).trim()).catch(() => '');
+  if (!durableProjectShareUrl(projectUrl)) {
+    throw new Error('Project share link clipboard value is missing or invalid');
+  }
+
+  console.log('[browser-operations] project-share-link-captured=' + JSON.stringify({
+    projectName,
+    origin: new URL(projectUrl).origin,
+    path: new URL(projectUrl).pathname.replace(/[A-Za-z0-9_-]{16,}/g, '<id>')
+  }));
+
+  const close = await firstVisible(page, [
+    '[role="dialog"] button[aria-label="Close"]',
+    '[role="dialog"] button:has-text("Done")',
+    '[role="dialog"] button:has-text("Close")'
+  ], 700);
+  if (close) await humanPointerClick(page, close, { hoverMs: 100, downMs: 50, settleMs: 220 }).catch(() => {});
+
+  return { projectName, projectUrl, captured: true };
+}
+
+async function openProjectByShareLink(page, { projectUrl }) {
+  if (!durableProjectShareUrl(projectUrl)) {
+    throw new Error('chatgpt.open_project_by_share_link requires a valid ChatGPT Project share URL');
+  }
+  await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(1200);
+
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  if (/Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText)) {
+    const error = new Error('Project share link opened into a browser/security challenge');
+    error.code = 'BROWSER_CHALLENGE';
+    error.retryable = true;
+    throw error;
+  }
+
+  const composer = await waitForComposer(page, 15000);
+  if (!composer) throw new Error('Project share link did not open a usable ChatGPT Project');
+  return { projectUrl, opened: true };
+}
+
+async function startChatInOpenProject(page) {
+  const newChat = await firstVisible(page, [
+    'button[aria-label*="New chat"]',
+    'button:has-text("New chat")',
+    'a:has-text("New chat")',
+    '[role="button"]:has-text("New chat")'
+  ], 1400);
+  if (newChat) {
+    await humanPointerClick(page, newChat);
+    await page.waitForTimeout(700);
+  }
+  const composer = await waitForComposer(page, 12000);
+  if (!composer) throw new Error('ChatGPT Project chat composer not found');
+  return { ready: true };
+}
+
 async function ensureProject(page, { projectName }) {
   if (!projectName) throw new Error('chatgpt.ensure_project requires projectName');
   await ensureChatMode(page);
@@ -715,18 +850,7 @@ async function ensureProject(page, { projectName }) {
 async function startProjectChat(page, { projectName }) {
   if (projectName) {
     const project = await ensureProject(page, { projectName });
-    const newChat = await firstVisible(page, [
-      'button[aria-label*="New chat"]',
-      'button:has-text("New chat")',
-      'a:has-text("New chat")',
-      '[role="button"]:has-text("New chat")'
-    ], 1200);
-    if (newChat) {
-      await humanPointerClick(page, newChat);
-      await page.waitForTimeout(700);
-    }
-    const composer = await waitForComposer(page, 12000);
-    if (!composer) throw new Error('ChatGPT project chat composer not found');
+    await startChatInOpenProject(page);
     return { ...project, ready: true };
   }
   const composer = await waitForComposer(page, 12000);
@@ -802,6 +926,9 @@ export const browserOperations = {
   'chatgpt.ensure_chat_mode': async ({ page }) => ensureChatMode(page),
   'chatgpt.ensure_thinking_effort': async ({ page, args }) => ensureThinkingEffort(page, args),
   'chatgpt.ensure_project': async ({ page, args }) => ensureProject(page, args),
+  'chatgpt.capture_project_share_link': async ({ page, args }) => captureProjectShareLink(page, args),
+  'chatgpt.open_project_by_share_link': async ({ page, args }) => openProjectByShareLink(page, args),
+  'chatgpt.start_chat_in_open_project': async ({ page }) => startChatInOpenProject(page),
   'chatgpt.start_project_chat': async ({ page, args }) => startProjectChat(page, args),
   'chatgpt.rename_current_chat': async ({ page, args }) => renameCurrentChat(page, args),
 };
