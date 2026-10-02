@@ -154,6 +154,15 @@ jobs:
             echo '__TASK_MANAGER_INITIAL_ASSIGNMENT__'
           } >> "$GITHUB_ENV"
 
+      - name: Select target-repository credential
+        if: env.TARGET_REPOSITORY == 'CurveYield2/Audit-Controller'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
       - name: Validate specification and durable branch
         env:
           GH_TOKEN: ${{ github.token }}
@@ -186,13 +195,14 @@ jobs:
           task_lock_protocol_sha="$(sha256sum /tmp/task-lock-protocol.md | awk '{print $1}')"
           task_lock_template_sha="$(sha256sum /tmp/task-lock-template.md | awk '{print $1}')"
           task_lock_state_path="process/development-agent-task-manager/task-locks/${safe_id}_v1.md"
+          target_token="${AUDIT_CONTROLLER_GITHUB_TOKEN:-$GH_TOKEN}"
 
           target_branch_uri="$(jq -rn --arg v "$TARGET_BRANCH" '$v|@uri')"
-          target_head="$(gh api "repos/$TARGET_REPOSITORY/git/ref/heads/$target_branch_uri" --jq '.object.sha' 2>/dev/null || true)"
+          target_head="$(GH_TOKEN="$target_token" gh api "repos/$TARGET_REPOSITORY/git/ref/heads/$target_branch_uri" --jq '.object.sha' 2>/dev/null || true)"
           if ! [[ "$target_head" =~ ^[0-9a-f]{40}$ ]]; then
-            base_sha="$(gh api -X GET "repos/$TARGET_REPOSITORY/commits" -f sha="$BASE_REF" -f per_page=1 --jq '.[0].sha')"
+            base_sha="$(GH_TOKEN="$target_token" gh api -X GET "repos/$TARGET_REPOSITORY/commits" -f sha="$BASE_REF" -f per_page=1 --jq '.[0].sha')"
             [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]]
-            gh api --method POST "repos/$TARGET_REPOSITORY/git/refs" \
+            GH_TOKEN="$target_token" gh api --method POST "repos/$TARGET_REPOSITORY/git/refs" \
               -f ref="refs/heads/$TARGET_BRANCH" -f sha="$base_sha" >/dev/null
             target_head="$base_sha"
           fi
@@ -528,6 +538,20 @@ jobs:
           echo "STATE_API=$api" >> "$GITHUB_ENV"
           echo 'valid=true' >> "$GITHUB_OUTPUT"
 
+      - name: Select target-repository credential
+        if: steps.manager_state.outputs.valid == 'true'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_repo="$(jq -r '.target.repository' /tmp/task-manager-state.json)"
+          if [ "$target_repo" = 'CurveYield2/Audit-Controller' ]; then
+            bash scripts/select-audit-controller-token.sh
+          fi
+
       - name: Verify pinned development authorities
         if: steps.manager_state.outputs.valid == 'true'
         env:
@@ -580,10 +604,11 @@ jobs:
           manager_id="$(jq -r '.managerId' /tmp/task-manager-state.json)"
           target_repo="$(jq -r '.target.repository' /tmp/task-manager-state.json)"
           target_branch="$(jq -r '.target.branch' /tmp/task-manager-state.json)"
+          target_token="${AUDIT_CONTROLLER_GITHUB_TOKEN:-$GH_TOKEN}"
           spec_sha="$(jq -r '.specification.sha256' /tmp/task-manager-state.json)"
           skill_sha="$(jq -r '.skill.sha256' /tmp/task-manager-state.json)"
           task_lock_state_path="$(jq -r '.taskLock.statePath' /tmp/task-manager-state.json)"
-          lock_encoded="$(gh api "repos/$target_repo/contents/$task_lock_state_path?ref=$target_branch" --jq '.content' 2>/dev/null || true)"
+          lock_encoded="$(GH_TOKEN="$target_token" gh api "repos/$target_repo/contents/$task_lock_state_path?ref=$target_branch" --jq '.content' 2>/dev/null || true)"
           if [ -z "$lock_encoded" ]; then
             echo 'complete=false' >> "$GITHUB_OUTPUT"
             exit 0
@@ -594,7 +619,7 @@ jobs:
           [ "$remaining_delta" = "- None" ] || { echo 'complete=false' >> "$GITHUB_OUTPUT"; exit 0; }
           [ "$active_blocker" = "None" ] || { echo 'complete=false' >> "$GITHUB_OUTPUT"; exit 0; }
           receipt_path="process/development-agent-task-manager/completions/$SAFE_ID.json"
-          encoded="$(gh api "repos/$target_repo/contents/$receipt_path?ref=$target_branch" --jq '.content' 2>/dev/null || true)"
+          encoded="$(GH_TOKEN="$target_token" gh api "repos/$target_repo/contents/$receipt_path?ref=$target_branch" --jq '.content' 2>/dev/null || true)"
           if [ -z "$encoded" ]; then
             echo 'complete=false' >> "$GITHUB_OUTPUT"
             exit 0
@@ -612,51 +637,180 @@ jobs:
             exit 0
           fi
           implementation_head="$(jq -r '.implementationHeadSha' /tmp/task-manager-completion.json)"
-          current_head="$(gh api -X GET "repos/$target_repo/commits" -f sha="$target_branch" -f per_page=1 --jq '.[0].sha')"
-          receipt_commit="$(gh api -X GET "repos/$target_repo/commits" -f sha="$target_branch" -f path="$receipt_path" -f per_page=1 --jq '.[0].sha // empty' 2>/dev/null || true)"
+          current_head="$(GH_TOKEN="$target_token" gh api -X GET "repos/$target_repo/commits" -f sha="$target_branch" -f per_page=1 --jq '.[0].sha')"
+          receipt_commit="$(GH_TOKEN="$target_token" gh api -X GET "repos/$target_repo/commits" -f sha="$target_branch" -f path="$receipt_path" -f per_page=1 --jq '.[0].sha // empty' 2>/dev/null || true)"
           [ -n "$receipt_commit" ] || { echo 'complete=false' >> "$GITHUB_OUTPUT"; exit 0; }
           [ "$receipt_commit" = "$current_head" ] || { echo 'complete=false' >> "$GITHUB_OUTPUT"; exit 0; }
-          receipt_parent="$(gh api "repos/$target_repo/commits/$receipt_commit" --jq '.parents[0].sha // empty')"
+          receipt_parent="$(GH_TOKEN="$target_token" gh api "repos/$target_repo/commits/$receipt_commit" --jq '.parents[0].sha // empty')"
           [ "$receipt_parent" = "$implementation_head" ] || { echo 'complete=false' >> "$GITHUB_OUTPUT"; exit 0; }
           echo 'complete=true' >> "$GITHUB_OUTPUT"
           echo "completion_head=$current_head" >> "$GITHUB_OUTPUT"
 
-      - name: Retire completed manager
+      - name: Finalize verified implementation into target main
         if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete == 'true'
+        id: finalization
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          jq --arg head "${{ steps.completion.outputs.completion_head }}"             '.status="COMPLETE" | .target.lastCheckpointSha=$head | .completedAt=(now|todate) | .updatedAt=(now|todate)'             /tmp/task-manager-state.json > /tmp/task-manager-completed.json
+          manager_id="$(jq -r '.managerId' /tmp/task-manager-state.json)"
+          target_repo="$(jq -r '.target.repository' /tmp/task-manager-state.json)"
+          target_branch="$(jq -r '.target.branch' /tmp/task-manager-state.json)"
+          target_head="${{ steps.completion.outputs.completion_head }}"
+          target_token="${AUDIT_CONTROLLER_GITHUB_TOKEN:-$GH_TOKEN}"
+          owner="${target_repo%%/*}"
+          base_branch='main'
+          summary="$(jq -r '.summary // ""' /tmp/task-manager-completion.json)"
+          [ -n "$summary" ] || summary="Verified implementation for $manager_id"
+
+          pulls_json="$(GH_TOKEN="$target_token" gh api -X GET "repos/$target_repo/pulls"             -f state=all -f head="$owner:$target_branch" -f base="$base_branch" -f per_page=100)"
+          pr_json="$(printf '%s' "$pulls_json" | jq -c --arg head "$target_head" '
+            ([.[] | select(.state=="open")] | first) //
+            ([.[] | select(.merged_at!=null and .head.sha==$head)] | first) //
+            empty
+          ')"
+
+          if [ -z "$pr_json" ]; then
+            body="$(cat <<EOF
+          Automated finalization for managed development task `$manager_id`.
+
+          $summary
+
+          The Development Agent Task Manager verified the task lock and completion receipt before opening this PR.
+          EOF
+            )"
+            pr_json="$(GH_TOKEN="$target_token" gh api --method POST "repos/$target_repo/pulls"               -f title="Upgrade: $manager_id" -f head="$target_branch" -f base="$base_branch" -f body="$body")"
+          fi
+
+          pr_number="$(printf '%s' "$pr_json" | jq -r '.number')"
+          pr_url="$(printf '%s' "$pr_json" | jq -r '.html_url')"
+          pr_state="$(GH_TOKEN="$target_token" gh api "repos/$target_repo/pulls/$pr_number")"
+          pr_head="$(printf '%s' "$pr_state" | jq -r '.head.sha')"
+          merged_at="$(printf '%s' "$pr_state" | jq -r '.merged_at // empty')"
+
+          if [ -n "$merged_at" ]; then
+            if [ "$pr_head" != "$target_head" ]; then
+              echo "::error::Existing merged PR does not contain the verified target head."
+              jq --arg url "$pr_url" --arg head "$target_head"                 '.merge={status:"REPAIR_REQUIRED",targetBranch:"main",pullRequestUrl:$url,reason:"Merged PR head does not match the currently verified completion head."}
+                 | .lastDecision="MERGE_REPAIR_REQUIRED"
+                 | .updatedAt=(now|todate)'                 /tmp/task-manager-state.json > /tmp/task-manager-next.json
+              mv /tmp/task-manager-next.json /tmp/task-manager-state.json
+              echo 'merged=false' >> "$GITHUB_OUTPUT"
+              echo 'requires_agent=true' >> "$GITHUB_OUTPUT"
+              echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            merge_sha="$(printf '%s' "$pr_state" | jq -r '.merge_commit_sha')"
+          else
+            set +e
+            GH_TOKEN="$target_token" gh api --method PUT "repos/$target_repo/pulls/$pr_number/merge"               -f merge_method=squash -f sha="$target_head" > /tmp/task-manager-merge.json 2>/tmp/task-manager-merge.err
+            merge_rc=$?
+            set -e
+
+            if [ "$merge_rc" -eq 0 ] && jq -e '.merged==true' /tmp/task-manager-merge.json >/dev/null 2>&1; then
+              merge_sha="$(jq -r '.sha' /tmp/task-manager-merge.json)"
+            else
+              pr_state="$(GH_TOKEN="$target_token" gh api "repos/$target_repo/pulls/$pr_number")"
+              mergeable_state="$(printf '%s' "$pr_state" | jq -r '.mergeable_state // "unknown"')"
+              reason="$(tr '\n' ' ' < /tmp/task-manager-merge.err | sed 's/[[:space:]]\+/ /g' | cut -c1-600)"
+              [ -n "$reason" ] || reason="GitHub did not admit the merge; mergeable_state=$mergeable_state"
+
+              if [ "$mergeable_state" = dirty ] || [ "$mergeable_state" = behind ]; then
+                jq --arg url "$pr_url" --arg reason "$reason" --arg state "$mergeable_state"                   '.merge={status:"REPAIR_REQUIRED",targetBranch:"main",pullRequestUrl:$url,reason:$reason,mergeableState:$state}
+                   | .lastDecision="MERGE_REPAIR_REQUIRED"
+                   | .updatedAt=(now|todate)'                   /tmp/task-manager-state.json > /tmp/task-manager-next.json
+                mv /tmp/task-manager-next.json /tmp/task-manager-state.json
+                echo 'merged=false' >> "$GITHUB_OUTPUT"
+                echo 'requires_agent=true' >> "$GITHUB_OUTPUT"
+                echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+
+              jq --arg url "$pr_url" --arg reason "$reason" --arg state "$mergeable_state"                 '.merge={status:"PENDING",targetBranch:"main",pullRequestUrl:$url,reason:$reason,mergeableState:$state}
+                 | .lastDecision="MERGE_PENDING"
+                 | .updatedAt=(now|todate)'                 /tmp/task-manager-state.json > /tmp/task-manager-next.json
+              mv /tmp/task-manager-next.json /tmp/task-manager-state.json
+              echo 'merged=false' >> "$GITHUB_OUTPUT"
+              echo 'requires_agent=false' >> "$GITHUB_OUTPUT"
+              echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          [[ "$merge_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Merged PR did not return a merge commit SHA."; exit 1; }
+          target_main_sha="$(GH_TOKEN="$target_token" gh api -X GET "repos/$target_repo/commits" -f sha=main -f per_page=1 --jq '.[0].sha')"
+          [[ "$target_main_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Unable to verify target main after merge."; exit 1; }
+
+          jq             --arg url "$pr_url"             --arg mergeSha "$merge_sha"             --arg mainSha "$target_main_sha"             '.merge={status:"MERGED",targetBranch:"main",pullRequestUrl:$url,mergeCommitSha:$mergeSha,targetMainSha:$mainSha}
+             | .output={url:$url,kind:"pull_request",artifactPath:null}
+             | .lastDecision="MERGED_TO_TARGET_MAIN"
+             | .updatedAt=(now|todate)'             /tmp/task-manager-state.json > /tmp/task-manager-next.json
+          mv /tmp/task-manager-next.json /tmp/task-manager-state.json
+          echo 'merged=true' >> "$GITHUB_OUTPUT"
+          echo 'requires_agent=false' >> "$GITHUB_OUTPUT"
+          echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
+          echo "merge_commit_sha=$merge_sha" >> "$GITHUB_OUTPUT"
+          echo "target_main_sha=$target_main_sha" >> "$GITHUB_OUTPUT"
+          echo "output_url=$pr_url" >> "$GITHUB_OUTPUT"
+
+      - name: Persist merge-pending or repair state
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete == 'true' && steps.finalization.outputs.merged != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          active_sha="$(gh api "$STATE_API?ref=main" --jq '.sha')"
+          content="$(base64 -w0 /tmp/task-manager-state.json)"
+          gh api --method PUT "$STATE_API"             -f message="chore(task-manager): persist merge state $SAFE_ID"             -f content="$content" -f sha="$active_sha" -f branch=main >/dev/null
+
+      - name: Retire merged manager
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete == 'true' && steps.finalization.outputs.merged == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq --arg head "${{ steps.completion.outputs.completion_head }}"             '.status="COMPLETE"
+             | .target.lastCheckpointSha=$head
+             | .completedAt=(now|todate)
+             | .updatedAt=(now|todate)'             /tmp/task-manager-state.json > /tmp/task-manager-completed.json
+          jq -e '
+            .merge.status=="MERGED"
+            and (.merge.pullRequestUrl|test("^https://github.com/"))
+            and (.merge.mergeCommitSha|test("^[0-9a-f]{40}$"))
+            and (.merge.targetMainSha|test("^[0-9a-f]{40}$"))
+            and (.output.url|test("^https://github.com/"))
+          ' /tmp/task-manager-completed.json >/dev/null
           active_sha="$(gh api "$STATE_API?ref=main" --jq '.sha')"
           completed_api="repos/$GITHUB_REPOSITORY/contents/process/development-agent-task-manager/completed/$SAFE_ID.json"
           content="$(base64 -w0 /tmp/task-manager-completed.json)"
           existing="$(gh api "$completed_api?ref=main" --jq '.sha' 2>/dev/null || true)"
           if [[ "$existing" =~ ^[0-9a-f]{40}$ ]]; then
-            gh api --method PUT "$completed_api" -f message="chore(task-manager): complete $SAFE_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
+            gh api --method PUT "$completed_api" -f message="chore(task-manager): complete merged $SAFE_ID" -f content="$content" -f sha="$existing" -f branch=main >/dev/null
           else
-            gh api --method PUT "$completed_api" -f message="chore(task-manager): complete $SAFE_ID" -f content="$content" -f branch=main >/dev/null
+            gh api --method PUT "$completed_api" -f message="chore(task-manager): complete merged $SAFE_ID" -f content="$content" -f branch=main >/dev/null
           fi
-          gh api --method DELETE "$STATE_API" -f message="chore(task-manager): retire $SAFE_ID" -f sha="$active_sha" -f branch=main >/dev/null
+          gh api --method DELETE "$STATE_API" -f message="chore(task-manager): retire merged $SAFE_ID" -f sha="$active_sha" -f branch=main >/dev/null
 
-      - name: Stop after completion
-        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete == 'true'
+      - name: Stop after terminal merged completion
+        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete == 'true' && steps.finalization.outputs.merged == 'true'
         shell: bash
         run: exit 0
 
       - name: Set up Node.js
-        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Set up isolated browser-agent runtime
-        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         uses: ./.github/actions/setup-browser-agent-runtime
 
       - name: Restore encrypted ChatGPT session state
-        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         uses: actions/cache/restore@v4
         with:
           path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
@@ -666,7 +820,7 @@ jobs:
             chatgpt-session-state-v1-
 
       - name: Install private VNC helper
-        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         shell: bash
         run: |
           set -euo pipefail
@@ -674,7 +828,7 @@ jobs:
           sudo apt-get install -y x11vnc
 
       - name: Record runner egress before home exit node
-        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         shell: bash
         run: |
           set -euo pipefail
@@ -683,14 +837,14 @@ jobs:
           printf '%s' "$direct" | sha256sum | awk '{print "DIRECT_EGRESS_HASH="$1}' >> "$GITHUB_ENV"
 
       - name: Connect runner to tailnet
-        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         uses: tailscale/github-action@v4
         with:
           authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
           ping: ${{ env.HOME_EXIT_NODE }}
 
       - name: Start visible Chrome display and private tailnet VNC
-        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         shell: bash
         run: |
           set -euo pipefail
@@ -708,7 +862,7 @@ jobs:
           echo $! >/tmp/x11vnc-development-agent.pid
 
       - name: Route browser phase through home exit node
-        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         shell: bash
         run: |
           set -euo pipefail
@@ -726,7 +880,7 @@ jobs:
           [ "$changed" = true ] || { echo "::error::Tailscale exit node did not change runner egress."; exit 1; }
 
       - name: Observe worker and execute bounded recovery policy
-        if: steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -739,9 +893,13 @@ jobs:
           previous_hash="$(jq -r '.chat.lastAssistantHash // empty' /tmp/task-manager-state.json)"
           target_repo="$(jq -r '.target.repository' /tmp/task-manager-state.json)"
           target_branch="$(jq -r '.target.branch' /tmp/task-manager-state.json)"
+          target_token="${AUDIT_CONTROLLER_GITHUB_TOKEN:-$GH_TOKEN}"
           continuity_mode="$(jq -r '.continuity.mode' /tmp/task-manager-state.json)"
           project_name="$(jq -r '.continuity.project.name // empty' /tmp/task-manager-state.json)"
           project_url="$(jq -r '.continuity.project.url // empty' /tmp/task-manager-state.json)"
+          if [ "${{ steps.finalization.outputs.requires_agent }}" = true ]; then
+            idle_message='[DEVELOPMENT_AGENT_MERGE_REPAIR_V1] Final merge into target main is blocked by branch integration state. Re-read the task lock and current target main, reconcile the same target branch without broadening scope, rerun every test affected by reconciliation, update the task lock, and write a fresh valid completion receipt. Do not create a new task or branch. Continue until the manager can merge this exact task into target main.'
+          fi
 
           export WAKE_MODE='resume_existing'
           export CHAT_URL="$chat_url"
@@ -803,7 +961,7 @@ jobs:
             fi
 
             if [ "$dead" = true ]; then
-              checkpoint_sha="$(gh api -X GET "repos/$target_repo/commits" -f sha="$target_branch" -f per_page=1 --jq '.[0].sha')"
+              checkpoint_sha="$(GH_TOKEN="$target_token" gh api -X GET "repos/$target_repo/commits" -f sha="$target_branch" -f per_page=1 --jq '.[0].sha')"
               [[ "$checkpoint_sha" =~ ^[0-9a-f]{40}$ ]]
               generation="$(jq -r '.generation' /tmp/task-manager-state.json)"
               next_generation=$((generation + 1))
@@ -908,7 +1066,7 @@ jobs:
           gh api --method PUT "$STATE_API" -f message="chore(task-manager): supervise $SAFE_ID" -f content="$content" -f sha="$current_sha" -f branch=main >/dev/null
 
       - name: Detect refreshed encrypted ChatGPT session state
-        if: always() && steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: always() && steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         id: refreshed-chatgpt-session
         shell: bash
         run: |
@@ -926,14 +1084,14 @@ jobs:
           key: development-chatgpt-session-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.SAFE_ID }}
 
       - name: Disable home exit node
-        if: always() && steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: always() && steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         shell: bash
         run: |
           set +e
           sudo tailscale set --exit-node=""
 
       - name: Cleanup browser display
-        if: always() && steps.manager_state.outputs.valid == 'true' && steps.completion.outputs.complete != 'true'
+        if: always() && steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         shell: bash
         run: |
           set +e
