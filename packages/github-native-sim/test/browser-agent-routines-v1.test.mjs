@@ -415,6 +415,9 @@ test('Project creation and reviewer wake use only ordinary pointer and keyboard 
   const sendBlock = wake.slice(fillStart, fillEnd);
   assert.match(sendBlock, /grantPermissions\(\['clipboard-read', 'clipboard-write'\]/);
   assert.match(sendBlock, /navigator\.clipboard\.writeText\(text\)/);
+  assert.match(sendBlock, /normalizeVisibleText/);
+  assert.match(sendBlock, /visibleMessageMarker/);
+  assert.match(sendBlock, /normalized wake marker after clipboard paste/);
   assert.match(sendBlock, /composer\.press\(process\.platform === 'darwin' \? 'Meta\+V' : 'Control\+V'\)/);
   assert.doesNotMatch(sendBlock, /pressSequentially\(message/);
   assert.match(sendBlock, /humanPointerClick\(page, send/);
