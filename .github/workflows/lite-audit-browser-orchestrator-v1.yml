@@ -144,17 +144,6 @@ jobs:
             }' > /tmp/registration.json
           current_payload="$(gh api "$api?ref=main" 2>/dev/null || true)"
           current="$(printf '%s' "$current_payload" | jq -r '.sha // empty')"
-          if [ -n "$current" ]; then
-            printf '%s' "$current_payload" | jq -r '.content' | tr -d '\n' | base64 -d > /tmp/existing-registration.json
-            jq -s '
-              .[0] as $new | .[1] as $old |
-              $new
-              + (if ($old.projectCreationPolicy? // "") != "" then {projectCreationPolicy:$old.projectCreationPolicy} else {} end)
-              + (if ($old.projectCreationPolicyReason? // "") != "" then {projectCreationPolicyReason:$old.projectCreationPolicyReason} else {} end)
-              + (if ($old.browserInteractionPolicy? // "") != "" then {browserInteractionPolicy:$old.browserInteractionPolicy} else {} end)
-            ' /tmp/registration.json /tmp/existing-registration.json > /tmp/registration-merged.json
-            mv /tmp/registration-merged.json /tmp/registration.json
-          fi
           body="$(base64 -w0 /tmp/registration.json)"
           if [ -n "$current" ]; then
             gh api --method PUT "$api" -f message="chore(wake): prepare $CAMPAIGN_ID ${{ steps.successor.outputs.boundary }}" -f content="$body" -f sha="$current" -f branch=main >/dev/null
