@@ -394,6 +394,11 @@ test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualifi
 });
 
 
+test('reviewer browser grants clipboard permissions only for the ChatGPT origin', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /grantPermissions\(\['clipboard-read', 'clipboard-write'\], \{ origin: 'https:\/\/chatgpt\.com' \}\)/);
+});
+
 test('Project creation and reviewer wake use only ordinary pointer and keyboard submission primitives', () => {
   const operations = read('scripts/browser-operations-v1.mjs');
   const wake = read('scripts/browser-agent-wake.mjs');
@@ -413,6 +418,9 @@ test('Project creation and reviewer wake use only ordinary pointer and keyboard 
   const fillStart = wake.indexOf('async function fillComposer(page, message)');
   const fillEnd = wake.indexOf('async function persistedWakeVisible', fillStart);
   const sendBlock = wake.slice(fillStart, fillEnd);
+  assert.match(sendBlock, /navigator\.clipboard\.writeText\(text\)/);
+  assert.match(sendBlock, /composer\.press\('Control\+V'\)/);
+  assert.match(sendBlock, /composer-paste=/);
   assert.match(sendBlock, /const chunkSize = 220/);
   assert.match(sendBlock, /pressSequentially\(chunk, \{ delay: 35 \}\)/);
   assert.match(sendBlock, /await page\.waitForTimeout\(180\)/);
