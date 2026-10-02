@@ -58,7 +58,7 @@ async function ensureChatMode(page) {
     'button:has-text("Chat")'
   ], 1000);
   if (!chat) throw new Error('ChatGPT Chat mode control not found while Work mode appears active');
-  await chat.click();
+  await humanPointerClick(page, chat);
   await page.waitForTimeout(600);
   return { mode: 'chat', changed: true };
 }
@@ -181,7 +181,7 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
     if (await chooseSliderHigh()) return true;
     const high = await visibleHighChoice();
     if (!high) return false;
-    await high.click();
+    await humanPointerClick(page, high);
     await page.waitForTimeout(700);
     if (await selectedHigh()) return true;
 
@@ -207,7 +207,7 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
 
     const opener = await firstVisible(page, openerSelectors, 1200);
     if (opener) {
-      await opener.click();
+      await humanPointerClick(page, opener);
       await page.waitForTimeout(550);
       if (await chooseHigh()) return { level: 'high', changed: true, verified: true };
     }
@@ -216,7 +216,7 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
     for (const label of submenuLabels) {
       const submenu = page.getByText(label, { exact: true }).first();
       if (await submenu.isVisible().catch(() => false)) {
-        await submenu.click();
+        await humanPointerClick(page, submenu);
         await page.waitForTimeout(500);
         openedSubmenu = true;
         if (await chooseHigh()) return { level: 'high', changed: true, verified: true };
@@ -256,6 +256,34 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
   error.retryable = true;
   throw error;
 }
+async function humanPointerClick(page, locator, { hoverMs = 220, downMs = 70, settleMs = 320 } = {}) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await locator.hover().catch(() => {});
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('Visible control has no clickable bounding box');
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y, { steps: 12 });
+  await page.waitForTimeout(hoverMs);
+  await page.mouse.down();
+  await page.waitForTimeout(downMs);
+  await page.mouse.up();
+  await page.waitForTimeout(settleMs);
+}
+
+async function humanTypeInto(page, locator, text, { delay = 45 } = {}) {
+  await humanPointerClick(page, locator, { hoverMs: 120, downMs: 55, settleMs: 180 });
+  const current = await locator.inputValue().catch(() => '');
+  if (current) {
+    await locator.press('Control+A').catch(async () => locator.press('Meta+A').catch(() => {}));
+    await page.waitForTimeout(120);
+    await locator.press('Backspace');
+    await page.waitForTimeout(120);
+  }
+  await locator.pressSequentially(String(text), { delay });
+  await page.waitForTimeout(280);
+}
+
 async function ensureSidebarOpen(page) {
   const open = await firstVisible(page, [
     'button[data-testid="open-sidebar-button"]',
@@ -270,7 +298,7 @@ async function ensureSidebarOpen(page) {
     'button[title*="sidebar" i]'
   ], 500);
   if (open) {
-    await open.click().catch(() => {});
+    await humanPointerClick(page, open).catch(() => {});
     await page.waitForTimeout(700);
     return { opened: true };
   }
@@ -322,7 +350,7 @@ async function exposeProjectsInSidebar(page) {
     '[role="button"]:has-text("Recents")'
   ], 700);
   if (recents) {
-    await recents.click().catch(() => {});
+    await humanPointerClick(page, recents).catch(() => {});
     await page.waitForTimeout(650);
   }
 
@@ -350,7 +378,7 @@ async function exposeProjectsInSidebar(page) {
   }
 
   if (organize) {
-    await organize.click().catch(() => {});
+    await humanPointerClick(page, organize).catch(() => {});
     await page.waitForTimeout(600);
   }
 
@@ -367,7 +395,7 @@ async function exposeProjectsInSidebar(page) {
     const selected = await projectsOption.getAttribute('aria-selected').catch(() => null);
     const state = await projectsOption.getAttribute('data-state').catch(() => null);
     if (checked !== 'true' && selected !== 'true' && state !== 'checked') {
-      await projectsOption.click().catch(() => projectsOption.press('Enter').catch(() => {}));
+      await humanPointerClick(page, projectsOption);
       await page.waitForTimeout(800);
     } else {
       await projectsOption.press('Escape').catch(() => {});
@@ -511,23 +539,19 @@ async function createProject(page, projectName) {
   page.on('response', recordResponse);
   await ensureSidebarOpen(page);
 
-  let trigger = await findNewProjectControl(page);
-  if (!trigger) {
+  let trigger = null;
+  let projects = page.getByText('Projects', { exact: true }).first();
+  if (!await projects.isVisible().catch(() => false)) {
     await exposeProjectsInSidebar(page);
-    trigger = await findNewProjectControl(page);
+    projects = page.getByText('Projects', { exact: true }).first();
+  }
+  if (await projects.isVisible().catch(() => false)) {
+    trigger = await findProjectsSectionAddControl(page);
   }
   if (!trigger) {
-    const projects = page.getByText('Projects', { exact: true }).first();
-    if (await projects.isVisible().catch(() => false)) {
-      const sectionAdd = await findProjectsSectionAddControl(page);
-      if (sectionAdd) {
-        trigger = sectionAdd;
-      } else {
-        await projects.click().catch(() => {});
-        await page.waitForTimeout(600);
-        trigger = await findNewProjectControl(page);
-      }
-    }
+    // Compatibility fallback only when the heading-specific + control cannot be
+    // discovered; this still requires a visible, ordinary UI control.
+    trigger = await findNewProjectControl(page);
   }
 
   if (!trigger) {
@@ -549,12 +573,10 @@ async function createProject(page, projectName) {
     );
   }
 
-  const triggerLabel = await trigger.getAttribute('aria-label').catch(() => '');
-  // Current sidebar paints overlapping section layers above the add button.
-  // Its standard keyboard activation remains available and avoids misclicks.
-  if (triggerLabel === 'Add new project') await trigger.press('Enter');
-  else await trigger.click();
-  await page.waitForTimeout(500);
+  // Mirror the human interaction exactly: expose the visible + control, move the
+  // pointer onto it, and perform a normal pointer click. Never activate this
+  // control through keyboard, force-click, DOM click, or form submission.
+  await humanPointerClick(page, trigger, { hoverMs: 260, downMs: 80, settleMs: 520 });
 
   let input = await firstVisible(page, [
     'input[placeholder*="Project name"]',
@@ -574,7 +596,7 @@ async function createProject(page, projectName) {
     }))).catch(() => []);
     throw new Error('ChatGPT project-name input not found; visibleFieldStructure=' + JSON.stringify(fields));
   }
-  await input.fill(projectName);
+  await humanTypeInto(page, input, projectName, { delay: 55 });
 
   const submit = await firstVisible(page, [
     '[role="dialog"] button:has-text("Create project")',
@@ -593,7 +615,7 @@ async function createProject(page, projectName) {
     } catch { return false; }
   }, { timeout: 20000 }).catch(() => null);
 
-  await submit.click();
+  await humanPointerClick(page, submit, { hoverMs: 280, downMs: 75, settleMs: 420 });
 
   const createResponse = await projectCreateResponse;
   if (createResponse) {
@@ -653,7 +675,7 @@ async function ensureProject(page, { projectName }) {
   }
 
   if (entry) {
-    await entry.click();
+    await humanPointerClick(page, entry);
     await page.waitForTimeout(900);
   }
 
@@ -661,7 +683,7 @@ async function ensureProject(page, { projectName }) {
   if (!await visibleName.isVisible().catch(() => false)) {
     const refreshedEntry = await findProjectEntry(page, projectName);
     if (refreshedEntry) {
-      await refreshedEntry.click();
+      await humanPointerClick(page, refreshedEntry);
       await page.waitForTimeout(900);
     }
   }
@@ -683,7 +705,7 @@ async function startProjectChat(page, { projectName }) {
       '[role="button"]:has-text("New chat")'
     ], 1200);
     if (newChat) {
-      await newChat.click();
+      await humanPointerClick(page, newChat);
       await page.waitForTimeout(700);
     }
     const composer = await waitForComposer(page, 12000);
@@ -724,27 +746,27 @@ async function renameCurrentChat(page, { chatName }) {
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const menu = await openCurrentChatMenu(page);
     if (menu) {
-      await menu.click();
+      await humanPointerClick(page, menu);
       const rename = await firstVisible(page, [
         '[role="menuitem"]:has-text("Rename")',
         'button:has-text("Rename")',
         '[role="menu"] :text("Rename")'
       ], 1200);
       if (rename) {
-        await rename.click();
+        await humanPointerClick(page, rename);
         const input = await firstVisible(page, [
           '[role="dialog"] input',
           'input[aria-label*="Rename"]',
           'input[value]'
         ], 1200);
         if (input) {
-          await input.fill(chatName);
+          await humanTypeInto(page, input, chatName, { delay: 45 });
           const save = await firstVisible(page, [
             '[role="dialog"] button:has-text("Save")',
             '[role="dialog"] button:has-text("Rename")',
             '[role="dialog"] button[type="submit"]'
           ], 1000);
-          if (save) await save.click();
+          if (save) await humanPointerClick(page, save);
           else await input.press('Enter');
           await page.waitForTimeout(600);
           const named = page.getByText(chatName, { exact: true }).first();
