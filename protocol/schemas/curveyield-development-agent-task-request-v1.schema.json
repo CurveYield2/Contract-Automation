@@ -54,6 +54,14 @@
     },
     "initialAssignment": {
       "type": "string"
+    },
+    "continuityMode": {
+      "type": "string",
+      "enum": [
+        "managed_project",
+        "standalone"
+      ],
+      "default": "managed_project"
     }
   }
 }
