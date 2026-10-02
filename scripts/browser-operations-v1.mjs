@@ -543,6 +543,13 @@ async function findProjectsSectionAddControl(page) {
   return null;
 }
 
+function retryableProjectUiError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  error.retryable = true;
+  return error;
+}
+
 async function createProject(page, projectName) {
   const projectNetworkFailures = [];
   const recordResponse = response => {
@@ -580,7 +587,8 @@ async function createProject(page, projectName) {
     const projectsVisible = await page.getByText('Projects', { exact: true }).first().isVisible().catch(() => false);
     const newProjectTextVisible = await page.getByText('New project', { exact: true }).first().isVisible().catch(() => false);
     const controls = await visibleNavigationDiagnostics(page);
-    throw new Error(
+    throw retryableProjectUiError(
+      'PROJECT_CREATE_CONTROL_MISSING',
       'ChatGPT project creation control not found' +
       ' (sidebarToggleVisible=' + sidebarToggleVisible +
       ', projectsVisible=' + projectsVisible +
@@ -611,7 +619,10 @@ async function createProject(page, projectName) {
       tag: el.tagName, type: el.getAttribute('type'), role: el.getAttribute('role'),
       label: el.getAttribute('aria-label'), placeholder: el.getAttribute('placeholder'), name: el.getAttribute('name'),
     }))).catch(() => []);
-    throw new Error('ChatGPT project-name input not found; visibleFieldStructure=' + JSON.stringify(fields));
+    throw retryableProjectUiError(
+      'PROJECT_NAME_INPUT_MISSING',
+      'ChatGPT project-name input not found; visibleFieldStructure=' + JSON.stringify(fields)
+    );
   }
   await humanTypeInto(page, input, projectName, { delay: 55 });
 
@@ -621,7 +632,12 @@ async function createProject(page, projectName) {
     'button:has-text("Create project")',
     'button[type="submit"]'
   ], 1200);
-  if (!submit) throw new Error('ChatGPT project-create submit control not found');
+  if (!submit) {
+    throw retryableProjectUiError(
+      'PROJECT_CREATE_SUBMIT_MISSING',
+      'ChatGPT project-create submit control not found'
+    );
+  }
 
   const projectCreateResponse = page.waitForResponse(response => {
     try {
@@ -673,10 +689,13 @@ async function createProject(page, projectName) {
     await page.waitForTimeout(500);
   }
   const alerts = await page.locator('[role="alert"]').allTextContents().catch(() => []);
-  throw new Error('ChatGPT project creation could not be verified; url=' + page.url() +
-    '; formStillVisible=' + await input.isVisible().catch(() => false) +
-    '; alerts=' + JSON.stringify(alerts.map(text => text.slice(0, 250))) +
-    '; failedResponses=' + JSON.stringify(projectNetworkFailures.slice(-10)));
+  throw retryableProjectUiError(
+    'PROJECT_CREATE_VERIFICATION_MISSING',
+    'ChatGPT project creation could not be verified; url=' + page.url() +
+      '; formStillVisible=' + await input.isVisible().catch(() => false) +
+      '; alerts=' + JSON.stringify(alerts.map(text => text.slice(0, 250))) +
+      '; failedResponses=' + JSON.stringify(projectNetworkFailures.slice(-10))
+  );
 
 }
 
