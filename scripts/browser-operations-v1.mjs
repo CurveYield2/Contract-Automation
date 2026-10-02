@@ -836,20 +836,82 @@ async function openProjectByUrl(page, { projectName, projectUrl }) {
   return { projectName: projectName || '', projectUrl, created: false, openedByUrl: true };
 }
 
-async function startCurrentProjectChat(page, { projectName = '', projectUrl = '' } = {}) {
-  const newChat = await firstVisible(page, [
-    'button[aria-label*="New chat"]',
-    'button:has-text("New chat")',
-    'a:has-text("New chat")',
-    '[role="button"]:has-text("New chat")'
-  ], 1500);
-  if (newChat) {
-    await humanPointerClick(page, newChat);
-    await page.waitForTimeout(700);
+async function findCurrentProjectNewChatControl(page, projectName) {
+  const main = page.locator('main, [role="main"]').first();
+  if (!await main.isVisible().catch(() => false)) return null;
+
+  if (projectName) {
+    const heading = main.getByText(projectName, { exact: true }).first();
+    if (await heading.isVisible().catch(() => false)) {
+      await heading.hover().catch(() => {});
+      await page.waitForTimeout(250);
+      let region = heading;
+      for (let depth = 0; depth < 5; depth += 1) {
+        region = region.locator('xpath=..');
+        const buttons = region.locator('button, [role="button"]');
+        const count = Math.min(await buttons.count().catch(() => 0), 12);
+        for (let i = 0; i < count; i += 1) {
+          const button = buttons.nth(i);
+          if (!await button.isVisible().catch(() => false)) continue;
+          const attrs = [
+            await button.innerText().catch(() => ''),
+            await button.getAttribute('aria-label').catch(() => ''),
+            await button.getAttribute('title').catch(() => ''),
+            await button.getAttribute('data-testid').catch(() => '')
+          ].filter(Boolean).join(' ');
+          if (/(?:new|add|create|start).*chat|chat.*(?:new|add|create|start)/i.test(attrs)) return button;
+        }
+        for (let i = 0; i < count; i += 1) {
+          const button = buttons.nth(i);
+          if (!await button.isVisible().catch(() => false)) continue;
+          const attrs = [
+            await button.innerText().catch(() => ''),
+            await button.getAttribute('aria-label').catch(() => ''),
+            await button.getAttribute('title').catch(() => ''),
+            await button.getAttribute('data-testid').catch(() => ''),
+            await button.evaluate(el => el.outerHTML.slice(0, 700)).catch(() => '')
+          ].filter(Boolean).join(' ');
+          const box = await button.boundingBox().catch(() => null);
+          const overflow = /more|options|overflow|ellipsis|\.\.\.|⋯/i.test(attrs);
+          const plus = /add|plus|new|M12 5v14|M5 12h14/i.test(attrs);
+          if (!overflow && plus && box && box.width <= 56 && box.height <= 56) return button;
+        }
+      }
+    }
   }
+
+  return firstVisible(page, [
+    'main button[aria-label*="New chat"]',
+    'main button[aria-label*="Add chat"]',
+    'main button[aria-label*="Create chat"]',
+    'main button:has-text("New chat")',
+    'main [role="button"]:has-text("New chat")',
+    '[role="main"] button[aria-label*="New chat"]',
+    '[role="main"] button[aria-label*="Add chat"]'
+  ], 1500);
+}
+
+async function startCurrentProjectChat(page, { projectName = '', projectUrl = '' } = {}) {
+  const newChat = await findCurrentProjectNewChatControl(page, projectName);
+  if (newChat) {
+    await humanPointerClick(page, newChat, { hoverMs: 180, downMs: 65, settleMs: 650 });
+  } else {
+    const existingComposer = await waitForComposer(page, 1200);
+    if (!existingComposer) {
+      const controls = await page.locator('main button, main [role="button"], [role="main"] button, [role="main"] [role="button"]')
+        .evaluateAll(nodes => nodes.filter(el => el.getClientRects().length).slice(0, 50).map(el => ({
+          text: String(el.innerText || '').trim().slice(0, 80),
+          aria: el.getAttribute('aria-label'),
+          title: el.getAttribute('title'),
+          testid: el.getAttribute('data-testid')
+        }))).catch(() => []);
+      throw new Error('ChatGPT Project new-chat (+) control not found; visibleMainControls=' + JSON.stringify(controls));
+    }
+  }
+
   const composer = await waitForComposer(page, 12000);
   if (!composer) throw new Error('ChatGPT Project chat composer not found');
-  return { projectName, projectUrl: projectUrl || page.url(), ready: true };
+  return { projectName, projectUrl: projectUrl || '', ready: true };
 }
 
 async function openCurrentChatMenu(page) {
