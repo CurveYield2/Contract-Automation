@@ -55,13 +55,16 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 - Exact comparison with the successful audit browser flow identified the browser challenge as retryable.
 - Current main already contains commit `54808c01f394f9151297f8b39cfb39de8cdded6b`, which added bounded fresh-runner retries to the Development Agent Task Manager after the failed smoke.
 - Therefore fresh-runner retry behavior is already SATISFIED and must not be reimplemented unless live verification disproves it.
+- A subsequent live retry reached the visible Add new project control but failed when the Project-name input did not appear; that older run classified the condition as non-retryable PROVIDER_ERROR.
+- Current main now also contains commit `1f040559fbfd17828debc26ba093a903c11b5e80`, which classifies transient human Project-create UI failures such as missing Project-name input as retryable.
+- That exact second live-smoke failure is therefore also already repaired on current main and must not be reimplemented.
 
 ## REMAINING DELTA
 
-1. Re-trigger the same live smoke task against current `main` so the already-merged fresh-runner retry logic is exercised.
+1. Re-trigger `upgrade-launcher-live-smoke-r1` against current `main` containing both fresh-runner retry commit `54808c01...` and transient Project-UI retry commit `1f040559...`.
 2. If Project creation succeeds, continue the same smoke task through focus-locked agent completion and mandatory merge-to-main finalization.
-3. If and only if bounded fresh-runner retries are live-proven insufficient, diagnose that exact retry failure before changing code.
-4. Close this focus lock only after the live smoke reaches terminal COMPLETE with output + Project links.
+3. If a new failure occurs, diagnose only that exact live failure and first verify whether current main already contains its repair before changing code.
+4. Close this focus lock only after terminal COMPLETE exposes output + ChatGPT Project links.
 
 ## PARKED OBSERVATIONS
 
@@ -73,11 +76,11 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 
 ## ACTIVE BLOCKER
 
-No code blocker is currently proven. The previous smoke failed on a retryable Cloudflare challenge, but fresh-runner retry support was subsequently merged to current `main` and has not yet been live-verified on this same task.
+No presently proven code blocker. Both observed live Project-create failure modes have corresponding repairs already on current main but have not yet been jointly live-verified on this task.
 
 ## NEXT ACTION
 
-Re-trigger the existing `upgrade-launcher-live-smoke-r1` request without changing its requested end-state. Observe whether current-main fresh-runner retry logic successfully creates the managed ChatGPT Project.
+Re-trigger the same live smoke request once against current main. Do not modify implementation code unless the new live run proves a new unsatisfied blocker.
 
 ## ANTI-DRIFT CHECK
 
