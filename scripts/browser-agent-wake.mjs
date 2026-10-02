@@ -361,23 +361,43 @@ async function fillComposer(page, message) {
     await page.waitForTimeout(150);
   }
 
-  // Keep ordinary keyboard semantics for long audit wakes without tripping
-  // Playwright's per-action timeout. Humans type long text in bursts with small
-  // pauses; preserve that shape instead of injecting the whole value at once.
-  const chunkSize = 220;
-  for (let offset = 0; offset < message.length; offset += chunkSize) {
-    const chunk = message.slice(offset, offset + chunkSize);
-    await composer.pressSequentially(chunk, { delay: 35 });
-    if (offset + chunkSize < message.length) {
-      await page.waitForTimeout(180);
-    }
+  let pasted = false;
+  try {
+    // Copy/paste is an ordinary human workflow for long instructions. We only
+    // use the browser clipboard to stage the text, then paste it into the real
+    // focused ChatGPT composer with Ctrl+V.
+    await page.evaluate(async (text) => {
+      await navigator.clipboard.writeText(text);
+    }, message);
+    await page.waitForTimeout(120);
+    await composer.press('Control+V');
+    await page.waitForTimeout(350);
+
+    const pastedText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
+    pasted = pastedText.includes(message.slice(0, Math.min(120, message.length)));
+    console.log('[github-playwright] composer-paste=' + JSON.stringify({ pasted, messageLength: message.length }));
+  } catch (error) {
+    console.log('[github-playwright] composer-paste-unavailable=' + JSON.stringify({ error: error.message }));
   }
-  await page.waitForTimeout(300);
+
+  if (!pasted) {
+    // Clipboard access can be unavailable in some fresh contexts. Fall back to
+    // ordinary keyboard events in bounded chunks; never use fill()/DOM value injection.
+    const chunkSize = 220;
+    for (let offset = 0; offset < message.length; offset += chunkSize) {
+      const chunk = message.slice(offset, offset + chunkSize);
+      await composer.pressSequentially(chunk, { delay: 35 });
+      if (offset + chunkSize < message.length) {
+        await page.waitForTimeout(180);
+      }
+    }
+    await page.waitForTimeout(300);
+  }
 
   const filledText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
   const marker = message.slice(0, Math.min(120, message.length));
   if (!filledText.includes(marker)) {
-    throw new BrowserAgentError('COMPOSER_FILL_MISMATCH', 'Composer did not retain the exact wake marker after keyboard typing', true);
+    throw new BrowserAgentError('COMPOSER_FILL_MISMATCH', 'Composer did not retain the exact wake marker after paste/keyboard entry', true);
   }
   return composer;
 }
@@ -808,6 +828,7 @@ async function localProvider(chromium) {
     screen: { width: 1920, height: 1080 },
     deviceScaleFactor: 1
   });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://chatgpt.com' }).catch(() => {});
   const page = await context.newPage();
   return { browser, context, page, close: () => browser.close() };
 }
