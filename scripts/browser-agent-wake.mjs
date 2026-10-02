@@ -577,6 +577,62 @@ async function postWithBackendVerification(page, message) {
 }
 
 
+
+async function backendPreflight(page) {
+  return page.evaluate(async () => {
+    const targets = [
+      '/backend-api/models',
+      '/backend-api/conversations?offset=0&limit=1&order=updated'
+    ];
+    const checks = [];
+    for (const target of targets) {
+      try {
+        const response = await fetch(target, { credentials: 'include', cache: 'no-store' });
+        checks.push({
+          target,
+          status: response.status,
+          ok: response.ok,
+          cfMitigated: response.headers.get('cf-mitigated'),
+          server: response.headers.get('server')
+        });
+      } catch (error) {
+        checks.push({ target, status: 0, ok: false, error: String(error) });
+      }
+    }
+    return checks;
+  });
+}
+
+async function waitForBackendHealth(page, reason = 'browser preflight') {
+  const requested = Number.parseInt(env.MANUAL_CHALLENGE_WAIT_MS || '0', 10);
+  const waitMs = Number.isFinite(requested) ? Math.max(0, requested) : 0;
+  const deadline = Date.now() + waitMs;
+  let last = null;
+
+  while (true) {
+    last = await backendPreflight(page).catch(error => [{ ok: false, status: 0, error: error.message }]);
+    const challenged = last.some(item => item?.cfMitigated === 'challenge');
+    const healthy = last.length > 0 && last.every(item => item?.ok === true && item?.cfMitigated !== 'challenge');
+
+    console.log('[github-playwright] backend-preflight=' + JSON.stringify({ reason, healthy, challenged, checks: last }));
+
+    if (healthy) return { healthy: true, challenged, checks: last };
+    if (Date.now() >= deadline) {
+      throw new BrowserAgentError(
+        'BROWSER_CHALLENGE',
+        'ChatGPT browser verification did not clear within the configured visible-session wait: ' + JSON.stringify(last),
+        true,
+      );
+    }
+
+    if (bool(env.INTERACTIVE_VIEW_ENABLED)) {
+      const vnc = env.TAILSCALE_RUNNER_IP ? env.TAILSCALE_RUNNER_IP + ':5900' : 'the private runner VNC endpoint';
+      console.log('[github-playwright] Browser verification is pending. The visible Chrome session remains available at ' + vnc + ' for normal human verification.');
+    }
+    await page.waitForTimeout(5000);
+  }
+}
+
 async function runWithPage(providerName, connect) {
   const { browser, context, page, close } = await connect();
   try {
@@ -595,6 +651,7 @@ async function runWithPage(providerName, connect) {
       await page.waitForTimeout(1500);
     }
 
+    await waitForBackendHealth(page, 'initial browser session');
     await ensureComposer(page);
 
     let routine = null;
@@ -602,18 +659,37 @@ async function runWithPage(providerName, connect) {
     if (mode === 'create_fresh' && browserRoutineId) {
       await ensureComposer(page);
       routine = await loadBrowserRoutine(browserRoutineId);
-      routineBefore = await runBrowserRoutineStage({
-        page,
-        routine,
-        stage: 'before_message',
-        vars: {
-          projectName,
-          projectUrl,
-          chatName: requestedChatName,
-          campaignId: env.CAMPAIGN_ID || '',
-          phaseId: env.PHASE_ID || ''
-        },
-      });
+      const routineVars = {
+        projectName,
+        projectUrl,
+        chatName: requestedChatName,
+        campaignId: env.CAMPAIGN_ID || '',
+        phaseId: env.PHASE_ID || ''
+      };
+      try {
+        routineBefore = await runBrowserRoutineStage({
+          page,
+          routine,
+          stage: 'before_message',
+          vars: routineVars,
+        });
+      } catch (error) {
+        if (error?.code !== 'BROWSER_CHALLENGE' || Number.parseInt(env.MANUAL_CHALLENGE_WAIT_MS || '0', 10) <= 0) {
+          throw error;
+        }
+        console.warn('[github-playwright] Browser verification appeared during the pre-message routine; keeping the visible session open before one same-session retry.');
+        await waitForBackendHealth(page, 'pre-message routine verification');
+        await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.waitForTimeout(1500);
+        await waitForBackendHealth(page, 'post-verification reload');
+        await ensureComposer(page);
+        routineBefore = await runBrowserRoutineStage({
+          page,
+          routine,
+          stage: 'before_message',
+          vars: routineVars,
+        });
+      }
       const capturedShare = routineBefore.find((entry) => entry.operation === 'chatgpt.capture_project_share_link')?.result;
       const openedProject = routineBefore.find((entry) => entry.operation === 'chatgpt.open_project_url')?.result;
       const namedProject = routineBefore.find((entry) => entry.operation === 'chatgpt.open_project_by_name')?.result;
