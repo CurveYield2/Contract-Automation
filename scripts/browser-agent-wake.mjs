@@ -361,7 +361,8 @@ async function fillComposer(page, message) {
     await page.waitForTimeout(150);
   }
 
-  await composer.pressSequentially(message, { delay: 35 });
+  const typingTimeoutMs = Math.max(120000, message.length * 50);
+  await composer.pressSequentially(message, { delay: 35, timeout: typingTimeoutMs });
   await page.waitForTimeout(300);
 
   const filledText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
