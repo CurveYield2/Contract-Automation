@@ -338,6 +338,19 @@ async function waitForBackendHealth(page) {
   }
 }
 
+async function humanPointerClick(page, locator, { hoverMs = 220, downMs = 70, settleMs = 280 } = {}) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await locator.hover().catch(() => {});
+  const box = await locator.boundingBox();
+  if (!box) throw new BrowserAgentError('VISIBLE_CONTROL_NOT_CLICKABLE', 'Visible control has no clickable bounding box', true);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 12 });
+  await page.waitForTimeout(hoverMs);
+  await page.mouse.down();
+  await page.waitForTimeout(downMs);
+  await page.mouse.up();
+  await page.waitForTimeout(settleMs);
+}
+
 async function composerDiagnostics(page) {
   return page.evaluate(() => {
     const buttons = [...document.querySelectorAll('button')].slice(-50).map((b, i) => ({
@@ -384,22 +397,23 @@ function likelyConversationWrite(url) {
 
 async function fillComposer(page, message) {
   const composer = await ensureComposer(page);
-  await composer.click();
-  const tag = await composer.evaluate(el => el.tagName.toLowerCase());
-  if (tag === 'textarea' || tag === 'input') {
-    await composer.fill(message);
-  } else {
-    await composer.fill(message).catch(async () => {
-      await composer.focus();
-      await composer.press('Control+A').catch(()=>{});
-      await composer.press('Meta+A').catch(()=>{});
-      await composer.press('Backspace').catch(()=>{});
-      await composer.type(message, { delay: 1 });
-    });
+  await humanPointerClick(page, composer, { hoverMs: 120, downMs: 55, settleMs: 180 });
+
+  const currentText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
+  if (currentText) {
+    await composer.press('Control+A').catch(async () => composer.press('Meta+A').catch(() => {}));
+    await page.waitForTimeout(120);
+    await composer.press('Backspace');
+    await page.waitForTimeout(150);
   }
-  const filledText = await composer.evaluate(el => (el.innerText || el.value || '')).catch(() => '');
-  if (!filledText.includes(message.slice(0, Math.min(120, message.length)))) {
-    throw new BrowserAgentError('COMPOSER_FILL_MISMATCH', 'Composer did not retain the exact wake marker after fill', true);
+
+  await composer.pressSequentially(message, { delay: 35 });
+  await page.waitForTimeout(300);
+
+  const filledText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
+  const marker = message.slice(0, Math.min(120, message.length));
+  if (!filledText.includes(marker)) {
+    throw new BrowserAgentError('COMPOSER_FILL_MISMATCH', 'Composer did not retain the exact wake marker after keyboard typing', true);
   }
   return composer;
 }
@@ -420,8 +434,9 @@ async function post(page, message) {
     if (likelyConversationWrite(request.url())) {
       candidateRequests.push({ url: request.url(), method, postDataLength: data.length });
     }
-    if (!data.includes(marker)) return;
-    observed = { url: request.url(), method, bodyContainsMarker: true, postDataLength: data.length };
+    if (data.includes(marker)) {
+      observed = { url: request.url(), method, bodyContainsMarker: true, postDataLength: data.length };
+    }
   };
   page.on('request', onRequest);
 
@@ -429,102 +444,52 @@ async function post(page, message) {
     let composer = await fillComposer(page, message);
     console.log('[github-playwright] composer-diagnostics=' + JSON.stringify(await composerDiagnostics(page)));
 
-    const sendSelectors = [
+    const send = await firstVisible(page, [
       'button[data-testid="send-button"]',
       'button[data-testid="composer-submit-button"]',
       'button[aria-label="Send prompt"]',
       'button[aria-label="Send"]',
       'button[aria-label*="Send"]'
-    ];
-    const strategies = [
-      async () => {
-        const send = await firstVisible(page, sendSelectors);
-        if (!send) throw new Error('No visible Send button for normal click');
-        await send.click({ timeout: 4000 });
-      },
-      async () => {
-        const send = await firstVisible(page, sendSelectors);
-        if (!send) throw new Error('No visible Send button for force click');
-        await send.click({ force: true, timeout: 4000 });
-      },
-      async () => {
-        const send = await firstVisible(page, sendSelectors);
-        if (!send) throw new Error('No visible Send button for DOM click');
-        await send.evaluate(el => el.click());
-      },
-      async () => {
-        composer = await ensureComposer(page);
-        const submitted = await composer.evaluate(el => {
-          const form = el.closest('form');
-          if (!form) return false;
-          if (typeof form.requestSubmit === 'function') form.requestSubmit();
-          else form.submit();
-          return true;
-        });
-        if (!submitted) throw new Error('Composer has no containing form');
-      },
-      async () => {
-        composer = await ensureComposer(page);
-        await composer.press('Enter');
-      },
-      async () => {
-        await page.keyboard.press('Enter');
-      }
-    ];
+    ]);
 
-    for (let i = 0; i < strategies.length; i += 1) {
-      observed = null;
-      candidateRequests.length = 0;
-      await waitForChatIdle(page, idleWaitMs);
+    if (send) {
+      await humanPointerClick(page, send, { hoverMs: 180, downMs: 65, settleMs: 260 });
+    } else {
+      composer = await ensureComposer(page);
+      await composer.press('Enter');
+    }
 
-      const currentComposer = await ensureComposer(page).catch(() => null);
-      if (currentComposer) {
-        const currentText = await currentComposer.evaluate(el => (el.innerText || el.value || '')).catch(() => '');
-        if (!currentText.includes(marker)) composer = await fillComposer(page, message);
-      }
-
-      await strategies[i]().catch(error => {
-        console.log('[github-playwright] send-strategy-error=' + JSON.stringify({ index: i, error: error.message }));
-      });
-
-      const deadline = Date.now() + 7000;
-      let dom = { visible: false, userCount: 0 };
-      while (Date.now() < deadline) {
-        if (observed) break;
-        dom = await wakeMarkerVisible(page, marker);
-        if (dom.visible) break;
-        await page.waitForTimeout(200);
-      }
-
-      if (observed) {
-        console.log('[github-playwright] send-request-observed=' + JSON.stringify(observed));
-        return { ...observed, domMarkerObserved: dom.visible };
-      }
-
+    const deadline = Date.now() + 10000;
+    let dom = { visible: false, userCount: 0 };
+    while (Date.now() < deadline) {
+      if (observed) break;
       dom = await wakeMarkerVisible(page, marker);
-      if (dom.visible) {
-        const fallback = {
-          url: candidateRequests.at(-1)?.url || null,
-          method: candidateRequests.at(-1)?.method || null,
-          bodyContainsMarker: false,
-          domMarkerObserved: true,
-          candidateRequests: [...candidateRequests],
-          userCount: dom.userCount
-        };
-        console.log('[github-playwright] send-dom-persisted-without-body-marker=' + JSON.stringify(fallback));
-        return fallback;
-      }
+      if (dom.visible) break;
+      await page.waitForTimeout(250);
+    }
 
-      console.log('[github-playwright] send-strategy-no-post=' + JSON.stringify({
-        index: i,
-        candidateRequests,
-        diagnostics: await composerDiagnostics(page)
-      }));
+    if (observed) {
+      console.log('[github-playwright] send-request-observed=' + JSON.stringify(observed));
+      return { ...observed, domMarkerObserved: dom.visible };
+    }
+
+    dom = await wakeMarkerVisible(page, marker);
+    if (dom.visible) {
+      const fallback = {
+        url: candidateRequests.at(-1)?.url || null,
+        method: candidateRequests.at(-1)?.method || null,
+        bodyContainsMarker: false,
+        domMarkerObserved: true,
+        candidateRequests: [...candidateRequests],
+        userCount: dom.userCount
+      };
+      console.log('[github-playwright] send-dom-persisted-without-body-marker=' + JSON.stringify(fallback));
+      return fallback;
     }
 
     throw new BrowserAgentError(
       'SEND_NOT_OBSERVED',
-      'No ChatGPT conversation write or durable user-message marker was observed after all send strategies',
+      'No ChatGPT conversation write or durable user-message marker was observed after ordinary pointer/keyboard submission',
       true
     );
   } finally {
@@ -601,14 +566,9 @@ async function postWithBackendVerification(page, message) {
     // VERIFY4 established the success boundary: once the exact write is
     // accepted and the wake is DOM-persisted, post-send health is telemetry only.
     // A later Cloudflare challenge must never retroactively invalidate delivery.
-    let postSendHealth = null;
-    let postSendChallenge = false;
-    try {
-      postSendHealth = await backendPreflight(page);
-      postSendChallenge = postSendHealth.some(item => item?.cfMitigated === 'challenge');
-    } catch (error) {
-      postSendHealth = [{ ok: false, status: 0, error: error.message }];
-    }
+    const passiveState = await snapshot(page).catch(() => null);
+    const postSendHealth = null;
+    const postSendChallenge = passiveState?.humanChallenge === true;
 
     const delivery = {
       writeRequestObserved: true,
@@ -648,7 +608,7 @@ async function runWithPage(providerName, connect) {
       await page.waitForTimeout(1500);
     }
 
-    await waitForBackendHealth(page);
+    await ensureComposer(page);
 
     let routine = null;
     let routineBefore = [];
@@ -718,16 +678,6 @@ async function runWithPage(providerName, connect) {
         }];
         await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForTimeout(1200);
-        const recoveryHealth = await backendPreflight(page).catch(error => [{ ok: false, status: 0, error: error.message }]);
-        const recoveryHealthy = recoveryHealth.length > 0 &&
-          recoveryHealth.every(item => item?.ok === true && item?.cfMitigated !== 'challenge');
-        if (!recoveryHealthy) {
-          throw new BrowserAgentError(
-            'BROWSER_CHALLENGE',
-            'Project challenge contaminated the current browser session; retry on a clean runner: ' + JSON.stringify(recoveryHealth),
-            true,
-          );
-        }
         await ensureComposer(page);
       }
     }
