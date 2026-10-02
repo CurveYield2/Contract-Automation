@@ -654,14 +654,47 @@ async function runWithPage(providerName, connect) {
       // ChatGPT UI has cleared any browser challenge and exposed a composer.
       await ensureComposer(page);
       routine = await loadBrowserRoutine(browserRoutineId);
-      routineBefore = await runBrowserRoutineStage({
-        page,
-        routine,
-        stage: 'before_message',
-        vars: { projectName, chatName: requestedChatName, campaignId: env.CAMPAIGN_ID || '', phaseId: env.PHASE_ID || '' },
-      });
-      const projectResult = [...routineBefore].reverse().find((entry) => entry?.result?.projectUrl)?.result;
-      projectUrl = projectResult?.projectUrl || '';
+      try {
+        routineBefore = await runBrowserRoutineStage({
+          page,
+          routine,
+          stage: 'before_message',
+          vars: { projectName, chatName: requestedChatName, campaignId: env.CAMPAIGN_ID || '', phaseId: env.PHASE_ID || '' },
+        });
+        const projectResult = [...routineBefore].reverse().find((entry) => entry?.result?.projectUrl)?.result;
+        projectUrl = projectResult?.projectUrl || '';
+      } catch (error) {
+        const projectChallengeContinuity =
+          browserRoutineId === 'audit-lite-reviewer-v1' &&
+          error?.code === 'BROWSER_CHALLENGE';
+
+        if (!projectChallengeContinuity) throw error;
+
+        // Cloudflare documents that automated browsers cannot solve production
+        // challenges. Do not evade or loop on the challenge. Project placement
+        // is orchestration metadata, not an audit-phase evidence requirement, so
+        // preserve audit continuity by starting the reviewer in a normal Chat.
+        console.warn('[github-playwright] project-create-challenged-fallback=' + JSON.stringify({
+          code: error.code,
+          projectName,
+          fallback: 'normal-chat',
+        }));
+        projectUrl = '';
+        routineBefore = [{
+          operation: 'chatgpt.ensure_project',
+          result: {
+            projectName,
+            projectUrl: '',
+            created: false,
+            challenged: true,
+            fallback: 'normal-chat',
+          },
+        }];
+        await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+        await page.waitForTimeout(1200);
+        await waitForBackendHealth(page);
+        await ensureComposer(page);
+      }
     }
 
     const before = await snapshot(page);
@@ -724,6 +757,13 @@ async function runWithPage(providerName, connect) {
     let after = before;
     let routineAfter = [];
     const postDeliveryWarnings = [];
+    const projectChallengeFallback = routineBefore.some(entry => entry?.result?.challenged === true);
+    if (projectChallengeFallback) {
+      postDeliveryWarnings.push({
+        code: 'PROJECT_CREATE_CHALLENGED_FALLBACK',
+        error: 'ChatGPT Project creation was Cloudflare-challenged; reviewer started in a normal durable chat instead.',
+      });
+    }
     try {
       if (action === 'wake_and_wait') {
         const requestedWait = Number.parseInt(env.RESPONSE_WAIT_MS || '120000', 10);
@@ -772,6 +812,7 @@ async function runWithPage(providerName, connect) {
       browserRoutineId: browserRoutineId || null,
       projectName: projectName || null,
       projectUrl: projectUrl || null,
+      projectChallengeFallback,
       requestedChatName: requestedChatName || null,
       chatRenamed: renameResult?.renamed ?? null,
       thinkingEffort: thinkingEffortResult,
