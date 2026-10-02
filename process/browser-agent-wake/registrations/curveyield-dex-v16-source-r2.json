@@ -3,7 +3,7 @@
   "campaignId": "curveyield-dex-v16-source-r2",
   "mode": "create_fresh",
   "chatUrl": "",
-  "browserRoutine": "audit-lite-reviewer-v1",
+  "browserRoutine": "audit-lite-reviewer-project-create-v1",
   "chatgptProject": {
     "name": "CurveYield DEX v16 Source r2",
     "url": ""
@@ -41,7 +41,5 @@
       ]
     }
   },
-  "projectCreationPolicy": "skip",
-  "projectCreationPolicyReason": "Exact desktop human-style Projects hover-plus-type-click flow still receives cf-mitigated=challenge under fresh Playwright browser identity; preserve Phase 1 continuity in normal Chat.",
   "browserInteractionPolicy": "ordinary-pointer-keyboard-only"
 }
