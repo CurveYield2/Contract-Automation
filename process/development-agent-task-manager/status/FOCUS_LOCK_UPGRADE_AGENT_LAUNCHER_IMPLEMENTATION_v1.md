@@ -7,52 +7,51 @@ The Upgrade Agent Launcher must admit a development task into the existing Devel
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Repair branch: `browser-challenge-fast-fail-durable-route-v1`
-- Launcher implementation is merged.
-- Shared browser visible-only verification is merged.
-- VERIFY4 proved human-style create-fresh send succeeds and the wake becomes visibly rendered.
-- VERIFY4 also proved reloading an optimistic `local-chatgpt:` route can trigger a Cloudflare challenge.
-- Current repair waits for a durable server `/c/<id>` route before reload.
-- Visible Cloudflare/human-verification challenge now aborts immediately and is non-retryable.
-- Ordinary visible-browser readiness timeout is 5 minutes.
-- Project-operation Cloudflare challenge is non-retryable.
-- No audit wake/monitor/orchestration workflow is being modified.
+- Fast-fail/durable-route repair merged by PR #503 at `70110bed210c7780b555f359f567dbb99d8f4d2a`.
+- Merged-code v10 run `37149537619` exercised the new behavior.
+- Tailscale/home-exit routing succeeded.
+- ChatGPT loaded normally and the wake was entered/sent through visible human-style controls.
+- The wake became visibly rendered on an optimistic `local-chatgpt:` route.
+- 157 ms later the visible page entered a Cloudflare/human-verification challenge.
+- The browser aborted immediately, as required. It did not reload, did not wait for challenge clearance, and did not retry.
+- Ordinary non-challenge readiness timeout is 5 minutes.
+- A `local-chatgpt:` route is never reloaded; the verifier waits for a real durable `/c/<id>` first.
 
 ## SATISFIED
 
-- Human-only ChatGPT input and verification guards are present.
-- No direct ChatGPT backend/API verification reads are used by v10 or shared wake runtime.
+- Human-only ChatGPT input and verification guards are merged.
+- No direct ChatGPT backend/API verification reads are used by v10 or the shared wake runtime.
 - No request/response network telemetry is used as delivery proof.
 - No synthetic DOM/form/force write fallback is used.
-- Post-Send verification failures are non-retryable to prevent duplicate sends.
+- Browser challenge is terminal/non-retryable in v10, shared runtime, and Project operations.
+- Challenge causes immediate workflow failure instead of any timeout wait.
+- Ordinary readiness timeout is 5 minutes.
+- Optimistic local chat routes are not persistence-reloaded.
 - Project sidebar discovery is repaired.
-- Tailscale home-exit routing has been proven functional in finalized runs.
-- Fresh chat can be created and the wake can be visibly rendered.
+- Tailscale home-exit routing is verified functional.
+- Fresh chat send reaches visible rendered-message state.
 
 ## REMAINING DELTA
 
-1. Pass both repository validation lanes for the fast-fail + durable-route repair.
-2. Merge this repair to `main`.
-3. Run the dedicated v10 create-fresh test on merged code and verify:
-   - challenge aborts immediately if it appears;
-   - otherwise the optimistic route transitions to a durable `/c/<id>` before reload;
-   - the visible wake survives the normal human-style reload.
-4. If v10 succeeds, rerun `upgrade-launcher-live-smoke-r1` on the merged shared runtime.
-5. Verify managed Project persistence, focus-locked agent completion, mandatory merge-to-main finalization, and terminal output + Project links.
+1. Compare merged run `37149537619` against the last human-confirmed successful v10 run `36942207641` and identify the smallest behavioral/environmental difference before the first Cloudflare challenge.
+2. Repair only that proven difference if it is in repository-controlled behavior.
+3. Re-run dedicated v10 create-fresh verification.
+4. Only after v10 succeeds, rerun `upgrade-launcher-live-smoke-r1`.
+5. Verify managed Project persistence, focus-locked completion, mandatory merge-to-main, and terminal output + Project links.
 
 ## ACTIVE BLOCKER
 
-None proven in code. The repair requires CI and live verification.
+Cloudflare challenge appears immediately after the visible fresh-chat send becomes rendered, before the optimistic chat route transitions to a durable server-backed URL.
 
 ## NEXT ACTION
 
-Run repository validation on this exact branch. Do not change scope unless a failing check proves a specific blocker.
+Compare the exact successful and failing v10 logs around browser startup, session source, send strategy, post-Send route transition, and first challenge detection. Do not change code until that comparison proves a specific delta.
 
 ## PARKED OBSERVATIONS
 
 - General dashboards and repository cleanup are out of scope.
 - Audit execution process redesign is out of scope.
-- GitHub live step-status lag is not evidence of a routing failure by itself.
+- GitHub live step-status lag is not evidence of routing failure by itself.
 
 ## ANTI-DRIFT CHECK
 
