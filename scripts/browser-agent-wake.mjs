@@ -43,6 +43,31 @@ class BrowserAgentError extends Error {
   }
 }
 
+async function importBrowserRuntimeModule(specifier) {
+  const runtimeRoot = env.BROWSER_AGENT_RUNTIME_ROOT || '';
+  if (!runtimeRoot) return import(specifier);
+  const runtimeRequire = createRequire(path.join(runtimeRoot, 'package.json'));
+  const resolved = runtimeRequire.resolve(specifier);
+  return import(pathToFileURL(resolved).href);
+}
+
+function unwrapRuntimeModule(mod) {
+  if (!mod) return {};
+  const first = mod.default && typeof mod.default === 'object' ? mod.default : mod;
+  const second = first.default && typeof first.default === 'object' ? first.default : first;
+  return { ...mod, ...first, ...second };
+}
+
+async function loadModules() {
+  const playwrightMod = await importBrowserRuntimeModule('playwright-core');
+  const playwright = unwrapRuntimeModule(playwrightMod);
+  const chromium = playwright.chromium;
+  if (!chromium || typeof chromium.launch !== 'function') {
+    throw new Error('playwright-core chromium launcher unavailable');
+  }
+  return { chromium };
+}
+
 async function hydrateBrowserContextFromRegistration() {
   if (mode !== 'create_fresh') return false;
   const projectUrlRequired = /project-open-v1$/.test(browserRoutineId);
