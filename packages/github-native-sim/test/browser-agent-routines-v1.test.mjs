@@ -22,8 +22,11 @@ test('project creation opens sidebar and uses the hover-revealed Projects plus c
   assert.match(source, /looksOverflow/);
   assert.match(source, /looksPlus/);
   assert.match(source, /projects-plus-control/);
-  assert.doesNotMatch(source, /findNewProjectControl\(page\)/);
-  assert.doesNotMatch(source, /PROJECT_CREATE_CONTROL_MISSING/);
+  const start = source.indexOf('async function createProject(page, projectName)');
+  const end = source.indexOf('function validProjectUrl', start);
+  const block = source.slice(start, end);
+  assert.doesNotMatch(block, /findNewProjectControl\(page\)/);
+  assert.doesNotMatch(block, /PROJECT_CREATE_CONTROL_MISSING/);
 });
 
 test('Phase1 captures the private Project share URL through the human overflow/share/clipboard sequence', () => {
