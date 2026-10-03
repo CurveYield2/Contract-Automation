@@ -526,10 +526,7 @@ async function findProjectsSectionAddControl(page) {
   const projects = page.getByText('Projects', { exact: true }).first();
   if (!await projects.isVisible().catch(() => false)) return null;
 
-  // Match the real human interaction: hover the Projects title first so the
-  // contextual + and overflow controls are revealed.
-  await projects.hover().catch(() => {});
-  await page.waitForTimeout(350);
+  // Caller has already hovered the visible Projects title, revealing contextual controls.
 
   let region = projects;
   for (let depth = 0; depth < 4; depth += 1) {
