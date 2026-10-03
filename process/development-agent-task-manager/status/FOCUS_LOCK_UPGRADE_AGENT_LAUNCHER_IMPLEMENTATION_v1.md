@@ -7,13 +7,14 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `c750ee95d8768c7b564174304d637cb6579b152c`.
+- Base: current `main` at `4536d3ae663104dfa8c29a1c64a280465f2b36bd`.
 - PR #508 through PR #514 are merged; their required validation lanes passed before merge.
-- Recovery-only run `37158111510` proves:
+- Recovery-only run `37158409016` proves:
   - fresh immutable browser state loads normally without a Cloudflare challenge;
   - no wake resend occurs in recovery mode;
-  - the current blocker is only the stale chat-search UI locator: after opening the search/filter surface, no old-style `input` or `searchbox` was found.
-- Current ChatGPT UI behavior is to open Search chats with the normal Ctrl+K/Cmd+K shortcut and present a visible editor labeled/placeholdered `Search chats...`.
+  - the attempted Ctrl+K search-open path did not produce a visible Search chats editor;
+  - therefore Ctrl+K is not a reliable recovery opener in this browser session.
+- The visible left sidebar includes a normal human Search control. Recovery should click that visible Search control with the existing human pointer primitive, then locate the visible search editor.
 - Durable Project URL already captured from the successful creation run: `https://chatgpt.com/g/g-p-6ac177c98f0c81919e970bb2a69b8583/project`.
 - Project chats use a Project-scoped durable route of the form `https://chatgpt.com/g/g-p-.../c/<id>`.
 - The operator supplied a screenshot of the successful Project landing page. Its reliable human-visible cue is the central composer labeled `New chat in <ProjectName>`, which differs from the homepage composer.
@@ -40,15 +41,15 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## ACTIVE BLOCKER
 
-**Recovery uses a stale search-popup locator. Use the current human keyboard shortcut (Ctrl+K/Cmd+K) and current visible `Search chats...` editor.**
+**Recovery must open Search chats through the visible sidebar Search control, not Ctrl+K.**
 
-No message mutation is allowed: the wake was already sent in run `37157762182`.
+Run `37158409016` disproved Ctrl+K as a reliable opener. No message mutation is allowed: the wake was already sent in run `37157762182`.
 
 ## REMAINING DELTA
 
 1. Keep the canonical request in `recover` mode.
-2. Open ChatGPT Search chats with the human keyboard shortcut Ctrl+K (Meta+K fallback only where applicable).
-3. Locate the visible `Search chats...` editor across current textbox/input/textarea/contenteditable/combobox shapes.
+2. Locate the visible left-sidebar Search control and click it using the existing human pointer primitive.
+3. After the search surface opens, locate the visible search editor across current textbox/input/textarea/contenteditable/combobox shapes, without backend/API or page-context inspection.
 4. Type only the unique wake marker with the existing human typing primitive.
 5. Click the matching visible result with the human pointer primitive.
 6. Accept the durable Project-scoped `/g/g-p-.../c/<id>` conversation route and verify the exact wake visibly exists.
@@ -56,7 +57,7 @@ No message mutation is allowed: the wake was already sent in run `37157762182`.
 
 ## NEXT ACTION
 
-Create a narrow branch that updates only recovery Search chats opening/field targeting, validate, merge, and rerun the existing recovery request.
+Create a narrow branch from current main that changes only recovery Search opening from Ctrl+K-first to visible-sidebar-Search-first, validate, merge, and rerun the existing recovery request.
 
 ## PARKED / OUT OF SCOPE
 
