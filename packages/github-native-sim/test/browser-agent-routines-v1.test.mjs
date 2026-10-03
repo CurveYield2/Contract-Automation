@@ -498,15 +498,16 @@ test('project creation hovers Projects and uses the visible accessible add-proje
   assert.doesNotMatch(source, /outerHTML|evaluateAll\(|innerText\(/);
 });
 
-test('fresh project routines wait for the normal ChatGPT composer before sidebar operations', () => {
-  const source = read('scripts/browser-agent-wake.mjs');
-  const block = source.slice(
-    source.indexOf("if (mode === 'create_fresh' && browserRoutineId)"),
-    source.indexOf('const before = await snapshot(page)')
+test('fresh project routines let the existing Chat-mode operation establish the composer', () => {
+  const runtime = read('scripts/browser-agent-wake.mjs');
+  const routine = JSON.parse(read('process/browser-routines/audit-lite-reviewer-project-create-v1.json'));
+  const block = runtime.slice(
+    runtime.indexOf("if (mode === 'create_fresh' && browserRoutineId)"),
+    runtime.indexOf('const before = await snapshot(page)')
   );
-  assert.match(block, /await ensureComposer\(page\)/);
   assert.match(block, /loadBrowserRoutine\(browserRoutineId\)/);
-  assert.ok(block.indexOf('await ensureComposer(page)') < block.indexOf('loadBrowserRoutine(browserRoutineId)'));
+  assert.doesNotMatch(block.slice(0, block.indexOf('loadBrowserRoutine(browserRoutineId)')), /await ensureComposer\(page\)/);
+  assert.equal(routine.stages.before_message[0].operation, 'chatgpt.ensure_chat_mode');
 });
 
 test('High effort uses the visible Power control and ordinary keyboard selection', () => {
