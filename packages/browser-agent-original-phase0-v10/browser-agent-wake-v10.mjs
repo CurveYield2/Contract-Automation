@@ -176,30 +176,6 @@ async function waitForAssistantResponse(page, before, timeoutMs) {
   return { responded: false, waitedMs: Date.now() - started, snapshot: current };
 }
 
-async function composerDiagnostics(page) {
-  return page.evaluate(() => {
-    const buttons = [...document.querySelectorAll('button')].slice(-40).map((b, i) => ({
-      i,
-      text: (b.innerText || '').trim().slice(0, 80),
-      aria: b.getAttribute('aria-label'),
-      testid: b.getAttribute('data-testid'),
-      disabled: !!b.disabled,
-      type: b.getAttribute('type')
-    }));
-    const editables = [...document.querySelectorAll('textarea,[contenteditable="true"]')].slice(-20).map((e, i) => ({
-      i,
-      tag: e.tagName,
-      id: e.id,
-      role: e.getAttribute('role'),
-      aria: e.getAttribute('aria-label'),
-      placeholder: e.getAttribute('placeholder'),
-      testid: e.getAttribute('data-testid'),
-      text: (e.innerText || e.value || '').slice(0, 120)
-    }));
-    return { buttons, editables, url: location.href, title: document.title };
-  });
-}
-
 function randomDelayMs(minMs, maxMs) {
   const min = Math.ceil(minMs);
   const max = Math.floor(maxMs);
@@ -332,8 +308,7 @@ async function findProjectsPlusAfterHover(page, projects) {
         await candidate.innerText().catch(() => ''),
         await candidate.getAttribute('aria-label').catch(() => ''),
         await candidate.getAttribute('title').catch(() => ''),
-        await candidate.getAttribute('data-testid').catch(() => ''),
-        await candidate.evaluate(el => el.outerHTML.slice(0, 900)).catch(() => '')
+        await candidate.getAttribute('data-testid').catch(() => '')
       ].filter(Boolean).join(' ');
       const looksOverflow = /more|overflow|menu|options|ellipsis|\.\.\.|⋯/i.test(attrs);
       const looksPlus = /add|plus|create|new|M12 5v14|M5 12h14|<line[^>]+x1=["']12["'][^>]+y1=["']5/i.test(attrs);
@@ -341,6 +316,109 @@ async function findProjectsPlusAfterHover(page, projects) {
     }
   }
   return null;
+}
+
+async function findVisibleProjectCreateButton(page) {
+  const buttons = page.getByRole('button', { name: /^Create project$/i });
+  const count = Math.min(await buttons.count().catch(() => 0), 8);
+  for (let i = 0; i < count; i += 1) {
+    const button = buttons.nth(i);
+    if (await button.isVisible().catch(() => false)) return button;
+  }
+  return null;
+}
+
+async function findProjectNameEditorFromVisibleCreateSurface(page) {
+  const create = await findVisibleProjectCreateButton(page);
+  if (!create) return { create: null, editor: null };
+
+  // Anchor the editor to the visible Create-project surface itself. This avoids
+  // accidentally selecting the dimmed homepage composer behind the modal and
+  // does not assume the editor is an <input> or that the surface has role=dialog.
+  let region = create;
+  for (let depth = 0; depth < 6; depth += 1) {
+    region = region.locator('xpath=..');
+
+    const textboxes = region.getByRole('textbox');
+    const textboxCount = Math.min(await textboxes.count().catch(() => 0), 8);
+    for (let i = 0; i < textboxCount; i += 1) {
+      const candidate = textboxes.nth(i);
+      if (await candidate.isVisible().catch(() => false)) {
+        return { create, editor: candidate };
+      }
+    }
+
+    const editable = region.locator('input, textarea, [contenteditable="true"]');
+    const editableCount = Math.min(await editable.count().catch(() => 0), 8);
+    for (let i = 0; i < editableCount; i += 1) {
+      const candidate = editable.nth(i);
+      if (await candidate.isVisible().catch(() => false)) {
+        return { create, editor: candidate };
+      }
+    }
+  }
+
+  return { create, editor: null };
+}
+
+async function findProjectLandingComposer(page, name) {
+  const main = page.locator('main, [role="main"]').first();
+  if (!await main.isVisible().catch(() => false)) return null;
+
+  const projectNameVisible = main.getByText(name, { exact: true }).first();
+  if (!await projectNameVisible.isVisible().catch(() => false)) return null;
+
+  // Project pages have their own new-chat box. Resolve it only inside the visible
+  // Project main surface; never reuse a homepage/global composer locator here.
+  const textboxes = main.getByRole('textbox');
+  const textboxCount = Math.min(await textboxes.count().catch(() => 0), 12);
+  let best = null;
+  let bestArea = 0;
+  for (let i = 0; i < textboxCount; i += 1) {
+    const candidate = textboxes.nth(i);
+    if (!await candidate.isVisible().catch(() => false)) continue;
+    const box = await candidate.boundingBox().catch(() => null);
+    if (!box) continue;
+    const area = box.width * box.height;
+    if (area > bestArea) {
+      best = candidate;
+      bestArea = area;
+    }
+  }
+  if (best) return best;
+
+  const editables = main.locator('textarea, [contenteditable="true"]');
+  const editableCount = Math.min(await editables.count().catch(() => 0), 12);
+  for (let i = 0; i < editableCount; i += 1) {
+    const candidate = editables.nth(i);
+    if (await candidate.isVisible().catch(() => false)) return candidate;
+  }
+  return null;
+}
+
+async function findSendControlNearComposer(page, composer) {
+  if (composer) {
+    let region = composer;
+    for (let depth = 0; depth < 5; depth += 1) {
+      region = region.locator('xpath=..');
+      const send = await firstVisible(region, [
+        'button[data-testid="send-button"]',
+        'button[data-testid="composer-submit-button"]',
+        'button[aria-label="Send prompt"]',
+        'button[aria-label="Send"]',
+        'button[aria-label*="Send"]'
+      ]);
+      if (send) return send;
+    }
+  }
+
+  return firstVisible(page, [
+    'button[data-testid="send-button"]',
+    'button[data-testid="composer-submit-button"]',
+    'button[aria-label="Send prompt"]',
+    'button[aria-label="Send"]',
+    'button[aria-label*="Send"]'
+  ]);
 }
 
 async function createProjectExactHumanFlow(page, name) {
@@ -359,56 +437,48 @@ async function createProjectExactHumanFlow(page, name) {
   if (!plus) throw new Error('Plus control did not appear to the right of Projects after hover');
   await humanPointerClick(page, plus);
 
-  const input = await firstVisible(page, [
-    '[role="dialog"] input[placeholder*="Project name" i]',
-    '[role="dialog"] input[aria-label*="Project name" i]',
-    '[role="dialog"] input[name="name"]',
-    '[role="dialog"] input'
-  ]);
-  if (!input) throw new Error('Project-name input was not found in the visible Project dialog');
-  await humanTypeInto(page, input, name);
+  await humanActionPause(page);
+  let controls = await findProjectNameEditorFromVisibleCreateSurface(page);
+  if (!controls.create || !controls.editor) {
+    const pendingCreate = page.getByRole('button', { name: /^Create project$/i }).first();
+    await pendingCreate.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+    controls = await findProjectNameEditorFromVisibleCreateSurface(page);
+  }
+  if (!controls.create) throw new Error('Create Project button was not found on the visible Create-project surface');
+  if (!controls.editor) throw new Error('Project-name editor was not found on the visible Create-project surface');
 
-  const create = await firstVisible(page, [
-    '[role="dialog"] button:has-text("Create project")',
-    '[role="dialog"] button:has-text("Create Project")'
-  ]);
-  if (!create) throw new Error('Create Project button was not found in the visible dialog');
-  await humanPointerClick(page, create);
+  await humanTypeInto(page, controls.editor, name);
+  await humanPointerClick(page, controls.create);
 
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
-    const title = await page.title().catch(() => '');
-    const bodyText = await page.locator('body').innerText().catch(() => '');
-    const visible = visibleBrowserStateText(bodyText, title);
-    if (visible.humanChallenge) {
+    const challenge = page.getByText(/Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i).first();
+    if (await challenge.isVisible().catch(() => false)) {
       const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected after Project creation; aborting immediately');
       error.code = 'BROWSER_CHALLENGE';
       throw error;
     }
 
-    const projectNameVisible = await page.getByText(name, { exact: true }).first().isVisible().catch(() => false);
-    const composer = await firstVisible(page, [
-      '#prompt-textarea',
-      'textarea[placeholder*="Message"]',
-      '[contenteditable="true"][data-lexical-editor="true"]',
-      '[contenteditable="true"]'
-    ]);
-    if (projectNameVisible && composer) {
+    const composer = await findProjectLandingComposer(page, name);
+    if (composer) {
       console.log('[github-playwright-v10] project-created-visible=' + JSON.stringify({ projectName: name, url: page.url() }));
-      return { projectName: name, url: page.url() };
+      return { projectName: name, url: page.url(), composer };
     }
     await page.waitForTimeout(750);
   }
-  throw new Error('Created Project did not become visibly ready with a composer within 60 seconds');
+  throw new Error('Created Project did not become visibly ready with its Project-scoped new-chat box within 60 seconds');
 }
 
-async function fillComposer(page, message) {
-  const composer = await ensureComposer(page);
+async function fillComposer(page, message, composerOverride = null) {
+  const composer = composerOverride || await ensureComposer(page);
+  if (!await composer.isVisible().catch(() => false)) {
+    throw new Error('Visible composer target is not available for human typing');
+  }
   await humanTypeInto(page, composer, message);
   return composer;
 }
 
-async function post(page, message) {
+async function post(page, message, composerOverride = null) {
   if (!message) throw new Error('Wake message is empty');
 
   const marker = message.slice(0, Math.min(120, message.length));
@@ -418,17 +488,9 @@ async function post(page, message) {
   // Human-only interaction: wait until the visible chat is idle, type through keyboard
   // events, and click the visible Send control with pointer movement.
   await waitForChatIdle(page, idleWaitMs);
-  const composer = await fillComposer(page, message);
-  const diagnostics = await composerDiagnostics(page);
-  console.log('[github-playwright-v10] composer-diagnostics=' + JSON.stringify(diagnostics));
+  const composer = await fillComposer(page, message, composerOverride);
 
-  const send = await firstVisible(page, [
-    'button[data-testid="send-button"]',
-    'button[data-testid="composer-submit-button"]',
-    'button[aria-label="Send prompt"]',
-    'button[aria-label="Send"]',
-    'button[aria-label*="Send"]'
-  ]);
+  const send = await findSendControlNearComposer(page, composer);
   if (!send) throw new Error('No visible Send button for normal human-style click');
 
   const composerText = await composer.inputValue().catch(async () => {
@@ -679,8 +741,8 @@ async function recoverCreatedChatByVisibleSearch(page, message) {
   throw new Error('No visible ChatGPT search result matched the unique wake marker within 30 seconds');
 }
 
-async function postWithVisibleVerification(page, message) {
-  const submitted = await post(page, message);
+async function postWithVisibleVerification(page, message, composerOverride = null) {
+  const submitted = await post(page, message, composerOverride);
 
   let initialRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
   if (mode === 'create_fresh') {
@@ -757,7 +819,6 @@ async function runWithPage(providerName, connect) {
     if (action === 'project_wake') {
       if (mode !== 'create_fresh') throw new Error('project_wake requires create_fresh mode');
       project = await createProjectExactHumanFlow(page, projectName);
-      await waitForVisibleBrowserReady(page);
     }
 
     const before = await snapshot(page);
@@ -808,7 +869,7 @@ async function runWithPage(providerName, connect) {
       return result;
     }
 
-    const verifiedSend = await postWithVisibleVerification(page, wakeMessage);
+    const verifiedSend = await postWithVisibleVerification(page, wakeMessage, project?.composer || null);
 
     let response = null;
     let after;

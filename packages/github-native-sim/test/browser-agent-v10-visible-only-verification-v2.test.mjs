@@ -18,7 +18,7 @@ test('v10 ChatGPT verification is visible-browser-only', () => {
   assert.doesNotMatch(source, /page\.on\(['"]response['"]/);
   assert.doesNotMatch(source, /fetch\s*\(/);
   assert.doesNotMatch(source, /force:\s*true/);
-  assert.doesNotMatch(source, /evaluate\s*\(\s*el\s*=>\s*el\.click/);
+  assert.doesNotMatch(source, /\.evaluate\s*\(/);
   assert.doesNotMatch(source, /requestSubmit/);
   assert.doesNotMatch(source, /form\.submit/);
 
@@ -80,11 +80,13 @@ test('visible wake detection does not depend only on legacy user-role attributes
 });
 
 test('send path uses visible pointer and keyboard primitives only', () => {
-  const postStart = source.indexOf('async function post(page, message)');
+  const postStart = source.indexOf('async function post(page, message, composerOverride = null)');
   const postEnd = source.indexOf('\nfunction visibleBrowserStateText', postStart);
   const block = source.slice(postStart, postEnd);
 
-  assert.match(block, /fillComposer\(page, message\)/);
+  assert.ok(postStart >= 0 && postEnd > postStart);
+  assert.match(block, /fillComposer\(page, message, composerOverride\)/);
+  assert.match(block, /findSendControlNearComposer\(page, composer\)/);
   assert.match(block, /humanPointerClick\(page, send/);
   assert.doesNotMatch(block, /\.click\s*\(/);
   assert.doesNotMatch(block, /\.fill\s*\(/);
@@ -144,10 +146,43 @@ test('v10 project_wake opens or scrolls the sidebar to Projects before hover-plu
   const sidebar = block.indexOf('await ensureSidebarOpenForProject');
   const hover = block.indexOf('await projects.hover()');
   const plus = block.indexOf('findProjectsPlusAfterHover');
-  const type = block.indexOf('await humanTypeInto(page, input, name)');
-  const create = block.indexOf('await humanPointerClick(page, create)');
-  assert.ok(sidebar >= 0 && hover > sidebar && plus > hover && type > plus && create > type);
+  const editor = block.indexOf('findProjectNameEditorFromVisibleCreateSurface');
+  const type = block.indexOf('await humanTypeInto(page, controls.editor, name)');
+  const create = block.indexOf('await humanPointerClick(page, controls.create)');
+  assert.ok(sidebar >= 0 && hover > sidebar && plus > hover && editor > plus && type > editor && create > type);
   assert.doesNotMatch(block, /fetch\s*\(|page\.on\(|waitForResponse|\/backend-api\//);
+});
+
+test('v10 project creation anchors the name editor to the visible Create-project surface', () => {
+  assert.match(source, /async function findVisibleProjectCreateButton/);
+  assert.match(source, /getByRole\('button', \{ name: \/\^Create project\$\/i \}\)/);
+  assert.match(source, /async function findProjectNameEditorFromVisibleCreateSurface/);
+  assert.match(source, /region\.getByRole\('textbox'\)/);
+  assert.match(source, /region\.locator\('input, textarea, \[contenteditable="true"\]'\)/);
+
+  const start = source.indexOf('async function createProjectExactHumanFlow');
+  const end = source.indexOf('\nasync function fillComposer', start);
+  const block = source.slice(start, end);
+  assert.match(block, /findProjectNameEditorFromVisibleCreateSurface/);
+  assert.match(block, /humanTypeInto\(page, controls\.editor, name\)/);
+  assert.match(block, /humanPointerClick\(page, controls\.create\)/);
+  assert.doesNotMatch(block, /\[role="dialog"\] input/);
+  assert.doesNotMatch(block, /\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
+});
+
+test('v10 project wake uses the Project-scoped new-chat box instead of the homepage composer', () => {
+  assert.match(source, /async function findProjectLandingComposer/);
+  assert.match(source, /const main = page\.locator\('main, \[role="main"\]'\)\.first\(\)/);
+  assert.match(source, /main\.getByText\(name, \{ exact: true \}\)/);
+  assert.match(source, /main\.getByRole\('textbox'\)/);
+  assert.match(source, /async function findSendControlNearComposer/);
+  assert.match(source, /postWithVisibleVerification\(page, wakeMessage, project\?\.composer \|\| null\)/);
+
+  const createStart = source.indexOf('async function createProjectExactHumanFlow');
+  const createEnd = source.indexOf('\nasync function fillComposer', createStart);
+  const createBlock = source.slice(createStart, createEnd);
+  assert.match(createBlock, /Created Project did not become visibly ready with its Project-scoped new-chat box/);
+  assert.doesNotMatch(createBlock, /ensureComposer\(/);
 });
 
 test('v10 randomized pacing uses 0.3-1.5s between actions and 0.2-0.4s per character', () => {
