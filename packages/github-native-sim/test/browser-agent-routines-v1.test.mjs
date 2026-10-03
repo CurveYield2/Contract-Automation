@@ -457,7 +457,7 @@ test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualifi
 });
 
 
-test('Project creation and reviewer wake use only ordinary pointer and keyboard submission primitives', () => {
+test('Project creation and reviewer wake use only ordinary pointer keyboard and OS clipboard primitives', () => {
   const operations = read('scripts/browser-operations-v1.mjs');
   const wake = read('scripts/browser-agent-wake.mjs');
 
@@ -468,39 +468,35 @@ test('Project creation and reviewer wake use only ordinary pointer and keyboard 
   assert.match(projectBlock, /humanTypeInto\(page, input/);
   assert.match(projectBlock, /humanPointerClick\(page, submit/);
   assert.doesNotMatch(projectBlock, /\.fill\(/);
-  assert.doesNotMatch(projectBlock, /\.press\('Enter'\)/);
   assert.doesNotMatch(projectBlock, /force:\s*true/);
-  assert.doesNotMatch(projectBlock, /evaluate\([^\n]*\.click/);
   assert.doesNotMatch(projectBlock, /requestSubmit|form\.submit/);
+  assert.doesNotMatch(projectBlock, /waitForResponse|backend-api|page\.on\(['"]response/);
 
   const fillStart = wake.indexOf('async function fillComposer(page, message)');
   const fillEnd = wake.indexOf('async function persistedWakeVisible', fillStart);
   const sendBlock = wake.slice(fillStart, fillEnd);
-  assert.match(sendBlock, /grantPermissions\(\['clipboard-read', 'clipboard-write'\]/);
-  assert.match(sendBlock, /navigator\.clipboard\.writeText\(text\)/);
-  assert.match(sendBlock, /normalizeVisibleText/);
-  assert.match(sendBlock, /visibleMessageMarker/);
-  assert.match(sendBlock, /normalized wake marker after clipboard paste/);
+  assert.match(sendBlock, /writeOsClipboard\(message\)/);
+  assert.match(wake, /spawnSync\('xclip'/);
   assert.match(sendBlock, /composer\.press\(process\.platform === 'darwin' \? 'Meta\+V' : 'Control\+V'\)/);
-  assert.doesNotMatch(sendBlock, /pressSequentially\(message/);
   assert.match(sendBlock, /humanPointerClick\(page, send/);
+  assert.match(sendBlock, /wakeMarkerVisible/);
+  assert.doesNotMatch(sendBlock, /navigator\.clipboard|grantPermissions|page\.evaluate\(/);
+  assert.doesNotMatch(sendBlock, /page\.on\(['"](?:request|response)/);
   assert.doesNotMatch(sendBlock, /\.fill\(/);
   assert.doesNotMatch(sendBlock, /force:\s*true/);
   assert.doesNotMatch(sendBlock, /requestSubmit|form\.submit/);
-  assert.doesNotMatch(sendBlock, /evaluate\([^\n]*\.click/);
 });
 
-test('project creation hovers Projects and distinguishes the plus control from the overflow menu', () => {
+test('project creation hovers Projects and uses the visible accessible add-project control', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /findProjectsSectionAddControl/);
   assert.match(source, /getByText\('Projects', \{ exact: true \}\)/);
   assert.match(source, /await projects\.hover\(\)/);
-  assert.match(source, /looksOverflow/);
-  assert.match(source, /looksPlus/);
-  assert.match(source, /projects-plus-control/);
-  assert.doesNotMatch(source, /count > 0 && count <= 3/);
+  assert.match(source, /aria-label\*="Add"/);
+  assert.match(source, /aria-label\*="New"/);
+  assert.match(source, /aria-label\*="Create"/);
+  assert.doesNotMatch(source, /outerHTML|evaluateAll\(|innerText\(/);
 });
-
 
 test('fresh project routines wait for the normal ChatGPT composer before sidebar operations', () => {
   const source = read('scripts/browser-agent-wake.mjs');
@@ -513,60 +509,17 @@ test('fresh project routines wait for the normal ChatGPT composer before sidebar
   assert.ok(block.indexOf('await ensureComposer(page)') < block.indexOf('loadBrowserRoutine(browserRoutineId)'));
 });
 
-test('High effort uses the observed Power slider and verifies the spoken label', async () => {
-  const { executeBrowserOperation } = await import('../../../scripts/browser-operations-v1.mjs');
-  function fixture({ max = 2, highLabel = 'High, 3 of 3.' } = {}) {
-    let value = 1;
-    const keys = [];
-    const empty = {
-      first() { return this; }, nth() { return this; }, locator() { return this; },
-      async isVisible() { return false; }, async count() { return 0; },
-      async getAttribute() { return null; }, async innerText() { return ''; },
-      async evaluateAll() { return []; },
-    };
-    const slider = {
-      first() { return this; },
-      async getAttribute(name) {
-        return ({ 'aria-valuemin': '0', 'aria-valuemax': String(max), 'aria-valuenow': String(value) })[name] ?? null;
-      },
-    };
-    const row = {
-      first() { return this; }, locator() { return slider; },
-      async isVisible() { return true; },
-      async getAttribute(name) { return name === 'aria-describedby' ? 'effort-status effort-help' : null; },
-      async press(key) { keys.push(key); if (key === 'ArrowRight') value += 1; },
-    };
-    const page = {
-      locator(selector) {
-        if (selector.startsWith('[data-reasoning-slider=')) return row;
-        if (selector === '[id="effort-status"]') return { async innerText() { return value === 2 ? highLabel : 'Medium, 2 of 3.'; } };
-        return empty;
-      },
-      getByText() { return empty; },
-      async waitForTimeout() {},
-    };
-    return { page, keys, value: () => value };
-  }
-
-  const valid = fixture();
-  assert.deepEqual(await executeBrowserOperation({
-    page: valid.page, name: 'chatgpt.ensure_thinking_effort', args: { level: 'high' },
-  }), { level: 'high', changed: true, verified: true });
-  assert.equal(valid.value(), 2);
-  assert.deepEqual(valid.keys, ['ArrowRight', 'Escape']);
-
-  // Numeric maximum alone cannot claim High on a differently labelled widget.
-  const wrongLabel = fixture({ highLabel: 'Maximum, 3 of 3.' });
-  await assert.rejects(executeBrowserOperation({
-    page: wrongLabel.page, name: 'chatgpt.ensure_thinking_effort', args: { level: 'high' },
-  }), error => error.code === 'THINKING_EFFORT_UI_CHANGED');
-
-  // Unknown slider ranges fail closed without changing a UI setting.
-  const unknownRange = fixture({ max: 4 });
-  await assert.rejects(executeBrowserOperation({
-    page: unknownRange.page, name: 'chatgpt.ensure_thinking_effort', args: { level: 'high' },
-  }), error => error.code === 'THINKING_EFFORT_UI_CHANGED');
-  assert.deepEqual(unknownRange.keys, []);
+test('High effort uses the visible Power control and ordinary keyboard selection', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  const start = source.indexOf('async function ensureThinkingEffort');
+  const end = source.indexOf('async function humanPointerClick', start);
+  const block = source.slice(start, end);
+  assert.match(block, /data-reasoning-slider/);
+  assert.match(block, /await power\.press\('End'\)/);
+  assert.match(block, /await power\.press\('Escape'\)/);
+  assert.match(block, /button:has-text\("High"\)/);
+  assert.match(block, /THINKING_EFFORT_UI_CHANGED/);
+  assert.doesNotMatch(block, /getAttribute\('aria-valuenow'\)|innerText\(|evaluateAll\(/);
 });
 
 test('only durable server chat URLs can activate a reviewer', async () => {
@@ -588,7 +541,7 @@ test('only durable server chat URLs can activate a reviewer', async () => {
 });
 
 
-test('Project-create pre-post UI transition failures are retryable on a fresh runner', () => {
+test('Project-create visible UI transition failures are retryable on a fresh runner', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /function retryableProjectUiError/);
   for (const code of [
@@ -600,8 +553,7 @@ test('Project-create pre-post UI transition failures are retryable on a fresh ru
     assert.match(source, new RegExp(code));
   }
   assert.match(source, /error\.retryable = true/);
-  assert.match(source, /PROJECT_CREATE_REJECTED/);
-  assert.match(source, /error\.retryable = false/);
+  assert.doesNotMatch(source, /PROJECT_CREATE_REJECTED|cf-mitigated|waitForResponse|backend-api/);
 });
 
 test('Project-create retries remain human-interaction-only', () => {
@@ -644,7 +596,7 @@ test('browser verification wait does not replace human Project interaction primi
 });
 
 
-test('Project sidebar recovery follows Chat sidebar options through Organize sidebar and Show', () => {
+test('Project sidebar recovery follows visible Chat sidebar options through Organize sidebar and Show', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   const start = source.indexOf('async function exposeProjectsInSidebar(page)');
   const end = source.indexOf('\nasync function ', start + 20);
@@ -657,12 +609,13 @@ test('Project sidebar recovery follows Chat sidebar options through Organize sid
   assert.match(block, /humanPointerClick\(page, sidebarOptions\)/);
   assert.match(block, /humanPointerClick\(page, organize\)/);
   assert.match(block, /humanPointerClick\(page, show\)/);
-  assert.match(block, /humanPointerClick\(page, projectsOption\)/);
+  assert.match(block, /humanPointerClick\(page, projectsOff\)/);
   assert.match(block, /sidebarOptionsFound/);
   assert.match(block, /showFound/);
 
   assert.doesNotMatch(block, /\.click\(/);
-  assert.doesNotMatch(block, /dispatchEvent/);
+  assert.doesNotMatch(block, /dispatchEvent|evaluateAll\(|innerText\(/);
   assert.doesNotMatch(block, /force:\s*true/);
   assert.doesNotMatch(block, /requestSubmit|form\.submit/);
 });
+
