@@ -209,6 +209,30 @@ async function humanPointerClick(page, locator) {
   await humanActionPause(page);
 }
 
+async function humanTapVisibleTitle(page, locator, horizontalFraction = 0.32) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await humanActionPause(page);
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('Visible Project title has no clickable bounding box');
+
+  const clampedFraction = Math.max(0.18, Math.min(horizontalFraction, 0.82));
+  const x = box.x + Math.max(8, Math.min(box.width - 8, box.width * clampedFraction));
+  const y = box.y + box.height / 2;
+
+  await page.mouse.move(x, y, { steps: 14 });
+  await humanActionPause(page);
+  await page.mouse.down();
+  await page.waitForTimeout(randomDelayMs(70, 150));
+  await page.mouse.up();
+  await humanActionPause(page);
+
+  console.log('[github-playwright-v10] project-title-tap=' + JSON.stringify({
+    x: Math.round(x),
+    y: Math.round(y),
+    fraction: Number(clampedFraction.toFixed(2))
+  }));
+}
+
 async function humanTypeInto(page, locator, text) {
   await humanPointerClick(page, locator);
   const current = await locator.inputValue().catch(async () => {
@@ -537,16 +561,21 @@ async function recoverExistingProjectExactHumanFlow(page, name) {
   if (!existing) return null;
 
   const beforeUrl = page.url();
-  await humanPointerClick(page, existing);
+
+  // Click directly on the visible title letters with a short physical mouse tap.
+  // If the first human click does not navigate, retry once at a second point on
+  // the same rendered title before declaring failure.
+  await humanTapVisibleTitle(page, existing, 0.32);
   await page.waitForTimeout(randomDelayMs(3000, 5000));
 
   let projectUrl = page.url();
   if (projectUrl === beforeUrl) {
-    await page.waitForTimeout(randomDelayMs(2000, 3500));
+    await humanTapVisibleTitle(page, existing, 0.68);
+    await page.waitForTimeout(randomDelayMs(3000, 5000));
     projectUrl = page.url();
   }
   if (projectUrl === beforeUrl) {
-    throw new Error('Existing exact-name Project did not navigate to its Project URL after a short visible wait');
+    throw new Error('Existing exact-name Project title did not navigate after two direct human title taps');
   }
 
   const composer = await ensureComposer(page);
