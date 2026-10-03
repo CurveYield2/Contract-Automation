@@ -11,43 +11,41 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
 
 
-test('project creation opens the sidebar and resolves semantic New project controls', () => {
+test('project creation opens the sidebar and resolves visible New project controls', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /async function ensureSidebarOpen\(page\)/);
   assert.match(source, /open-sidebar-button/);
   assert.match(source, /sidebar-toggle-button/);
   assert.match(source, /aria-label="Open sidebar"/);
-  assert.match(source, /aria-label="Toggle sidebar"/);
+  assert.match(source, /\['New chat', 'Scheduled', 'Plugins', 'Explore'\]/);
+  assert.match(source, /alreadyOpen/);
+  assert.doesNotMatch(source, /aria-label="Toggle sidebar"/);
   assert.match(source, /async function findNewProjectControl\(page\)/);
   assert.match(source, /await projects\.hover\(\)/);
-  assert.match(source, /projects-plus-control/);
-  assert.match(source, /looksOverflow/);
-  assert.match(source, /looksPlus/);
-  assert.doesNotMatch(source, /count > 0 && count <= 3/);
+  assert.match(source, /async function findProjectsSectionAddControl\(page\)/);
+  assert.match(source, /aria-label\*="Add"/);
   assert.match(source, /async function exposeProjectsInSidebar\(page\)/);
   assert.match(source, /Organize sidebar/);
-  assert.match(source, /menuitemcheckbox.*Projects/);
+  assert.match(source, /menuitemcheckbox/);
   assert.match(source, /sidebar-projects-recovery/);
   assert.match(source, /async function findSemanticProjectAction\(page\)/);
-  assert.match(source, /new\|add\|create/);
+  assert.match(source, /getByRole\('button'/);
   assert.match(source, /getByText\('New project', \{ exact: true \}\)/);
   assert.match(source, /getByText\('Projects', \{ exact: true \}\)/);
-  assert.match(source, /async function visibleNavigationDiagnostics\(page\)/);
-  assert.match(source, /sidebarToggleVisible=/);
-  assert.match(source, /projectsVisible=/);
-  assert.match(source, /newProjectTextVisible=/);
-  assert.match(source, /visibleControls=/);
+  assert.doesNotMatch(source, /evaluateAll\(|innerText\(/);
 });
 
-test('Phase1 captures the private Project share URL through the human overflow/share/clipboard sequence', () => {
+test('Phase1 captures the private Project share URL through visible overflow/share and OS clipboard', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /findProjectOverflowControl/);
   assert.match(source, /await entry\.hover\(\)/);
   assert.match(source, /Share project/);
   assert.match(source, /Share link/);
-  assert.match(source, /navigator\.clipboard\.readText\(\)/);
+  assert.match(source, /readOsClipboard/);
+  assert.match(source, /spawnSync\('xclip'/);
   assert.match(source, /PROJECT_SHARE_URL_MISSING/);
   assert.match(source, /project-share-url-captured/);
+  assert.doesNotMatch(source, /navigator\.clipboard|page\.evaluate\(/);
 });
 
 test('later and replacement reviewers open the persisted Project URL and never create a second Project', () => {
@@ -61,17 +59,16 @@ test('later and replacement reviewers open the persisted Project URL and never c
   assert.match(repair, /projectUrl:\$projectUrl/);
 });
 
-test('project creation records the exact backend response and only retries confirmed security challenges', () => {
+test('project creation verifies success only through visible Project UI', () => {
   const source = read('scripts/browser-operations-v1.mjs');
-  assert.match(source, /\/backend-api\/projects/);
-  assert.match(source, /project-create-response/);
-  assert.match(source, /cf-mitigated/);
-  assert.match(source, /PROJECT_CREATE_REJECTED/);
-  assert.match(source, /error\.code = 'BROWSER_CHALLENGE'/);
-  assert.match(source, /error\.retryable = true/);
-  assert.match(source, /safeBody/);
+  assert.match(source, /PROJECT_CREATE_VERIFICATION_MISSING/);
+  assert.match(source, /findProjectEntry/);
+  assert.match(source, /getByText\(projectName, \{ exact: true \}\)/);
+  assert.doesNotMatch(source, /\/backend-api\/projects/);
+  assert.doesNotMatch(source, /waitForResponse\(/);
+  assert.doesNotMatch(source, /page\.on\(['"]response/);
+  assert.doesNotMatch(source, /cf-mitigated/);
 });
-
 
 test('browser operation registry exposes reusable normal-ChatGPT project operations', () => {
   const source = read('scripts/browser-operations-v1.mjs');
@@ -121,17 +118,16 @@ test('browser routine engine has separate deterministic Project-create and Proje
   assert.doesNotMatch(read('.github/workflows/lite-audit-browser-orchestrator-v1.yml'), /audit-lite-reviewer-v1/);
 });
 
-test('audit wakes enforce verified High reasoning effort and keep follow-up messages minimal', () => {
+test('audit wakes use visible High reasoning controls and keep follow-up messages minimal', () => {
   const operations = read('scripts/browser-operations-v1.mjs');
   const runtime = read('scripts/browser-agent-wake.mjs');
   const wake = read('.github/workflows/browser-agent-wake.yml');
   assert.match(operations, /ensureThinkingEffort/);
   assert.match(operations, /menuitemradio/);
-  assert.match(operations, /Thinking time/);
-  assert.match(operations, /button:has-text\("GPT-5\.6"\)/);
+  assert.match(operations, /button:has-text\("High"\)/);
   assert.match(operations, /THINKING_EFFORT_UI_CHANGED/);
-  assert.match(operations, /visibleControls=/);
-  assert.match(operations, /High thinking-effort control could not be selected and verified/);
+  assert.match(operations, /humanPointerClick/);
+  assert.doesNotMatch(operations, /evaluateAll\(|innerText\(|textContent/);
   assert.match(runtime, /CHATGPT_THINKING_EFFORT/);
   assert.match(runtime, /chatgpt\.ensure_thinking_effort/);
   assert.match(wake, /default: high/);
@@ -163,25 +159,24 @@ test('assignment-v2 campaigns resolve active phase from Audit Campaign Directory
   assert.doesNotMatch(repair, /nextMilestone\.phaseRange/);
 });
 
-test('long wake submission is duplicate-safe when ChatGPT transport no longer exposes the message body', () => {
+test('long wake submission verifies the visible user marker without ChatGPT network inspection', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   const postStart = source.indexOf('async function post(page, message)');
   const postEnd = source.indexOf('async function runWithPage', postStart);
   const postBlock = source.slice(postStart, postEnd);
-  assert.match(postBlock, /send-request-observed/);
-  assert.match(postBlock, /send-dom-persisted-without-body-marker/);
+  assert.match(postBlock, /human-ui-send-observed/);
   assert.match(postBlock, /wakeMarkerVisible/);
-  assert.match(postBlock, /likelyConversationWrite/);
   assert.match(postBlock, /composer-diagnostics/);
   assert.match(postBlock, /SEND_NOT_OBSERVED/);
   assert.match(postBlock, /postWithBackendVerification/);
-  assert.match(postBlock, /WRITE_RESPONSE_MISSING/);
-  assert.match(postBlock, /WRITE_REJECTED/);
   assert.match(postBlock, /DURABILITY_NOT_OBSERVED/);
   assert.match(postBlock, /persistedWakeVisible/);
-  assert.match(postBlock, /responseCandidates/);
   assert.match(postBlock, /postSendChallenge/);
-  assert.match(postBlock, /post-send health/);
+  assert.doesNotMatch(postBlock, /likelyConversationWrite/);
+  assert.doesNotMatch(postBlock, /send-request-observed/);
+  assert.doesNotMatch(postBlock, /WRITE_RESPONSE_MISSING|WRITE_REJECTED/);
+  assert.doesNotMatch(postBlock, /page\.on\(['"](?:request|response)/);
+  assert.doesNotMatch(postBlock, /\/backend-api\//);
 });
 
 test('failed non-infrastructure idle pokes consume the escalation budget and can repair Phase-0', () => {
@@ -465,7 +460,7 @@ test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualifi
 });
 
 
-test('Project creation and reviewer wake use only ordinary pointer and keyboard submission primitives', () => {
+test('Project creation and reviewer wake use only ordinary pointer keyboard and OS clipboard primitives', () => {
   const operations = read('scripts/browser-operations-v1.mjs');
   const wake = read('scripts/browser-agent-wake.mjs');
 
@@ -476,105 +471,59 @@ test('Project creation and reviewer wake use only ordinary pointer and keyboard 
   assert.match(projectBlock, /humanTypeInto\(page, input/);
   assert.match(projectBlock, /humanPointerClick\(page, submit/);
   assert.doesNotMatch(projectBlock, /\.fill\(/);
-  assert.doesNotMatch(projectBlock, /\.press\('Enter'\)/);
   assert.doesNotMatch(projectBlock, /force:\s*true/);
-  assert.doesNotMatch(projectBlock, /evaluate\([^\n]*\.click/);
   assert.doesNotMatch(projectBlock, /requestSubmit|form\.submit/);
+  assert.doesNotMatch(projectBlock, /waitForResponse|backend-api|page\.on\(['"]response/);
 
   const fillStart = wake.indexOf('async function fillComposer(page, message)');
   const fillEnd = wake.indexOf('async function persistedWakeVisible', fillStart);
   const sendBlock = wake.slice(fillStart, fillEnd);
-  assert.match(sendBlock, /grantPermissions\(\['clipboard-read', 'clipboard-write'\]/);
-  assert.match(sendBlock, /navigator\.clipboard\.writeText\(text\)/);
-  assert.match(sendBlock, /normalizeVisibleText/);
-  assert.match(sendBlock, /visibleMessageMarker/);
-  assert.match(sendBlock, /normalized wake marker after clipboard paste/);
+  assert.match(sendBlock, /writeOsClipboard\(message\)/);
+  assert.match(wake, /spawnSync\('xclip'/);
   assert.match(sendBlock, /composer\.press\(process\.platform === 'darwin' \? 'Meta\+V' : 'Control\+V'\)/);
-  assert.doesNotMatch(sendBlock, /pressSequentially\(message/);
   assert.match(sendBlock, /humanPointerClick\(page, send/);
+  assert.match(sendBlock, /wakeMarkerVisible/);
+  assert.doesNotMatch(sendBlock, /navigator\.clipboard|grantPermissions|page\.evaluate\(/);
+  assert.doesNotMatch(sendBlock, /page\.on\(['"](?:request|response)/);
   assert.doesNotMatch(sendBlock, /\.fill\(/);
   assert.doesNotMatch(sendBlock, /force:\s*true/);
   assert.doesNotMatch(sendBlock, /requestSubmit|form\.submit/);
-  assert.doesNotMatch(sendBlock, /evaluate\([^\n]*\.click/);
 });
 
-test('project creation hovers Projects and distinguishes the plus control from the overflow menu', () => {
+test('project creation hovers Projects and uses the visible accessible add-project control', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /findProjectsSectionAddControl/);
   assert.match(source, /getByText\('Projects', \{ exact: true \}\)/);
   assert.match(source, /await projects\.hover\(\)/);
-  assert.match(source, /looksOverflow/);
-  assert.match(source, /looksPlus/);
-  assert.match(source, /projects-plus-control/);
-  assert.doesNotMatch(source, /count > 0 && count <= 3/);
+  assert.match(source, /aria-label\*="Add"/);
+  assert.match(source, /aria-label\*="New"/);
+  assert.match(source, /aria-label\*="Create"/);
+  assert.doesNotMatch(source, /outerHTML|evaluateAll\(|innerText\(/);
 });
 
-
-test('fresh project routines wait for the normal ChatGPT composer before sidebar operations', () => {
-  const source = read('scripts/browser-agent-wake.mjs');
-  const block = source.slice(
-    source.indexOf("if (mode === 'create_fresh' && browserRoutineId)"),
-    source.indexOf('const before = await snapshot(page)')
+test('fresh project routines let the existing Chat-mode operation establish the composer', () => {
+  const runtime = read('scripts/browser-agent-wake.mjs');
+  const routine = JSON.parse(read('process/browser-routines/audit-lite-reviewer-project-create-v1.json'));
+  const block = runtime.slice(
+    runtime.indexOf("if (mode === 'create_fresh' && browserRoutineId)"),
+    runtime.indexOf('const before = await snapshot(page)')
   );
-  assert.match(block, /await ensureComposer\(page\)/);
   assert.match(block, /loadBrowserRoutine\(browserRoutineId\)/);
-  assert.ok(block.indexOf('await ensureComposer(page)') < block.indexOf('loadBrowserRoutine(browserRoutineId)'));
+  assert.doesNotMatch(block.slice(0, block.indexOf('loadBrowserRoutine(browserRoutineId)')), /await ensureComposer\(page\)/);
+  assert.equal(routine.stages.before_message[0].operation, 'chatgpt.ensure_chat_mode');
 });
 
-test('High effort uses the observed Power slider and verifies the spoken label', async () => {
-  const { executeBrowserOperation } = await import('../../../scripts/browser-operations-v1.mjs');
-  function fixture({ max = 2, highLabel = 'High, 3 of 3.' } = {}) {
-    let value = 1;
-    const keys = [];
-    const empty = {
-      first() { return this; }, nth() { return this; }, locator() { return this; },
-      async isVisible() { return false; }, async count() { return 0; },
-      async getAttribute() { return null; }, async innerText() { return ''; },
-      async evaluateAll() { return []; },
-    };
-    const slider = {
-      first() { return this; },
-      async getAttribute(name) {
-        return ({ 'aria-valuemin': '0', 'aria-valuemax': String(max), 'aria-valuenow': String(value) })[name] ?? null;
-      },
-    };
-    const row = {
-      first() { return this; }, locator() { return slider; },
-      async isVisible() { return true; },
-      async getAttribute(name) { return name === 'aria-describedby' ? 'effort-status effort-help' : null; },
-      async press(key) { keys.push(key); if (key === 'ArrowRight') value += 1; },
-    };
-    const page = {
-      locator(selector) {
-        if (selector.startsWith('[data-reasoning-slider=')) return row;
-        if (selector === '[id="effort-status"]') return { async innerText() { return value === 2 ? highLabel : 'Medium, 2 of 3.'; } };
-        return empty;
-      },
-      getByText() { return empty; },
-      async waitForTimeout() {},
-    };
-    return { page, keys, value: () => value };
-  }
-
-  const valid = fixture();
-  assert.deepEqual(await executeBrowserOperation({
-    page: valid.page, name: 'chatgpt.ensure_thinking_effort', args: { level: 'high' },
-  }), { level: 'high', changed: true, verified: true });
-  assert.equal(valid.value(), 2);
-  assert.deepEqual(valid.keys, ['ArrowRight', 'Escape']);
-
-  // Numeric maximum alone cannot claim High on a differently labelled widget.
-  const wrongLabel = fixture({ highLabel: 'Maximum, 3 of 3.' });
-  await assert.rejects(executeBrowserOperation({
-    page: wrongLabel.page, name: 'chatgpt.ensure_thinking_effort', args: { level: 'high' },
-  }), error => error.code === 'THINKING_EFFORT_UI_CHANGED');
-
-  // Unknown slider ranges fail closed without changing a UI setting.
-  const unknownRange = fixture({ max: 4 });
-  await assert.rejects(executeBrowserOperation({
-    page: unknownRange.page, name: 'chatgpt.ensure_thinking_effort', args: { level: 'high' },
-  }), error => error.code === 'THINKING_EFFORT_UI_CHANGED');
-  assert.deepEqual(unknownRange.keys, []);
+test('High effort uses the visible Power control and ordinary keyboard selection', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  const start = source.indexOf('async function ensureThinkingEffort');
+  const end = source.indexOf('async function humanPointerClick', start);
+  const block = source.slice(start, end);
+  assert.match(block, /data-reasoning-slider/);
+  assert.match(block, /await power\.press\('End'\)/);
+  assert.match(block, /await power\.press\('Escape'\)/);
+  assert.match(block, /button:has-text\("High"\)/);
+  assert.match(block, /THINKING_EFFORT_UI_CHANGED/);
+  assert.doesNotMatch(block, /getAttribute\('aria-valuenow'\)|innerText\(|evaluateAll\(/);
 });
 
 test('only durable server chat URLs can activate a reviewer', async () => {
@@ -596,7 +545,7 @@ test('only durable server chat URLs can activate a reviewer', async () => {
 });
 
 
-test('Project-create pre-post UI transition failures are retryable on a fresh runner', () => {
+test('Project-create visible UI transition failures are retryable on a fresh runner', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /function retryableProjectUiError/);
   for (const code of [
@@ -608,8 +557,7 @@ test('Project-create pre-post UI transition failures are retryable on a fresh ru
     assert.match(source, new RegExp(code));
   }
   assert.match(source, /error\.retryable = true/);
-  assert.match(source, /PROJECT_CREATE_REJECTED/);
-  assert.match(source, /error\.retryable = false/);
+  assert.doesNotMatch(source, /PROJECT_CREATE_REJECTED|cf-mitigated|waitForResponse|backend-api/);
 });
 
 test('Project-create retries remain human-interaction-only', () => {
@@ -652,7 +600,7 @@ test('browser verification wait does not replace human Project interaction primi
 });
 
 
-test('Project sidebar recovery follows Chat sidebar options through Organize sidebar and Show', () => {
+test('Project sidebar recovery follows visible Chat sidebar options through Organize sidebar and Show', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   const start = source.indexOf('async function exposeProjectsInSidebar(page)');
   const end = source.indexOf('\nasync function ', start + 20);
@@ -666,11 +614,15 @@ test('Project sidebar recovery follows Chat sidebar options through Organize sid
   assert.match(block, /humanPointerClick\(page, organize\)/);
   assert.match(block, /humanPointerClick\(page, show\)/);
   assert.match(block, /humanPointerClick\(page, projectsOption\)/);
+  assert.match(block, /firstVisibleText\(page, \['Explore'\]/);
+  assert.match(block, /humanPointerClick\(page, explore\)/);
+  assert.match(block, /projectsFromExplore/);
   assert.match(block, /sidebarOptionsFound/);
   assert.match(block, /showFound/);
 
   assert.doesNotMatch(block, /\.click\(/);
-  assert.doesNotMatch(block, /dispatchEvent/);
+  assert.doesNotMatch(block, /dispatchEvent|evaluateAll\(|innerText\(/);
   assert.doesNotMatch(block, /force:\s*true/);
   assert.doesNotMatch(block, /requestSubmit|form\.submit/);
 });
+

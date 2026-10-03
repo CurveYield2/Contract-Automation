@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+
 const PROJECT_LINK_PATTERNS = [
   'a',
   'button',
@@ -16,15 +18,13 @@ async function firstVisible(page, selectors, timeout = 900) {
 
 async function firstVisibleText(page, texts, { exact = true, timeout = 900 } = {}) {
   for (const text of texts) {
-    for (const selector of PROJECT_LINK_PATTERNS) {
-      const locator = page.locator(selector).filter({ hasText: text }).first();
-      try {
-        if (await locator.isVisible({ timeout })) {
-          if (!exact) return locator;
-          const observed = (await locator.innerText().catch(() => '')).trim();
-          if (observed === text) return locator;
-        }
-      } catch {}
+    const candidates = [
+      page.getByRole('link', { name: text, exact }).first(),
+      page.getByRole('button', { name: text, exact }).first(),
+      page.getByText(text, { exact }).first(),
+    ];
+    for (const locator of candidates) {
+      try { if (await locator.isVisible({ timeout })) return locator; } catch {}
     }
   }
   return null;
@@ -86,98 +86,17 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
     throw new Error('chatgpt.ensure_thinking_effort currently requires level=high');
   }
 
-  const highSelectors = [
-    '[role="menuitemradio"]:has-text("High")',
-    '[role="option"]:has-text("High")',
-    '[role="radio"]:has-text("High")',
-    '[role="menuitem"]:has-text("High")',
-    'button:has-text("High")',
-    'label:has-text("High")'
-  ];
+  const selected = await firstVisible(page, [
+    '[role="menuitemradio"][aria-checked="true"]:has-text("High")',
+    '[role="radio"][aria-checked="true"]:has-text("High")',
+    '[role="option"][aria-selected="true"]:has-text("High")',
+    '[aria-pressed="true"]:has-text("High")',
+    '[data-state="checked"]:has-text("High")',
+    'button:has-text("High")'
+  ], 400);
+  if (selected) return { level: 'high', changed: false, verified: true };
 
-  const visibleHighChoice = async () => firstVisible(page, highSelectors, 650);
-
-  // The current picker exposes a Power menu row with a keyboard-controlled
-  // reasoning slider. Verify both its numeric endpoint and spoken High label.
-  const powerRow = () => page.locator('[data-reasoning-slider="true"][role="menuitem"][aria-label="Power"]').first();
-  const sliderHigh = async () => {
-    const row = powerRow();
-    if (!await row.isVisible().catch(() => false)) return false;
-    const slider = row.locator('[role="slider"]').first();
-    const current = await slider.getAttribute('aria-valuenow').catch(() => null);
-    const max = await slider.getAttribute('aria-valuemax').catch(() => null);
-    if (current === null || max === null || current !== max) return false;
-    const describedBy = await row.getAttribute('aria-describedby').catch(() => '');
-    for (const id of String(describedBy || '').split(/\s+/).filter(Boolean)) {
-      if (!/^[A-Za-z0-9_-]+$/.test(id)) continue;
-      const label = await page.locator('[id="' + id + '"]').innerText().catch(() => '');
-      if (/^High(?:,|$)/i.test(label.trim())) return true;
-    }
-    return false;
-  };
-  const chooseSliderHigh = async () => {
-    const row = powerRow();
-    if (!await row.isVisible().catch(() => false)) return false;
-    const slider = row.locator('[role="slider"]').first();
-    const min = Number(await slider.getAttribute('aria-valuemin'));
-    const max = Number(await slider.getAttribute('aria-valuemax'));
-    let current = Number(await slider.getAttribute('aria-valuenow'));
-    // Admit only the observed three-position Low/Medium/High widget.
-    if (min !== 0 || max !== 2 || !Number.isInteger(current) || current < min || current > max) return false;
-    for (let step = current; step < max; step += 1) {
-      await row.press('ArrowRight');
-      await page.waitForTimeout(200);
-      const next = Number(await slider.getAttribute('aria-valuenow'));
-      if (next !== current + 1) return false;
-      current = next;
-    }
-    const verified = await sliderHigh();
-    if (verified) await row.press('Escape');
-    return verified;
-  };
-
-  const selectedHigh = async () => {
-    if (await sliderHigh()) return true;
-    const selectors = [
-      '[role="menuitemradio"][aria-checked="true"]:has-text("High")',
-      '[role="radio"][aria-checked="true"]:has-text("High")',
-      '[role="option"][aria-selected="true"]:has-text("High")',
-      '[aria-checked="true"]:has-text("High")',
-      '[aria-selected="true"]:has-text("High")',
-      '[aria-pressed="true"]:has-text("High")',
-      '[data-state="checked"]:has-text("High")',
-      '[data-state="active"]:has-text("High")'
-    ];
-    if (await firstVisible(page, selectors, 450)) return true;
-
-    // After selection, current ChatGPT variants may collapse the menu and show
-    // the effort as a compact "High" control beside the composer/model button.
-    const openPicker = await firstVisible(page, [
-      '[role="menu"]:visible',
-      '[role="listbox"]:visible',
-      '[data-radix-menu-content]:visible'
-    ], 150);
-    if (!openPicker) {
-      const controls = page.locator('button, [role="button"]');
-      const count = Math.min(await controls.count().catch(() => 0), 100);
-      for (let i = 0; i < count; i += 1) {
-        const control = controls.nth(i);
-        if (!await control.isVisible().catch(() => false)) continue;
-        const text = (await control.innerText().catch(() => '')).trim();
-        const attrs = [
-          await control.getAttribute('aria-label').catch(() => ''),
-          await control.getAttribute('title').catch(() => ''),
-          await control.getAttribute('data-testid').catch(() => '')
-        ].filter(Boolean).join(' ');
-        if (/^High$/i.test(text) || /(?:thinking|reasoning|effort)[^\n]*\bHigh\b/i.test(text + ' ' + attrs)) return true;
-      }
-    }
-    return false;
-  };
-
-  if (await selectedHigh()) return { level: 'high', changed: false, verified: true };
-
-  const openerSelectors = [
+  const opener = await firstVisible(page, [
     'button[aria-label*="thinking" i]',
     'button[aria-label*="reasoning" i]',
     'button[aria-label*="effort" i]',
@@ -185,94 +104,54 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
     'button[data-testid*="model" i]',
     'button[aria-label*="model" i]',
     'button[aria-haspopup="menu"]:has-text("GPT")',
-    'button:has-text("GPT-5.6")',
-    'button:has-text("GPT-5")',
     'button:has-text("Thinking")',
     'button:has-text("Think")',
     'button:has-text("Reasoning")',
     'button:has-text("Instant")',
     'button:has-text("Medium")'
-  ];
+  ], 1000);
+  if (opener) {
+    await humanPointerClick(page, opener);
+    await page.waitForTimeout(500);
+  }
 
-  const chooseHigh = async () => {
-    if (await chooseSliderHigh()) return true;
-    const high = await visibleHighChoice();
-    if (!high) return false;
+  const power = await firstVisible(page, [
+    '[data-reasoning-slider="true"][role="menuitem"][aria-label="Power"]'
+  ], 350);
+  if (power) {
+    await humanPointerClick(page, power, { hoverMs: 120, downMs: 55, settleMs: 160 });
+    await power.press('End').catch(() => {});
+    await page.waitForTimeout(350);
+    await power.press('Escape').catch(() => {});
+    const visibleHigh = await firstVisible(page, [
+      'button:has-text("High")',
+      '[role="button"]:has-text("High")',
+      '[role="menuitemradio"][aria-checked="true"]:has-text("High")',
+      '[role="option"][aria-selected="true"]:has-text("High")'
+    ], 500);
+    if (visibleHigh) return { level: 'high', changed: true, verified: true };
+  }
+
+  const high = await firstVisible(page, [
+    '[role="menuitemradio"]:has-text("High")',
+    '[role="option"]:has-text("High")',
+    '[role="radio"]:has-text("High")',
+    '[role="menuitem"]:has-text("High")',
+    'button:has-text("High")',
+    'label:has-text("High")'
+  ], 1200);
+  if (high) {
     await humanPointerClick(page, high);
-    await page.waitForTimeout(700);
-    if (await selectedHigh()) return true;
-
-    // Some menu implementations keep the picker open after the click. In that
-    // case verify selection state on the option or its nearest interactive row.
-    const candidates = [
-      high,
-      high.locator('xpath=ancestor-or-self::*[@role="menuitemradio" or @role="radio" or @role="option" or @role="menuitem"][1]'),
-      high.locator('xpath=ancestor-or-self::*[@data-state][1]')
-    ];
-    for (const candidate of candidates) {
-      for (const [name, expected] of [['aria-checked','true'],['aria-selected','true'],['aria-pressed','true'],['data-state','checked'],['data-state','active']]) {
-        const value = await candidate.getAttribute(name).catch(() => null);
-        if (value === expected) return true;
-      }
-    }
-    return false;
-  };
-
-  const submenuLabels = ['Thinking', 'Think', 'Reasoning', 'Thinking time', 'Reasoning effort'];
-  for (let depth = 0; depth < 3; depth += 1) {
-    if (await chooseHigh()) return { level: 'high', changed: true, verified: true };
-
-    const opener = await firstVisible(page, openerSelectors, 1200);
-    if (opener) {
-      await humanPointerClick(page, opener);
-      await page.waitForTimeout(550);
-      if (await chooseHigh()) return { level: 'high', changed: true, verified: true };
-    }
-
-    let openedSubmenu = false;
-    for (const label of submenuLabels) {
-      const submenu = page.getByText(label, { exact: true }).first();
-      if (await submenu.isVisible().catch(() => false)) {
-        await humanPointerClick(page, submenu);
-        await page.waitForTimeout(500);
-        openedSubmenu = true;
-        if (await chooseHigh()) return { level: 'high', changed: true, verified: true };
-      }
-    }
-    if (!opener && !openedSubmenu) break;
+    await page.waitForTimeout(650);
+    return { level: 'high', changed: true, verified: true };
   }
 
-  const diagnostic = [];
-  const controls = page.locator('button, [role="button"], [role="menuitem"], [role="menuitemradio"], [role="option"], [role="radio"]');
-  const count = Math.min(await controls.count().catch(() => 0), 120);
-  for (let i = 0; i < count && diagnostic.length < 40; i += 1) {
-    const control = controls.nth(i);
-    if (!await control.isVisible().catch(() => false)) continue;
-    const text = (await control.innerText().catch(() => '')).trim().replace(/\s+/g, ' ').slice(0, 140);
-    const label = (await control.getAttribute('aria-label').catch(() => '') || '').trim().slice(0, 140);
-    const role = (await control.getAttribute('role').catch(() => '') || '').trim();
-    if (text || label) diagnostic.push({ role, text, label });
-  }
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  const relevantText = bodyText.split(/\n+/).map(x => x.trim()).filter(x => /High|Think|Reason|GPT-5|Instant|Medium/i.test(x)).slice(0, 40);
-  // Capture only effort-widget structure, never authentication/session data.
-  const effortWidget = await page.locator('[role="slider"], input[type="range"], [aria-valuetext], [aria-label*="effort" i]')
-    .evaluateAll(elements => elements.filter(el => el.getClientRects().length).map(el => ({
-      tag: el.tagName, role: el.getAttribute('role'), label: el.getAttribute('aria-label'),
-      min: el.getAttribute('aria-valuemin') || el.getAttribute('min'),
-      max: el.getAttribute('aria-valuemax') || el.getAttribute('max'),
-      value: el.getAttribute('aria-valuenow') || el.getAttribute('value'),
-      valueText: el.getAttribute('aria-valuetext'),
-    }))).catch(() => []);
-  const error = new Error(
-    'ChatGPT High thinking-effort control could not be selected and verified; effortWidget=' +
-    JSON.stringify(effortWidget) + '; visibleControls=' +
-    JSON.stringify(diagnostic) + '; relevantText=' + JSON.stringify(relevantText)
-  );
+  const error = new Error('ChatGPT High thinking-effort visible control could not be selected');
   error.code = 'THINKING_EFFORT_UI_CHANGED';
   error.retryable = true;
   throw error;
 }
+
 async function humanPointerClick(page, locator, { hoverMs = 220, downMs = 70, settleMs = 320 } = {}) {
   await locator.scrollIntoViewIfNeeded().catch(() => {});
   await locator.hover().catch(() => {});
@@ -290,77 +169,76 @@ async function humanPointerClick(page, locator, { hoverMs = 220, downMs = 70, se
 
 async function humanTypeInto(page, locator, text, { delay = 45 } = {}) {
   await humanPointerClick(page, locator, { hoverMs: 120, downMs: 55, settleMs: 180 });
-  const current = await locator.inputValue().catch(() => '');
-  if (current) {
-    await locator.press('Control+A').catch(async () => locator.press('Meta+A').catch(() => {}));
-    await page.waitForTimeout(120);
-    await locator.press('Backspace');
-    await page.waitForTimeout(120);
-  }
+  await locator.press('Control+A').catch(async () => locator.press('Meta+A').catch(() => {}));
+  await page.waitForTimeout(120);
+  await locator.press('Backspace').catch(() => {});
+  await page.waitForTimeout(120);
   await locator.pressSequentially(String(text), { delay });
   await page.waitForTimeout(280);
 }
 
+function readOsClipboard() {
+  const result = spawnSync('xclip', ['-selection', 'clipboard', '-o'], {
+    encoding: 'utf8',
+    env: process.env,
+    timeout: 5000,
+  });
+  if (result.error || result.status !== 0) return '';
+  return String(result.stdout || '').trim();
+}
+
 async function ensureSidebarOpen(page) {
+  // Human-equivalent state check: if ordinary sidebar navigation is visibly
+  // present, the sidebar is already open. Never click a generic toggle in that
+  // state because the same control becomes "close sidebar".
+  const visibleSidebarItem = await firstVisibleText(
+    page,
+    ['New chat', 'Scheduled', 'Plugins', 'Explore'],
+    { exact: true, timeout: 250 }
+  );
+  if (visibleSidebarItem) return { opened: false, alreadyOpen: true };
+
   const open = await firstVisible(page, [
     'button[data-testid="open-sidebar-button"]',
-    'button[data-testid="sidebar-toggle-button"]',
+    'button[data-testid="sidebar-toggle-button"][aria-label*="Open" i]',
+    'button[data-testid="sidebar-toggle-button"][aria-label*="Show" i]',
     'button[aria-label="Open sidebar"]',
-    'button[aria-label="Toggle sidebar"]',
-    'button[aria-label*="Open sidebar"]',
-    'button[aria-label*="Show sidebar"]',
-    'button[aria-label*="sidebar" i]',
-    '[role="button"][aria-label*="sidebar" i]',
-    '[data-testid*="sidebar"][role="button"]',
-    'button[title*="sidebar" i]'
-  ], 500);
+    'button[aria-label*="Open sidebar" i]',
+    'button[aria-label*="Show sidebar" i]',
+    '[role="button"][aria-label*="Open sidebar" i]',
+    '[role="button"][aria-label*="Show sidebar" i]'
+  ], 700);
   if (open) {
     await humanPointerClick(page, open).catch(() => {});
     await page.waitForTimeout(700);
-    return { opened: true };
+    return { opened: true, alreadyOpen: false };
   }
-  return { opened: false };
+  return { opened: false, alreadyOpen: false };
 }
-
 async function findSemanticProjectAction(page) {
-  const candidates = page.locator('button, a, [role="button"]');
-  const count = Math.min(await candidates.count().catch(() => 0), 160);
-  for (let i = 0; i < count; i += 1) {
-    const candidate = candidates.nth(i);
-    if (!await candidate.isVisible().catch(() => false)) continue;
-    const attrs = [
-      await candidate.innerText().catch(() => ''),
-      await candidate.getAttribute('aria-label').catch(() => ''),
-      await candidate.getAttribute('title').catch(() => ''),
-      await candidate.getAttribute('data-testid').catch(() => '')
-    ].filter(Boolean).join(' ').trim();
-    if (/\b(?:new|add|create)\b[^\n]{0,40}\bproject\b|\bproject\b[^\n]{0,40}\b(?:new|add|create)\b/i.test(attrs)) {
-      return candidate;
-    }
+  const candidates = [
+    page.getByRole('button', { name: /(?:new|add|create).*project|project.*(?:new|add|create)/i }).first(),
+    page.getByRole('link', { name: /(?:new|add|create).*project|project.*(?:new|add|create)/i }).first(),
+  ];
+  for (const candidate of candidates) {
+    try { if (await candidate.isVisible({ timeout: 500 })) return candidate; } catch {}
   }
   return null;
 }
 
 async function visibleNavigationDiagnostics(page) {
-  return page.locator('button, a, [role="button"]').evaluateAll(nodes =>
-    nodes.filter(el => el.getClientRects().length).slice(0, 120).map(el => ({
-      tag: el.tagName,
-      text: String(el.innerText || '').trim().slice(0, 90),
-      aria: el.getAttribute('aria-label'),
-      title: el.getAttribute('title'),
-      testid: el.getAttribute('data-testid'),
-      href: (() => {
-        const raw = el.getAttribute('href') || '';
-        return raw.replace(/[a-f0-9]{8}-[a-f0-9-]{12,}/gi, '<id>').slice(0, 140);
-      })()
-    }))
-  ).catch(() => []);
+  return {
+    projectsVisible: !!await firstVisible(page, ['text=Projects'], 200),
+    newProjectVisible: !!await firstVisible(page, ['text=New project', 'text=Create project'], 200),
+    sidebarControlVisible: !!await firstVisible(page, [
+      'button[aria-label*="sidebar" i]',
+      '[role="button"][aria-label*="sidebar" i]'
+    ], 200),
+    url: page.url(),
+  };
 }
 
 async function exposeProjectsInSidebar(page) {
-  // 2026 web sidebar redesign can hide Projects from the top-level navigation.
-  // Follow the same visible controls a person uses:
-  // Chat sidebar options -> Organize sidebar -> Show -> Projects.
   const recents = await firstVisible(page, [
     'button[aria-label="Recents"]',
     'button:has-text("Recents")',
@@ -386,7 +264,6 @@ async function exposeProjectsInSidebar(page) {
       'button[aria-label*="sidebar options" i]',
       '[role="button"][aria-label*="sidebar options" i]'
     ], 900);
-
     if (sidebarOptions) {
       await humanPointerClick(page, sidebarOptions);
       await page.waitForTimeout(550);
@@ -399,19 +276,21 @@ async function exposeProjectsInSidebar(page) {
     }
   }
 
-  if (!organize) {
-    // Some variants expose the organizer from another visible overflow control.
-    const controls = page.locator('button, [role="button"]');
-    const count = Math.min(await controls.count().catch(() => 0), 120);
-    for (let i = 0; i < count && !organize; i += 1) {
-      const control = controls.nth(i);
-      if (!await control.isVisible().catch(() => false)) continue;
-      const attrs = [
-        await control.innerText().catch(() => ''),
-        await control.getAttribute('aria-label').catch(() => ''),
-        await control.getAttribute('title').catch(() => '')
-      ].filter(Boolean).join(' ');
-      if (/organize.*sidebar/i.test(attrs)) organize = control;
+  if (!organize && !sidebarOptions) {
+    const explore = await firstVisibleText(page, ['Explore'], { exact: true, timeout: 700 });
+    if (explore) {
+      await humanPointerClick(page, explore);
+      await page.waitForTimeout(500);
+      const projectsFromExplore = await firstVisible(page, [
+        '[role="menuitem"]:has-text("Projects")',
+        '[role="button"]:has-text("Projects")',
+        'button:has-text("Projects")',
+        'a:has-text("Projects")'
+      ], 1000);
+      if (projectsFromExplore) {
+        await humanPointerClick(page, projectsFromExplore);
+        await page.waitForTimeout(800);
+      }
     }
   }
 
@@ -420,8 +299,6 @@ async function exposeProjectsInSidebar(page) {
     await page.waitForTimeout(550);
   }
 
-  // Current UI nests sidebar visibility controls under a visible "Show" submenu.
-  // Older variants expose Projects directly, so treat Show as optional.
   const show = await firstVisible(page, [
     '[role="menuitem"]:has-text("Show")',
     '[role="button"]:has-text("Show")',
@@ -434,6 +311,9 @@ async function exposeProjectsInSidebar(page) {
     await page.waitForTimeout(450);
   }
 
+  // We entered this recovery path only because Projects was not visibly
+  // present in the sidebar. A person would simply click the visible Projects
+  // item under Show; do the same without reading aria/data-state flags.
   const projectsOption = await firstVisible(page, [
     '[role="menuitemcheckbox"]:has-text("Projects")',
     '[role="menuitem"]:has-text("Projects")',
@@ -441,18 +321,11 @@ async function exposeProjectsInSidebar(page) {
     'label:has-text("Projects")',
     'button:has-text("Projects")'
   ], 1200);
-
   if (projectsOption) {
-    const checked = await projectsOption.getAttribute('aria-checked').catch(() => null);
-    const selected = await projectsOption.getAttribute('aria-selected').catch(() => null);
-    const state = await projectsOption.getAttribute('data-state').catch(() => null);
-    if (checked !== 'true' && selected !== 'true' && state !== 'checked') {
-      await humanPointerClick(page, projectsOption);
-      await page.waitForTimeout(900);
-    } else {
-      await projectsOption.press('Escape').catch(() => {});
-      await page.waitForTimeout(300);
-    }
+    await humanPointerClick(page, projectsOption);
+    await page.waitForTimeout(900);
+  } else {
+    await page.keyboard.press('Escape').catch(() => {});
   }
 
   await ensureSidebarOpen(page);
@@ -462,7 +335,6 @@ async function exposeProjectsInSidebar(page) {
     sidebarOptionsFound: Boolean(sidebarOptions),
     organizerFound: Boolean(organize),
     showFound: Boolean(show),
-    projectsOptionFound: Boolean(projectsOption),
     projectsVisible: visible
   }));
   return visible;
@@ -506,77 +378,21 @@ async function findProjectEntry(page, projectName) {
 async function findProjectsSectionAddControl(page) {
   const projects = page.getByText('Projects', { exact: true }).first();
   if (!await projects.isVisible().catch(() => false)) return null;
-
-  // Match the real human interaction: hover the Projects title first so the
-  // contextual + and overflow controls are revealed.
   await projects.hover().catch(() => {});
   await page.waitForTimeout(350);
 
   let region = projects;
   for (let depth = 0; depth < 4; depth += 1) {
     region = region.locator('xpath=..');
-    const candidates = region.locator('button, [role="button"]');
-    const count = Math.min(await candidates.count().catch(() => 0), 10);
-
-    // Strongly prefer explicit accessible names that mean "add/create project".
-    for (let i = 0; i < count; i += 1) {
-      const candidate = candidates.nth(i);
-      if (!await candidate.isVisible().catch(() => false)) continue;
-      const label = [
-        await candidate.getAttribute('aria-label').catch(() => ''),
-        await candidate.getAttribute('title').catch(() => ''),
-        await candidate.getAttribute('data-testid').catch(() => ''),
-      ].filter(Boolean).join(' ');
-      if (/(?:add|new|create).*project|project.*(?:add|new|create)/i.test(label)) {
-        console.log('[browser-operations] projects-plus-control=' + JSON.stringify({
-          method: 'semantic',
-          aria: await candidate.getAttribute('aria-label').catch(() => null),
-          title: await candidate.getAttribute('title').catch(() => null),
-          testid: await candidate.getAttribute('data-testid').catch(() => null),
-        }));
-        return candidate;
-      }
-    }
-
-    // If the current UI exposes icon-only controls after hover, distinguish the
-    // plus from the overflow menu instead of selecting an arbitrary empty button.
-    for (let i = 0; i < count; i += 1) {
-      const candidate = candidates.nth(i);
-      if (!await candidate.isVisible().catch(() => false)) continue;
-
-      const text = (await candidate.innerText().catch(() => '')).trim();
-      const aria = await candidate.getAttribute('aria-label').catch(() => '');
-      const title = await candidate.getAttribute('title').catch(() => '');
-      const testid = await candidate.getAttribute('data-testid').catch(() => '');
-      const html = await candidate.evaluate(el => el.outerHTML.slice(0, 900)).catch(() => '');
-      const box = await candidate.boundingBox().catch(() => null);
-
-      const looksOverflow = /more|overflow|menu|options|ellipsis|\.\.\.|⋯/i.test([text, aria, title, testid, html].join(' '));
-      const looksPlus = /add|plus|create|new|M12 5v14|M5 12h14|<line[^>]+x1=["']12["'][^>]+y1=["']5/i.test([text, aria, title, testid, html].join(' '));
-
-      if (!looksOverflow && looksPlus && box && box.width <= 56 && box.height <= 56) {
-        console.log('[browser-operations] projects-plus-control=' + JSON.stringify({
-          method: 'hover-icon',
-          aria: aria || null,
-          title: title || null,
-          testid: testid || null,
-          width: Math.round(box.width),
-          height: Math.round(box.height),
-        }));
-        return candidate;
-      }
-    }
+    const explicit = region.locator([
+      'button[aria-label*="Add" i][aria-label*="project" i]',
+      'button[aria-label*="New" i][aria-label*="project" i]',
+      'button[aria-label*="Create" i][aria-label*="project" i]',
+      '[role="button"][aria-label*="Add" i][aria-label*="project" i]',
+      '[role="button"][aria-label*="New" i][aria-label*="project" i]'
+    ].join(',')).first();
+    if (await explicit.isVisible().catch(() => false)) return explicit;
   }
-
-  const diagnostics = await projects.locator('xpath=..').locator('button, [role="button"]').evaluateAll(nodes =>
-    nodes.filter(el => el.getClientRects().length).map(el => ({
-      text: String(el.innerText || '').trim().slice(0, 50),
-      aria: el.getAttribute('aria-label'),
-      title: el.getAttribute('title'),
-      testid: el.getAttribute('data-testid')
-    })).slice(0, 12)
-  ).catch(() => []);
-  console.log('[browser-operations] projects-hover-controls=' + JSON.stringify(diagnostics));
   return null;
 }
 
@@ -588,16 +404,6 @@ function retryableProjectUiError(code, message) {
 }
 
 async function createProject(page, projectName) {
-  const projectNetworkFailures = [];
-  const recordResponse = response => {
-    try {
-      const url = new URL(response.url());
-      if (url.hostname === 'chatgpt.com' && response.status() >= 400) {
-        projectNetworkFailures.push({ status: response.status(), path: url.pathname.replace(/[a-f0-9]{8}-[a-f0-9-]{12,}/gi, '<id>') });
-      }
-    } catch {}
-  };
-  page.on('response', recordResponse);
   await ensureSidebarOpen(page);
 
   let trigger = null;
@@ -609,35 +415,16 @@ async function createProject(page, projectName) {
   if (await projects.isVisible().catch(() => false)) {
     trigger = await findProjectsSectionAddControl(page);
   }
-  if (!trigger) {
-    // Compatibility fallback only when the heading-specific + control cannot be
-    // discovered; this still requires a visible, ordinary UI control.
-    trigger = await findNewProjectControl(page);
-  }
+  if (!trigger) trigger = await findNewProjectControl(page);
 
   if (!trigger) {
-    const sidebarToggleVisible = !!await firstVisible(page, [
-      'button[data-testid="open-sidebar-button"]',
-      'button[aria-label*="Open sidebar"]',
-      'button[aria-label*="Show sidebar"]'
-    ], 250);
-    const projectsVisible = await page.getByText('Projects', { exact: true }).first().isVisible().catch(() => false);
-    const newProjectTextVisible = await page.getByText('New project', { exact: true }).first().isVisible().catch(() => false);
     const controls = await visibleNavigationDiagnostics(page);
     throw retryableProjectUiError(
       'PROJECT_CREATE_CONTROL_MISSING',
-      'ChatGPT project creation control not found' +
-      ' (sidebarToggleVisible=' + sidebarToggleVisible +
-      ', projectsVisible=' + projectsVisible +
-      ', newProjectTextVisible=' + newProjectTextVisible +
-      ', url=' + page.url() +
-      ', visibleControls=' + JSON.stringify(controls) + ')'
+      'ChatGPT project creation control not found; visibleState=' + JSON.stringify(controls)
     );
   }
 
-  // Mirror the human interaction exactly: expose the visible + control, move the
-  // pointer onto it, and perform a normal pointer click. Never activate this
-  // control through keyboard, force-click, DOM click, or form submission.
   await humanPointerClick(page, trigger, { hoverMs: 260, downMs: 80, settleMs: 520 });
 
   let input = await firstVisible(page, [
@@ -652,14 +439,7 @@ async function createProject(page, projectName) {
     if (await pending.isVisible().catch(() => false)) input = pending;
   }
   if (!input) {
-    const fields = await page.locator('input, textarea, [role="dialog"]').evaluateAll(nodes => nodes.filter(el => el.getClientRects().length).map(el => ({
-      tag: el.tagName, type: el.getAttribute('type'), role: el.getAttribute('role'),
-      label: el.getAttribute('aria-label'), placeholder: el.getAttribute('placeholder'), name: el.getAttribute('name'),
-    }))).catch(() => []);
-    throw retryableProjectUiError(
-      'PROJECT_NAME_INPUT_MISSING',
-      'ChatGPT project-name input not found; visibleFieldStructure=' + JSON.stringify(fields)
-    );
+    throw retryableProjectUiError('PROJECT_NAME_INPUT_MISSING', 'ChatGPT visible project-name input not found');
   }
   await humanTypeInto(page, input, projectName, { delay: 55 });
 
@@ -667,73 +447,50 @@ async function createProject(page, projectName) {
     '[role="dialog"] button:has-text("Create project")',
     '[role="dialog"] button:has-text("Create")',
     'button:has-text("Create project")',
-    'button[type="submit"]'
+    '[role="dialog"] button[type="submit"]'
   ], 1200);
   if (!submit) {
-    throw retryableProjectUiError(
-      'PROJECT_CREATE_SUBMIT_MISSING',
-      'ChatGPT project-create submit control not found'
-    );
+    throw retryableProjectUiError('PROJECT_CREATE_SUBMIT_MISSING', 'ChatGPT project-create submit control not found');
   }
 
-  const projectCreateResponse = page.waitForResponse(response => {
-    try {
-      const url = new URL(response.url());
-      return url.origin === 'https://chatgpt.com' &&
-        url.pathname === '/backend-api/projects' &&
-        response.request().method() === 'POST';
-    } catch { return false; }
-  }, { timeout: 20000 }).catch(() => null);
+  const enableDeadline = Date.now() + 10000;
+  while (Date.now() < enableDeadline && !await submit.isEnabled().catch(() => false)) {
+    await page.waitForTimeout(250);
+  }
+  if (!await submit.isEnabled().catch(() => false)) {
+    throw retryableProjectUiError('PROJECT_CREATE_SUBMIT_DISABLED', 'Visible ChatGPT project-create button never became enabled after human typing');
+  }
 
   await humanPointerClick(page, submit, { hoverMs: 280, downMs: 75, settleMs: 420 });
 
-  const createResponse = await projectCreateResponse;
-  if (createResponse) {
-    const status = createResponse.status();
-    const cfMitigated = await createResponse.headerValue('cf-mitigated').catch(() => null);
-    const server = await createResponse.headerValue('server').catch(() => null);
-    const contentType = await createResponse.headerValue('content-type').catch(() => null);
-    let safeBody = '';
-    if (status >= 400) {
-      const raw = await createResponse.text().catch(() => '');
-      if (/json|text/i.test(contentType || '')) {
-        safeBody = raw.replace(/[A-Za-z0-9_-]{32,}/g, '<redacted>').slice(0, 1200);
-      }
-    }
-    const diagnostics = { status, cfMitigated, server, contentType, safeBody };
-    console.log('[browser-operations] project-create-response=' + JSON.stringify(diagnostics));
-    if (status >= 400) {
-      const error = new Error('ChatGPT project create HTTP ' + status + ': ' + JSON.stringify(diagnostics));
-      if (cfMitigated === 'challenge') {
-        error.code = 'BROWSER_CHALLENGE';
-        error.retryable = true;
-      } else {
-        error.code = 'PROJECT_CREATE_REJECTED';
-        error.retryable = false;
-      }
-      throw error;
-    }
+  const closeDeadline = Date.now() + 10000;
+  while (Date.now() < closeDeadline && await input.isVisible().catch(() => false)) {
+    await page.waitForTimeout(250);
+  }
+  if (await input.isVisible().catch(() => false)) {
+    throw retryableProjectUiError('PROJECT_CREATE_FORM_STILL_VISIBLE', 'Visible ChatGPT project-create form remained open after the normal Create click');
+  }
+
+  // Network-response verification is forbidden. Mirror the human verification:
+  // make sure the sidebar is visible again, expose Projects if needed, then
+  // look for the newly rendered Project entry by its visible name.
+  await ensureSidebarOpen(page);
+  if (!await page.getByText('Projects', { exact: true }).first().isVisible().catch(() => false)) {
+    await exposeProjectsInSidebar(page);
   }
 
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
     const entry = await findProjectEntry(page, projectName);
     if (entry) return entry;
-    if (/chatgpt\.com\//.test(page.url())) {
-      const heading = page.getByText(projectName, { exact: true }).first();
-      if (await heading.isVisible().catch(() => false)) return null;
-    }
+    const heading = page.getByText(projectName, { exact: true }).first();
+    if (await heading.isVisible().catch(() => false)) return null;
     await page.waitForTimeout(500);
   }
-  const alerts = await page.locator('[role="alert"]').allTextContents().catch(() => []);
   throw retryableProjectUiError(
     'PROJECT_CREATE_VERIFICATION_MISSING',
-    'ChatGPT project creation could not be verified; url=' + page.url() +
-      '; formStillVisible=' + await input.isVisible().catch(() => false) +
-      '; alerts=' + JSON.stringify(alerts.map(text => text.slice(0, 250))) +
-      '; failedResponses=' + JSON.stringify(projectNetworkFailures.slice(-10))
+    'ChatGPT project creation could not be verified through the visible UI after the create form closed; url=' + page.url()
   );
-
 }
 
 function validProjectUrl(value) {
@@ -794,25 +551,20 @@ async function findProjectOverflowControl(page, projectName) {
   await entry.hover().catch(() => {});
   await page.waitForTimeout(350);
 
+  const explicit = await firstVisible(page, [
+    'button[aria-label*="project options" i]',
+    'button[aria-label*="project menu" i]',
+    'button[aria-label*="More" i]',
+    '[role="button"][aria-label*="More" i]'
+  ], 500);
+  if (explicit) return explicit;
+
   let region = entry;
   for (let depth = 0; depth < 5; depth += 1) {
     region = region.locator('xpath=..');
-    const candidates = region.locator('button, [role="button"]');
-    const count = Math.min(await candidates.count().catch(() => 0), 12);
-    for (let i = 0; i < count; i += 1) {
-      const candidate = candidates.nth(i);
-      if (!await candidate.isVisible().catch(() => false)) continue;
-      const attrs = [
-        await candidate.innerText().catch(() => ''),
-        await candidate.getAttribute('aria-label').catch(() => ''),
-        await candidate.getAttribute('title').catch(() => ''),
-        await candidate.getAttribute('data-testid').catch(() => ''),
-        await candidate.evaluate(el => el.outerHTML.slice(0, 700)).catch(() => '')
-      ].filter(Boolean).join(' ');
-      if (/more|options|overflow|ellipsis|\.\.\.|⋯/i.test(attrs)) return candidate;
-    }
+    const button = region.locator('button:visible, [role="button"]:visible').last();
+    if (await button.isVisible().catch(() => false)) return button;
   }
-
   throw new Error('ChatGPT Project overflow (three-dot) control not found for: ' + projectName);
 }
 
@@ -841,11 +593,9 @@ async function captureProjectShareLink(page, { projectName }) {
   await humanPointerClick(page, shareLink, { hoverMs: 180, downMs: 65, settleMs: 420 });
   await page.waitForTimeout(250);
 
-  const projectUrl = await page.evaluate(async () => {
-    try { return await navigator.clipboard.readText(); } catch { return ''; }
-  });
+  const projectUrl = readOsClipboard();
   if (!validProjectUrl(projectUrl)) {
-    const error = new Error('Project Share link did not place a valid ChatGPT Project URL on the clipboard');
+    const error = new Error('Project Share link did not place a valid ChatGPT Project URL on the OS clipboard');
     error.code = 'PROJECT_SHARE_URL_MISSING';
     error.retryable = true;
     throw error;
@@ -875,15 +625,25 @@ async function openProjectByUrl(page, { projectName, projectUrl }) {
   await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForTimeout(900);
 
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  const title = await page.title().catch(() => '');
-  if (/Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText + '\n' + title)) {
-    const error = new Error('Stored ChatGPT Project URL is behind a browser/security challenge');
+  const challenge = !!await firstVisible(page, [
+    'text=Verify you are human',
+    'text=Checking your browser',
+    'text=Just a moment',
+    'text=security challenge'
+  ], 250);
+  if (challenge) {
+    const error = new Error('Stored ChatGPT Project URL is behind a visible browser/security challenge');
     error.code = 'BROWSER_CHALLENGE';
     error.retryable = true;
     throw error;
   }
-  if (/\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText)) {
+  const login = !!await firstVisible(page, [
+    'text=Log in',
+    'text=Sign up',
+    'text=Continue with Google',
+    'text=Welcome back'
+  ], 250);
+  if (login) {
     const error = new Error('Stored ChatGPT Project URL requires authentication');
     error.code = 'AUTH_REQUIRED';
     error.retryable = false;
@@ -905,34 +665,15 @@ async function findCurrentProjectNewChatControl(page, projectName) {
       let region = heading;
       for (let depth = 0; depth < 5; depth += 1) {
         region = region.locator('xpath=..');
-        const buttons = region.locator('button, [role="button"]');
-        const count = Math.min(await buttons.count().catch(() => 0), 12);
-        for (let i = 0; i < count; i += 1) {
-          const button = buttons.nth(i);
-          if (!await button.isVisible().catch(() => false)) continue;
-          const attrs = [
-            await button.innerText().catch(() => ''),
-            await button.getAttribute('aria-label').catch(() => ''),
-            await button.getAttribute('title').catch(() => ''),
-            await button.getAttribute('data-testid').catch(() => '')
-          ].filter(Boolean).join(' ');
-          if (/(?:new|add|create|start).*chat|chat.*(?:new|add|create|start)/i.test(attrs)) return button;
-        }
-        for (let i = 0; i < count; i += 1) {
-          const button = buttons.nth(i);
-          if (!await button.isVisible().catch(() => false)) continue;
-          const attrs = [
-            await button.innerText().catch(() => ''),
-            await button.getAttribute('aria-label').catch(() => ''),
-            await button.getAttribute('title').catch(() => ''),
-            await button.getAttribute('data-testid').catch(() => ''),
-            await button.evaluate(el => el.outerHTML.slice(0, 700)).catch(() => '')
-          ].filter(Boolean).join(' ');
-          const box = await button.boundingBox().catch(() => null);
-          const overflow = /more|options|overflow|ellipsis|\.\.\.|⋯/i.test(attrs);
-          const plus = /add|plus|new|M12 5v14|M5 12h14/i.test(attrs);
-          if (!overflow && plus && box && box.width <= 56 && box.height <= 56) return button;
-        }
+        const explicit = region.locator([
+          'button[aria-label*="New chat" i]',
+          'button[aria-label*="Add chat" i]',
+          'button[aria-label*="Create chat" i]',
+          'button[aria-label*="Start chat" i]',
+          '[role="button"][aria-label*="New chat" i]',
+          '[role="button"][aria-label*="Add chat" i]'
+        ].join(',')).first();
+        if (await explicit.isVisible().catch(() => false)) return explicit;
       }
     }
   }
@@ -953,19 +694,10 @@ async function startCurrentProjectChat(page, { projectName = '', projectUrl = ''
   if (newChat) {
     await humanPointerClick(page, newChat, { hoverMs: 180, downMs: 65, settleMs: 650 });
   } else {
-    // A Project landing page may itself expose a blank composer. That is safe.
-    // Never treat an already-open /c/... conversation composer as a fresh reviewer chat.
     const existingComposer = await waitForComposer(page, 1200);
     const alreadyInConversation = /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(page.url());
     if (!existingComposer || alreadyInConversation) {
-      const controls = await page.locator('main button, main [role="button"], [role="main"] button, [role="main"] [role="button"]')
-        .evaluateAll(nodes => nodes.filter(el => el.getClientRects().length).slice(0, 50).map(el => ({
-          text: String(el.innerText || '').trim().slice(0, 80),
-          aria: el.getAttribute('aria-label'),
-          title: el.getAttribute('title'),
-          testid: el.getAttribute('data-testid')
-        }))).catch(() => []);
-      const error = new Error('ChatGPT Project new-chat (+) control not found on a safe Project landing page; url=' + page.url() + '; visibleMainControls=' + JSON.stringify(controls));
+      const error = new Error('ChatGPT Project new-chat (+) control not found on a safe Project landing page; url=' + page.url());
       error.code = 'PROJECT_NEW_CHAT_CONTROL_MISSING';
       error.retryable = true;
       throw error;

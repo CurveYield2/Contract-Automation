@@ -132,7 +132,7 @@ jobs:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: audit-wake-human-only-v1
           persist-credentials: false
           fetch-depth: 1
 
@@ -190,7 +190,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y x11vnc
+          sudo apt-get install -y x11vnc xclip
 
       - name: Record runner egress before home exit node
         shell: bash
@@ -304,6 +304,7 @@ jobs:
           export WAKE_ACTION='wake'
           export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
           export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
+          export BROWSER_DIAGNOSTIC_SCREENSHOT='true'
           set +e
           node scripts/browser-agent-wake.mjs
           rc=$?
@@ -344,6 +345,15 @@ jobs:
           if [ "$ok" != true ]; then
             echo "::warning::Browser wake did not complete on this runner (retryable=$retryable code=$retry_code rc=$rc)."
           fi
+
+      - name: Upload visible browser failure screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-agent-visible-failure-${{ github.run_id }}
+          path: /tmp/browser-agent-visible-failure.png
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Persist captured Phase-1 Project URL
         if: ${{ inputs.worker_role == 'reviewer' && inputs.phase_id == 'phase-1' && steps.deliver.outputs.project_url != '' }}
@@ -400,7 +410,7 @@ jobs:
             | .runner_retry_attempt=$next
           ')"
 
-          printf '%s\n' "$retry_inputs" | gh workflow run browser-agent-wake.yml             --repo "$GITHUB_REPOSITORY"             --ref main             --json
+          printf '%s\n' "$retry_inputs" | gh workflow run browser-agent-wake.yml             --repo "$GITHUB_REPOSITORY"             --ref audit-wake-human-only-v1             --json
 
           echo "dispatched=true" >> "$GITHUB_OUTPUT"
           echo "next_attempt=$next" >> "$GITHUB_OUTPUT"
@@ -682,7 +692,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$WAKE_ID"
+          gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref audit-wake-human-only-v1 -f wake_id="$WAKE_ID"
 
       - name: Cleanup browser display
         if: always()

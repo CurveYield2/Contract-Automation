@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "curveyield-audit-wake-phase1-live-trigger-v1",
+  "campaignId": "curveyield-dex-v16-source-r2",
+  "triggeredAt": "2026-10-03T17:12:10Z",
+  "purpose": "live verification attempt 5 of human-only Phase 1 audit wake/watch pipeline with visible Explore Projects fallback",
+  "attempt": 5
+}

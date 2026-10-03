@@ -82,7 +82,7 @@ jobs:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: audit-wake-human-only-v1
           persist-credentials: false
           fetch-depth: 1
 
@@ -160,7 +160,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y x11vnc
+          sudo apt-get install -y x11vnc xclip
 
       - name: Record runner egress before home exit node
         if: steps.target.outputs.valid == 'true'
@@ -666,7 +666,7 @@ jobs:
 
                 echo "Lite machine gate PASS: $expected_milestone requires an inter-phase mechanical pass before $next_id."
                 poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
-                gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$mechanical_wake_id" -f campaign_id="$campaign_id" -f phase_id="interphase-$completed_id-to-$next_id" -f mode="create_fresh" -f chat_url="" -f wake_message_b64="$mechanical_b64" -f watchdog_enabled="true" -f worker_role="interphase_mechanical" -f watchdog_message_b64="$poke_b64" -f gate_mode="LITE" -f gate_repository="$gate_repo" -f gate_ref="$gate_ref" -f gate_state_path="$gate_path" -f gate_expected_phase_id="$gate_expected_phase" -f gate_expected_milestone_id="$expected_milestone" -f gate_active_pointer_path="$pointer_path" -f gate_interphase_handoff_path="$handoff_path" -f gate_interphase_work_packet_path="$packet_path" -f gate_interphase_completion_path="$completion_path" -f gate_interphase_work_packet_sha256="$packet_sha"
+                gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref audit-wake-human-only-v1 -f wake_id="$mechanical_wake_id" -f campaign_id="$campaign_id" -f phase_id="interphase-$completed_id-to-$next_id" -f mode="create_fresh" -f chat_url="" -f wake_message_b64="$mechanical_b64" -f watchdog_enabled="true" -f worker_role="interphase_mechanical" -f watchdog_message_b64="$poke_b64" -f gate_mode="LITE" -f gate_repository="$gate_repo" -f gate_ref="$gate_ref" -f gate_state_path="$gate_path" -f gate_expected_phase_id="$gate_expected_phase" -f gate_expected_milestone_id="$expected_milestone" -f gate_active_pointer_path="$pointer_path" -f gate_interphase_handoff_path="$handoff_path" -f gate_interphase_work_packet_path="$packet_path" -f gate_interphase_completion_path="$completion_path" -f gate_interphase_work_packet_sha256="$packet_sha"
                 return 4
               fi
             fi
@@ -773,7 +773,7 @@ jobs:
               '{routineId:$routine,projectName:$project,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2}}' | base64 -w0)"
 
             echo "Lite machine gate PASS: $expected_milestone -> $next_id. Creating fresh normal ChatGPT web successor."
-            gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref audit-wake-human-only-v1 \
               -f wake_id="$successor_wake_id" \
               -f campaign_id="$campaign_id" \
               -f phase_id="$next_phase" \

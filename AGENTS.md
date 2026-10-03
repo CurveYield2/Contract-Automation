@@ -1,3 +1,6 @@
+> [!CAUTION]
+> **CHATGPT BROWSER AUTOMATION HARD RULE:** ALL NON-HUMAN CHATGPT READ AND WRITE METHODS ARE BANNED. Do not use ChatGPT backend/API requests, network interception, injected JavaScript/DOM extraction, or programmatic field mutation. Use visible rendered controls plus ordinary mouse/keyboard/OS-clipboard interaction only. This rule governs audit wake/watch/repair flows and every other ChatGPT browser agent. Read `docs/BROWSER_AUTOMATION_CHATGPT_HUMAN_ONLY_PROTOCOL_v1.md` before editing browser automation.
+
 # Contract-Automation Agent Execution Policy
 
 Policy version: v10

@@ -92,26 +92,25 @@ test('browser wake normalizes CommonJS and ESM runtime module shapes before usin
 });
 
 
-test('missing-composer diagnostics classify state without logging page body text or cookie values', () => {
+test('missing-composer diagnostics use only visible UI state and never scrape page content', () => {
   const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /visibleTextPresent/);
   assert.match(source, /loginPrompt=/);
   assert.match(source, /humanChallenge=/);
   assert.match(source, /conversationUnavailable=/);
-  assert.match(source, /textareaCount=/);
-  assert.match(source, /editableCount=/);
-  assert.doesNotMatch(source, /bodyText\s*\+|JSON\.stringify\(bodyText\)/);
+  assert.doesNotMatch(source, /bodyText|innerText\(|textContent|page\.evaluate\(/);
 });
 
-
-test('browser wake allows bounded time for ChatGPT browser challenge to resolve', () => {
+test('browser wake allows bounded time for visible ChatGPT challenge UI to resolve', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /const deadline = Date\.now\(\) \+ 30000/);
   assert.match(source, /while \(!composer && Date\.now\(\) < deadline\)/);
   assert.match(source, /await page\.waitForTimeout\(1000\)/);
   assert.match(source, /ChatGPT composer not found after 30s/);
-  assert.match(source, /Just a moment\|Cloudflare\/i\.test\(title\)/);
+  assert.match(source, /Verify you are human/);
+  assert.match(source, /Checking your browser/);
+  assert.doesNotMatch(source, /backend-api|fetch\(/);
 });
-
 
 test('audit browser wake and watchdog use visible Xvfb Chrome through the private home-exit route', () => {
   const source = read('scripts/browser-agent-wake.mjs');
@@ -139,22 +138,32 @@ test('audit browser wake and watchdog use visible Xvfb Chrome through the privat
 });
 
 
-test('browser runtime classifies only pre-durable-send failures as fresh-runner retryable', () => {
+test('browser runtime uses human-style ChatGPT reads and writes only', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /class BrowserAgentError extends Error/);
   assert.match(source, /BrowserAgentError\('BROWSER_CHALLENGE', diagnostic, true\)/);
   assert.match(source, /BrowserAgentError\('CHATGPT_UI_UNAVAILABLE', diagnostic, true\)/);
   assert.match(source, /BrowserAgentError\('AUTH_REQUIRED', diagnostic, false\)/);
   assert.match(source, /BrowserAgentError\('CHAT_UNAVAILABLE', diagnostic, false\)/);
-  assert.match(source, /'SEND_NOT_OBSERVED'/);
-  assert.match(source, /No ChatGPT conversation write or durable user-message marker/);
-  assert.match(source, /retryable:\s*error\?\.retryable === true/);
-  assert.match(source, /code:\s*error\?\.code \|\| 'PROVIDER_ERROR'/);
-  assert.match(source, /WRITE_RESPONSE_MISSING/);
-  assert.match(source, /WRITE_REJECTED/);
+  assert.match(source, /writeOsClipboard/);
+  assert.match(source, /spawnSync\('xclip'/);
+  assert.match(source, /humanPointerClick/);
+  assert.match(source, /wakeMarkerVisible/);
   assert.match(source, /DURABILITY_NOT_OBSERVED/);
-  assert.match(source, /postSendChallenge/);
   assert.match(source, /domPersisted:\s*true/);
+  for (const forbidden of [
+    /\/backend-api\//,
+    /fetch\(/,
+    /page\.evaluate\(/,
+    /page\.on\(['"]request/,
+    /page\.on\(['"]response/,
+    /navigator\.clipboard/,
+    /\.innerText\(/,
+    /\.textContent/,
+    /\.inputValue\(/,
+  ]) {
+    assert.doesNotMatch(source, forbidden);
+  }
 });
 
 test('wake workflow retries retryable browser failures on a bounded fresh runner and gates all durable follow-ons', () => {
