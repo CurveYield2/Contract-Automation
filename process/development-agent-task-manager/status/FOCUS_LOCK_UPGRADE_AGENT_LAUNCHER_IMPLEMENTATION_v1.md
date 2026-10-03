@@ -7,15 +7,20 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `4536d3ae663104dfa8c29a1c64a280465f2b36bd`.
+- Base: current `main` at `7e9e322d58227f96de611f430e2076d37377f934`.
 - PR #508 through PR #514 are merged; their required validation lanes passed before merge.
-- Recovery-only run `37158409016` proves:
+- Recovery-only run `37158898640` proves:
   - fresh immutable browser state loads normally without a Cloudflare challenge;
   - no wake resend occurs in recovery mode;
-  - the attempted Ctrl+K search-open path did not produce a visible Search chats editor;
-  - therefore Ctrl+K is not a reliable recovery opener in this browser session.
-- The visible left sidebar includes a normal human Search control. Recovery should click that visible Search control with the existing human pointer primitive, then locate the visible search editor.
-- Durable Project URL already captured from the successful creation run: `https://chatgpt.com/g/g-p-6ac177c98f0c81919e970bb2a69b8583/project`.
+  - sidebar Search can be opened and a query can be entered, but no matching global search result was found;
+  - global/sidebar Search is unnecessary for Project recovery.
+- Operator-confirmed Project UI model:
+  - open the exact Project URL directly;
+  - the Project page has its own top input/composer;
+  - the Project's chats are visibly listed underneath that top area;
+  - a sidebar may exist, but recovery does not need it.
+- Operator supplied the exact Project URL to use: `https://chatgpt.com/g/g-p-6ac173c6f6648191969a8988d6b2d51a/project`.
+- Durable Project URL for this test is now operator-confirmed as `https://chatgpt.com/g/g-p-6ac173c6f6648191969a8988d6b2d51a/project`.
 - Project chats use a Project-scoped durable route of the form `https://chatgpt.com/g/g-p-.../c/<id>`.
 - The operator supplied a screenshot of the successful Project landing page. Its reliable human-visible cue is the central composer labeled `New chat in <ProjectName>`, which differs from the homepage composer.
 - Retry must first recover/open an already-created Project with the same exact name if one exists, to avoid duplicate Projects.
@@ -41,23 +46,23 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## ACTIVE BLOCKER
 
-**Recovery must open Search chats through the visible sidebar Search control, not Ctrl+K.**
+**Recovery is using the wrong UI model. It must recover from inside the Project page's own visible chat list, not global/sidebar Search.**
 
-Run `37158409016` disproved Ctrl+K as a reliable opener. No message mutation is allowed: the wake was already sent in run `37157762182`.
+The Project URL is known. Open it directly, then use the visible list of Project chats underneath the Project page's top input/composer. Do not resend the wake.
 
 ## REMAINING DELTA
 
 1. Keep the canonical request in `recover` mode.
-2. Locate the visible left-sidebar Search control and click it using the existing human pointer primitive.
-3. After the search surface opens, locate the visible search editor across current textbox/input/textarea/contenteditable/combobox shapes, without backend/API or page-context inspection.
-4. Type only the unique wake marker with the existing human typing primitive.
-5. Click the matching visible result with the human pointer primitive.
-6. Accept the durable Project-scoped `/g/g-p-.../c/<id>` conversation route and verify the exact wake visibly exists.
+2. Replace the test request's persisted Project URL with the exact operator-supplied URL.
+3. For recovery, navigate directly to that Project URL before any homepage/global-search flow.
+4. On the visible Project page, ignore the sidebar and enumerate only the visible Project chat entries underneath the Project page's top input/composer.
+5. Open the matching Project chat with the existing human pointer primitive. Prefer an exact/contains match on the unique wake marker/title when visible.
+6. Accept the durable Project-scoped `/g/g-p-.../c/<id>` route and verify the exact wake visibly exists.
 7. Do not send any message. Abort immediately if a human-verification challenge appears.
 
 ## NEXT ACTION
 
-Create a narrow branch from current main that changes only recovery Search opening from Ctrl+K-first to visible-sidebar-Search-first, validate, merge, and rerun the existing recovery request.
+Create a narrow branch from current main that removes global/sidebar Search from recovery and instead opens the exact Project URL and selects the existing chat from the visible Project chat list underneath the Project page's top input/composer.
 
 ## PARKED / OUT OF SCOPE
 
