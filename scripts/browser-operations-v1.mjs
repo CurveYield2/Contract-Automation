@@ -416,7 +416,7 @@ async function createProject(page, projectName) {
     '[role="dialog"] button:has-text("Create project")',
     '[role="dialog"] button:has-text("Create")',
     'button:has-text("Create project")',
-    'button[type="submit"]'
+    '[role="dialog"] button[type="submit"]'
   ], 1200);
   if (!submit) {
     throw retryableProjectUiError('PROJECT_CREATE_SUBMIT_MISSING', 'ChatGPT project-create submit control not found');
@@ -438,6 +438,14 @@ async function createProject(page, projectName) {
   }
   if (await input.isVisible().catch(() => false)) {
     throw retryableProjectUiError('PROJECT_CREATE_FORM_STILL_VISIBLE', 'Visible ChatGPT project-create form remained open after the normal Create click');
+  }
+
+  // Network-response verification is forbidden. Mirror the human verification:
+  // make sure the sidebar is visible again, expose Projects if needed, then
+  // look for the newly rendered Project entry by its visible name.
+  await ensureSidebarOpen(page);
+  if (!await page.getByText('Projects', { exact: true }).first().isVisible().catch(() => false)) {
+    await exposeProjectsInSidebar(page);
   }
 
   const deadline = Date.now() + 60000;
