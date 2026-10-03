@@ -17,6 +17,9 @@ test('project creation opens the sidebar and resolves visible New project contro
   assert.match(source, /open-sidebar-button/);
   assert.match(source, /sidebar-toggle-button/);
   assert.match(source, /aria-label="Open sidebar"/);
+  assert.match(source, /has-text\("New chat"\)/);
+  assert.match(source, /alreadyOpen/);
+  assert.doesNotMatch(source, /aria-label="Toggle sidebar"/);
   assert.match(source, /async function findNewProjectControl\(page\)/);
   assert.match(source, /await projects\.hover\(\)/);
   assert.match(source, /async function findProjectsSectionAddControl\(page\)/);
