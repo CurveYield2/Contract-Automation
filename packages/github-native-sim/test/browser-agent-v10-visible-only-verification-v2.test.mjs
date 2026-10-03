@@ -80,11 +80,13 @@ test('visible wake detection does not depend only on legacy user-role attributes
 });
 
 test('send path uses visible pointer and keyboard primitives only', () => {
-  const postStart = source.indexOf('async function post(page, message)');
+  const postStart = source.indexOf('async function post(page, message, composerOverride = null)');
   const postEnd = source.indexOf('\nfunction visibleBrowserStateText', postStart);
   const block = source.slice(postStart, postEnd);
 
-  assert.match(block, /fillComposer\(page, message\)/);
+  assert.ok(postStart >= 0 && postEnd > postStart);
+  assert.match(block, /fillComposer\(page, message, composerOverride\)/);
+  assert.match(block, /findSendControlNearComposer\(page, composer\)/);
   assert.match(block, /humanPointerClick\(page, send/);
   assert.doesNotMatch(block, /\.click\s*\(/);
   assert.doesNotMatch(block, /\.fill\s*\(/);
@@ -144,9 +146,10 @@ test('v10 project_wake opens or scrolls the sidebar to Projects before hover-plu
   const sidebar = block.indexOf('await ensureSidebarOpenForProject');
   const hover = block.indexOf('await projects.hover()');
   const plus = block.indexOf('findProjectsPlusAfterHover');
-  const type = block.indexOf('await humanTypeInto(page, input, name)');
-  const create = block.indexOf('await humanPointerClick(page, create)');
-  assert.ok(sidebar >= 0 && hover > sidebar && plus > hover && type > plus && create > type);
+  const editor = block.indexOf('findProjectNameEditorFromVisibleCreateSurface');
+  const type = block.indexOf('await humanTypeInto(page, controls.editor, name)');
+  const create = block.indexOf('await humanPointerClick(page, controls.create)');
+  assert.ok(sidebar >= 0 && hover > sidebar && plus > hover && editor > plus && type > editor && create > type);
   assert.doesNotMatch(block, /fetch\s*\(|page\.on\(|waitForResponse|\/backend-api\//);
 });
 
