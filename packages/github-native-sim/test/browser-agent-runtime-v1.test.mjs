@@ -142,7 +142,7 @@ test('audit browser wake and watchdog use visible Xvfb Chrome through the privat
 test('browser runtime classifies only pre-send failures as fresh-runner retryable', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /class BrowserAgentError extends Error/);
-  assert.match(source, /BrowserAgentError\('BROWSER_CHALLENGE', diagnostic, true\)/);
+  assert.match(source, /BrowserAgentError\('BROWSER_CHALLENGE', diagnostic, false\)/);
   assert.match(source, /BrowserAgentError\('CHATGPT_UI_UNAVAILABLE', diagnostic, true\)/);
   assert.match(source, /BrowserAgentError\('AUTH_REQUIRED', diagnostic, false\)/);
   assert.match(source, /BrowserAgentError\('CHAT_UNAVAILABLE', diagnostic, false\)/);
