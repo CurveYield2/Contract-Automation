@@ -286,12 +286,18 @@ async function exposeProjectsInSidebar(page) {
     await page.waitForTimeout(450);
   }
 
-  const projectsOff = await firstVisible(page, [
-    '[role="menuitemcheckbox"][aria-checked="false"]:has-text("Projects")',
-    '[role="checkbox"][aria-checked="false"]:has-text("Projects")'
-  ], 500);
-  if (projectsOff) {
-    await humanPointerClick(page, projectsOff);
+  // We entered this recovery path only because Projects was not visibly
+  // present in the sidebar. A person would simply click the visible Projects
+  // item under Show; do the same without reading aria/data-state flags.
+  const projectsOption = await firstVisible(page, [
+    '[role="menuitemcheckbox"]:has-text("Projects")',
+    '[role="menuitem"]:has-text("Projects")',
+    '[role="checkbox"]:has-text("Projects")',
+    'label:has-text("Projects")',
+    'button:has-text("Projects")'
+  ], 1200);
+  if (projectsOption) {
+    await humanPointerClick(page, projectsOption);
     await page.waitForTimeout(900);
   } else {
     await page.keyboard.press('Escape').catch(() => {});
