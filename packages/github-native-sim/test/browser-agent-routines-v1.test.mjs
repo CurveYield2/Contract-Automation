@@ -11,32 +11,19 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
 
 
-test('project creation opens the sidebar and resolves semantic New project controls', () => {
+test('project creation opens sidebar and uses the hover-revealed Projects plus control only', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /async function ensureSidebarOpen\(page\)/);
   assert.match(source, /open-sidebar-button/);
-  assert.match(source, /sidebar-toggle-button/);
   assert.match(source, /aria-label="Open sidebar"/);
-  assert.match(source, /aria-label="Toggle sidebar"/);
-  assert.match(source, /async function findNewProjectControl\(page\)/);
+  assert.match(source, /async function findProjectsSectionAddControl\(page\)/);
+  assert.match(source, /getByText\('Projects', \{ exact: true \}\)/);
   assert.match(source, /await projects\.hover\(\)/);
-  assert.match(source, /projects-plus-control/);
   assert.match(source, /looksOverflow/);
   assert.match(source, /looksPlus/);
-  assert.doesNotMatch(source, /count > 0 && count <= 3/);
-  assert.match(source, /async function exposeProjectsInSidebar\(page\)/);
-  assert.match(source, /Organize sidebar/);
-  assert.match(source, /menuitemcheckbox.*Projects/);
-  assert.match(source, /sidebar-projects-recovery/);
-  assert.match(source, /async function findSemanticProjectAction\(page\)/);
-  assert.match(source, /new\|add\|create/);
-  assert.match(source, /getByText\('New project', \{ exact: true \}\)/);
-  assert.match(source, /getByText\('Projects', \{ exact: true \}\)/);
-  assert.match(source, /async function visibleNavigationDiagnostics\(page\)/);
-  assert.match(source, /sidebarToggleVisible=/);
-  assert.match(source, /projectsVisible=/);
-  assert.match(source, /newProjectTextVisible=/);
-  assert.match(source, /visibleControls=/);
+  assert.match(source, /projects-plus-control/);
+  assert.doesNotMatch(source, /findNewProjectControl\(page\)/);
+  assert.doesNotMatch(source, /PROJECT_CREATE_CONTROL_MISSING/);
 });
 
 test('Phase1 captures the private Project share URL through the human overflow/share/clipboard sequence', () => {
@@ -610,7 +597,8 @@ test('Project-create pre-post UI transition failures are retryable on a fresh ru
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /function retryableProjectUiError/);
   for (const code of [
-    'PROJECT_CREATE_CONTROL_MISSING',
+    'PROJECTS_SECTION_MISSING',
+    'PROJECT_PLUS_MISSING',
     'PROJECT_NAME_INPUT_MISSING',
     'PROJECT_CREATE_SUBMIT_MISSING',
     'PROJECT_CREATE_VERIFICATION_MISSING',
@@ -618,8 +606,9 @@ test('Project-create pre-post UI transition failures are retryable on a fresh ru
     assert.match(source, new RegExp(code));
   }
   assert.match(source, /error\.retryable = true/);
-  assert.match(source, /PROJECT_CREATE_REJECTED/);
+  assert.match(source, /error\.code = 'BROWSER_CHALLENGE'/);
   assert.match(source, /error\.retryable = false/);
+  assert.doesNotMatch(source, /PROJECT_CREATE_REJECTED/);
 });
 
 test('Project-create retries remain human-interaction-only', () => {
