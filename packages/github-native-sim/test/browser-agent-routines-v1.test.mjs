@@ -57,7 +57,7 @@ test('project creation is verified only through visible UI and never backend res
   const end = source.indexOf('function validProjectUrl', start);
   const block = source.slice(start, end);
   assert.match(block, /ensureSidebarOpen\(page\)/);
-  assert.match(block, /getByText\('Projects', \{ exact: true \}\)/);
+  assert.match(block, /humanScrollSidebarForProjects\(page\)/);
   assert.match(block, /await projects\.hover\(\)/);
   assert.match(block, /findProjectsSectionAddControl/);
   assert.match(block, /humanTypeInto\(page, input, projectName\)/);
@@ -709,11 +709,20 @@ test('Project creation follows the exact sidebar Projects-hover-plus dialog sequ
   const end = source.indexOf('function validProjectUrl', start);
   const block = source.slice(start, end);
   const sidebar = block.indexOf('await ensureSidebarOpen(page)');
-  const projects = block.indexOf("getByText('Projects', { exact: true })");
+  const scroll = block.indexOf('humanScrollSidebarForProjects(page)');
   const hover = block.indexOf('await projects.hover()');
   const plus = block.indexOf('findProjectsSectionAddControl');
   const type = block.indexOf('await humanTypeInto(page, input, projectName)');
   const create = block.indexOf('await humanPointerClick(page, submit)');
-  assert.ok(sidebar >= 0 && projects > sidebar && hover > projects && plus > hover && type > plus && create > type);
+  assert.ok(sidebar >= 0 && scroll > sidebar && hover > scroll && plus > hover && type > plus && create > type);
   assert.doesNotMatch(block, /findNewProjectControl/);
+});
+
+
+test('Project lookup uses human mouse-wheel scrolling with randomized pauses', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  assert.match(source, /async function humanScrollSidebarForProjects/);
+  assert.match(source, /page\.mouse\.wheel\(0, -randomDelayMs\(500, 900\)\)/);
+  assert.match(source, /page\.mouse\.wheel\(0, randomDelayMs\(350, 700\)\)/);
+  assert.match(source, /humanActionPause\(page\)/);
 });

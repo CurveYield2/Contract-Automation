@@ -7,25 +7,16 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Repair branch: `browser-bootstrap-secret-only-v1`
-- Rolling encrypted ChatGPT session-state load/save has been removed from:
-  - dedicated v10 browser workflow/runtime;
-  - Development Agent Task Manager start and supervise browser paths.
-- Every run now starts exclusively from `CHATGPT_STORAGE_STATE_B64` and discards run state.
-- Visible browser pacing now uses randomized 0.3–1.5 second pauses between normal browser actions.
-- Typing now uses randomized 0.2–0.4 second pauses between each character.
-- Project creation is visible-UI-only and follows the operator-defined sequence:
-  1. open sidebar if closed;
-  2. find visible Projects section;
-  3. hover Projects title;
-  4. click the plus revealed to its right;
-  5. type the Project name one character at a time;
-  6. click visible Create Project button.
-- Project creation no longer watches `/backend-api/projects`, response events, or any other backend/network signal.
-- Dedicated v10 request is armed as `project_wake` with Project `HOME_EXIT_PROJECT_WAKE_VERIFY1`.
-- Cloudflare challenge remains immediate terminal/non-retryable.
-- Ordinary readiness timeout remains 5 minutes.
-- No audit wake/monitor/orchestration workflow was modified.
+- Repair branch: `browser-project-sidebar-scroll-v1`
+- Fresh bootstrap-secret-only state is merged and verified to load cleanly without Cloudflare.
+- First Project-wake run `37152260428` reached ChatGPT successfully, used the immutable secret, and failed only because the sidebar helper assumed a missing Projects title meant the sidebar was closed.
+- Current repair distinguishes an already-open sidebar from a closed one.
+- If Projects is below the fold, the browser now moves into the visible left sidebar and human-scrolls:
+  - randomized upward wheel motion first;
+  - then randomized downward wheel motion;
+  - 0.3–1.5 second human pauses between scroll actions.
+- Once Projects appears, the exact sequence remains: hover Projects -> click revealed plus -> type name 0.2–0.4s per character -> click Create Project.
+- Same Project-wake request is re-armed for a fresh merged-code retry.
 
 ## SATISFIED
 
@@ -41,17 +32,16 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## REMAINING DELTA
 
-1. Pass both repository validation lanes for this branch.
+1. Pass both repository validation lanes for this sidebar-scroll repair.
 2. Merge this repair to `main`.
-3. Let the armed merged-code `project_wake` test run from the untouched bootstrap secret.
-4. Verify visible Project creation succeeds using the exact sidebar sequence.
-5. Verify the new wake is visibly sent inside that Project.
-6. Observe whether Cloudflare appears; if it does, workflow must abort immediately.
-7. If Project wake succeeds, apply the verified Project path to the upgrade-manager smoke and complete managed Project continuity through terminal merge/output links.
+3. Run the re-armed fresh-secret `project_wake`.
+4. Verify the browser finds Projects via normal sidebar opening/scrolling, creates `HOME_EXIT_PROJECT_WAKE_VERIFY1`, and sends the wake inside that Project.
+5. Observe whether Cloudflare appears; if it does, abort immediately.
+6. If Project wake succeeds, resume the upgrade-manager smoke on the verified Project path.
 
 ## ACTIVE BLOCKER
 
-None proven in code. Validation and live Project-wake verification remain.
+No code blocker proven. The previous failure was narrow: Projects was not visible and no explicit sidebar-open button existed, so the routine failed instead of treating the sidebar as already open and scrolling it.
 
 ## NEXT ACTION
 

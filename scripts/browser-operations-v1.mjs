@@ -522,6 +522,41 @@ async function findProjectEntry(page, projectName) {
   return firstVisibleText(page, [projectName], { exact: true, timeout: 700 });
 }
 
+async function findVisibleSidebarSurface(page) {
+  const candidates = page.locator('nav, aside, [data-testid*="sidebar" i], [class*="sidebar" i]');
+  const count = Math.min(await candidates.count().catch(() => 0), 40);
+  for (let i = 0; i < count; i += 1) {
+    const candidate = candidates.nth(i);
+    if (!await candidate.isVisible().catch(() => false)) continue;
+    const box = await candidate.boundingBox().catch(() => null);
+    if (!box) continue;
+    if (box.x <= 420 && box.width <= 520 && box.height >= 280) return candidate;
+  }
+  return null;
+}
+
+async function humanScrollSidebarForProjects(page) {
+  const projects = page.getByText('Projects', { exact: true }).first();
+  if (await projects.isVisible().catch(() => false)) return projects;
+
+  const sidebar = await findVisibleSidebarSurface(page);
+  if (!sidebar) return null;
+  await sidebar.hover().catch(() => {});
+  await humanActionPause(page);
+
+  for (let i = 0; i < 4; i += 1) {
+    await page.mouse.wheel(0, -randomDelayMs(500, 900));
+    await humanActionPause(page);
+    if (await projects.isVisible().catch(() => false)) return projects;
+  }
+  for (let i = 0; i < 14; i += 1) {
+    await page.mouse.wheel(0, randomDelayMs(350, 700));
+    await humanActionPause(page);
+    if (await projects.isVisible().catch(() => false)) return projects;
+  }
+  return null;
+}
+
 async function findProjectsSectionAddControl(page) {
   const projects = page.getByText('Projects', { exact: true }).first();
   if (!await projects.isVisible().catch(() => false)) return null;
@@ -610,11 +645,11 @@ async function createProject(page, projectName) {
   await ensureSidebarOpen(page);
   await humanActionPause(page);
 
-  const projects = page.getByText('Projects', { exact: true }).first();
-  if (!await projects.isVisible().catch(() => false)) {
+  const projects = await humanScrollSidebarForProjects(page);
+  if (!projects) {
     throw retryableProjectUiError(
       'PROJECTS_SECTION_MISSING',
-      'Visible Projects section title was not found in the open ChatGPT sidebar'
+      'Visible Projects section title could not be found after human-scrolling the open ChatGPT sidebar'
     );
   }
 

@@ -133,18 +133,20 @@ test('v10 always starts from immutable bootstrap secret and discards run state',
   assert.doesNotMatch(source, /CHATGPT_SESSION_STATE_/);
 });
 
-test('v10 project_wake follows exact human Project creation before sending', () => {
+test('v10 project_wake opens or scrolls the sidebar to Projects before hover-plus creation', () => {
+  assert.match(source, /async function humanScrollSidebarForProjects/);
+  assert.match(source, /page\.mouse\.wheel\(0, -randomDelayMs\(500, 900\)\)/);
+  assert.match(source, /page\.mouse\.wheel\(0, randomDelayMs\(350, 700\)\)/);
   assert.match(source, /async function createProjectExactHumanFlow/);
   const start = source.indexOf('async function createProjectExactHumanFlow');
   const end = source.indexOf('\nasync function fillComposer', start);
   const block = source.slice(start, end);
-  const sidebar = block.indexOf('ensureSidebarOpenForProject');
-  const projects = block.indexOf("getByText('Projects', { exact: true })");
+  const sidebar = block.indexOf('await ensureSidebarOpenForProject');
   const hover = block.indexOf('await projects.hover()');
   const plus = block.indexOf('findProjectsPlusAfterHover');
   const type = block.indexOf('await humanTypeInto(page, input, name)');
   const create = block.indexOf('await humanPointerClick(page, create)');
-  assert.ok(sidebar >= 0 && projects > sidebar && hover > projects && plus > hover && type > plus && create > type);
+  assert.ok(sidebar >= 0 && hover > sidebar && plus > hover && type > plus && create > type);
   assert.doesNotMatch(block, /fetch\s*\(|page\.on\(|waitForResponse|\/backend-api\//);
 });
 
