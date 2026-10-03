@@ -9,5 +9,5 @@
   "targetBranch": "upgrade/launcher-live-smoke-r1",
   "baseRef": "main",
   "continuityMode": "managed_project",
-  "initialAssignment": "Same live smoke task. Fresh runner retry because prior runner stalled before browser execution in the Tailscale home-exit routing step. Continue the same task and branch; do not restart, redesign, or broaden scope."
+  "initialAssignment": "Same live smoke task. Operator disabled the separate VPN on the Tailscale home exit-node machine. Retry with no other changes; continue the same task and branch; do not restart, redesign, or broaden scope."
 }
