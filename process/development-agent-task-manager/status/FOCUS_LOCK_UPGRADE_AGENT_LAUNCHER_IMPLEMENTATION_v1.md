@@ -7,7 +7,7 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `7e9e322d58227f96de611f430e2076d37377f934`.
+- Base: current `main` at `7ad3d7a727605c0299dd8fe7e0602fb95f5e76c2`.
 - PR #508 through PR #514 are merged; their required validation lanes passed before merge.
 - Recovery-only run `37158898640` proves:
   - fresh immutable browser state loads normally without a Cloudflare challenge;
@@ -46,9 +46,9 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## ACTIVE BLOCKER
 
-**Recovery is using the wrong UI model. It must recover from inside the Project page's own visible chat list, not global/sidebar Search.**
+**The exact visible Project title is now correctly identified, but the generic long-press pointer primitive is not opening it.**
 
-The Project URL is known. Open it directly, then use the visible list of Project chats underneath the Project page's top input/composer. Do not resend the wake.
+Merged live run `37161509276` logged the exact visible Project title box at `x=42, y=408, width=261, height=20`, confirming the selector is on the correct title. The title click still left the URL unchanged. The next repair must preserve this exact target and change only the physical click gesture: a short normal mouse tap directly on the title letters, with one human retry at another point on the same visible title if navigation does not begin.
 
 ## REMAINING DELTA
 
@@ -62,7 +62,7 @@ The Project URL is known. Open it directly, then use the visible list of Project
 
 ## NEXT ACTION
 
-Create a narrow branch from current main that removes global/sidebar Search from recovery and instead opens the exact Project URL and selects the existing chat from the visible Project chat list underneath the Project page's top input/composer.
+Create a narrow branch that changes only the Project-title physical click gesture and retry behavior, validate, merge, and rerun recovery.
 
 ## PARKED / OUT OF SCOPE
 
