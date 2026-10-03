@@ -671,17 +671,28 @@ async function waitForVisibleBrowserReady(page) {
 function chatRouteInfo(value) {
   try {
     const url = new URL(value);
-    if (url.origin !== 'https://chatgpt.com') return { isChat: false, isLocal: false, id: '' };
-    const match = url.pathname.match(/^\/c\/([^/]+)\/?$/);
-    if (!match) return { isChat: false, isLocal: false, id: '' };
-    const id = decodeURIComponent(match[1]);
+    if (url.origin !== 'https://chatgpt.com') {
+      return { isChat: false, isLocal: false, id: '', projectScoped: false, projectId: '' };
+    }
+
+    const rootMatch = url.pathname.match(/^\/c\/([^/]+)\/?$/);
+    const projectMatch = url.pathname.match(/^\/g\/(g-p-[^/]+)\/c\/([^/]+)\/?$/);
+    const id = rootMatch
+      ? decodeURIComponent(rootMatch[1])
+      : projectMatch
+        ? decodeURIComponent(projectMatch[2])
+        : '';
+    const projectId = projectMatch ? decodeURIComponent(projectMatch[1]) : '';
+
     return {
       isChat: Boolean(id),
       isLocal: id.startsWith('local-chatgpt:'),
-      id
+      id,
+      projectScoped: Boolean(projectMatch),
+      projectId
     };
   } catch {
-    return { isChat: false, isLocal: false, id: '' };
+    return { isChat: false, isLocal: false, id: '', projectScoped: false, projectId: '' };
   }
 }
 
@@ -743,7 +754,7 @@ async function waitForFreshChatRoute(page, timeoutMs = 90000) {
     if (info.isChat) return { url: current, ...info };
     await page.waitForTimeout(500);
   }
-  throw new Error('Fresh chat did not visibly navigate to a chatgpt.com/c/... route');
+  throw new Error('Fresh chat did not visibly navigate to a durable ChatGPT conversation route');
 }
 
 async function waitForDurableChatRoute(page, timeoutMs = 300000) {
@@ -820,7 +831,7 @@ async function recoverCreatedChatByVisibleSearch(page, message) {
     }
 
     const candidates = page.locator(
-      '[role="dialog"] a, [role="dialog"] button, [role="option"], a[href^="/c/"], a[href*="chatgpt.com/c/"]'
+      '[role="dialog"] a, [role="dialog"] button, [role="option"], a[href^="/c/"], a[href^="/g/g-p-"][href*="/c/"], a[href*="chatgpt.com/c/"], a[href*="chatgpt.com/g/g-p-"][href*="/c/"]'
     );
     const count = Math.min(await candidates.count().catch(() => 0), 120);
     for (let i = 0; i < count; i += 1) {
@@ -860,7 +871,7 @@ async function postWithVisibleVerification(page, message, composerOverride = nul
   if (mode === 'create_fresh') {
     initialRoute = await waitForFreshChatRoute(page, 90000);
   } else if (!initialRoute.isChat) {
-    throw new Error('Existing-chat send is not on a visible chatgpt.com/c/... route');
+    throw new Error('Existing-chat send is not on a visible durable ChatGPT conversation route');
   }
 
   const beforeReload = await visibleWakePresent(page, message, 90000);
@@ -874,7 +885,7 @@ async function postWithVisibleVerification(page, message, composerOverride = nul
   }
 
   // Never reload an optimistic local-chatgpt route. Wait for the normal UI
-  // to transition to a durable server-backed /c/<id> route first.
+  // to transition to a durable server-backed root or Project-scoped chat route first.
   if (initialRoute.isLocal) {
     initialRoute = await waitForDurableChatRoute(page, 300000);
   }
@@ -884,7 +895,7 @@ async function postWithVisibleVerification(page, message, composerOverride = nul
 
   const reloadedRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
   if (!reloadedRoute.isChat || reloadedRoute.isLocal) {
-    throw new Error('Human-style reload did not return to a durable chatgpt.com/c/... conversation');
+    throw new Error('Human-style reload did not return to a durable ChatGPT conversation');
   }
 
   const afterReload = await visibleWakePresent(page, message, 90000);
@@ -911,7 +922,10 @@ async function runWithPage(providerName, connect) {
   const { browser, context, page, close } = await connect();
   try {
     if (mode === 'resume_existing') {
-      if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(requestedUrl)) throw new Error('resume_existing requires a chatgpt.com/c/... URL');
+      const requestedRoute = chatRouteInfo(requestedUrl);
+      if (!requestedRoute.isChat || requestedRoute.isLocal) {
+        throw new Error('resume_existing requires a durable root or Project-scoped ChatGPT conversation URL');
+      }
       await page.goto(requestedUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     } else if (mode === 'create_fresh') {
       await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
