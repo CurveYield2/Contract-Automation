@@ -28,9 +28,12 @@ function bool(v) { return String(v || '').toLowerCase() === 'true'; }
 function durableChatUrl(value) {
   try {
     const url = new URL(String(value));
-    return url.origin === 'https://chatgpt.com'
-      && /^\/c\/[A-Za-z0-9_-]+$/.test(url.pathname)
-      && !/^\/c\/local[-_:]/i.test(url.pathname);
+    if (url.origin !== 'https://chatgpt.com') return false;
+
+    const root = url.pathname.match(/^\/c\/([^/]+)\/?$/);
+    const project = url.pathname.match(/^\/g\/g-p-[^/]+\/c\/([^/]+)\/?$/);
+    const id = root?.[1] || project?.[1] || '';
+    return Boolean(id) && !/^local[-_:]/i.test(id);
   } catch { return false; }
 }
 
@@ -605,7 +608,9 @@ async function runWithPage(providerName, connect) {
   const { browser, context, page, close } = await connect();
   try {
     if (mode === 'resume_existing') {
-      if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(requestedUrl)) throw new Error('resume_existing requires a chatgpt.com/c/... URL');
+      if (!durableChatUrl(requestedUrl)) {
+        throw new Error('resume_existing requires a durable root or Project-scoped ChatGPT conversation URL');
+      }
       await page.goto(requestedUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     } else if (mode === 'create_fresh') {
       await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -650,7 +655,7 @@ async function runWithPage(providerName, connect) {
       if (routineBefore.some((entry) => entry.operation === 'chatgpt.capture_project_share_link')) {
         try {
           const parsed = new URL(projectUrl);
-          if (parsed.origin !== 'https://chatgpt.com' || parsed.pathname === '/' || /^\/c\//.test(parsed.pathname)) {
+          if (parsed.origin !== 'https://chatgpt.com' || parsed.pathname === '/' || /\/c\//.test(parsed.pathname)) {
             throw new Error('invalid project URL');
           }
         } catch {
