@@ -341,3 +341,18 @@ test('visible Project-name recovery clicks the exact rendered Project title text
   assert.match(block, /box\.y <= projectsBox\.y \+ 420/);
   assert.match(block, /return candidate/);
 });
+
+test('existing Project recovery uses short direct human taps on the visible title and retries once', () => {
+  assert.match(source, /async function humanTapVisibleTitle/);
+  assert.match(source, /randomDelayMs\(70, 150\)/);
+  assert.match(source, /project-title-tap=/);
+
+  const start = source.indexOf('async function recoverExistingProjectExactHumanFlow');
+  const end = source.indexOf('\nasync function findSendControlNearComposer', start);
+  const block = source.slice(start, end);
+  const first = block.indexOf('humanTapVisibleTitle(page, existing, 0.32)');
+  const second = block.indexOf('humanTapVisibleTitle(page, existing, 0.68)');
+  assert.ok(first >= 0 && second > first);
+  assert.match(block, /Existing exact-name Project title did not navigate after two direct human title taps/);
+  assert.doesNotMatch(block, /humanPointerClick\(page, existing\)/);
+});
