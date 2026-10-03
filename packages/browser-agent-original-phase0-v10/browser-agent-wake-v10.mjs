@@ -848,15 +848,50 @@ async function recoverCreatedChatByVisibleSearch(page, message) {
   const marker = recoverySearchMarker(message);
   if (!marker) throw new Error('recover action could not derive a visible search marker');
 
-  // Current ChatGPT Search chats is opened by the normal human keyboard
-  // shortcut. Prefer that over stale filter-button assumptions.
-  await humanActionPause(page);
-  await page.keyboard.press('Control+K');
-  await humanActionPause(page);
+  // Open Search through the visible left-sidebar control exactly as a
+  // person would. The previous Ctrl+K path was not reliable in live Chrome.
+  const sidebar = await findVisibleSidebarSurface(page);
+  if (!sidebar) throw new Error('Visible ChatGPT sidebar was not found for recovery search');
+
+  let searchControl = null;
+  const roleCandidates = [
+    sidebar.getByRole('button', { name: /^Search$/i }).first(),
+    sidebar.getByRole('button', { name: /Search chats/i }).first(),
+    sidebar.getByRole('link', { name: /^Search$/i }).first(),
+    sidebar.getByRole('link', { name: /Search chats/i }).first()
+  ];
+  for (const candidate of roleCandidates) {
+    if (await candidate.isVisible().catch(() => false)) {
+      searchControl = candidate;
+      break;
+    }
+  }
+
+  if (!searchControl) {
+    const visibleSearchText = sidebar.getByText('Search', { exact: true }).first();
+    if (await visibleSearchText.isVisible().catch(() => false)) {
+      searchControl = visibleSearchText;
+    }
+  }
+
+  if (!searchControl) {
+    searchControl = await firstVisible(page, [
+      'button[aria-label="Filter chats and work"]',
+      '[role="button"][aria-label="Filter chats and work"]',
+      'button[aria-label*="Search chats" i]',
+      'button[aria-label*="Search" i]'
+    ]);
+  }
+
+  if (!searchControl) throw new Error('Visible ChatGPT sidebar Search control was not found');
+  await humanPointerClick(page, searchControl);
+  await page.waitForTimeout(randomDelayMs(900, 1800));
 
   const searchSelectors = [
     '[placeholder*="Search chats" i]',
     '[aria-label*="Search chats" i]',
+    '[placeholder*="Search" i]',
+    '[aria-label*="Search" i]',
     '[role="dialog"] [role="combobox"]',
     '[role="dialog"] [role="textbox"]',
     '[role="dialog"] textarea',
@@ -867,23 +902,30 @@ async function recoverCreatedChatByVisibleSearch(page, message) {
 
   let searchInput = await firstVisible(page, searchSelectors);
 
-  // Retain a human pointer fallback for accounts where the visible search
-  // control still exists but Ctrl+K is not bound.
   if (!searchInput) {
-    const filter = await firstVisible(page, [
-      'button[aria-label="Filter chats and work"]',
-      '[role="button"][aria-label="Filter chats and work"]',
-      'button[aria-label*="Search chats" i]',
-      'button[aria-label*="Search" i]'
-    ]);
-    if (filter) {
-      await humanPointerClick(page, filter);
-      await humanActionPause(page);
-      searchInput = await firstVisible(page, searchSelectors);
+    const cue = page.getByText(/Search chats/i).first();
+    if (await cue.isVisible().catch(() => false)) {
+      let region = cue;
+      for (let depth = 0; depth < 6 && !searchInput; depth += 1) {
+        region = region.locator('xpath=..');
+        const editorCandidates = [
+          region.getByRole('combobox').first(),
+          region.getByRole('textbox').first(),
+          region.locator('textarea').first(),
+          region.locator('input').first(),
+          region.locator('[contenteditable="true"]').first()
+        ];
+        for (const candidate of editorCandidates) {
+          if (await candidate.isVisible().catch(() => false)) {
+            searchInput = candidate;
+            break;
+          }
+        }
+      }
     }
   }
 
-  if (!searchInput) throw new Error('Visible ChatGPT Search chats editor was not found after Ctrl+K');
+  if (!searchInput) throw new Error('Visible ChatGPT Search chats editor was not found after clicking sidebar Search');
   await humanTypeInto(page, searchInput, marker);
 
   const normalizedMarker = marker.replace(/\s+/g, ' ').trim();
