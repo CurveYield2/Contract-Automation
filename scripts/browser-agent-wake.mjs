@@ -457,10 +457,11 @@ async function postWithBackendVerification(page, message) {
 
 async function backendPreflight(page) {
   const state = await snapshot(page);
+  const onChatgpt = /^https:\/\/chatgpt\.com\//.test(state.url || '');
   return [{
     target: 'visible-chatgpt-ui',
-    status: state.chatViewable || state.composerVisible ? 200 : 0,
-    ok: !state.humanChallenge && !state.loginPrompt && (state.composerVisible || state.chatViewable),
+    status: onChatgpt && !state.humanChallenge && !state.loginPrompt ? 200 : 0,
+    ok: onChatgpt && !state.humanChallenge && !state.loginPrompt,
     cfMitigated: state.humanChallenge ? 'challenge' : null,
     server: null,
     visibleUi: true,
@@ -516,12 +517,13 @@ async function runWithPage(providerName, connect) {
     }
 
     await waitForBackendHealth(page, 'initial browser session');
-    await ensureComposer(page);
+    if (!(mode === 'create_fresh' && browserRoutineId)) {
+      await ensureComposer(page);
+    }
 
     let routine = null;
     let routineBefore = [];
     if (mode === 'create_fresh' && browserRoutineId) {
-      await ensureComposer(page);
       routine = await loadBrowserRoutine(browserRoutineId);
       const routineVars = {
         projectName,
@@ -546,7 +548,6 @@ async function runWithPage(providerName, connect) {
         await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForTimeout(1500);
         await waitForBackendHealth(page, 'post-verification reload');
-        await ensureComposer(page);
         routineBefore = await runBrowserRoutineStage({
           page,
           routine,
