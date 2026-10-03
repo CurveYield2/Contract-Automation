@@ -111,44 +111,32 @@ test('invalid rolling-cache key cannot suppress the bootstrap fallback path', as
   });
 });
 
-test('wake and watchdog restore rolling encrypted state and save only refreshed generations', async () => {
+test('wake and watchdog always use immutable bootstrap login state with no rolling cache', async () => {
   for (const relative of [
     '.github/workflows/browser-agent-wake.yml',
     '.github/workflows/browser-agent-watchdog.yml',
   ]) {
     const workflow = await fs.readFile(path.join(root, relative), 'utf8');
-    assert.match(workflow, /CHATGPT_SESSION_STATE_KEY_B64/);
-    assert.match(workflow, /actions\/cache\/restore@v4/);
-    assert.match(workflow, /actions\/cache\/save@v4/);
-    assert.match(workflow, /chatgpt-session-state-v1-/);
-    assert.match(workflow, /restore-keys:[\s\S]*chatgpt-session-state-v1-/);
-    assert.match(workflow, /path: \/tmp\/curveyield-browser-agent\/session-state-v1\.enc\.json/);
-    assert.match(workflow, /session-state-updated/);
-    assert.match(workflow, /outputs\.updated == 'true'/);
-    assert.doesNotMatch(workflow, /CHATGPT_SESSION_STATE_(?:PATH|UPDATED_MARKER):\s*\$\{\{\s*runner\./);
+    assert.match(workflow, /CHATGPT_STORAGE_STATE_B64/);
+    assert.doesNotMatch(workflow, /CHATGPT_SESSION_STATE_/);
+    assert.doesNotMatch(workflow, /actions\/cache\/(?:restore|save)@v4/);
+    assert.doesNotMatch(workflow, /chatgpt-session-state-v1-|session-state-updated|session-state-v1\.enc\.json/);
   }
 });
 
-test('GitHub Playwright prefers encrypted rolling state, keeps bootstrap fallback, and persists only healthy authenticated state', async () => {
+test('GitHub Playwright loads only the bootstrap secret and never persists automated run state', async () => {
   const source = await fs.readFile(path.join(root, 'scripts/browser-agent-wake.mjs'), 'utf8');
   const localStart = source.indexOf('async function localProvider');
-  const localEnd = source.indexOf('const { chromium } = await loadModules();');
+  const localEnd = source.indexOf('await hydrateBrowserContextFromRegistration();');
   assert.ok(localStart >= 0 && localEnd > localStart);
   const localSource = source.slice(localStart, localEnd);
-  const cacheLoad = localSource.indexOf('loadEncryptedSessionState({');
-  const bootstrapLoad = localSource.indexOf('CHATGPT_STORAGE_STATE_B64');
-  assert.ok(cacheLoad >= 0);
-  assert.ok(bootstrapLoad > cacheLoad);
-  assert.match(source, /providerName !== 'github-playwright'/);
-  assert.match(source, /state\?\.composerVisible/);
-  assert.match(source, /chatgpt\\\.com/);
-  assert.match(source, /saveEncryptedSessionState\(/);
-  assert.match(source, /deriveSessionStateKeyB64\(\{/);
-  assert.match(source, /const sessionStateKeyB64 = deriveSessionStateKeyB64\(\{\s*keyB64:\s*env\.CHATGPT_SESSION_STATE_KEY_B64,\s*bootstrapStateB64:\s*env\.CHATGPT_STORAGE_STATE_B64,\s*\}\);/);
-  assert.match(source, /context\.storageState\(\{ indexedDB: true, opfs: true \}\)/);
-  assert.match(source, /CHATGPT_SESSION_STATE_UPDATED_MARKER/);
+  assert.match(localSource, /CHATGPT_STORAGE_STATE_B64 is required/);
+  assert.match(localSource, /Buffer\.from\(env\.CHATGPT_STORAGE_STATE_B64, 'base64'\)/);
+  assert.match(localSource, /validateStorageState\(storage\)/);
+  assert.match(localSource, /Using immutable bootstrap-secret session state; run state will be discarded/);
+  assert.doesNotMatch(source, /loadEncryptedSessionState|saveEncryptedSessionState|deriveSessionStateKeyB64|persistHealthySession/);
+  assert.doesNotMatch(source, /CHATGPT_SESSION_STATE_/);
 });
-
 
 test('browser session persistence changes remain in the control-light qualification lane', () => {
   const result = classifyV7QualificationChanges([
@@ -162,12 +150,13 @@ test('browser session persistence changes remain in the control-light qualificat
   assert.equal(result.lane, 'CONTROL_LIGHT');
 });
 
-test('operator-selected saved login state bypasses rolling cache in wake and watchdog', async () => {
+test('bootstrap secret is the single browser session source across wake and watchdog', async () => {
   const runtime = await fs.readFile(path.join(root, 'scripts/browser-agent-wake.mjs'), 'utf8');
-  assert.match(runtime, /env\.CHATGPT_SESSION_STATE_SOURCE === 'bootstrap-secret' \? null : await loadEncryptedSessionState/);
+  assert.match(runtime, /CHATGPT_STORAGE_STATE_B64 is required/);
+  assert.doesNotMatch(runtime, /CHATGPT_SESSION_STATE_SOURCE|loadEncryptedSessionState|saveEncryptedSessionState/);
   for (const relative of ['.github/workflows/browser-agent-wake.yml', '.github/workflows/browser-agent-watchdog.yml']) {
     const workflow = await fs.readFile(path.join(root, relative), 'utf8');
-    assert.match(workflow, /CHATGPT_SESSION_STATE_SOURCE: bootstrap-secret/);
     assert.match(workflow, /CHATGPT_STORAGE_STATE_B64: \$\{\{ secrets\.CHATGPT_STORAGE_STATE_B64 \}\}/);
+    assert.doesNotMatch(workflow, /CHATGPT_SESSION_STATE_|actions\/cache\/(?:restore|save)@v4/);
   }
 });

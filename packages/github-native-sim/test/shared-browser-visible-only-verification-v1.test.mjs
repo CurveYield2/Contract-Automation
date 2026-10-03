@@ -28,11 +28,22 @@ test('shared ChatGPT runtime contains no synthetic write fallbacks', () => {
 test('shared ChatGPT runtime verifies through visible human browser behavior', () => {
   assert.match(source, /async function waitForVisibleBrowserReady/);
   assert.match(source, /async function postWithVisibleVerification/);
-  assert.match(source, /pressSequentially\(String\(message\), \{ delay: 12 \}\)/);
+  assert.match(source, /for \(const char of String\(message\)\)/);
+  assert.match(source, /humanTypingPause\(page\)/);
+  assert.match(source, /randomDelayMs\(300, 1500\)/);
+  assert.match(source, /randomDelayMs\(200, 400\)/);
   assert.match(source, /send-strategy=human-pointer-click/);
   assert.match(source, /send-strategy=human-keyboard-enter/);
   assert.match(source, /verification-reload=human-keyboard-control-r/);
   assert.match(source, /visible-wake-before-reload/);
   assert.match(source, /visible-wake-after-reload/);
   assert.match(source, /verification: 'visible-browser-only'/);
+});
+
+
+test('shared ChatGPT runtime always starts from immutable bootstrap secret and never persists run state', () => {
+  assert.match(source, /CHATGPT_STORAGE_STATE_B64 is required/);
+  assert.match(source, /Using immutable bootstrap-secret session state; run state will be discarded/);
+  assert.doesNotMatch(source, /loadEncryptedSessionState|saveEncryptedSessionState|persistHealthySession/);
+  assert.doesNotMatch(source, /CHATGPT_SESSION_STATE_/);
 });

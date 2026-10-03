@@ -226,15 +226,14 @@ test('managed Project continuity is the default with standalone as explicit exce
   assert.equal(schema.properties.continuityMode.default, 'managed_project');
 });
 
-test('development manager uses corrected home-exit Playwright transport instead of stale fallback providers', () => {
+test('development manager uses corrected home-exit Playwright transport with immutable bootstrap state', () => {
   assert.match(workflow, /tailscale\/github-action@v4/);
   assert.match(workflow, /Route browser phase through home exit node/);
   assert.match(workflow, /Xvfb :99 -screen 0 1920x1080x24/);
   assert.match(workflow, /x11vnc -display :99/);
-  assert.match(workflow, /CHATGPT_SESSION_STATE_KEY_B64/);
-  assert.match(workflow, /actions\/cache\/restore@v4/);
-  assert.match(workflow, /actions\/cache\/save@v4/);
+  assert.match(workflow, /CHATGPT_STORAGE_STATE_B64/);
   assert.match(workflow, /node scripts\/browser-agent-wake\.mjs/);
+  assert.doesNotMatch(workflow, /CHATGPT_SESSION_STATE_|actions\/cache\/(?:restore|save)@v4|session-state-v1\.enc\.json/);
   assert.doesNotMatch(workflow, /BROWSERLESS_TOKEN|BROWSERBASE_API_KEY|BROWSERBASE_PROJECT_ID|BROWSERBASE_CONTEXT_ID/);
   assert.doesNotMatch(workflow, /xvfb-run -a node scripts\/browser-agent-wake\.mjs/);
 });

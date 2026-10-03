@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { deriveSessionStateKeyB64, loadEncryptedSessionState, saveEncryptedSessionState, validateStorageState } from './browser-session-state-v1.mjs';
+import { validateStorageState } from './browser-session-state-v1.mjs';
 
 const env = process.env;
 const action = env.WAKE_ACTION || 'wake';
@@ -12,39 +12,12 @@ const mode = env.WAKE_MODE || 'resume_existing';
 const wakeId = env.WAKE_ID || crypto.randomUUID();
 const wakeMessage = env.WAKE_MESSAGE || '';
 const requestedUrl = env.CHAT_URL || '';
+const projectName = env.PROJECT_NAME || '';
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
-const encryptedSessionPath = env.CHATGPT_SESSION_STATE_PATH || '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
-const sessionUpdatedMarker = env.CHATGPT_SESSION_STATE_UPDATED_MARKER || '/tmp/curveyield-browser-agent/session-state-updated';
-const sessionStateKeyB64 = deriveSessionStateKeyB64({
-  keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
-  bootstrapStateB64: env.CHATGPT_STORAGE_STATE_B64,
-});
-
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
 function bool(v) { return String(v || '').toLowerCase() === 'true'; }
-
-async function persistHealthySession(providerName, context, state) {
-  if (providerName !== 'github-playwright') return false;
-  if (!state?.composerVisible || !/^https:\/\/chatgpt\.com\//.test(state.url || '')) return false;
-  try {
-    const storage = await context.storageState({ indexedDB: true, opfs: true });
-    const persisted = await saveEncryptedSessionState({
-      encryptedSessionPath,
-      keyB64: sessionStateKeyB64,
-      storage,
-    });
-    if (persisted) {
-      await fs.mkdir(path.dirname(sessionUpdatedMarker), { recursive: true });
-      await fs.writeFile(sessionUpdatedMarker, new Date().toISOString() + '\n', { mode: 0o600 });
-    }
-    return persisted;
-  } catch (error) {
-    console.warn('[github-playwright] Refreshed session state could not be persisted: ' + error.message);
-    return false;
-  }
-}
 
 async function importBrowserRuntimeModule(specifier) {
   const runtimeRoot = env.BROWSER_AGENT_RUNTIME_ROOT || '';
@@ -227,34 +200,158 @@ async function composerDiagnostics(page) {
   });
 }
 
-async function humanPointerClick(page, locator, { hoverMs = 220, downMs = 70, settleMs = 320 } = {}) {
+function randomDelayMs(minMs, maxMs) {
+  const min = Math.ceil(minMs);
+  const max = Math.floor(maxMs);
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+async function humanActionPause(page) {
+  await page.waitForTimeout(randomDelayMs(300, 1500));
+}
+
+async function humanTypingPause(page) {
+  await page.waitForTimeout(randomDelayMs(200, 400));
+}
+
+async function humanPointerClick(page, locator) {
   await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await humanActionPause(page);
   await locator.hover().catch(() => {});
+  await humanActionPause(page);
   const box = await locator.boundingBox();
   if (!box) throw new Error('Visible control has no clickable bounding box');
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
   await page.mouse.move(x, y, { steps: 12 });
-  await page.waitForTimeout(hoverMs);
+  await humanActionPause(page);
   await page.mouse.down();
-  await page.waitForTimeout(downMs);
+  await page.waitForTimeout(randomDelayMs(300, 700));
   await page.mouse.up();
-  await page.waitForTimeout(settleMs);
+  await humanActionPause(page);
 }
 
-async function humanTypeInto(page, locator, text, { delay = 45 } = {}) {
-  await humanPointerClick(page, locator, { hoverMs: 120, downMs: 55, settleMs: 180 });
+async function humanTypeInto(page, locator, text) {
+  await humanPointerClick(page, locator);
   const current = await locator.inputValue().catch(async () => {
     return await locator.innerText().catch(() => '');
   });
   if (current) {
     await locator.press('Control+A').catch(async () => locator.press('Meta+A').catch(() => {}));
-    await page.waitForTimeout(120);
+    await humanActionPause(page);
     await locator.press('Backspace');
-    await page.waitForTimeout(120);
+    await humanActionPause(page);
   }
-  await locator.pressSequentially(String(text), { delay });
-  await page.waitForTimeout(280);
+  for (const char of String(text)) {
+    await locator.pressSequentially(char);
+    await humanTypingPause(page);
+  }
+  await humanActionPause(page);
+}
+
+async function ensureSidebarOpenForProject(page) {
+  const projects = page.getByText('Projects', { exact: true }).first();
+  if (await projects.isVisible().catch(() => false)) return;
+
+  const open = await firstVisible(page, [
+    'button[data-testid="open-sidebar-button"]',
+    'button[aria-label="Open sidebar"]',
+    'button[aria-label*="Open sidebar" i]',
+    'button[aria-label*="Show sidebar" i]',
+    'button[aria-label*="Toggle sidebar" i]'
+  ]);
+  if (!open) throw new Error('Visible sidebar-open control was not found');
+  await humanPointerClick(page, open);
+  await humanActionPause(page);
+
+  if (!await projects.isVisible().catch(() => false)) {
+    throw new Error('Projects section is not visible after opening the sidebar');
+  }
+}
+
+async function findProjectsPlusAfterHover(page, projects) {
+  let region = projects;
+  for (let depth = 0; depth < 4; depth += 1) {
+    region = region.locator('xpath=..');
+    const candidates = region.locator('button, [role="button"]');
+    const count = Math.min(await candidates.count().catch(() => 0), 12);
+    for (let i = 0; i < count; i += 1) {
+      const candidate = candidates.nth(i);
+      if (!await candidate.isVisible().catch(() => false)) continue;
+      const attrs = [
+        await candidate.innerText().catch(() => ''),
+        await candidate.getAttribute('aria-label').catch(() => ''),
+        await candidate.getAttribute('title').catch(() => ''),
+        await candidate.getAttribute('data-testid').catch(() => ''),
+        await candidate.evaluate(el => el.outerHTML.slice(0, 900)).catch(() => '')
+      ].filter(Boolean).join(' ');
+      const looksOverflow = /more|overflow|menu|options|ellipsis|\.\.\.|⋯/i.test(attrs);
+      const looksPlus = /add|plus|create|new|M12 5v14|M5 12h14|<line[^>]+x1=["']12["'][^>]+y1=["']5/i.test(attrs);
+      if (!looksOverflow && looksPlus) return candidate;
+    }
+  }
+  return null;
+}
+
+async function createProjectExactHumanFlow(page, name) {
+  if (!name) throw new Error('PROJECT_NAME is required for project_wake');
+
+  await ensureSidebarOpenForProject(page);
+  await humanActionPause(page);
+
+  const projects = page.getByText('Projects', { exact: true }).first();
+  if (!await projects.isVisible().catch(() => false)) {
+    throw new Error('Visible Projects section title was not found');
+  }
+
+  await projects.hover();
+  await humanActionPause(page);
+
+  const plus = await findProjectsPlusAfterHover(page, projects);
+  if (!plus) throw new Error('Plus control did not appear to the right of Projects after hover');
+  await humanPointerClick(page, plus);
+
+  const input = await firstVisible(page, [
+    '[role="dialog"] input[placeholder*="Project name" i]',
+    '[role="dialog"] input[aria-label*="Project name" i]',
+    '[role="dialog"] input[name="name"]',
+    '[role="dialog"] input'
+  ]);
+  if (!input) throw new Error('Project-name input was not found in the visible Project dialog');
+  await humanTypeInto(page, input, name);
+
+  const create = await firstVisible(page, [
+    '[role="dialog"] button:has-text("Create project")',
+    '[role="dialog"] button:has-text("Create Project")'
+  ]);
+  if (!create) throw new Error('Create Project button was not found in the visible dialog');
+  await humanPointerClick(page, create);
+
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    const title = await page.title().catch(() => '');
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const visible = visibleBrowserStateText(bodyText, title);
+    if (visible.humanChallenge) {
+      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected after Project creation; aborting immediately');
+      error.code = 'BROWSER_CHALLENGE';
+      throw error;
+    }
+
+    const projectNameVisible = await page.getByText(name, { exact: true }).first().isVisible().catch(() => false);
+    const composer = await firstVisible(page, [
+      '#prompt-textarea',
+      'textarea[placeholder*="Message"]',
+      '[contenteditable="true"][data-lexical-editor="true"]',
+      '[contenteditable="true"]'
+    ]);
+    if (projectNameVisible && composer) {
+      console.log('[github-playwright-v10] project-created-visible=' + JSON.stringify({ projectName: name, url: page.url() }));
+      return { projectName: name, url: page.url() };
+    }
+    await page.waitForTimeout(750);
+  }
+  throw new Error('Created Project did not become visibly ready with a composer within 60 seconds');
 }
 
 async function fillComposer(page, message) {
@@ -607,10 +704,18 @@ async function runWithPage(providerName, connect) {
     }
 
     await waitForVisibleBrowserReady(page);
+
+    let project = null;
+    if (action === 'project_wake') {
+      if (mode !== 'create_fresh') throw new Error('project_wake requires create_fresh mode');
+      project = await createProjectExactHumanFlow(page, projectName);
+      await waitForVisibleBrowserReady(page);
+    }
+
     const before = await snapshot(page);
 
     if (action === 'observe') {
-      const sessionStatePersisted = await persistHealthySession(providerName, context, before);
+      const sessionStatePersisted = false;
       const result = { ok: true, provider: providerName, action, wakeId, sessionStatePersisted, ...before };
       await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
       return result;
@@ -619,7 +724,7 @@ async function runWithPage(providerName, connect) {
     if (action === 'recover') {
       const recovered = await recoverCreatedChatByVisibleSearch(page, wakeMessage);
       const after = await snapshot(page);
-      const sessionStatePersisted = await persistHealthySession(providerName, context, after);
+      const sessionStatePersisted = false;
       const result = {
         ok: true,
         provider: providerName,
@@ -673,11 +778,12 @@ async function runWithPage(providerName, connect) {
       after.url = verifiedSend.chatUrl;
     }
 
-    const sessionStatePersisted = await persistHealthySession(providerName, context, after);
+    const sessionStatePersisted = false;
     const result = {
       ok: true, provider: providerName, action, wakeId, posted: true, before, after, sessionStatePersisted,
       chatUrl: verifiedSend.chatUrl || after.url,
       verification: 'visible-browser-only',
+      ...(project ? { projectName: project.projectName, projectUrl: project.url } : {}),
       ...(response ? { responded: response.responded, waitedMs: response.waitedMs } : {})
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
@@ -688,23 +794,17 @@ async function runWithPage(providerName, connect) {
 }
 
 async function localProvider(chromium) {
-  let storage = await loadEncryptedSessionState({
-    encryptedSessionPath,
-    keyB64: sessionStateKeyB64,
-  });
-  let source = storage ? 'encrypted-cache' : '';
-  if (!storage && env.CHATGPT_STORAGE_STATE_B64) {
-    try {
-      const bootstrap = JSON.parse(Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'));
-      if (!validateStorageState(bootstrap)) throw new Error('invalid storage state');
-      storage = bootstrap;
-      source = 'bootstrap-secret';
-    } catch {
-      throw new Error('CHATGPT_STORAGE_STATE_B64 is invalid');
-    }
+  if (!env.CHATGPT_STORAGE_STATE_B64) {
+    throw new Error('CHATGPT_STORAGE_STATE_B64 is required');
   }
-  if (!storage) throw new Error('No usable ChatGPT storage state is available');
-  console.log('[github-playwright] Using ' + source + ' session state');
+  let storage;
+  try {
+    storage = JSON.parse(Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'));
+    if (!validateStorageState(storage)) throw new Error('invalid storage state');
+  } catch {
+    throw new Error('CHATGPT_STORAGE_STATE_B64 is invalid');
+  }
+  console.log('[github-playwright-v10] Using immutable bootstrap-secret session state; run state will be discarded.');
   const launchOptions = {
     headless: env.BROWSER_HEADLESS !== 'false',
     channel: 'chrome',

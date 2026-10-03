@@ -124,3 +124,33 @@ test('recover action remains visible-browser-only', () => {
   assert.doesNotMatch(block, /force:\s*true/);
   assert.doesNotMatch(block, /requestSubmit|form\.submit/);
 });
+
+
+test('v10 always starts from immutable bootstrap secret and discards run state', () => {
+  assert.match(source, /CHATGPT_STORAGE_STATE_B64 is required/);
+  assert.match(source, /Using immutable bootstrap-secret session state; run state will be discarded/);
+  assert.doesNotMatch(source, /loadEncryptedSessionState|saveEncryptedSessionState|persistHealthySession/);
+  assert.doesNotMatch(source, /CHATGPT_SESSION_STATE_/);
+});
+
+test('v10 project_wake follows exact human Project creation before sending', () => {
+  assert.match(source, /async function createProjectExactHumanFlow/);
+  const start = source.indexOf('async function createProjectExactHumanFlow');
+  const end = source.indexOf('\nasync function fillComposer', start);
+  const block = source.slice(start, end);
+  const sidebar = block.indexOf('ensureSidebarOpenForProject');
+  const projects = block.indexOf("getByText('Projects', { exact: true })");
+  const hover = block.indexOf('await projects.hover()');
+  const plus = block.indexOf('findProjectsPlusAfterHover');
+  const type = block.indexOf('await humanTypeInto(page, input, name)');
+  const create = block.indexOf('await humanPointerClick(page, create)');
+  assert.ok(sidebar >= 0 && projects > sidebar && hover > projects && plus > hover && type > plus && create > type);
+  assert.doesNotMatch(block, /fetch\s*\(|page\.on\(|waitForResponse|\/backend-api\//);
+});
+
+test('v10 randomized pacing uses 0.3-1.5s between actions and 0.2-0.4s per character', () => {
+  assert.match(source, /randomDelayMs\(300, 1500\)/);
+  assert.match(source, /randomDelayMs\(200, 400\)/);
+  assert.match(source, /for \(const char of String\(text\)\)/);
+  assert.match(source, /await locator\.pressSequentially\(char\)/);
+});
