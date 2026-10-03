@@ -227,21 +227,39 @@ async function composerDiagnostics(page) {
   });
 }
 
+async function humanPointerClick(page, locator, { hoverMs = 220, downMs = 70, settleMs = 320 } = {}) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await locator.hover().catch(() => {});
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('Visible control has no clickable bounding box');
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y, { steps: 12 });
+  await page.waitForTimeout(hoverMs);
+  await page.mouse.down();
+  await page.waitForTimeout(downMs);
+  await page.mouse.up();
+  await page.waitForTimeout(settleMs);
+}
+
+async function humanTypeInto(page, locator, text, { delay = 45 } = {}) {
+  await humanPointerClick(page, locator, { hoverMs: 120, downMs: 55, settleMs: 180 });
+  const current = await locator.inputValue().catch(async () => {
+    return await locator.innerText().catch(() => '');
+  });
+  if (current) {
+    await locator.press('Control+A').catch(async () => locator.press('Meta+A').catch(() => {}));
+    await page.waitForTimeout(120);
+    await locator.press('Backspace');
+    await page.waitForTimeout(120);
+  }
+  await locator.pressSequentially(String(text), { delay });
+  await page.waitForTimeout(280);
+}
+
 async function fillComposer(page, message) {
   const composer = await ensureComposer(page);
-  await composer.click();
-  const tag = await composer.evaluate(el => el.tagName.toLowerCase());
-  if (tag === 'textarea' || tag === 'input') {
-    await composer.fill(message);
-  } else {
-    await composer.fill(message).catch(async () => {
-      await composer.focus();
-      await composer.press('Control+A').catch(()=>{});
-      await composer.press('Meta+A').catch(()=>{});
-      await composer.press('Backspace').catch(()=>{});
-      await composer.type(message, { delay: 1 });
-    });
-  }
+  await humanTypeInto(page, composer, message);
   return composer;
 }
 
@@ -252,239 +270,152 @@ async function post(page, message) {
   const requestedIdleWait = Number.parseInt(env.IDLE_WAIT_MS || '600000', 10);
   const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
 
-  // Final race guard: do not even fill the composer while this conversation is generating.
+  // Human-only interaction: wait until the visible chat is idle, type through keyboard
+  // events, and click the visible Send control with pointer movement.
   await waitForChatIdle(page, idleWaitMs);
-  let observed = null;
+  const composer = await fillComposer(page, message);
+  const diagnostics = await composerDiagnostics(page);
+  console.log('[github-playwright-v10] composer-diagnostics=' + JSON.stringify(diagnostics));
 
-  const onRequest = request => {
-    const method = request.method();
-    if (!['POST','PUT','PATCH'].includes(method)) return;
-    const data = request.postData() || '';
-    if (!data.includes(marker)) return;
-    observed = {
-      url: request.url(),
-      method,
-      bodyContainsMarker: true,
-      postDataLength: data.length
-    };
-  };
+  const send = await firstVisible(page, [
+    'button[data-testid="send-button"]',
+    'button[data-testid="composer-submit-button"]',
+    'button[aria-label="Send prompt"]',
+    'button[aria-label="Send"]',
+    'button[aria-label*="Send"]'
+  ]);
+  if (!send) throw new Error('No visible Send button for normal human-style click');
 
-  page.on('request', onRequest);
-  try {
-    let composer = await fillComposer(page, message);
-    const diagnostics = await composerDiagnostics(page);
-    console.log('[github-playwright-v10] composer-diagnostics=' + JSON.stringify(diagnostics));
-
-    const sendSelectors = [
-      'button[data-testid="send-button"]',
-      'button[data-testid="composer-submit-button"]',
-      'button[aria-label="Send prompt"]',
-      'button[aria-label="Send"]',
-      'button[aria-label*="Send"]'
-    ];
-
-    const strategies = [
-      async () => {
-        const send = await firstVisible(page, sendSelectors);
-        if (!send) throw new Error('No visible Send button for normal click');
-        console.log('[github-playwright-v10] send-strategy=button-click');
-        await send.click({ timeout: 4000 });
-      },
-      async () => {
-        const send = await firstVisible(page, sendSelectors);
-        if (!send) throw new Error('No visible Send button for force click');
-        console.log('[github-playwright-v10] send-strategy=button-force-click');
-        await send.click({ force: true, timeout: 4000 });
-      },
-      async () => {
-        const send = await firstVisible(page, sendSelectors);
-        if (!send) throw new Error('No visible Send button for DOM click');
-        console.log('[github-playwright-v10] send-strategy=button-dom-click');
-        await send.evaluate(el => el.click());
-      },
-      async () => {
-        composer = await ensureComposer(page);
-        console.log('[github-playwright-v10] send-strategy=form-request-submit');
-        const submitted = await composer.evaluate(el => {
-          const form = el.closest('form');
-          if (!form) return false;
-          if (typeof form.requestSubmit === 'function') form.requestSubmit();
-          else form.submit();
-          return true;
-        });
-        if (!submitted) throw new Error('Composer has no containing form');
-      },
-      async () => {
-        composer = await ensureComposer(page);
-        console.log('[github-playwright-v10] send-strategy=composer-enter');
-        await composer.press('Enter');
-      },
-      async () => {
-        console.log('[github-playwright-v10] send-strategy=page-keyboard-enter');
-        await page.keyboard.press('Enter');
-      }
-    ];
-
-    for (let i = 0; i < strategies.length; i++) {
-      observed = null;
-
-      await waitForChatIdle(page, idleWaitMs);
-
-      // Ensure the exact wake text is still in the composer before each retry.
-      const currentComposer = await ensureComposer(page).catch(() => null);
-      if (currentComposer) {
-        const currentText = await currentComposer.evaluate(el => (el.innerText || el.value || '')).catch(() => '');
-        if (!currentText.includes(marker)) composer = await fillComposer(page, message);
-      }
-
-      await strategies[i]().catch(error => {
-        console.log('[github-playwright-v10] send-strategy-error=' + JSON.stringify({ index: i, error: error.message }));
-      });
-
-      const deadline = Date.now() + 7000;
-      while (Date.now() < deadline && !observed) {
-        await page.waitForTimeout(200);
-      }
-
-      if (observed) {
-        console.log('[github-playwright-v10] send-request-observed=' + JSON.stringify(observed));
-        return observed;
-      }
-
-      console.log('[github-playwright-v10] send-strategy-no-post=' + JSON.stringify({ index: i }));
-    }
-
-    throw new Error('No real ChatGPT write request containing the wake marker was observed after all send strategies');
-  } finally {
-    page.off('request', onRequest);
-  }
-}
-
-async function backendPreflight(page) {
-  return page.evaluate(async () => {
-    const targets = [
-      '/backend-api/models',
-      '/backend-api/conversations?offset=0&limit=1&order=updated'
-    ];
-    const checks = [];
-    for (const target of targets) {
-      try {
-        const response = await fetch(target, { credentials: 'include', cache: 'no-store' });
-        checks.push({
-          target,
-          status: response.status,
-          ok: response.ok,
-          cfMitigated: response.headers.get('cf-mitigated'),
-          server: response.headers.get('server')
-        });
-      } catch (error) {
-        checks.push({ target, status: 0, ok: false, error: String(error) });
-      }
-    }
-    return checks;
+  const composerText = await composer.inputValue().catch(async () => {
+    return await composer.innerText().catch(() => '');
   });
+  if (!composerText.includes(marker)) {
+    throw new Error('Wake marker is not visibly present in the composer before Send');
+  }
+
+  console.log('[github-playwright-v10] send-strategy=human-pointer-click');
+  await humanPointerClick(page, send, { hoverMs: 220, downMs: 75, settleMs: 500 });
+  return { strategy: 'human-pointer-click' };
 }
 
-async function waitForBackendHealth(page) {
+function visibleBrowserStateText(bodyText = '', title = '') {
+  return {
+    loginPrompt: /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText),
+    humanChallenge:
+      /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText) ||
+      /Just a moment|Cloudflare/i.test(title),
+    conversationUnavailable:
+      /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText)
+  };
+}
+
+async function waitForVisibleBrowserReady(page) {
   const requested = Number.parseInt(env.MANUAL_CHALLENGE_WAIT_MS || '0', 10);
   const waitMs = Number.isFinite(requested) ? Math.max(0, requested) : 0;
   const deadline = Date.now() + waitMs;
-  let last = null;
 
   while (true) {
-    last = await backendPreflight(page).catch(error => [{ ok: false, status: 0, error: error.message }]);
-    const challenged = last.some(item => item?.cfMitigated === 'challenge');
-    const healthy = last.length > 0 && last.every(item => item?.ok === true && item?.cfMitigated !== 'challenge');
+    const title = await page.title().catch(() => '');
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const visible = visibleBrowserStateText(bodyText, title);
+    const composer = await firstVisible(page, [
+      '#prompt-textarea',
+      'textarea[placeholder*="Message"]',
+      '[contenteditable="true"][data-lexical-editor="true"]',
+      '[contenteditable="true"]'
+    ]);
 
-    console.log('[github-playwright-v10] backend-preflight=' + JSON.stringify({ healthy, challenged, checks: last }));
+    console.log('[github-playwright-v10] visible-browser-ready=' + JSON.stringify({
+      ready: Boolean(composer) && !visible.loginPrompt && !visible.humanChallenge && !visible.conversationUnavailable,
+      ...visible,
+      composerVisible: Boolean(composer),
+      url: page.url()
+    }));
 
-    if (healthy) return last;
+    if (composer && !visible.loginPrompt && !visible.humanChallenge && !visible.conversationUnavailable) return true;
     if (Date.now() >= deadline) {
-      throw new Error('ChatGPT backend preflight is not healthy: ' + JSON.stringify(last));
+      throw new Error('ChatGPT visible browser state did not become ready within the configured wait');
     }
 
     if (bool(env.INTERACTIVE_VIEW_ENABLED)) {
-      console.log('[github-playwright-v10] Browser remains visible through the private VNC tunnel. On your home PC connect a VNC viewer to 127.0.0.1:' + (env.HOME_VNC_PORT || '5901') + ' and complete any normal login or verification shown.');
+      console.log('[github-playwright-v10] Visible browser is not ready. The private VNC session remains available for normal human login or verification.');
     }
     await page.waitForTimeout(5000);
   }
 }
 
-async function persistedWakeVisible(page, message) {
-  const deadline = Date.now() + 30000;
+async function visibleWakePresent(page, message, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const users = page.locator('[data-message-author-role="user"]');
     const count = await users.count().catch(() => 0);
-    for (let i = Math.max(0, count - 5); i < count; i++) {
+    for (let i = Math.max(0, count - 8); i < count; i += 1) {
       const text = await users.nth(i).innerText().catch(() => '');
-      if (text.includes(message)) return { persisted: true, userCount: count };
+      if (text.includes(message)) return { visible: true, userCount: count };
     }
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(750);
   }
-  return { persisted: false, userCount: await page.locator('[data-message-author-role="user"]').count().catch(() => 0) };
-}
-
-async function postWithBackendVerification(page, message) {
-  const marker = message.slice(0, Math.min(120, message.length));
-  let accepted = null;
-
-  const onResponse = async response => {
-    const request = response.request();
-    const method = request.method();
-    if (!['POST','PUT','PATCH'].includes(method)) return;
-    const postData = request.postData() || '';
-    if (!postData.includes(marker)) return;
-
-    accepted = {
-      url: response.url(),
-      status: response.status(),
-      method,
-      bodyContainsMarker: true,
-      cfMitigated: await response.headerValue('cf-mitigated').catch(() => null),
-      server: await response.headerValue('server').catch(() => null)
-    };
+  return {
+    visible: false,
+    userCount: await page.locator('[data-message-author-role="user"]').count().catch(() => 0)
   };
-
-  page.on('response', onResponse);
-  try {
-    const submittedRequest = await post(page, message);
-
-    const deadline = Date.now() + 20000;
-    while (Date.now() < deadline) {
-      if (accepted) break;
-      await page.waitForTimeout(250);
-    }
-
-    if (!accepted) {
-      throw new Error('Wake write request was observed but no corresponding response was observed');
-    }
-    if (
-      accepted.status < 200 ||
-      accepted.status >= 300 ||
-      accepted.cfMitigated === 'challenge' ||
-      !accepted.bodyContainsMarker
-    ) {
-      throw new Error('ChatGPT wake write was rejected: ' + JSON.stringify(accepted));
-    }
-
-    console.log('[github-playwright-v10] wake-write-response=' + JSON.stringify(accepted));
-
-    await page.waitForTimeout(2500);
-    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
-    await waitForBackendHealth(page);
-
-    const persisted = await persistedWakeVisible(page, message);
-    console.log('[github-playwright-v10] persisted-wake=' + JSON.stringify(persisted));
-    if (!persisted.persisted) {
-      throw new Error('Wake write returned success but did not persist as a user message after reload');
-    }
-
-    return { ...accepted, ...persisted, submittedRequest };
-  } finally {
-    page.off('response', onResponse);
-  }
 }
 
+async function waitForFreshChatUrl(page, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const current = page.url();
+    if (/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(current)) return current;
+    await page.waitForTimeout(500);
+  }
+  throw new Error('Fresh chat did not visibly navigate to a durable chatgpt.com/c/... URL');
+}
+
+async function humanReload(page) {
+  console.log('[github-playwright-v10] verification-reload=human-keyboard-control-r');
+  await page.keyboard.press('Control+R');
+  await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+}
+
+async function postWithVisibleVerification(page, message) {
+  const submitted = await post(page, message);
+
+  let chatUrl = page.url();
+  if (mode === 'create_fresh') {
+    chatUrl = await waitForFreshChatUrl(page, 30000);
+  } else if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(chatUrl)) {
+    throw new Error('Existing-chat send is not on a durable chatgpt.com/c/... URL');
+  }
+
+  const beforeReload = await visibleWakePresent(page, message, 30000);
+  console.log('[github-playwright-v10] visible-wake-before-reload=' + JSON.stringify({ ...beforeReload, chatUrl }));
+  if (!beforeReload.visible) {
+    throw new Error('Sent wake is not visibly present in the conversation before reload');
+  }
+
+  // Persistence proof uses a normal visible browser reload of the exact durable chat URL.
+  // No direct backend request or network-response telemetry is used.
+  await humanReload(page);
+  await waitForVisibleBrowserReady(page);
+
+  if (page.url() !== chatUrl) {
+    throw new Error('Human-style reload did not remain on the same durable chat URL');
+  }
+
+  const afterReload = await visibleWakePresent(page, message, 30000);
+  console.log('[github-playwright-v10] visible-wake-after-reload=' + JSON.stringify({ ...afterReload, chatUrl }));
+  if (!afterReload.visible) {
+    throw new Error('Wake is not visibly present after human-style reload of the durable chat');
+  }
+
+  return {
+    ...submitted,
+    persisted: true,
+    userCount: afterReload.userCount,
+    chatUrl
+  };
+}
 
 async function runWithPage(providerName, connect) {
   const { browser, context, page, close } = await connect();
@@ -504,7 +435,7 @@ async function runWithPage(providerName, connect) {
       await page.waitForTimeout(1500);
     }
 
-    await waitForBackendHealth(page);
+    await waitForVisibleBrowserReady(page);
     const before = await snapshot(page);
 
     if (action === 'observe') {
@@ -518,7 +449,7 @@ async function runWithPage(providerName, connect) {
       const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
       console.log('[github-playwright-v10] Chat is currently generating; waiting for idle before wake send.');
       await waitForChatIdle(page, idleWaitMs);
-      await waitForBackendHealth(page);
+      await waitForVisibleBrowserReady(page);
     }
 
     if (action === 'wake_and_wait' && mode === 'resume_existing' && !before.chatViewable) {
@@ -531,7 +462,7 @@ async function runWithPage(providerName, connect) {
       return result;
     }
 
-    await postWithBackendVerification(page, wakeMessage);
+    const verifiedSend = await postWithVisibleVerification(page, wakeMessage);
 
     let response = null;
     let after;
@@ -545,15 +476,15 @@ async function runWithPage(providerName, connect) {
       after = await snapshot(page);
     }
 
-    if (mode === 'create_fresh' && !/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(after.url)) {
-      await page.waitForURL(/https:\/\/chatgpt\.com\/c\//, { timeout: 15000 }).catch(()=>{});
-      after.url = page.url();
+    if (mode === 'create_fresh') {
+      after.url = verifiedSend.chatUrl;
     }
 
     const sessionStatePersisted = await persistHealthySession(providerName, context, after);
     const result = {
       ok: true, provider: providerName, action, wakeId, posted: true, before, after, sessionStatePersisted,
-      chatUrl: after.url,
+      chatUrl: verifiedSend.chatUrl || after.url,
+      verification: 'visible-browser-only',
       ...(response ? { responded: response.responded, waitedMs: response.waitedMs } : {})
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
