@@ -15,9 +15,11 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 ## CURRENT MAIN
 
 - Repository: `CurveYield2/Contract-Automation`
-- Current main checked after sidebar repair merge and smoke retrigger.
-- Sidebar repair merge commit: `77bdce5bea75ff2868394aaaa7cb2708f9a87a15`
-- Smoke retrigger commit: `0ae6e4fde7a08c78c864ba95fc55b708416dc130`
+- Current main commit checked: `147af0885915eef9c6e4eb8a59f747265bf6b82d`
+- Upgrade Agent Launcher implementation merged.
+- Shared development-agent ChatGPT visible-only verification merged by PR #502 at merge commit `8caf39065cc64e40d9cbe56a0f002384d4f2c250`.
+- Dedicated v10 create-fresh VERIFY4 request currently exercising merged behavior.
+- Current dedicated browser run: `37145638325`.
 
 ## AUTHORITATIVE SPECIFICATIONS
 
@@ -36,42 +38,34 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 - Cloudflare never receives ChatGPT credentials/session state.
 - No force-push or branch-protection bypass.
 - Successful completion requires verified merge into target repository `main`.
+- All ChatGPT interaction and verification must use visible human browser behavior only:
+  - no direct ChatGPT backend/API reads;
+  - no request/response network telemetry as proof;
+  - no synthetic DOM/form/force writes;
+  - no page-context clipboard injection.
 
 ## SATISFIED
 
-- Launcher design v2, launcher implementation, merge finalization, output metadata and Project continuity are merged.
+- Launcher design v2 and launcher implementation are merged.
+- Cloudflare intake, GitHub fallback admission, merge finalization, output metadata, and Project continuity are implemented.
 - V7 Execution Infrastructure Qualification and Lite Structured Phase Regression passed for the launcher implementation.
-- Saved ChatGPT bootstrap state is confirmed in live runs.
-- Backend-health/manual-verification wait is merged and regression-tested.
-- Live smoke proved ChatGPT backend verification can clear and return healthy 200 responses.
-- Live smoke terminal UI diagnostics identified the current sidebar layout: visible `Chat sidebar options` with Projects hidden.
-- Project sidebar recovery was repaired to follow the visible human path: `Chat sidebar options -> Organize sidebar -> Show -> Projects`.
-- Project sidebar repair PR #497 passed both GitHub validation suites.
-- Project sidebar repair PR #497 was merged to main at `77bdce5bea75ff2868394aaaa7cb2708f9a87a15`.
-- The same `upgrade-launcher-live-smoke-r1` request was retriggered without changing its specification, target branch, or end-state.
+- Saved ChatGPT authenticated state is confirmed in live runs.
+- Project sidebar recovery follows the current visible UI path: `Chat sidebar options -> Organize sidebar -> Show -> Projects`.
+- Project sidebar repair PR #497 is merged.
+- Original v10 browser verification was repaired to visible-browser-only behavior and merged.
+- Shared development-agent browser runtime was repaired to visible-browser-only behavior.
+- Shared-runtime duplicate-safety is preserved: every post-Send verification failure is non-retryable.
+- PR #502 passed both repository validation suites and is merged.
+- Static guards now prohibit backend/network ChatGPT verification and synthetic ChatGPT writes in both v10 and the shared runtime.
+- Tailscale home-exit routing has been proven successful in finalized runs; apparent long-lived `Route browser phase...` states can be GitHub Actions status lag while Playwright is already running.
 
 ## REMAINING DELTA
 
-1. Obtain one healthy smoke runner through the existing home-exit routing step; do not modify browser/Project code for a runner-level routing stall.
-2. Verify the merged sidebar repair creates the managed ChatGPT Project and persists active manager state.
-3. Continue the same smoke through focus-locked agent completion and mandatory merge-to-main finalization.
-4. Close this focus lock only after terminal COMPLETE exposes output + ChatGPT Project links.
-
-
-
-1. Extend only `exposeProjectsInSidebar` so it can open the visible `Chat sidebar options` control, then follow the existing human UI path through `Organize sidebar` and `Show` when present.
-2. Preserve the existing human pointer interaction primitives; do not add DOM-click, force-click, direct backend, or alternate browser paths.
-3. Add focused regression coverage for the sidebar-options navigation.
-4. Re-run `upgrade-launcher-live-smoke-r1`; if Project creation succeeds, continue the same smoke through agent completion and mandatory merge-to-main finalization.
-5. Close this focus lock only after terminal COMPLETE exposes output + ChatGPT Project links.
-
-
-
-1. Add the proven visible-browser backend-health preflight/manual-verification wait to the shared browser runtime without changing the human interaction primitives.
-2. Enable a bounded manual-verification wait for Development Agent Task Manager launches while keeping visible Chrome, VNC, and home-exit routing active.
-3. Add focused regression coverage for that exact wait path and preserve audit-specific wake instructions unchanged.
-4. Re-run `upgrade-launcher-live-smoke-r1`; continue through focus-locked agent completion and mandatory merge-to-main finalization.
-5. Close this focus lock only after terminal COMPLETE exposes output + ChatGPT Project links.
+1. Let dedicated v10 run `37145638325` reach a finalized Playwright result without retriggering it.
+2. Verify `create_fresh` produces a visible new chat, captures its chat route, performs a normal human-style reload, and still visibly contains VERIFY4 using no machine backend/network reads.
+3. If VERIFY4 succeeds, return to the existing `upgrade-launcher-live-smoke-r1` task and rerun it on merged shared-runtime code.
+4. Verify the Development Agent Task Manager creates/persists the managed ChatGPT Project, runs the focus-locked agent, validates its completion receipt, merges the implementation to target `main`, and writes terminal completed state.
+5. Close this focus lock only after terminal COMPLETE exposes both the output link and ChatGPT Project link.
 
 ## PARKED OBSERVATIONS
 
@@ -80,14 +74,17 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 - Audit-process redesign is out of scope.
 - General repository cleanup is out of scope.
 - Cloudflare deployment/account provisioning is outside repository code; implementation should be deployment-ready without embedded credentials.
+- GitHub Actions live step-state lag is an observation only; do not redesign routing based solely on a stale in-progress label.
 
 ## ACTIVE BLOCKER
 
-Current smoke run `37087636054` is stalled before browser execution in `Route browser phase through home exit node`. Tailscale connection and visible VNC setup succeeded, but the routing step has exceeded its normal internal bounded duration. This run has not exercised the newly merged Project sidebar repair yet.
+No code blocker is presently proven.
+
+The only unresolved item is the terminal result of dedicated v10 create-fresh VERIFY4 run `37145638325`. Its live GitHub step state may lag behind the runner's actual progress, so it must not be retriggered solely because `Route browser phase through home exit node` appears in progress.
 
 ## NEXT ACTION
 
-Treat the current run as a runner/infrastructure instance until it either fails or recovers. Do not change Project/browser code. Once the run terminates, use the existing retry path/fresh runner to exercise the same smoke task.
+Wait for run `37145638325` to finalize. Inspect its completed Playwright log and classify only the exact terminal result. Do not change browser, Tailscale, Project, launcher, or audit code unless that finalized result proves a specific unsatisfied blocker.
 
 ## ANTI-DRIFT CHECK
 
