@@ -148,8 +148,9 @@ test('v10 project_wake opens or scrolls the sidebar to Projects before hover-plu
   const plus = block.indexOf('findProjectsPlusAfterHover');
   const editor = block.indexOf('findProjectNameEditorFromVisibleCreateSurface');
   const type = block.indexOf('await humanTypeInto(page, controls.editor, name)');
-  const create = block.indexOf('await humanPointerClick(page, controls.create)');
-  assert.ok(sidebar >= 0 && hover > sidebar && plus > hover && editor > plus && type > editor && create > type);
+  const enabled = block.indexOf('findEnabledProjectCreateButton(page, 8000)');
+  const create = block.indexOf('await humanPointerClick(page, enabledCreate)');
+  assert.ok(sidebar >= 0 && hover > sidebar && plus > hover && editor > plus && type > editor && enabled > type && create > enabled);
   assert.doesNotMatch(block, /fetch\s*\(|page\.on\(|waitForResponse|\/backend-api\//);
 });
 
@@ -165,7 +166,8 @@ test('v10 project creation anchors the name editor to the visible Create-project
   const block = source.slice(start, end);
   assert.match(block, /findProjectNameEditorFromVisibleCreateSurface/);
   assert.match(block, /humanTypeInto\(page, controls\.editor, name\)/);
-  assert.match(block, /humanPointerClick\(page, controls\.create\)/);
+  assert.match(block, /findEnabledProjectCreateButton\(page, 8000\)/);
+  assert.match(block, /humanPointerClick\(page, enabledCreate\)/);
   assert.doesNotMatch(block, /\[role="dialog"\] input/);
   assert.doesNotMatch(block, /\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
 });
