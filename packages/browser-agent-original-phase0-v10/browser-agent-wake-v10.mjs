@@ -499,28 +499,43 @@ async function findVisibleExactProjectEntry(page, projectsTitle, name) {
   const projectsBox = await projectsTitle.boundingBox().catch(() => null);
   if (!projectsBox) return null;
 
-  const chatsTitle = page.getByText('Chats', { exact: true }).first();
-  const chatsVisible = await chatsTitle.isVisible().catch(() => false);
-  const chatsBox = chatsVisible ? await chatsTitle.boundingBox().catch(() => null) : null;
+  const namePattern = new RegExp('^' + escapeRegExp(name) + '$', 'i');
+  const inProjectBand = async (candidate) => {
+    if (!await candidate.isVisible().catch(() => false)) return false;
+    const box = await candidate.boundingBox().catch(() => null);
+    if (!box) return false;
+    return box.x <= 460 && box.y >= projectsBox.y && box.y <= projectsBox.y + 420;
+  };
 
-  const matches = page.getByText(name, { exact: true });
+  // Prefer the complete visible interactive Project row. Clicking the inner text
+  // node did not navigate in live Chrome, while a person clicks the rendered row.
+  const roleGroups = [
+    page.getByRole('link', { name: namePattern }),
+    page.getByRole('button', { name: namePattern })
+  ];
+  for (const group of roleGroups) {
+    const count = Math.min(await group.count().catch(() => 0), 12);
+    for (let i = 0; i < count; i += 1) {
+      const candidate = group.nth(i);
+      if (await inProjectBand(candidate)) return candidate;
+    }
+  }
+
+  const matches = page.getByText(namePattern, { exact: true });
   const count = Math.min(await matches.count().catch(() => 0), 20);
   for (let i = 0; i < count; i += 1) {
     const candidate = matches.nth(i);
-    if (!await candidate.isVisible().catch(() => false)) continue;
-    const box = await candidate.boundingBox().catch(() => null);
-    if (!box) continue;
+    if (!await inProjectBand(candidate)) continue;
 
-    const inLeftSidebar = box.x <= 460;
-    const belowProjects = box.y >= projectsBox.y;
-    const aboveChats = !chatsBox || box.y < chatsBox.y;
-    if (inLeftSidebar && belowProjects && aboveChats) {
-      const link = candidate.locator('xpath=ancestor-or-self::a[1]');
-      if (await link.isVisible().catch(() => false)) return link;
-      const button = candidate.locator('xpath=ancestor-or-self::button[1]');
-      if (await button.isVisible().catch(() => false)) return button;
-      return candidate;
-    }
+    const roleLink = candidate.locator('xpath=ancestor-or-self::*[@role="link"][1]');
+    if (await roleLink.isVisible().catch(() => false)) return roleLink;
+    const roleButton = candidate.locator('xpath=ancestor-or-self::*[@role="button"][1]');
+    if (await roleButton.isVisible().catch(() => false)) return roleButton;
+    const link = candidate.locator('xpath=ancestor-or-self::a[1]');
+    if (await link.isVisible().catch(() => false)) return link;
+    const button = candidate.locator('xpath=ancestor-or-self::button[1]');
+    if (await button.isVisible().catch(() => false)) return button;
+    return candidate;
   }
 
   return null;
