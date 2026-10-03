@@ -650,3 +650,27 @@ test('browser verification wait does not replace human Project interaction primi
   assert.match(block, /humanPointerClick\(page, submit/);
   assert.doesNotMatch(block, /dispatchEvent|requestSubmit|form\.submit|force:\s*true/);
 });
+
+
+test('Project sidebar recovery follows Chat sidebar options through Organize sidebar and Show', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  const start = source.indexOf('async function exposeProjectsInSidebar(page)');
+  const end = source.indexOf('\nasync function ', start + 20);
+  const block = source.slice(start, end);
+
+  assert.match(block, /aria-label="Chat sidebar options"/);
+  assert.match(block, /has-text\("Organize sidebar"\)/);
+  assert.match(block, /has-text\("Show"\)/);
+  assert.match(block, /has-text\("Projects"\)/);
+  assert.match(block, /humanPointerClick\(page, sidebarOptions\)/);
+  assert.match(block, /humanPointerClick\(page, organize\)/);
+  assert.match(block, /humanPointerClick\(page, show\)/);
+  assert.match(block, /humanPointerClick\(page, projectsOption\)/);
+  assert.match(block, /sidebarOptionsFound/);
+  assert.match(block, /showFound/);
+
+  assert.doesNotMatch(block, /\.click\(/);
+  assert.doesNotMatch(block, /dispatchEvent/);
+  assert.doesNotMatch(block, /force:\s*true/);
+  assert.doesNotMatch(block, /requestSubmit|form\.submit/);
+});
