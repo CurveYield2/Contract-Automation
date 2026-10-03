@@ -47,3 +47,11 @@ test('shared ChatGPT runtime always starts from immutable bootstrap secret and n
   assert.doesNotMatch(source, /loadEncryptedSessionState|saveEncryptedSessionState|persistHealthySession/);
   assert.doesNotMatch(source, /CHATGPT_SESSION_STATE_/);
 });
+
+test('shared ChatGPT runtime accepts durable root and Project-scoped chat URLs', () => {
+  assert.match(source, /const root = url\.pathname\.match\(\/\^\\\/c\\\/\(\[\^\/\]\+\)/);
+  assert.match(source, /const project = url\.pathname\.match\(\/\^\\\/g\\\/g-p-\[\^\/\]\+\\\/c\\\/\(\[\^\/\]\+\)/);
+  assert.match(source, /if \(!durableChatUrl\(requestedUrl\)\)/);
+  assert.match(source, /root or Project-scoped ChatGPT conversation URL/);
+  assert.match(source, /\/\\\/c\\\/\.test\(parsed\.pathname\)/);
+});
