@@ -105,8 +105,8 @@ test('send path uses visible pointer and keyboard primitives only', () => {
 
 test('recover action reopens the already-posted chat through visible UI without resending', () => {
   assert.match(source, /async function recoverCreatedChatByVisibleSearch/);
-  assert.match(source, /Filter chats and work/);
-  assert.match(source, /humanPointerClick\(page, filter/);
+  assert.match(source, /Visible ChatGPT sidebar Search control was not found/);
+  assert.match(source, /humanPointerClick\(page, searchControl\)/);
   assert.match(source, /humanTypeInto\(page, searchInput, marker/);
   assert.match(source, /humanPointerClick\(page, candidate/);
   assert.match(source, /await waitForDurableChatRoute\(page, 300000\)/);
@@ -309,18 +309,23 @@ test('v10 saved Project reuse accepts canonical Project root while rejecting cha
   assert.match(source, /observedUrl=/);
 });
 
-test('recover opens current Search chats UI with human Ctrl+K and supports current visible editor shapes', () => {
+test('recover opens current Search chats UI through the visible sidebar Search control', () => {
   const start = source.indexOf('async function recoverCreatedChatByVisibleSearch');
   const end = source.indexOf('\nasync function postWithVisibleVerification', start);
   const block = source.slice(start, end);
 
-  const shortcut = block.indexOf("page.keyboard.press('Control+K')");
+  const sidebar = block.indexOf('findVisibleSidebarSurface(page)');
+  const searchControl = block.indexOf("sidebar.getByRole('button', { name: /^Search$/i })");
+  const click = block.indexOf('humanPointerClick(page, searchControl)');
   const locate = block.indexOf("let searchInput = await firstVisible(page, searchSelectors)");
   const type = block.indexOf("await humanTypeInto(page, searchInput, marker)");
-  assert.ok(shortcut >= 0 && locate > shortcut && type > locate);
+  assert.ok(sidebar >= 0 && searchControl > sidebar && click > searchControl && locate > click && type > locate);
+  assert.match(block, /sidebar\.getByText\('Search', \{ exact: true \}\)/);
   assert.match(block, /placeholder\*="Search chats"/);
+  assert.match(block, /placeholder\*="Search"/);
   assert.match(block, /role="combobox"/);
   assert.match(block, /role="textbox"/);
   assert.match(block, /contenteditable="true"/);
-  assert.match(block, /Visible ChatGPT Search chats editor was not found after Ctrl\+K/);
+  assert.match(block, /Visible ChatGPT Search chats editor was not found after clicking sidebar Search/);
+  assert.doesNotMatch(block, /page\.keyboard\.press\('Control\+K'\)/);
 });
