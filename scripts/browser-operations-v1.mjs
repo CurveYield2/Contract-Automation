@@ -422,7 +422,23 @@ async function createProject(page, projectName) {
     throw retryableProjectUiError('PROJECT_CREATE_SUBMIT_MISSING', 'ChatGPT project-create submit control not found');
   }
 
+  const enableDeadline = Date.now() + 10000;
+  while (Date.now() < enableDeadline && !await submit.isEnabled().catch(() => false)) {
+    await page.waitForTimeout(250);
+  }
+  if (!await submit.isEnabled().catch(() => false)) {
+    throw retryableProjectUiError('PROJECT_CREATE_SUBMIT_DISABLED', 'Visible ChatGPT project-create button never became enabled after human typing');
+  }
+
   await humanPointerClick(page, submit, { hoverMs: 280, downMs: 75, settleMs: 420 });
+
+  const closeDeadline = Date.now() + 10000;
+  while (Date.now() < closeDeadline && await input.isVisible().catch(() => false)) {
+    await page.waitForTimeout(250);
+  }
+  if (await input.isVisible().catch(() => false)) {
+    throw retryableProjectUiError('PROJECT_CREATE_FORM_STILL_VISIBLE', 'Visible ChatGPT project-create form remained open after the normal Create click');
+  }
 
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
@@ -434,7 +450,7 @@ async function createProject(page, projectName) {
   }
   throw retryableProjectUiError(
     'PROJECT_CREATE_VERIFICATION_MISSING',
-    'ChatGPT project creation could not be verified through the visible UI; url=' + page.url()
+    'ChatGPT project creation could not be verified through the visible UI after the create form closed; url=' + page.url()
   );
 }
 
