@@ -177,7 +177,8 @@ async function ensureForkRoute({ provider, ethers, txEvidence }) {
     'function execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes) returns (bool)'
   ];
 
-  const localReadSigner = await provider.getSigner(0);\n  const routerRead = new ethers.Contract(ROUTER, routerAbi, localReadSigner);
+  const localReadSigner = await provider.getSigner(0);
+  const routerRead = new ethers.Contract(ROUTER, routerAbi, localReadSigner);
   const current = await routerRead.routeFor(KAT, VB_USDC);
   if (current !== '0x') {
     assert(lower(current) === lower(EXPECTED_ROUTE), 'Existing route differs from expected direct KAT/vbUSDC path');
