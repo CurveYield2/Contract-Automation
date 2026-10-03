@@ -361,39 +361,99 @@ async function findProjectNameEditorFromVisibleCreateSurface(page) {
   return { create, editor: null };
 }
 
+function escapeRegExp(text) {
+  const specials = '\\^$.*+?()[]{}|';
+  let escaped = '';
+  for (const char of String(text)) {
+    escaped += specials.includes(char) ? '\\' + char : char;
+  }
+  return escaped;
+}
+
 async function findProjectLandingComposer(page, name) {
-  const main = page.locator('main, [role="main"]').first();
-  if (!await main.isVisible().catch(() => false)) return null;
+  const cue = 'New chat in ' + name;
+  const cuePattern = new RegExp('^' + escapeRegExp(cue) + '$', 'i');
 
-  const projectNameVisible = main.getByText(name, { exact: true }).first();
-  if (!await projectNameVisible.isVisible().catch(() => false)) return null;
+  // Use the exact human-visible Project-specific new-chat cue shown on the
+  // Project landing page. Never infer Project context from the homepage composer.
+  const placeholderComposer = page.getByPlaceholder(cuePattern).first();
+  if (await placeholderComposer.isVisible().catch(() => false)) return placeholderComposer;
 
-  // Project pages have their own new-chat box. Resolve it only inside the visible
-  // Project main surface; never reuse a homepage/global composer locator here.
-  const textboxes = main.getByRole('textbox');
-  const textboxCount = Math.min(await textboxes.count().catch(() => 0), 12);
-  let best = null;
-  let bestArea = 0;
-  for (let i = 0; i < textboxCount; i += 1) {
-    const candidate = textboxes.nth(i);
+  const visibleCue = page.getByText(cuePattern, { exact: true }).first();
+  if (!await visibleCue.isVisible().catch(() => false)) return null;
+
+  let region = visibleCue;
+  for (let depth = 0; depth < 6; depth += 1) {
+    region = region.locator('xpath=..');
+
+    const textboxes = region.getByRole('textbox');
+    const textboxCount = Math.min(await textboxes.count().catch(() => 0), 8);
+    for (let i = 0; i < textboxCount; i += 1) {
+      const candidate = textboxes.nth(i);
+      if (await candidate.isVisible().catch(() => false)) return candidate;
+    }
+
+    const editables = region.locator('textarea, [contenteditable="true"]');
+    const editableCount = Math.min(await editables.count().catch(() => 0), 8);
+    for (let i = 0; i < editableCount; i += 1) {
+      const candidate = editables.nth(i);
+      if (await candidate.isVisible().catch(() => false)) return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function findVisibleExactProjectEntry(page, projectsTitle, name) {
+  const projectsBox = await projectsTitle.boundingBox().catch(() => null);
+  if (!projectsBox) return null;
+
+  const chatsTitle = page.getByText('Chats', { exact: true }).first();
+  const chatsVisible = await chatsTitle.isVisible().catch(() => false);
+  const chatsBox = chatsVisible ? await chatsTitle.boundingBox().catch(() => null) : null;
+
+  const matches = page.getByText(name, { exact: true });
+  const count = Math.min(await matches.count().catch(() => 0), 20);
+  for (let i = 0; i < count; i += 1) {
+    const candidate = matches.nth(i);
     if (!await candidate.isVisible().catch(() => false)) continue;
     const box = await candidate.boundingBox().catch(() => null);
     if (!box) continue;
-    const area = box.width * box.height;
-    if (area > bestArea) {
-      best = candidate;
-      bestArea = area;
-    }
-  }
-  if (best) return best;
 
-  const editables = main.locator('textarea, [contenteditable="true"]');
-  const editableCount = Math.min(await editables.count().catch(() => 0), 12);
-  for (let i = 0; i < editableCount; i += 1) {
-    const candidate = editables.nth(i);
-    if (await candidate.isVisible().catch(() => false)) return candidate;
+    const inLeftSidebar = box.x <= 460;
+    const belowProjects = box.y >= projectsBox.y;
+    const aboveChats = !chatsBox || box.y < chatsBox.y;
+    if (inLeftSidebar && belowProjects && aboveChats) return candidate;
   }
+
   return null;
+}
+
+async function recoverExistingProjectExactHumanFlow(page, name) {
+  const projects = await ensureSidebarOpenForProject(page);
+  const existing = await findVisibleExactProjectEntry(page, projects, name);
+  if (!existing) return null;
+
+  await humanPointerClick(page, existing);
+
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const challenge = page.getByText(/Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i).first();
+    if (await challenge.isVisible().catch(() => false)) {
+      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected while opening existing Project; aborting immediately');
+      error.code = 'BROWSER_CHALLENGE';
+      throw error;
+    }
+
+    const composer = await findProjectLandingComposer(page, name);
+    if (composer) {
+      console.log('[github-playwright-v10] project-recovered-visible=' + JSON.stringify({ projectName: name, url: page.url() }));
+      return { projectName: name, url: page.url(), composer, recoveredExisting: true };
+    }
+    await page.waitForTimeout(750);
+  }
+
+  throw new Error('Existing exact-name Project was clicked but its visible Project-specific new-chat box did not appear within 30 seconds');
 }
 
 async function findSendControlNearComposer(page, composer) {
@@ -423,6 +483,9 @@ async function findSendControlNearComposer(page, composer) {
 
 async function createProjectExactHumanFlow(page, name) {
   if (!name) throw new Error('PROJECT_NAME is required for project_wake');
+
+  const recovered = await recoverExistingProjectExactHumanFlow(page, name);
+  if (recovered) return recovered;
 
   const projects = await ensureSidebarOpenForProject(page);
   await humanActionPause(page);
@@ -466,7 +529,7 @@ async function createProjectExactHumanFlow(page, name) {
     }
     await page.waitForTimeout(750);
   }
-  throw new Error('Created Project did not become visibly ready with its Project-scoped new-chat box within 60 seconds');
+  throw new Error('Created Project did not show the visible "New chat in ' + name + '" Project-specific composer within 60 seconds');
 }
 
 async function fillComposer(page, message, composerOverride = null) {

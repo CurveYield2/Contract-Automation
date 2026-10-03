@@ -170,19 +170,38 @@ test('v10 project creation anchors the name editor to the visible Create-project
   assert.doesNotMatch(block, /\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
 });
 
-test('v10 project wake uses the Project-scoped new-chat box instead of the homepage composer', () => {
+test('v10 project wake uses the exact visible Project-specific new-chat cue instead of the homepage composer', () => {
   assert.match(source, /async function findProjectLandingComposer/);
-  assert.match(source, /const main = page\.locator\('main, \[role="main"\]'\)\.first\(\)/);
-  assert.match(source, /main\.getByText\(name, \{ exact: true \}\)/);
-  assert.match(source, /main\.getByRole\('textbox'\)/);
+  assert.match(source, /const cue = 'New chat in ' \+ name/);
+  assert.match(source, /page\.getByPlaceholder\(cuePattern\)/);
+  assert.match(source, /page\.getByText\(cuePattern, \{ exact: true \}\)/);
+  assert.match(source, /region\.getByRole\('textbox'\)/);
   assert.match(source, /async function findSendControlNearComposer/);
   assert.match(source, /postWithVisibleVerification\(page, wakeMessage, project\?\.composer \|\| null\)/);
 
   const createStart = source.indexOf('async function createProjectExactHumanFlow');
   const createEnd = source.indexOf('\nasync function fillComposer', createStart);
   const createBlock = source.slice(createStart, createEnd);
-  assert.match(createBlock, /Created Project did not become visibly ready with its Project-scoped new-chat box/);
+  assert.match(createBlock, /visible "New chat in ' \+ name \+ '" Project-specific composer/);
+  assert.doesNotMatch(createBlock, /const main = page\.locator/);
   assert.doesNotMatch(createBlock, /ensureComposer\(/);
+});
+
+test('v10 project retry recovers an existing exact-name Project before creating a duplicate', () => {
+  assert.match(source, /async function findVisibleExactProjectEntry/);
+  assert.match(source, /async function recoverExistingProjectExactHumanFlow/);
+  assert.match(source, /const matches = page\.getByText\(name, \{ exact: true \}\)/);
+  assert.match(source, /const inLeftSidebar = box\.x <= 460/);
+  assert.match(source, /await humanPointerClick\(page, existing\)/);
+  assert.match(source, /project-recovered-visible/);
+
+  const start = source.indexOf('async function createProjectExactHumanFlow');
+  const end = source.indexOf('\nasync function fillComposer', start);
+  const block = source.slice(start, end);
+  const recover = block.indexOf('recoverExistingProjectExactHumanFlow');
+  const plus = block.indexOf('findProjectsPlusAfterHover');
+  assert.ok(recover >= 0 && plus > recover);
+  assert.match(block, /if \(recovered\) return recovered/);
 });
 
 test('v10 randomized pacing uses 0.3-1.5s between actions and 0.2-0.4s per character', () => {
