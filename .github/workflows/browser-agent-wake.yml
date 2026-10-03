@@ -132,7 +132,7 @@ jobs:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: audit-wake-human-only-v1
           persist-credentials: false
           fetch-depth: 1
 
@@ -682,7 +682,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main -f wake_id="$WAKE_ID"
+          gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref audit-wake-human-only-v1 -f wake_id="$WAKE_ID"
 
       - name: Cleanup browser display
         if: always()
