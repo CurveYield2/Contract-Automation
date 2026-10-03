@@ -848,25 +848,43 @@ async function recoverCreatedChatByVisibleSearch(page, message) {
   const marker = recoverySearchMarker(message);
   if (!marker) throw new Error('recover action could not derive a visible search marker');
 
-  const filter = await firstVisible(page, [
-    'button[aria-label="Filter chats and work"]',
-    '[role="button"][aria-label="Filter chats and work"]',
-    'button[aria-label*="Filter chats" i]',
-    'button[aria-label*="Search chats" i]',
-    'button[aria-label*="Search" i]'
-  ]);
-  if (!filter) throw new Error('Visible ChatGPT chat-search control was not found');
-  await humanPointerClick(page, filter, { hoverMs: 180, downMs: 65, settleMs: 420 });
+  // Current ChatGPT Search chats is opened by the normal human keyboard
+  // shortcut. Prefer that over stale filter-button assumptions.
+  await humanActionPause(page);
+  await page.keyboard.press('Control+K');
+  await humanActionPause(page);
 
-  const searchInput = await firstVisible(page, [
-    '[role="dialog"] input[placeholder*="Search" i]',
-    '[role="dialog"] input[aria-label*="Search" i]',
-    'input[placeholder*="Search" i]',
-    'input[aria-label*="Search" i]',
+  const searchSelectors = [
+    '[placeholder*="Search chats" i]',
+    '[aria-label*="Search chats" i]',
+    '[role="dialog"] [role="combobox"]',
+    '[role="dialog"] [role="textbox"]',
+    '[role="dialog"] textarea',
+    '[role="dialog"] input',
+    '[role="dialog"] [contenteditable="true"]',
     '[role="searchbox"]'
-  ]);
-  if (!searchInput) throw new Error('Visible ChatGPT chat-search input was not found');
-  await humanTypeInto(page, searchInput, marker, { delay: 45 });
+  ];
+
+  let searchInput = await firstVisible(page, searchSelectors);
+
+  // Retain a human pointer fallback for accounts where the visible search
+  // control still exists but Ctrl+K is not bound.
+  if (!searchInput) {
+    const filter = await firstVisible(page, [
+      'button[aria-label="Filter chats and work"]',
+      '[role="button"][aria-label="Filter chats and work"]',
+      'button[aria-label*="Search chats" i]',
+      'button[aria-label*="Search" i]'
+    ]);
+    if (filter) {
+      await humanPointerClick(page, filter);
+      await humanActionPause(page);
+      searchInput = await firstVisible(page, searchSelectors);
+    }
+  }
+
+  if (!searchInput) throw new Error('Visible ChatGPT Search chats editor was not found after Ctrl+K');
+  await humanTypeInto(page, searchInput, marker);
 
   const normalizedMarker = marker.replace(/\s+/g, ' ').trim();
   const deadline = Date.now() + 30000;
