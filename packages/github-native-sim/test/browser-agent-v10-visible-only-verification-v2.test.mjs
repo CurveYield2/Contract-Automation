@@ -325,10 +325,18 @@ test('recover opens the Project first, then uses only the visible Project chat l
   assert.doesNotMatch(block, /Search chats|Control\+K|humanTypeInto\(page, searchInput/);
 });
 
-test('visible Project-name recovery clicks the nearest rendered link or button and captures navigation', () => {
+test('visible Project-name recovery prefers the full accessible Project row before inner text', () => {
   const start = source.indexOf('async function findVisibleExactProjectEntry');
   const end = source.indexOf('\nasync function recoverExistingProjectExactHumanFlow', start);
   const block = source.slice(start, end);
+  const roleLink = block.indexOf("page.getByRole('link', { name: namePattern })");
+  const roleButton = block.indexOf("page.getByRole('button', { name: namePattern })");
+  const textFallback = block.indexOf('page.getByText(namePattern, { exact: true })');
+  assert.ok(roleLink >= 0 && roleButton > roleLink && textFallback > roleButton);
+  assert.match(block, /box\.x <= 460/);
+  assert.match(block, /box\.y <= projectsBox\.y \+ 420/);
+  assert.match(block, /ancestor-or-self::\*\[@role="link"\]\[1\]/);
+  assert.match(block, /ancestor-or-self::\*\[@role="button"\]\[1\]/);
   assert.match(block, /ancestor-or-self::a\[1\]/);
   assert.match(block, /ancestor-or-self::button\[1\]/);
 });
