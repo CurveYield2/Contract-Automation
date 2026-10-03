@@ -174,8 +174,9 @@ test('wake workflow retries retryable browser failures on a bounded fresh runner
   assert.match(workflow, /--json/);
   assert.match(workflow, /steps\.fresh-runner-retry\.outputs\.dispatched != 'true'/);
 
+  assert.doesNotMatch(workflow, /Detect refreshed encrypted ChatGPT session state|actions\/cache\/(?:restore|save)@v4|chatgpt-session-state-v1-/);
+
   for (const stepName of [
-    'Detect refreshed encrypted ChatGPT session state',
     'Create watchdog state',
     'Persist watchdog state',
     'Persist fresh-chat URL into campaign registration',
