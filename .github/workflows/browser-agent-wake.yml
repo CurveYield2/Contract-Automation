@@ -304,6 +304,7 @@ jobs:
           export WAKE_ACTION='wake'
           export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
           export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
+          export BROWSER_DIAGNOSTIC_SCREENSHOT='true'
           set +e
           node scripts/browser-agent-wake.mjs
           rc=$?
@@ -344,6 +345,15 @@ jobs:
           if [ "$ok" != true ]; then
             echo "::warning::Browser wake did not complete on this runner (retryable=$retryable code=$retry_code rc=$rc)."
           fi
+
+      - name: Upload visible browser failure screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-agent-visible-failure-${{ github.run_id }}
+          path: /tmp/browser-agent-visible-failure.png
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Persist captured Phase-1 Project URL
         if: ${{ inputs.worker_role == 'reviewer' && inputs.phase_id == 'phase-1' && steps.deliver.outputs.project_url != '' }}
