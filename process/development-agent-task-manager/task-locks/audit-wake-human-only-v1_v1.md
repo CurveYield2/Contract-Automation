@@ -21,9 +21,9 @@ SATISFIED:
 
 REMAINING DELTA:
 - Make the human-only ChatGPT interaction ban impossible for browser agents to miss in governing instructions.
-- Remove/disable every direct ChatGPT backend/API/network-probe, DOM-injection, and non-human content read/write mechanism from the live browser path.
-- Upgrade the live browser program to create a new ChatGPT Project, obtain its private share URL through the visible Share Project UI, create a new chat inside it, enter/send the exact Phase 1 wake through human-style visible UI interaction, and durably verify/persist project/chat state.
-- Wire the upgraded protocol into the audit Phase 1 controller/overseer wake pathway and subsequent watch/resume pathway, replacing the broken protocol.
+- In the existing live browser wake/watch implementation, replace only the exact non-human ChatGPT reads/writes (backend/API probes, network inspection, injected-JS/DOM extraction, programmatic clipboard/value mutation) with equivalent visible human UI + mouse/keyboard/OS-clipboard interactions. Do not recreate, redesign, or otherwise alter the workflow.
+- Verify the existing Phase 1 Project-create routine still creates a new Project, obtains its private share URL through the visible Share Project UI, creates a new chat inside it, enters/sends the exact Phase 1 wake through human-style visible UI interaction, and persists project/chat state.
+- Verify the existing audit Phase 1 controller/overseer wake and subsequent watch/resume pathway use the surgically upgraded human-only interactions with no other behavioral changes.
 - Execute a live Phase 1 end-to-end verification using the real pipeline and confirm the correct wake is durably stored in the newly created Project chat.
 - Run regression/qualification checks and merge the verified result to main.
 
@@ -34,4 +34,4 @@ ACTIVE BLOCKER:
 None
 
 NEXT ACTION:
-Inspect the current live Phase 1 controller/orchestrator/browser implementation and enumerate the smallest code delta required to remove non-human ChatGPT interactions and add Project creation/persistence.
+Surgically replace the prohibited ChatGPT read/write calls in scripts/browser-agent-wake.mjs and scripts/browser-operations-v1.mjs, adding only the OS-clipboard dependency required by those replacements; preserve all surrounding workflow/control logic.
