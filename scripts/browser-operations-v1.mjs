@@ -188,26 +188,36 @@ function readOsClipboard() {
 }
 
 async function ensureSidebarOpen(page) {
+  // Human-equivalent state check: if ordinary sidebar navigation is visibly
+  // present, the sidebar is already open. Never click a generic toggle in that
+  // state because the same control becomes "close sidebar".
+  const visibleSidebarItem = await firstVisible(page, [
+    'a:has-text("New chat")',
+    'button:has-text("New chat")',
+    '[role="button"]:has-text("New chat")',
+    'a:has-text("Scheduled")',
+    'a:has-text("Plugins")',
+    'a:has-text("Explore")'
+  ], 250);
+  if (visibleSidebarItem) return { opened: false, alreadyOpen: true };
+
   const open = await firstVisible(page, [
     'button[data-testid="open-sidebar-button"]',
-    'button[data-testid="sidebar-toggle-button"]',
+    'button[data-testid="sidebar-toggle-button"][aria-label*="Open" i]',
+    'button[data-testid="sidebar-toggle-button"][aria-label*="Show" i]',
     'button[aria-label="Open sidebar"]',
-    'button[aria-label="Toggle sidebar"]',
-    'button[aria-label*="Open sidebar"]',
-    'button[aria-label*="Show sidebar"]',
-    'button[aria-label*="sidebar" i]',
-    '[role="button"][aria-label*="sidebar" i]',
-    '[data-testid*="sidebar"][role="button"]',
-    'button[title*="sidebar" i]'
-  ], 500);
+    'button[aria-label*="Open sidebar" i]',
+    'button[aria-label*="Show sidebar" i]',
+    '[role="button"][aria-label*="Open sidebar" i]',
+    '[role="button"][aria-label*="Show sidebar" i]'
+  ], 700);
   if (open) {
     await humanPointerClick(page, open).catch(() => {});
     await page.waitForTimeout(700);
-    return { opened: true };
+    return { opened: true, alreadyOpen: false };
   }
-  return { opened: false };
+  return { opened: false, alreadyOpen: false };
 }
-
 async function findSemanticProjectAction(page) {
   const candidates = [
     page.getByRole('button', { name: /(?:new|add|create).*project|project.*(?:new|add|create)/i }).first(),
