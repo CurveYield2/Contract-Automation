@@ -60,7 +60,7 @@ test('project creation is verified only through visible UI and never backend res
   assert.match(block, /humanScrollSidebarForProjects\(page\)/);
   assert.match(block, /await projects\.hover\(\)/);
   assert.match(block, /findProjectsSectionAddControl/);
-  assert.match(block, /humanTypeInto\(page, input, projectName\)/);
+  assert.match(block, /humanTypeInto\(page, popup\.input, projectName\)/);
   assert.match(block, /Create Project/);
   assert.doesNotMatch(block, /\/backend-api\/projects/);
   assert.doesNotMatch(block, /waitForResponse|page\.on\(['"]response['"]/);
@@ -712,8 +712,8 @@ test('Project creation follows the exact sidebar Projects-hover-plus dialog sequ
   const scroll = block.indexOf('humanScrollSidebarForProjects(page)');
   const hover = block.indexOf('await projects.hover()');
   const plus = block.indexOf('findProjectsSectionAddControl');
-  const type = block.indexOf('await humanTypeInto(page, input, projectName)');
-  const create = block.indexOf('await humanPointerClick(page, submit)');
+  const type = block.indexOf('await humanTypeInto(page, popup.input, projectName)');
+  const create = block.indexOf('await humanPointerClick(page, popup.submit)');
   assert.ok(sidebar >= 0 && scroll > sidebar && hover > scroll && plus > hover && type > plus && create > type);
   assert.doesNotMatch(block, /findNewProjectControl/);
 });
@@ -725,4 +725,17 @@ test('Project lookup uses human mouse-wheel scrolling with randomized pauses', (
   assert.match(source, /page\.mouse\.wheel\(0, -randomDelayMs\(500, 900\)\)/);
   assert.match(source, /page\.mouse\.wheel\(0, randomDelayMs\(350, 700\)\)/);
   assert.match(source, /humanActionPause\(page\)/);
+});
+
+
+test('shared Project popup discovery anchors textbox to visible Create Project control without dialog-role assumptions', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  assert.match(source, /async function findProjectCreatePopupControls/);
+  const start = source.indexOf('async function findProjectCreatePopupControls');
+  const end = source.indexOf('\nasync function createProject(page, projectName)', start);
+  const block = source.slice(start, end);
+  assert.match(block, /button:has-text\("Create project"\)/);
+  assert.match(block, /input:not\(\[type="hidden"\]\), textarea, \[role="textbox"\], \[contenteditable="true"\]/);
+  assert.match(block, /id === 'prompt-textarea'/);
+  assert.doesNotMatch(block, /\[role="dialog"\]/);
 });
