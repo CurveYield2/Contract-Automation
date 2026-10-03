@@ -9,5 +9,5 @@
   "targetBranch": "upgrade/launcher-live-smoke-r1",
   "baseRef": "main",
   "continuityMode": "managed_project",
-  "initialAssignment": "Live smoke retry after Chat sidebar options Project-discovery repair merged to main. Continue the same task and branch; do not restart, redesign, or broaden scope."
+  "initialAssignment": "Same live smoke task. Fresh runner retry because prior runner stalled before browser execution in the Tailscale home-exit routing step. Continue the same task and branch; do not restart, redesign, or broaden scope."
 }
