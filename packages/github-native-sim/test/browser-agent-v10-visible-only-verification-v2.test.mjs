@@ -375,3 +375,28 @@ test('existing Project recovery uses short-click then double-click then long-cli
   assert.match(recover, /Existing exact-name Project title did not navigate after short-click, double-click, and long-click sequence/);
   assert.doesNotMatch(recover, /humanPointerClick\(page, existing\)/);
 });
+
+test('Project recovery requires physical viewport visibility and never scrolls the target into view programmatically', () => {
+  assert.match(source, /async function locatorIsPhysicallyOnscreen/);
+  assert.match(source, /const viewport = page\.viewportSize\(\)/);
+  assert.match(source, /centerY >= 0/);
+  assert.match(source, /centerY <= viewport\.height/);
+
+  const scrollStart = source.indexOf('async function humanScrollSidebarForProjects');
+  const scrollEnd = source.indexOf('\nasync function ensureSidebarOpenForProject', scrollStart);
+  const scrollBlock = source.slice(scrollStart, scrollEnd);
+  assert.match(scrollBlock, /locatorIsPhysicallyOnscreen\(page, projects\)/);
+  assert.match(scrollBlock, /page\.mouse\.wheel/);
+
+  const findStart = source.indexOf('async function findVisibleExactProjectEntry');
+  const findEnd = source.indexOf('\nasync function recoverExistingProjectExactHumanFlow', findStart);
+  const findBlock = source.slice(findStart, findEnd);
+  assert.match(findBlock, /locatorIsPhysicallyOnscreen\(page, candidate\)/);
+
+  const pointStart = source.indexOf('async function visibleTitlePoint');
+  const pointEnd = source.indexOf('\nasync function humanShortTitleClick', pointStart);
+  const pointBlock = source.slice(pointStart, pointEnd);
+  assert.match(pointBlock, /locatorIsPhysicallyOnscreen\(page, locator\)/);
+  assert.doesNotMatch(pointBlock, /scrollIntoViewIfNeeded/);
+  assert.match(pointBlock, /not physically on-screen for human clicking/);
+});
