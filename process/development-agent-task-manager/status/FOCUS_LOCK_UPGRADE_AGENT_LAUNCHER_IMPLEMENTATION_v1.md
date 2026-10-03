@@ -7,14 +7,15 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `768afef6fb97d1214187d90316bc4f7e8f7ed539` after PR #509 merged.
-- PR #508 and PR #509 are merged; their required validation lanes passed.
-- Merged live Project-wake run `37154646487` proves:
+- Base: current `main` at `452d4056af0004409650897fd21c91f021de6914`.
+- PR #508, PR #509, and PR #510 are merged; their required validation lanes passed.
+- Latest merged live Project-wake run `37155631970` proves:
   - home-exit routing succeeded;
   - immutable bootstrap secret loaded successfully;
   - ChatGPT became visibly ready without a Cloudflare challenge;
-  - the Create-project modal name field was found and submitted successfully enough to clear the former modal-input blocker;
-  - terminal failure moved to: `Created Project did not become visibly ready with its Project-scoped new-chat box within 60 seconds`.
+  - the Create-project modal was found, the Project name was typed, and the Create project control was clicked;
+  - browser URL did not change afterward, so the click did not actually create the Project.
+- Most likely current UI cause: the Create project control is visible while disabled and is being clicked before it becomes enabled after typing the Project name.
 - The operator supplied a screenshot of the successful Project landing page. Its reliable human-visible cue is the central composer labeled `New chat in <ProjectName>`, which differs from the homepage composer.
 - Retry must first recover/open an already-created Project with the same exact name if one exists, to avoid duplicate Projects.
 - New operator fact: after successful Project creation, the browser automatically navigates to that Project's URL. Treat that browser URL transition as the earliest durable Project-creation signal and capture the resulting Project URL immediately.
@@ -39,26 +40,24 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## ACTIVE BLOCKER
 
-**The browser must bind successful Project creation to the automatic navigation onto the new Project URL, then resolve the Project-scoped new-chat composer on that destination.**
+**After typing the Project name, wait for the visible Create project control to become enabled before clicking it.**
 
-The previous verification depended only on page-content cues. The operator confirms that successful creation automatically changes the browser URL to the new Project URL. The repair must use that navigation as the first success signal, persist the resulting Project URL, then continue visible-UI composer resolution on the Project page.
+The latest live run reached the Create project click but did not navigate away from the homepage. Since successful creation is confirmed to auto-navigate to the Project URL, the click did not take effect. The current locator accepts a visible button even while disabled.
 
 ## REMAINING DELTA
 
-1. For a newly created Project, record the pre-create browser URL, click the visible Create project button, and wait for the browser to navigate to a distinct Project URL.
-2. Persist that resulting Project URL immediately in the Project result state.
-3. On the destination Project page, locate the Project-specific new-chat box using the visible `New chat in <ProjectName>` cue.
-4. For retries, recover/open an existing exact-name Project before attempting creation, and retain the navigated Project URL.
-5. Keep all ChatGPT interaction human-visible only: mouse/keyboard/scroll and visible accessible controls; no backend/API/network telemetry, page-context `evaluate()`, synthetic DOM click/fill, or clipboard injection.
-6. Add/update regression coverage for Project URL transition capture plus exact-name recovery and Project-specific composer targeting.
+1. After human typing finishes, reacquire the visible Create project button and wait a few seconds for it to become enabled.
+2. Click only the enabled visible Create project control.
+3. Wait a few seconds for automatic Project URL navigation and capture that URL.
+4. Use the captured Project URL as the durable Project identity and include it in the browser result state.
+5. For retries, recover/open an existing exact-name Project before attempting creation.
+6. Keep all ChatGPT interaction human-visible only: mouse/keyboard/scroll and visible accessible controls; no backend/API/network telemetry, page-context `evaluate()`, synthetic DOM click/fill, or clipboard injection.
 7. Run both validation lanes, merge only after both pass, then rerun the exact `HOME_EXIT_PROJECT_WAKE_VERIFY1` Project wake from merged `main`.
-8. Verify the wake is visibly sent inside that Project and persists after the existing visible verification flow.
+8. Verify the wake is visibly sent inside that Project and persists.
 
 ## NEXT ACTION
 
-Create a narrow branch from this focus-lock state and bind Project creation/recovery to the browser's automatic Project-URL navigation. Do not broaden scope.
-
-Create `browser-project-name-control-v1` from this re-anchored current main state, then diagnose the visible Project-name control. Do not broaden scope.
+Create a narrow branch from this focus-lock state, wait for the visible Create project control to become enabled after typing, then rerun the exact Project wake.
 
 ## PARKED / OUT OF SCOPE
 
