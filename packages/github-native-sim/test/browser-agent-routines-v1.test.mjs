@@ -17,7 +17,7 @@ test('project creation opens the sidebar and resolves visible New project contro
   assert.match(source, /open-sidebar-button/);
   assert.match(source, /sidebar-toggle-button/);
   assert.match(source, /aria-label="Open sidebar"/);
-  assert.match(source, /has-text\("New chat"\)/);
+  assert.match(source, /\['New chat', 'Scheduled', 'Plugins', 'Explore'\]/);
   assert.match(source, /alreadyOpen/);
   assert.doesNotMatch(source, /aria-label="Toggle sidebar"/);
   assert.match(source, /async function findNewProjectControl\(page\)/);
@@ -614,6 +614,9 @@ test('Project sidebar recovery follows visible Chat sidebar options through Orga
   assert.match(block, /humanPointerClick\(page, organize\)/);
   assert.match(block, /humanPointerClick\(page, show\)/);
   assert.match(block, /humanPointerClick\(page, projectsOption\)/);
+  assert.match(block, /firstVisibleText\(page, \['Explore'\]/);
+  assert.match(block, /humanPointerClick\(page, explore\)/);
+  assert.match(block, /projectsFromExplore/);
   assert.match(block, /sidebarOptionsFound/);
   assert.match(block, /showFound/);
 
