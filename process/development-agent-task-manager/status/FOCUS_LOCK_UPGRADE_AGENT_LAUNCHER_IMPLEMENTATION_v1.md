@@ -15,8 +15,8 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 ## CURRENT MAIN
 
 - Repository: `CurveYield2/Contract-Automation`
-- Current main commit checked: `ebd90fc50baaf62e26560a37bfa1b40639857978`
-- Repair branch: `upgrade-agent-launcher-live-smoke-repair-v1`
+- Current main commit checked: `988c9d13e979f99720f90a63ac6ebf4830db641d`
+- Repair branch: `upgrade-agent-launcher-project-control-repair-v1`
 
 ## AUTHORITATIVE SPECIFICATIONS
 
@@ -49,17 +49,23 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 - V7 Execution Infrastructure Qualification passed.
 - Lite Structured Phase Regression v2 passed.
 - Implementation PR #492 merged to main.
-- Live smoke request was atomically admitted.
-- Live smoke passed request intake, target-branch creation, authority/spec validation, browser runtime setup, encrypted session restore, Tailscale connection, visible Chrome/Xvfb, VNC setup, and home-exit routing.
-- Live smoke failed only at initial ChatGPT Project creation with retryable Cloudflare challenge HTTP 403 before manager state persistence.
-- Exact comparison with the successful audit browser flow identified the browser challenge as retryable.
-- Current main already contains commit `54808c01f394f9151297f8b39cfb39de8cdded6b`, which added bounded fresh-runner retries to the Development Agent Task Manager after the failed smoke.
-- Therefore fresh-runner retry behavior is already SATISFIED and must not be reimplemented unless live verification disproves it.
-- A subsequent live retry reached the visible Add new project control but failed when the Project-name input did not appear; that older run classified the condition as non-retryable PROVIDER_ERROR.
-- Current main now also contains commit `1f040559fbfd17828debc26ba093a903c11b5e80`, which classifies transient human Project-create UI failures such as missing Project-name input as retryable.
-- That exact second live-smoke failure is therefore also already repaired on current main and must not be reimplemented.
+- Fresh-runner retry support merged.
+- Retryable Project UI failure classification merged.
+- Visible-browser backend-health/manual-verification wait merged in PR #496.
+- Live smoke proved backend verification can clear: later retries returned healthy 200 responses for ChatGPT backend preflight.
+- Live smoke then failed only because the current sidebar recovery did not expose the Project creation control.
+- Terminal diagnostics showed visible `Recents` and `Chat sidebar options`, but no visible `Projects` or `New project`.
+- Current recovery already knows how to use `Organize sidebar` and a `Projects` option once visible, but it does not open `Chat sidebar options` first.
 
 ## REMAINING DELTA
+
+1. Extend only `exposeProjectsInSidebar` so it can open the visible `Chat sidebar options` control, then follow the existing human UI path through `Organize sidebar` and `Show` when present.
+2. Preserve the existing human pointer interaction primitives; do not add DOM-click, force-click, direct backend, or alternate browser paths.
+3. Add focused regression coverage for the sidebar-options navigation.
+4. Re-run `upgrade-launcher-live-smoke-r1`; if Project creation succeeds, continue the same smoke through agent completion and mandatory merge-to-main finalization.
+5. Close this focus lock only after terminal COMPLETE exposes output + ChatGPT Project links.
+
+
 
 1. Add the proven visible-browser backend-health preflight/manual-verification wait to the shared browser runtime without changing the human interaction primitives.
 2. Enable a bounded manual-verification wait for Development Agent Task Manager launches while keeping visible Chrome, VNC, and home-exit routing active.
@@ -77,11 +83,11 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 
 ## ACTIVE BLOCKER
 
-All bounded fresh-runner attempts reached ChatGPT through the intended visible/home-exit browser path but encountered the same browser verification gate during Project creation. The proven older home-exit browser keeps the visible session open and waits for normal human verification or natural recovery; the shared current runtime does not yet implement that wait.
+Current ChatGPT web UI exposes `Chat sidebar options` but the Project recovery path only searches directly for `Organize sidebar`. Because it never opens the sidebar-options menu, it fails with `PROJECT_CREATE_CONTROL_MISSING` even after backend health is restored.
 
 ## NEXT ACTION
 
-Port only the visible-browser backend-health preflight/manual-verification wait into the shared runtime, enable it for development-agent launches, add focused regression coverage, and retry the same smoke task.
+Patch only the sidebar recovery path to open `Chat sidebar options`, then `Organize sidebar`, then `Show` when present, and reuse the existing Projects toggle + human Project creation logic.
 
 ## ANTI-DRIFT CHECK
 
