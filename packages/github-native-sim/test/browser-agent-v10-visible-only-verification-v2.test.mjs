@@ -25,7 +25,6 @@ test('v10 ChatGPT verification is visible-browser-only', () => {
   assert.match(source, /async function humanPointerClick/);
   assert.match(source, /async function humanTypeInto/);
   assert.match(source, /send-strategy=human-pointer-click/);
-  assert.match(source, /async function waitForFreshChatUrl/);
   assert.match(source, /async function humanReload/);
   assert.match(source, /Control\+R/);
   assert.match(source, /visible-wake-before-reload/);
@@ -33,20 +32,36 @@ test('v10 ChatGPT verification is visible-browser-only', () => {
   assert.match(source, /verification: 'visible-browser-only'/);
 });
 
-test('create_fresh captures durable chat URL before persistence reload', () => {
+test('create_fresh handles optimistic local-chatgpt routes without treating them as persistence proof', () => {
+  assert.match(source, /function chatRouteInfo/);
+  assert.match(source, /id\.startsWith\('local-chatgpt:'\)/);
+  assert.match(source, /async function waitForFreshChatRoute/);
+
   const verifyStart = source.indexOf('async function postWithVisibleVerification');
   const verifyEnd = source.indexOf('\nasync function runWithPage', verifyStart);
   const block = source.slice(verifyStart, verifyEnd);
 
-  const waitUrl = block.indexOf('chatUrl = await waitForFreshChatUrl');
+  const waitRoute = block.indexOf('initialRoute = await waitForFreshChatRoute');
   const beforeReload = block.indexOf('visible-wake-before-reload');
   const reload = block.indexOf('await humanReload(page)');
   const afterReload = block.indexOf('visible-wake-after-reload');
 
-  assert.ok(waitUrl >= 0);
-  assert.ok(beforeReload > waitUrl);
+  assert.ok(waitRoute >= 0);
+  assert.ok(beforeReload > waitRoute);
   assert.ok(reload > beforeReload);
   assert.ok(afterReload > reload);
+});
+
+test('visible wake detection does not depend only on legacy user-role attributes', () => {
+  const start = source.indexOf('async function visibleWakePresent');
+  const end = source.indexOf('\nasync function waitForFreshChatRoute', start);
+  const block = source.slice(start, end);
+
+  assert.match(block, /data-message-author-role="user"/);
+  assert.match(block, /page\.locator\('body'\)\.innerText/);
+  assert.match(block, /composerHasMessage/);
+  assert.match(block, /bodyHasMessage && !composerHasMessage/);
+  assert.match(block, /rendered-page-text/);
 });
 
 test('send path uses visible pointer and keyboard primitives only', () => {

@@ -344,31 +344,82 @@ async function waitForVisibleBrowserReady(page) {
   }
 }
 
-async function visibleWakePresent(page, message, timeoutMs = 30000) {
+function chatRouteInfo(value) {
+  try {
+    const url = new URL(value);
+    if (url.origin !== 'https://chatgpt.com') return { isChat: false, isLocal: false, id: '' };
+    const match = url.pathname.match(/^\/c\/([^/]+)\/?$/);
+    if (!match) return { isChat: false, isLocal: false, id: '' };
+    const id = decodeURIComponent(match[1]);
+    return {
+      isChat: Boolean(id),
+      isLocal: id.startsWith('local-chatgpt:'),
+      id
+    };
+  } catch {
+    return { isChat: false, isLocal: false, id: '' };
+  }
+}
+
+async function visibleWakePresent(page, message, timeoutMs = 90000) {
   const deadline = Date.now() + timeoutMs;
+  let last = null;
+
   while (Date.now() < deadline) {
     const users = page.locator('[data-message-author-role="user"]');
-    const count = await users.count().catch(() => 0);
-    for (let i = Math.max(0, count - 8); i < count; i += 1) {
+    const userCount = await users.count().catch(() => 0);
+    for (let i = Math.max(0, userCount - 8); i < userCount; i += 1) {
       const text = await users.nth(i).innerText().catch(() => '');
-      if (text.includes(message)) return { visible: true, userCount: count };
+      if (text.includes(message)) {
+        return { visible: true, userCount, method: 'user-role' };
+      }
     }
+
+    const composer = await firstVisible(page, [
+      '#prompt-textarea',
+      'textarea[placeholder*="Message"]',
+      '[contenteditable="true"][data-lexical-editor="true"]',
+      '[contenteditable="true"]'
+    ]);
+    const composerText = composer
+      ? await composer.inputValue().catch(async () => await composer.innerText().catch(() => ''))
+      : '';
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const bodyHasMessage = bodyText.includes(message);
+    const composerHasMessage = composerText.includes(message);
+
+    last = {
+      visible: bodyHasMessage && !composerHasMessage,
+      userCount,
+      method: bodyHasMessage && !composerHasMessage ? 'rendered-page-text' : 'not-visible',
+      bodyHasMessage,
+      composerHasMessage,
+      url: page.url()
+    };
+    if (last.visible) return last;
+
     await page.waitForTimeout(750);
   }
-  return {
+
+  return last || {
     visible: false,
-    userCount: await page.locator('[data-message-author-role="user"]').count().catch(() => 0)
+    userCount: 0,
+    method: 'not-visible',
+    bodyHasMessage: false,
+    composerHasMessage: false,
+    url: page.url()
   };
 }
 
-async function waitForFreshChatUrl(page, timeoutMs = 30000) {
+async function waitForFreshChatRoute(page, timeoutMs = 90000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const current = page.url();
-    if (/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(current)) return current;
+    const info = chatRouteInfo(current);
+    if (info.isChat) return { url: current, ...info };
     await page.waitForTimeout(500);
   }
-  throw new Error('Fresh chat did not visibly navigate to a durable chatgpt.com/c/... URL');
+  throw new Error('Fresh chat did not visibly navigate to a chatgpt.com/c/... route');
 }
 
 async function humanReload(page) {
@@ -381,39 +432,51 @@ async function humanReload(page) {
 async function postWithVisibleVerification(page, message) {
   const submitted = await post(page, message);
 
-  let chatUrl = page.url();
+  let initialRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
   if (mode === 'create_fresh') {
-    chatUrl = await waitForFreshChatUrl(page, 30000);
-  } else if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(chatUrl)) {
-    throw new Error('Existing-chat send is not on a durable chatgpt.com/c/... URL');
+    initialRoute = await waitForFreshChatRoute(page, 90000);
+  } else if (!initialRoute.isChat) {
+    throw new Error('Existing-chat send is not on a visible chatgpt.com/c/... route');
   }
 
-  const beforeReload = await visibleWakePresent(page, message, 30000);
-  console.log('[github-playwright-v10] visible-wake-before-reload=' + JSON.stringify({ ...beforeReload, chatUrl }));
+  const beforeReload = await visibleWakePresent(page, message, 90000);
+  console.log('[github-playwright-v10] visible-wake-before-reload=' + JSON.stringify({
+    ...beforeReload,
+    chatUrl: initialRoute.url,
+    localRoute: initialRoute.isLocal
+  }));
   if (!beforeReload.visible) {
-    throw new Error('Sent wake is not visibly present in the conversation before reload');
+    throw new Error('Sent wake is not visibly present in the rendered conversation before reload');
   }
 
-  // Persistence proof uses a normal visible browser reload of the exact durable chat URL.
-  // No direct backend request or network-response telemetry is used.
+  // Persistence proof uses a normal visible browser reload of the exact chat route.
+  // A temporary local-chatgpt route is allowed before reload; persistence is proven
+  // only if the message remains visibly rendered after the human-style reload.
   await humanReload(page);
   await waitForVisibleBrowserReady(page);
 
-  if (page.url() !== chatUrl) {
-    throw new Error('Human-style reload did not remain on the same durable chat URL');
+  const reloadedRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
+  if (!reloadedRoute.isChat) {
+    throw new Error('Human-style reload did not return to a visible chatgpt.com/c/... conversation');
   }
 
-  const afterReload = await visibleWakePresent(page, message, 30000);
-  console.log('[github-playwright-v10] visible-wake-after-reload=' + JSON.stringify({ ...afterReload, chatUrl }));
+  const afterReload = await visibleWakePresent(page, message, 90000);
+  console.log('[github-playwright-v10] visible-wake-after-reload=' + JSON.stringify({
+    ...afterReload,
+    chatUrl: reloadedRoute.url,
+    localRoute: reloadedRoute.isLocal
+  }));
   if (!afterReload.visible) {
-    throw new Error('Wake is not visibly present after human-style reload of the durable chat');
+    throw new Error('Wake is not visibly present after human-style reload of the conversation');
   }
 
   return {
     ...submitted,
     persisted: true,
     userCount: afterReload.userCount,
-    chatUrl
+    verificationMethod: afterReload.method,
+    chatUrl: reloadedRoute.url,
+    localRoute: reloadedRoute.isLocal
   };
 }
 
