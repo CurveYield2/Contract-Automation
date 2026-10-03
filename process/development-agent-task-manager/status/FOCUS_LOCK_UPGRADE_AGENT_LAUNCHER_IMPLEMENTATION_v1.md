@@ -12,7 +12,7 @@
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `8424711d153e8ee6989645a4db023476024a6893`.
+- Base: current `main` at `5b73c30a477f3bf0af707a94bbd097ace8c0dd4d`.
 - PR #508 through PR #514 are merged; their required validation lanes passed before merge.
 - Recovery-only run `37158898640` proves:
   - fresh immutable browser state loads normally without a Cloudflare challenge;
@@ -51,17 +51,17 @@
 
 ## ACTIVE BLOCKER
 
-**Merged live run `37162502663` proved the exact Project title target is correct and executed the requested gesture sequence, but the implemented "double-click" was two ordinary clickCount=1 taps rather than a real browser double-click event.**
+**Merged live run `37162936420` revealed that the exact Project title selector is correct, but the selected title was not actually on-screen when chosen.**
 
-Observed live target and gestures:
-- exact visible Project title box: `x=42, y=408, width=261, height=20`;
-- short click fired on the title;
-- attempted double-click fired as two ordinary down/up pairs;
-- long click fired on the title;
-- URL did not navigate;
+Critical evidence:
+- selector matched `HOME_EXIT_PROJECT_WAKE_VERIFY1`;
+- logged title box before click preparation: `x=42, y=-522, width=261, height=20`;
+- Playwright `isVisible()` treated that off-viewport element as visible;
+- the click helper then used programmatic `scrollIntoViewIfNeeded()`, after which gestures fired around `y=373`;
+- real double-click semantics were confirmed (`clickCountSequence:[1,2]`) but URL still did not navigate;
 - no Cloudflare challenge and no wake resend occurred.
 
-The selector remains locked. The next repair changes only double-click event semantics so the second click carries browser clickCount=2 and can emit a genuine `dblclick` event. Keep the user-directed order: short click -> 0.1–0.3s -> real double-click -> 0.1–0.3s -> long click.
+The exact title selector and user-directed click sequence remain locked. The next repair changes only human-visible viewport handling: Projects/title must be physically on-screen before selection, sidebar movement must use human mouse-wheel scrolling, and Project recovery must not use `scrollIntoViewIfNeeded()`.
 
 
 ## REMAINING DELTA
