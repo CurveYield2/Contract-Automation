@@ -7,8 +7,8 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `788b5da91f944575b94ec982fab76d7c40ffc41f` after PR #508 merged and canonical qualification refresh.
-- PR #508 is merged and both validation lanes passed.
+- Base: current `main` at `768afef6fb97d1214187d90316bc4f7e8f7ed539` after PR #509 merged.
+- PR #508 and PR #509 are merged; their required validation lanes passed.
 - Merged live Project-wake run `37154646487` proves:
   - home-exit routing succeeded;
   - immutable bootstrap secret loaded successfully;
@@ -17,6 +17,7 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
   - terminal failure moved to: `Created Project did not become visibly ready with its Project-scoped new-chat box within 60 seconds`.
 - The operator supplied a screenshot of the successful Project landing page. Its reliable human-visible cue is the central composer labeled `New chat in <ProjectName>`, which differs from the homepage composer.
 - Retry must first recover/open an already-created Project with the same exact name if one exists, to avoid duplicate Projects.
+- New operator fact: after successful Project creation, the browser automatically navigates to that Project's URL. Treat that browser URL transition as the earliest durable Project-creation signal and capture the resulting Project URL immediately.
 - The same Project-wake request remains the canonical comparable test:
   - Project: `HOME_EXIT_PROJECT_WAKE_VERIFY1`
   - wake: `[HOME_EXIT_PROJECT_WAKE_VERIFY1] Assistant: when you personally receive this as a new user message inside this new Project, reply exactly HOME_EXIT_PROJECT_WAKE_PERSONALLY_SEEN_VERIFY1`
@@ -38,23 +39,24 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## ACTIVE BLOCKER
 
-**The browser now clears Project creation but fails to recognize the resulting Project landing page / Project-scoped new-chat composer.**
+**The browser must bind successful Project creation to the automatic navigation onto the new Project URL, then resolve the Project-scoped new-chat composer on that destination.**
 
-Current verification wrongly requires the Project name to be visible inside a `main/[role=main]` subtree before accepting the composer. The operator screenshot shows the strongest visible cue is the Project-specific composer text `New chat in <ProjectName>`.
+The previous verification depended only on page-content cues. The operator confirms that successful creation automatically changes the browser URL to the new Project URL. The repair must use that navigation as the first success signal, persist the resulting Project URL, then continue visible-UI composer resolution on the Project page.
 
 ## REMAINING DELTA
 
-1. Add visible-UI recovery for an existing exact-name Project before attempting creation, so retries never create duplicates.
-2. Identify the Project landing page using the visible `New chat in <ProjectName>` composer cue rather than requiring the Project title inside `main/[role=main]`.
-3. Keep all ChatGPT interaction human-visible only: mouse/keyboard/scroll and visible accessible controls; no backend/API/network telemetry, no page-context `evaluate()`, no synthetic DOM click/fill, no clipboard injection.
-4. Add/update regression coverage for exact-name Project recovery and the Project-specific composer cue.
-5. Run both validation lanes.
-6. Merge only after both pass.
-7. Re-run the exact `HOME_EXIT_PROJECT_WAKE_VERIFY1` Project wake from merged `main`.
+1. For a newly created Project, record the pre-create browser URL, click the visible Create project button, and wait for the browser to navigate to a distinct Project URL.
+2. Persist that resulting Project URL immediately in the Project result state.
+3. On the destination Project page, locate the Project-specific new-chat box using the visible `New chat in <ProjectName>` cue.
+4. For retries, recover/open an existing exact-name Project before attempting creation, and retain the navigated Project URL.
+5. Keep all ChatGPT interaction human-visible only: mouse/keyboard/scroll and visible accessible controls; no backend/API/network telemetry, page-context `evaluate()`, synthetic DOM click/fill, or clipboard injection.
+6. Add/update regression coverage for Project URL transition capture plus exact-name recovery and Project-specific composer targeting.
+7. Run both validation lanes, merge only after both pass, then rerun the exact `HOME_EXIT_PROJECT_WAKE_VERIFY1` Project wake from merged `main`.
 8. Verify the wake is visibly sent inside that Project and persists after the existing visible verification flow.
-9. Persist/share the Project URL when the existing share-link stage is reached.
 
 ## NEXT ACTION
+
+Create a narrow branch from this focus-lock state and bind Project creation/recovery to the browser's automatic Project-URL navigation. Do not broaden scope.
 
 Create `browser-project-name-control-v1` from this re-anchored current main state, then diagnose the visible Project-name control. Do not broaden scope.
 
