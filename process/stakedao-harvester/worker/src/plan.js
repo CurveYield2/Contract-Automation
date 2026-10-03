@@ -1,8 +1,8 @@
 // Pure planning functions (no I/O) — SPEC.md §5. Units: CRV and ETH as JS numbers in whole tokens, gas prices in wei.
 
 export const DEFAULT_CONFIG = {
-  minTotalProfitUsd: 0.09, // per-tx minimum profit (2026-10-02: lowered to $0.09; was 0.30 temporarily, 0.12 before) — live via /config
-  minVaultProfitUsd: 0.02,
+  minTotalProfitUsd: 0.03, // per-tx minimum profit (2026-10-02: $0.03; live value set via /config)
+  minVaultProfitUsd: 0.01,
   maxBaseFeeGwei: 0.12,
   gasStreakOverride: 50,
   maxFeeOverBasePct: 5,
@@ -20,6 +20,20 @@ export const DEFAULT_CONFIG = {
   gasLimitMarginPct: 20, // gas LIMIT only (unused gas is not charged)
   maxVaultsPerTx: 40, // harvest every profitable vault at once (40 × ~320k gas ≈ 13M, within a block)
   priorityMaxAgeSec: 1_800, // ignore a hot list older than this
+  // v1.1 (only used when the Worker var HARVESTER_V11 = "1" and the contract has harvestBatch — SPEC.md v1.1)
+  batchFirstVaultGas: 620_000, // harvestBatch, measured 2026-10-02: 1 vault 826k with swap, 664k without
+  batchNextVaultGas: 290_000, // measured 249k–348k per extra vault, avg 290k (5-vault fork run)
+  noSwapBaseGas: 30_000, // harvestBatch without the swap: CRV transfer + checks
+  swapMode: 0, // 0 = always swap (ETH profit floor); 1 = swap only while the bot holds < swapBelowEth
+  swapBelowEth: 0.0005,
+  batchRetryPerVaultSec: 900, // after a batch is not included, use the per-vault harvest for this long
+  // vault tracking by prediction (SPEC "Vault tracking inside the Worker")
+  readyGasGwei: 0.03, // a vault is 'ready' once its fee could pay its own gas at this price (+ the per-vault minimum)
+  harvestedDropPct: 50, // exact read this far below the prediction -> someone harvested it
+  recalcDevPct: 5, // otherwise an error above this -> recompute that vault's rate
+  calibrateHeavyChunk: 60, // claimable_tokens/getPendingRewards per eth_call (they checkpoint: heavy)
+  sidecarRateBlocks: 300, // sidecar accrual measured over this many blocks (about 1 h)
+  rateRefreshSec: 21_600, // light TVL refresh (working balance/supply only) every 6 h
   paused: 0, // circuit breaker: set to 1 by the bot itself on a mined revert; resume with /config {"paused":0}
 };
 
@@ -116,4 +130,22 @@ export function intrinsicGasOf(hexData) {
   let gas = 21_000;
   for (let i = 2; i < hexData.length; i += 2) gas += hexData.slice(i, i + 2) === '00' ? 4 : 16;
   return gas;
+}
+
+/// v1.1: swap this transaction? Always in swapMode 0; in swapMode 1 only while the bot's ETH is below swapBelowEth.
+export function useSwap(botBalanceWei, cfg) {
+  return !cfg.swapMode || Number(botBalanceWei) / 1e18 < cfg.swapBelowEth;
+}
+
+/// The planning config for a transaction: per-vault (v1) or batched (v1.1), with or without the swap. Without the
+/// swap the contract values CRV at Chainlink minus slippageBps, so the model uses the same haircut.
+export function planCfg(cfg, batch, swap) {
+  if (!batch) return cfg;
+  return {
+    ...cfg,
+    firstVaultGas: cfg.batchFirstVaultGas,
+    nextVaultGas: cfg.batchNextVaultGas,
+    baseGas: swap ? cfg.baseGas : cfg.noSwapBaseGas,
+    swapLossPct: swap ? cfg.swapLossPct : cfg.swapSlippageBps / 100,
+  };
 }

@@ -124,3 +124,56 @@ Never the deployer key; keys never printed or committed.
 - **Circuit breaker:** the first mined revert (any version of the tx, incl. abandoned ones that land later) sets
   `paused = 1` in the bot's config and records `halted` in `/stats`; nothing is sent until `/config {"paused":0}`.
   Worst case if MEV Blocker's revert protection ever fails = one reverted tx (≈ $0.5–2.6), not the bot's balance.
+
+## Next version (v2) — planned after the current version is battle-tested (user, 2026-10-02)
+Measured on a fork (2026-10-02, same gauges): ours 833k / 1.263M / 1.605M gas for 1 / 2 / 3 vaults vs one direct
+Accountant call 614k / 995k / 1.289M. Gap = fixed ≈ 170k (CRV→ETH swap ≈ 141k + payout) + ≈ 48k per vault.
+- **Swap only occasionally**, from a bot ETH budget: skip the swap while the bot holds enough ETH (CRV goes to the fee
+  Safe), swap only to refill. Saves ≈ 150k per tx. Trade-off: the profit floor is then CRV at an oracle price, not
+  ETH actually received — which is why v1 swaps every time.
+- **One batched Accountant call** instead of one per vault: ≈ 48k per vault; one bad vault reverts the batch (free
+  under /noreverts) → the bot retries without it.
+- Needs a redeploy. Measurement test: `contracts/test/BatchGas.t.sol`.
+
+## v1.1 — batched harvest + optional swap (DRAFT for approval, 2026-10-02)
+New function next to the existing per-vault `harvest` (kept as fallback):
+`harvestBatch(gauges, minTotalProfitWei, intrinsicGas, slippageBps, swap)` — bot only.
+1. **One** `Accountant.harvest(gauges, data, this)` call for every vault (no per-vault rollback; the bot pre-filters
+   with exact on-chain fee reads). One failing vault reverts the whole batch — free under `/noreverts`; the bot then
+   falls back to the per-vault `harvest` for that set.
+2. `swap = true` (v1 behaviour): all CRV → ETH on tricrv (min = Chainlink − slippage); bot refilled to `botReserve`,
+   rest to `admin`; **profit = ETH received − all gas ≥ minTotalProfitWei** (real ETH floor).
+3. `swap = false`: all CRV straight to `admin` (fee Safe); no bot refill; **profit = CRV × Chainlink ×
+   (1 − slippageBps) − all gas ≥ minTotalProfitWei** (oracle floor with a haircut). Saves the ≈ 141k-gas swap.
+- Bot (config): `swapMode` 0 = always swap (default — battle-test v1 behaviour), 1 = swap only while the bot's ETH
+  is below `swapBelowEth` (an ETH budget), otherwise send CRV to the fee Safe.
+- Needs a redeploy (measured 1,726,622 gas ≈ 0.00012 ETH at 0.07 gwei).
+- **Prepared (2026-10-02), not live:** contract `harvestBatch` + 35 fork tests (incl. `test/BatchGas.t.sol`); bot path
+  behind the Worker var `HARVESTER_V11` (= "0" now, so redeploying the Worker changes nothing); gas model 620k + 290k
+  per extra vault (+190k swap / +30k without), within 5% of the fork measurements. Switch-over:
+  `C:SERSSERDESKTOPCLAUDESTAKEDAO-UPGRADE-V11.PS1` (DEPLOY + VERIFY + WORKER `HARVESTER` + `HARVESTER_V11 = "1"`).
+
+## Vault tracking inside the Worker — prediction, not polling (DRAFT for approval, 2026-10-03)
+Why: GitHub runs scheduled workflows in CurveYield2/Contract-Automation only every 3–6 h (the repo's own
+`browser-agent-watchdog`, set to every 5 min, shows the same), so the hot list goes stale. And polling is pointless:
+**a gauge's CRV accrues at a fixed rate within an epoch** (rates change only when gauge weights update, weekly,
+Thursday 00:00 UTC). So each vault's fee is *predicted*, and read on-chain only when the prediction says it matters.
+- **Rates, calculated (not measured):** for each gauge the locker's CRV per second =
+  `CRV.rate()` × `GaugeController.gauge_relative_weight(gauge)` × `gauge.working_balances(locker)` ÷
+  `gauge.working_supply()` (0 if `is_killed`); fee rate = that × the Accountant's harvest fee %. Sidecar CRV
+  (Convex share) is calculated the same way from its own gauge position where possible, otherwise from two of its
+  reads. One Multicall3 pass for all vaults computes every rate (+ a baseline fee read); recomputed **once per epoch**
+  right after the Thursday 00:00 UTC weight update, and for a single vault whenever its exact read before sending
+  disagrees with the prediction by more than a few % (e.g. a large deposit/withdrawal changed the working supply).
+- **Predicted fee** = last read fee + rate × time since that read — only ever evaluated for ready vaults.
+- **"Only cut the grass at 6 inches" — computed once, not every minute:** when a vault's rate or baseline is set,
+  its **ready time** is computed once and stored: the earliest moment it could be worth harvesting at all — its fee
+  covering its gas at the lowest gas price the bot would ever act at (`readyGasGwei`, e.g. 0.03) plus the per-vault
+  minimum. Vaults sit in a queue sorted by ready time. The per-minute tick only looks at the **front of the queue**
+  (ready time ≤ now) — every other vault is untouched: no RPC, no arithmetic. Ready vaults stay in a small "ready
+  pool" that the tick plans with (exact read before sending, as today) until they are harvested.
+- **Someone else harvested** shows up exactly when it matters: the exact read before sending comes back far below
+  the prediction → that vault's baseline resets to the read value (rate kept), and it drops out until it re-accrues.
+- New vaults (daily vault-list refresh) are read once to get a baseline, then follow the same rules.
+- Storage: one ledger key (fee, read time, rate per vault), written only after a read pass or a candidate read.
+- The GitHub workflow keeps only `workflow_dispatch` (manual backup; a signed `/priority` push is still accepted).
