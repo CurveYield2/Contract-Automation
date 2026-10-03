@@ -42,7 +42,7 @@ on:
       manual_challenge_wait_minutes:
         description: Maximum wait for manual login/verification
         required: true
-        default: "15"
+        default: "5"
         type: string
 
   push:
@@ -103,7 +103,7 @@ jobs:
             echo "wake_message=$(jq -r '.wake_message // ""' "$request")" >> "$GITHUB_OUTPUT"
             echo "home_exit_node=$(jq -r '.home_exit_node' "$request")" >> "$GITHUB_OUTPUT"
             echo "interactive_view=$(jq -r '.interactive_view // true' "$request")" >> "$GITHUB_OUTPUT"
-            echo "manual_wait=$(jq -r '.manual_challenge_wait_minutes // 15' "$request")" >> "$GITHUB_OUTPUT"
+            echo "manual_wait=$(jq -r '.manual_challenge_wait_minutes // 5' "$request")" >> "$GITHUB_OUTPUT"
           else
             echo "action=$INPUT_ACTION" >> "$GITHUB_OUTPUT"
             echo "mode=$INPUT_MODE" >> "$GITHUB_OUTPUT"

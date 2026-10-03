@@ -2,94 +2,58 @@
 
 ## END-STATE INVARIANT
 
-Implement the merged Upgrade Agent Launcher v2 specifications on top of current Contract-Automation main so the operator can:
+The Upgrade Agent Launcher must admit a development task into the existing Development Agent Task Manager, create and preserve one ChatGPT Project for managed continuity, keep all ChatGPT interaction human-visible, complete the focus-locked task, verify it, merge it into the target repository main branch, and expose the output + ChatGPT Project links.
 
-1. submit a repository-development task from a minimal private Cloudflare page;
-2. have that task admitted into the existing Development Agent Task Manager without a parallel runtime;
-3. allow the existing focus-locked Project-backed manager to implement, supervise, recover, and verify the task;
-4. require successful tasks to merge their verified implementation into the target repository's main branch before terminal completion;
-5. receive exactly the useful final links: Open output and Open ChatGPT Project.
-
-A GitHub-only workflow-dispatch fallback must admit the same task shape without Cloudflare.
-
-## CURRENT MAIN
+## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Current main commit checked: `147af0885915eef9c6e4eb8a59f747265bf6b82d`
-- Upgrade Agent Launcher implementation merged.
-- Shared development-agent ChatGPT visible-only verification merged by PR #502 at merge commit `8caf39065cc64e40d9cbe56a0f002384d4f2c250`.
-- Dedicated v10 create-fresh VERIFY4 request currently exercising merged behavior.
-- Current dedicated browser run: `37145638325`.
-
-## AUTHORITATIVE SPECIFICATIONS
-
-- `process/development-agent-task-manager/specifications/UPGRADE_AGENT_LAUNCHER_SYSTEM_SPEC_v2.md`
-- `process/development-agent-task-manager/specifications/UPGRADE_AGENT_LAUNCHER_CLOUDFLARE_WEB_SPEC_v2.md`
-- `process/development-agent-task-manager/specifications/UPGRADE_AGENT_LAUNCHER_GITHUB_FALLBACK_SPEC_v2.md`
-- existing `TASK_LOCK_PROTOCOL_v1.md`
-
-## HARD BOUNDARIES
-
-- Reuse `.github/workflows/development-agent-task-manager.yml` as the sole development-agent runtime.
-- Do not create a parallel browser driver, watchdog, supervisor, or replacement system.
-- Do not alter audit execution wakes, audit reviewer monitors/watchdogs, audit campaign orchestration, audit phase handoffs, or audit methodology.
-- Never add GitHub Actions workflows to Audit-Controller.
-- Cloudflare performs intake + minimal submitted-task result lookup only.
-- Cloudflare never receives ChatGPT credentials/session state.
-- No force-push or branch-protection bypass.
-- Successful completion requires verified merge into target repository `main`.
-- All ChatGPT interaction and verification must use visible human browser behavior only:
-  - no direct ChatGPT backend/API reads;
-  - no request/response network telemetry as proof;
-  - no synthetic DOM/form/force writes;
-  - no page-context clipboard injection.
+- Repair branch: `browser-challenge-fast-fail-durable-route-v1`
+- Launcher implementation is merged.
+- Shared browser visible-only verification is merged.
+- VERIFY4 proved human-style create-fresh send succeeds and the wake becomes visibly rendered.
+- VERIFY4 also proved reloading an optimistic `local-chatgpt:` route can trigger a Cloudflare challenge.
+- Current repair waits for a durable server `/c/<id>` route before reload.
+- Visible Cloudflare/human-verification challenge now aborts immediately and is non-retryable.
+- Ordinary visible-browser readiness timeout is 5 minutes.
+- Project-operation Cloudflare challenge is non-retryable.
+- No audit wake/monitor/orchestration workflow is being modified.
 
 ## SATISFIED
 
-- Launcher design v2 and launcher implementation are merged.
-- Cloudflare intake, GitHub fallback admission, merge finalization, output metadata, and Project continuity are implemented.
-- V7 Execution Infrastructure Qualification and Lite Structured Phase Regression passed for the launcher implementation.
-- Saved ChatGPT authenticated state is confirmed in live runs.
-- Project sidebar recovery follows the current visible UI path: `Chat sidebar options -> Organize sidebar -> Show -> Projects`.
-- Project sidebar repair PR #497 is merged.
-- Original v10 browser verification was repaired to visible-browser-only behavior and merged.
-- Shared development-agent browser runtime was repaired to visible-browser-only behavior.
-- Shared-runtime duplicate-safety is preserved: every post-Send verification failure is non-retryable.
-- PR #502 passed both repository validation suites and is merged.
-- Static guards now prohibit backend/network ChatGPT verification and synthetic ChatGPT writes in both v10 and the shared runtime.
-- Tailscale home-exit routing has been proven successful in finalized runs; apparent long-lived `Route browser phase...` states can be GitHub Actions status lag while Playwright is already running.
+- Human-only ChatGPT input and verification guards are present.
+- No direct ChatGPT backend/API verification reads are used by v10 or shared wake runtime.
+- No request/response network telemetry is used as delivery proof.
+- No synthetic DOM/form/force write fallback is used.
+- Post-Send verification failures are non-retryable to prevent duplicate sends.
+- Project sidebar discovery is repaired.
+- Tailscale home-exit routing has been proven functional in finalized runs.
+- Fresh chat can be created and the wake can be visibly rendered.
 
 ## REMAINING DELTA
 
-1. Let dedicated v10 run `37145638325` reach a finalized Playwright result without retriggering it.
-2. Verify `create_fresh` produces a visible new chat, captures its chat route, performs a normal human-style reload, and still visibly contains VERIFY4 using no machine backend/network reads.
-3. If VERIFY4 succeeds, return to the existing `upgrade-launcher-live-smoke-r1` task and rerun it on merged shared-runtime code.
-4. Verify the Development Agent Task Manager creates/persists the managed ChatGPT Project, runs the focus-locked agent, validates its completion receipt, merges the implementation to target `main`, and writes terminal completed state.
-5. Close this focus lock only after terminal COMPLETE exposes both the output link and ChatGPT Project link.
-
-## PARKED OBSERVATIONS
-
-- General dashboards are out of scope.
-- Active-task control buttons are out of scope.
-- Audit-process redesign is out of scope.
-- General repository cleanup is out of scope.
-- Cloudflare deployment/account provisioning is outside repository code; implementation should be deployment-ready without embedded credentials.
-- GitHub Actions live step-state lag is an observation only; do not redesign routing based solely on a stale in-progress label.
+1. Pass both repository validation lanes for the fast-fail + durable-route repair.
+2. Merge this repair to `main`.
+3. Run the dedicated v10 create-fresh test on merged code and verify:
+   - challenge aborts immediately if it appears;
+   - otherwise the optimistic route transitions to a durable `/c/<id>` before reload;
+   - the visible wake survives the normal human-style reload.
+4. If v10 succeeds, rerun `upgrade-launcher-live-smoke-r1` on the merged shared runtime.
+5. Verify managed Project persistence, focus-locked agent completion, mandatory merge-to-main finalization, and terminal output + Project links.
 
 ## ACTIVE BLOCKER
 
-No code blocker is presently proven.
-
-The only unresolved item is the terminal result of dedicated v10 create-fresh VERIFY4 run `37145638325`. Its live GitHub step state may lag behind the runner's actual progress, so it must not be retriggered solely because `Route browser phase through home exit node` appears in progress.
+None proven in code. The repair requires CI and live verification.
 
 ## NEXT ACTION
 
-Wait for run `37145638325` to finalize. Inspect its completed Playwright log and classify only the exact terminal result. Do not change browser, Tailscale, Project, launcher, or audit code unless that finalized result proves a specific unsatisfied blocker.
+Run repository validation on this exact branch. Do not change scope unless a failing check proves a specific blocker.
+
+## PARKED OBSERVATIONS
+
+- General dashboards and repository cleanup are out of scope.
+- Audit execution process redesign is out of scope.
+- GitHub live step-status lag is not evidence of a routing failure by itself.
 
 ## ANTI-DRIFT CHECK
 
-Before each meaningful action:
-
-`Which REMAINING DELTA item does this action eliminate or verify?`
-
-If none, do not perform it.
+Before each meaningful action: which REMAINING DELTA item does this eliminate or verify? If none, do not perform it.

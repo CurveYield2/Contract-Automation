@@ -332,13 +332,18 @@ async function waitForVisibleBrowserReady(page) {
       url: page.url()
     }));
 
-    if (composer && !visible.loginPrompt && !visible.humanChallenge && !visible.conversationUnavailable) return true;
+    if (visible.humanChallenge) {
+      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected; aborting immediately');
+      error.code = 'BROWSER_CHALLENGE';
+      throw error;
+    }
+    if (composer && !visible.loginPrompt && !visible.conversationUnavailable) return true;
     if (Date.now() >= deadline) {
-      throw new Error('ChatGPT visible browser state did not become ready within the configured wait');
+      throw new Error('ChatGPT visible browser state did not become ready within the configured 5-minute wait');
     }
 
     if (bool(env.INTERACTIVE_VIEW_ENABLED)) {
-      console.log('[github-playwright-v10] Visible browser is not ready. The private VNC session remains available for normal human login or verification.');
+      console.log('[github-playwright-v10] Visible browser is not ready; waiting only for ordinary UI/login readiness. Cloudflare challenge would abort immediately.');
     }
     await page.waitForTimeout(5000);
   }
@@ -422,6 +427,29 @@ async function waitForFreshChatRoute(page, timeoutMs = 90000) {
   throw new Error('Fresh chat did not visibly navigate to a chatgpt.com/c/... route');
 }
 
+async function waitForDurableChatRoute(page, timeoutMs = 300000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const title = await page.title().catch(() => '');
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const visible = visibleBrowserStateText(bodyText, title);
+    if (visible.humanChallenge) {
+      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected while waiting for durable chat URL; aborting immediately');
+      error.code = 'BROWSER_CHALLENGE';
+      throw error;
+    }
+
+    const current = page.url();
+    const info = chatRouteInfo(current);
+    if (info.isChat && !info.isLocal) {
+      console.log('[github-playwright-v10] durable-chat-route=' + JSON.stringify({ url: current }));
+      return { url: current, ...info };
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error('Fresh chat remained on an optimistic/local route beyond the 5-minute durable-route timeout');
+}
+
 async function humanReload(page) {
   console.log('[github-playwright-v10] verification-reload=human-keyboard-control-r');
   await page.keyboard.press('Control+R');
@@ -449,15 +477,18 @@ async function postWithVisibleVerification(page, message) {
     throw new Error('Sent wake is not visibly present in the rendered conversation before reload');
   }
 
-  // Persistence proof uses a normal visible browser reload of the exact chat route.
-  // A temporary local-chatgpt route is allowed before reload; persistence is proven
-  // only if the message remains visibly rendered after the human-style reload.
+  // Never reload an optimistic local-chatgpt route. Wait for the normal UI
+  // to transition to a durable server-backed /c/<id> route first.
+  if (initialRoute.isLocal) {
+    initialRoute = await waitForDurableChatRoute(page, 300000);
+  }
+
   await humanReload(page);
   await waitForVisibleBrowserReady(page);
 
   const reloadedRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
-  if (!reloadedRoute.isChat) {
-    throw new Error('Human-style reload did not return to a visible chatgpt.com/c/... conversation');
+  if (!reloadedRoute.isChat || reloadedRoute.isLocal) {
+    throw new Error('Human-style reload did not return to a durable chatgpt.com/c/... conversation');
   }
 
   const afterReload = await visibleWakePresent(page, message, 90000);

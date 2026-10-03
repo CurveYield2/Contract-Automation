@@ -706,7 +706,7 @@ async function createProject(page, projectName) {
       const error = new Error('ChatGPT project create HTTP ' + status + ': ' + JSON.stringify(diagnostics));
       if (cfMitigated === 'challenge') {
         error.code = 'BROWSER_CHALLENGE';
-        error.retryable = true;
+        error.retryable = false;
       } else {
         error.code = 'PROJECT_CREATE_REJECTED';
         error.retryable = false;
@@ -880,7 +880,7 @@ async function openProjectByUrl(page, { projectName, projectUrl }) {
   if (/Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText + '\n' + title)) {
     const error = new Error('Stored ChatGPT Project URL is behind a browser/security challenge');
     error.code = 'BROWSER_CHALLENGE';
-    error.retryable = true;
+    error.retryable = false;
     throw error;
   }
   if (/\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText)) {

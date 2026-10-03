@@ -97,7 +97,7 @@ jobs:
       BROWSER_HEADLESS: 'false'
       DISPLAY: ':99'
       INTERACTIVE_VIEW_ENABLED: 'true'
-      MANUAL_CHALLENGE_WAIT_MS: '900000'
+      MANUAL_CHALLENGE_WAIT_MS: '300000'
       HOME_EXIT_NODE: ${{ vars.BROWSER_HOME_EXIT_NODE || '100.112.238.56' }}
     steps:
       - name: Checkout trusted Contract-Automation control plane
@@ -541,7 +541,7 @@ jobs:
       BROWSER_HEADLESS: 'false'
       DISPLAY: ':99'
       INTERACTIVE_VIEW_ENABLED: 'true'
-      MANUAL_CHALLENGE_WAIT_MS: '900000'
+      MANUAL_CHALLENGE_WAIT_MS: '300000'
       HOME_EXIT_NODE: ${{ vars.BROWSER_HOME_EXIT_NODE || '100.112.238.56' }}
     steps:
       - name: Checkout trusted Contract-Automation control plane

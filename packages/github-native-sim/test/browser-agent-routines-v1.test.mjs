@@ -630,22 +630,35 @@ test('Project-create retries remain human-interaction-only', () => {
 });
 
 
-test('shared visible browser runtime waits for normal visible readiness before Project routines', () => {
+test('shared visible browser runtime fast-fails Cloudflare and waits only for ordinary readiness', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   assert.match(source, /async function waitForVisibleBrowserReady\(page, reason = 'visible browser readiness'\)/);
   assert.match(source, /MANUAL_CHALLENGE_WAIT_MS/);
   assert.match(source, /INTERACTIVE_VIEW_ENABLED/);
-  assert.match(source, /Visible browser is not ready/);
+  assert.match(source, /if \(state\?\.humanChallenge\)/);
+  assert.match(source, /Visible ChatGPT\/Cloudflare verification detected; aborting workflow immediately/);
   assert.match(source, /await waitForVisibleBrowserReady\(page, 'initial browser session'\)/);
-  assert.match(source, /error\?\.code !== 'BROWSER_CHALLENGE'/);
-  assert.match(source, /pre-message routine verification/);
-  assert.match(source, /post-verification reload/);
   assert.match(source, /runBrowserRoutineStage/);
-
+  assert.doesNotMatch(source, /pre-message routine verification/);
+  assert.doesNotMatch(source, /post-verification reload/);
   assert.doesNotMatch(source, /async function backendPreflight/);
   assert.doesNotMatch(source, /async function waitForBackendHealth/);
   assert.doesNotMatch(source, /\/backend-api\//);
   assert.doesNotMatch(source, /fetch\s*\(/);
+});
+
+test('shared create_fresh waits for a durable chat URL before human reload', () => {
+  const source = read('scripts/browser-agent-wake.mjs');
+  assert.match(source, /async function waitForDurableChatUrl\(page, timeoutMs = 300000\)/);
+  const start = source.indexOf('async function postWithVisibleVerification');
+  const end = source.indexOf('\nasync function waitForVisibleBrowserReady', start);
+  const block = source.slice(start, end);
+  const visible = block.indexOf('visible-wake-before-reload');
+  const durable = block.indexOf('await waitForDurableChatUrl(page, 300000)');
+  const reload = block.indexOf('await humanReload(page)');
+  assert.ok(visible >= 0);
+  assert.ok(durable > visible);
+  assert.ok(reload > durable);
 });
 
 test('browser verification wait does not replace human Project interaction primitives', () => {
