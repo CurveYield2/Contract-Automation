@@ -209,8 +209,10 @@ async function humanPointerClick(page, locator) {
   await humanActionPause(page);
 }
 
-async function visibleTitlePoint(locator, horizontalFraction) {
-  await locator.scrollIntoViewIfNeeded().catch(() => {});
+async function visibleTitlePoint(page, locator, horizontalFraction) {
+  if (!await locatorIsPhysicallyOnscreen(page, locator)) {
+    throw new Error('Visible Project title is not physically on-screen for human clicking');
+  }
   const box = await locator.boundingBox();
   if (!box) throw new Error('Visible Project title has no clickable bounding box');
 
@@ -223,7 +225,7 @@ async function visibleTitlePoint(locator, horizontalFraction) {
 }
 
 async function humanShortTitleClick(page, locator, horizontalFraction = 0.32) {
-  const point = await visibleTitlePoint(locator, horizontalFraction);
+  const point = await visibleTitlePoint(page, locator, horizontalFraction);
   await page.mouse.move(point.x, point.y, { steps: 14 });
   await page.mouse.down();
   await page.waitForTimeout(randomDelayMs(70, 140));
@@ -237,7 +239,7 @@ async function humanShortTitleClick(page, locator, horizontalFraction = 0.32) {
 }
 
 async function humanDoubleTitleClick(page, locator, horizontalFraction = 0.5) {
-  const point = await visibleTitlePoint(locator, horizontalFraction);
+  const point = await visibleTitlePoint(page, locator, horizontalFraction);
   await page.mouse.move(point.x, point.y, { steps: 12 });
 
   // Chromium only emits genuine double-click semantics when the second physical
@@ -261,7 +263,7 @@ async function humanDoubleTitleClick(page, locator, horizontalFraction = 0.5) {
 }
 
 async function humanLongTitleClick(page, locator, horizontalFraction = 0.68) {
-  const point = await visibleTitlePoint(locator, horizontalFraction);
+  const point = await visibleTitlePoint(page, locator, horizontalFraction);
   await page.mouse.move(point.x, point.y, { steps: 14 });
   await page.mouse.down();
   await page.waitForTimeout(randomDelayMs(550, 900));
@@ -326,9 +328,27 @@ async function findVisibleSidebarSurface(page) {
   return null;
 }
 
+async function locatorIsPhysicallyOnscreen(page, locator) {
+  if (!await locator.isVisible().catch(() => false)) return false;
+  const box = await locator.boundingBox().catch(() => null);
+  const viewport = page.viewportSize();
+  if (!box || !viewport) return false;
+
+  const centerX = box.x + box.width / 2;
+  const centerY = box.y + box.height / 2;
+  return (
+    box.width > 0 &&
+    box.height > 0 &&
+    centerX >= 0 &&
+    centerY >= 0 &&
+    centerX <= viewport.width &&
+    centerY <= viewport.height
+  );
+}
+
 async function humanScrollSidebarForProjects(page) {
   const projects = page.getByText('Projects', { exact: true }).first();
-  if (await projects.isVisible().catch(() => false)) return projects;
+  if (await locatorIsPhysicallyOnscreen(page, projects)) return projects;
 
   const sidebar = await findVisibleSidebarSurface(page);
   if (!sidebar) return null;
@@ -337,23 +357,23 @@ async function humanScrollSidebarForProjects(page) {
   await humanActionPause(page);
 
   // A person can arrive with the sidebar scrolled anywhere. First move toward
-  // the top, then scan downward until the Projects title appears.
-  for (let i = 0; i < 4; i += 1) {
+  // the top, then scan downward until Projects is physically inside the viewport.
+  for (let i = 0; i < 6; i += 1) {
     await page.mouse.wheel(0, -randomDelayMs(500, 900));
     await humanActionPause(page);
-    if (await projects.isVisible().catch(() => false)) return projects;
+    if (await locatorIsPhysicallyOnscreen(page, projects)) return projects;
   }
-  for (let i = 0; i < 14; i += 1) {
+  for (let i = 0; i < 16; i += 1) {
     await page.mouse.wheel(0, randomDelayMs(350, 700));
     await humanActionPause(page);
-    if (await projects.isVisible().catch(() => false)) return projects;
+    if (await locatorIsPhysicallyOnscreen(page, projects)) return projects;
   }
   return null;
 }
 
 async function ensureSidebarOpenForProject(page) {
   const projects = page.getByText('Projects', { exact: true }).first();
-  if (await projects.isVisible().catch(() => false)) return projects;
+  if (await locatorIsPhysicallyOnscreen(page, projects)) return projects;
 
   const open = await firstVisible(page, [
     'button[data-testid="open-sidebar-button"]',
@@ -591,7 +611,7 @@ async function findVisibleExactProjectEntry(page, projectsTitle, name) {
 
   for (let i = 0; i < count; i += 1) {
     const candidate = matches.nth(i);
-    if (!await candidate.isVisible().catch(() => false)) continue;
+    if (!await locatorIsPhysicallyOnscreen(page, candidate)) continue;
     const box = await candidate.boundingBox().catch(() => null);
     if (!box) continue;
 
