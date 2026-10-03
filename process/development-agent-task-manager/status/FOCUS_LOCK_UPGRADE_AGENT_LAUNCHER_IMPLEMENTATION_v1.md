@@ -2,7 +2,12 @@
 
 ## END-STATE INVARIANT
 
-The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot per browser run, interact with ChatGPT only through visible human UI, create one managed Project through the normal sidebar Projects control, create the task chat inside that Project, complete the focus-locked task, merge the verified implementation to target main, and expose output + Project links.
+1. Finish and live-prove the repaired human-only Project wake/recovery browser routine.
+2. Replace only the broken browser wake/watch implementation inside the audit process pathway with that proven routine; do not recreate or redesign the audit pipeline.
+3. Preserve all current audit/controller authority, validation, phase, Project-continuity, and human-only browser invariants.
+4. Initialize the Phase 1 wake for the most recent CurveYield DEX v16 audit campaign.
+5. Monitor the audit wake/watch/controller execution for glitches; for each actual glitch use DIAGNOSE -> REPAIR -> RETRY -> VERIFY -> CONTINUE.
+6. Continue the existing campaign through its required phases until the audit is complete, without restarting sealed/completed work.
 
 ## CURRENT STATE
 
@@ -46,42 +51,48 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## ACTIVE BLOCKER
 
-**The exact Project title target is confirmed correct. The remaining issue is the physical click gesture.**
+**Finish live verification of the exact visible Project-title gesture sequence before transplanting the routine into the audit wake/watch pathway.**
 
-User-directed click sequence on the exact visible Project title:
+Current user-directed gesture sequence on the already-confirmed exact Project title:
 1. one short normal click;
 2. wait 0.1–0.3 seconds;
 3. one human double-click;
 4. wait 0.1–0.3 seconds;
 5. one longer click;
-6. stop as soon as Project URL navigation is observed.
+6. stop immediately when Project URL navigation is observed.
 
-Do not change the Project selector again unless this exact gesture sequence is disproven by a merged live run.
+The exact Project-title selector is locked. Do not redesign it unless a merged live run disproves this gesture sequence.
 
 ## REMAINING DELTA
 
-1. Keep the canonical request in `recover` mode.
-2. Replace the test request's persisted Project URL with the exact operator-supplied URL.
-3. For recovery, navigate directly to that Project URL before any homepage/global-search flow.
-4. On the visible Project page, ignore the sidebar and enumerate only the visible Project chat entries underneath the Project page's top input/composer.
-5. Open the matching Project chat with the existing human pointer primitive. Prefer an exact/contains match on the unique wake marker/title when visible.
-6. Accept the durable Project-scoped `/g/g-p-.../c/<id>` route and verify the exact wake visibly exists.
-7. Do not send any message. Abort immediately if a human-verification challenge appears.
+1. Validate the current gesture-sequence candidate in the required repository lanes. The unrelated `run-v5.mjs` / `run-v6.mjs` syntax defect may be normalized only in a validation-only branch and must not be merged with browser work.
+2. Merge the production browser candidate only after the browser candidate itself is proven green.
+3. Run the merged recovery workflow and prove:
+   - correct existing Project opens;
+   - Project URL is captured;
+   - existing `VERIFY PROJECT WAKE SIGNAL` chat opens from the Project page;
+   - exact original wake is visibly present;
+   - no wake is resent.
+4. Inspect the audit process wake/watch pathway and replace only its broken browser implementation with the proven routine. Preserve controller/orchestrator/audit semantics.
+5. Run end-to-end audit-path validation for a Phase 1 wake.
+6. Locate the most recent CurveYield DEX v16 audit campaign in `CurveYield2/Audit-Controller`; recover its exact current durable state and do not restart sealed/completed phases.
+7. Initialize Phase 1 wake for that campaign using the current authority skill and required controller validation/campaign/Project links.
+8. Monitor every wake/watch/phase transition. Repair each concrete glitch, restart only the failed step, and continue until the audit reaches its defined completion state.
 
 ## NEXT ACTION
 
-Create a narrow branch that changes only the exact-title click gesture sequence, validate, merge, and rerun recovery.
+Finish validation + merged live proof for the current Project-title gesture sequence. Immediately after success, transplant the proven browser routine into the audit wake/watch pathway and begin the latest DEX v16 campaign Phase 1 wake.
+
 
 ## PARKED / OUT OF SCOPE
 
 - PR #505 and PR #506 branches are historical; do not restart them.
 - Do not redesign Tailscale.
 - Do not change immutable session-state behavior.
-- Do not change audit wake/monitor/orchestration pathways.
 - Do not restore rolling browser-state caches.
 - Do not add generic Project creation shortcuts.
 - Do not add machine-speed or non-human write fallbacks.
-- Do not resume general upgrade-launcher redesign until this Project-wake experiment succeeds.
+- Do not resume general upgrade-launcher redesign. After Project-wake proof, scope moves only to the audit wake/watch pathway and the latest DEX v16 campaign.
 
 ## ANTI-DRIFT CHECK
 
@@ -89,4 +100,4 @@ Before every meaningful action ask:
 
 > Which exact current blocker does this action eliminate or verify?
 
-If it does not diagnose, repair, validate, or retest the Project-name-control blocker, do not perform it.
+Until Project-wake proof: only diagnose, repair, validate, or retest the exact Project-title recovery blocker. After proof: only transplant the proven browser routine into the audit wake/watch pathway, initialize the latest DEX v16 Phase 1 wake, and diagnose/repair/continue that campaign until completion.
