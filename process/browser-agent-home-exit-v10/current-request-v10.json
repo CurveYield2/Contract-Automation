@@ -6,6 +6,6 @@
   "wake_message": "[HOME_EXIT_PLAYWRIGHT_CREATE_FRESH_V10_VERIFY4] Assistant: when you personally receive this as a new user message in this new conversation, reply exactly HOME_EXIT_PLAYWRIGHT_CREATE_FRESH_PERSONALLY_SEEN_V10_VERIFY4",
   "home_exit_node": "100.112.238.56",
   "interactive_view": true,
-  "manual_challenge_wait_minutes": 15,
-  "requested_at": "2026-10-03T11:47:00-07:00"
+  "manual_challenge_wait_minutes": 5,
+  "requested_at": "2026-10-03T12:00:00-07:00"
 }
