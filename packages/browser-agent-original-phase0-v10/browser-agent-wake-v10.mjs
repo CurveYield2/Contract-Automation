@@ -338,6 +338,34 @@ async function findVisibleProjectCreateButton(page) {
   return null;
 }
 
+async function findEnabledProjectCreateButton(page, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const buttons = page.getByRole('button', { name: /^Create project$/i });
+    const count = Math.min(await buttons.count().catch(() => 0), 8);
+    for (let i = 0; i < count; i += 1) {
+      const button = buttons.nth(i);
+      const visible = await button.isVisible().catch(() => false);
+      const enabled = visible ? await button.isEnabled().catch(() => false) : false;
+      if (visible && enabled) return button;
+    }
+
+    const labels = page.getByText(/^Create project$/i, { exact: true });
+    const labelCount = Math.min(await labels.count().catch(() => 0), 8);
+    for (let i = 0; i < labelCount; i += 1) {
+      const label = labels.nth(i);
+      if (!await label.isVisible().catch(() => false)) continue;
+      const button = label.locator('xpath=ancestor-or-self::button[1]');
+      const visible = await button.isVisible().catch(() => false);
+      const enabled = visible ? await button.isEnabled().catch(() => false) : false;
+      if (visible && enabled) return button;
+    }
+
+    await page.waitForTimeout(500);
+  }
+  return null;
+}
+
 async function findProjectNameEditorFromVisibleCreateSurface(page) {
   const create = await findVisibleProjectCreateButton(page);
   if (!create) return { create: null, editor: null };
@@ -524,8 +552,17 @@ async function createProjectExactHumanFlow(page, name) {
 
   await humanTypeInto(page, controls.editor, name);
 
+  // The visible Create project button is initially disabled. Give the UI a
+  // short human-scale moment to enable it after typing, then click only the
+  // enabled rendered control.
+  await page.waitForTimeout(randomDelayMs(1200, 2500));
+  const enabledCreate = await findEnabledProjectCreateButton(page, 8000);
+  if (!enabledCreate) {
+    throw new Error('Create project control did not become visibly enabled after typing the Project name');
+  }
+
   const beforeCreateUrl = page.url();
-  await humanPointerClick(page, controls.create);
+  await humanPointerClick(page, enabledCreate);
 
   // Successful Project creation automatically navigates the browser to the new
   // Project URL. A short human-scale wait is sufficient; capture that URL directly.

@@ -148,8 +148,9 @@ test('v10 project_wake opens or scrolls the sidebar to Projects before hover-plu
   const plus = block.indexOf('findProjectsPlusAfterHover');
   const editor = block.indexOf('findProjectNameEditorFromVisibleCreateSurface');
   const type = block.indexOf('await humanTypeInto(page, controls.editor, name)');
-  const create = block.indexOf('await humanPointerClick(page, controls.create)');
-  assert.ok(sidebar >= 0 && hover > sidebar && plus > hover && editor > plus && type > editor && create > type);
+  const enabled = block.indexOf('findEnabledProjectCreateButton(page, 8000)');
+  const create = block.indexOf('await humanPointerClick(page, enabledCreate)');
+  assert.ok(sidebar >= 0 && hover > sidebar && plus > hover && editor > plus && type > editor && enabled > type && create > enabled);
   assert.doesNotMatch(block, /fetch\s*\(|page\.on\(|waitForResponse|\/backend-api\//);
 });
 
@@ -165,7 +166,8 @@ test('v10 project creation anchors the name editor to the visible Create-project
   const block = source.slice(start, end);
   assert.match(block, /findProjectNameEditorFromVisibleCreateSurface/);
   assert.match(block, /humanTypeInto\(page, controls\.editor, name\)/);
-  assert.match(block, /humanPointerClick\(page, controls\.create\)/);
+  assert.match(block, /findEnabledProjectCreateButton\(page, 8000\)/);
+  assert.match(block, /humanPointerClick\(page, enabledCreate\)/);
   assert.doesNotMatch(block, /\[role="dialog"\] input/);
   assert.doesNotMatch(block, /\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
 });
@@ -176,7 +178,7 @@ test('v10 project creation waits briefly for automatic Project URL navigation an
   const createBlock = source.slice(createStart, createEnd);
 
   assert.match(createBlock, /const beforeCreateUrl = page\.url\(\)/);
-  assert.match(createBlock, /humanPointerClick\(page, controls\.create\)/);
+  assert.match(createBlock, /humanPointerClick\(page, enabledCreate\)/);
   assert.match(createBlock, /randomDelayMs\(3000, 5000\)/);
   assert.match(createBlock, /projectUrl = page\.url\(\)/);
   assert.match(createBlock, /Create project did not navigate to a new Project URL after a short visible wait/);
@@ -218,4 +220,20 @@ test('v10 Create-project modal has visible-label fallbacks and a short render wa
   const end = source.indexOf('\nasync function fillComposer', start);
   const block = source.slice(start, end);
   assert.match(block, /randomDelayMs\(2500, 4500\)/);
+});
+
+test('v10 waits for the visible Create project button to become enabled after typing', () => {
+  assert.match(source, /async function findEnabledProjectCreateButton/);
+  assert.match(source, /button\.isEnabled\(\)/);
+  assert.match(source, /ancestor-or-self::button\[1\]/);
+
+  const start = source.indexOf('async function createProjectExactHumanFlow');
+  const end = source.indexOf('\nasync function fillComposer', start);
+  const block = source.slice(start, end);
+  const type = block.indexOf('await humanTypeInto(page, controls.editor, name)');
+  const enabled = block.indexOf('findEnabledProjectCreateButton(page, 8000)');
+  const click = block.indexOf('humanPointerClick(page, enabledCreate)');
+  assert.ok(type >= 0 && enabled > type && click > enabled);
+  assert.match(block, /randomDelayMs\(1200, 2500\)/);
+  assert.match(block, /Create project control did not become visibly enabled after typing the Project name/);
 });
