@@ -1,11 +1,12 @@
 {
   "schemaVersion": "curveyield-browser-home-exit-request-v10",
-  "action": "recover",
+  "action": "project_wake",
   "mode": "create_fresh",
   "chat_url": "",
-  "wake_message": "[HOME_EXIT_PLAYWRIGHT_CREATE_FRESH_V10_VERIFY4] Assistant: when you personally receive this as a new user message in this new conversation, reply exactly HOME_EXIT_PLAYWRIGHT_CREATE_FRESH_PERSONALLY_SEEN_V10_VERIFY4",
+  "wake_message": "[HOME_EXIT_PROJECT_WAKE_VERIFY1] Assistant: when you personally receive this as a new user message inside this new Project, reply exactly HOME_EXIT_PROJECT_WAKE_PERSONALLY_SEEN_VERIFY1",
   "home_exit_node": "100.112.238.56",
   "interactive_view": true,
   "manual_challenge_wait_minutes": 5,
-  "requested_at": "2026-10-03T13:05:00-07:00"
+  "requested_at": "2026-10-03T13:30:00-07:00",
+  "project_name": "HOME_EXIT_PROJECT_WAKE_VERIFY1"
 }
