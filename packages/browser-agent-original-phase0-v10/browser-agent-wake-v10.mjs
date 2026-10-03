@@ -500,76 +500,32 @@ async function findVisibleExactProjectEntry(page, projectsTitle, name) {
   if (!projectsBox) return null;
 
   const namePattern = new RegExp('^' + escapeRegExp(name) + '$', 'i');
-  const inProjectBand = async (candidate) => {
-    if (!await candidate.isVisible().catch(() => false)) return false;
-    const box = await candidate.boundingBox().catch(() => null);
-    if (!box) return false;
-    return box.x <= 460 && box.y >= projectsBox.y && box.y <= projectsBox.y + 420;
-  };
-
-  // Prefer the complete visible interactive Project row. Clicking the inner text
-  // node did not navigate in live Chrome, while a person clicks the rendered row.
-  const roleGroups = [
-    page.getByRole('link', { name: namePattern }),
-    page.getByRole('button', { name: namePattern })
-  ];
-  for (const group of roleGroups) {
-    const count = Math.min(await group.count().catch(() => 0), 12);
-    for (let i = 0; i < count; i += 1) {
-      const candidate = group.nth(i);
-      if (await inProjectBand(candidate)) return candidate;
-    }
-  }
-
   const matches = page.getByText(namePattern, { exact: true });
   const count = Math.min(await matches.count().catch(() => 0), 20);
+
   for (let i = 0; i < count; i += 1) {
     const candidate = matches.nth(i);
-    if (!await inProjectBand(candidate)) continue;
+    if (!await candidate.isVisible().catch(() => false)) continue;
+    const box = await candidate.boundingBox().catch(() => null);
+    if (!box) continue;
 
-    const roleLink = candidate.locator('xpath=ancestor-or-self::*[@role="link"][1]');
-    if (await roleLink.isVisible().catch(() => false)) return roleLink;
-    const roleButton = candidate.locator('xpath=ancestor-or-self::*[@role="button"][1]');
-    if (await roleButton.isVisible().catch(() => false)) return roleButton;
-    const link = candidate.locator('xpath=ancestor-or-self::a[1]');
-    if (await link.isVisible().catch(() => false)) return link;
-    const button = candidate.locator('xpath=ancestor-or-self::button[1]');
-    if (await button.isVisible().catch(() => false)) return button;
+    const inProjectBand =
+      box.x <= 460 &&
+      box.y >= projectsBox.y &&
+      box.y <= projectsBox.y + 420;
 
-    // Some current Project rows expose no link/button role at all. In that UI,
-    // a person still clicks the larger rendered row surrounding the Project name.
-    // Walk outward using only visible geometry and pick the first compact sidebar
-    // row that clearly contains the text, rather than clicking the text glyphs.
-    const textBox = await candidate.boundingBox().catch(() => null);
-    if (textBox) {
-      let row = candidate;
-      for (let depth = 0; depth < 6; depth += 1) {
-        row = row.locator('xpath=..');
-        if (!await row.isVisible().catch(() => false)) continue;
-        const rowBox = await row.boundingBox().catch(() => null);
-        if (!rowBox) continue;
-
-        const containsText =
-          rowBox.x <= textBox.x &&
-          rowBox.y <= textBox.y &&
-          rowBox.x + rowBox.width >= textBox.x + textBox.width &&
-          rowBox.y + rowBox.height >= textBox.y + textBox.height;
-        const compactProjectRow =
-          rowBox.x <= 460 &&
-          rowBox.y >= projectsBox.y &&
-          rowBox.y <= projectsBox.y + 420 &&
-          rowBox.width >= Math.max(textBox.width + 24, 140) &&
-          rowBox.height >= 28 &&
-          rowBox.height <= 72;
-
-        if (containsText && compactProjectRow) {
-          console.log('[github-playwright-v10] project-row-target=visible-geometry-parent');
-          return row;
+    if (inProjectBand) {
+      console.log('[github-playwright-v10] project-title-target=' + JSON.stringify({
+        strategy: 'exact-visible-title-text',
+        box: {
+          x: Math.round(box.x),
+          y: Math.round(box.y),
+          width: Math.round(box.width),
+          height: Math.round(box.height)
         }
-      }
+      }));
+      return candidate;
     }
-
-    return candidate;
   }
 
   return null;

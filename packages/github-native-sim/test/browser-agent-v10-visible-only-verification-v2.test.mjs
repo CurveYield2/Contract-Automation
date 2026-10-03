@@ -199,10 +199,9 @@ test('v10 project retry recovers an existing exact-name Project and captures its
   assert.match(source, /async function findVisibleExactProjectEntry/);
   assert.match(source, /async function recoverExistingProjectExactHumanFlow/);
   assert.match(source, /const namePattern = new RegExp/);
-  assert.match(source, /page\.getByRole\('link', \{ name: namePattern \}\)/);
-  assert.match(source, /page\.getByRole\('button', \{ name: namePattern \}\)/);
   assert.match(source, /page\.getByText\(namePattern, \{ exact: true \}\)/);
   assert.match(source, /box\.x <= 460/);
+  assert.match(source, /project-title-target=/);
   assert.match(source, /const beforeUrl = page\.url\(\)/);
   assert.match(source, /await humanPointerClick\(page, existing\)/);
   assert.match(source, /projectUrl = page\.url\(\)/);
@@ -328,24 +327,17 @@ test('recover opens the Project first, then uses only the visible Project chat l
   assert.doesNotMatch(block, /Search chats|Control\+K|humanTypeInto\(page, searchInput/);
 });
 
-test('visible Project-name recovery prefers interactive rows then a compact rendered geometry parent', () => {
+test('visible Project-name recovery clicks the exact rendered Project title text directly', () => {
   const start = source.indexOf('async function findVisibleExactProjectEntry');
   const end = source.indexOf('\nasync function recoverExistingProjectExactHumanFlow', start);
   const block = source.slice(start, end);
-  const roleLink = block.indexOf("page.getByRole('link', { name: namePattern })");
-  const roleButton = block.indexOf("page.getByRole('button', { name: namePattern })");
-  const textFallback = block.indexOf('page.getByText(namePattern, { exact: true })');
-  const geometry = block.indexOf('project-row-target=visible-geometry-parent');
-  assert.ok(roleLink >= 0 && roleButton > roleLink && textFallback > roleButton && geometry > textFallback);
+  const text = block.indexOf('page.getByText(namePattern, { exact: true })');
+  const target = block.indexOf("strategy: 'exact-visible-title-text'");
+  assert.ok(text >= 0 && target > text);
+  assert.doesNotMatch(block, /page\.getByRole\('link'|page\.getByRole\('button'/);
+  assert.doesNotMatch(block, /locator\('xpath=\.\.'\)/);
   assert.match(block, /box\.x <= 460/);
+  assert.match(block, /box\.y >= projectsBox\.y/);
   assert.match(block, /box\.y <= projectsBox\.y \+ 420/);
-  assert.match(block, /ancestor-or-self::\*\[@role="link"\]\[1\]/);
-  assert.match(block, /ancestor-or-self::\*\[@role="button"\]\[1\]/);
-  assert.match(block, /ancestor-or-self::a\[1\]/);
-  assert.match(block, /ancestor-or-self::button\[1\]/);
-  assert.match(block, /row = row\.locator\('xpath=\.\.'\)/);
-  assert.match(block, /rowBox\.width >= Math\.max\(textBox\.width \+ 24, 140\)/);
-  assert.match(block, /rowBox\.height >= 28/);
-  assert.match(block, /rowBox\.height <= 72/);
-  assert.match(block, /containsText && compactProjectRow/);
+  assert.match(block, /return candidate/);
 });
