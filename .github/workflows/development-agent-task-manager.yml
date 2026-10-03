@@ -364,9 +364,9 @@ jobs:
           retry_code="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true) | .code][0] // empty' /tmp/task-manager-start.json)"
 
           if [ "$ok" = true ]; then
-            jq -e '.ok==true and (.chatUrl|type=="string" and test("^https://chatgpt.com/c/"))' /tmp/task-manager-start.json >/dev/null
+            jq -e '.ok==true and (.chatUrl|type=="string" and test("^https://chatgpt.com/(c/|g/g-p-[^/]+/c/)"))' /tmp/task-manager-start.json >/dev/null
             if [ "$TASK_MANAGER_CONTINUITY_MODE" = managed_project ]; then
-              jq -e '.projectUrl|type=="string" and test("^https://chatgpt.com/") and (test("^https://chatgpt.com/c/")|not)' /tmp/task-manager-start.json >/dev/null
+              jq -e '.projectUrl|type=="string" and test("^https://chatgpt.com/g/g-p-[^/]+/project/?$")' /tmp/task-manager-start.json >/dev/null
             fi
             echo 'created=true' >> "$GITHUB_OUTPUT"
             echo 'retry_dispatched=false' >> "$GITHUB_OUTPUT"
@@ -407,7 +407,7 @@ jobs:
           project_url="$(jq -r '.projectUrl // empty' /tmp/task-manager-start.json)"
           if [ "$TASK_MANAGER_CONTINUITY_MODE" = managed_project ]; then
             [ -n "$project_name" ] || project_name="$TASK_MANAGER_PROJECT_NAME"
-            [[ "$project_url" =~ ^https://chatgpt\.com/.+ ]] && ! [[ "$project_url" =~ ^https://chatgpt\.com/c/ ]] || {
+            [[ "$project_url" =~ ^https://chatgpt\.com/g/g-p-[^/]+/project/?$ ]] || {
               echo "::error::Managed development task requires a persisted private Project URL."
               exit 1
             }
@@ -546,7 +546,7 @@ jobs:
             and (.continuity.mode=="managed_project" or .continuity.mode=="standalone")
             and (.continuity.project.name|type=="string")
             and (.continuity.project.url|type=="string")
-            and (if .continuity.mode=="managed_project" then (.continuity.project.url|test("^https://chatgpt.com/") and (test("^https://chatgpt.com/c/")|not)) else true end)
+            and (if .continuity.mode=="managed_project" then (.continuity.project.url|test("^https://chatgpt.com/g/g-p-[^/]+/project/?$")) else true end)
             and (.target.repository|type=="string" and length>0)
             and (.target.branch|type=="string" and length>0)
             and (.chat.url|type=="string")
@@ -1038,7 +1038,7 @@ jobs:
                 unset BROWSER_ROUTINE_ID CHATGPT_PROJECT_NAME CHATGPT_PROJECT_URL
               fi
               unset REFRESH_BEFORE_WAKE RESPONSE_WAIT_MS
-              if node scripts/browser-agent-wake.mjs && jq -e '.ok==true and (.chatUrl|test("^https://chatgpt.com/c/"))' /tmp/task-manager-replacement.json >/dev/null; then
+              if node scripts/browser-agent-wake.mjs && jq -e '.ok==true and (.chatUrl|test("^https://chatgpt.com/(c/|g/g-p-[^/]+/c/)"))' /tmp/task-manager-replacement.json >/dev/null; then
                 new_url="$(jq -r '.chatUrl' /tmp/task-manager-replacement.json)"
                 new_count="$(jq -r '.after.assistantCount // 0' /tmp/task-manager-replacement.json)"
                 new_hash="$(jq -r '.after.lastAssistantHash // empty' /tmp/task-manager-replacement.json)"

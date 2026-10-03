@@ -237,3 +237,30 @@ test('v10 waits for the visible Create project button to become enabled after ty
   assert.match(block, /randomDelayMs\(1200, 2500\)/);
   assert.match(block, /Create project control did not become visibly enabled after typing the Project name/);
 });
+
+test('v10 recognizes both root and Project-scoped durable ChatGPT conversation routes', () => {
+  const start = source.indexOf('function chatRouteInfo');
+  const end = source.indexOf('\nasync function visibleWakePresent', start);
+  const block = source.slice(start, end);
+  assert.match(block, /\^\\\/c\\\/\(\[\^\/\]\+\)/);
+  assert.match(block, /\^\\\/g\\\/\(g-p-\[\^\/\]\+\)\\\/c\\\/\(\[\^\/\]\+\)/);
+  assert.match(block, /projectScoped: Boolean\(projectMatch\)/);
+  assert.match(block, /projectId/);
+});
+
+test('v10 visible recovery can select Project-scoped conversation links', () => {
+  const start = source.indexOf('async function recoverCreatedChatByVisibleSearch');
+  const end = source.indexOf('\nasync function postWithVisibleVerification', start);
+  const block = source.slice(start, end);
+  assert.match(block, /a\[href\^="\/g\/g-p-"\]\[href\*="\/c\/"\]/);
+  assert.match(block, /a\[href\*="chatgpt\.com\/g\/g-p-"\]\[href\*="\/c\/"\]/);
+});
+
+test('v10 resume_existing accepts durable Project-scoped conversations through route parsing', () => {
+  const start = source.indexOf('async function runWithPage');
+  const block = source.slice(start);
+  assert.match(block, /const requestedRoute = chatRouteInfo\(requestedUrl\)/);
+  assert.match(block, /!requestedRoute\.isChat \|\| requestedRoute\.isLocal/);
+  assert.match(block, /root or Project-scoped ChatGPT conversation URL/);
+  assert.doesNotMatch(block, /resume_existing requires a chatgpt\.com\/c\/\.\.\. URL/);
+});
