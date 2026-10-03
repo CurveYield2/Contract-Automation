@@ -400,7 +400,7 @@ jobs:
             | .runner_retry_attempt=$next
           ')"
 
-          printf '%s\n' "$retry_inputs" | gh workflow run browser-agent-wake.yml             --repo "$GITHUB_REPOSITORY"             --ref main             --json
+          printf '%s\n' "$retry_inputs" | gh workflow run browser-agent-wake.yml             --repo "$GITHUB_REPOSITORY"             --ref audit-wake-human-only-v1             --json
 
           echo "dispatched=true" >> "$GITHUB_OUTPUT"
           echo "next_attempt=$next" >> "$GITHUB_OUTPUT"
