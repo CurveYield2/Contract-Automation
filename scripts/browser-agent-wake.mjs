@@ -459,7 +459,7 @@ async function post(page, message) {
   throw new BrowserAgentError(
     'SEND_NOT_VISIBLE',
     'Wake message was submitted through the visible composer but did not become visibly rendered within 90 seconds',
-    true
+    false
   );
 }
 
@@ -494,7 +494,7 @@ async function postWithVisibleVerification(page, message) {
     throw new BrowserAgentError(
       'DURABILITY_NOT_VISIBLE',
       'Wake message was not visibly rendered before persistence reload',
-      true
+      false
     );
   }
 
@@ -510,7 +510,7 @@ async function postWithVisibleVerification(page, message) {
     throw new BrowserAgentError(
       'DURABILITY_NOT_VISIBLE_AFTER_RELOAD',
       'Wake message was not visibly rendered after human-style reload',
-      true
+      false
     );
   }
 
