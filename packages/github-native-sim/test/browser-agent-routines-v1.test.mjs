@@ -163,25 +163,30 @@ test('assignment-v2 campaigns resolve active phase from Audit Campaign Directory
   assert.doesNotMatch(repair, /nextMilestone\.phaseRange/);
 });
 
-test('long wake submission is duplicate-safe when ChatGPT transport no longer exposes the message body', () => {
+test('long wake submission is verified through visible browser state only', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   const postStart = source.indexOf('async function post(page, message)');
   const postEnd = source.indexOf('async function runWithPage', postStart);
   const postBlock = source.slice(postStart, postEnd);
-  assert.match(postBlock, /send-request-observed/);
-  assert.match(postBlock, /send-dom-persisted-without-body-marker/);
+
   assert.match(postBlock, /wakeMarkerVisible/);
-  assert.match(postBlock, /likelyConversationWrite/);
   assert.match(postBlock, /composer-diagnostics/);
-  assert.match(postBlock, /SEND_NOT_OBSERVED/);
-  assert.match(postBlock, /postWithBackendVerification/);
-  assert.match(postBlock, /WRITE_RESPONSE_MISSING/);
-  assert.match(postBlock, /WRITE_REJECTED/);
-  assert.match(postBlock, /DURABILITY_NOT_OBSERVED/);
+  assert.match(postBlock, /send-strategy=human-pointer-click/);
+  assert.match(postBlock, /send-strategy=human-keyboard-enter/);
+  assert.match(postBlock, /SEND_NOT_VISIBLE/);
+  assert.match(postBlock, /postWithVisibleVerification/);
   assert.match(postBlock, /persistedWakeVisible/);
-  assert.match(postBlock, /responseCandidates/);
-  assert.match(postBlock, /postSendChallenge/);
-  assert.match(postBlock, /post-send health/);
+  assert.match(postBlock, /verification-reload=human-keyboard-control-r/);
+  assert.match(postBlock, /visible-wake-before-reload/);
+  assert.match(postBlock, /visible-wake-after-reload/);
+  assert.match(postBlock, /verification: 'visible-browser-only'/);
+
+  assert.doesNotMatch(postBlock, /send-request-observed/);
+  assert.doesNotMatch(postBlock, /likelyConversationWrite/);
+  assert.doesNotMatch(postBlock, /page\.on\(['"]request['"]/);
+  assert.doesNotMatch(postBlock, /page\.on\(['"]response['"]/);
+  assert.doesNotMatch(postBlock, /\/backend-api\//);
+  assert.doesNotMatch(postBlock, /fetch\s*\(/);
 });
 
 test('failed non-infrastructure idle pokes consume the escalation budget and can repair Phase-0', () => {
@@ -269,7 +274,7 @@ test('wake runtime executes browser routines around the first message and return
   assert.match(source, /CHATGPT_PROJECT_URL/);
   assert.match(source, /CHATGPT_CHAT_NAME/);
   assert.match(source, /stage:\s*'before_message'/);
-  assert.match(source, /await postWithBackendVerification\(page, wakeMessage\)/);
+  assert.match(source, /await postWithVisibleVerification\(page, wakeMessage\)/);
   assert.match(source, /stage:\s*'after_message'/);
   assert.match(source, /projectUrl:/);
   assert.match(source, /chatRenamed:/);
@@ -484,18 +489,17 @@ test('Project creation and reviewer wake use only ordinary pointer and keyboard 
   const fillStart = wake.indexOf('async function fillComposer(page, message)');
   const fillEnd = wake.indexOf('async function persistedWakeVisible', fillStart);
   const sendBlock = wake.slice(fillStart, fillEnd);
-  assert.match(sendBlock, /grantPermissions\(\['clipboard-read', 'clipboard-write'\]/);
-  assert.match(sendBlock, /navigator\.clipboard\.writeText\(text\)/);
+  assert.match(sendBlock, /pressSequentially\(String\(message\), \{ delay: 12 \}\)/);
   assert.match(sendBlock, /normalizeVisibleText/);
   assert.match(sendBlock, /visibleMessageMarker/);
-  assert.match(sendBlock, /normalized wake marker after clipboard paste/);
-  assert.match(sendBlock, /composer\.press\(process\.platform === 'darwin' \? 'Meta\+V' : 'Control\+V'\)/);
-  assert.doesNotMatch(sendBlock, /pressSequentially\(message/);
+  assert.match(sendBlock, /normalized wake marker after keyboard entry/);
   assert.match(sendBlock, /humanPointerClick\(page, send/);
+  assert.doesNotMatch(sendBlock, /clipboard-read|clipboard-write|navigator\.clipboard/);
   assert.doesNotMatch(sendBlock, /\.fill\(/);
   assert.doesNotMatch(sendBlock, /force:\s*true/);
   assert.doesNotMatch(sendBlock, /requestSubmit|form\.submit/);
   assert.doesNotMatch(sendBlock, /evaluate\([^\n]*\.click/);
+  assert.doesNotMatch(sendBlock, /page\.on\(['"](?:request|response)['"]/);
 });
 
 test('project creation hovers Projects and distinguishes the plus control from the overflow menu', () => {
@@ -626,18 +630,22 @@ test('Project-create retries remain human-interaction-only', () => {
 });
 
 
-test('shared visible browser runtime waits for normal verification before Project routines', () => {
+test('shared visible browser runtime waits for normal visible readiness before Project routines', () => {
   const source = read('scripts/browser-agent-wake.mjs');
-  assert.match(source, /async function backendPreflight\(page\)/);
-  assert.match(source, /async function waitForBackendHealth\(page, reason = 'browser preflight'\)/);
+  assert.match(source, /async function waitForVisibleBrowserReady\(page, reason = 'visible browser readiness'\)/);
   assert.match(source, /MANUAL_CHALLENGE_WAIT_MS/);
   assert.match(source, /INTERACTIVE_VIEW_ENABLED/);
-  assert.match(source, /Browser verification is pending/);
-  assert.match(source, /await waitForBackendHealth\(page, 'initial browser session'\)/);
+  assert.match(source, /Visible browser is not ready/);
+  assert.match(source, /await waitForVisibleBrowserReady\(page, 'initial browser session'\)/);
   assert.match(source, /error\?\.code !== 'BROWSER_CHALLENGE'/);
   assert.match(source, /pre-message routine verification/);
   assert.match(source, /post-verification reload/);
   assert.match(source, /runBrowserRoutineStage/);
+
+  assert.doesNotMatch(source, /async function backendPreflight/);
+  assert.doesNotMatch(source, /async function waitForBackendHealth/);
+  assert.doesNotMatch(source, /\/backend-api\//);
+  assert.doesNotMatch(source, /fetch\s*\(/);
 });
 
 test('browser verification wait does not replace human Project interaction primitives', () => {

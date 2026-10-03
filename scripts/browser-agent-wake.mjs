@@ -340,29 +340,43 @@ function visibleMessageMarker(message, maxLength = 160) {
 async function wakeMarkerVisible(page, marker) {
   const normalizedMarker = normalizeVisibleText(marker);
   const users = page.locator('[data-message-author-role="user"]');
-  const count = await users.count().catch(() => 0);
-  for (let i = Math.max(0, count - 8); i < count; i += 1) {
+  const userCount = await users.count().catch(() => 0);
+  for (let i = Math.max(0, userCount - 8); i < userCount; i += 1) {
     const text = normalizeVisibleText(await users.nth(i).innerText().catch(() => ''));
-    if (normalizedMarker && text.includes(normalizedMarker)) return { visible: true, userCount: count };
+    if (normalizedMarker && text.includes(normalizedMarker)) {
+      return { visible: true, userCount, method: 'user-role' };
+    }
   }
-  return { visible: false, userCount: count };
-}
 
-function likelyConversationWrite(url) {
-  try {
-    const u = new URL(url);
-    return /\/backend-api\/(?:f\/)?conversation(?:[/?]|$)/.test(u.pathname + u.search) ||
-      /\/backend-api\/.*messages?(?:[/?]|$)/.test(u.pathname + u.search);
-  } catch {
-    return false;
-  }
+  const composer = await firstVisible(page, [
+    '#prompt-textarea',
+    'textarea[placeholder*="Message"]',
+    '[contenteditable="true"][data-lexical-editor="true"]',
+    '[contenteditable="true"]'
+  ]);
+  const composerText = composer
+    ? normalizeVisibleText(await composer.inputValue().catch(async () => await composer.innerText().catch(() => '')))
+    : '';
+  const bodyText = normalizeVisibleText(await page.locator('body').innerText().catch(() => ''));
+  const bodyHasMarker = normalizedMarker && bodyText.includes(normalizedMarker);
+  const composerHasMarker = normalizedMarker && composerText.includes(normalizedMarker);
+
+  return {
+    visible: Boolean(bodyHasMarker && !composerHasMarker),
+    userCount,
+    method: bodyHasMarker && !composerHasMarker ? 'rendered-page-text' : 'not-visible',
+    bodyHasMarker: Boolean(bodyHasMarker),
+    composerHasMarker: Boolean(composerHasMarker)
+  };
 }
 
 async function fillComposer(page, message) {
   const composer = await ensureComposer(page);
   await humanPointerClick(page, composer, { hoverMs: 120, downMs: 55, settleMs: 180 });
 
-  const currentText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
+  const currentText = await composer.inputValue().catch(async () => {
+    return await composer.innerText().catch(() => '');
+  });
   if (currentText) {
     await composer.press('Control+A').catch(async () => composer.press('Meta+A').catch(() => {}));
     await page.waitForTimeout(120);
@@ -370,18 +384,12 @@ async function fillComposer(page, message) {
     await page.waitForTimeout(150);
   }
 
-  // Long audit wakes are normally pasted by a human. Put the message on the
-  // browser clipboard, keep the visible composer focused, and issue a normal
-  // keyboard paste. Do not inject the value into the DOM.
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://chatgpt.com' });
-  await page.evaluate(async (text) => {
-    await navigator.clipboard.writeText(text);
-  }, message);
-  await page.waitForTimeout(180);
-  await composer.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
+  await composer.pressSequentially(String(message), { delay: 12 });
   await page.waitForTimeout(320);
 
-  const filledText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
+  const filledText = await composer.inputValue().catch(async () => {
+    return await composer.innerText().catch(() => '');
+  });
   const normalizedFilled = normalizeVisibleText(filledText);
   const normalizedMessage = normalizeVisibleText(message);
   const marker = visibleMessageMarker(message);
@@ -389,7 +397,7 @@ async function fillComposer(page, message) {
   const prefixMatches = marker.length > 0 && normalizedFilled.includes(marker);
   const lengthLooksPlausible = normalizedFilled.length >= minimumExpectedLength;
   if (!prefixMatches || !lengthLooksPlausible) {
-    console.log('[github-playwright] composer-paste-verification=' + JSON.stringify({
+    console.log('[github-playwright] composer-keyboard-verification=' + JSON.stringify({
       normalizedFilledLength: normalizedFilled.length,
       normalizedMessageLength: normalizedMessage.length,
       markerLength: marker.length,
@@ -398,7 +406,7 @@ async function fillComposer(page, message) {
     }));
     throw new BrowserAgentError(
       'COMPOSER_FILL_MISMATCH',
-      'Composer did not retain the normalized wake marker after clipboard paste',
+      'Composer did not retain the normalized wake marker after keyboard entry',
       true
     );
   }
@@ -412,222 +420,159 @@ async function post(page, message) {
   const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
   await waitForChatIdle(page, idleWaitMs);
 
-  let observed = null;
-  const candidateRequests = [];
-  const onRequest = request => {
-    const method = request.method();
-    if (!['POST','PUT','PATCH'].includes(method)) return;
-    const data = request.postData() || '';
-    if (likelyConversationWrite(request.url())) {
-      candidateRequests.push({ url: request.url(), method, postDataLength: data.length });
-    }
-    if (data.includes(marker)) {
-      observed = { url: request.url(), method, bodyContainsMarker: true, postDataLength: data.length };
-    }
-  };
-  page.on('request', onRequest);
+  let composer = await fillComposer(page, message);
+  console.log('[github-playwright] composer-diagnostics=' + JSON.stringify(await composerDiagnostics(page)));
 
-  try {
-    let composer = await fillComposer(page, message);
-    console.log('[github-playwright] composer-diagnostics=' + JSON.stringify(await composerDiagnostics(page)));
+  const send = await firstVisible(page, [
+    'button[data-testid="send-button"]',
+    'button[data-testid="composer-submit-button"]',
+    'button[aria-label="Send prompt"]',
+    'button[aria-label="Send"]',
+    'button[aria-label*="Send"]'
+  ]);
 
-    const send = await firstVisible(page, [
-      'button[data-testid="send-button"]',
-      'button[data-testid="composer-submit-button"]',
-      'button[aria-label="Send prompt"]',
-      'button[aria-label="Send"]',
-      'button[aria-label*="Send"]'
-    ]);
+  if (send) {
+    console.log('[github-playwright] send-strategy=human-pointer-click');
+    await humanPointerClick(page, send, { hoverMs: 180, downMs: 65, settleMs: 320 });
+  } else {
+    composer = await ensureComposer(page);
+    console.log('[github-playwright] send-strategy=human-keyboard-enter');
+    await composer.press('Enter');
+    await page.waitForTimeout(320);
+  }
 
-    if (send) {
-      await humanPointerClick(page, send, { hoverMs: 180, downMs: 65, settleMs: 260 });
-    } else {
-      composer = await ensureComposer(page);
-      await composer.press('Enter');
-    }
-
-    const deadline = Date.now() + 10000;
-    let dom = { visible: false, userCount: 0 };
-    while (Date.now() < deadline) {
-      if (observed) break;
-      dom = await wakeMarkerVisible(page, marker);
-      if (dom.visible) break;
-      await page.waitForTimeout(250);
-    }
-
-    if (observed) {
-      console.log('[github-playwright] send-request-observed=' + JSON.stringify(observed));
-      return { ...observed, domMarkerObserved: dom.visible };
-    }
-
+  const deadline = Date.now() + 90000;
+  let dom = { visible: false, userCount: 0, method: 'not-visible' };
+  while (Date.now() < deadline) {
     dom = await wakeMarkerVisible(page, marker);
     if (dom.visible) {
-      const fallback = {
-        url: candidateRequests.at(-1)?.url || null,
-        method: candidateRequests.at(-1)?.method || null,
-        bodyContainsMarker: false,
+      console.log('[github-playwright] send-visible-marker=' + JSON.stringify(dom));
+      return {
         domMarkerObserved: true,
-        candidateRequests: [...candidateRequests],
-        userCount: dom.userCount
+        userCount: dom.userCount,
+        verificationMethod: dom.method
       };
-      console.log('[github-playwright] send-dom-persisted-without-body-marker=' + JSON.stringify(fallback));
-      return fallback;
     }
-
-    throw new BrowserAgentError(
-      'SEND_NOT_OBSERVED',
-      'No ChatGPT conversation write or durable user-message marker was observed after ordinary pointer/keyboard submission',
-      true
-    );
-  } finally {
-    page.off('request', onRequest);
+    await page.waitForTimeout(750);
   }
+
+  throw new BrowserAgentError(
+    'SEND_NOT_VISIBLE',
+    'Wake message was submitted through the visible composer but did not become visibly rendered within 90 seconds',
+    false
+  );
 }
 
-async function persistedWakeVisible(page, message) {
+async function persistedWakeVisible(page, message, timeoutMs = 90000) {
   const marker = visibleMessageMarker(message);
-  const deadline = Date.now() + 30000;
+  const deadline = Date.now() + timeoutMs;
+  let state = { visible: false, userCount: 0, method: 'not-visible' };
   while (Date.now() < deadline) {
-    const state = await wakeMarkerVisible(page, marker);
-    if (state.visible) return { persisted: true, userCount: state.userCount };
-    await page.waitForTimeout(1000);
+    state = await wakeMarkerVisible(page, marker);
+    if (state.visible) return { persisted: true, ...state };
+    await page.waitForTimeout(750);
   }
-  const state = await wakeMarkerVisible(page, marker);
-  return { persisted: false, userCount: state.userCount };
+  return { persisted: false, ...state };
 }
 
-async function postWithBackendVerification(page, message) {
-  const marker = visibleMessageMarker(message);
-  let acceptedExact = null;
-  const acceptedCandidates = [];
+async function humanReload(page) {
+  console.log('[github-playwright] verification-reload=human-keyboard-control-r');
+  await page.keyboard.press('Control+R');
+  await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+}
 
-  const onResponse = async response => {
-    const request = response.request();
-    const method = request.method();
-    if (!['POST','PUT','PATCH'].includes(method)) return;
-    const postData = request.postData() || '';
-    const info = {
-      url: response.url(),
-      status: response.status(),
-      method,
-      bodyContainsMarker: postData.includes(marker),
-      cfMitigated: await response.headerValue('cf-mitigated').catch(() => null),
-      server: await response.headerValue('server').catch(() => null)
-    };
-    if (info.bodyContainsMarker) acceptedExact = info;
-    if (likelyConversationWrite(response.url())) acceptedCandidates.push(info);
+async function postWithVisibleVerification(page, message) {
+  const submittedRequest = await post(page, message);
+
+  const beforeReload = await persistedWakeVisible(page, message, 90000);
+  console.log('[github-playwright] visible-wake-before-reload=' + JSON.stringify({
+    ...beforeReload,
+    chatUrl: page.url()
+  }));
+  if (!beforeReload.persisted) {
+    throw new BrowserAgentError(
+      'DURABILITY_NOT_VISIBLE',
+      'Wake message was not visibly rendered before persistence reload',
+      false
+    );
+  }
+
+  await humanReload(page);
+  await waitForVisibleBrowserReady(page, 'post-send persistence reload');
+
+  const afterReload = await persistedWakeVisible(page, message, 90000);
+  console.log('[github-playwright] visible-wake-after-reload=' + JSON.stringify({
+    ...afterReload,
+    chatUrl: page.url()
+  }));
+  if (!afterReload.persisted) {
+    throw new BrowserAgentError(
+      'DURABILITY_NOT_VISIBLE_AFTER_RELOAD',
+      'Wake message was not visibly rendered after human-style reload',
+      false
+    );
+  }
+
+  const passiveState = await snapshot(page).catch(() => null);
+  const delivery = {
+    writeRequestObserved: false,
+    writeAccepted: true,
+    responseBodyMarkerObserved: false,
+    domPersisted: true,
+    verification: 'visible-browser-only',
+    verificationMethod: afterReload.method,
+    postSendChallenge: passiveState?.humanChallenge === true,
+    postSendHealth: null,
+    response: null,
+    responseCandidates: [],
+    submittedRequest,
+    persisted: true,
+    userCount: afterReload.userCount
   };
-
-  page.on('response', onResponse);
-  try {
-    const submittedRequest = await post(page, message);
-    const deadline = Date.now() + 20000;
-    while (Date.now() < deadline && !acceptedExact) {
-      const candidateAccepted = submittedRequest.domMarkerObserved &&
-        acceptedCandidates.find(item => item.status >= 200 && item.status < 300 && item.cfMitigated !== 'challenge');
-      if (candidateAccepted) break;
-      await page.waitForTimeout(250);
-    }
-
-    const accepted = acceptedExact ||
-      (submittedRequest.domMarkerObserved
-        ? acceptedCandidates.find(item => item.status >= 200 && item.status < 300 && item.cfMitigated !== 'challenge')
-        : null);
-
-    if (!accepted) {
-      throw new BrowserAgentError(
-        'WRITE_RESPONSE_MISSING',
-        'Wake submission was observed but no successful ChatGPT conversation write response was captured; candidates=' + JSON.stringify(acceptedCandidates),
-        false
-      );
-    }
-    if (accepted.status < 200 || accepted.status >= 300 || accepted.cfMitigated === 'challenge') {
-      throw new BrowserAgentError('WRITE_REJECTED', 'ChatGPT wake write was rejected: ' + JSON.stringify(accepted), false);
-    }
-
-    const persisted = await persistedWakeVisible(page, message);
-    if (!persisted.persisted) {
-      throw new BrowserAgentError('DURABILITY_NOT_OBSERVED', 'Wake write returned success but the user message was not observed in the current DOM', false);
-    }
-
-    // VERIFY4 established the success boundary: once the exact write is
-    // accepted and the wake is DOM-persisted, post-send health is telemetry only.
-    // A later Cloudflare challenge must never retroactively invalidate delivery.
-    const passiveState = await snapshot(page).catch(() => null);
-    const postSendHealth = null;
-    const postSendChallenge = passiveState?.humanChallenge === true;
-
-    const delivery = {
-      writeRequestObserved: true,
-      writeAccepted: true,
-      responseBodyMarkerObserved: accepted.bodyContainsMarker,
-      domPersisted: true,
-      postSendChallenge,
-      postSendHealth,
-      response: accepted,
-      responseCandidates: acceptedCandidates,
-      submittedRequest,
-      ...persisted
-    };
-    console.log('[github-playwright] delivery-state=' + JSON.stringify(delivery));
-    return delivery;
-  } finally {
-    page.off('response', onResponse);
-  }
+  console.log('[github-playwright] delivery-state=' + JSON.stringify(delivery));
+  return delivery;
 }
 
 
-
-async function backendPreflight(page) {
-  return page.evaluate(async () => {
-    const targets = [
-      '/backend-api/models',
-      '/backend-api/conversations?offset=0&limit=1&order=updated'
-    ];
-    const checks = [];
-    for (const target of targets) {
-      try {
-        const response = await fetch(target, { credentials: 'include', cache: 'no-store' });
-        checks.push({
-          target,
-          status: response.status,
-          ok: response.ok,
-          cfMitigated: response.headers.get('cf-mitigated'),
-          server: response.headers.get('server')
-        });
-      } catch (error) {
-        checks.push({ target, status: 0, ok: false, error: String(error) });
-      }
-    }
-    return checks;
-  });
-}
-
-async function waitForBackendHealth(page, reason = 'browser preflight') {
+async function waitForVisibleBrowserReady(page, reason = 'visible browser readiness') {
   const requested = Number.parseInt(env.MANUAL_CHALLENGE_WAIT_MS || '0', 10);
   const waitMs = Number.isFinite(requested) ? Math.max(0, requested) : 0;
   const deadline = Date.now() + waitMs;
-  let last = null;
 
   while (true) {
-    last = await backendPreflight(page).catch(error => [{ ok: false, status: 0, error: error.message }]);
-    const challenged = last.some(item => item?.cfMitigated === 'challenge');
-    const healthy = last.length > 0 && last.every(item => item?.ok === true && item?.cfMitigated !== 'challenge');
+    const state = await snapshot(page).catch(() => null);
+    const ready = Boolean(
+      state?.composerVisible &&
+      !state?.loginPrompt &&
+      !state?.humanChallenge &&
+      !state?.conversationUnavailable
+    );
 
-    console.log('[github-playwright] backend-preflight=' + JSON.stringify({ reason, healthy, challenged, checks: last }));
+    console.log('[github-playwright] visible-browser-ready=' + JSON.stringify({
+      reason,
+      ready,
+      url: state?.url || page.url(),
+      composerVisible: state?.composerVisible ?? false,
+      loginPrompt: state?.loginPrompt ?? false,
+      humanChallenge: state?.humanChallenge ?? false,
+      conversationUnavailable: state?.conversationUnavailable ?? false
+    }));
 
-    if (healthy) return { healthy: true, challenged, checks: last };
+    if (ready) return state;
     if (Date.now() >= deadline) {
-      throw new BrowserAgentError(
-        'BROWSER_CHALLENGE',
-        'ChatGPT browser verification did not clear within the configured visible-session wait: ' + JSON.stringify(last),
-        true,
-      );
+      if (state?.humanChallenge) {
+        throw new BrowserAgentError('BROWSER_CHALLENGE', 'Visible ChatGPT verification did not clear within the configured wait', true);
+      }
+      if (state?.loginPrompt) {
+        throw new BrowserAgentError('AUTH_REQUIRED', 'Visible ChatGPT browser requires login', false);
+      }
+      throw new BrowserAgentError('VISIBLE_BROWSER_NOT_READY', 'Visible ChatGPT browser did not become ready within the configured wait', true);
     }
 
     if (bool(env.INTERACTIVE_VIEW_ENABLED)) {
       const vnc = env.TAILSCALE_RUNNER_IP ? env.TAILSCALE_RUNNER_IP + ':5900' : 'the private runner VNC endpoint';
-      console.log('[github-playwright] Browser verification is pending. The visible Chrome session remains available at ' + vnc + ' for normal human verification.');
+      console.log('[github-playwright] Visible browser is not ready. The Chrome session remains available at ' + vnc + ' for normal human verification.');
     }
     await page.waitForTimeout(5000);
   }
@@ -651,7 +596,7 @@ async function runWithPage(providerName, connect) {
       await page.waitForTimeout(1500);
     }
 
-    await waitForBackendHealth(page, 'initial browser session');
+    await waitForVisibleBrowserReady(page, 'initial browser session');
     await ensureComposer(page);
 
     let routine = null;
@@ -678,10 +623,10 @@ async function runWithPage(providerName, connect) {
           throw error;
         }
         console.warn('[github-playwright] Browser verification appeared during the pre-message routine; keeping the visible session open before one same-session retry.');
-        await waitForBackendHealth(page, 'pre-message routine verification');
+        await waitForVisibleBrowserReady(page, 'pre-message routine verification');
         await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForTimeout(1500);
-        await waitForBackendHealth(page, 'post-verification reload');
+        await waitForVisibleBrowserReady(page, 'post-verification reload');
         await ensureComposer(page);
         routineBefore = await runBrowserRoutineStage({
           page,
@@ -765,7 +710,7 @@ async function runWithPage(providerName, connect) {
       });
     }
 
-    const delivery = await postWithBackendVerification(page, wakeMessage);
+    const delivery = await postWithVisibleVerification(page, wakeMessage);
 
     // Once submission is verified, never fail over to another browser provider for
     // post-delivery UI bookkeeping. Doing so can create a second reviewer chat.
@@ -866,7 +811,6 @@ async function localProvider(chromium) {
     screen: { width: 1920, height: 1080 },
     deviceScaleFactor: 1
   });
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://chatgpt.com' }).catch(() => {});
   const page = await context.newPage();
   return { browser, context, page, close: () => browser.close() };
 }
