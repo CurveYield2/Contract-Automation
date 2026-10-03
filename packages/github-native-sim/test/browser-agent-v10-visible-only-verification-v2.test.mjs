@@ -32,10 +32,13 @@ test('v10 ChatGPT verification is visible-browser-only', () => {
   assert.match(source, /verification: 'visible-browser-only'/);
 });
 
-test('create_fresh handles optimistic local-chatgpt routes without treating them as persistence proof', () => {
+test('create_fresh waits for a durable server route before persistence reload', () => {
   assert.match(source, /function chatRouteInfo/);
   assert.match(source, /id\.startsWith\('local-chatgpt:'\)/);
   assert.match(source, /async function waitForFreshChatRoute/);
+  assert.match(source, /async function waitForDurableChatRoute/);
+  assert.match(source, /timeoutMs = 300000/);
+  assert.match(source, /BROWSER_CHALLENGE: visible ChatGPT\/Cloudflare verification detected while waiting for durable chat URL; aborting immediately/);
 
   const verifyStart = source.indexOf('async function postWithVisibleVerification');
   const verifyEnd = source.indexOf('\nasync function runWithPage', verifyStart);
@@ -43,13 +46,25 @@ test('create_fresh handles optimistic local-chatgpt routes without treating them
 
   const waitRoute = block.indexOf('initialRoute = await waitForFreshChatRoute');
   const beforeReload = block.indexOf('visible-wake-before-reload');
+  const waitDurable = block.indexOf('initialRoute = await waitForDurableChatRoute');
   const reload = block.indexOf('await humanReload(page)');
   const afterReload = block.indexOf('visible-wake-after-reload');
 
   assert.ok(waitRoute >= 0);
   assert.ok(beforeReload > waitRoute);
-  assert.ok(reload > beforeReload);
+  assert.ok(waitDurable > beforeReload);
+  assert.ok(reload > waitDurable);
   assert.ok(afterReload > reload);
+  assert.match(block, /!reloadedRoute\.isChat \|\| reloadedRoute\.isLocal/);
+});
+
+test('v10 Cloudflare challenge aborts immediately instead of waiting', () => {
+  const start = source.indexOf('async function waitForVisibleBrowserReady');
+  const end = source.indexOf('\nfunction chatRouteInfo', start);
+  const block = source.slice(start, end);
+  assert.match(block, /if \(visible\.humanChallenge\)/);
+  assert.match(block, /BROWSER_CHALLENGE: visible ChatGPT\/Cloudflare verification detected; aborting immediately/);
+  assert.ok(block.indexOf('if (visible.humanChallenge)') < block.indexOf('Date.now() >= deadline'));
 });
 
 test('visible wake detection does not depend only on legacy user-role attributes', () => {
