@@ -191,14 +191,11 @@ async function ensureSidebarOpen(page) {
   // Human-equivalent state check: if ordinary sidebar navigation is visibly
   // present, the sidebar is already open. Never click a generic toggle in that
   // state because the same control becomes "close sidebar".
-  const visibleSidebarItem = await firstVisible(page, [
-    'a:has-text("New chat")',
-    'button:has-text("New chat")',
-    '[role="button"]:has-text("New chat")',
-    'a:has-text("Scheduled")',
-    'a:has-text("Plugins")',
-    'a:has-text("Explore")'
-  ], 250);
+  const visibleSidebarItem = await firstVisibleText(
+    page,
+    ['New chat', 'Scheduled', 'Plugins', 'Explore'],
+    { exact: true, timeout: 250 }
+  );
   if (visibleSidebarItem) return { opened: false, alreadyOpen: true };
 
   const open = await firstVisible(page, [
@@ -276,6 +273,24 @@ async function exposeProjectsInSidebar(page) {
         '[role="button"]:has-text("Organize sidebar")',
         '[aria-label*="Organize sidebar" i]'
       ], 1000);
+    }
+  }
+
+  if (!organize && !sidebarOptions) {
+    const explore = await firstVisibleText(page, ['Explore'], { exact: true, timeout: 700 });
+    if (explore) {
+      await humanPointerClick(page, explore);
+      await page.waitForTimeout(500);
+      const projectsFromExplore = await firstVisible(page, [
+        '[role="menuitem"]:has-text("Projects")',
+        '[role="button"]:has-text("Projects")',
+        'button:has-text("Projects")',
+        'a:has-text("Projects")'
+      ], 1000);
+      if (projectsFromExplore) {
+        await humanPointerClick(page, projectsFromExplore);
+        await page.waitForTimeout(800);
+      }
     }
   }
 
