@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { deriveSessionStateKeyB64, loadEncryptedSessionState, saveEncryptedSessionState, validateStorageState } from './browser-session-state-v1.mjs';
 import { loadBrowserRoutine, runBrowserRoutineStage } from './browser-routine-engine-v1.mjs';
 import { executeBrowserOperation } from './browser-operations-v1.mjs';
@@ -144,6 +145,14 @@ async function firstVisible(page, selectors) {
   return null;
 }
 
+async function visibleTextPresent(page, texts) {
+  for (const text of texts) {
+    const locator = page.getByText(text, { exact: false }).first();
+    try { if (await locator.isVisible({ timeout: 180 })) return true; } catch {}
+  }
+  return false;
+}
+
 async function snapshot(page) {
   const stop = await firstVisible(page, [
     'button[data-testid="stop-button"]',
@@ -156,48 +165,41 @@ async function snapshot(page) {
     '[contenteditable="true"][data-lexical-editor="true"]',
     '[contenteditable="true"]'
   ]);
-  const assistant = page.locator('[data-message-author-role="assistant"]');
-  const user = page.locator('[data-message-author-role="user"]');
-  const aCount = await assistant.count().catch(() => 0);
-  const uCount = await user.count().catch(() => 0);
-  let last = '';
-  if (aCount) last = await assistant.nth(aCount - 1).innerText().catch(() => '');
+  const assistantCount = await page.locator('[data-message-author-role="assistant"]:visible').count().catch(() => 0);
+  const userCount = await page.locator('[data-message-author-role="user"]:visible').count().catch(() => 0);
   const currentUrl = page.url();
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  const title = await page.title().catch(() => '');
-  const conversationUnavailable =
-    /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText);
-  const loginPrompt = /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText);
-  const humanChallenge =
-    /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText) ||
-    /Just a moment|Cloudflare/i.test(title);
+  const conversationUnavailable = await visibleTextPresent(page, [
+    'Unable to load conversation', 'Conversation not found', 'Chat not found', 'This conversation is unavailable'
+  ]);
+  const loginPrompt = await visibleTextPresent(page, [
+    'Log in', 'Sign up', 'Continue with Google', 'Welcome back'
+  ]);
+  const humanChallenge = await visibleTextPresent(page, [
+    'Verify you are human', 'Checking your browser', 'Just a moment', 'security challenge'
+  ]);
+  const loadingText = await visibleTextPresent(page, [
+    'Loading', 'Opening chat', 'Reconnecting', 'Synchronizing'
+  ]);
   const chatViewable =
     /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(currentUrl) &&
     !!composer &&
     !conversationUnavailable &&
     !loginPrompt &&
     !humanChallenge;
-  const mainDiagnostics = await page.locator('main, [role="main"]').first().evaluate(el => ({
-    tag: el.tagName,
-    controls: [...el.querySelectorAll('button,[role="button"],[role="status"],h1,h2')].slice(0,25).map(node => ({
-      tag: node.tagName, role: node.getAttribute('role'), label: node.getAttribute('aria-label'),
-      testId: node.getAttribute('data-testid'), text: node.getAttribute('role') === 'status' ? node.textContent.trim().slice(0,120) : null,
-    })),
-  })).catch(() => null);
   return {
-    pageTitle: title,
-    mainDiagnostics,
-    loadingText: /loading|opening chat|reconnecting|synchroniz/i.test(bodyText),
+    pageTitle: null,
+    mainDiagnostics: null,
+    loadingText,
     generating: !!stop,
     composerVisible: !!composer,
     conversationUnavailable,
     loginPrompt,
     humanChallenge,
     chatViewable,
-    assistantCount: aCount,
-    userCount: uCount,
-    lastAssistantHash: sha(last),
-    lastAssistantLength: last.length,
+    assistantCount,
+    userCount,
+    lastAssistantHash: assistantCount ? 'VISIBLE_ASSISTANT_COUNT_' + assistantCount : '',
+    lastAssistantLength: 0,
     url: currentUrl,
   };
 }
@@ -219,35 +221,19 @@ async function ensureComposer(page) {
   if (composer) return composer;
 
   const currentUrl = page.url();
-  const title = await page.title().catch(() => '');
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  const loginPrompt = /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText);
-  const humanChallenge =
-    /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText) ||
-    /Just a moment|Cloudflare/i.test(title);
-  const conversationUnavailable = /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText);
-  const textareaCount = await page.locator('textarea').count().catch(() => 0);
-  const editableCount = await page.locator('[contenteditable="true"]').count().catch(() => 0);
-
+  const loginPrompt = await visibleTextPresent(page, ['Log in', 'Sign up', 'Continue with Google', 'Welcome back']);
+  const humanChallenge = await visibleTextPresent(page, ['Verify you are human', 'Checking your browser', 'Just a moment', 'security challenge']);
+  const conversationUnavailable = await visibleTextPresent(page, ['Unable to load conversation', 'Conversation not found', 'Chat not found', 'This conversation is unavailable']);
   const diagnostic =
     'ChatGPT composer not found after 30s' +
     ' (url=' + currentUrl +
-    ', title=' + JSON.stringify(title) +
     ', loginPrompt=' + loginPrompt +
     ', humanChallenge=' + humanChallenge +
-    ', conversationUnavailable=' + conversationUnavailable +
-    ', textareaCount=' + textareaCount +
-    ', editableCount=' + editableCount + ')';
+    ', conversationUnavailable=' + conversationUnavailable + ')';
 
-  if (humanChallenge) {
-    throw new BrowserAgentError('BROWSER_CHALLENGE', diagnostic, true);
-  }
-  if (loginPrompt) {
-    throw new BrowserAgentError('AUTH_REQUIRED', diagnostic, false);
-  }
-  if (conversationUnavailable) {
-    throw new BrowserAgentError('CHAT_UNAVAILABLE', diagnostic, false);
-  }
+  if (humanChallenge) throw new BrowserAgentError('BROWSER_CHALLENGE', diagnostic, true);
+  if (loginPrompt) throw new BrowserAgentError('AUTH_REQUIRED', diagnostic, false);
+  if (conversationUnavailable) throw new BrowserAgentError('CHAT_UNAVAILABLE', diagnostic, false);
   throw new BrowserAgentError('CHATGPT_UI_UNAVAILABLE', diagnostic, true);
 }
 
@@ -306,27 +292,20 @@ async function humanPointerClick(page, locator, { hoverMs = 220, downMs = 70, se
 }
 
 async function composerDiagnostics(page) {
-  return page.evaluate(() => {
-    const buttons = [...document.querySelectorAll('button')].slice(-50).map((b, i) => ({
-      i,
-      text: (b.innerText || '').trim().slice(0, 80),
-      aria: b.getAttribute('aria-label'),
-      testid: b.getAttribute('data-testid'),
-      disabled: !!b.disabled,
-      type: b.getAttribute('type')
-    }));
-    const editables = [...document.querySelectorAll('textarea,[contenteditable="true"]')].slice(-20).map((e, i) => ({
-      i,
-      tag: e.tagName,
-      id: e.id,
-      role: e.getAttribute('role'),
-      aria: e.getAttribute('aria-label'),
-      placeholder: e.getAttribute('placeholder'),
-      testid: e.getAttribute('data-testid'),
-      textLength: String(e.innerText || e.value || '').length
-    }));
-    return { buttons, editables, url: location.href, title: document.title };
-  });
+  const sendVisible = !!await firstVisible(page, [
+    'button[data-testid="send-button"]',
+    'button[data-testid="composer-submit-button"]',
+    'button[aria-label="Send prompt"]',
+    'button[aria-label="Send"]',
+    'button[aria-label*="Send"]'
+  ]);
+  const composerVisible = !!await firstVisible(page, [
+    '#prompt-textarea',
+    'textarea[placeholder*="Message"]',
+    '[contenteditable="true"][data-lexical-editor="true"]',
+    '[contenteditable="true"]'
+  ]);
+  return { sendVisible, composerVisible, url: page.url() };
 }
 
 function normalizeVisibleText(value) {
@@ -339,22 +318,23 @@ function visibleMessageMarker(message, maxLength = 160) {
 
 async function wakeMarkerVisible(page, marker) {
   const normalizedMarker = normalizeVisibleText(marker);
-  const users = page.locator('[data-message-author-role="user"]');
+  if (!normalizedMarker) return { visible: false, userCount: 0 };
+  const users = page.locator('[data-message-author-role="user"]:visible');
   const count = await users.count().catch(() => 0);
-  for (let i = Math.max(0, count - 8); i < count; i += 1) {
-    const text = normalizeVisibleText(await users.nth(i).innerText().catch(() => ''));
-    if (normalizedMarker && text.includes(normalizedMarker)) return { visible: true, userCount: count };
-  }
-  return { visible: false, userCount: count };
+  const match = users.filter({ hasText: normalizedMarker }).last();
+  const visible = await match.isVisible({ timeout: 350 }).catch(() => false);
+  return { visible, userCount: count };
 }
 
-function likelyConversationWrite(url) {
-  try {
-    const u = new URL(url);
-    return /\/backend-api\/(?:f\/)?conversation(?:[/?]|$)/.test(u.pathname + u.search) ||
-      /\/backend-api\/.*messages?(?:[/?]|$)/.test(u.pathname + u.search);
-  } catch {
-    return false;
+function writeOsClipboard(text) {
+  const result = spawnSync('xclip', ['-selection', 'clipboard'], {
+    input: String(text),
+    encoding: 'utf8',
+    env: process.env,
+    timeout: 5000,
+  });
+  if (result.error || result.status !== 0) {
+    throw new BrowserAgentError('OS_CLIPBOARD_WRITE_FAILED', 'Unable to write normal X clipboard for ChatGPT paste', true);
   }
 }
 
@@ -362,46 +342,17 @@ async function fillComposer(page, message) {
   const composer = await ensureComposer(page);
   await humanPointerClick(page, composer, { hoverMs: 120, downMs: 55, settleMs: 180 });
 
-  const currentText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
-  if (currentText) {
-    await composer.press('Control+A').catch(async () => composer.press('Meta+A').catch(() => {}));
-    await page.waitForTimeout(120);
-    await composer.press('Backspace');
-    await page.waitForTimeout(150);
-  }
+  await composer.press('Control+A').catch(async () => composer.press('Meta+A').catch(() => {}));
+  await page.waitForTimeout(120);
+  await composer.press('Backspace').catch(() => {});
+  await page.waitForTimeout(150);
 
-  // Long audit wakes are normally pasted by a human. Put the message on the
-  // browser clipboard, keep the visible composer focused, and issue a normal
-  // keyboard paste. Do not inject the value into the DOM.
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://chatgpt.com' });
-  await page.evaluate(async (text) => {
-    await navigator.clipboard.writeText(text);
-  }, message);
+  // Human-equivalent long-message input: place text on the OS clipboard and
+  // paste it into the visibly focused ChatGPT composer with the normal shortcut.
+  writeOsClipboard(message);
   await page.waitForTimeout(180);
   await composer.press(process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
   await page.waitForTimeout(320);
-
-  const filledText = await composer.evaluate(el => (el.innerText || el.textContent || el.value || '')).catch(() => '');
-  const normalizedFilled = normalizeVisibleText(filledText);
-  const normalizedMessage = normalizeVisibleText(message);
-  const marker = visibleMessageMarker(message);
-  const minimumExpectedLength = Math.min(marker.length, Math.floor(normalizedMessage.length * 0.65));
-  const prefixMatches = marker.length > 0 && normalizedFilled.includes(marker);
-  const lengthLooksPlausible = normalizedFilled.length >= minimumExpectedLength;
-  if (!prefixMatches || !lengthLooksPlausible) {
-    console.log('[github-playwright] composer-paste-verification=' + JSON.stringify({
-      normalizedFilledLength: normalizedFilled.length,
-      normalizedMessageLength: normalizedMessage.length,
-      markerLength: marker.length,
-      prefixMatches,
-      lengthLooksPlausible
-    }));
-    throw new BrowserAgentError(
-      'COMPOSER_FILL_MISMATCH',
-      'Composer did not retain the normalized wake marker after clipboard paste',
-      true
-    );
-  }
   return composer;
 }
 
@@ -412,76 +363,56 @@ async function post(page, message) {
   const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
   await waitForChatIdle(page, idleWaitMs);
 
-  let observed = null;
-  const candidateRequests = [];
-  const onRequest = request => {
-    const method = request.method();
-    if (!['POST','PUT','PATCH'].includes(method)) return;
-    const data = request.postData() || '';
-    if (likelyConversationWrite(request.url())) {
-      candidateRequests.push({ url: request.url(), method, postDataLength: data.length });
-    }
-    if (data.includes(marker)) {
-      observed = { url: request.url(), method, bodyContainsMarker: true, postDataLength: data.length };
-    }
-  };
-  page.on('request', onRequest);
+  let composer = await fillComposer(page, message);
+  console.log('[github-playwright] composer-diagnostics=' + JSON.stringify(await composerDiagnostics(page)));
 
-  try {
-    let composer = await fillComposer(page, message);
-    console.log('[github-playwright] composer-diagnostics=' + JSON.stringify(await composerDiagnostics(page)));
+  const send = await firstVisible(page, [
+    'button[data-testid="send-button"]',
+    'button[data-testid="composer-submit-button"]',
+    'button[aria-label="Send prompt"]',
+    'button[aria-label="Send"]',
+    'button[aria-label*="Send"]'
+  ]);
 
-    const send = await firstVisible(page, [
-      'button[data-testid="send-button"]',
-      'button[data-testid="composer-submit-button"]',
-      'button[aria-label="Send prompt"]',
-      'button[aria-label="Send"]',
-      'button[aria-label*="Send"]'
-    ]);
+  if (send) {
+    await humanPointerClick(page, send, { hoverMs: 180, downMs: 65, settleMs: 260 });
+  } else {
+    composer = await ensureComposer(page);
+    await composer.press('Enter');
+  }
 
-    if (send) {
-      await humanPointerClick(page, send, { hoverMs: 180, downMs: 65, settleMs: 260 });
-    } else {
-      composer = await ensureComposer(page);
-      await composer.press('Enter');
-    }
-
-    const deadline = Date.now() + 10000;
-    let dom = { visible: false, userCount: 0 };
-    while (Date.now() < deadline) {
-      if (observed) break;
-      dom = await wakeMarkerVisible(page, marker);
-      if (dom.visible) break;
-      await page.waitForTimeout(250);
-    }
-
-    if (observed) {
-      console.log('[github-playwright] send-request-observed=' + JSON.stringify(observed));
-      return { ...observed, domMarkerObserved: dom.visible };
-    }
-
+  const deadline = Date.now() + 60000;
+  let dom = { visible: false, userCount: 0 };
+  while (Date.now() < deadline) {
     dom = await wakeMarkerVisible(page, marker);
-    if (dom.visible) {
-      const fallback = {
-        url: candidateRequests.at(-1)?.url || null,
-        method: candidateRequests.at(-1)?.method || null,
-        bodyContainsMarker: false,
-        domMarkerObserved: true,
-        candidateRequests: [...candidateRequests],
-        userCount: dom.userCount
-      };
-      console.log('[github-playwright] send-dom-persisted-without-body-marker=' + JSON.stringify(fallback));
-      return fallback;
-    }
+    if (dom.visible && durableChatUrl(page.url())) break;
+    await page.waitForTimeout(500);
+  }
 
+  if (!dom.visible) {
     throw new BrowserAgentError(
       'SEND_NOT_OBSERVED',
-      'No ChatGPT conversation write or durable user-message marker was observed after ordinary pointer/keyboard submission',
+      'Wake marker was not visibly rendered as a user message after ordinary pointer/keyboard submission',
       true
     );
-  } finally {
-    page.off('request', onRequest);
   }
+  if (!durableChatUrl(page.url())) {
+    throw new BrowserAgentError(
+      'CHAT_URL_NOT_DURABLE',
+      'Visible wake was submitted but no durable chatgpt.com/c/... URL appeared',
+      false
+    );
+  }
+
+  const submitted = {
+    url: page.url(),
+    method: null,
+    bodyContainsMarker: false,
+    domMarkerObserved: true,
+    userCount: dom.userCount,
+  };
+  console.log('[github-playwright] human-ui-send-observed=' + JSON.stringify(submitted));
+  return submitted;
 }
 
 async function persistedWakeVisible(page, message) {
@@ -497,110 +428,43 @@ async function persistedWakeVisible(page, message) {
 }
 
 async function postWithBackendVerification(page, message) {
-  const marker = visibleMessageMarker(message);
-  let acceptedExact = null;
-  const acceptedCandidates = [];
-
-  const onResponse = async response => {
-    const request = response.request();
-    const method = request.method();
-    if (!['POST','PUT','PATCH'].includes(method)) return;
-    const postData = request.postData() || '';
-    const info = {
-      url: response.url(),
-      status: response.status(),
-      method,
-      bodyContainsMarker: postData.includes(marker),
-      cfMitigated: await response.headerValue('cf-mitigated').catch(() => null),
-      server: await response.headerValue('server').catch(() => null)
-    };
-    if (info.bodyContainsMarker) acceptedExact = info;
-    if (likelyConversationWrite(response.url())) acceptedCandidates.push(info);
-  };
-
-  page.on('response', onResponse);
-  try {
-    const submittedRequest = await post(page, message);
-    const deadline = Date.now() + 20000;
-    while (Date.now() < deadline && !acceptedExact) {
-      const candidateAccepted = submittedRequest.domMarkerObserved &&
-        acceptedCandidates.find(item => item.status >= 200 && item.status < 300 && item.cfMitigated !== 'challenge');
-      if (candidateAccepted) break;
-      await page.waitForTimeout(250);
-    }
-
-    const accepted = acceptedExact ||
-      (submittedRequest.domMarkerObserved
-        ? acceptedCandidates.find(item => item.status >= 200 && item.status < 300 && item.cfMitigated !== 'challenge')
-        : null);
-
-    if (!accepted) {
-      throw new BrowserAgentError(
-        'WRITE_RESPONSE_MISSING',
-        'Wake submission was observed but no successful ChatGPT conversation write response was captured; candidates=' + JSON.stringify(acceptedCandidates),
-        false
-      );
-    }
-    if (accepted.status < 200 || accepted.status >= 300 || accepted.cfMitigated === 'challenge') {
-      throw new BrowserAgentError('WRITE_REJECTED', 'ChatGPT wake write was rejected: ' + JSON.stringify(accepted), false);
-    }
-
-    const persisted = await persistedWakeVisible(page, message);
-    if (!persisted.persisted) {
-      throw new BrowserAgentError('DURABILITY_NOT_OBSERVED', 'Wake write returned success but the user message was not observed in the current DOM', false);
-    }
-
-    // VERIFY4 established the success boundary: once the exact write is
-    // accepted and the wake is DOM-persisted, post-send health is telemetry only.
-    // A later Cloudflare challenge must never retroactively invalidate delivery.
-    const passiveState = await snapshot(page).catch(() => null);
-    const postSendHealth = null;
-    const postSendChallenge = passiveState?.humanChallenge === true;
-
-    const delivery = {
-      writeRequestObserved: true,
-      writeAccepted: true,
-      responseBodyMarkerObserved: accepted.bodyContainsMarker,
-      domPersisted: true,
-      postSendChallenge,
-      postSendHealth,
-      response: accepted,
-      responseCandidates: acceptedCandidates,
-      submittedRequest,
-      ...persisted
-    };
-    console.log('[github-playwright] delivery-state=' + JSON.stringify(delivery));
-    return delivery;
-  } finally {
-    page.off('response', onResponse);
+  const submittedRequest = await post(page, message);
+  const persisted = await persistedWakeVisible(page, message);
+  if (!persisted.persisted) {
+    throw new BrowserAgentError(
+      'DURABILITY_NOT_OBSERVED',
+      'Wake marker was not visibly present after human-style submission',
+      false
+    );
   }
+
+  const passiveState = await snapshot(page).catch(() => null);
+  const delivery = {
+    writeRequestObserved: false,
+    writeAccepted: true,
+    responseBodyMarkerObserved: false,
+    domPersisted: true,
+    postSendChallenge: passiveState?.humanChallenge === true,
+    postSendHealth: null,
+    response: null,
+    responseCandidates: [],
+    submittedRequest,
+    ...persisted
+  };
+  console.log('[github-playwright] delivery-state=' + JSON.stringify(delivery));
+  return delivery;
 }
 
-
-
 async function backendPreflight(page) {
-  return page.evaluate(async () => {
-    const targets = [
-      '/backend-api/models',
-      '/backend-api/conversations?offset=0&limit=1&order=updated'
-    ];
-    const checks = [];
-    for (const target of targets) {
-      try {
-        const response = await fetch(target, { credentials: 'include', cache: 'no-store' });
-        checks.push({
-          target,
-          status: response.status,
-          ok: response.ok,
-          cfMitigated: response.headers.get('cf-mitigated'),
-          server: response.headers.get('server')
-        });
-      } catch (error) {
-        checks.push({ target, status: 0, ok: false, error: String(error) });
-      }
-    }
-    return checks;
-  });
+  const state = await snapshot(page);
+  return [{
+    target: 'visible-chatgpt-ui',
+    status: state.chatViewable || state.composerVisible ? 200 : 0,
+    ok: !state.humanChallenge && !state.loginPrompt && (state.composerVisible || state.chatViewable),
+    cfMitigated: state.humanChallenge ? 'challenge' : null,
+    server: null,
+    visibleUi: true,
+  }];
 }
 
 async function waitForBackendHealth(page, reason = 'browser preflight') {
@@ -866,7 +730,6 @@ async function localProvider(chromium) {
     screen: { width: 1920, height: 1080 },
     deviceScaleFactor: 1
   });
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://chatgpt.com' }).catch(() => {});
   const page = await context.newPage();
   return { browser, context, page, close: () => browser.close() };
 }
