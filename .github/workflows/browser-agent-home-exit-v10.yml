@@ -12,6 +12,7 @@ on:
           - observe
           - wake
           - recover
+          - project_wake
       mode:
         description: Browser mode
         required: true
@@ -25,8 +26,13 @@ on:
         required: false
         default: https://chatgpt.com/c/6abe90a0-fd68-83e8-8026-8af0171605fc
         type: string
+      project_name:
+        description: Project name for action=project_wake
+        required: false
+        default: "Home Exit Project Test"
+        type: string
       wake_message:
-        description: Message to send when action=wake
+        description: Message to send when action=wake or project_wake
         required: false
         default: "[HOME_EXIT_PLAYWRIGHT_WAKE_v10] Assistant: when you personally receive this as a new user message, reply exactly HOME_EXIT_PLAYWRIGHT_WAKE_PERSONALLY_SEEN_v10"
         type: string
@@ -87,6 +93,7 @@ jobs:
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_CHAT_URL: ${{ inputs.chat_url }}
           INPUT_WAKE_MESSAGE: ${{ inputs.wake_message }}
+          INPUT_PROJECT_NAME: ${{ inputs.project_name }}
           INPUT_HOME_EXIT_NODE: ${{ inputs.home_exit_node }}
           INPUT_INTERACTIVE_VIEW: ${{ inputs.interactive_view }}
           INPUT_MANUAL_WAIT: ${{ inputs.manual_challenge_wait_minutes }}
@@ -99,6 +106,7 @@ jobs:
             echo "mode=$(jq -r '.mode // "create_fresh"' "$request")" >> "$GITHUB_OUTPUT"
             echo "chat_url=$(jq -r '.chat_url // ""' "$request")" >> "$GITHUB_OUTPUT"
             echo "wake_message=$(jq -r '.wake_message // ""' "$request")" >> "$GITHUB_OUTPUT"
+            echo "project_name=$(jq -r '.project_name // ""' "$request")" >> "$GITHUB_OUTPUT"
             echo "home_exit_node=$(jq -r '.home_exit_node' "$request")" >> "$GITHUB_OUTPUT"
             echo "interactive_view=$(jq -r '.interactive_view // true' "$request")" >> "$GITHUB_OUTPUT"
             echo "manual_wait=$(jq -r '.manual_challenge_wait_minutes // 5' "$request")" >> "$GITHUB_OUTPUT"
@@ -107,6 +115,7 @@ jobs:
             echo "mode=$INPUT_MODE" >> "$GITHUB_OUTPUT"
             echo "chat_url=$INPUT_CHAT_URL" >> "$GITHUB_OUTPUT"
             echo "wake_message=$INPUT_WAKE_MESSAGE" >> "$GITHUB_OUTPUT"
+            echo "project_name=$INPUT_PROJECT_NAME" >> "$GITHUB_OUTPUT"
             echo "home_exit_node=$INPUT_HOME_EXIT_NODE" >> "$GITHUB_OUTPUT"
             echo "interactive_view=$INPUT_INTERACTIVE_VIEW" >> "$GITHUB_OUTPUT"
             echo "manual_wait=$INPUT_MANUAL_WAIT" >> "$GITHUB_OUTPUT"
@@ -208,6 +217,7 @@ jobs:
           WAKE_MODE: ${{ steps.request.outputs.mode }}
           CHAT_URL: ${{ steps.request.outputs.chat_url }}
           WAKE_MESSAGE: ${{ steps.request.outputs.wake_message }}
+          PROJECT_NAME: ${{ steps.request.outputs.project_name }}
           WAKE_ID: home-exit-playwright-v10-${{ github.run_id }}
           INTERACTIVE_VIEW_ENABLED: ${{ steps.request.outputs.interactive_view }}
           MANUAL_CHALLENGE_WAIT_MINUTES: ${{ steps.request.outputs.manual_wait }}
