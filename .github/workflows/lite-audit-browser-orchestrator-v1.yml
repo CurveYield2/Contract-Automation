@@ -1,6 +1,11 @@
 name: Lite Audit Browser Orchestrator v1
 
 on:
+  push:
+    branches:
+      - audit-wake-human-only-v1
+    paths:
+      - 'process/live-tests/audit-wake-phase1-trigger-v1.json'
   workflow_dispatch:
     inputs:
       campaign_id:
@@ -30,10 +35,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      CAMPAIGN_ID: ${{ inputs.campaign_id }}
-      CAMPAIGN_NAME: ${{ inputs.campaign_name }}
-      CAMPAIGN_PATH: ${{ inputs.campaign_path }}
-      AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+      CAMPAIGN_ID: ${{ inputs.campaign_id || 'curveyield-dex-v16-source-r2' }}
+      CAMPAIGN_NAME: ${{ inputs.campaign_name || 'CurveYield DEX v16 Source r2' }}
+      CAMPAIGN_PATH: ${{ inputs.campaign_path || 'campaigns/CurveYield DEX v16 Source r2' }}
+      AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref || 'main' }}
     steps:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
