@@ -31,6 +31,11 @@ on:
         required: false
         default: "Home Exit Project Test"
         type: string
+      project_url:
+        description: Persisted ChatGPT Project URL to reuse for action=project_wake
+        required: false
+        default: ""
+        type: string
       wake_message:
         description: Message to send when action=wake or project_wake
         required: false
@@ -94,6 +99,7 @@ jobs:
           INPUT_CHAT_URL: ${{ inputs.chat_url }}
           INPUT_WAKE_MESSAGE: ${{ inputs.wake_message }}
           INPUT_PROJECT_NAME: ${{ inputs.project_name }}
+          INPUT_PROJECT_URL: ${{ inputs.project_url }}
           INPUT_HOME_EXIT_NODE: ${{ inputs.home_exit_node }}
           INPUT_INTERACTIVE_VIEW: ${{ inputs.interactive_view }}
           INPUT_MANUAL_WAIT: ${{ inputs.manual_challenge_wait_minutes }}
@@ -107,6 +113,7 @@ jobs:
             echo "chat_url=$(jq -r '.chat_url // ""' "$request")" >> "$GITHUB_OUTPUT"
             echo "wake_message=$(jq -r '.wake_message // ""' "$request")" >> "$GITHUB_OUTPUT"
             echo "project_name=$(jq -r '.project_name // ""' "$request")" >> "$GITHUB_OUTPUT"
+            echo "project_url=$(jq -r '.project_url // ""' "$request")" >> "$GITHUB_OUTPUT"
             echo "home_exit_node=$(jq -r '.home_exit_node' "$request")" >> "$GITHUB_OUTPUT"
             echo "interactive_view=$(jq -r '.interactive_view // true' "$request")" >> "$GITHUB_OUTPUT"
             echo "manual_wait=$(jq -r '.manual_challenge_wait_minutes // 5' "$request")" >> "$GITHUB_OUTPUT"
@@ -116,6 +123,7 @@ jobs:
             echo "chat_url=$INPUT_CHAT_URL" >> "$GITHUB_OUTPUT"
             echo "wake_message=$INPUT_WAKE_MESSAGE" >> "$GITHUB_OUTPUT"
             echo "project_name=$INPUT_PROJECT_NAME" >> "$GITHUB_OUTPUT"
+            echo "project_url=$INPUT_PROJECT_URL" >> "$GITHUB_OUTPUT"
             echo "home_exit_node=$INPUT_HOME_EXIT_NODE" >> "$GITHUB_OUTPUT"
             echo "interactive_view=$INPUT_INTERACTIVE_VIEW" >> "$GITHUB_OUTPUT"
             echo "manual_wait=$INPUT_MANUAL_WAIT" >> "$GITHUB_OUTPUT"
@@ -218,6 +226,7 @@ jobs:
           CHAT_URL: ${{ steps.request.outputs.chat_url }}
           WAKE_MESSAGE: ${{ steps.request.outputs.wake_message }}
           PROJECT_NAME: ${{ steps.request.outputs.project_name }}
+          PROJECT_URL: ${{ steps.request.outputs.project_url }}
           WAKE_ID: home-exit-playwright-v10-${{ github.run_id }}
           INTERACTIVE_VIEW_ENABLED: ${{ steps.request.outputs.interactive_view }}
           MANUAL_CHALLENGE_WAIT_MINUTES: ${{ steps.request.outputs.manual_wait }}
