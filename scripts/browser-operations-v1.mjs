@@ -273,32 +273,51 @@ async function ensureThinkingEffort(page, { level = 'high' } = {}) {
   error.retryable = true;
   throw error;
 }
-async function humanPointerClick(page, locator, { hoverMs = 220, downMs = 70, settleMs = 320 } = {}) {
+function randomDelayMs(minMs, maxMs) {
+  const min = Math.ceil(minMs);
+  const max = Math.floor(maxMs);
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+async function humanActionPause(page) {
+  await page.waitForTimeout(randomDelayMs(300, 1500));
+}
+
+async function humanTypingPause(page) {
+  await page.waitForTimeout(randomDelayMs(200, 400));
+}
+
+async function humanPointerClick(page, locator) {
   await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await humanActionPause(page);
   await locator.hover().catch(() => {});
+  await humanActionPause(page);
   const box = await locator.boundingBox();
   if (!box) throw new Error('Visible control has no clickable bounding box');
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
   await page.mouse.move(x, y, { steps: 12 });
-  await page.waitForTimeout(hoverMs);
+  await humanActionPause(page);
   await page.mouse.down();
-  await page.waitForTimeout(downMs);
+  await page.waitForTimeout(randomDelayMs(300, 700));
   await page.mouse.up();
-  await page.waitForTimeout(settleMs);
+  await humanActionPause(page);
 }
 
-async function humanTypeInto(page, locator, text, { delay = 45 } = {}) {
-  await humanPointerClick(page, locator, { hoverMs: 120, downMs: 55, settleMs: 180 });
+async function humanTypeInto(page, locator, text) {
+  await humanPointerClick(page, locator);
   const current = await locator.inputValue().catch(() => '');
   if (current) {
     await locator.press('Control+A').catch(async () => locator.press('Meta+A').catch(() => {}));
-    await page.waitForTimeout(120);
+    await humanActionPause(page);
     await locator.press('Backspace');
-    await page.waitForTimeout(120);
+    await humanActionPause(page);
   }
-  await locator.pressSequentially(String(text), { delay });
-  await page.waitForTimeout(280);
+  for (const char of String(text)) {
+    await locator.pressSequentially(char);
+    await humanTypingPause(page);
+  }
+  await humanActionPause(page);
 }
 
 async function ensureSidebarOpen(page) {
@@ -588,152 +607,93 @@ function retryableProjectUiError(code, message) {
 }
 
 async function createProject(page, projectName) {
-  const projectNetworkFailures = [];
-  const recordResponse = response => {
-    try {
-      const url = new URL(response.url());
-      if (url.hostname === 'chatgpt.com' && response.status() >= 400) {
-        projectNetworkFailures.push({ status: response.status(), path: url.pathname.replace(/[a-f0-9]{8}-[a-f0-9-]{12,}/gi, '<id>') });
-      }
-    } catch {}
-  };
-  page.on('response', recordResponse);
+  // Exact normal-human sequence required by operator:
+  // sidebar open -> Projects title -> hover Projects -> click revealed + ->
+  // type project name letter-by-letter -> click Create Project.
   await ensureSidebarOpen(page);
+  await humanActionPause(page);
 
-  let trigger = null;
-  let projects = page.getByText('Projects', { exact: true }).first();
+  const projects = page.getByText('Projects', { exact: true }).first();
   if (!await projects.isVisible().catch(() => false)) {
-    await exposeProjectsInSidebar(page);
-    projects = page.getByText('Projects', { exact: true }).first();
-  }
-  if (await projects.isVisible().catch(() => false)) {
-    trigger = await findProjectsSectionAddControl(page);
-  }
-  if (!trigger) {
-    // Compatibility fallback only when the heading-specific + control cannot be
-    // discovered; this still requires a visible, ordinary UI control.
-    trigger = await findNewProjectControl(page);
-  }
-
-  if (!trigger) {
-    const sidebarToggleVisible = !!await firstVisible(page, [
-      'button[data-testid="open-sidebar-button"]',
-      'button[aria-label*="Open sidebar"]',
-      'button[aria-label*="Show sidebar"]'
-    ], 250);
-    const projectsVisible = await page.getByText('Projects', { exact: true }).first().isVisible().catch(() => false);
-    const newProjectTextVisible = await page.getByText('New project', { exact: true }).first().isVisible().catch(() => false);
-    const controls = await visibleNavigationDiagnostics(page);
     throw retryableProjectUiError(
-      'PROJECT_CREATE_CONTROL_MISSING',
-      'ChatGPT project creation control not found' +
-      ' (sidebarToggleVisible=' + sidebarToggleVisible +
-      ', projectsVisible=' + projectsVisible +
-      ', newProjectTextVisible=' + newProjectTextVisible +
-      ', url=' + page.url() +
-      ', visibleControls=' + JSON.stringify(controls) + ')'
+      'PROJECTS_SECTION_MISSING',
+      'Visible Projects section title was not found in the open ChatGPT sidebar'
     );
   }
 
-  // Mirror the human interaction exactly: expose the visible + control, move the
-  // pointer onto it, and perform a normal pointer click. Never activate this
-  // control through keyboard, force-click, DOM click, or form submission.
-  await humanPointerClick(page, trigger, { hoverMs: 260, downMs: 80, settleMs: 520 });
+  await projects.hover();
+  await humanActionPause(page);
+
+  const trigger = await findProjectsSectionAddControl(page);
+  if (!trigger) {
+    throw retryableProjectUiError(
+      'PROJECT_PLUS_MISSING',
+      'Hovering the visible Projects title did not reveal a usable plus control'
+    );
+  }
+  await humanPointerClick(page, trigger);
 
   let input = await firstVisible(page, [
-    'input[placeholder*="Project name"]',
-    'input[aria-label*="Project name"]',
-    'input[name="name"]',
+    '[role="dialog"] input[placeholder*="Project name"]',
+    '[role="dialog"] input[aria-label*="Project name"]',
+    '[role="dialog"] input[name="name"]',
     '[role="dialog"] input'
   ], 2200);
   if (!input) {
-    const pending = page.locator('input[placeholder*="Project name"]:visible, input[aria-label*="Project name"]:visible, input[name="name"]:visible, [role="dialog"] input:visible').first();
+    const pending = page.locator(
+      '[role="dialog"] input[placeholder*="Project name"]:visible, ' +
+      '[role="dialog"] input[aria-label*="Project name"]:visible, ' +
+      '[role="dialog"] input[name="name"]:visible, [role="dialog"] input:visible'
+    ).first();
     await pending.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
     if (await pending.isVisible().catch(() => false)) input = pending;
   }
   if (!input) {
-    const fields = await page.locator('input, textarea, [role="dialog"]').evaluateAll(nodes => nodes.filter(el => el.getClientRects().length).map(el => ({
-      tag: el.tagName, type: el.getAttribute('type'), role: el.getAttribute('role'),
-      label: el.getAttribute('aria-label'), placeholder: el.getAttribute('placeholder'), name: el.getAttribute('name'),
-    }))).catch(() => []);
     throw retryableProjectUiError(
       'PROJECT_NAME_INPUT_MISSING',
-      'ChatGPT project-name input not found; visibleFieldStructure=' + JSON.stringify(fields)
+      'Visible project-name field was not found in the Project creation dialog'
     );
   }
-  await humanTypeInto(page, input, projectName, { delay: 55 });
+
+  await humanTypeInto(page, input, projectName);
 
   const submit = await firstVisible(page, [
     '[role="dialog"] button:has-text("Create project")',
-    '[role="dialog"] button:has-text("Create")',
-    'button:has-text("Create project")',
-    'button[type="submit"]'
-  ], 1200);
+    '[role="dialog"] button:has-text("Create Project")'
+  ], 2000);
   if (!submit) {
     throw retryableProjectUiError(
       'PROJECT_CREATE_SUBMIT_MISSING',
-      'ChatGPT project-create submit control not found'
+      'Visible Create Project button was not found at the bottom of the Project dialog'
     );
   }
 
-  const projectCreateResponse = page.waitForResponse(response => {
-    try {
-      const url = new URL(response.url());
-      return url.origin === 'https://chatgpt.com' &&
-        url.pathname === '/backend-api/projects' &&
-        response.request().method() === 'POST';
-    } catch { return false; }
-  }, { timeout: 20000 }).catch(() => null);
-
-  await humanPointerClick(page, submit, { hoverMs: 280, downMs: 75, settleMs: 420 });
-
-  const createResponse = await projectCreateResponse;
-  if (createResponse) {
-    const status = createResponse.status();
-    const cfMitigated = await createResponse.headerValue('cf-mitigated').catch(() => null);
-    const server = await createResponse.headerValue('server').catch(() => null);
-    const contentType = await createResponse.headerValue('content-type').catch(() => null);
-    let safeBody = '';
-    if (status >= 400) {
-      const raw = await createResponse.text().catch(() => '');
-      if (/json|text/i.test(contentType || '')) {
-        safeBody = raw.replace(/[A-Za-z0-9_-]{32,}/g, '<redacted>').slice(0, 1200);
-      }
-    }
-    const diagnostics = { status, cfMitigated, server, contentType, safeBody };
-    console.log('[browser-operations] project-create-response=' + JSON.stringify(diagnostics));
-    if (status >= 400) {
-      const error = new Error('ChatGPT project create HTTP ' + status + ': ' + JSON.stringify(diagnostics));
-      if (cfMitigated === 'challenge') {
-        error.code = 'BROWSER_CHALLENGE';
-        error.retryable = false;
-      } else {
-        error.code = 'PROJECT_CREATE_REJECTED';
-        error.retryable = false;
-      }
-      throw error;
-    }
-  }
+  await humanPointerClick(page, submit);
 
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const title = await page.title().catch(() => '');
+    if (/Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText + '\n' + title)) {
+      const error = new Error('Visible ChatGPT/Cloudflare challenge detected after Create Project');
+      error.code = 'BROWSER_CHALLENGE';
+      error.retryable = false;
+      throw error;
+    }
+
     const entry = await findProjectEntry(page, projectName);
     if (entry) return entry;
-    if (/chatgpt\.com\//.test(page.url())) {
-      const heading = page.getByText(projectName, { exact: true }).first();
-      if (await heading.isVisible().catch(() => false)) return null;
-    }
-    await page.waitForTimeout(500);
+
+    const heading = page.getByText(projectName, { exact: true }).first();
+    if (await heading.isVisible().catch(() => false)) return null;
+
+    await page.waitForTimeout(750);
   }
-  const alerts = await page.locator('[role="alert"]').allTextContents().catch(() => []);
+
   throw retryableProjectUiError(
     'PROJECT_CREATE_VERIFICATION_MISSING',
-    'ChatGPT project creation could not be verified; url=' + page.url() +
-      '; formStillVisible=' + await input.isVisible().catch(() => false) +
-      '; alerts=' + JSON.stringify(alerts.map(text => text.slice(0, 250))) +
-      '; failedResponses=' + JSON.stringify(projectNetworkFailures.slice(-10))
+    'Project was submitted through the visible dialog but did not become visibly identifiable within 60 seconds'
   );
-
 }
 
 function validProjectUrl(value) {
