@@ -11,43 +11,38 @@ const read = (relative) => fs.readFileSync(path.join(root, relative), 'utf8');
 
 
 
-test('project creation opens the sidebar and resolves semantic New project controls', () => {
+test('project creation opens the sidebar and resolves visible New project controls', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /async function ensureSidebarOpen\(page\)/);
   assert.match(source, /open-sidebar-button/);
   assert.match(source, /sidebar-toggle-button/);
   assert.match(source, /aria-label="Open sidebar"/);
-  assert.match(source, /aria-label="Toggle sidebar"/);
   assert.match(source, /async function findNewProjectControl\(page\)/);
   assert.match(source, /await projects\.hover\(\)/);
-  assert.match(source, /projects-plus-control/);
-  assert.match(source, /looksOverflow/);
-  assert.match(source, /looksPlus/);
-  assert.doesNotMatch(source, /count > 0 && count <= 3/);
+  assert.match(source, /async function findProjectsSectionAddControl\(page\)/);
+  assert.match(source, /aria-label\*="Add"/);
   assert.match(source, /async function exposeProjectsInSidebar\(page\)/);
   assert.match(source, /Organize sidebar/);
-  assert.match(source, /menuitemcheckbox.*Projects/);
+  assert.match(source, /menuitemcheckbox/);
   assert.match(source, /sidebar-projects-recovery/);
   assert.match(source, /async function findSemanticProjectAction\(page\)/);
-  assert.match(source, /new\|add\|create/);
+  assert.match(source, /getByRole\('button'/);
   assert.match(source, /getByText\('New project', \{ exact: true \}\)/);
   assert.match(source, /getByText\('Projects', \{ exact: true \}\)/);
-  assert.match(source, /async function visibleNavigationDiagnostics\(page\)/);
-  assert.match(source, /sidebarToggleVisible=/);
-  assert.match(source, /projectsVisible=/);
-  assert.match(source, /newProjectTextVisible=/);
-  assert.match(source, /visibleControls=/);
+  assert.doesNotMatch(source, /evaluateAll\(|innerText\(/);
 });
 
-test('Phase1 captures the private Project share URL through the human overflow/share/clipboard sequence', () => {
+test('Phase1 captures the private Project share URL through visible overflow/share and OS clipboard', () => {
   const source = read('scripts/browser-operations-v1.mjs');
   assert.match(source, /findProjectOverflowControl/);
   assert.match(source, /await entry\.hover\(\)/);
   assert.match(source, /Share project/);
   assert.match(source, /Share link/);
-  assert.match(source, /navigator\.clipboard\.readText\(\)/);
+  assert.match(source, /readOsClipboard/);
+  assert.match(source, /spawnSync\('xclip'/);
   assert.match(source, /PROJECT_SHARE_URL_MISSING/);
   assert.match(source, /project-share-url-captured/);
+  assert.doesNotMatch(source, /navigator\.clipboard|page\.evaluate\(/);
 });
 
 test('later and replacement reviewers open the persisted Project URL and never create a second Project', () => {
@@ -61,17 +56,16 @@ test('later and replacement reviewers open the persisted Project URL and never c
   assert.match(repair, /projectUrl:\$projectUrl/);
 });
 
-test('project creation records the exact backend response and only retries confirmed security challenges', () => {
+test('project creation verifies success only through visible Project UI', () => {
   const source = read('scripts/browser-operations-v1.mjs');
-  assert.match(source, /\/backend-api\/projects/);
-  assert.match(source, /project-create-response/);
-  assert.match(source, /cf-mitigated/);
-  assert.match(source, /PROJECT_CREATE_REJECTED/);
-  assert.match(source, /error\.code = 'BROWSER_CHALLENGE'/);
-  assert.match(source, /error\.retryable = true/);
-  assert.match(source, /safeBody/);
+  assert.match(source, /PROJECT_CREATE_VERIFICATION_MISSING/);
+  assert.match(source, /findProjectEntry/);
+  assert.match(source, /getByText\(projectName, \{ exact: true \}\)/);
+  assert.doesNotMatch(source, /\/backend-api\/projects/);
+  assert.doesNotMatch(source, /waitForResponse\(/);
+  assert.doesNotMatch(source, /page\.on\(['"]response/);
+  assert.doesNotMatch(source, /cf-mitigated/);
 });
-
 
 test('browser operation registry exposes reusable normal-ChatGPT project operations', () => {
   const source = read('scripts/browser-operations-v1.mjs');
@@ -121,17 +115,16 @@ test('browser routine engine has separate deterministic Project-create and Proje
   assert.doesNotMatch(read('.github/workflows/lite-audit-browser-orchestrator-v1.yml'), /audit-lite-reviewer-v1/);
 });
 
-test('audit wakes enforce verified High reasoning effort and keep follow-up messages minimal', () => {
+test('audit wakes use visible High reasoning controls and keep follow-up messages minimal', () => {
   const operations = read('scripts/browser-operations-v1.mjs');
   const runtime = read('scripts/browser-agent-wake.mjs');
   const wake = read('.github/workflows/browser-agent-wake.yml');
   assert.match(operations, /ensureThinkingEffort/);
   assert.match(operations, /menuitemradio/);
-  assert.match(operations, /Thinking time/);
-  assert.match(operations, /button:has-text\("GPT-5\.6"\)/);
+  assert.match(operations, /button:has-text\("High"\)/);
   assert.match(operations, /THINKING_EFFORT_UI_CHANGED/);
-  assert.match(operations, /visibleControls=/);
-  assert.match(operations, /High thinking-effort control could not be selected and verified/);
+  assert.match(operations, /humanPointerClick/);
+  assert.doesNotMatch(operations, /evaluateAll\(|innerText\(|textContent/);
   assert.match(runtime, /CHATGPT_THINKING_EFFORT/);
   assert.match(runtime, /chatgpt\.ensure_thinking_effort/);
   assert.match(wake, /default: high/);
@@ -163,25 +156,24 @@ test('assignment-v2 campaigns resolve active phase from Audit Campaign Directory
   assert.doesNotMatch(repair, /nextMilestone\.phaseRange/);
 });
 
-test('long wake submission is duplicate-safe when ChatGPT transport no longer exposes the message body', () => {
+test('long wake submission verifies the visible user marker without ChatGPT network inspection', () => {
   const source = read('scripts/browser-agent-wake.mjs');
   const postStart = source.indexOf('async function post(page, message)');
   const postEnd = source.indexOf('async function runWithPage', postStart);
   const postBlock = source.slice(postStart, postEnd);
-  assert.match(postBlock, /send-request-observed/);
-  assert.match(postBlock, /send-dom-persisted-without-body-marker/);
+  assert.match(postBlock, /human-ui-send-observed/);
   assert.match(postBlock, /wakeMarkerVisible/);
-  assert.match(postBlock, /likelyConversationWrite/);
   assert.match(postBlock, /composer-diagnostics/);
   assert.match(postBlock, /SEND_NOT_OBSERVED/);
   assert.match(postBlock, /postWithBackendVerification/);
-  assert.match(postBlock, /WRITE_RESPONSE_MISSING/);
-  assert.match(postBlock, /WRITE_REJECTED/);
   assert.match(postBlock, /DURABILITY_NOT_OBSERVED/);
   assert.match(postBlock, /persistedWakeVisible/);
-  assert.match(postBlock, /responseCandidates/);
   assert.match(postBlock, /postSendChallenge/);
-  assert.match(postBlock, /post-send health/);
+  assert.doesNotMatch(postBlock, /likelyConversationWrite/);
+  assert.doesNotMatch(postBlock, /send-request-observed/);
+  assert.doesNotMatch(postBlock, /WRITE_RESPONSE_MISSING|WRITE_REJECTED/);
+  assert.doesNotMatch(postBlock, /page\.on\(['"](?:request|response)/);
+  assert.doesNotMatch(postBlock, /\/backend-api\//);
 });
 
 test('failed non-infrastructure idle pokes consume the escalation budget and can repair Phase-0', () => {
