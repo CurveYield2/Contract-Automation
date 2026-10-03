@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { deriveSessionStateKeyB64, loadEncryptedSessionState, saveEncryptedSessionState, validateStorageState } from './browser-session-state-v1.mjs';
+import { validateStorageState } from './browser-session-state-v1.mjs';
 import { loadBrowserRoutine, runBrowserRoutineStage } from './browser-routine-engine-v1.mjs';
 import { executeBrowserOperation } from './browser-operations-v1.mjs';
 
@@ -20,13 +20,6 @@ let projectUrl = env.CHATGPT_PROJECT_URL || '';
 let requestedChatName = env.CHATGPT_CHAT_NAME || '';
 const thinkingEffort = (env.CHATGPT_THINKING_EFFORT || '').trim();
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
-const encryptedSessionPath = env.CHATGPT_SESSION_STATE_PATH || '/tmp/curveyield-browser-agent/session-state-v1.enc.json';
-const sessionUpdatedMarker = env.CHATGPT_SESSION_STATE_UPDATED_MARKER || '/tmp/curveyield-browser-agent/session-state-updated';
-const sessionStateKeyB64 = deriveSessionStateKeyB64({
-  keyB64: env.CHATGPT_SESSION_STATE_KEY_B64,
-  bootstrapStateB64: env.CHATGPT_STORAGE_STATE_B64,
-});
-
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
@@ -48,52 +41,6 @@ class BrowserAgentError extends Error {
     this.code = code;
     this.retryable = retryable;
   }
-}
-
-async function persistHealthySession(providerName, context, state) {
-  if (providerName !== 'github-playwright') return false;
-  if (!state?.composerVisible || !/^https:\/\/chatgpt\.com\//.test(state.url || '')) return false;
-  try {
-    const storage = await context.storageState({ indexedDB: true, opfs: true });
-    const persisted = await saveEncryptedSessionState({
-      encryptedSessionPath,
-      keyB64: sessionStateKeyB64,
-      storage,
-    });
-    if (persisted) {
-      await fs.mkdir(path.dirname(sessionUpdatedMarker), { recursive: true });
-      await fs.writeFile(sessionUpdatedMarker, new Date().toISOString() + '\n', { mode: 0o600 });
-    }
-    return persisted;
-  } catch (error) {
-    console.warn('[github-playwright] Refreshed session state could not be persisted: ' + error.message);
-    return false;
-  }
-}
-
-async function importBrowserRuntimeModule(specifier) {
-  const runtimeRoot = env.BROWSER_AGENT_RUNTIME_ROOT || '';
-  if (!runtimeRoot) return import(specifier);
-  const runtimeRequire = createRequire(path.join(runtimeRoot, 'package.json'));
-  const resolved = runtimeRequire.resolve(specifier);
-  return import(pathToFileURL(resolved).href);
-}
-
-function unwrapRuntimeModule(mod) {
-  if (!mod) return {};
-  const first = mod.default && typeof mod.default === 'object' ? mod.default : mod;
-  const second = first.default && typeof first.default === 'object' ? first.default : first;
-  return { ...mod, ...first, ...second };
-}
-
-async function loadModules() {
-  const playwrightMod = await importBrowserRuntimeModule('playwright-core');
-  const playwright = unwrapRuntimeModule(playwrightMod);
-  const chromium = playwright.chromium;
-  if (!chromium || typeof chromium.launch !== 'function') {
-    throw new Error('playwright-core chromium launcher unavailable');
-  }
-  return { chromium };
 }
 
 async function hydrateBrowserContextFromRegistration() {
@@ -292,17 +239,33 @@ async function waitForChatIdle(page, timeoutMs) {
   throw new BrowserAgentError('CHAT_BUSY_TIMEOUT', 'Chat remained busy/generating beyond idle wait timeout', false);
 }
 
-async function humanPointerClick(page, locator, { hoverMs = 220, downMs = 70, settleMs = 280 } = {}) {
+function randomDelayMs(minMs, maxMs) {
+  const min = Math.ceil(minMs);
+  const max = Math.floor(maxMs);
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+async function humanActionPause(page) {
+  await page.waitForTimeout(randomDelayMs(300, 1500));
+}
+
+async function humanTypingPause(page) {
+  await page.waitForTimeout(randomDelayMs(200, 400));
+}
+
+async function humanPointerClick(page, locator) {
   await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await humanActionPause(page);
   await locator.hover().catch(() => {});
+  await humanActionPause(page);
   const box = await locator.boundingBox();
   if (!box) throw new BrowserAgentError('VISIBLE_CONTROL_NOT_CLICKABLE', 'Visible control has no clickable bounding box', true);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 12 });
-  await page.waitForTimeout(hoverMs);
+  await humanActionPause(page);
   await page.mouse.down();
-  await page.waitForTimeout(downMs);
+  await page.waitForTimeout(randomDelayMs(300, 700));
   await page.mouse.up();
-  await page.waitForTimeout(settleMs);
+  await humanActionPause(page);
 }
 
 async function composerDiagnostics(page) {
@@ -384,8 +347,11 @@ async function fillComposer(page, message) {
     await page.waitForTimeout(150);
   }
 
-  await composer.pressSequentially(String(message), { delay: 12 });
-  await page.waitForTimeout(320);
+  for (const char of String(message)) {
+    await composer.pressSequentially(char);
+    await humanTypingPause(page);
+  }
+  await humanActionPause(page);
 
   const filledText = await composer.inputValue().catch(async () => {
     return await composer.innerText().catch(() => '');
@@ -692,13 +658,13 @@ async function runWithPage(providerName, connect) {
           false,
         );
       }
-      const sessionStatePersisted = await persistHealthySession(providerName, context, before);
+      const sessionStatePersisted = false;
       const result = { ok: true, provider: providerName, action, wakeId, sessionStatePersisted, ...before };
       await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
       return result;
     }
     if (before.generating && !bool(env.FORCE_WAKE)) {
-      const sessionStatePersisted = await persistHealthySession(providerName, context, before);
+      const sessionStatePersisted = false;
       const result = { ok: true, provider: providerName, action, wakeId, skipped: 'PRODUCTIVE_GENERATING', sessionStatePersisted, ...before };
       await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
       return result;
@@ -767,7 +733,7 @@ async function runWithPage(providerName, connect) {
     }
 
     const renameResult = [...routineAfter].reverse().find((entry) => entry.operation === 'chatgpt.rename_current_chat')?.result || null;
-    const sessionStatePersisted = await persistHealthySession(providerName, context, after);
+    const sessionStatePersisted = false;
     const chatUrlVerified = durableChatUrl(after.url);
     const result = {
       // A posted message with no durable conversation cannot activate a reviewer.
@@ -795,25 +761,17 @@ async function runWithPage(providerName, connect) {
 }
 
 async function localProvider(chromium) {
-  // Explicit bootstrap mode honors the operator's saved login snapshot and
-  // does not silently prefer a rolling cache from another browser session.
-  let storage = env.CHATGPT_SESSION_STATE_SOURCE === 'bootstrap-secret' ? null : await loadEncryptedSessionState({
-    encryptedSessionPath,
-    keyB64: sessionStateKeyB64,
-  });
-  let source = storage ? 'encrypted-cache' : '';
-  if (!storage && env.CHATGPT_STORAGE_STATE_B64) {
-    try {
-      const bootstrap = JSON.parse(Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'));
-      if (!validateStorageState(bootstrap)) throw new Error('invalid storage state');
-      storage = bootstrap;
-      source = 'bootstrap-secret';
-    } catch {
-      throw new Error('CHATGPT_STORAGE_STATE_B64 is invalid');
-    }
+  if (!env.CHATGPT_STORAGE_STATE_B64) {
+    throw new Error('CHATGPT_STORAGE_STATE_B64 is required');
   }
-  if (!storage) throw new Error('No usable ChatGPT storage state is available');
-  console.log('[github-playwright] Using ' + source + ' session state');
+  let storage;
+  try {
+    storage = JSON.parse(Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'));
+    if (!validateStorageState(storage)) throw new Error('invalid storage state');
+  } catch {
+    throw new Error('CHATGPT_STORAGE_STATE_B64 is invalid');
+  }
+  console.log('[github-playwright] Using immutable bootstrap-secret session state; run state will be discarded.');
   const browser = await chromium.launch({
     headless: env.BROWSER_HEADLESS !== 'false',
     channel: 'chrome',
