@@ -12,7 +12,7 @@
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `3fab2c1c5a5d6497240d241b02c60102f76429af`.
+- Base: current `main` at `8424711d153e8ee6989645a4db023476024a6893`.
 - PR #508 through PR #514 are merged; their required validation lanes passed before merge.
 - Recovery-only run `37158898640` proves:
   - fresh immutable browser state loads normally without a Cloudflare challenge;
@@ -51,17 +51,18 @@
 
 ## ACTIVE BLOCKER
 
-**Finish live verification of the exact visible Project-title gesture sequence before transplanting the routine into the audit wake/watch pathway.**
+**Merged live run `37162502663` proved the exact Project title target is correct and executed the requested gesture sequence, but the implemented "double-click" was two ordinary clickCount=1 taps rather than a real browser double-click event.**
 
-Current user-directed gesture sequence on the already-confirmed exact Project title:
-1. one short normal click;
-2. wait 0.1–0.3 seconds;
-3. one human double-click;
-4. wait 0.1–0.3 seconds;
-5. one longer click;
-6. stop immediately when Project URL navigation is observed.
+Observed live target and gestures:
+- exact visible Project title box: `x=42, y=408, width=261, height=20`;
+- short click fired on the title;
+- attempted double-click fired as two ordinary down/up pairs;
+- long click fired on the title;
+- URL did not navigate;
+- no Cloudflare challenge and no wake resend occurred.
 
-The exact Project-title selector is locked. Do not redesign it unless a merged live run disproves this gesture sequence.
+The selector remains locked. The next repair changes only double-click event semantics so the second click carries browser clickCount=2 and can emit a genuine `dblclick` event. Keep the user-directed order: short click -> 0.1–0.3s -> real double-click -> 0.1–0.3s -> long click.
+
 
 ## REMAINING DELTA
 
