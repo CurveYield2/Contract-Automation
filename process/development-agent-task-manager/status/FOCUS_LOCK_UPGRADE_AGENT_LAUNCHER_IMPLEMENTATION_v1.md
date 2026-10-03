@@ -7,14 +7,15 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `cb844a5ed5d9abe51a4a9db051ab12407aa7e0fa`.
-- PR #508 through PR #513 are merged; their required validation lanes passed before merge.
-- Latest merged live Project-wake run `37157337293` proves:
-  - home-exit routing and immutable bootstrap session both succeeded;
-  - saved `project_url` is passed through the v10 request/workflow correctly;
-  - ChatGPT homepage became visibly ready without Cloudflare challenge;
-  - direct open of the persisted Project URL did not remain on the validator's exact `/project` pathname;
-  - failure occurred before any wake was sent, so no duplicate message was created.
+- Base: current `main` at `59c2f19547725b933405612fdd376a4990c02e5f`.
+- PR #508 through PR #514 are merged; their required validation lanes passed before merge.
+- Latest merged live Project-wake run `37157762182` proves:
+  - persisted Project URL reuse works and reopened the exact saved Project;
+  - Project identity was verified as `g-p-6ac177c98f0c81919e970bb2a69b8583`;
+  - the exact wake was typed and visibly sent using the human-pointer path;
+  - the rendered Project conversation visibly contained the exact wake before reload;
+  - ChatGPT then exposed a visible human-verification/Cloudflare challenge while the conversation still had an optimistic local-chat route;
+  - the automation aborted immediately as required, without reload and without resending.
 - Durable Project URL already captured from the successful creation run: `https://chatgpt.com/g/g-p-6ac177c98f0c81919e970bb2a69b8583/project`.
 - Project chats use a Project-scoped durable route of the form `https://chatgpt.com/g/g-p-.../c/<id>`.
 - The operator supplied a screenshot of the successful Project landing page. Its reliable human-visible cue is the central composer labeled `New chat in <ProjectName>`, which differs from the homepage composer.
@@ -41,23 +42,23 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## ACTIVE BLOCKER
 
-**Saved Project URL reuse is wired correctly, but the post-navigation validator is too strict about the exact Project collection pathname.**
+**The wake has already been visibly sent. Do not send it again. Recover the created Project chat from a fresh immutable browser run and capture its durable Project-scoped conversation URL.**
 
-The persisted identity remains the same `g-p-...` Project. ChatGPT may canonicalize the collection page to the Project root rather than retaining the literal `/project` suffix. Accept only safe Project collection routes for that same `g-p-` identity, while continuing to reject homepage and conversation routes.
+A Cloudflare/human-verification challenge appeared only after the visible send, while waiting for the optimistic local route to become durable. Immediate abort was correct. The next action must be read/recovery-only with the unique wake marker.
 
 ## REMAINING DELTA
 
-1. Keep persisted `project_url` request/workflow wiring from PR #513 unchanged.
-2. Broaden saved Project collection validation from only `/g/g-p-.../project` to the safe same-Project collection forms `/g/g-p-...` and `/g/g-p-.../project`.
-3. Continue rejecting homepage, root `/c/` chats, and Project-scoped `/c/` conversation routes as Project collection URLs.
-4. Preserve exact `g-p-` Project identity when reusing the saved URL.
-5. Add regression coverage for canonicalized Project-root acceptance and conversation-route rejection.
-6. Run both validation lanes, merge only after both pass, then rerun the exact Project wake.
-7. Verify the exact wake remains visibly present after human-style reload and the returned `chatUrl` is the Project-scoped conversation URL.
+1. Change the canonical v10 request from `project_wake` to `recover`; keep the exact original wake message as the unique search marker.
+2. Start from the immutable bootstrap login state; do not send any message.
+3. Use the existing visible ChatGPT search flow with human pointer/typing to locate the already-created chat.
+4. Accept the durable Project-scoped conversation URL `/g/g-p-.../c/<id>`.
+5. Verify the exact original wake is visibly present in that recovered conversation.
+6. Preserve the known Project URL separately for later reuse.
+7. If human verification appears again, abort immediately without mutation; do not retry by resending.
 
 ## NEXT ACTION
 
-Create a narrow branch from this lock state and relax only saved-Project collection route validation for safe canonicalized `g-p-` Project roots.
+Trigger the existing `recover` action against the unique HOME_EXIT_PROJECT_WAKE_VERIFY1 marker. No code change is authorized unless recovery itself exposes a new exact blocker.
 
 ## PARKED / OUT OF SCOPE
 
