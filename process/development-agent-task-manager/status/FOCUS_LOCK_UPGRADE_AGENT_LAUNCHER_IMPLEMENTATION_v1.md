@@ -33,19 +33,19 @@ The Upgrade Agent Launcher must admit a development task into the existing Devel
 
 ## REMAINING DELTA
 
-1. Compare merged run `37149537619` against the last human-confirmed successful v10 run `36942207641` and identify the smallest behavioral/environmental difference before the first Cloudflare challenge.
-2. Repair only that proven difference if it is in repository-controlled behavior.
-3. Re-run dedicated v10 create-fresh verification.
-4. Only after v10 succeeds, rerun `upgrade-launcher-live-smoke-r1`.
+1. Add a read-only recovery mode to the existing v10 browser workflow using only visible human UI: Filter chats and work -> type the unique wake marker -> open the matching saved chat -> verify the exact message is visible -> capture the durable chat URL.
+2. Run recovery for the challenged merged VERIFY4 send without resending.
+3. If recovery succeeds, apply the same no-resend recovery primitive to the shared Development Agent Task Manager challenge-after-send path.
+4. Rerun `upgrade-launcher-live-smoke-r1`.
 5. Verify managed Project persistence, focus-locked completion, mandatory merge-to-main, and terminal output + Project links.
 
 ## ACTIVE BLOCKER
 
-Cloudflare challenge appears immediately after the visible fresh-chat send becomes rendered, before the optimistic chat route transitions to a durable server-backed URL.
+Create-fresh sends can become visibly rendered and then immediately trigger Cloudflare before the temporary `local-chatgpt:` route transitions to a durable URL. The original human-confirmed VERIFY4 proves this post-Send challenge does not necessarily mean the send failed.
 
 ## NEXT ACTION
 
-Compare the exact successful and failing v10 logs around browser startup, session source, send strategy, post-Send route transition, and first challenge detection. Do not change code until that comparison proves a specific delta.
+Implement and test visible-UI-only recovery in the existing v10 workflow. Do not resend the wake and do not use backend/API/network reads.
 
 ## PARKED OBSERVATIONS
 
