@@ -7,7 +7,7 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `7ad3d7a727605c0299dd8fe7e0602fb95f5e76c2`.
+- Base: current `main` at `3fab2c1c5a5d6497240d241b02c60102f76429af`.
 - PR #508 through PR #514 are merged; their required validation lanes passed before merge.
 - Recovery-only run `37158898640` proves:
   - fresh immutable browser state loads normally without a Cloudflare challenge;
@@ -46,9 +46,17 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## ACTIVE BLOCKER
 
-**The exact visible Project title is now correctly identified, but the generic long-press pointer primitive is not opening it.**
+**The exact Project title target is confirmed correct. The remaining issue is the physical click gesture.**
 
-Merged live run `37161509276` logged the exact visible Project title box at `x=42, y=408, width=261, height=20`, confirming the selector is on the correct title. The title click still left the URL unchanged. The next repair must preserve this exact target and change only the physical click gesture: a short normal mouse tap directly on the title letters, with one human retry at another point on the same visible title if navigation does not begin.
+User-directed click sequence on the exact visible Project title:
+1. one short normal click;
+2. wait 0.1–0.3 seconds;
+3. one human double-click;
+4. wait 0.1–0.3 seconds;
+5. one longer click;
+6. stop as soon as Project URL navigation is observed.
+
+Do not change the Project selector again unless this exact gesture sequence is disproven by a merged live run.
 
 ## REMAINING DELTA
 
@@ -62,7 +70,7 @@ Merged live run `37161509276` logged the exact visible Project title box at `x=4
 
 ## NEXT ACTION
 
-Create a narrow branch that changes only the Project-title physical click gesture and retry behavior, validate, merge, and rerun recovery.
+Create a narrow branch that changes only the exact-title click gesture sequence, validate, merge, and rerun recovery.
 
 ## PARKED / OUT OF SCOPE
 
