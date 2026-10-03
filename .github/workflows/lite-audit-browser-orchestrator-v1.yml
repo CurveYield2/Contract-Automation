@@ -38,7 +38,7 @@ jobs:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: audit-wake-human-only-v1
           persist-credentials: false
           fetch-depth: 1
 
@@ -199,7 +199,7 @@ jobs:
             --arg projectUrl "$project_url" \
             --arg chat "$chat_name" \
             '{routineId:$routine,projectName:$project,projectUrl:$projectUrl,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"standard"}' | base64 -w0)"
-          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref audit-wake-human-only-v1 \
             -f wake_id="$wake_id" \
             -f campaign_id="$CAMPAIGN_ID" \
             -f phase_id="$phase_id" \
