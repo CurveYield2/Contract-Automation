@@ -325,9 +325,9 @@ test('fresh-runner retry preserves the exact development task and Project contin
 });
 
 
-test('development manager keeps visible browser available for normal verification waits', () => {
+test('development manager uses five-minute ordinary readiness waits and fast-fails challenges', () => {
   assert.equal((workflow.match(/INTERACTIVE_VIEW_ENABLED: 'true'/g) || []).length, 2);
-  assert.equal((workflow.match(/MANUAL_CHALLENGE_WAIT_MS: '900000'/g) || []).length, 2);
+  assert.equal((workflow.match(/MANUAL_CHALLENGE_WAIT_MS: '300000'/g) || []).length, 2);
   assert.match(workflow, /x11vnc -display :99/);
   assert.match(workflow, /HOME_EXIT_NODE/);
 });
