@@ -170,30 +170,30 @@ test('v10 project creation anchors the name editor to the visible Create-project
   assert.doesNotMatch(block, /\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
 });
 
-test('v10 project wake uses the exact visible Project-specific new-chat cue instead of the homepage composer', () => {
-  assert.match(source, /async function findProjectLandingComposer/);
-  assert.match(source, /const cue = 'New chat in ' \+ name/);
-  assert.match(source, /page\.getByPlaceholder\(cuePattern\)/);
-  assert.match(source, /page\.getByText\(cuePattern, \{ exact: true \}\)/);
-  assert.match(source, /region\.getByRole\('textbox'\)/);
-  assert.match(source, /async function findSendControlNearComposer/);
-  assert.match(source, /postWithVisibleVerification\(page, wakeMessage, project\?\.composer \|\| null\)/);
-
+test('v10 project creation waits briefly for automatic Project URL navigation and saves that URL', () => {
   const createStart = source.indexOf('async function createProjectExactHumanFlow');
   const createEnd = source.indexOf('\nasync function fillComposer', createStart);
   const createBlock = source.slice(createStart, createEnd);
-  assert.match(createBlock, /visible "New chat in ' \+ name \+ '" Project-specific composer/);
-  assert.doesNotMatch(createBlock, /const main = page\.locator/);
-  assert.doesNotMatch(createBlock, /ensureComposer\(/);
+
+  assert.match(createBlock, /const beforeCreateUrl = page\.url\(\)/);
+  assert.match(createBlock, /humanPointerClick\(page, controls\.create\)/);
+  assert.match(createBlock, /randomDelayMs\(3000, 5000\)/);
+  assert.match(createBlock, /projectUrl = page\.url\(\)/);
+  assert.match(createBlock, /Create project did not navigate to a new Project URL after a short visible wait/);
+  assert.match(createBlock, /const composer = await ensureComposer\(page\)/);
+  assert.match(createBlock, /return \{ projectName: name, url: projectUrl, composer \}/);
+  assert.doesNotMatch(createBlock, /Date\.now\(\) \+ 60000/);
 });
 
-test('v10 project retry recovers an existing exact-name Project before creating a duplicate', () => {
+test('v10 project retry recovers an existing exact-name Project and captures its navigated URL', () => {
   assert.match(source, /async function findVisibleExactProjectEntry/);
   assert.match(source, /async function recoverExistingProjectExactHumanFlow/);
   assert.match(source, /const matches = page\.getByText\(name, \{ exact: true \}\)/);
   assert.match(source, /const inLeftSidebar = box\.x <= 460/);
+  assert.match(source, /const beforeUrl = page\.url\(\)/);
   assert.match(source, /await humanPointerClick\(page, existing\)/);
-  assert.match(source, /project-recovered-visible/);
+  assert.match(source, /projectUrl = page\.url\(\)/);
+  assert.match(source, /return \{ projectName: name, url: projectUrl, composer, recoveredExisting: true \}/);
 
   const start = source.indexOf('async function createProjectExactHumanFlow');
   const end = source.indexOf('\nasync function fillComposer', start);
@@ -209,4 +209,13 @@ test('v10 randomized pacing uses 0.3-1.5s between actions and 0.2-0.4s per chara
   assert.match(source, /randomDelayMs\(200, 400\)/);
   assert.match(source, /for \(const char of String\(text\)\)/);
   assert.match(source, /await locator\.pressSequentially\(char\)/);
+});
+
+test('v10 Create-project modal has visible-label fallbacks and a short render wait', () => {
+  assert.match(source, /page\.getByText\(\/\^Create project\$\/i, \{ exact: true \}\)/);
+  assert.match(source, /page\.getByLabel\(\/\^Project name\$\/i\)\.first\(\)/);
+  const start = source.indexOf('async function createProjectExactHumanFlow');
+  const end = source.indexOf('\nasync function fillComposer', start);
+  const block = source.slice(start, end);
+  assert.match(block, /randomDelayMs\(2500, 4500\)/);
 });
