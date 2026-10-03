@@ -198,8 +198,11 @@ test('v10 project creation waits briefly for automatic Project URL navigation an
 test('v10 project retry recovers an existing exact-name Project and captures its navigated URL', () => {
   assert.match(source, /async function findVisibleExactProjectEntry/);
   assert.match(source, /async function recoverExistingProjectExactHumanFlow/);
-  assert.match(source, /const matches = page\.getByText\(name, \{ exact: true \}\)/);
-  assert.match(source, /const inLeftSidebar = box\.x <= 460/);
+  assert.match(source, /const namePattern = new RegExp/);
+  assert.match(source, /page\.getByRole\('link', \{ name: namePattern \}\)/);
+  assert.match(source, /page\.getByRole\('button', \{ name: namePattern \}\)/);
+  assert.match(source, /page\.getByText\(namePattern, \{ exact: true \}\)/);
+  assert.match(source, /box\.x <= 460/);
   assert.match(source, /const beforeUrl = page\.url\(\)/);
   assert.match(source, /await humanPointerClick\(page, existing\)/);
   assert.match(source, /projectUrl = page\.url\(\)/);
@@ -325,10 +328,18 @@ test('recover opens the Project first, then uses only the visible Project chat l
   assert.doesNotMatch(block, /Search chats|Control\+K|humanTypeInto\(page, searchInput/);
 });
 
-test('visible Project-name recovery clicks the nearest rendered link or button and captures navigation', () => {
+test('visible Project-name recovery prefers the full accessible Project row before inner text', () => {
   const start = source.indexOf('async function findVisibleExactProjectEntry');
   const end = source.indexOf('\nasync function recoverExistingProjectExactHumanFlow', start);
   const block = source.slice(start, end);
+  const roleLink = block.indexOf("page.getByRole('link', { name: namePattern })");
+  const roleButton = block.indexOf("page.getByRole('button', { name: namePattern })");
+  const textFallback = block.indexOf('page.getByText(namePattern, { exact: true })');
+  assert.ok(roleLink >= 0 && roleButton > roleLink && textFallback > roleButton);
+  assert.match(block, /box\.x <= 460/);
+  assert.match(block, /box\.y <= projectsBox\.y \+ 420/);
+  assert.match(block, /ancestor-or-self::\*\[@role="link"\]\[1\]/);
+  assert.match(block, /ancestor-or-self::\*\[@role="button"\]\[1\]/);
   assert.match(block, /ancestor-or-self::a\[1\]/);
   assert.match(block, /ancestor-or-self::button\[1\]/);
 });
