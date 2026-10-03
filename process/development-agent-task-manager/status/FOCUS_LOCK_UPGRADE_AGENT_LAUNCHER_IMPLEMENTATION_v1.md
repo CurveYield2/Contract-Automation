@@ -7,15 +7,17 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `452d4056af0004409650897fd21c91f021de6914`.
-- PR #508, PR #509, and PR #510 are merged; their required validation lanes passed.
-- Latest merged live Project-wake run `37155631970` proves:
+- Base: current `main` at `fe681ffc2fea791acd0a1b01b0c8bd41b5c21936`.
+- PR #508 through PR #511 are merged; the final PR #511 head passed both required validation lanes before merge.
+- Latest merged live Project-wake run `37156159975` proves:
   - home-exit routing succeeded;
   - immutable bootstrap secret loaded successfully;
   - ChatGPT became visibly ready without a Cloudflare challenge;
-  - the Create-project modal was found, the Project name was typed, and the Create project control was clicked;
-  - browser URL did not change afterward, so the click did not actually create the Project.
-- Most likely current UI cause: the Create project control is visible while disabled and is being clicked before it becomes enabled after typing the Project name.
+  - Project creation succeeded;
+  - browser automatically navigated to and captured Project URL `https://chatgpt.com/g/g-p-6ac177c98f0c81919e970bb2a69b8583/project`;
+  - the exact wake was typed and visibly sent with the human-pointer path;
+  - terminal failure occurred only afterward because chat-route verification recognizes only root `https://chatgpt.com/c/<id>` URLs.
+- Project chats use a Project-scoped durable route of the form `https://chatgpt.com/g/g-p-.../c/<id>`.
 - The operator supplied a screenshot of the successful Project landing page. Its reliable human-visible cue is the central composer labeled `New chat in <ProjectName>`, which differs from the homepage composer.
 - Retry must first recover/open an already-created Project with the same exact name if one exists, to avoid duplicate Projects.
 - New operator fact: after successful Project creation, the browser automatically navigates to that Project's URL. Treat that browser URL transition as the earliest durable Project-creation signal and capture the resulting Project URL immediately.
@@ -40,24 +42,24 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## ACTIVE BLOCKER
 
-**After typing the Project name, wait for the visible Create project control to become enabled before clicking it.**
+**The post-send verification parser rejects valid Project-scoped chat URLs.**
 
-The latest live run reached the Create project click but did not navigate away from the homepage. Since successful creation is confirmed to auto-navigate to the Project URL, the click did not take effect. The current locator accepts a visible button even while disabled.
+Project creation and the human send are now working. The remaining blocker is route recognition: `chatRouteInfo`, recovery selectors, resume validation, and manager validators assume only `/c/<id>`; Project chats use `/g/g-p-.../c/<id>`.
 
 ## REMAINING DELTA
 
-1. After human typing finishes, reacquire the visible Create project button and wait a few seconds for it to become enabled.
-2. Click only the enabled visible Create project control.
-3. Wait a few seconds for automatic Project URL navigation and capture that URL.
-4. Use the captured Project URL as the durable Project identity and include it in the browser result state.
-5. For retries, recover/open an existing exact-name Project before attempting creation.
-6. Keep all ChatGPT interaction human-visible only: mouse/keyboard/scroll and visible accessible controls; no backend/API/network telemetry, page-context `evaluate()`, synthetic DOM click/fill, or clipboard injection.
-7. Run both validation lanes, merge only after both pass, then rerun the exact `HOME_EXIT_PROJECT_WAKE_VERIFY1` Project wake from merged `main`.
-8. Verify the wake is visibly sent inside that Project and persists.
+1. Extend visible chat-route recognition to accept both root `/c/<id>` and Project-scoped `/g/g-p-.../c/<id>` routes.
+2. Keep local optimistic `local-chatgpt:` handling unchanged.
+3. Extend visible recovery/search link matching to Project-scoped chat links.
+4. Extend browser resume/verification and workflow validators that currently hard-require `https://chatgpt.com/c/`.
+5. Preserve captured `projectUrl`; the Development Agent Task Manager already persists it to `.continuity.project.url` in durable manager state for future replacement/open operations.
+6. Add regression coverage for both root and Project-scoped durable chat URLs.
+7. Run both validation lanes, merge only after both pass, then rerun the exact Project wake.
+8. Verify the exact wake remains visibly present after human-style reload and the returned `chatUrl` is the Project-scoped conversation URL.
 
 ## NEXT ACTION
 
-Create a narrow branch from this focus-lock state, wait for the visible Create project control to become enabled after typing, then rerun the exact Project wake.
+Create a narrow branch from this lock state and update route recognition/validation only for valid Project-scoped conversation URLs.
 
 ## PARKED / OUT OF SCOPE
 
