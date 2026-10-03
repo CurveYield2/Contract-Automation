@@ -240,16 +240,20 @@ async function humanDoubleTitleClick(page, locator, horizontalFraction = 0.5) {
   const point = await visibleTitlePoint(locator, horizontalFraction);
   await page.mouse.move(point.x, point.y, { steps: 12 });
 
-  await page.mouse.down();
+  // Chromium only emits genuine double-click semantics when the second physical
+  // click carries clickCount=2. Keep the two presses human-paced while preserving
+  // that browser event detail.
+  await page.mouse.down({ clickCount: 1 });
   await page.waitForTimeout(randomDelayMs(70, 130));
-  await page.mouse.up();
+  await page.mouse.up({ clickCount: 1 });
   await page.waitForTimeout(randomDelayMs(100, 220));
-  await page.mouse.down();
+  await page.mouse.down({ clickCount: 2 });
   await page.waitForTimeout(randomDelayMs(70, 130));
-  await page.mouse.up();
+  await page.mouse.up({ clickCount: 2 });
 
   console.log('[github-playwright-v10] project-title-gesture=' + JSON.stringify({
     gesture: 'double-click',
+    clickCountSequence: [1, 2],
     x: Math.round(point.x),
     y: Math.round(point.y),
     fraction: Number(point.fraction.toFixed(2))
