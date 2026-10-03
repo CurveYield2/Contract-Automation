@@ -90,10 +90,6 @@ jobs:
       TASK_LOCK_PROTOCOL_PATH: process/development-agent-task-manager/TASK_LOCK_PROTOCOL_v1.md
       TASK_LOCK_TEMPLATE_PATH: process/development-agent-task-manager/TASK_LOCK_STATE_TEMPLATE_v1.md
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
-      CHATGPT_SESSION_STATE_SOURCE: bootstrap-secret
-      CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
-      CHATGPT_SESSION_STATE_PATH: /tmp/curveyield-browser-agent/session-state-v1.enc.json
-      CHATGPT_SESSION_STATE_UPDATED_MARKER: /tmp/curveyield-browser-agent/session-state-updated
       BROWSER_HEADLESS: 'false'
       DISPLAY: ':99'
       INTERACTIVE_VIEW_ENABLED: 'true'
@@ -238,15 +234,6 @@ jobs:
 
       - name: Set up isolated browser-agent runtime
         uses: ./.github/actions/setup-browser-agent-runtime
-
-      - name: Restore encrypted ChatGPT session state
-        uses: actions/cache/restore@v4
-        with:
-          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
-          key: development-chatgpt-session-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.MANAGER_ID }}
-          restore-keys: |
-            development-chatgpt-session-v1-
-            chatgpt-session-state-v1-
 
       - name: Install private VNC helper
         shell: bash
@@ -448,24 +435,6 @@ jobs:
             gh api --method PUT "$api" -f message="chore(task-manager): start $MANAGER_ID" -f content="$content" -f branch=main >/dev/null
           fi
 
-      - name: Detect refreshed encrypted ChatGPT session state
-        if: always()
-        id: refreshed-chatgpt-session
-        shell: bash
-        run: |
-          if [ -s /tmp/curveyield-browser-agent/session-state-updated ] && [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
-            echo "updated=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "updated=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Save refreshed encrypted ChatGPT session state
-        if: always() && steps.refreshed-chatgpt-session.outputs.updated == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
-          key: development-chatgpt-session-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.MANAGER_ID }}
-
       - name: Disable home exit node
         if: always()
         shell: bash
@@ -534,10 +503,6 @@ jobs:
     env:
       SAFE_ID: ${{ matrix.manager_id }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
-      CHATGPT_SESSION_STATE_SOURCE: bootstrap-secret
-      CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
-      CHATGPT_SESSION_STATE_PATH: /tmp/curveyield-browser-agent/session-state-v1.enc.json
-      CHATGPT_SESSION_STATE_UPDATED_MARKER: /tmp/curveyield-browser-agent/session-state-updated
       BROWSER_HEADLESS: 'false'
       DISPLAY: ':99'
       INTERACTIVE_VIEW_ENABLED: 'true'
@@ -856,16 +821,6 @@ jobs:
         if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         uses: ./.github/actions/setup-browser-agent-runtime
 
-      - name: Restore encrypted ChatGPT session state
-        if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
-        uses: actions/cache/restore@v4
-        with:
-          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
-          key: development-chatgpt-session-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.SAFE_ID }}
-          restore-keys: |
-            development-chatgpt-session-v1-
-            chatgpt-session-state-v1-
-
       - name: Install private VNC helper
         if: steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
         shell: bash
@@ -1111,24 +1066,6 @@ jobs:
           [ -n "$current_sha" ] || exit 0
           content="$(base64 -w0 /tmp/task-manager-state.json)"
           gh api --method PUT "$STATE_API" -f message="chore(task-manager): supervise $SAFE_ID" -f content="$content" -f sha="$current_sha" -f branch=main >/dev/null
-
-      - name: Detect refreshed encrypted ChatGPT session state
-        if: always() && steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
-        id: refreshed-chatgpt-session
-        shell: bash
-        run: |
-          if [ -s /tmp/curveyield-browser-agent/session-state-updated ] && [ -s /tmp/curveyield-browser-agent/session-state-v1.enc.json ]; then
-            echo "updated=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "updated=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Save refreshed encrypted ChatGPT session state
-        if: always() && steps.refreshed-chatgpt-session.outputs.updated == 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: /tmp/curveyield-browser-agent/session-state-v1.enc.json
-          key: development-chatgpt-session-v1-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.SAFE_ID }}
 
       - name: Disable home exit node
         if: always() && steps.manager_state.outputs.valid == 'true' && (steps.completion.outputs.complete != 'true' || steps.finalization.outputs.requires_agent == 'true')
