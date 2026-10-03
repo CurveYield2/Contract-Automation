@@ -14,6 +14,7 @@ const wakeMessage = env.WAKE_MESSAGE || '';
 const requestedUrl = env.CHAT_URL || '';
 const projectName = env.PROJECT_NAME || '';
 const requestedProjectUrl = env.PROJECT_URL || '';
+const recoveryChatTitle = env.RECOVERY_CHAT_TITLE || '';
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
@@ -513,7 +514,13 @@ async function findVisibleExactProjectEntry(page, projectsTitle, name) {
     const inLeftSidebar = box.x <= 460;
     const belowProjects = box.y >= projectsBox.y;
     const aboveChats = !chatsBox || box.y < chatsBox.y;
-    if (inLeftSidebar && belowProjects && aboveChats) return candidate;
+    if (inLeftSidebar && belowProjects && aboveChats) {
+      const link = candidate.locator('xpath=ancestor-or-self::a[1]');
+      if (await link.isVisible().catch(() => false)) return link;
+      const button = candidate.locator('xpath=ancestor-or-self::button[1]');
+      if (await button.isVisible().catch(() => false)) return button;
+      return candidate;
+    }
   }
 
   return null;
@@ -843,135 +850,67 @@ function recoverySearchMarker(message) {
   return bracket ? bracket[0] : text.slice(0, 120);
 }
 
-async function recoverCreatedChatByVisibleSearch(page, message) {
+async function recoverCreatedChatFromProjectPage(page, message) {
   if (!message) throw new Error('recover action requires the original wake message');
-  const marker = recoverySearchMarker(message);
-  if (!marker) throw new Error('recover action could not derive a visible search marker');
+  if (!recoveryChatTitle) throw new Error('recover action requires the visible Project chat title');
 
-  // Open Search through the visible left-sidebar control exactly as a
-  // person would. The previous Ctrl+K path was not reliable in live Chrome.
-  const sidebar = await findVisibleSidebarSurface(page);
-  if (!sidebar) throw new Error('Visible ChatGPT sidebar was not found for recovery search');
+  // Prefer an already-persisted Project URL when supplied. If this one-time
+  // recovery request does not have one, open the exact visible Project entry
+  // by name with the normal human pointer flow and capture the navigated URL.
+  // Once inside the Project, recovery never uses global Search.
+  const project = requestedProjectUrl
+    ? await openSavedProjectUrl(page, projectName, requestedProjectUrl)
+    : await recoverExistingProjectExactHumanFlow(page, projectName);
+  if (!project) throw new Error('Existing Project could not be opened for recovery');
 
-  let searchControl = null;
-  const roleCandidates = [
-    sidebar.getByRole('button', { name: /^Search$/i }).first(),
-    sidebar.getByRole('button', { name: /Search chats/i }).first(),
-    sidebar.getByRole('link', { name: /^Search$/i }).first(),
-    sidebar.getByRole('link', { name: /Search chats/i }).first()
-  ];
-  for (const candidate of roleCandidates) {
-    if (await candidate.isVisible().catch(() => false)) {
-      searchControl = candidate;
-      break;
-    }
+  await page.waitForTimeout(randomDelayMs(1200, 2200));
+
+  const projectMain = page.locator('main, [role="main"]').first();
+  if (!await projectMain.isVisible().catch(() => false)) {
+    throw new Error('Visible Project main surface was not found after opening the persisted Project URL');
   }
 
-  if (!searchControl) {
-    const visibleSearchText = sidebar.getByText('Search', { exact: true }).first();
-    if (await visibleSearchText.isVisible().catch(() => false)) {
-      searchControl = visibleSearchText;
-    }
+  const titlePattern = new RegExp('^' + escapeRegExp(recoveryChatTitle) + '$', 'i');
+  const visibleTitle = projectMain.getByText(titlePattern, { exact: true }).first();
+  if (!await visibleTitle.isVisible().catch(() => false)) {
+    throw new Error('Visible Project chat title was not found in the Project chat list');
   }
 
-  if (!searchControl) {
-    searchControl = await firstVisible(page, [
-      'button[aria-label="Filter chats and work"]',
-      '[role="button"][aria-label="Filter chats and work"]',
-      'button[aria-label*="Search chats" i]',
-      'button[aria-label*="Search" i]'
-    ]);
+  let chatControl = visibleTitle;
+  const link = visibleTitle.locator('xpath=ancestor-or-self::a[1]');
+  if (await link.isVisible().catch(() => false)) {
+    chatControl = link;
+  } else {
+    const button = visibleTitle.locator('xpath=ancestor-or-self::button[1]');
+    if (await button.isVisible().catch(() => false)) chatControl = button;
   }
 
-  if (!searchControl) throw new Error('Visible ChatGPT sidebar Search control was not found');
-  await humanPointerClick(page, searchControl);
-  await page.waitForTimeout(randomDelayMs(900, 1800));
+  await humanPointerClick(page, chatControl);
 
-  const searchSelectors = [
-    '[placeholder*="Search chats" i]',
-    '[aria-label*="Search chats" i]',
-    '[placeholder*="Search" i]',
-    '[aria-label*="Search" i]',
-    '[role="dialog"] [role="combobox"]',
-    '[role="dialog"] [role="textbox"]',
-    '[role="dialog"] textarea',
-    '[role="dialog"] input',
-    '[role="dialog"] [contenteditable="true"]',
-    '[role="searchbox"]'
-  ];
-
-  let searchInput = await firstVisible(page, searchSelectors);
-
-  if (!searchInput) {
-    const cue = page.getByText(/Search chats/i).first();
-    if (await cue.isVisible().catch(() => false)) {
-      let region = cue;
-      for (let depth = 0; depth < 6 && !searchInput; depth += 1) {
-        region = region.locator('xpath=..');
-        const editorCandidates = [
-          region.getByRole('combobox').first(),
-          region.getByRole('textbox').first(),
-          region.locator('textarea').first(),
-          region.locator('input').first(),
-          region.locator('[contenteditable="true"]').first()
-        ];
-        for (const candidate of editorCandidates) {
-          if (await candidate.isVisible().catch(() => false)) {
-            searchInput = candidate;
-            break;
-          }
-        }
-      }
-    }
+  const route = await waitForDurableChatRoute(page, 300000);
+  if (!route.projectScoped) {
+    throw new Error('Recovered Project chat did not open a Project-scoped durable conversation route');
   }
 
-  if (!searchInput) throw new Error('Visible ChatGPT Search chats editor was not found after clicking sidebar Search');
-  await humanTypeInto(page, searchInput, marker);
-
-  const normalizedMarker = marker.replace(/\s+/g, ' ').trim();
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    const title = await page.title().catch(() => '');
-    const bodyText = await page.locator('body').innerText().catch(() => '');
-    const visible = visibleBrowserStateText(bodyText, title);
-    if (visible.humanChallenge) {
-      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected during read-only chat recovery; aborting immediately');
-      error.code = 'BROWSER_CHALLENGE';
-      throw error;
-    }
-
-    const candidates = page.locator(
-      '[role="dialog"] a, [role="dialog"] button, [role="option"], a[href^="/c/"], a[href^="/g/g-p-"][href*="/c/"], a[href*="chatgpt.com/c/"], a[href*="chatgpt.com/g/g-p-"][href*="/c/"]'
-    );
-    const count = Math.min(await candidates.count().catch(() => 0), 120);
-    for (let i = 0; i < count; i += 1) {
-      const candidate = candidates.nth(i);
-      if (!await candidate.isVisible().catch(() => false)) continue;
-      const text = [
-        await candidate.innerText().catch(() => ''),
-        await candidate.getAttribute('aria-label').catch(() => ''),
-        await candidate.getAttribute('title').catch(() => '')
-      ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-      if (!text.includes(normalizedMarker)) continue;
-
-      await humanPointerClick(page, candidate, { hoverMs: 180, downMs: 65, settleMs: 650 });
-      const route = await waitForDurableChatRoute(page, 300000);
-      const wake = await visibleWakePresent(page, message, 30000);
-      if (!wake.visible) {
-        throw new Error('Recovered chat URL did not visibly contain the exact original wake message');
-      }
-
-      console.log('[github-playwright-v10] recovered-created-chat=' + JSON.stringify({
-        chatUrl: route.url,
-        verificationMethod: wake.method
-      }));
-      return { recovered: true, chatUrl: route.url, verificationMethod: wake.method, userCount: wake.userCount };
-    }
-
-    await page.waitForTimeout(750);
+  const wake = await visibleWakePresent(page, message, 30000);
+  if (!wake.visible) {
+    throw new Error('Recovered Project chat did not visibly contain the exact original wake message');
   }
 
-  throw new Error('No visible ChatGPT search result matched the unique wake marker within 30 seconds');
+  console.log('[github-playwright-v10] recovered-project-chat=' + JSON.stringify({
+    projectUrl: project.url,
+    chatUrl: route.url,
+    chatTitle: recoveryChatTitle,
+    verificationMethod: wake.method
+  }));
+  return {
+    recovered: true,
+    projectUrl: project.url,
+    chatUrl: route.url,
+    chatTitle: recoveryChatTitle,
+    verificationMethod: wake.method,
+    userCount: wake.userCount
+  };
 }
 
 async function postWithVisibleVerification(page, message, composerOverride = null) {
@@ -1067,7 +1006,7 @@ async function runWithPage(providerName, connect) {
     }
 
     if (action === 'recover') {
-      const recovered = await recoverCreatedChatByVisibleSearch(page, wakeMessage);
+      const recovered = await recoverCreatedChatFromProjectPage(page, wakeMessage);
       const after = await snapshot(page);
       const sessionStatePersisted = false;
       const result = {
@@ -1080,6 +1019,7 @@ async function runWithPage(providerName, connect) {
         sessionStatePersisted,
         before,
         after,
+        projectUrl: recovered.projectUrl,
         chatUrl: recovered.chatUrl,
         verification: 'visible-browser-only',
         verificationMethod: recovered.verificationMethod

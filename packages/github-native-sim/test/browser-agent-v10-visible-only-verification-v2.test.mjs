@@ -103,15 +103,15 @@ test('send path uses visible pointer and keyboard primitives only', () => {
 });
 
 
-test('recover action reopens the already-posted chat through visible UI without resending', () => {
-  assert.match(source, /async function recoverCreatedChatByVisibleSearch/);
-  assert.match(source, /Visible ChatGPT sidebar Search control was not found/);
-  assert.match(source, /humanPointerClick\(page, searchControl\)/);
-  assert.match(source, /humanTypeInto\(page, searchInput, marker/);
-  assert.match(source, /humanPointerClick\(page, candidate/);
+test('recover action reopens the already-posted Project chat through visible UI without resending', () => {
+  assert.match(source, /async function recoverCreatedChatFromProjectPage/);
+  assert.match(source, /requestedProjectUrl\s*\?\s*await openSavedProjectUrl\(page, projectName, requestedProjectUrl\)/);
+  assert.match(source, /:\s*await recoverExistingProjectExactHumanFlow\(page, projectName\)/);
+  assert.match(source, /projectMain\.getByText\(titlePattern, \{ exact: true \}\)/);
+  assert.match(source, /humanPointerClick\(page, chatControl\)/);
   assert.match(source, /await waitForDurableChatRoute\(page, 300000\)/);
   assert.match(source, /await visibleWakePresent\(page, message, 30000\)/);
-  assert.match(source, /recovered-created-chat/);
+  assert.match(source, /recovered-project-chat/);
 
   const runStart = source.indexOf('async function runWithPage');
   const runBlock = source.slice(runStart);
@@ -125,7 +125,7 @@ test('recover action reopens the already-posted chat through visible UI without 
 });
 
 test('recover action remains visible-browser-only', () => {
-  const start = source.indexOf('async function recoverCreatedChatByVisibleSearch');
+  const start = source.indexOf('async function recoverCreatedChatFromProjectPage');
   const end = source.indexOf('\nasync function postWithVisibleVerification', start);
   const block = source.slice(start, end);
   assert.doesNotMatch(block, /fetch\s*\(/);
@@ -256,12 +256,12 @@ test('v10 recognizes both root and Project-scoped durable ChatGPT conversation r
   assert.match(block, /projectId/);
 });
 
-test('v10 visible recovery can select Project-scoped conversation links', () => {
-  const start = source.indexOf('async function recoverCreatedChatByVisibleSearch');
+test('v10 visible recovery requires the opened chat to resolve to a Project-scoped conversation route', () => {
+  const start = source.indexOf('async function recoverCreatedChatFromProjectPage');
   const end = source.indexOf('\nasync function postWithVisibleVerification', start);
   const block = source.slice(start, end);
-  assert.match(block, /a\[href\^="\/g\/g-p-"\]\[href\*="\/c\/"\]/);
-  assert.match(block, /a\[href\*="chatgpt\.com\/g\/g-p-"\]\[href\*="\/c\/"\]/);
+  assert.match(block, /if \(!route\.projectScoped\)/);
+  assert.match(block, /Recovered Project chat did not open a Project-scoped durable conversation route/);
 });
 
 test('v10 resume_existing accepts durable Project-scoped conversations through route parsing', () => {
@@ -290,14 +290,13 @@ test('v10 reuses a persisted Project URL before sidebar recovery or duplicate cr
   assert.match(block, /if \(saved\) return saved/);
 
   assert.match(workflow, /project_url:/);
+  assert.doesNotMatch(workflow, /project_id:/);
   assert.match(workflow, /INPUT_PROJECT_URL: \$\{\{ inputs\.project_url \}\}/);
-  assert.match(workflow, /project_url=\$\(jq -r '\.project_url \/\/ ""'/);
   assert.match(workflow, /PROJECT_URL: \$\{\{ steps\.request\.outputs\.project_url \}\}/);
 
-  assert.equal(
-    request.project_url,
-    'https://chatgpt.com/g/g-p-6ac177c98f0c81919e970bb2a69b8583/project',
-  );
+  assert.equal(request.project_url, '');
+  assert.equal(request.project_id, undefined);
+  assert.equal(request.recovery_chat_title, 'VERIFY PROJECT WAKE SIGNAL');
 });
 
 test('v10 saved Project reuse accepts canonical Project root while rejecting chat routes by shape', () => {
@@ -309,23 +308,27 @@ test('v10 saved Project reuse accepts canonical Project root while rejecting cha
   assert.match(source, /observedUrl=/);
 });
 
-test('recover opens current Search chats UI through the visible sidebar Search control', () => {
-  const start = source.indexOf('async function recoverCreatedChatByVisibleSearch');
+test('recover opens the Project first, then uses only the visible Project chat list', () => {
+  const start = source.indexOf('async function recoverCreatedChatFromProjectPage');
   const end = source.indexOf('\nasync function postWithVisibleVerification', start);
   const block = source.slice(start, end);
 
-  const sidebar = block.indexOf('findVisibleSidebarSurface(page)');
-  const searchControl = block.indexOf("sidebar.getByRole('button', { name: /^Search$/i })");
-  const click = block.indexOf('humanPointerClick(page, searchControl)');
-  const locate = block.indexOf("let searchInput = await firstVisible(page, searchSelectors)");
-  const type = block.indexOf("await humanTypeInto(page, searchInput, marker)");
-  assert.ok(sidebar >= 0 && searchControl > sidebar && click > searchControl && locate > click && type > locate);
-  assert.match(block, /sidebar\.getByText\('Search', \{ exact: true \}\)/);
-  assert.match(block, /placeholder\*="Search chats"/);
-  assert.match(block, /placeholder\*="Search"/);
-  assert.match(block, /role="combobox"/);
-  assert.match(block, /role="textbox"/);
-  assert.match(block, /contenteditable="true"/);
-  assert.match(block, /Visible ChatGPT Search chats editor was not found after clicking sidebar Search/);
-  assert.doesNotMatch(block, /page\.keyboard\.press\('Control\+K'\)/);
+  const openSaved = block.indexOf('openSavedProjectUrl(page, projectName, requestedProjectUrl)');
+  const openByName = block.indexOf('recoverExistingProjectExactHumanFlow(page, projectName)');
+  const projectMain = block.indexOf("page.locator('main, [role=\"main\"]').first()");
+  const title = block.indexOf('projectMain.getByText(titlePattern, { exact: true })');
+  const click = block.indexOf('humanPointerClick(page, chatControl)');
+  assert.ok(openSaved >= 0 && openByName > openSaved && projectMain > openByName && title > projectMain && click > title);
+  assert.match(block, /recoveryChatTitle/);
+  assert.match(block, /ancestor-or-self::a\[1\]/);
+  assert.match(block, /ancestor-or-self::button\[1\]/);
+  assert.doesNotMatch(block, /Search chats|Control\+K|humanTypeInto\(page, searchInput/);
+});
+
+test('visible Project-name recovery clicks the nearest rendered link or button and captures navigation', () => {
+  const start = source.indexOf('async function findVisibleExactProjectEntry');
+  const end = source.indexOf('\nasync function recoverExistingProjectExactHumanFlow', start);
+  const block = source.slice(start, end);
+  assert.match(block, /ancestor-or-self::a\[1\]/);
+  assert.match(block, /ancestor-or-self::button\[1\]/);
 });
