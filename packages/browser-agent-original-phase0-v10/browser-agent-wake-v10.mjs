@@ -448,18 +448,25 @@ async function findProjectLandingComposer(page, name) {
   return null;
 }
 
-function validSavedProjectUrl(value) {
+function savedProjectIdentity(value) {
   try {
     const url = new URL(value);
-    return url.origin === 'https://chatgpt.com' && /^\/g\/g-p-[^/]+\/project\/?$/.test(url.pathname);
+    if (url.origin !== 'https://chatgpt.com') return '';
+    const match = url.pathname.match(/^\/g\/(g-p-[A-Za-z0-9]+)(?:-[^/]+)?(?:\/project)?\/?$/);
+    return match?.[1] || '';
   } catch {
-    return false;
+    return '';
   }
+}
+
+function validSavedProjectUrl(value) {
+  return Boolean(savedProjectIdentity(value));
 }
 
 async function openSavedProjectUrl(page, name, projectUrl) {
   if (!projectUrl) return null;
-  if (!validSavedProjectUrl(projectUrl)) {
+  const expectedProjectIdentity = savedProjectIdentity(projectUrl);
+  if (!expectedProjectIdentity) {
     throw new Error('Persisted Project URL is not a valid ChatGPT Project URL');
   }
 
@@ -470,14 +477,19 @@ async function openSavedProjectUrl(page, name, projectUrl) {
   await page.waitForTimeout(randomDelayMs(3000, 5000));
 
   const currentProjectUrl = page.url();
-  if (!validSavedProjectUrl(currentProjectUrl)) {
-    throw new Error('Persisted Project URL did not open the expected ChatGPT Project page');
+  const currentProjectIdentity = savedProjectIdentity(currentProjectUrl);
+  if (!currentProjectIdentity || currentProjectIdentity !== expectedProjectIdentity) {
+    throw new Error(
+      'Persisted Project URL did not open the expected ChatGPT Project page' +
+      ' (observedUrl=' + currentProjectUrl + ')'
+    );
   }
 
   const composer = await ensureComposer(page);
   console.log('[github-playwright-v10] project-reused-saved-url=' + JSON.stringify({
     projectName: name,
-    url: currentProjectUrl
+    url: currentProjectUrl,
+    projectIdentity: currentProjectIdentity
   }));
   return { projectName: name, url: currentProjectUrl, composer, recoveredExisting: true, reusedSavedUrl: true };
 }
