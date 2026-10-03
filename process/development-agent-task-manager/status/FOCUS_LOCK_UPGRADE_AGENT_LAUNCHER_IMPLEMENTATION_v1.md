@@ -7,15 +7,14 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `90a76470592eb6aa72469f8572676cc4193b4736`.
-- PR #508 through PR #512 are merged; the final PR #512 head passed both required validation lanes before merge.
-- Latest merged live Project-wake run `37156888925` proves:
-  - home-exit routing succeeded;
-  - immutable bootstrap secret loaded successfully;
-  - ChatGPT became visibly ready without a Cloudflare challenge;
-  - the previously created Project remains visible by exact name;
-  - route support for Project-scoped chats is merged;
-  - retry failed only because clicking the existing sidebar Project entry did not navigate.
+- Base: current `main` at `cb844a5ed5d9abe51a4a9db051ab12407aa7e0fa`.
+- PR #508 through PR #513 are merged; their required validation lanes passed before merge.
+- Latest merged live Project-wake run `37157337293` proves:
+  - home-exit routing and immutable bootstrap session both succeeded;
+  - saved `project_url` is passed through the v10 request/workflow correctly;
+  - ChatGPT homepage became visibly ready without Cloudflare challenge;
+  - direct open of the persisted Project URL did not remain on the validator's exact `/project` pathname;
+  - failure occurred before any wake was sent, so no duplicate message was created.
 - Durable Project URL already captured from the successful creation run: `https://chatgpt.com/g/g-p-6ac177c98f0c81919e970bb2a69b8583/project`.
 - Project chats use a Project-scoped durable route of the form `https://chatgpt.com/g/g-p-.../c/<id>`.
 - The operator supplied a screenshot of the successful Project landing page. Its reliable human-visible cue is the central composer labeled `New chat in <ProjectName>`, which differs from the homepage composer.
@@ -42,25 +41,23 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## ACTIVE BLOCKER
 
-**Retries must reuse the already captured durable Project URL instead of depending on clicking the sidebar Project entry by name.**
+**Saved Project URL reuse is wired correctly, but the post-navigation validator is too strict about the exact Project collection pathname.**
 
-Project creation is already proven successful and its exact Project URL is known. The sidebar-name recovery click is unnecessary and failed to navigate in run `37156888925`. The system should persist and reuse the exact Project URL for future opens.
+The persisted identity remains the same `g-p-...` Project. ChatGPT may canonicalize the collection page to the Project root rather than retaining the literal `/project` suffix. Accept only safe Project collection routes for that same `g-p-` identity, while continuing to reject homepage and conversation routes.
 
 ## REMAINING DELTA
 
-1. Add optional persisted `project_url` to the v10 request/workflow input path.
-2. On `project_wake`, if a valid persisted Project URL is supplied, open that exact Project URL before any sidebar-name recovery or new Project creation.
-3. Persist the known test Project URL in `current-request-v10.json`.
-4. Preserve the existing first-creation path for requests with no saved Project URL.
-5. Keep Project-scoped conversation route support from PR #512 unchanged.
-6. Preserve `.continuity.project.url` persistence in the Development Agent Task Manager for managed Project tasks.
-7. Add regression coverage for saved-Project-URL reuse and no duplicate creation.
-8. Run both validation lanes, merge only after both pass, then rerun the exact Project wake.
-9. Verify the exact wake remains visibly present after human-style reload and the returned `chatUrl` is the Project-scoped conversation URL.
+1. Keep persisted `project_url` request/workflow wiring from PR #513 unchanged.
+2. Broaden saved Project collection validation from only `/g/g-p-.../project` to the safe same-Project collection forms `/g/g-p-...` and `/g/g-p-.../project`.
+3. Continue rejecting homepage, root `/c/` chats, and Project-scoped `/c/` conversation routes as Project collection URLs.
+4. Preserve exact `g-p-` Project identity when reusing the saved URL.
+5. Add regression coverage for canonicalized Project-root acceptance and conversation-route rejection.
+6. Run both validation lanes, merge only after both pass, then rerun the exact Project wake.
+7. Verify the exact wake remains visibly present after human-style reload and the returned `chatUrl` is the Project-scoped conversation URL.
 
 ## NEXT ACTION
 
-Create a narrow branch from this lock state, wire persisted `project_url` into the v10 request, and reuse the exact saved Project URL before any sidebar-name recovery.
+Create a narrow branch from this lock state and relax only saved-Project collection route validation for safe canonicalized `g-p-` Project roots.
 
 ## PARKED / OUT OF SCOPE
 
