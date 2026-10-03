@@ -178,7 +178,7 @@ test('v10 project creation waits briefly for automatic Project URL navigation an
   const createBlock = source.slice(createStart, createEnd);
 
   assert.match(createBlock, /const beforeCreateUrl = page\.url\(\)/);
-  assert.match(createBlock, /humanPointerClick\(page, controls\.create\)/);
+  assert.match(createBlock, /humanPointerClick\(page, enabledCreate\)/);
   assert.match(createBlock, /randomDelayMs\(3000, 5000\)/);
   assert.match(createBlock, /projectUrl = page\.url\(\)/);
   assert.match(createBlock, /Create project did not navigate to a new Project URL after a short visible wait/);
