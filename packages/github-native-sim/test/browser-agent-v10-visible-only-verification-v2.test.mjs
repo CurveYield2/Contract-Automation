@@ -203,7 +203,8 @@ test('v10 project retry recovers an existing exact-name Project and captures its
   assert.match(source, /box\.x <= 460/);
   assert.match(source, /project-title-target=/);
   assert.match(source, /const beforeUrl = page\.url\(\)/);
-  assert.match(source, /await humanPointerClick\(page, existing\)/);
+  assert.match(source, /await humanTapVisibleTitle\(page, existing, 0\.32\)/);
+  assert.match(source, /await humanTapVisibleTitle\(page, existing, 0\.68\)/);
   assert.match(source, /projectUrl = page\.url\(\)/);
   assert.match(source, /return \{ projectName: name, url: projectUrl, composer, recoveredExisting: true \}/);
 
