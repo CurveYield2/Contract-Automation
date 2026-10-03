@@ -209,28 +209,86 @@ async function humanPointerClick(page, locator) {
   await humanActionPause(page);
 }
 
-async function humanTapVisibleTitle(page, locator, horizontalFraction = 0.32) {
+async function visibleTitlePoint(locator, horizontalFraction) {
   await locator.scrollIntoViewIfNeeded().catch(() => {});
-  await humanActionPause(page);
   const box = await locator.boundingBox();
   if (!box) throw new Error('Visible Project title has no clickable bounding box');
 
-  const clampedFraction = Math.max(0.18, Math.min(horizontalFraction, 0.82));
-  const x = box.x + Math.max(8, Math.min(box.width - 8, box.width * clampedFraction));
-  const y = box.y + box.height / 2;
+  const fraction = Math.max(0.18, Math.min(horizontalFraction, 0.82));
+  return {
+    x: box.x + Math.max(8, Math.min(box.width - 8, box.width * fraction)),
+    y: box.y + box.height / 2,
+    fraction
+  };
+}
 
-  await page.mouse.move(x, y, { steps: 14 });
-  await humanActionPause(page);
+async function humanShortTitleClick(page, locator, horizontalFraction = 0.32) {
+  const point = await visibleTitlePoint(locator, horizontalFraction);
+  await page.mouse.move(point.x, point.y, { steps: 14 });
   await page.mouse.down();
-  await page.waitForTimeout(randomDelayMs(70, 150));
+  await page.waitForTimeout(randomDelayMs(70, 140));
   await page.mouse.up();
-  await humanActionPause(page);
-
-  console.log('[github-playwright-v10] project-title-tap=' + JSON.stringify({
-    x: Math.round(x),
-    y: Math.round(y),
-    fraction: Number(clampedFraction.toFixed(2))
+  console.log('[github-playwright-v10] project-title-gesture=' + JSON.stringify({
+    gesture: 'short-click',
+    x: Math.round(point.x),
+    y: Math.round(point.y),
+    fraction: Number(point.fraction.toFixed(2))
   }));
+}
+
+async function humanDoubleTitleClick(page, locator, horizontalFraction = 0.5) {
+  const point = await visibleTitlePoint(locator, horizontalFraction);
+  await page.mouse.move(point.x, point.y, { steps: 12 });
+
+  await page.mouse.down();
+  await page.waitForTimeout(randomDelayMs(70, 130));
+  await page.mouse.up();
+  await page.waitForTimeout(randomDelayMs(100, 220));
+  await page.mouse.down();
+  await page.waitForTimeout(randomDelayMs(70, 130));
+  await page.mouse.up();
+
+  console.log('[github-playwright-v10] project-title-gesture=' + JSON.stringify({
+    gesture: 'double-click',
+    x: Math.round(point.x),
+    y: Math.round(point.y),
+    fraction: Number(point.fraction.toFixed(2))
+  }));
+}
+
+async function humanLongTitleClick(page, locator, horizontalFraction = 0.68) {
+  const point = await visibleTitlePoint(locator, horizontalFraction);
+  await page.mouse.move(point.x, point.y, { steps: 14 });
+  await page.mouse.down();
+  await page.waitForTimeout(randomDelayMs(550, 900));
+  await page.mouse.up();
+  console.log('[github-playwright-v10] project-title-gesture=' + JSON.stringify({
+    gesture: 'long-click',
+    x: Math.round(point.x),
+    y: Math.round(point.y),
+    fraction: Number(point.fraction.toFixed(2))
+  }));
+}
+
+async function runProjectTitleClickSequence(page, locator, beforeUrl) {
+  await humanShortTitleClick(page, locator, 0.32);
+  await page.waitForTimeout(randomDelayMs(100, 300));
+  let projectUrl = page.url();
+  if (projectUrl !== beforeUrl) return projectUrl;
+
+  await humanDoubleTitleClick(page, locator, 0.5);
+  await page.waitForTimeout(randomDelayMs(100, 300));
+  projectUrl = page.url();
+  if (projectUrl !== beforeUrl) return projectUrl;
+
+  await humanLongTitleClick(page, locator, 0.68);
+  await page.waitForTimeout(randomDelayMs(100, 300));
+  projectUrl = page.url();
+  if (projectUrl !== beforeUrl) return projectUrl;
+
+  // Allow the final long click a short navigation-settle window before failing.
+  await page.waitForTimeout(randomDelayMs(2500, 4500));
+  return page.url();
 }
 
 async function humanTypeInto(page, locator, text) {
@@ -562,20 +620,12 @@ async function recoverExistingProjectExactHumanFlow(page, name) {
 
   const beforeUrl = page.url();
 
-  // Click directly on the visible title letters with a short physical mouse tap.
-  // If the first human click does not navigate, retry once at a second point on
-  // the same rendered title before declaring failure.
-  await humanTapVisibleTitle(page, existing, 0.32);
-  await page.waitForTimeout(randomDelayMs(3000, 5000));
-
-  let projectUrl = page.url();
+  // User-directed human gesture sequence on the exact visible Project title:
+  // short click -> 0.1-0.3s -> double-click -> 0.1-0.3s -> longer click.
+  // Stop immediately if any gesture causes Project URL navigation.
+  const projectUrl = await runProjectTitleClickSequence(page, existing, beforeUrl);
   if (projectUrl === beforeUrl) {
-    await humanTapVisibleTitle(page, existing, 0.68);
-    await page.waitForTimeout(randomDelayMs(3000, 5000));
-    projectUrl = page.url();
-  }
-  if (projectUrl === beforeUrl) {
-    throw new Error('Existing exact-name Project title did not navigate after two direct human title taps');
+    throw new Error('Existing exact-name Project title did not navigate after short-click, double-click, and long-click sequence');
   }
 
   const composer = await ensureComposer(page);

@@ -203,8 +203,8 @@ test('v10 project retry recovers an existing exact-name Project and captures its
   assert.match(source, /box\.x <= 460/);
   assert.match(source, /project-title-target=/);
   assert.match(source, /const beforeUrl = page\.url\(\)/);
-  assert.match(source, /await humanTapVisibleTitle\(page, existing, 0\.32\)/);
-  assert.match(source, /await humanTapVisibleTitle\(page, existing, 0\.68\)/);
+  assert.match(source, /runProjectTitleClickSequence\(page, existing, beforeUrl\)/);
+  assert.match(source, /short-click, double-click, and long-click sequence/);
   assert.match(source, /projectUrl = page\.url\(\)/);
   assert.match(source, /return \{ projectName: name, url: projectUrl, composer, recoveredExisting: true \}/);
 
@@ -343,17 +343,30 @@ test('visible Project-name recovery clicks the exact rendered Project title text
   assert.match(block, /return candidate/);
 });
 
-test('existing Project recovery uses short direct human taps on the visible title and retries once', () => {
-  assert.match(source, /async function humanTapVisibleTitle/);
-  assert.match(source, /randomDelayMs\(70, 150\)/);
-  assert.match(source, /project-title-tap=/);
+test('existing Project recovery uses short-click then double-click then long-click with 0.1-0.3s gaps', () => {
+  assert.match(source, /async function humanShortTitleClick/);
+  assert.match(source, /async function humanDoubleTitleClick/);
+  assert.match(source, /async function humanLongTitleClick/);
+  assert.match(source, /async function runProjectTitleClickSequence/);
 
-  const start = source.indexOf('async function recoverExistingProjectExactHumanFlow');
-  const end = source.indexOf('\nasync function findSendControlNearComposer', start);
-  const block = source.slice(start, end);
-  const first = block.indexOf('humanTapVisibleTitle(page, existing, 0.32)');
-  const second = block.indexOf('humanTapVisibleTitle(page, existing, 0.68)');
-  assert.ok(first >= 0 && second > first);
-  assert.match(block, /Existing exact-name Project title did not navigate after two direct human title taps/);
-  assert.doesNotMatch(block, /humanPointerClick\(page, existing\)/);
+  const sequenceStart = source.indexOf('async function runProjectTitleClickSequence');
+  const sequenceEnd = source.indexOf('\nasync function humanTypeInto', sequenceStart);
+  const sequence = source.slice(sequenceStart, sequenceEnd);
+  const shortClick = sequence.indexOf('humanShortTitleClick(page, locator, 0.32)');
+  const doubleClick = sequence.indexOf('humanDoubleTitleClick(page, locator, 0.5)');
+  const longClick = sequence.indexOf('humanLongTitleClick(page, locator, 0.68)');
+  assert.ok(shortClick >= 0 && doubleClick > shortClick && longClick > doubleClick);
+  assert.match(sequence, /randomDelayMs\(100, 300\)/);
+  assert.match(sequence, /if \(projectUrl !== beforeUrl\) return projectUrl/);
+  assert.match(source, /randomDelayMs\(550, 900\)/);
+  assert.match(source, /gesture: 'short-click'/);
+  assert.match(source, /gesture: 'double-click'/);
+  assert.match(source, /gesture: 'long-click'/);
+
+  const recoverStart = source.indexOf('async function recoverExistingProjectExactHumanFlow');
+  const recoverEnd = source.indexOf('\nasync function findSendControlNearComposer', recoverStart);
+  const recover = source.slice(recoverStart, recoverEnd);
+  assert.match(recover, /runProjectTitleClickSequence\(page, existing, beforeUrl\)/);
+  assert.match(recover, /Existing exact-name Project title did not navigate after short-click, double-click, and long-click sequence/);
+  assert.doesNotMatch(recover, /humanPointerClick\(page, existing\)/);
 });
