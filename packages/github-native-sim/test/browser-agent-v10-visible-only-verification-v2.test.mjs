@@ -308,3 +308,19 @@ test('v10 saved Project reuse accepts canonical Project root while rejecting cha
   assert.match(source, /currentProjectIdentity !== expectedProjectIdentity/);
   assert.match(source, /observedUrl=/);
 });
+
+test('recover opens current Search chats UI with human Ctrl+K and supports current visible editor shapes', () => {
+  const start = source.indexOf('async function recoverCreatedChatByVisibleSearch');
+  const end = source.indexOf('\nasync function postWithVisibleVerification', start);
+  const block = source.slice(start, end);
+
+  const shortcut = block.indexOf("page.keyboard.press('Control+K')");
+  const locate = block.indexOf("let searchInput = await firstVisible(page, searchSelectors)");
+  const type = block.indexOf("await humanTypeInto(page, searchInput, marker)");
+  assert.ok(shortcut >= 0 && locate > shortcut && type > locate);
+  assert.match(block, /placeholder\*="Search chats"/);
+  assert.match(block, /role="combobox"/);
+  assert.match(block, /role="textbox"/);
+  assert.match(block, /contenteditable="true"/);
+  assert.match(block, /Visible ChatGPT Search chats editor was not found after Ctrl\+K/);
+});
