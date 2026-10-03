@@ -65,11 +65,8 @@ jobs:
     timeout-minutes: 35
     env:
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
-      CHATGPT_SESSION_STATE_KEY_B64: ${{ secrets.CHATGPT_SESSION_STATE_KEY_B64 }}
       DISPLAY: ":99"
       BROWSER_HEADLESS: "false"
-      CHATGPT_SESSION_STATE_PATH: /tmp/curveyield-browser-agent-v10/session-state-v1.enc.json
-      CHATGPT_SESSION_STATE_UPDATED_MARKER: /tmp/curveyield-browser-agent-v10/session-state-updated
       WAKE_RESULT_PATH: /tmp/browser-agent-home-exit-v10-result.json
 
     steps:
@@ -122,14 +119,6 @@ jobs:
 
       - name: Set up isolated Playwright runtime
         uses: ./packages/browser-agent-original-phase0-v10/runtime-v10
-
-      - name: Restore encrypted browser session state
-        uses: actions/cache/restore@v4
-        with:
-          path: /tmp/curveyield-browser-agent-v10/session-state-v1.enc.json
-          key: chatgpt-home-exit-session-v10-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            chatgpt-home-exit-session-v10-
 
       - name: Install private VNC helper
         if: steps.request.outputs.interactive_view == 'true'
@@ -248,13 +237,6 @@ jobs:
           set +e
           sudo tailscale set --exit-node=""
           echo "Home exit-node routing disabled for post-browser workflow steps."
-
-      - name: Save refreshed encrypted browser session state
-        if: steps.browser.outcome == 'success'
-        uses: actions/cache/save@v4
-        with:
-          path: /tmp/curveyield-browser-agent-v10/session-state-v1.enc.json
-          key: chatgpt-home-exit-session-v10-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Cleanup browser display
         if: always()
