@@ -15,8 +15,9 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 ## CURRENT MAIN
 
 - Repository: `CurveYield2/Contract-Automation`
-- Current main commit checked: `988c9d13e979f99720f90a63ac6ebf4830db641d`
-- Repair branch: `upgrade-agent-launcher-project-control-repair-v1`
+- Current main checked after sidebar repair merge and smoke retrigger.
+- Sidebar repair merge commit: `77bdce5bea75ff2868394aaaa7cb2708f9a87a15`
+- Smoke retrigger commit: `0ae6e4fde7a08c78c864ba95fc55b708416dc130`
 
 ## AUTHORITATIVE SPECIFICATIONS
 
@@ -38,26 +39,25 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 
 ## SATISFIED
 
-- Launcher design v2 merged to main.
-- Upgrade Agent Execution Authority v1 implemented.
-- Deterministic launcher admission module implemented.
-- Minimal Cloudflare launcher implemented.
-- GitHub fallback launcher implemented.
-- Development Agent Task Manager merge-to-main finalization implemented.
-- Terminal output and ChatGPT Project metadata implemented.
-- Regression tests added.
-- V7 Execution Infrastructure Qualification passed.
-- Lite Structured Phase Regression v2 passed.
-- Implementation PR #492 merged to main.
-- Fresh-runner retry support merged.
-- Retryable Project UI failure classification merged.
-- Visible-browser backend-health/manual-verification wait merged in PR #496.
-- Live smoke proved backend verification can clear: later retries returned healthy 200 responses for ChatGPT backend preflight.
-- Live smoke then failed only because the current sidebar recovery did not expose the Project creation control.
-- Terminal diagnostics showed visible `Recents` and `Chat sidebar options`, but no visible `Projects` or `New project`.
-- Current recovery already knows how to use `Organize sidebar` and a `Projects` option once visible, but it does not open `Chat sidebar options` first.
+- Launcher design v2, launcher implementation, merge finalization, output metadata and Project continuity are merged.
+- V7 Execution Infrastructure Qualification and Lite Structured Phase Regression passed for the launcher implementation.
+- Saved ChatGPT bootstrap state is confirmed in live runs.
+- Backend-health/manual-verification wait is merged and regression-tested.
+- Live smoke proved ChatGPT backend verification can clear and return healthy 200 responses.
+- Live smoke terminal UI diagnostics identified the current sidebar layout: visible `Chat sidebar options` with Projects hidden.
+- Project sidebar recovery was repaired to follow the visible human path: `Chat sidebar options -> Organize sidebar -> Show -> Projects`.
+- Project sidebar repair PR #497 passed both GitHub validation suites.
+- Project sidebar repair PR #497 was merged to main at `77bdce5bea75ff2868394aaaa7cb2708f9a87a15`.
+- The same `upgrade-launcher-live-smoke-r1` request was retriggered without changing its specification, target branch, or end-state.
 
 ## REMAINING DELTA
+
+1. Obtain one healthy smoke runner through the existing home-exit routing step; do not modify browser/Project code for a runner-level routing stall.
+2. Verify the merged sidebar repair creates the managed ChatGPT Project and persists active manager state.
+3. Continue the same smoke through focus-locked agent completion and mandatory merge-to-main finalization.
+4. Close this focus lock only after terminal COMPLETE exposes output + ChatGPT Project links.
+
+
 
 1. Extend only `exposeProjectsInSidebar` so it can open the visible `Chat sidebar options` control, then follow the existing human UI path through `Organize sidebar` and `Show` when present.
 2. Preserve the existing human pointer interaction primitives; do not add DOM-click, force-click, direct backend, or alternate browser paths.
@@ -83,11 +83,11 @@ A GitHub-only workflow-dispatch fallback must admit the same task shape without 
 
 ## ACTIVE BLOCKER
 
-Current ChatGPT web UI exposes `Chat sidebar options` but the Project recovery path only searches directly for `Organize sidebar`. Because it never opens the sidebar-options menu, it fails with `PROJECT_CREATE_CONTROL_MISSING` even after backend health is restored.
+Current smoke run `37087636054` is stalled before browser execution in `Route browser phase through home exit node`. Tailscale connection and visible VNC setup succeeded, but the routing step has exceeded its normal internal bounded duration. This run has not exercised the newly merged Project sidebar repair yet.
 
 ## NEXT ACTION
 
-Patch only the sidebar recovery path to open `Chat sidebar options`, then `Organize sidebar`, then `Show` when present, and reuse the existing Projects toggle + human Project creation logic.
+Treat the current run as a runner/infrastructure instance until it either fails or recovers. Do not change Project/browser code. Once the run terminates, use the existing retry path/fresh runner to exercise the same smoke task.
 
 ## ANTI-DRIFT CHECK
 
