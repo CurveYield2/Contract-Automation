@@ -249,25 +249,75 @@ async function humanTypeInto(page, locator, text) {
   await humanActionPause(page);
 }
 
+async function findVisibleSidebarSurface(page) {
+  const candidates = page.locator('nav, aside, [data-testid*="sidebar" i], [class*="sidebar" i]');
+  const count = Math.min(await candidates.count().catch(() => 0), 40);
+  for (let i = 0; i < count; i += 1) {
+    const candidate = candidates.nth(i);
+    if (!await candidate.isVisible().catch(() => false)) continue;
+    const box = await candidate.boundingBox().catch(() => null);
+    if (!box) continue;
+    if (box.x <= 420 && box.width <= 520 && box.height >= 280) return candidate;
+  }
+  return null;
+}
+
+async function humanScrollSidebarForProjects(page) {
+  const projects = page.getByText('Projects', { exact: true }).first();
+  if (await projects.isVisible().catch(() => false)) return projects;
+
+  const sidebar = await findVisibleSidebarSurface(page);
+  if (!sidebar) return null;
+
+  await sidebar.hover().catch(() => {});
+  await humanActionPause(page);
+
+  // A person can arrive with the sidebar scrolled anywhere. First move toward
+  // the top, then scan downward until the Projects title appears.
+  for (let i = 0; i < 4; i += 1) {
+    await page.mouse.wheel(0, -randomDelayMs(500, 900));
+    await humanActionPause(page);
+    if (await projects.isVisible().catch(() => false)) return projects;
+  }
+  for (let i = 0; i < 14; i += 1) {
+    await page.mouse.wheel(0, randomDelayMs(350, 700));
+    await humanActionPause(page);
+    if (await projects.isVisible().catch(() => false)) return projects;
+  }
+  return null;
+}
+
 async function ensureSidebarOpenForProject(page) {
   const projects = page.getByText('Projects', { exact: true }).first();
-  if (await projects.isVisible().catch(() => false)) return;
+  if (await projects.isVisible().catch(() => false)) return projects;
 
   const open = await firstVisible(page, [
     'button[data-testid="open-sidebar-button"]',
+    'button[data-testid="sidebar-toggle-button"]',
     'button[aria-label="Open sidebar"]',
+    'button[aria-label="Toggle sidebar"]',
     'button[aria-label*="Open sidebar" i]',
     'button[aria-label*="Show sidebar" i]',
-    'button[aria-label*="Toggle sidebar" i]'
+    'button[aria-label*="sidebar" i]',
+    '[role="button"][aria-label*="sidebar" i]',
+    '[data-testid*="sidebar"][role="button"]',
+    'button[title*="sidebar" i]'
   ]);
-  if (!open) throw new Error('Visible sidebar-open control was not found');
-  await humanPointerClick(page, open);
-  await humanActionPause(page);
 
-  if (!await projects.isVisible().catch(() => false)) {
-    throw new Error('Projects section is not visible after opening the sidebar');
+  // If the explicit open control is absent, do not assume failure: the sidebar
+  // may already be open with Projects simply below the fold.
+  if (open) {
+    await humanPointerClick(page, open);
+    await humanActionPause(page);
   }
+
+  const found = await humanScrollSidebarForProjects(page);
+  if (!found) {
+    throw new Error('Projects section could not be found after opening/scrolling the visible sidebar');
+  }
+  return found;
 }
+
 
 async function findProjectsPlusAfterHover(page, projects) {
   let region = projects;
@@ -296,10 +346,8 @@ async function findProjectsPlusAfterHover(page, projects) {
 async function createProjectExactHumanFlow(page, name) {
   if (!name) throw new Error('PROJECT_NAME is required for project_wake');
 
-  await ensureSidebarOpenForProject(page);
+  const projects = await ensureSidebarOpenForProject(page);
   await humanActionPause(page);
-
-  const projects = page.getByText('Projects', { exact: true }).first();
   if (!await projects.isVisible().catch(() => false)) {
     throw new Error('Visible Projects section title was not found');
   }
