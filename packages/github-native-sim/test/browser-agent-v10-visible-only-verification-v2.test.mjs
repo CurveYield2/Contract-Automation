@@ -198,8 +198,11 @@ test('v10 project creation waits briefly for automatic Project URL navigation an
 test('v10 project retry recovers an existing exact-name Project and captures its navigated URL', () => {
   assert.match(source, /async function findVisibleExactProjectEntry/);
   assert.match(source, /async function recoverExistingProjectExactHumanFlow/);
-  assert.match(source, /const matches = page\.getByText\(name, \{ exact: true \}\)/);
-  assert.match(source, /const inLeftSidebar = box\.x <= 460/);
+  assert.match(source, /const namePattern = new RegExp/);
+  assert.match(source, /page\.getByRole\('link', \{ name: namePattern \}\)/);
+  assert.match(source, /page\.getByRole\('button', \{ name: namePattern \}\)/);
+  assert.match(source, /page\.getByText\(namePattern, \{ exact: true \}\)/);
+  assert.match(source, /box\.x <= 460/);
   assert.match(source, /const beforeUrl = page\.url\(\)/);
   assert.match(source, /await humanPointerClick\(page, existing\)/);
   assert.match(source, /projectUrl = page\.url\(\)/);
