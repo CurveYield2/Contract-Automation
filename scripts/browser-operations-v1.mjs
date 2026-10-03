@@ -359,8 +359,8 @@ async function visibleNavigationDiagnostics(page) {
 
 async function exposeProjectsInSidebar(page) {
   // 2026 web sidebar redesign can hide Projects from the top-level navigation.
-  // Recover through the visible Recents/sidebar organization controls rather than
-  // assuming Projects was removed or bypassing project creation.
+  // Follow the same visible controls a person uses:
+  // Chat sidebar options -> Organize sidebar -> Show -> Projects.
   const recents = await firstVisible(page, [
     'button[aria-label="Recents"]',
     'button:has-text("Recents")',
@@ -376,10 +376,31 @@ async function exposeProjectsInSidebar(page) {
     '[role="menuitem"]:has-text("Organize sidebar")',
     '[role="button"]:has-text("Organize sidebar")',
     'button[aria-label*="Organize sidebar" i]'
-  ], 700);
+  ], 500);
+
+  let sidebarOptions = null;
+  if (!organize) {
+    sidebarOptions = await firstVisible(page, [
+      'button[aria-label="Chat sidebar options"]',
+      '[role="button"][aria-label="Chat sidebar options"]',
+      'button[aria-label*="sidebar options" i]',
+      '[role="button"][aria-label*="sidebar options" i]'
+    ], 900);
+
+    if (sidebarOptions) {
+      await humanPointerClick(page, sidebarOptions);
+      await page.waitForTimeout(550);
+      organize = await firstVisible(page, [
+        '[role="menuitem"]:has-text("Organize sidebar")',
+        'button:has-text("Organize sidebar")',
+        '[role="button"]:has-text("Organize sidebar")',
+        '[aria-label*="Organize sidebar" i]'
+      ], 1000);
+    }
+  }
 
   if (!organize) {
-    // Some variants expose the organizer from an adjacent overflow button.
+    // Some variants expose the organizer from another visible overflow control.
     const controls = page.locator('button, [role="button"]');
     const count = Math.min(await controls.count().catch(() => 0), 120);
     for (let i = 0; i < count && !organize; i += 1) {
@@ -395,8 +416,22 @@ async function exposeProjectsInSidebar(page) {
   }
 
   if (organize) {
-    await humanPointerClick(page, organize).catch(() => {});
-    await page.waitForTimeout(600);
+    await humanPointerClick(page, organize);
+    await page.waitForTimeout(550);
+  }
+
+  // Current UI nests sidebar visibility controls under a visible "Show" submenu.
+  // Older variants expose Projects directly, so treat Show as optional.
+  const show = await firstVisible(page, [
+    '[role="menuitem"]:has-text("Show")',
+    '[role="button"]:has-text("Show")',
+    'button:has-text("Show")',
+    '[aria-label="Show"]',
+    '[aria-label*="Show" i]'
+  ], 700);
+  if (show) {
+    await humanPointerClick(page, show);
+    await page.waitForTimeout(450);
   }
 
   const projectsOption = await firstVisible(page, [
@@ -405,7 +440,7 @@ async function exposeProjectsInSidebar(page) {
     '[role="checkbox"]:has-text("Projects")',
     'label:has-text("Projects")',
     'button:has-text("Projects")'
-  ], 900);
+  ], 1200);
 
   if (projectsOption) {
     const checked = await projectsOption.getAttribute('aria-checked').catch(() => null);
@@ -413,7 +448,7 @@ async function exposeProjectsInSidebar(page) {
     const state = await projectsOption.getAttribute('data-state').catch(() => null);
     if (checked !== 'true' && selected !== 'true' && state !== 'checked') {
       await humanPointerClick(page, projectsOption);
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(900);
     } else {
       await projectsOption.press('Escape').catch(() => {});
       await page.waitForTimeout(300);
@@ -424,7 +459,9 @@ async function exposeProjectsInSidebar(page) {
   const visible = await page.getByText('Projects', { exact: true }).first().isVisible().catch(() => false);
   console.log('[browser-operations] sidebar-projects-recovery=' + JSON.stringify({
     recentsVisible: Boolean(recents),
+    sidebarOptionsFound: Boolean(sidebarOptions),
     organizerFound: Boolean(organize),
+    showFound: Boolean(show),
     projectsOptionFound: Boolean(projectsOption),
     projectsVisible: visible
   }));
