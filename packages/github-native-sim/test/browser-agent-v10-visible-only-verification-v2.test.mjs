@@ -361,6 +361,11 @@ test('existing Project recovery uses short-click then double-click then long-cli
   assert.match(source, /randomDelayMs\(550, 900\)/);
   assert.match(source, /gesture: 'short-click'/);
   assert.match(source, /gesture: 'double-click'/);
+  assert.match(source, /page\.mouse\.down\(\{ clickCount: 1 \}\)/);
+  assert.match(source, /page\.mouse\.up\(\{ clickCount: 1 \}\)/);
+  assert.match(source, /page\.mouse\.down\(\{ clickCount: 2 \}\)/);
+  assert.match(source, /page\.mouse\.up\(\{ clickCount: 2 \}\)/);
+  assert.match(source, /clickCountSequence: \[1, 2\]/);
   assert.match(source, /gesture: 'long-click'/);
 
   const recoverStart = source.indexOf('async function recoverExistingProjectExactHumanFlow');
