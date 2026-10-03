@@ -7,16 +7,14 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Repair branch: `browser-project-sidebar-scroll-v1`
-- Fresh bootstrap-secret-only state is merged and verified to load cleanly without Cloudflare.
-- First Project-wake run `37152260428` reached ChatGPT successfully, used the immutable secret, and failed only because the sidebar helper assumed a missing Projects title meant the sidebar was closed.
-- Current repair distinguishes an already-open sidebar from a closed one.
-- If Projects is below the fold, the browser now moves into the visible left sidebar and human-scrolls:
-  - randomized upward wheel motion first;
-  - then randomized downward wheel motion;
-  - 0.3–1.5 second human pauses between scroll actions.
-- Once Projects appears, the exact sequence remains: hover Projects -> click revealed plus -> type name 0.2–0.4s per character -> click Create Project.
-- Same Project-wake request is re-armed for a fresh merged-code retry.
+- Repair branch: `browser-project-name-field-v1`
+- Fresh bootstrap-secret-only state remains the only browser session source.
+- Project-wake run `37152694131` successfully reached ChatGPT, found Projects through human sidebar scrolling, hovered Projects, and clicked the revealed plus.
+- Current failure is narrow: the current Project popup does not expose its textbox under a `role="dialog"` ancestor.
+- Current repair anchors the popup to the visible `Create Project` control, walks its visible ancestor region, and selects the visible textbox there while excluding the main message composer.
+- No backend/network reads were added.
+- Exact human pacing remains 0.3–1.5 seconds between actions and 0.2–0.4 seconds per typed character.
+- Same Project-wake request is re-armed.
 
 ## SATISFIED
 
@@ -41,9 +39,13 @@ The Upgrade Agent Launcher must use one clean immutable ChatGPT login snapshot p
 
 ## ACTIVE BLOCKER
 
-No code blocker proven. The previous failure was narrow: Projects was not visible and no explicit sidebar-open button existed, so the routine failed instead of treating the sidebar as already open and scrolling it.
+No transport, session, sidebar, or Cloudflare blocker is currently proven. The only proven blocker is visible Project-name textbox discovery in the current popup markup.
 
 ## NEXT ACTION
+
+Pass validation, merge this popup locator repair, and rerun the same fresh-secret Project wake. Do not change any other browser behavior unless the merged run proves a new specific blocker.
+
+
 
 Run repository validation on this exact branch. Do not alter scope unless a validation failure or the merged live Project test proves a specific blocker.
 
