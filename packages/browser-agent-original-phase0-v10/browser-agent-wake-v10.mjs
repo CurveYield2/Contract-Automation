@@ -12,6 +12,7 @@ const mode = env.WAKE_MODE || 'resume_existing';
 const wakeId = env.WAKE_ID || crypto.randomUUID();
 const wakeMessage = env.WAKE_MESSAGE || '';
 const requestedUrl = env.CHAT_URL || '';
+const projectName = env.PROJECT_NAME || '';
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
@@ -246,6 +247,111 @@ async function humanTypeInto(page, locator, text) {
     await humanTypingPause(page);
   }
   await humanActionPause(page);
+}
+
+async function ensureSidebarOpenForProject(page) {
+  const projects = page.getByText('Projects', { exact: true }).first();
+  if (await projects.isVisible().catch(() => false)) return;
+
+  const open = await firstVisible(page, [
+    'button[data-testid="open-sidebar-button"]',
+    'button[aria-label="Open sidebar"]',
+    'button[aria-label*="Open sidebar" i]',
+    'button[aria-label*="Show sidebar" i]',
+    'button[aria-label*="Toggle sidebar" i]'
+  ]);
+  if (!open) throw new Error('Visible sidebar-open control was not found');
+  await humanPointerClick(page, open);
+  await humanActionPause(page);
+
+  if (!await projects.isVisible().catch(() => false)) {
+    throw new Error('Projects section is not visible after opening the sidebar');
+  }
+}
+
+async function findProjectsPlusAfterHover(page, projects) {
+  let region = projects;
+  for (let depth = 0; depth < 4; depth += 1) {
+    region = region.locator('xpath=..');
+    const candidates = region.locator('button, [role="button"]');
+    const count = Math.min(await candidates.count().catch(() => 0), 12);
+    for (let i = 0; i < count; i += 1) {
+      const candidate = candidates.nth(i);
+      if (!await candidate.isVisible().catch(() => false)) continue;
+      const attrs = [
+        await candidate.innerText().catch(() => ''),
+        await candidate.getAttribute('aria-label').catch(() => ''),
+        await candidate.getAttribute('title').catch(() => ''),
+        await candidate.getAttribute('data-testid').catch(() => ''),
+        await candidate.evaluate(el => el.outerHTML.slice(0, 900)).catch(() => '')
+      ].filter(Boolean).join(' ');
+      const looksOverflow = /more|overflow|menu|options|ellipsis|\.\.\.|⋯/i.test(attrs);
+      const looksPlus = /add|plus|create|new|M12 5v14|M5 12h14|<line[^>]+x1=["']12["'][^>]+y1=["']5/i.test(attrs);
+      if (!looksOverflow && looksPlus) return candidate;
+    }
+  }
+  return null;
+}
+
+async function createProjectExactHumanFlow(page, name) {
+  if (!name) throw new Error('PROJECT_NAME is required for project_wake');
+
+  await ensureSidebarOpenForProject(page);
+  await humanActionPause(page);
+
+  const projects = page.getByText('Projects', { exact: true }).first();
+  if (!await projects.isVisible().catch(() => false)) {
+    throw new Error('Visible Projects section title was not found');
+  }
+
+  await projects.hover();
+  await humanActionPause(page);
+
+  const plus = await findProjectsPlusAfterHover(page, projects);
+  if (!plus) throw new Error('Plus control did not appear to the right of Projects after hover');
+  await humanPointerClick(page, plus);
+
+  const input = await firstVisible(page, [
+    '[role="dialog"] input[placeholder*="Project name" i]',
+    '[role="dialog"] input[aria-label*="Project name" i]',
+    '[role="dialog"] input[name="name"]',
+    '[role="dialog"] input'
+  ]);
+  if (!input) throw new Error('Project-name input was not found in the visible Project dialog');
+  await humanTypeInto(page, input, name);
+
+  const create = await firstVisible(page, [
+    '[role="dialog"] button:has-text("Create project")',
+    '[role="dialog"] button:has-text("Create Project")'
+  ]);
+  if (!create) throw new Error('Create Project button was not found in the visible dialog');
+  await humanPointerClick(page, create);
+
+  const deadline = Date.now() + 60000;
+  while (Date.now() < deadline) {
+    const title = await page.title().catch(() => '');
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const visible = visibleBrowserStateText(bodyText, title);
+    if (visible.humanChallenge) {
+      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected after Project creation; aborting immediately');
+      error.code = 'BROWSER_CHALLENGE';
+      throw error;
+    }
+
+    const projectNameVisible = await page.getByText(name, { exact: true }).first().isVisible().catch(() => false);
+    const composer = await firstVisible(page, [
+      '#prompt-textarea',
+      'textarea[placeholder*="Message"]',
+      '[contenteditable="true"][data-lexical-editor="true"]',
+      '[contenteditable="true"]'
+    ]);
+    if (projectNameVisible && composer) {
+      console.log('[github-playwright-v10] project-created-visible=' + JSON.stringify({ projectName: name, url: page.url() }));
+      return { projectName: name, url: page.url() };
+    }
+    await page.waitForTimeout(750);
+  }
+  throw new Error('Created Project did not become visibly ready with a composer within 60 seconds');
 }
 
 async function fillComposer(page, message) {
@@ -598,6 +704,14 @@ async function runWithPage(providerName, connect) {
     }
 
     await waitForVisibleBrowserReady(page);
+
+    let project = null;
+    if (action === 'project_wake') {
+      if (mode !== 'create_fresh') throw new Error('project_wake requires create_fresh mode');
+      project = await createProjectExactHumanFlow(page, projectName);
+      await waitForVisibleBrowserReady(page);
+    }
+
     const before = await snapshot(page);
 
     if (action === 'observe') {
@@ -669,6 +783,7 @@ async function runWithPage(providerName, connect) {
       ok: true, provider: providerName, action, wakeId, posted: true, before, after, sessionStatePersisted,
       chatUrl: verifiedSend.chatUrl || after.url,
       verification: 'visible-browser-only',
+      ...(project ? { projectName: project.projectName, projectUrl: project.url } : {}),
       ...(response ? { responded: response.responded, waitedMs: response.waitedMs } : {})
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
