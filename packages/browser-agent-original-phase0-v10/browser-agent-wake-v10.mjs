@@ -535,6 +535,40 @@ async function findVisibleExactProjectEntry(page, projectsTitle, name) {
     if (await link.isVisible().catch(() => false)) return link;
     const button = candidate.locator('xpath=ancestor-or-self::button[1]');
     if (await button.isVisible().catch(() => false)) return button;
+
+    // Some current Project rows expose no link/button role at all. In that UI,
+    // a person still clicks the larger rendered row surrounding the Project name.
+    // Walk outward using only visible geometry and pick the first compact sidebar
+    // row that clearly contains the text, rather than clicking the text glyphs.
+    const textBox = await candidate.boundingBox().catch(() => null);
+    if (textBox) {
+      let row = candidate;
+      for (let depth = 0; depth < 6; depth += 1) {
+        row = row.locator('xpath=..');
+        if (!await row.isVisible().catch(() => false)) continue;
+        const rowBox = await row.boundingBox().catch(() => null);
+        if (!rowBox) continue;
+
+        const containsText =
+          rowBox.x <= textBox.x &&
+          rowBox.y <= textBox.y &&
+          rowBox.x + rowBox.width >= textBox.x + textBox.width &&
+          rowBox.y + rowBox.height >= textBox.y + textBox.height;
+        const compactProjectRow =
+          rowBox.x <= 460 &&
+          rowBox.y >= projectsBox.y &&
+          rowBox.y <= projectsBox.y + 420 &&
+          rowBox.width >= Math.max(textBox.width + 24, 140) &&
+          rowBox.height >= 28 &&
+          rowBox.height <= 72;
+
+        if (containsText && compactProjectRow) {
+          console.log('[github-playwright-v10] project-row-target=visible-geometry-parent');
+          return row;
+        }
+      }
+    }
+
     return candidate;
   }
 
