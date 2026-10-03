@@ -155,6 +155,53 @@ contract StakeDaoHarvester {
         emit Settled(harvested, crv, ethOut, toBot, toAdmin, profitWei);
     }
 
+    /// @notice All vaults in ONE Accountant call (cheaper than `harvest`: no per-vault sub-calls). Any failing vault
+    /// reverts the whole batch. `swap` = true: all CRV → ETH, bot refilled, profit = ETH received − all gas.
+    /// `swap` = false: all CRV to `admin`, profit = CRV at Chainlink × (1 − slippageBps) − all gas.
+    function harvestBatch(
+        address[] calldata gauges,
+        uint256 minTotalProfitWei,
+        uint256 intrinsicGas,
+        uint256 slippageBps,
+        bool swap
+    ) external returns (int256 profitWei) {
+        uint256 gasStart = gasleft();
+        if (msg.sender != bot) revert NotBot();
+        if (slippageBps > MAX_SLIPPAGE_BPS) revert BadSlippage();
+        uint256 price = _crvEthPrice();
+
+        bytes[] memory data = new bytes[](gauges.length);
+        ACCOUNTANT.harvest(gauges, data, address(this));
+        uint256 crv = CRV.balanceOf(address(this));
+
+        uint256 valueWei;
+        uint256 toBot;
+        uint256 toAdmin;
+        if (swap) {
+            if (crv != 0) {
+                uint256 minOut = crv * price / 1e18 * (10_000 - slippageBps) / 10_000;
+                valueWei = TRICRV.exchange(TRICRV_CRV, TRICRV_WETH, crv, minOut, true, address(this));
+            }
+            uint256 balance = address(this).balance;
+            uint256 botBalance = bot.balance;
+            if (botBalance < botReserve) {
+                toBot = botReserve - botBalance;
+                if (toBot > balance) toBot = balance;
+                _sendEth(bot, toBot);
+            }
+            toAdmin = balance - toBot;
+            if (toAdmin != 0) _sendEth(admin, toAdmin);
+        } else {
+            valueWei = crv * price / 1e18 * (10_000 - slippageBps) / 10_000;
+            if (crv != 0 && !CRV.transfer(admin, crv)) revert TransferFailed();
+        }
+
+        uint256 gasUsed = gasStart - gasleft() + intrinsicGas + TAIL_GAS;
+        profitWei = int256(valueWei) - int256(gasUsed * tx.gasprice);
+        if (profitWei < int256(minTotalProfitWei)) revert TotalUnprofitable(profitWei, minTotalProfitWei);
+        emit Settled(gauges.length, crv, valueWei, toBot, toAdmin, profitWei);
+    }
+
     /// @notice One vault's harvest; only callable by this contract (from `harvest`). Reverts — rolling the vault's
     /// harvest back — when its profit is below `minProfitWei`.
     function harvestOne(address gauge, uint256 minProfitWei, uint256 price) external {

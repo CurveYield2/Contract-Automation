@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_CONFIG as cfg, candidates, selectSet, breakEvenGasPrice, feePlan, intrinsicGasOf } from '../src/plan.js';
+import { DEFAULT_CONFIG as cfg, candidates, selectSet, breakEvenGasPrice, feePlan, intrinsicGasOf, evaluate, useSwap, planCfg } from '../src/plan.js';
 
 const crvEth = 0.000142; // ETH per CRV
 const ethUsd = 2700;
@@ -80,3 +80,22 @@ test('intrinsicGasOf counts zero and non-zero calldata bytes', () => {
   assert.equal(intrinsicGasOf('0x00ff'), 21_000 + 4 + 16);
 });
 
+
+test('v1.1 useSwap: always in swapMode 0; in swapMode 1 only below swapBelowEth', () => {
+  assert.equal(useSwap(10n ** 18n, { ...cfg, swapMode: 0 }), true);
+  assert.equal(useSwap(4n * 10n ** 14n, { ...cfg, swapMode: 1, swapBelowEth: 0.0005 }), true);
+  assert.equal(useSwap(6n * 10n ** 14n, { ...cfg, swapMode: 1, swapBelowEth: 0.0005 }), false);
+});
+
+test('v1.1 planCfg: batched gas model matches the 2026-10-02 fork measurements within 5%', () => {
+  const measured = { swap: [826_000, 1_098_000, 1_347_000, 1_696_000, 1_987_000], noSwap: [664_000, 936_000, 1_186_000, 1_534_000, 1_826_000] };
+  for (const swap of [true, false]) {
+    const pc = planCfg(cfg, true, swap);
+    measured[swap ? 'swap' : 'noSwap'].forEach((m, i) => {
+      const { gas } = evaluate(Array.from({ length: i + 1 }, () => ({ feeCrv: 1 })), 0, 0.0001, pc, 0);
+      assert.ok(Math.abs(gas - m) / m < 0.05, `${swap ? 'swap' : 'no swap'} ${i + 1} vaults: model ${gas} vs measured ${m}`);
+    });
+  }
+  assert.equal(planCfg(cfg, false, true), cfg, 'per-vault (v1) keeps the v1 model');
+  assert.equal(planCfg(cfg, true, false).swapLossPct, cfg.swapSlippageBps / 100, 'no swap: valued with the contract haircut');
+});
