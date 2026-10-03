@@ -330,3 +330,11 @@ test('development manager uses five-minute ordinary readiness waits and fast-fai
   assert.match(workflow, /x11vnc -display :99/);
   assert.match(workflow, /HOME_EXIT_NODE/);
 });
+
+test('managed Project state persists Project URL while accepting Project-scoped worker chat URLs', () => {
+  assert.match(workflow, /\.chatUrl\|type=="string" and test\("\^https:\/\/chatgpt\.com\/\(c\/\|g\/g-p-\[\^\/\]\+\/c\/\)"\)/);
+  assert.match(workflow, /projectUrl\|type=="string" and test\("\^https:\/\/chatgpt\.com\/g\/g-p-\[\^\/\]\+\/project\/\?\$"\)/);
+  assert.match(workflow, /continuity:\{mode:\$continuityMode,project:\{name:\$projectName,url:\$projectUrl\}\}/);
+  assert.match(workflow, /replacement_project_url=.*\.projectUrl/);
+  assert.match(workflow, /g\/g-p-\[\^\/\]\+\/c\//);
+});
