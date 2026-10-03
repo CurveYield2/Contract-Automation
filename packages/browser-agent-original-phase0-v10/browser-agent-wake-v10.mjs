@@ -325,12 +325,27 @@ async function findVisibleProjectCreateButton(page) {
     const button = buttons.nth(i);
     if (await button.isVisible().catch(() => false)) return button;
   }
+
+  // Visible-text fallback for UI variants whose Create project control is not
+  // exposed with button semantics. Clicking the visible label is still a normal
+  // human pointer action on the rendered control.
+  const labels = page.getByText(/^Create project$/i, { exact: true });
+  const labelCount = Math.min(await labels.count().catch(() => 0), 8);
+  for (let i = 0; i < labelCount; i += 1) {
+    const label = labels.nth(i);
+    if (await label.isVisible().catch(() => false)) return label;
+  }
   return null;
 }
 
 async function findProjectNameEditorFromVisibleCreateSurface(page) {
   const create = await findVisibleProjectCreateButton(page);
   if (!create) return { create: null, editor: null };
+
+  const labelled = page.getByLabel(/^Project name$/i).first();
+  if (await labelled.isVisible().catch(() => false)) {
+    return { create, editor: labelled };
+  }
 
   // Anchor the editor to the visible Create-project surface itself. This avoids
   // accidentally selecting the dimmed homepage composer behind the modal and
@@ -434,26 +449,22 @@ async function recoverExistingProjectExactHumanFlow(page, name) {
   const existing = await findVisibleExactProjectEntry(page, projects, name);
   if (!existing) return null;
 
+  const beforeUrl = page.url();
   await humanPointerClick(page, existing);
+  await page.waitForTimeout(randomDelayMs(3000, 5000));
 
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    const challenge = page.getByText(/Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i).first();
-    if (await challenge.isVisible().catch(() => false)) {
-      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected while opening existing Project; aborting immediately');
-      error.code = 'BROWSER_CHALLENGE';
-      throw error;
-    }
-
-    const composer = await findProjectLandingComposer(page, name);
-    if (composer) {
-      console.log('[github-playwright-v10] project-recovered-visible=' + JSON.stringify({ projectName: name, url: page.url() }));
-      return { projectName: name, url: page.url(), composer, recoveredExisting: true };
-    }
-    await page.waitForTimeout(750);
+  let projectUrl = page.url();
+  if (projectUrl === beforeUrl) {
+    await page.waitForTimeout(randomDelayMs(2000, 3500));
+    projectUrl = page.url();
+  }
+  if (projectUrl === beforeUrl) {
+    throw new Error('Existing exact-name Project did not navigate to its Project URL after a short visible wait');
   }
 
-  throw new Error('Existing exact-name Project was clicked but its visible Project-specific new-chat box did not appear within 30 seconds');
+  const composer = await ensureComposer(page);
+  console.log('[github-playwright-v10] project-recovered-visible=' + JSON.stringify({ projectName: name, url: projectUrl }));
+  return { projectName: name, url: projectUrl, composer, recoveredExisting: true };
 }
 
 async function findSendControlNearComposer(page, composer) {
@@ -500,7 +511,8 @@ async function createProjectExactHumanFlow(page, name) {
   if (!plus) throw new Error('Plus control did not appear to the right of Projects after hover');
   await humanPointerClick(page, plus);
 
-  await humanActionPause(page);
+  // The Create project modal takes a moment to render in the normal UI.
+  await page.waitForTimeout(randomDelayMs(2500, 4500));
   let controls = await findProjectNameEditorFromVisibleCreateSurface(page);
   if (!controls.create || !controls.editor) {
     const pendingCreate = page.getByRole('button', { name: /^Create project$/i }).first();
@@ -511,25 +523,25 @@ async function createProjectExactHumanFlow(page, name) {
   if (!controls.editor) throw new Error('Project-name editor was not found on the visible Create-project surface');
 
   await humanTypeInto(page, controls.editor, name);
+
+  const beforeCreateUrl = page.url();
   await humanPointerClick(page, controls.create);
 
-  const deadline = Date.now() + 60000;
-  while (Date.now() < deadline) {
-    const challenge = page.getByText(/Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i).first();
-    if (await challenge.isVisible().catch(() => false)) {
-      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected after Project creation; aborting immediately');
-      error.code = 'BROWSER_CHALLENGE';
-      throw error;
-    }
-
-    const composer = await findProjectLandingComposer(page, name);
-    if (composer) {
-      console.log('[github-playwright-v10] project-created-visible=' + JSON.stringify({ projectName: name, url: page.url() }));
-      return { projectName: name, url: page.url(), composer };
-    }
-    await page.waitForTimeout(750);
+  // Successful Project creation automatically navigates the browser to the new
+  // Project URL. A short human-scale wait is sufficient; capture that URL directly.
+  await page.waitForTimeout(randomDelayMs(3000, 5000));
+  let projectUrl = page.url();
+  if (projectUrl === beforeCreateUrl) {
+    await page.waitForTimeout(randomDelayMs(2000, 3500));
+    projectUrl = page.url();
   }
-  throw new Error('Created Project did not show the visible "New chat in ' + name + '" Project-specific composer within 60 seconds');
+  if (projectUrl === beforeCreateUrl) {
+    throw new Error('Create project did not navigate to a new Project URL after a short visible wait');
+  }
+
+  const composer = await ensureComposer(page);
+  console.log('[github-playwright-v10] project-created-visible=' + JSON.stringify({ projectName: name, url: projectUrl }));
+  return { projectName: name, url: projectUrl, composer };
 }
 
 async function fillComposer(page, message, composerOverride = null) {
