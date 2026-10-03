@@ -695,6 +695,11 @@ async function runWithPage(providerName, connect) {
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
     return result;
+  } catch (error) {
+    if (bool(env.BROWSER_DIAGNOSTIC_SCREENSHOT)) {
+      await page.screenshot({ path: '/tmp/browser-agent-visible-failure.png', fullPage: true }).catch(() => {});
+    }
+    throw error;
   } finally {
     await close().catch(()=>{});
   }
