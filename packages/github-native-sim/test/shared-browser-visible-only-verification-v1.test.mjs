@@ -53,5 +53,5 @@ test('shared ChatGPT runtime accepts durable root and Project-scoped chat URLs',
   assert.match(source, /const project = url\.pathname\.match\(\/\^\\\/g\\\/g-p-\[\^\/\]\+\\\/c\\\/\(\[\^\/\]\+\)/);
   assert.match(source, /if \(!durableChatUrl\(requestedUrl\)\)/);
   assert.match(source, /root or Project-scoped ChatGPT conversation URL/);
-  assert.match(source, /\/\\\/c\\\/\.test\(parsed\.pathname\)/);
+  assert.ok(source.includes('/\\/c\\//.test(parsed.pathname)'));
 });
