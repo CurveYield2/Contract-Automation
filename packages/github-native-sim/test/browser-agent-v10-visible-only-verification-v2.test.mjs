@@ -219,3 +219,19 @@ test('v10 Create-project modal has visible-label fallbacks and a short render wa
   const block = source.slice(start, end);
   assert.match(block, /randomDelayMs\(2500, 4500\)/);
 });
+
+test('v10 waits for the visible Create project button to become enabled after typing', () => {
+  assert.match(source, /async function findEnabledProjectCreateButton/);
+  assert.match(source, /button\.isEnabled\(\)/);
+  assert.match(source, /ancestor-or-self::button\[1\]/);
+
+  const start = source.indexOf('async function createProjectExactHumanFlow');
+  const end = source.indexOf('\nasync function fillComposer', start);
+  const block = source.slice(start, end);
+  const type = block.indexOf('await humanTypeInto(page, controls.editor, name)');
+  const enabled = block.indexOf('findEnabledProjectCreateButton(page, 8000)');
+  const click = block.indexOf('humanPointerClick(page, enabledCreate)');
+  assert.ok(type >= 0 && enabled > type && click > enabled);
+  assert.match(block, /randomDelayMs\(1200, 2500\)/);
+  assert.match(block, /Create project control did not become visibly enabled after typing the Project name/);
+});
