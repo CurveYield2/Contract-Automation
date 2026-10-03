@@ -610,7 +610,7 @@ test('Project sidebar recovery follows visible Chat sidebar options through Orga
   assert.match(block, /humanPointerClick\(page, sidebarOptions\)/);
   assert.match(block, /humanPointerClick\(page, organize\)/);
   assert.match(block, /humanPointerClick\(page, show\)/);
-  assert.match(block, /humanPointerClick\(page, projectsOff\)/);
+  assert.match(block, /humanPointerClick\(page, projectsOption\)/);
   assert.match(block, /sidebarOptionsFound/);
   assert.match(block, /showFound/);
 
