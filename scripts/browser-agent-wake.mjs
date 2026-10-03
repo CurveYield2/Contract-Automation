@@ -240,7 +240,7 @@ async function ensureComposer(page) {
     ', editableCount=' + editableCount + ')';
 
   if (humanChallenge) {
-    throw new BrowserAgentError('BROWSER_CHALLENGE', diagnostic, true);
+    throw new BrowserAgentError('BROWSER_CHALLENGE', diagnostic, false);
   }
   if (loginPrompt) {
     throw new BrowserAgentError('AUTH_REQUIRED', diagnostic, false);
@@ -475,6 +475,30 @@ async function persistedWakeVisible(page, message, timeoutMs = 90000) {
   return { persisted: false, ...state };
 }
 
+async function waitForDurableChatUrl(page, timeoutMs = 300000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await snapshot(page).catch(() => null);
+    if (state?.humanChallenge) {
+      throw new BrowserAgentError(
+        'BROWSER_CHALLENGE',
+        'Visible ChatGPT/Cloudflare verification detected while waiting for durable chat URL; aborting workflow immediately',
+        false
+      );
+    }
+    if (durableChatUrl(page.url())) {
+      console.log('[github-playwright] durable-chat-route=' + JSON.stringify({ url: page.url() }));
+      return page.url();
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new BrowserAgentError(
+    'CHAT_URL_NOT_DURABLE',
+    'Fresh chat did not transition from its optimistic/local route to a durable chat URL within 5 minutes',
+    false
+  );
+}
+
 async function humanReload(page) {
   console.log('[github-playwright] verification-reload=human-keyboard-control-r');
   await page.keyboard.press('Control+R');
@@ -496,6 +520,10 @@ async function postWithVisibleVerification(page, message) {
       'Wake message was not visibly rendered before persistence reload',
       false
     );
+  }
+
+  if (mode === 'create_fresh' && !durableChatUrl(page.url())) {
+    await waitForDurableChatUrl(page, 300000);
   }
 
   await humanReload(page);
@@ -559,20 +587,24 @@ async function waitForVisibleBrowserReady(page, reason = 'visible browser readin
       conversationUnavailable: state?.conversationUnavailable ?? false
     }));
 
+    if (state?.humanChallenge) {
+      throw new BrowserAgentError(
+        'BROWSER_CHALLENGE',
+        'Visible ChatGPT/Cloudflare verification detected; aborting workflow immediately',
+        false
+      );
+    }
     if (ready) return state;
     if (Date.now() >= deadline) {
-      if (state?.humanChallenge) {
-        throw new BrowserAgentError('BROWSER_CHALLENGE', 'Visible ChatGPT verification did not clear within the configured wait', true);
-      }
       if (state?.loginPrompt) {
         throw new BrowserAgentError('AUTH_REQUIRED', 'Visible ChatGPT browser requires login', false);
       }
-      throw new BrowserAgentError('VISIBLE_BROWSER_NOT_READY', 'Visible ChatGPT browser did not become ready within the configured wait', true);
+      throw new BrowserAgentError('VISIBLE_BROWSER_NOT_READY', 'Visible ChatGPT browser did not become ready within the configured 5-minute wait', true);
     }
 
     if (bool(env.INTERACTIVE_VIEW_ENABLED)) {
       const vnc = env.TAILSCALE_RUNNER_IP ? env.TAILSCALE_RUNNER_IP + ':5900' : 'the private runner VNC endpoint';
-      console.log('[github-playwright] Visible browser is not ready. The Chrome session remains available at ' + vnc + ' for normal human verification.');
+      console.log('[github-playwright] Visible browser is not ready at ' + vnc + '; waiting only for ordinary UI/login readiness. Cloudflare challenge aborts immediately.');
     }
     await page.waitForTimeout(5000);
   }
@@ -611,30 +643,12 @@ async function runWithPage(providerName, connect) {
         campaignId: env.CAMPAIGN_ID || '',
         phaseId: env.PHASE_ID || ''
       };
-      try {
-        routineBefore = await runBrowserRoutineStage({
-          page,
-          routine,
-          stage: 'before_message',
-          vars: routineVars,
-        });
-      } catch (error) {
-        if (error?.code !== 'BROWSER_CHALLENGE' || Number.parseInt(env.MANUAL_CHALLENGE_WAIT_MS || '0', 10) <= 0) {
-          throw error;
-        }
-        console.warn('[github-playwright] Browser verification appeared during the pre-message routine; keeping the visible session open before one same-session retry.');
-        await waitForVisibleBrowserReady(page, 'pre-message routine verification');
-        await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.waitForTimeout(1500);
-        await waitForVisibleBrowserReady(page, 'post-verification reload');
-        await ensureComposer(page);
-        routineBefore = await runBrowserRoutineStage({
-          page,
-          routine,
-          stage: 'before_message',
-          vars: routineVars,
-        });
-      }
+      routineBefore = await runBrowserRoutineStage({
+        page,
+        routine,
+        stage: 'before_message',
+        vars: routineVars,
+      });
       const capturedShare = routineBefore.find((entry) => entry.operation === 'chatgpt.capture_project_share_link')?.result;
       const openedProject = routineBefore.find((entry) => entry.operation === 'chatgpt.open_project_url')?.result;
       const namedProject = routineBefore.find((entry) => entry.operation === 'chatgpt.open_project_by_name')?.result;
