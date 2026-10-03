@@ -362,46 +362,100 @@ async function findProjectNameEditorFromVisibleCreateSurface(page) {
 }
 
 function escapeRegExp(text) {
-  return String(text).replace(/[\\^$.*+?()[\]{}|]/g, '\\async function findProjectLandingComposer(page, name) {
-  const main = page.locator('main, [role="main"]').first();
-  if (!await main.isVisible().catch(() => false)) return null;
-
-  const projectNameVisible = main.getByText(name, { exact: true }).first();
-  if (!await projectNameVisible.isVisible().catch(() => false)) return null;
-
-  // Project pages have their own new-chat box. Resolve it only inside the visible
-  // Project main surface; never reuse a homepage/global composer locator here.
-  const textboxes = main.getByRole('textbox');
-  const textboxCount = Math.min(await textboxes.count().catch(() => 0), 12);
-  let best = null;
-  let bestArea = 0;
-  for (let i = 0; i < textboxCount; i += 1) {
-    const candidate = textboxes.nth(i);
-    if (!await candidate.isVisible().catch(() => false)) continue;
-    const box = await candidate.boundingBox().catch(() => null);
-    if (!box) continue;
-    const area = box.width * box.height;
-    if (area > bestArea) {
-      best = candidate;
-      bestArea = area;
-    }
+  const specials = '\\^$.*+?()[]{}|';
+  let escaped = '';
+  for (const char of String(text)) {
+    escaped += specials.includes(char) ? '\\' + char : char;
   }
-  if (best) return best;
-
-  const editables = main.locator('textarea, [contenteditable="true"]');
-  const editableCount = Math.min(await editables.count().catch(() => 0), 12);
-  for (let i = 0; i < editableCount; i += 1) {
-    const candidate = editables.nth(i);
-    if (await candidate.isVisible().catch(() => false)) return candidate;
-  }
-  return null;
-}
-');
+  return escaped;
 }
 
 async function findProjectLandingComposer(page, name) {
   const cue = 'New chat in ' + name;
-  const cuePattern = new RegExp('^' + escapeRegExp(cue) + '
+  const cuePattern = new RegExp('^' + escapeRegExp(cue) + '$', 'i');
+
+  // Use the exact human-visible Project-specific new-chat cue shown on the
+  // Project landing page. Never infer Project context from the homepage composer.
+  const placeholderComposer = page.getByPlaceholder(cuePattern).first();
+  if (await placeholderComposer.isVisible().catch(() => false)) return placeholderComposer;
+
+  const visibleCue = page.getByText(cuePattern, { exact: true }).first();
+  if (!await visibleCue.isVisible().catch(() => false)) return null;
+
+  let region = visibleCue;
+  for (let depth = 0; depth < 6; depth += 1) {
+    region = region.locator('xpath=..');
+
+    const textboxes = region.getByRole('textbox');
+    const textboxCount = Math.min(await textboxes.count().catch(() => 0), 8);
+    for (let i = 0; i < textboxCount; i += 1) {
+      const candidate = textboxes.nth(i);
+      if (await candidate.isVisible().catch(() => false)) return candidate;
+    }
+
+    const editables = region.locator('textarea, [contenteditable="true"]');
+    const editableCount = Math.min(await editables.count().catch(() => 0), 8);
+    for (let i = 0; i < editableCount; i += 1) {
+      const candidate = editables.nth(i);
+      if (await candidate.isVisible().catch(() => false)) return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function findVisibleExactProjectEntry(page, projectsTitle, name) {
+  const projectsBox = await projectsTitle.boundingBox().catch(() => null);
+  if (!projectsBox) return null;
+
+  const chatsTitle = page.getByText('Chats', { exact: true }).first();
+  const chatsVisible = await chatsTitle.isVisible().catch(() => false);
+  const chatsBox = chatsVisible ? await chatsTitle.boundingBox().catch(() => null) : null;
+
+  const matches = page.getByText(name, { exact: true });
+  const count = Math.min(await matches.count().catch(() => 0), 20);
+  for (let i = 0; i < count; i += 1) {
+    const candidate = matches.nth(i);
+    if (!await candidate.isVisible().catch(() => false)) continue;
+    const box = await candidate.boundingBox().catch(() => null);
+    if (!box) continue;
+
+    const inLeftSidebar = box.x <= 460;
+    const belowProjects = box.y >= projectsBox.y;
+    const aboveChats = !chatsBox || box.y < chatsBox.y;
+    if (inLeftSidebar && belowProjects && aboveChats) return candidate;
+  }
+
+  return null;
+}
+
+async function recoverExistingProjectExactHumanFlow(page, name) {
+  const projects = await ensureSidebarOpenForProject(page);
+  const existing = await findVisibleExactProjectEntry(page, projects, name);
+  if (!existing) return null;
+
+  await humanPointerClick(page, existing);
+
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const challenge = page.getByText(/Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i).first();
+    if (await challenge.isVisible().catch(() => false)) {
+      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected while opening existing Project; aborting immediately');
+      error.code = 'BROWSER_CHALLENGE';
+      throw error;
+    }
+
+    const composer = await findProjectLandingComposer(page, name);
+    if (composer) {
+      console.log('[github-playwright-v10] project-recovered-visible=' + JSON.stringify({ projectName: name, url: page.url() }));
+      return { projectName: name, url: page.url(), composer, recoveredExisting: true };
+    }
+    await page.waitForTimeout(750);
+  }
+
+  throw new Error('Existing exact-name Project was clicked but its visible Project-specific new-chat box did not appear within 30 seconds');
+}
+
 async function findSendControlNearComposer(page, composer) {
   if (composer) {
     let region = composer;
@@ -476,640 +530,6 @@ async function createProjectExactHumanFlow(page, name) {
     await page.waitForTimeout(750);
   }
   throw new Error('Created Project did not show the visible "New chat in ' + name + '" Project-specific composer within 60 seconds');
-}
-
-async function fillComposer(page, message, composerOverride = null) {
-  const composer = composerOverride || await ensureComposer(page);
-  if (!await composer.isVisible().catch(() => false)) {
-    throw new Error('Visible composer target is not available for human typing');
-  }
-  await humanTypeInto(page, composer, message);
-  return composer;
-}
-
-async function post(page, message, composerOverride = null) {
-  if (!message) throw new Error('Wake message is empty');
-
-  const marker = message.slice(0, Math.min(120, message.length));
-  const requestedIdleWait = Number.parseInt(env.IDLE_WAIT_MS || '600000', 10);
-  const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
-
-  // Human-only interaction: wait until the visible chat is idle, type through keyboard
-  // events, and click the visible Send control with pointer movement.
-  await waitForChatIdle(page, idleWaitMs);
-  const composer = await fillComposer(page, message, composerOverride);
-
-  const send = await findSendControlNearComposer(page, composer);
-  if (!send) throw new Error('No visible Send button for normal human-style click');
-
-  const composerText = await composer.inputValue().catch(async () => {
-    return await composer.innerText().catch(() => '');
-  });
-  if (!composerText.includes(marker)) {
-    throw new Error('Wake marker is not visibly present in the composer before Send');
-  }
-
-  console.log('[github-playwright-v10] send-strategy=human-pointer-click');
-  await humanPointerClick(page, send, { hoverMs: 220, downMs: 75, settleMs: 500 });
-  return { strategy: 'human-pointer-click' };
-}
-
-function visibleBrowserStateText(bodyText = '', title = '') {
-  return {
-    loginPrompt: /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText),
-    humanChallenge:
-      /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText) ||
-      /Just a moment|Cloudflare/i.test(title),
-    conversationUnavailable:
-      /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText)
-  };
-}
-
-async function waitForVisibleBrowserReady(page) {
-  const requested = Number.parseInt(env.MANUAL_CHALLENGE_WAIT_MS || '0', 10);
-  const waitMs = Number.isFinite(requested) ? Math.max(0, requested) : 0;
-  const deadline = Date.now() + waitMs;
-
-  while (true) {
-    const title = await page.title().catch(() => '');
-    const bodyText = await page.locator('body').innerText().catch(() => '');
-    const visible = visibleBrowserStateText(bodyText, title);
-    const composer = await firstVisible(page, [
-      '#prompt-textarea',
-      'textarea[placeholder*="Message"]',
-      '[contenteditable="true"][data-lexical-editor="true"]',
-      '[contenteditable="true"]'
-    ]);
-
-    console.log('[github-playwright-v10] visible-browser-ready=' + JSON.stringify({
-      ready: Boolean(composer) && !visible.loginPrompt && !visible.humanChallenge && !visible.conversationUnavailable,
-      ...visible,
-      composerVisible: Boolean(composer),
-      url: page.url()
-    }));
-
-    if (visible.humanChallenge) {
-      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected; aborting immediately');
-      error.code = 'BROWSER_CHALLENGE';
-      throw error;
-    }
-    if (composer && !visible.loginPrompt && !visible.conversationUnavailable) return true;
-    if (Date.now() >= deadline) {
-      throw new Error('ChatGPT visible browser state did not become ready within the configured 5-minute wait');
-    }
-
-    if (bool(env.INTERACTIVE_VIEW_ENABLED)) {
-      console.log('[github-playwright-v10] Visible browser is not ready; waiting only for ordinary UI/login readiness. Cloudflare challenge would abort immediately.');
-    }
-    await page.waitForTimeout(5000);
-  }
-}
-
-function chatRouteInfo(value) {
-  try {
-    const url = new URL(value);
-    if (url.origin !== 'https://chatgpt.com') return { isChat: false, isLocal: false, id: '' };
-    const match = url.pathname.match(/^\/c\/([^/]+)\/?$/);
-    if (!match) return { isChat: false, isLocal: false, id: '' };
-    const id = decodeURIComponent(match[1]);
-    return {
-      isChat: Boolean(id),
-      isLocal: id.startsWith('local-chatgpt:'),
-      id
-    };
-  } catch {
-    return { isChat: false, isLocal: false, id: '' };
-  }
-}
-
-async function visibleWakePresent(page, message, timeoutMs = 90000) {
-  const deadline = Date.now() + timeoutMs;
-  let last = null;
-
-  while (Date.now() < deadline) {
-    const users = page.locator('[data-message-author-role="user"]');
-    const userCount = await users.count().catch(() => 0);
-    for (let i = Math.max(0, userCount - 8); i < userCount; i += 1) {
-      const text = await users.nth(i).innerText().catch(() => '');
-      if (text.includes(message)) {
-        return { visible: true, userCount, method: 'user-role' };
-      }
-    }
-
-    const composer = await firstVisible(page, [
-      '#prompt-textarea',
-      'textarea[placeholder*="Message"]',
-      '[contenteditable="true"][data-lexical-editor="true"]',
-      '[contenteditable="true"]'
-    ]);
-    const composerText = composer
-      ? await composer.inputValue().catch(async () => await composer.innerText().catch(() => ''))
-      : '';
-    const bodyText = await page.locator('body').innerText().catch(() => '');
-    const bodyHasMessage = bodyText.includes(message);
-    const composerHasMessage = composerText.includes(message);
-
-    last = {
-      visible: bodyHasMessage && !composerHasMessage,
-      userCount,
-      method: bodyHasMessage && !composerHasMessage ? 'rendered-page-text' : 'not-visible',
-      bodyHasMessage,
-      composerHasMessage,
-      url: page.url()
-    };
-    if (last.visible) return last;
-
-    await page.waitForTimeout(750);
-  }
-
-  return last || {
-    visible: false,
-    userCount: 0,
-    method: 'not-visible',
-    bodyHasMessage: false,
-    composerHasMessage: false,
-    url: page.url()
-  };
-}
-
-async function waitForFreshChatRoute(page, timeoutMs = 90000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const current = page.url();
-    const info = chatRouteInfo(current);
-    if (info.isChat) return { url: current, ...info };
-    await page.waitForTimeout(500);
-  }
-  throw new Error('Fresh chat did not visibly navigate to a chatgpt.com/c/... route');
-}
-
-async function waitForDurableChatRoute(page, timeoutMs = 300000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const title = await page.title().catch(() => '');
-    const bodyText = await page.locator('body').innerText().catch(() => '');
-    const visible = visibleBrowserStateText(bodyText, title);
-    if (visible.humanChallenge) {
-      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected while waiting for durable chat URL; aborting immediately');
-      error.code = 'BROWSER_CHALLENGE';
-      throw error;
-    }
-
-    const current = page.url();
-    const info = chatRouteInfo(current);
-    if (info.isChat && !info.isLocal) {
-      console.log('[github-playwright-v10] durable-chat-route=' + JSON.stringify({ url: current }));
-      return { url: current, ...info };
-    }
-    await page.waitForTimeout(500);
-  }
-  throw new Error('Fresh chat remained on an optimistic/local route beyond the 5-minute durable-route timeout');
-}
-
-async function humanReload(page) {
-  console.log('[github-playwright-v10] verification-reload=human-keyboard-control-r');
-  await page.keyboard.press('Control+R');
-  await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
-  await page.waitForTimeout(1500);
-}
-
-function recoverySearchMarker(message) {
-  const text = String(message || '').trim();
-  const bracket = text.match(/^\[[^\]]{6,180}\]/);
-  return bracket ? bracket[0] : text.slice(0, 120);
-}
-
-async function recoverCreatedChatByVisibleSearch(page, message) {
-  if (!message) throw new Error('recover action requires the original wake message');
-  const marker = recoverySearchMarker(message);
-  if (!marker) throw new Error('recover action could not derive a visible search marker');
-
-  const filter = await firstVisible(page, [
-    'button[aria-label="Filter chats and work"]',
-    '[role="button"][aria-label="Filter chats and work"]',
-    'button[aria-label*="Filter chats" i]',
-    'button[aria-label*="Search chats" i]',
-    'button[aria-label*="Search" i]'
-  ]);
-  if (!filter) throw new Error('Visible ChatGPT chat-search control was not found');
-  await humanPointerClick(page, filter, { hoverMs: 180, downMs: 65, settleMs: 420 });
-
-  const searchInput = await firstVisible(page, [
-    '[role="dialog"] input[placeholder*="Search" i]',
-    '[role="dialog"] input[aria-label*="Search" i]',
-    'input[placeholder*="Search" i]',
-    'input[aria-label*="Search" i]',
-    '[role="searchbox"]'
-  ]);
-  if (!searchInput) throw new Error('Visible ChatGPT chat-search input was not found');
-  await humanTypeInto(page, searchInput, marker, { delay: 45 });
-
-  const normalizedMarker = marker.replace(/\s+/g, ' ').trim();
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    const title = await page.title().catch(() => '');
-    const bodyText = await page.locator('body').innerText().catch(() => '');
-    const visible = visibleBrowserStateText(bodyText, title);
-    if (visible.humanChallenge) {
-      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected during read-only chat recovery; aborting immediately');
-      error.code = 'BROWSER_CHALLENGE';
-      throw error;
-    }
-
-    const candidates = page.locator(
-      '[role="dialog"] a, [role="dialog"] button, [role="option"], a[href^="/c/"], a[href*="chatgpt.com/c/"]'
-    );
-    const count = Math.min(await candidates.count().catch(() => 0), 120);
-    for (let i = 0; i < count; i += 1) {
-      const candidate = candidates.nth(i);
-      if (!await candidate.isVisible().catch(() => false)) continue;
-      const text = [
-        await candidate.innerText().catch(() => ''),
-        await candidate.getAttribute('aria-label').catch(() => ''),
-        await candidate.getAttribute('title').catch(() => '')
-      ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-      if (!text.includes(normalizedMarker)) continue;
-
-      await humanPointerClick(page, candidate, { hoverMs: 180, downMs: 65, settleMs: 650 });
-      const route = await waitForDurableChatRoute(page, 300000);
-      const wake = await visibleWakePresent(page, message, 30000);
-      if (!wake.visible) {
-        throw new Error('Recovered chat URL did not visibly contain the exact original wake message');
-      }
-
-      console.log('[github-playwright-v10] recovered-created-chat=' + JSON.stringify({
-        chatUrl: route.url,
-        verificationMethod: wake.method
-      }));
-      return { recovered: true, chatUrl: route.url, verificationMethod: wake.method, userCount: wake.userCount };
-    }
-
-    await page.waitForTimeout(750);
-  }
-
-  throw new Error('No visible ChatGPT search result matched the unique wake marker within 30 seconds');
-}
-
-async function postWithVisibleVerification(page, message, composerOverride = null) {
-  const submitted = await post(page, message, composerOverride);
-
-  let initialRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
-  if (mode === 'create_fresh') {
-    initialRoute = await waitForFreshChatRoute(page, 90000);
-  } else if (!initialRoute.isChat) {
-    throw new Error('Existing-chat send is not on a visible chatgpt.com/c/... route');
-  }
-
-  const beforeReload = await visibleWakePresent(page, message, 90000);
-  console.log('[github-playwright-v10] visible-wake-before-reload=' + JSON.stringify({
-    ...beforeReload,
-    chatUrl: initialRoute.url,
-    localRoute: initialRoute.isLocal
-  }));
-  if (!beforeReload.visible) {
-    throw new Error('Sent wake is not visibly present in the rendered conversation before reload');
-  }
-
-  // Never reload an optimistic local-chatgpt route. Wait for the normal UI
-  // to transition to a durable server-backed /c/<id> route first.
-  if (initialRoute.isLocal) {
-    initialRoute = await waitForDurableChatRoute(page, 300000);
-  }
-
-  await humanReload(page);
-  await waitForVisibleBrowserReady(page);
-
-  const reloadedRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
-  if (!reloadedRoute.isChat || reloadedRoute.isLocal) {
-    throw new Error('Human-style reload did not return to a durable chatgpt.com/c/... conversation');
-  }
-
-  const afterReload = await visibleWakePresent(page, message, 90000);
-  console.log('[github-playwright-v10] visible-wake-after-reload=' + JSON.stringify({
-    ...afterReload,
-    chatUrl: reloadedRoute.url,
-    localRoute: reloadedRoute.isLocal
-  }));
-  if (!afterReload.visible) {
-    throw new Error('Wake is not visibly present after human-style reload of the conversation');
-  }
-
-  return {
-    ...submitted,
-    persisted: true,
-    userCount: afterReload.userCount,
-    verificationMethod: afterReload.method,
-    chatUrl: reloadedRoute.url,
-    localRoute: reloadedRoute.isLocal
-  };
-}
-
-async function runWithPage(providerName, connect) {
-  const { browser, context, page, close } = await connect();
-  try {
-    if (mode === 'resume_existing') {
-      if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(requestedUrl)) throw new Error('resume_existing requires a chatgpt.com/c/... URL');
-      await page.goto(requestedUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    } else if (mode === 'create_fresh') {
-      await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-    } else {
-      throw new Error('Unsupported WAKE_MODE');
-    }
-
-    await page.waitForTimeout(1500);
-    if (bool(env.REFRESH_BEFORE_WAKE)) {
-      await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
-      await page.waitForTimeout(1500);
-    }
-
-    await waitForVisibleBrowserReady(page);
-
-    let project = null;
-    if (action === 'project_wake') {
-      if (mode !== 'create_fresh') throw new Error('project_wake requires create_fresh mode');
-      project = await createProjectExactHumanFlow(page, projectName);
-    }
-
-    const before = await snapshot(page);
-
-    if (action === 'observe') {
-      const sessionStatePersisted = false;
-      const result = { ok: true, provider: providerName, action, wakeId, sessionStatePersisted, ...before };
-      await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
-      return result;
-    }
-
-    if (action === 'recover') {
-      const recovered = await recoverCreatedChatByVisibleSearch(page, wakeMessage);
-      const after = await snapshot(page);
-      const sessionStatePersisted = false;
-      const result = {
-        ok: true,
-        provider: providerName,
-        action,
-        wakeId,
-        posted: false,
-        recovered: true,
-        sessionStatePersisted,
-        before,
-        after,
-        chatUrl: recovered.chatUrl,
-        verification: 'visible-browser-only',
-        verificationMethod: recovered.verificationMethod
-      };
-      await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
-      return result;
-    }
-    if (before.generating && !bool(env.FORCE_WAKE)) {
-      const requestedIdleWait = Number.parseInt(env.IDLE_WAIT_MS || '600000', 10);
-      const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
-      console.log('[github-playwright-v10] Chat is currently generating; waiting for idle before wake send.');
-      await waitForChatIdle(page, idleWaitMs);
-      await waitForVisibleBrowserReady(page);
-    }
-
-    if (action === 'wake_and_wait' && mode === 'resume_existing' && !before.chatViewable) {
-      const result = {
-        ok: true, provider: providerName, action, wakeId,
-        posted: false, responded: false, deadReason: 'CHAT_UNVIEWABLE',
-        before, after: before, chatUrl: before.url
-      };
-      await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
-      return result;
-    }
-
-    const verifiedSend = await postWithVisibleVerification(page, wakeMessage, project?.composer || null);
-
-    let response = null;
-    let after;
-    if (action === 'wake_and_wait') {
-      const requestedWait = Number.parseInt(env.RESPONSE_WAIT_MS || '120000', 10);
-      const responseWaitMs = Number.isFinite(requestedWait) ? Math.max(120000, requestedWait) : 120000;
-      response = await waitForAssistantResponse(page, before, responseWaitMs);
-      after = response.snapshot;
-    } else {
-      await page.waitForTimeout(1500);
-      after = await snapshot(page);
-    }
-
-    if (mode === 'create_fresh') {
-      after.url = verifiedSend.chatUrl;
-    }
-
-    const sessionStatePersisted = false;
-    const result = {
-      ok: true, provider: providerName, action, wakeId, posted: true, before, after, sessionStatePersisted,
-      chatUrl: verifiedSend.chatUrl || after.url,
-      verification: 'visible-browser-only',
-      ...(project ? { projectName: project.projectName, projectUrl: project.url } : {}),
-      ...(response ? { responded: response.responded, waitedMs: response.waitedMs } : {})
-    };
-    await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
-    return result;
-  } finally {
-    await close().catch(()=>{});
-  }
-}
-
-async function localProvider(chromium) {
-  if (!env.CHATGPT_STORAGE_STATE_B64) {
-    throw new Error('CHATGPT_STORAGE_STATE_B64 is required');
-  }
-  let storage;
-  try {
-    storage = JSON.parse(Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'));
-    if (!validateStorageState(storage)) throw new Error('invalid storage state');
-  } catch {
-    throw new Error('CHATGPT_STORAGE_STATE_B64 is invalid');
-  }
-  console.log('[github-playwright-v10] Using immutable bootstrap-secret session state; run state will be discarded.');
-  const launchOptions = {
-    headless: env.BROWSER_HEADLESS !== 'false',
-    channel: 'chrome',
-    args: ['--disable-quic']
-  };
-  console.log('[github-playwright-v10] Chrome uses runner system routing; QUIC disabled so ChatGPT web traffic stays on TCP.');
-  const browser = await chromium.launch(launchOptions);
-  const context = await browser.newContext({ storageState: storage });
-  const page = await context.newPage();
-  return { browser, context, page, close: () => browser.close() };
-}
-
-const { chromium } = await loadModules();
-const providers = [
-  ['github-playwright', () => localProvider(chromium)],
-];
-
-const failures = [];
-for (const [name, connect] of providers) {
-  try {
-    const result = await runWithPage(name, connect);
-    console.log(JSON.stringify(result));
-    process.exit(0);
-  } catch (error) {
-    failures.push({ provider: name, error: error.message });
-    console.error('[' + name + '] ' + error.message);
-  }
-}
-await fs.writeFile(statePath, JSON.stringify({ ok:false, wakeId, failures }, null, 2) + '\n');
-console.error(JSON.stringify({ ok:false, wakeId, failures }));
-process.exit(1);
-, 'i');
-
-  // Prefer the exact human-visible Project-specific composer cue shown on the
-  // Project landing page. Do not infer Project context from the homepage composer.
-  const placeholderComposer = page.getByPlaceholder(cuePattern).first();
-  if (await placeholderComposer.isVisible().catch(() => false)) return placeholderComposer;
-
-  const visibleCue = page.getByText(cuePattern, { exact: true }).first();
-  if (!await visibleCue.isVisible().catch(() => false)) return null;
-
-  // The visible cue may be rendered adjacent to, or inside, the actual editor.
-  // Walk only through its visible local surface and select a visible textbox/editor.
-  let region = visibleCue;
-  for (let depth = 0; depth < 6; depth += 1) {
-    region = region.locator('xpath=..');
-
-    const textboxes = region.getByRole('textbox');
-    const textboxCount = Math.min(await textboxes.count().catch(() => 0), 8);
-    for (let i = 0; i < textboxCount; i += 1) {
-      const candidate = textboxes.nth(i);
-      if (await candidate.isVisible().catch(() => false)) return candidate;
-    }
-
-    const editables = region.locator('textarea, [contenteditable="true"]');
-    const editableCount = Math.min(await editables.count().catch(() => 0), 8);
-    for (let i = 0; i < editableCount; i += 1) {
-      const candidate = editables.nth(i);
-      if (await candidate.isVisible().catch(() => false)) return candidate;
-    }
-  }
-
-  return null;
-}
-
-async function findVisibleExactProjectEntry(page, projectsTitle, name) {
-  const projectsBox = await projectsTitle.boundingBox().catch(() => null);
-  if (!projectsBox) return null;
-
-  const chatsTitle = page.getByText('Chats', { exact: true }).first();
-  const chatsVisible = await chatsTitle.isVisible().catch(() => false);
-  const chatsBox = chatsVisible ? await chatsTitle.boundingBox().catch(() => null) : null;
-
-  const matches = page.getByText(name, { exact: true });
-  const count = Math.min(await matches.count().catch(() => 0), 20);
-  for (let i = 0; i < count; i += 1) {
-    const candidate = matches.nth(i);
-    if (!await candidate.isVisible().catch(() => false)) continue;
-    const box = await candidate.boundingBox().catch(() => null);
-    if (!box) continue;
-
-    const inLeftSidebar = box.x <= 460;
-    const belowProjects = box.y >= projectsBox.y;
-    const aboveChats = !chatsBox || box.y < chatsBox.y;
-    if (inLeftSidebar && belowProjects && aboveChats) return candidate;
-  }
-  return null;
-}
-
-async function recoverExistingProjectExactHumanFlow(page, name) {
-  const projects = await ensureSidebarOpenForProject(page);
-  const existing = await findVisibleExactProjectEntry(page, projects, name);
-  if (!existing) return null;
-
-  await humanPointerClick(page, existing);
-
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    const challenge = page.getByText(/Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i).first();
-    if (await challenge.isVisible().catch(() => false)) {
-      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected while opening existing Project; aborting immediately');
-      error.code = 'BROWSER_CHALLENGE';
-      throw error;
-    }
-
-    const composer = await findProjectLandingComposer(page, name);
-    if (composer) {
-      console.log('[github-playwright-v10] project-recovered-visible=' + JSON.stringify({ projectName: name, url: page.url() }));
-      return { projectName: name, url: page.url(), composer, recoveredExisting: true };
-    }
-    await page.waitForTimeout(750);
-  }
-
-  throw new Error('Existing exact-name Project was clicked but its visible Project-specific new-chat box did not appear within 30 seconds');
-}
-
-async function findSendControlNearComposer(page, composer) {
-  if (composer) {
-    let region = composer;
-    for (let depth = 0; depth < 5; depth += 1) {
-      region = region.locator('xpath=..');
-      const send = await firstVisible(region, [
-        'button[data-testid="send-button"]',
-        'button[data-testid="composer-submit-button"]',
-        'button[aria-label="Send prompt"]',
-        'button[aria-label="Send"]',
-        'button[aria-label*="Send"]'
-      ]);
-      if (send) return send;
-    }
-  }
-
-  return firstVisible(page, [
-    'button[data-testid="send-button"]',
-    'button[data-testid="composer-submit-button"]',
-    'button[aria-label="Send prompt"]',
-    'button[aria-label="Send"]',
-    'button[aria-label*="Send"]'
-  ]);
-}
-
-async function createProjectExactHumanFlow(page, name) {
-  if (!name) throw new Error('PROJECT_NAME is required for project_wake');
-
-  const projects = await ensureSidebarOpenForProject(page);
-  await humanActionPause(page);
-  if (!await projects.isVisible().catch(() => false)) {
-    throw new Error('Visible Projects section title was not found');
-  }
-
-  await projects.hover();
-  await humanActionPause(page);
-
-  const plus = await findProjectsPlusAfterHover(page, projects);
-  if (!plus) throw new Error('Plus control did not appear to the right of Projects after hover');
-  await humanPointerClick(page, plus);
-
-  await humanActionPause(page);
-  let controls = await findProjectNameEditorFromVisibleCreateSurface(page);
-  if (!controls.create || !controls.editor) {
-    const pendingCreate = page.getByRole('button', { name: /^Create project$/i }).first();
-    await pendingCreate.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
-    controls = await findProjectNameEditorFromVisibleCreateSurface(page);
-  }
-  if (!controls.create) throw new Error('Create Project button was not found on the visible Create-project surface');
-  if (!controls.editor) throw new Error('Project-name editor was not found on the visible Create-project surface');
-
-  await humanTypeInto(page, controls.editor, name);
-  await humanPointerClick(page, controls.create);
-
-  const deadline = Date.now() + 60000;
-  while (Date.now() < deadline) {
-    const challenge = page.getByText(/Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i).first();
-    if (await challenge.isVisible().catch(() => false)) {
-      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected after Project creation; aborting immediately');
-      error.code = 'BROWSER_CHALLENGE';
-      throw error;
-    }
-
-    const composer = await findProjectLandingComposer(page, name);
-    if (composer) {
-      console.log('[github-playwright-v10] project-created-visible=' + JSON.stringify({ projectName: name, url: page.url() }));
-      return { projectName: name, url: page.url(), composer };
-    }
-    await page.waitForTimeout(750);
-  }
-  throw new Error('Created Project did not become visibly ready with its Project-scoped new-chat box within 60 seconds');
 }
 
 async function fillComposer(page, message, composerOverride = null) {
