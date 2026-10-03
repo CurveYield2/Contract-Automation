@@ -61,15 +61,20 @@ test('later and replacement reviewers open the persisted Project URL and never c
   assert.match(repair, /projectUrl:\$projectUrl/);
 });
 
-test('project creation records the exact backend response and only retries confirmed security challenges', () => {
+test('project creation is verified only through visible UI and never backend response telemetry', () => {
   const source = read('scripts/browser-operations-v1.mjs');
-  assert.match(source, /\/backend-api\/projects/);
-  assert.match(source, /project-create-response/);
-  assert.match(source, /cf-mitigated/);
-  assert.match(source, /PROJECT_CREATE_REJECTED/);
-  assert.match(source, /error\.code = 'BROWSER_CHALLENGE'/);
-  assert.match(source, /error\.retryable = true/);
-  assert.match(source, /safeBody/);
+  const start = source.indexOf('async function createProject(page, projectName)');
+  const end = source.indexOf('function validProjectUrl', start);
+  const block = source.slice(start, end);
+  assert.match(block, /ensureSidebarOpen\(page\)/);
+  assert.match(block, /getByText\('Projects', \{ exact: true \}\)/);
+  assert.match(block, /await projects\.hover\(\)/);
+  assert.match(block, /findProjectsSectionAddControl/);
+  assert.match(block, /humanTypeInto\(page, input, projectName\)/);
+  assert.match(block, /Create Project/);
+  assert.doesNotMatch(block, /\/backend-api\/projects/);
+  assert.doesNotMatch(block, /waitForResponse|page\.on\(['"]response['"]/);
+  assert.doesNotMatch(block, /project-create-response|cf-mitigated/);
 });
 
 
@@ -489,7 +494,8 @@ test('Project creation and reviewer wake use only ordinary pointer and keyboard 
   const fillStart = wake.indexOf('async function fillComposer(page, message)');
   const fillEnd = wake.indexOf('async function persistedWakeVisible', fillStart);
   const sendBlock = wake.slice(fillStart, fillEnd);
-  assert.match(sendBlock, /pressSequentially\(String\(message\), \{ delay: 12 \}\)/);
+  assert.match(sendBlock, /for \(const char of String\(message\)\)/);
+  assert.match(sendBlock, /humanTypingPause\(page\)/);
   assert.match(sendBlock, /normalizeVisibleText/);
   assert.match(sendBlock, /visibleMessageMarker/);
   assert.match(sendBlock, /normalized wake marker after keyboard entry/);
@@ -694,4 +700,28 @@ test('Project sidebar recovery follows Chat sidebar options through Organize sid
   assert.doesNotMatch(block, /dispatchEvent/);
   assert.doesNotMatch(block, /force:\s*true/);
   assert.doesNotMatch(block, /requestSubmit|form\.submit/);
+});
+
+
+test('browser human pacing randomizes action and per-character delays', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  assert.match(source, /randomDelayMs\(300, 1500\)/);
+  assert.match(source, /randomDelayMs\(200, 400\)/);
+  assert.match(source, /for \(const char of String\(text\)\)/);
+  assert.match(source, /await locator\.pressSequentially\(char\)/);
+});
+
+test('Project creation follows the exact sidebar Projects-hover-plus dialog sequence', () => {
+  const source = read('scripts/browser-operations-v1.mjs');
+  const start = source.indexOf('async function createProject(page, projectName)');
+  const end = source.indexOf('function validProjectUrl', start);
+  const block = source.slice(start, end);
+  const sidebar = block.indexOf('await ensureSidebarOpen(page)');
+  const projects = block.indexOf("getByText('Projects', { exact: true })");
+  const hover = block.indexOf('await projects.hover()');
+  const plus = block.indexOf('findProjectsSectionAddControl');
+  const type = block.indexOf('await humanTypeInto(page, input, projectName)');
+  const create = block.indexOf('await humanPointerClick(page, submit)');
+  assert.ok(sidebar >= 0 && projects > sidebar && hover > projects && plus > hover && type > plus && create > type);
+  assert.doesNotMatch(block, /findNewProjectControl/);
 });
