@@ -11,6 +11,7 @@ on:
         options:
           - observe
           - wake
+          - recover
       mode:
         description: Browser mode
         required: true
@@ -234,6 +235,8 @@ jobs:
 
           if [ "$WAKE_ACTION" = "observe" ]; then
             jq -e '.ok==true and .provider=="github-playwright"' "$WAKE_RESULT_PATH" >/dev/null
+          elif [ "$WAKE_ACTION" = "recover" ]; then
+            jq -e '.ok==true and .provider=="github-playwright" and .recovered==true and (.chatUrl|test("^https://chatgpt.com/c/"))' "$WAKE_RESULT_PATH" >/dev/null
           else
             jq -e '.ok==true and .provider=="github-playwright" and (.posted==true or .skipped=="PRODUCTIVE_GENERATING")' "$WAKE_RESULT_PATH" >/dev/null
           fi

@@ -91,3 +91,36 @@ test('send path uses visible pointer and keyboard primitives only', () => {
   assert.doesNotMatch(block, /page\.on\(/);
   assert.doesNotMatch(block, /evaluate\s*\(/);
 });
+
+
+test('recover action reopens the already-posted chat through visible UI without resending', () => {
+  assert.match(source, /async function recoverCreatedChatByVisibleSearch/);
+  assert.match(source, /Filter chats and work/);
+  assert.match(source, /humanPointerClick\(page, filter/);
+  assert.match(source, /humanTypeInto\(page, searchInput, marker/);
+  assert.match(source, /humanPointerClick\(page, candidate/);
+  assert.match(source, /await waitForDurableChatRoute\(page, 300000\)/);
+  assert.match(source, /await visibleWakePresent\(page, message, 30000\)/);
+  assert.match(source, /recovered-created-chat/);
+
+  const runStart = source.indexOf('async function runWithPage');
+  const runBlock = source.slice(runStart);
+  const recoverBranch = runBlock.indexOf("if (action === 'recover')");
+  const sendCall = runBlock.indexOf('const verifiedSend = await postWithVisibleVerification');
+  assert.ok(recoverBranch >= 0);
+  assert.ok(sendCall > recoverBranch);
+  const between = runBlock.slice(recoverBranch, sendCall);
+  assert.match(between, /return result/);
+  assert.doesNotMatch(between, /postWithVisibleVerification|await post\(/);
+});
+
+test('recover action remains visible-browser-only', () => {
+  const start = source.indexOf('async function recoverCreatedChatByVisibleSearch');
+  const end = source.indexOf('\nasync function postWithVisibleVerification', start);
+  const block = source.slice(start, end);
+  assert.doesNotMatch(block, /fetch\s*\(/);
+  assert.doesNotMatch(block, /page\.on\(/);
+  assert.doesNotMatch(block, /\.fill\s*\(/);
+  assert.doesNotMatch(block, /force:\s*true/);
+  assert.doesNotMatch(block, /requestSubmit|form\.submit/);
+});

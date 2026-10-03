@@ -457,6 +457,83 @@ async function humanReload(page) {
   await page.waitForTimeout(1500);
 }
 
+function recoverySearchMarker(message) {
+  const text = String(message || '').trim();
+  const bracket = text.match(/^\[[^\]]{6,180}\]/);
+  return bracket ? bracket[0] : text.slice(0, 120);
+}
+
+async function recoverCreatedChatByVisibleSearch(page, message) {
+  if (!message) throw new Error('recover action requires the original wake message');
+  const marker = recoverySearchMarker(message);
+  if (!marker) throw new Error('recover action could not derive a visible search marker');
+
+  const filter = await firstVisible(page, [
+    'button[aria-label="Filter chats and work"]',
+    '[role="button"][aria-label="Filter chats and work"]',
+    'button[aria-label*="Filter chats" i]',
+    'button[aria-label*="Search chats" i]',
+    'button[aria-label*="Search" i]'
+  ]);
+  if (!filter) throw new Error('Visible ChatGPT chat-search control was not found');
+  await humanPointerClick(page, filter, { hoverMs: 180, downMs: 65, settleMs: 420 });
+
+  const searchInput = await firstVisible(page, [
+    '[role="dialog"] input[placeholder*="Search" i]',
+    '[role="dialog"] input[aria-label*="Search" i]',
+    'input[placeholder*="Search" i]',
+    'input[aria-label*="Search" i]',
+    '[role="searchbox"]'
+  ]);
+  if (!searchInput) throw new Error('Visible ChatGPT chat-search input was not found');
+  await humanTypeInto(page, searchInput, marker, { delay: 45 });
+
+  const normalizedMarker = marker.replace(/\s+/g, ' ').trim();
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const title = await page.title().catch(() => '');
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const visible = visibleBrowserStateText(bodyText, title);
+    if (visible.humanChallenge) {
+      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected during read-only chat recovery; aborting immediately');
+      error.code = 'BROWSER_CHALLENGE';
+      throw error;
+    }
+
+    const candidates = page.locator(
+      '[role="dialog"] a, [role="dialog"] button, [role="option"], a[href^="/c/"], a[href*="chatgpt.com/c/"]'
+    );
+    const count = Math.min(await candidates.count().catch(() => 0), 120);
+    for (let i = 0; i < count; i += 1) {
+      const candidate = candidates.nth(i);
+      if (!await candidate.isVisible().catch(() => false)) continue;
+      const text = [
+        await candidate.innerText().catch(() => ''),
+        await candidate.getAttribute('aria-label').catch(() => ''),
+        await candidate.getAttribute('title').catch(() => '')
+      ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+      if (!text.includes(normalizedMarker)) continue;
+
+      await humanPointerClick(page, candidate, { hoverMs: 180, downMs: 65, settleMs: 650 });
+      const route = await waitForDurableChatRoute(page, 300000);
+      const wake = await visibleWakePresent(page, message, 30000);
+      if (!wake.visible) {
+        throw new Error('Recovered chat URL did not visibly contain the exact original wake message');
+      }
+
+      console.log('[github-playwright-v10] recovered-created-chat=' + JSON.stringify({
+        chatUrl: route.url,
+        verificationMethod: wake.method
+      }));
+      return { recovered: true, chatUrl: route.url, verificationMethod: wake.method, userCount: wake.userCount };
+    }
+
+    await page.waitForTimeout(750);
+  }
+
+  throw new Error('No visible ChatGPT search result matched the unique wake marker within 30 seconds');
+}
+
 async function postWithVisibleVerification(page, message) {
   const submitted = await post(page, message);
 
@@ -535,6 +612,28 @@ async function runWithPage(providerName, connect) {
     if (action === 'observe') {
       const sessionStatePersisted = await persistHealthySession(providerName, context, before);
       const result = { ok: true, provider: providerName, action, wakeId, sessionStatePersisted, ...before };
+      await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
+      return result;
+    }
+
+    if (action === 'recover') {
+      const recovered = await recoverCreatedChatByVisibleSearch(page, wakeMessage);
+      const after = await snapshot(page);
+      const sessionStatePersisted = await persistHealthySession(providerName, context, after);
+      const result = {
+        ok: true,
+        provider: providerName,
+        action,
+        wakeId,
+        posted: false,
+        recovered: true,
+        sessionStatePersisted,
+        before,
+        after,
+        chatUrl: recovered.chatUrl,
+        verification: 'visible-browser-only',
+        verificationMethod: recovered.verificationMethod
+      };
       await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
       return result;
     }
