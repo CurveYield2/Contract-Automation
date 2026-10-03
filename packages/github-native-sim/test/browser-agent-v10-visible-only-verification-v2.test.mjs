@@ -10,6 +10,14 @@ const source = fs.readFileSync(
   path.join(root, 'packages/browser-agent-original-phase0-v10/browser-agent-wake-v10.mjs'),
   'utf8',
 );
+const workflow = fs.readFileSync(
+  path.join(root, '.github/workflows/browser-agent-home-exit-v10.yml'),
+  'utf8',
+);
+const request = JSON.parse(fs.readFileSync(
+  path.join(root, 'process/browser-agent-home-exit-v10/current-request-v10.json'),
+  'utf8',
+));
 
 test('v10 ChatGPT verification is visible-browser-only', () => {
   assert.doesNotMatch(source, /\/backend-api\/models/);
@@ -263,4 +271,31 @@ test('v10 resume_existing accepts durable Project-scoped conversations through r
   assert.match(block, /!requestedRoute\.isChat \|\| requestedRoute\.isLocal/);
   assert.match(block, /root or Project-scoped ChatGPT conversation URL/);
   assert.doesNotMatch(block, /resume_existing requires a chatgpt\.com\/c\/\.\.\. URL/);
+});
+
+test('v10 reuses a persisted Project URL before sidebar recovery or duplicate creation', () => {
+  assert.match(source, /const requestedProjectUrl = env\.PROJECT_URL \|\| ''/);
+  assert.match(source, /function validSavedProjectUrl/);
+  assert.match(source, /async function openSavedProjectUrl/);
+  assert.match(source, /project-reused-saved-url/);
+  assert.match(source, /reusedSavedUrl: true/);
+
+  const start = source.indexOf('async function createProjectExactHumanFlow');
+  const end = source.indexOf('\nasync function fillComposer', start);
+  const block = source.slice(start, end);
+  const saved = block.indexOf('openSavedProjectUrl(page, name, requestedProjectUrl)');
+  const recover = block.indexOf('recoverExistingProjectExactHumanFlow(page, name)');
+  const create = block.indexOf('findProjectsPlusAfterHover');
+  assert.ok(saved >= 0 && recover > saved && create > recover);
+  assert.match(block, /if \(saved\) return saved/);
+
+  assert.match(workflow, /project_url:/);
+  assert.match(workflow, /INPUT_PROJECT_URL: \$\{\{ inputs\.project_url \}\}/);
+  assert.match(workflow, /project_url=\$\(jq -r '\.project_url \/\/ ""'/);
+  assert.match(workflow, /PROJECT_URL: \$\{\{ steps\.request\.outputs\.project_url \}\}/);
+
+  assert.equal(
+    request.project_url,
+    'https://chatgpt.com/g/g-p-6ac177c98f0c81919e970bb2a69b8583/project',
+  );
 });

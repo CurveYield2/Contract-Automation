@@ -13,6 +13,7 @@ const wakeId = env.WAKE_ID || crypto.randomUUID();
 const wakeMessage = env.WAKE_MESSAGE || '';
 const requestedUrl = env.CHAT_URL || '';
 const projectName = env.PROJECT_NAME || '';
+const requestedProjectUrl = env.PROJECT_URL || '';
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
@@ -447,6 +448,40 @@ async function findProjectLandingComposer(page, name) {
   return null;
 }
 
+function validSavedProjectUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.origin === 'https://chatgpt.com' && /^\/g\/g-p-[^/]+\/project\/?$/.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function openSavedProjectUrl(page, name, projectUrl) {
+  if (!projectUrl) return null;
+  if (!validSavedProjectUrl(projectUrl)) {
+    throw new Error('Persisted Project URL is not a valid ChatGPT Project URL');
+  }
+
+  // This is navigation to a previously persisted Project identity, not a
+  // ChatGPT data read/write shortcut. All Project interaction after load stays
+  // on the visible human UI.
+  await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(randomDelayMs(3000, 5000));
+
+  const currentProjectUrl = page.url();
+  if (!validSavedProjectUrl(currentProjectUrl)) {
+    throw new Error('Persisted Project URL did not open the expected ChatGPT Project page');
+  }
+
+  const composer = await ensureComposer(page);
+  console.log('[github-playwright-v10] project-reused-saved-url=' + JSON.stringify({
+    projectName: name,
+    url: currentProjectUrl
+  }));
+  return { projectName: name, url: currentProjectUrl, composer, recoveredExisting: true, reusedSavedUrl: true };
+}
+
 async function findVisibleExactProjectEntry(page, projectsTitle, name) {
   const projectsBox = await projectsTitle.boundingBox().catch(() => null);
   if (!projectsBox) return null;
@@ -522,6 +557,9 @@ async function findSendControlNearComposer(page, composer) {
 
 async function createProjectExactHumanFlow(page, name) {
   if (!name) throw new Error('PROJECT_NAME is required for project_wake');
+
+  const saved = await openSavedProjectUrl(page, name, requestedProjectUrl);
+  if (saved) return saved;
 
   const recovered = await recoverExistingProjectExactHumanFlow(page, name);
   if (recovered) return recovered;
