@@ -67,6 +67,7 @@ on:
       - main
     paths:
       - 'process/browser-agent-home-exit-v10/current-request-v10.json'
+      - 'packages/browser-agent-original-phase0-v10/browser-agent-wake-v10.mjs'
 
 permissions:
   contents: read
