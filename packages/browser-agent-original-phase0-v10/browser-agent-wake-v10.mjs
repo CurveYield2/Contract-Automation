@@ -514,7 +514,13 @@ async function findVisibleExactProjectEntry(page, projectsTitle, name) {
     const inLeftSidebar = box.x <= 460;
     const belowProjects = box.y >= projectsBox.y;
     const aboveChats = !chatsBox || box.y < chatsBox.y;
-    if (inLeftSidebar && belowProjects && aboveChats) return candidate;
+    if (inLeftSidebar && belowProjects && aboveChats) {
+      const link = candidate.locator('xpath=ancestor-or-self::a[1]');
+      if (await link.isVisible().catch(() => false)) return link;
+      const button = candidate.locator('xpath=ancestor-or-self::button[1]');
+      if (await button.isVisible().catch(() => false)) return button;
+      return candidate;
+    }
   }
 
   return null;
@@ -846,14 +852,16 @@ function recoverySearchMarker(message) {
 
 async function recoverCreatedChatFromProjectPage(page, message) {
   if (!message) throw new Error('recover action requires the original wake message');
-  if (!requestedProjectUrl) throw new Error('recover action requires the persisted Project URL');
   if (!recoveryChatTitle) throw new Error('recover action requires the visible Project chat title');
 
-  // Recovery happens entirely inside the known Project page. Do not use global
-  // Search or the sidebar. Open the persisted Project URL, then select the
-  // existing visible Project chat from the list beneath the Project top area.
-  const project = await openSavedProjectUrl(page, projectName, requestedProjectUrl);
-  if (!project) throw new Error('Persisted Project URL could not be opened for recovery');
+  // Prefer an already-persisted Project URL when supplied. If this one-time
+  // recovery request does not have one, open the exact visible Project entry
+  // by name with the normal human pointer flow and capture the navigated URL.
+  // Once inside the Project, recovery never uses global Search.
+  const project = requestedProjectUrl
+    ? await openSavedProjectUrl(page, projectName, requestedProjectUrl)
+    : await recoverExistingProjectExactHumanFlow(page, projectName);
+  if (!project) throw new Error('Existing Project could not be opened for recovery');
 
   await page.waitForTimeout(randomDelayMs(1200, 2200));
 
