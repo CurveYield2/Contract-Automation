@@ -32,7 +32,17 @@ on:
         default: "Home Exit Project Test"
         type: string
       project_url:
-        description: Persisted ChatGPT Project URL to reuse for action=project_wake
+        description: Persisted ChatGPT Project URL to reuse for action=project_wake or recover
+        required: false
+        default: ""
+        type: string
+      project_id:
+        description: Persisted ChatGPT Project ID; reconstructs Project URL when project_url is blank
+        required: false
+        default: ""
+        type: string
+      recovery_chat_title:
+        description: Visible Project chat title used only by action=recover
         required: false
         default: ""
         type: string
@@ -100,6 +110,8 @@ jobs:
           INPUT_WAKE_MESSAGE: ${{ inputs.wake_message }}
           INPUT_PROJECT_NAME: ${{ inputs.project_name }}
           INPUT_PROJECT_URL: ${{ inputs.project_url }}
+          INPUT_PROJECT_ID: ${{ inputs.project_id }}
+          INPUT_RECOVERY_CHAT_TITLE: ${{ inputs.recovery_chat_title }}
           INPUT_HOME_EXIT_NODE: ${{ inputs.home_exit_node }}
           INPUT_INTERACTIVE_VIEW: ${{ inputs.interactive_view }}
           INPUT_MANUAL_WAIT: ${{ inputs.manual_challenge_wait_minutes }}
@@ -113,7 +125,13 @@ jobs:
             echo "chat_url=$(jq -r '.chat_url // ""' "$request")" >> "$GITHUB_OUTPUT"
             echo "wake_message=$(jq -r '.wake_message // ""' "$request")" >> "$GITHUB_OUTPUT"
             echo "project_name=$(jq -r '.project_name // ""' "$request")" >> "$GITHUB_OUTPUT"
-            echo "project_url=$(jq -r '.project_url // ""' "$request")" >> "$GITHUB_OUTPUT"
+            project_url="$(jq -r '.project_url // ""' "$request")"
+            project_id="$(jq -r '.project_id // ""' "$request")"
+            if [ -z "$project_url" ] && [ -n "$project_id" ]; then
+              project_url="https://chatgpt.com/g/$project_id/project"
+            fi
+            echo "project_url=$project_url" >> "$GITHUB_OUTPUT"
+            echo "recovery_chat_title=$(jq -r '.recovery_chat_title // ""' "$request")" >> "$GITHUB_OUTPUT"
             echo "home_exit_node=$(jq -r '.home_exit_node' "$request")" >> "$GITHUB_OUTPUT"
             echo "interactive_view=$(jq -r '.interactive_view // true' "$request")" >> "$GITHUB_OUTPUT"
             echo "manual_wait=$(jq -r '.manual_challenge_wait_minutes // 5' "$request")" >> "$GITHUB_OUTPUT"
@@ -123,7 +141,12 @@ jobs:
             echo "chat_url=$INPUT_CHAT_URL" >> "$GITHUB_OUTPUT"
             echo "wake_message=$INPUT_WAKE_MESSAGE" >> "$GITHUB_OUTPUT"
             echo "project_name=$INPUT_PROJECT_NAME" >> "$GITHUB_OUTPUT"
-            echo "project_url=$INPUT_PROJECT_URL" >> "$GITHUB_OUTPUT"
+            project_url="$INPUT_PROJECT_URL"
+            if [ -z "$project_url" ] && [ -n "$INPUT_PROJECT_ID" ]; then
+              project_url="https://chatgpt.com/g/$INPUT_PROJECT_ID/project"
+            fi
+            echo "project_url=$project_url" >> "$GITHUB_OUTPUT"
+            echo "recovery_chat_title=$INPUT_RECOVERY_CHAT_TITLE" >> "$GITHUB_OUTPUT"
             echo "home_exit_node=$INPUT_HOME_EXIT_NODE" >> "$GITHUB_OUTPUT"
             echo "interactive_view=$INPUT_INTERACTIVE_VIEW" >> "$GITHUB_OUTPUT"
             echo "manual_wait=$INPUT_MANUAL_WAIT" >> "$GITHUB_OUTPUT"
@@ -227,6 +250,7 @@ jobs:
           WAKE_MESSAGE: ${{ steps.request.outputs.wake_message }}
           PROJECT_NAME: ${{ steps.request.outputs.project_name }}
           PROJECT_URL: ${{ steps.request.outputs.project_url }}
+          RECOVERY_CHAT_TITLE: ${{ steps.request.outputs.recovery_chat_title }}
           WAKE_ID: home-exit-playwright-v10-${{ github.run_id }}
           INTERACTIVE_VIEW_ENABLED: ${{ steps.request.outputs.interactive_view }}
           MANUAL_CHALLENGE_WAIT_MINUTES: ${{ steps.request.outputs.manual_wait }}
