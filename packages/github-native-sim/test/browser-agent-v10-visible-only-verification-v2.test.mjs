@@ -144,8 +144,8 @@ test('v10 project_wake opens or scrolls the sidebar to Projects before hover-plu
   const sidebar = block.indexOf('await ensureSidebarOpenForProject');
   const hover = block.indexOf('await projects.hover()');
   const plus = block.indexOf('findProjectsPlusAfterHover');
-  const type = block.indexOf('await humanTypeInto(page, input, name)');
-  const create = block.indexOf('await humanPointerClick(page, create)');
+  const type = block.indexOf('await humanTypeInto(page, popup.input, name)');
+  const create = block.indexOf('await humanPointerClick(page, popup.create)');
   assert.ok(sidebar >= 0 && hover > sidebar && plus > hover && type > plus && create > type);
   assert.doesNotMatch(block, /fetch\s*\(|page\.on\(|waitForResponse|\/backend-api\//);
 });
@@ -155,4 +155,16 @@ test('v10 randomized pacing uses 0.3-1.5s between actions and 0.2-0.4s per chara
   assert.match(source, /randomDelayMs\(200, 400\)/);
   assert.match(source, /for \(const char of String\(text\)\)/);
   assert.match(source, /await locator\.pressSequentially\(char\)/);
+});
+
+
+test('v10 Project popup discovery anchors textbox to visible Create Project control without dialog-role assumptions', () => {
+  assert.match(source, /async function findProjectCreatePopupControls/);
+  const start = source.indexOf('async function findProjectCreatePopupControls');
+  const end = source.indexOf('\nasync function createProjectExactHumanFlow', start);
+  const block = source.slice(start, end);
+  assert.match(block, /button:has-text\("Create project"\)/);
+  assert.match(block, /input:not\(\[type="hidden"\]\), textarea, \[role="textbox"\], \[contenteditable="true"\]/);
+  assert.match(block, /id === 'prompt-textarea'/);
+  assert.doesNotMatch(block, /\[role="dialog"\]/);
 });
