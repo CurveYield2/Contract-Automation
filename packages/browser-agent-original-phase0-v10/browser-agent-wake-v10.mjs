@@ -343,6 +343,43 @@ async function findProjectsPlusAfterHover(page, projects) {
   return null;
 }
 
+async function findProjectCreatePopupControls(page) {
+  const create = await firstVisible(page, [
+    'button:has-text("Create project")',
+    'button:has-text("Create Project")',
+    '[role="button"]:has-text("Create project")',
+    '[role="button"]:has-text("Create Project")'
+  ]);
+  if (!create) return { input: null, create: null };
+
+  let region = create;
+  for (let depth = 0; depth < 7; depth += 1) {
+    region = region.locator('xpath=..');
+    const fields = region.locator(
+      'input:not([type="hidden"]), textarea, [role="textbox"], [contenteditable="true"]'
+    );
+    const count = Math.min(await fields.count().catch(() => 0), 20);
+    for (let i = 0; i < count; i += 1) {
+      const field = fields.nth(i);
+      if (!await field.isVisible().catch(() => false)) continue;
+      const id = await field.getAttribute('id').catch(() => '');
+      const aria = await field.getAttribute('aria-label').catch(() => '');
+      const placeholder = await field.getAttribute('placeholder').catch(() => '');
+      if (id === 'prompt-textarea' || /message/i.test(aria + ' ' + placeholder)) continue;
+      return { input: field, create };
+    }
+  }
+
+  const direct = await firstVisible(page, [
+    'input[placeholder*="Project" i]',
+    'input[aria-label*="Project" i]',
+    '[role="textbox"][placeholder*="Project" i]',
+    '[role="textbox"][aria-label*="Project" i]',
+    'input[name="name"]'
+  ]);
+  return { input: direct, create };
+}
+
 async function createProjectExactHumanFlow(page, name) {
   if (!name) throw new Error('PROJECT_NAME is required for project_wake');
 
@@ -359,21 +396,12 @@ async function createProjectExactHumanFlow(page, name) {
   if (!plus) throw new Error('Plus control did not appear to the right of Projects after hover');
   await humanPointerClick(page, plus);
 
-  const input = await firstVisible(page, [
-    '[role="dialog"] input[placeholder*="Project name" i]',
-    '[role="dialog"] input[aria-label*="Project name" i]',
-    '[role="dialog"] input[name="name"]',
-    '[role="dialog"] input'
-  ]);
-  if (!input) throw new Error('Project-name input was not found in the visible Project dialog');
-  await humanTypeInto(page, input, name);
+  const popup = await findProjectCreatePopupControls(page);
+  if (!popup.input) throw new Error('Project-name input was not found in the visible Project creation popup');
+  if (!popup.create) throw new Error('Create Project button was not found in the visible Project creation popup');
 
-  const create = await firstVisible(page, [
-    '[role="dialog"] button:has-text("Create project")',
-    '[role="dialog"] button:has-text("Create Project")'
-  ]);
-  if (!create) throw new Error('Create Project button was not found in the visible dialog');
-  await humanPointerClick(page, create);
+  await humanTypeInto(page, popup.input, name);
+  await humanPointerClick(page, popup.create);
 
   const deadline = Date.now() + 60000;
   while (Date.now() < deadline) {
