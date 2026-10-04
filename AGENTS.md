@@ -1,6 +1,64 @@
 # Contract-Automation Agent Execution Policy
 
-Policy version: v10
+Policy version: v11
+
+## Repository hygiene, anti-spam, and single-flight execution — mandatory
+
+These rules govern all repository work unless a more specific local `AGENTS.md` adds stricter requirements.
+
+### One live file per purpose
+
+- Active repository paths MUST contain only the current live implementation for a given purpose.
+- Before creating a file, search the repository for the same or substantially similar responsibility. Reuse or edit the existing canonical file whenever possible.
+- Do not create retry/version trash such as `foo-v2`, `foo-v3`, `foo-fixed`, `foo-final`, `foo-new`, `foo-copy`, or equivalent siblings merely because an attempt failed.
+- If a genuine version bump is required, the same change MUST remove or archive the superseded active version. Never leave a chain of old active siblings behind.
+- Historical files belong in `CurveYield2/archive` when preservation is required. Git history is sufficient when no separate historical copy is required.
+- Temporary diagnostics, scratch output, screenshots, generated probes, and transient execution data MUST use temporary runtime storage or the existing artifact/results location. Do not commit them as new permanent top-level files unless they are required durable evidence.
+
+### File placement is not optional
+
+- Before creating a file, inspect the surrounding tree and the nearest local `AGENTS.md`.
+- Put the file in the established owner directory for that responsibility. Do not dump files into repository root, `.github/workflows`, `process`, `scripts`, or another convenient directory merely because it is easy to reach.
+- When a similar file already exists elsewhere, follow that location and naming pattern.
+- If no clear owner exists, choose the narrowest existing subsystem directory that owns the behavior; do not invent a new top-level category without a human requirement.
+
+### Single-flight browser and workflow execution
+
+- Before starting any browser session, GitHub Actions workflow, simulation, deployment, or long-running test, inspect currently queued/in-progress runs and durable task state.
+- If the same workflow, browser lane, target branch, campaign, request, or shared browser/login state is already active, DO NOT launch another copy in parallel.
+- Reuse/observe the active run. If it is genuinely stale or hung, terminate or retire it first, then start exactly one replacement.
+- Workflows sharing the same ChatGPT browser state, account session, Project, request queue, target branch, or mutable execution environment are strictly single-flight.
+- Never start multiple same-kind workflows merely to see which one finishes first.
+- A retry means repair the existing implementation and rerun one instance. It does not mean create another workflow file or another browser session.
+
+### Repeated-failure and repeated-analysis stop rule
+
+- Do not execute the same failed operation three times with materially identical code, inputs, and environment.
+- After two materially identical failures, further execution is prohibited until the agent identifies a concrete new cause or changes a relevant input/code/configuration.
+- Before re-analyzing a failure, inspect the current handoff, existing diagnosis, logs already read, and repository changes made since that analysis.
+- Do not repeatedly summarize or re-investigate the same unchanged logs/source/state. Re-analysis is justified only by new evidence or a changed implementation/environment.
+- Do not create a new diagnosis/report/status file for each retry. Update the existing canonical task state or report when one exists.
+
+### No self-triggering execution loops
+
+- A workflow that commits generated results MUST NOT watch those generated result paths with a `push` trigger.
+- Do not use broad directory triggers that include both workflow inputs and workflow outputs.
+- Test/diagnostic workflows MUST NOT run on every push to `main` unless repository-wide execution on every push is explicitly required.
+- Request-triggered workflows should watch only their request/input paths and necessary implementation files.
+- Before merging workflow changes, reason through whether the workflow's own commits can trigger itself or another cyclic workflow chain.
+
+### Cleanup is part of completion
+
+Before declaring repository work complete:
+
+- remove superseded versions and temporary helper files;
+- remove or archive obsolete one-off workflows;
+- verify no duplicate same-purpose file family remains active;
+- verify no unnecessary duplicate browser/workflow execution is still queued or running;
+- verify generated files landed in their proper subsystem directory;
+- leave one clear current implementation and one clear next state.
+
+These rules are specifically intended to prevent runaway agents from generating thousands of useless files, runs, analyses, or retries.
 
 ## Bounded auxiliary work — anti-loop policy
 
