@@ -313,7 +313,7 @@ jobs:
           export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
           export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
           set +e
-          timeout -k 10s 180s node scripts/browser-agent-wake.mjs
+          timeout -k 10s 360s node scripts/browser-agent-wake.mjs
           rc=$?
           set -e
 
