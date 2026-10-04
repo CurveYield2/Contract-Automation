@@ -1,8 +1,0 @@
-{
-  "schemaVersion": "katana-network-specific-anvil-simulator-request-v10",
-  "purpose": "Resolve the exact registered Katana vbWBTC f(x) market from PoolManager RegisterPool events",
-  "fxUsd": "0x4c03ff0f44A55e7098a09016E02a01d3cdC2FDF9",
-  "poolManager": "0x27b3eE81DF2Dd7356D5ac282e2416991A616f96a",
-  "vbWbtc": "0x0913DA6Da4b42f538B445599b46Bb4622342Cf52",
-  "productionWritesAllowed": false
-}
