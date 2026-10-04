@@ -849,6 +849,24 @@ async function fillComposer(page, message, composerOverride = null) {
   return composer;
 }
 
+async function saveWakeEvidence(page, label, extra = {}) {
+  const dir = '/tmp/browser-wake-evidence-v1';
+  await fs.mkdir(dir, { recursive: true });
+  const safe = String(label).replace(/[^A-Za-z0-9._-]+/g, '-');
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const diagnostics = {
+    label,
+    capturedAt: new Date().toISOString(),
+    url: page.url(),
+    title: await page.title().catch(() => ''),
+    bodyTail: bodyText.slice(-6000),
+    ...extra
+  };
+  await fs.writeFile(path.join(dir, safe + '.json'), JSON.stringify(diagnostics, null, 2) + '\n', 'utf8');
+  await page.screenshot({ path: path.join(dir, safe + '.png'), fullPage: true }).catch(() => {});
+  console.log('[github-playwright-v10] wake-evidence-saved=' + JSON.stringify({ label, dir }));
+}
+
 async function post(page, message, composerOverride = null) {
   if (!message) throw new Error('Wake message is empty');
 
@@ -883,9 +901,19 @@ async function post(page, message, composerOverride = null) {
     throw new Error('Human-typed wake was not fully and visibly present in the composer before Send');
   }
 
+  const sendDiagnostics = {
+    aria: await send.getAttribute('aria-label').catch(() => null),
+    testid: await send.getAttribute('data-testid').catch(() => null),
+    text: await send.innerText().catch(() => ''),
+    disabled: await send.isDisabled().catch(() => false),
+    box: await send.boundingBox().catch(() => null)
+  };
+  await saveWakeEvidence(page, '01-before-send-v1', { sendDiagnostics });
+
   console.log('[github-playwright-v10] send-strategy=human-short-pointer-click');
   await humanShortPointerClick(page, send);
   await page.waitForTimeout(randomDelayMs(1400, 2200));
+  await saveWakeEvidence(page, '02-after-first-send-click-v1', { sendDiagnostics });
 
   const quickVisible = await visibleWakePresent(page, message, 2500);
   if (!quickVisible.visible) {
@@ -903,6 +931,15 @@ async function post(page, message, composerOverride = null) {
       console.log('[github-playwright-v10] send-retry=human-short-pointer-click reason=message-still-in-composer');
       await humanShortPointerClick(page, retrySend);
       await page.waitForTimeout(randomDelayMs(900, 1500));
+      await saveWakeEvidence(page, '03-after-send-retry-v1', {
+        retrySendDiagnostics: {
+          aria: await retrySend.getAttribute('aria-label').catch(() => null),
+          testid: await retrySend.getAttribute('data-testid').catch(() => null),
+          text: await retrySend.innerText().catch(() => ''),
+          disabled: await retrySend.isDisabled().catch(() => false),
+          box: await retrySend.boundingBox().catch(() => null)
+        }
+      });
     }
   }
 
@@ -1138,6 +1175,13 @@ async function postWithVisibleVerification(page, message, composerOverride = nul
     localRoute: initialRoute.isLocal
   }));
   if (!beforeReload.visible) {
+    await saveWakeEvidence(page, '04-send-not-rendered-v1', {
+      verification: beforeReload,
+      composerDiagnostics: {
+        text: await page.locator('#prompt-textarea').innerText().catch(() => ''),
+        visible: await page.locator('#prompt-textarea').isVisible().catch(() => false)
+      }
+    });
     throw new Error('Sent wake is not visibly present in the rendered conversation before reload');
   }
 
