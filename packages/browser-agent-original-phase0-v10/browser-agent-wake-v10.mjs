@@ -196,11 +196,19 @@ async function humanTypingPause(page, char = '') {
     min = 55;
     max = 95;
   }
+  if (char === '\n') {
+    min = 140;
+    max = 230;
+  }
   if (/[.!?,;:]/.test(char)) {
     min = 145;
     max = 230;
   }
   await page.waitForTimeout(randomDelayMs(min, max));
+}
+
+function normalizeVisibleText(text = '') {
+  return String(text).replace(/\s+/g, ' ').trim();
 }
 
 async function x11Key(args, label = 'x11-key') {
@@ -273,7 +281,11 @@ async function humanTypeInto(page, locator, text) {
   const value = String(text);
   console.log('[github-playwright-v10] text-entry-strategy=human-x11-skilled-typist-per-character length=' + value.length);
   for (const char of value) {
-    await x11Key(['type', '--clearmodifiers', '--delay', '0', char], 'x11-type-character');
+    if (char === '\n') {
+      await x11Key(['key', '--clearmodifiers', 'shift+Return'], 'x11-line-break');
+    } else {
+      await x11Key(['type', '--clearmodifiers', '--delay', '0', char], 'x11-type-character');
+    }
     await humanTypingPause(page, char);
   }
   await humanActionPause(page);
@@ -840,7 +852,8 @@ async function fillComposer(page, message, composerOverride = null) {
 async function post(page, message, composerOverride = null) {
   if (!message) throw new Error('Wake message is empty');
 
-  const marker = message.slice(0, Math.min(120, message.length));
+  const normalizedMessage = normalizeVisibleText(message);
+  const marker = normalizedMessage.slice(0, Math.min(180, normalizedMessage.length));
   const requestedIdleWait = Number.parseInt(env.IDLE_WAIT_MS || '600000', 10);
   const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
 
@@ -855,8 +868,19 @@ async function post(page, message, composerOverride = null) {
   const composerText = await composer.inputValue().catch(async () => {
     return await composer.innerText().catch(() => '');
   });
-  if (!composerText.includes(marker)) {
-    throw new Error('Wake marker is not visibly present in the composer before Send');
+  const normalizedComposer = normalizeVisibleText(composerText);
+  const minimumExpectedLength = Math.floor(normalizedMessage.length * 0.95);
+  const markerPresent = marker.length > 0 && normalizedComposer.includes(marker);
+  const lengthPlausible = normalizedComposer.length >= minimumExpectedLength;
+  console.log('[github-playwright-v10] composer-pre-send-verification=' + JSON.stringify({
+    normalizedComposerLength: normalizedComposer.length,
+    normalizedMessageLength: normalizedMessage.length,
+    markerLength: marker.length,
+    markerPresent,
+    lengthPlausible
+  }));
+  if (!markerPresent || !lengthPlausible) {
+    throw new Error('Human-typed wake was not fully and visibly present in the composer before Send');
   }
 
   console.log('[github-playwright-v10] send-strategy=human-pointer-click');
