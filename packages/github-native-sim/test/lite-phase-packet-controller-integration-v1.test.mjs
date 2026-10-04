@@ -7,7 +7,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {refreshControllerPrefillDigest} from '../../../scripts/lib/lite-phase-prefill-v1.mjs';
 import {requiredFile,repoFile} from '../../../scripts/lib/lite-phase-work-v1.mjs';
-import {MASTER_REVIEW_SEGMENTS_V1} from '../../../scripts/lib/lite-master-review-v1.mjs';
+import {MASTER_REVIEW_SEGMENTS_V1,collectSegmentArtifacts} from '../../../scripts/lib/lite-master-review-v1.mjs';
 
 const mkdir=p=>fs.mkdirSync(p,{recursive:true});
 const writeJson=(p,v)=>{mkdir(path.dirname(p));fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n');};
@@ -31,7 +31,7 @@ function fixture(){
   const source='a'.repeat(64);
 
   const receiptStub=`export function phaseReceiptPath(workspacePath,sequence,revision=1){return workspacePath+'/receipts/PHASE_'+String(sequence).padStart(2,'0')+'_RECEIPT_v'+revision+'.json';}
-export function createLitePhaseReceiptV1(input){return {schemaVersion:'curveyield-lite-phase-receipt-v1',campaign:{campaignId:input.campaignId,campaignGenerationId:input.campaignGenerationId,campaignName:input.campaignName,workspacePath:input.workspacePath,campaignDirectoryEntryPath:input.campaignDirectoryEntryPath,mode:'LITE'},phase:{sequence:input.sequence,id:'phase-'+input.sequence,revision:1,status:input.status},executor:{type:input.executorType,lineage:input.executorLineage},authority:input.authority,source:{sha256:input.sourceSha256,...input.source},startedAt:input.now,updatedAt:input.now,sealedAt:null,inputs:input.inputs??[],evidence:input.evidence??[],outputs:input.outputs??[],globalControls:input.globalControls??{},obligations:{due:[],created:[],closed:[],carriedForward:[],...(input.obligations??{})},invalidation:{status:'NO_MATERIAL_CHANGE',events:[]},automation:[],validation:input.validation??{status:'PENDING',failures:[]},handoff:input.handoff??{required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:null,sameReviewer:false,status:'NOT_APPLICABLE'},errors:[]};}
+export function createLitePhaseReceiptV1(input){return {schemaVersion:'curveyield-lite-phase-receipt-v1',campaign:{campaignId:input.campaignId,campaignGenerationId:input.campaignGenerationId,campaignName:input.campaignName,workspacePath:input.workspacePath,campaignDirectoryEntryPath:input.campaignDirectoryEntryPath,mode:'LITE'},phase:{sequence:input.sequence,id:'phase-'+input.sequence,revision:input.revision??1,status:input.status},executor:{type:input.executorType,lineage:input.executorLineage},authority:input.authority,source:{sha256:input.sourceSha256,...input.source},startedAt:input.now,updatedAt:input.now,sealedAt:null,inputs:input.inputs??[],evidence:input.evidence??[],outputs:input.outputs??[],globalControls:input.globalControls??{},obligations:{due:[],created:[],closed:[],carriedForward:[],...(input.obligations??{})},invalidation:{status:'NO_MATERIAL_CHANGE',events:[]},automation:[],validation:input.validation??{status:'PENDING',failures:[]},handoff:input.handoff??{required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:null,sameReviewer:false,status:'NOT_APPLICABLE'},errors:[]};}
 `;
   write(path.join(root,'packages/controller-core/src/lite-phase-receipt-v1.mjs'),receiptStub);
 
@@ -253,7 +253,7 @@ test('v11-configured Phase 1 seals but cannot create Phase 2 until exact master 
   assert.ok(master.reviewedArtifacts.some(x=>x.kind==='SEALED_RECEIPT'));
   assert.ok(master.reviewedArtifacts.some(x=>x.kind==='GLOBAL_CONTROL_SOURCEINTELLIGENCEBUNDLE'));
   assert.ok(master.reviewedArtifacts.some(x=>x.kind==='INPUT_CONTROLLER_GENERATED_PHASE_WORK_PACKET'));
-  master.review={outcome:'ACCEPT',summary:'Entire reviewer-1 segment accepted.',deficiencies:[],repairSpec:null};
+  master.review={outcome:'ACCEPT',summary:'<REQUIRED>',deficiencies:[],repairSpec:null};
   master.masterVerification={
     outcome:'ACCEPT',
     verifiedArtifactDigests:master.reviewedArtifacts.map(x=>({path:x.path,sha256:x.sha256})),
@@ -262,12 +262,28 @@ test('v11-configured Phase 1 seals but cannot create Phase 2 until exact master 
     verifiedAt:'2026-10-04T00:00:00Z'
   };
   writeJson(masterPath,master);
+  const placeholderRejected=runMaster(f);
+  assert.equal(placeholderRejected.status,'MASTER_REVIEW_INVALID');
+  assert.match(placeholderRejected.feedbackText,/substantive review.summary/);
+  master.review.summary='Entire reviewer-1 segment accepted.';
+  writeJson(masterPath,master);
+  const stoppedDirectory=readJson(path.join(f.root,f.dirRel));
+  stoppedDirectory.campaignStatus='STOPPED_BY_HUMAN';
+  writeJson(path.join(f.root,f.dirRel),stoppedDirectory);
+  const stoppedDirectoryBytes=fs.readFileSync(path.join(f.root,f.dirRel),'utf8');
+  const stoppedFormBytes=fs.readFileSync(masterPath,'utf8');
+  const held=runMaster(f);
+  assert.equal(held.status,'MASTER_REVIEW_HELD');
+  assert.equal(fs.readFileSync(path.join(f.root,f.dirRel),'utf8'),stoppedDirectoryBytes);
+  assert.equal(fs.readFileSync(masterPath,'utf8'),stoppedFormBytes);
+  stoppedDirectory.campaignStatus='WAITING_FOR_MASTER_REVIEW';
+  writeJson(path.join(f.root,f.dirRel),stoppedDirectory);
 
   const accepted=runMaster(f);
   assert.equal(accepted.status,'PASS');
   assert.equal(accepted.masterReviewAccepted,true);
   const advanced=readJson(path.join(f.root,f.dirRel));
-  assert.equal(advanced.pendingMasterReview,null);
+  assert.equal(Object.hasOwn(advanced,'pendingMasterReview'),false);
   assert.equal(advanced.currentAssignment.phaseSequence,2);
   assert.equal(advanced.campaignStatus,'WAITING_FOR_SUCCESSOR_AGENT');
 });
@@ -291,12 +307,13 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
   master.review={
     outcome:'REWORK',
     summary:'One bounded defect.',
-    deficiencies:[{id:'MR-001',phase:1,ownedPaths:['actions.step-1.outputs.analysis'],description:'Clarify evidence.',evidenceRefs:[f.formRel]}],
+    deficiencies:[{id:'MR-001',phase:1,file:path.posix.relative(f.campaign,f.formRel),ownedPaths:['actions.step-1.outputs.analysis'],evidenceRefs:[path.posix.relative(f.campaign,f.formRel)],rationale:'Clarify the evidence-bound Phase-1 analysis.'}],
     repairSpec:{
       scopeId:'MR-001-repair',
       allowedFiles:[path.posix.relative(f.campaign,f.formRel)],
       allowedSemanticPaths:[{file:path.posix.relative(f.campaign,f.formRel),path:'actions.step-1.outputs.analysis'}],
-      requiredDependentRefreshes:['phase-1-canonical','phase-1-report','phase-1-receipt'],
+      requiredDependentRefreshes:['REGENERATE_CANONICAL','REGENERATE_REPORT','REGENERATE_DERIVED','RESEAL_RECEIPT'],
+      acceptanceConditions:['The repaired analysis cites exact staged evidence and resolves MR-001.'],
       prohibitedActions:['SEAL','ADVANCE','MUTATE_ACCEPTED_PREFILL','MUTATE_UNRELATED_EVIDENCE']
     }
   };
@@ -310,6 +327,15 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
   assert.equal(blocked.campaignStatus,'MASTER_REVIEW_REWORK_REQUIRED');
   assert.match(blocked.pendingMasterReview.repairSpecSha256,/^[0-9a-f]{64}$/);
   const repairPending=blocked.pendingMasterReview;
+  assert.match(repairPending.originalDeficienciesSha256,/^[0-9a-f]{64}$/);
+  const admittedMaster=readJson(masterPath);
+  const changedDeficiencies=structuredClone(admittedMaster);
+  changedDeficiencies.review.deficiencies[0].id='MR-CHANGED';
+  writeJson(masterPath,changedDeficiencies);
+  const rejectedDeficiencyMutation=runMaster(f);
+  assert.equal(rejectedDeficiencyMutation.status,'MASTER_REVIEW_INVALID');
+  assert.match(rejectedDeficiencyMutation.feedbackText,/review deficiencies changed/);
+  writeJson(masterPath,admittedMaster);
   const originalRepairForm=readJson(path.join(f.root,f.formRel));
   const beforeSha=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.formRel))).digest('hex');
   const tamperedForm=structuredClone(originalRepairForm);
@@ -367,6 +393,7 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
   assert.equal(verificationPending.currentAssignment,null);
   assert.equal(verificationPending.campaignStatus,'WAITING_FOR_MASTER_REVIEW');
   assert.match(verificationPending.pendingMasterReview.postRepairManifestSha256,/^[0-9a-f]{64}$/);
+  assert.equal(verificationPending.lastSealedReceiptPath,verificationPending.pendingMasterReview.lastSealedReceiptPath);
   assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v1.json')),true);
   assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v2.json')),true);
   assert.equal(fs.existsSync(path.join(f.root,f.reportRel)),true);
@@ -389,7 +416,7 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
   assert.equal(accepted.status,'PASS');
   assert.equal(accepted.masterReviewAccepted,true);
   const advanced=readJson(path.join(f.root,f.dirRel));
-  assert.equal(advanced.pendingMasterReview,null);
+  assert.equal(Object.hasOwn(advanced,'pendingMasterReview'),false);
   assert.equal(advanced.currentAssignment.phaseSequence,2);
   assert.equal(advanced.lastAcceptedMasterReview.postRepairManifestSha256,verifiedForm.postRepair.manifestSha256);
 });
