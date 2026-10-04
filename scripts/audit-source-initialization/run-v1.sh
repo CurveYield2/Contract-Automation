@@ -203,7 +203,7 @@ if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
          "reviewer-3L":$chat3,
          "reviewer-4":$chat4
        }
-     | .browserInteractionPolicy=(.browserInteractionPolicy // "ordinary-pointer-keyboard-only")
+     | .browserInteractionPolicy=(.browserInteractionPolicy // "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1")
      | .repair=((.repair // {}) + {enabled:true,idlePokeThreshold:(.repair.idlePokeThreshold // 3),unviewableThreshold:(.repair.unviewableThreshold // 2)})
      | .watchdog=((.watchdog // {}) + {enabled:true,idleMessage:"GET BACK TO WORK"})
      | .updatedAt=(now|todate)' \
@@ -229,7 +229,7 @@ else
       activeChat:{name:"",url:""},
       wakeMessage:"",
       thinkingEffort:"high",
-      browserInteractionPolicy:"ordinary-pointer-keyboard-only",
+      browserInteractionPolicy:"phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
       activeAssignment:{},
       watchdog:{enabled:true,idleMessage:"GET BACK TO WORK"},
       repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},
