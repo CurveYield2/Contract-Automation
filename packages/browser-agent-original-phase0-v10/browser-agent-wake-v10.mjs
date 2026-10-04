@@ -1290,6 +1290,7 @@ async function postWithVisibleVerification(page, message, composerOverride = nul
 
 
 const visualScreenPath = '/tmp/browser-agent-v10-visual-screen.png';
+let lastVisualDiagnostics = {};
 
 function visualSleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1409,7 +1410,7 @@ async function visualAddressBarUrl(windowId) {
 
 async function visualWords() {
   await execFile('scrot', ['-o', visualScreenPath]);
-  const { stdout } = await execFile('tesseract', [visualScreenPath, 'stdout', 'tsv']);
+  const { stdout } = await execFile('tesseract', [visualScreenPath, 'stdout', '--psm', '11', 'tsv']);
 
   const words = [];
   for (const line of String(stdout || '').split('\n').slice(1)) {
@@ -1543,8 +1544,9 @@ async function waitForVisualChat(stage) {
 
 function visualProjectsBox(words) {
   for (const word of words) {
-    if (word.left > 420 || word.top < 80) continue;
-    if (/^Projects?$/i.test(word.text) || /^Projec[tf]s?$/i.test(word.text)) {
+    if (word.left > 440 || word.top < 75) continue;
+    const normalized = String(word.text || '').toLowerCase().replace(/[^a-z]/g, '');
+    if (normalized === 'projects' || normalized === 'project' || normalized.startsWith('projec') || normalized.startsWith('proje')) {
       return {
         ...word,
         cx: word.left + word.width / 2,
@@ -1593,15 +1595,16 @@ async function visualFindProjects(windowId) {
   }
 
   const leftColumnText = words
-    .filter((word) => word.left < 420 && word.top >= 80)
+    .filter((word) => word.left < 440 && word.top >= 75)
     .map((word) => word.text)
-    .slice(0, 80)
+    .slice(0, 120)
     .join(' ');
 
-  await publishOperatorStatus('FAILED_VISUAL_NAVIGATION', {
+  lastVisualDiagnostics = {
     stage: 'find_projects',
     visibleLeftColumnText: leftColumnText
-  });
+  };
+  await publishOperatorStatus('FAILED_VISUAL_NAVIGATION', lastVisualDiagnostics);
   console.log('[github-playwright-v10] visual-left-column=' + JSON.stringify(leftColumnText));
   throw new Error('Rendered Projects label was not found');
 }
@@ -1873,7 +1876,8 @@ for (const [name, connect] of providers) {
   } catch (error) {
     if (bool(env.VISUAL_ONLY_PROJECT_WAKE) && action === 'project_wake') {
       await publishOperatorStatus('FAILED', {
-        error: error.message
+        error: error.message,
+        ...lastVisualDiagnostics
       }).catch(() => {});
     }
     failures.push({ provider: name, error: error.message });
