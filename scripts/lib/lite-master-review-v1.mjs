@@ -159,6 +159,7 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
     reviewAttempt:1,
     masterChatUrl:cfg.chatUrl,
     manifestSha256:bindings.segmentManifestSha256,
+    bindingsSha256:digestJson(bindings),
     lastSealedReceiptPath,
     successorPlan:{
       nextPhaseSequence:nextSequence,
@@ -190,6 +191,7 @@ function validateLockedForm(form,pending,directory,cfg){
   if(!exactJson(form.segmentPhases,pending.segmentPhases))failures.push('master work form segmentPhases mismatch');
   if(form.masterIdentity?.chatUrl!==cfg.chatUrl||form.masterIdentity?.reasoning!=='MAXIMUM')failures.push('master identity/configuration mismatch');
   if(form.bindings?.segmentManifestSha256!==pending.manifestSha256)failures.push('master manifest digest mismatch');
+  if(digestJson(form.bindings)!==pending.bindingsSha256)failures.push('master source/build/authority bindings were modified');
   if(digestJson(form.reviewedArtifacts)!==pending.manifestSha256)failures.push('master reviewedArtifacts were modified');
   return failures;
 }
@@ -200,6 +202,35 @@ function currentArtifactFailures(root,campaignPath,rows){
     const file=existing(root,rel);
     if(!file)failures.push('reviewed artifact missing: '+row.path);
     else if(digestFile(file)!==row.sha256)failures.push('reviewed artifact digest changed: '+row.path);
+  }
+  return failures;
+}
+function currentBindingFailures(root,campaignPath,form){
+  const failures=[];
+  const bindings=form.bindings??{};
+  const build=bindings.build;
+  if(!build||typeof build.path!=='string'||!SHA256.test(String(build.sha256??'')))failures.push('build binding is incomplete');
+  else{
+    const rel=path.posix.join(campaignPath,build.path);
+    const file=existing(root,rel);
+    if(!file)failures.push('bound build identity is missing: '+build.path);
+    else if(digestFile(file)!==build.sha256)failures.push('bound build identity digest changed: '+build.path);
+  }
+  const authority=bindings.authority;
+  if(!authority||typeof authority.homepagePath!=='string'||!SHA256.test(String(authority.sha256??'')))failures.push('authority binding is incomplete');
+  else{
+    try{
+      const file=requiredFile(root,authority.homepagePath,'bound master-review authority');
+      if(digestFile(file)!==authority.sha256)failures.push('bound authority digest changed: '+authority.homepagePath);
+    }catch(error){failures.push(String(error.message||error));}
+  }
+  const source=bindings.source;
+  if(!source||!SHA256.test(String(source.sha256??'')))failures.push('source binding is incomplete');
+  else if(typeof source.path==='string'&&source.path&&!/^https?:\/\//.test(source.path)){
+    const candidates=[source.path,path.posix.join(campaignPath,source.path)];
+    const rel=candidates.find(x=>existing(root,x));
+    if(!rel)failures.push('bound source artifact is missing: '+source.path);
+    else if(digestFile(existing(root,rel))!==source.sha256)failures.push('bound source artifact digest changed: '+source.path);
   }
   return failures;
 }
@@ -214,8 +245,10 @@ function validateRepairSpec({root,authorityRoot,segment,form}){
   if(!Array.isArray(spec.allowedSemanticPaths)||spec.allowedSemanticPaths.length===0)failures.push('repairSpec.allowedSemanticPaths must be non-empty');
   const workFiles=new Map((form.reviewedArtifacts??[]).filter(x=>x.kind==='WORK_FORM').map(x=>[x.path,x.phase]));
   for(const file of spec.allowedFiles??[])if(!workFiles.has(file))failures.push('repairSpec.allowedFiles is outside reviewed work forms: '+file);
+  const allowedFileSet=new Set(spec.allowedFiles??[]);
   for(const entry of spec.allowedSemanticPaths??[]){
     if(!entry||typeof entry!=='object'){failures.push('repairSpec.allowedSemanticPaths entries must be objects');continue;}
+    if(!allowedFileSet.has(entry.file)){failures.push('repair semantic path file is not listed in repairSpec.allowedFiles: '+String(entry.file));continue;}
     const phase=workFiles.get(entry.file);
     if(!segment.phases.includes(phase)){failures.push('repair semantic path phase is outside segment');continue;}
     const match=String(entry.path??'').match(/^actions\.([A-Za-z0-9._-]+)\.outputs\.([A-Za-z0-9._-]+)(?:\[[0-9]+\])?(?:\.[A-Za-z0-9._-]+)*$/);
@@ -226,7 +259,7 @@ function validateRepairSpec({root,authorityRoot,segment,form}){
   }
   const prohibited=new Set(spec.prohibitedActions??[]);
   for(const action of ['SEAL','ADVANCE','MUTATE_ACCEPTED_PREFILL','MUTATE_UNRELATED_EVIDENCE'])if(!prohibited.has(action))failures.push('repairSpec.prohibitedActions must include '+action);
-  if(!Array.isArray(spec.requiredDependentRefreshes))failures.push('repairSpec.requiredDependentRefreshes must be an array');
+  if(!Array.isArray(spec.requiredDependentRefreshes)||spec.requiredDependentRefreshes.length===0||spec.requiredDependentRefreshes.some(x=>typeof x!=='string'||!x))failures.push('repairSpec.requiredDependentRefreshes must be a non-empty string array');
   return failures;
 }
 
@@ -238,18 +271,23 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   const segment=segmentForId(pending.segmentId);
   if(!segment)throw new Error('pending master review segment is unsupported');
   const form=readJson(requiredFile(root,pending.workFormPath,'master review work form'));
+  const currentRows=collectSegmentArtifacts({root,campaignPath,segment});
   const failures=[
     ...validateLockedForm(form,pending,directory,cfg),
-    ...currentArtifactFailures(root,campaignPath,form.reviewedArtifacts)
+    ...currentArtifactFailures(root,campaignPath,form.reviewedArtifacts),
+    ...currentBindingFailures(root,campaignPath,form)
   ];
+  if(digestJson(currentRows)!==pending.manifestSha256)failures.push('current segment manifest no longer matches the staged master-review manifest');
   if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
   const outcome=String(form.review?.outcome??'');
+  if(pending.status==='MASTER_REVIEW_REWORK_REQUIRED')return {status:'MASTER_REVIEW_INVALID',failures:['MASTER_REPAIR_TRANSPORT_BLOCKED: bounded child-result admission and controller dependent refresh are not yet qualified; successor remains blocked'],form,pending};
   if(outcome==='REWORK'){
     failures.push(...validateRepairSpec({root,authorityRoot,segment,form}));
     if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
     pending.status='MASTER_REVIEW_REWORK_REQUIRED';
     pending.reviewAttempt=Number(pending.reviewAttempt??1);
     pending.repairScopeId=form.review.repairSpec.scopeId;
+    pending.repairSpecSha256=digestJson(form.review.repairSpec);
     pending.updatedAt=now;
     directory.campaignStatus='MASTER_REVIEW_REWORK_REQUIRED';
     directory.updatedAt=now;
@@ -258,6 +296,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   if(outcome!=='ACCEPT')return {status:'MASTER_REVIEW_INVALID',failures:['review.outcome must be ACCEPT or REWORK'],form,pending};
   if((form.review?.deficiencies??[]).length)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT cannot retain deficiencies'],form,pending};
   if(form.review?.repairSpec!==null&&form.review?.repairSpec!==undefined)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT cannot retain repairSpec'],form,pending};
+  if(form.childRepair!==null&&form.childRepair!==undefined)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT without a REWORK cycle cannot retain childRepair evidence'],form,pending};
   const verification=form.masterVerification;
   if(verification?.outcome!=='ACCEPT')return {status:'MASTER_REVIEW_INVALID',failures:['masterVerification.outcome must be ACCEPT'],form,pending};
   const expected=(form.reviewedArtifacts??[]).map(x=>({path:x.path,sha256:x.sha256}));
