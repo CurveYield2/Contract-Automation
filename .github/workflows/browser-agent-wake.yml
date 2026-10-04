@@ -22,7 +22,7 @@ on:
         required: true
         default: resume_existing
         type: choice
-        options: [resume_existing, create_fresh]
+        options: [resume_existing]
       chat_url:
         required: false
         type: string
