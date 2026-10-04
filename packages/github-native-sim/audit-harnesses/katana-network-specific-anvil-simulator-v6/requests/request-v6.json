@@ -1,7 +1,0 @@
-{
-  "schemaVersion": "katana-network-specific-anvil-simulator-request-v6",
-  "purpose": "Resolve live Katana fxUSD and PoolManager proxy implementations and exact callable selectors",
-  "fxUsdProxy": "0x4c03ff0f44A55e7098a09016E02a01d3cdC2FDF9",
-  "poolManagerProxy": "0x27b3eE81DF2Dd7356D5ac282e2416991A616f96a",
-  "productionWritesAllowed": false
-}
