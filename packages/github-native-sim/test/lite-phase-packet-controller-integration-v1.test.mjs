@@ -442,6 +442,10 @@ test('typed held revision2-to-revision3 admission regenerates controller product
   const result=JSON.parse(out.trim());
   assert.equal(result.status,'PASS');
   assert.equal(result.sealedRework,true);
+  const persistentHold=readJson(path.join(f.root,f.campaign,'controller/SUCCESSOR_DELIVERY_HOLD_v1.json'));
+  assert.equal(persistentHold.status,'ACTIVE');
+  assert.equal(persistentHold.scopeId,'phase1-r2-r3');
+  assert.equal(persistentHold.releaseRequiresExplicitHumanAuthorization,true);
   assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v3.json')),true);
   const canonical=readJson(path.join(f.root,f.campaign,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json'));
   assert.equal(canonical.actions['step-1'].outputs.analysis,'Corrected, source-bound interpretation.');
