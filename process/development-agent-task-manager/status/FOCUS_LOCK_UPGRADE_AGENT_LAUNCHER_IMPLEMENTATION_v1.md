@@ -51,12 +51,13 @@
 
 ## ACTIVE BLOCKER
 
-**Live run `37165281363` reached a healthy signed-in ChatGPT homepage, used the merged human address-bar path for the exact saved Project URL, then immediately encountered a visible Cloudflare verification page. The worker correctly aborted; no bypass was attempted. This is now a transient browser/rate-state gate on the deep-link attempt, not a Project selector/sidebar bug. The exact same fail-closed human-only recovery is being retried on a fresh runner before any further code change.**
+**Run `37165554868` proved the previous "human address" implementation was still targeting the webpage renderer: after Ctrl+L + URL typing it landed on `/c/local-chatgpt:...`, meaning the URL had been typed into the ChatGPT composer instead of Chrome's omnibox. The worker is now repaired to drive the visible headed Chrome window with OS-level X11 keyboard events (window focus -> Ctrl+L -> per-character URL typing -> Enter), and the workflow installs `xdotool`. Canonical recovery request commit `70e1015a2f59e4790fea4b0c1408677bac2a952b` is the fresh live proof.**
 
-Latest browser repair commits on `main`:
-- `2cc4fc94f88e4eb632756ebfded49fd3f9ee3a02` — human address-bar navigation for saved routes.
-- `d89655da3e97b87fea9ff1a2a5be7cb65b75bfa0` — regression coverage for the human address path.
-- `07b65acb533f02c6dd92efc79d4326e6478e83d7` — lock updated for live human-navigation proof.
+Latest repair commits:
+- `b1b3a01d192f4e2c72811b565131cbc930ab32db` — visible X11 Chrome omnibox control.
+- `c7a1e5702b698d3da444e8e1dfa2d54df8897f51` — install X11 keyboard helper in browser workflow.
+- `eb5bbb7525d4bc2b8b2948184abdbf361f6de7b7` — regression coverage for X11 omnibox navigation.
+- `70e1015a2f59e4790fea4b0c1408677bac2a952b` — canonical live recovery trigger.
 
 ## REMAINING DELTA
 
@@ -72,7 +73,7 @@ Latest browser repair commits on `main`:
 
 ## NEXT ACTION
 
-Retry the exact merged human-only recovery on a fresh runner. If the visible challenge recurs, abort again and diagnose the fresh-run/browser-state pattern without bypassing verification. If the Project opens, click the already-visible center chat title, capture the Project-scoped durable chat URL, verify the state artifact, then immediately run a second blank-chat_url recovery proving artifact-restored direct saved-chat reuse.
+Verify the canonical X11-omnibox recovery run opens the exact saved Project URL, then click the visible center chat title and capture the durable Project-scoped chat URL/artifact. Immediately trigger a second recovery with request chat_url blank and prove the workflow restores the artifact and opens that saved chat URL directly with the same visible omnibox path. Only then transplant the proven browser implementation into the existing audit wake/watch pathway and resume the latest DEX v16 campaign.
 
 ## PARKED / OUT OF SCOPE
 
