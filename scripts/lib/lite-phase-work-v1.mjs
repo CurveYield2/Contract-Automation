@@ -25,12 +25,19 @@ function frozenV103File(root,rel){
   if(!fs.existsSync(manifestFile)||sha256File(manifestFile)!==LEGACY_V103_MANIFEST_SHA256)throw new Error('frozen v10.3 authority manifest digest mismatch');
   const manifest=readJson(manifestFile);
   if(manifest.release!=='Audit_Litemode_v10.3'||manifest.entrypoint!=='SKILL.md')throw new Error('frozen v10.3 authority manifest identity mismatch');
-  const target=suffix?path.join(frozenRoot,...suffix.split('/')):frozenRoot;
-  if(suffix&&suffix!=='MANIFEST.json'){
-    const entry=(manifest.files??[]).find(x=>x?.path===suffix);
-    if(!entry)throw new Error('frozen v10.3 manifest does not admit '+suffix);
-    if(!fs.existsSync(target)||fs.statSync(target).size!==entry.bytes||sha256File(target)!==entry.sha256)throw new Error('frozen v10.3 authority file digest mismatch: '+suffix);
+  const entries=manifest.files??[];
+  if(!Array.isArray(entries)||entries.length===0)throw new Error('frozen v10.3 authority manifest files are missing');
+  const seen=new Set();
+  for(const entry of entries){
+    const entryPath=safeRel(entry?.path,'frozen authority manifest path');
+    if(seen.has(entryPath))throw new Error('frozen v10.3 authority manifest has duplicate path: '+entryPath);
+    seen.add(entryPath);
+    if(!Number.isInteger(entry?.bytes)||entry.bytes<0||!/^([0-9a-f]{64})$/.test(String(entry?.sha256??'')))throw new Error('frozen v10.3 authority manifest entry is malformed: '+entryPath);
+    const admitted=path.join(frozenRoot,...entryPath.split('/'));
+    if(!fs.existsSync(admitted)||!fs.statSync(admitted).isFile()||fs.statSync(admitted).size!==entry.bytes||sha256File(admitted)!==entry.sha256)throw new Error('frozen v10.3 authority file digest mismatch: '+entryPath);
   }
+  const target=suffix?path.join(frozenRoot,...suffix.split('/')):frozenRoot;
+  if(suffix&&suffix!=='MANIFEST.json'&&!seen.has(suffix))throw new Error('frozen v10.3 manifest does not admit '+suffix);
   return target;
 }
 export function requiredFile(root,rel,label='file'){
