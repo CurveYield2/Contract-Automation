@@ -138,6 +138,8 @@ const directoryV2={
   workspacePath:campaignPath,
   mode:'LITE',
   sourceSha256:sourceSha,
+  masterReview:directory.masterReview,
+  pendingMasterReview:null,
   lastSealedReceiptPath:sealedPhase0Receipt,
   campaignStatus:'WAITING_FOR_SUCCESSOR_AGENT',
   currentAssignment:assignment,
