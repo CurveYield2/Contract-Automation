@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "curveyield-browser-agent-watchdog-state-v1",
+  "wakeId": "curveyield-dex-v16-source-r3-PHASE_1_WORK_PACKET-reviewer-1",
+  "campaignId": "curveyield-dex-v16-source-r3",
+  "phaseId": "phase-1",
+  "workerRole": "reviewer",
+  "status": "ACTIVE",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da50-e3a0-83e8-88ea-843db6f426f0",
+  "lastProvider": "normal-system-chrome-x11",
+  "armedAt": "2026-10-04T12:05:21Z",
+  "intervalMinutes": 5,
+  "idleMessage": "GET BACK TO WORK",
+  "observation": {
+    "assistantCount": 0,
+    "lastAssistantHash": "",
+    "observedAt": "2026-10-04T12:05:21Z"
+  },
+  "gate": {
+    "mode": "LITE",
+    "repository": "CurveYield2/Audit-Controller",
+    "ref": "main",
+    "statePath": "Audit Campaign Directory/campaigns/curveyield-dex-v16-source.json",
+    "expectedPhaseId": "phase-1",
+    "expectedMilestoneId": "PHASE_1_WORK_PACKET",
+    "activePointerPath": "",
+    "interphase": {
+      "handoffPath": "",
+      "workPacketPath": "",
+      "completionPath": "",
+      "workPacketSha256": ""
+    },
+    "stopStates": [
+      "STOPPED_BY_HUMAN"
+    ],
+    "stopCampaignStatuses": [
+      "COMPLETE",
+      "STOPPED_BY_HUMAN"
+    ]
+  },
+  "repair": {
+    "enabled": true,
+    "idlePokeThreshold": 3,
+    "unviewableThreshold": 2,
+    "consecutiveIdlePokes": 0,
+    "consecutiveUnviewable": 0
+  }
+}
