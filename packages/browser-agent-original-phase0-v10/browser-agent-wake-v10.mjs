@@ -598,19 +598,32 @@ async function createProjectExactHumanFlow(page, name) {
   }
   console.log('[github-playwright-v10] project-flow=project-name-verified');
 
-  // The visible Create project button is initially disabled. Give the UI a
-  // short human-scale moment to enable it after typing, then perform an ordinary
-  // short human click on the enabled rendered control.
+  // Keep the Create target bound to the same visible Create-project surface
+  // that supplied the Project-name editor. Do not re-search the whole page after
+  // typing, because current ChatGPT UI variants can expose duplicate/stale
+  // "Create project" controls outside the active surface.
   await page.waitForTimeout(randomDelayMs(1200, 2500));
-  const enabledCreate = await findEnabledProjectCreateButton(page, 8000);
-  if (!enabledCreate) {
-    throw new Error('Create project control did not become visibly enabled after typing the Project name');
+  let surfaceCreate = controls.create;
+  const surfaceCreateButton = controls.create.locator('xpath=ancestor-or-self::button[1]');
+  if (await surfaceCreateButton.isVisible().catch(() => false)) {
+    surfaceCreate = surfaceCreateButton;
+  }
+  const enableDeadline = Date.now() + 8000;
+  let surfaceCreateEnabled = false;
+  while (Date.now() < enableDeadline) {
+    const visible = await surfaceCreate.isVisible().catch(() => false);
+    surfaceCreateEnabled = visible ? await surfaceCreate.isEnabled().catch(() => false) : false;
+    if (visible && surfaceCreateEnabled) break;
+    await page.waitForTimeout(500);
+  }
+  if (!surfaceCreateEnabled) {
+    throw new Error('Same-surface Create project control did not become visibly enabled after typing the Project name');
   }
 
   const beforeCreateUrl = page.url();
-  console.log('[github-playwright-v10] project-flow=create-button-enabled');
-  await humanShortPointerClick(page, enabledCreate);
-  console.log('[github-playwright-v10] project-flow=create-button-short-clicked');
+  console.log('[github-playwright-v10] project-flow=create-button-same-surface-enabled');
+  await humanShortPointerClick(page, surfaceCreate);
+  console.log('[github-playwright-v10] project-flow=create-button-same-surface-short-clicked');
 
   await page.waitForTimeout(1000);
   const postClickCreate = page.getByRole('button', { name: /^Create project$/i }).first();
