@@ -154,7 +154,7 @@ interface IERC3156FlashBorrower {
 
 contract CobaltLender is IERC3156FlashLender {
     IndigoAsset public immutable token;
-    uint256 public completed;
+    uint256 public totalCompleted;
     constructor(){ token=new IndigoAsset(address(this)); }
 
     function maxFlashLoan(address tokenAddress) external view override returns(uint256){
@@ -171,7 +171,7 @@ contract CobaltLender is IERC3156FlashLender {
         bytes32 answer=IERC3156FlashBorrower(receiver).onFlashLoan(msg.sender,tokenAddress,amount,0,data);
         require(answer==keccak256("ERC3156FlashBorrower.onFlashLoan"),"CALLBACK");
         require(token.balanceOf(address(this))>=beforeBalance,"REPAY");
-        completed++;
+        totalCompleted++;
         return true;
     }
     function property_lender_has_liquidity() external view returns(bool){
