@@ -430,24 +430,22 @@ async function fillComposer(page, message) {
 
   const useHumanPaste = messagePurpose === 'initial_wake' && String(message).length > 500;
   if (useHumanPaste) {
+    const humanText = String(message).replace(/\s+/g, ' ').trim();
     for (let attempt = 1; attempt <= 2; attempt += 1) {
-      const clipboardOwner = await startSystemClipboard(message);
-      await page.waitForTimeout(200 + Math.floor(Math.random() * 301));
       await new Promise((resolve, reject) => {
-        const paste = spawn('xdotool', ['key', '--clearmodifiers', 'ctrl+v'], {
+        const typer = spawn('xdotool', ['type', '--clearmodifiers', '--delay', '8', humanText], {
           env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
           stdio: ['ignore', 'ignore', 'pipe']
         });
         let stderr = '';
-        paste.stderr?.on('data', chunk => { stderr += chunk.toString(); });
-        paste.on('error', reject);
-        paste.on('close', code => code === 0 ? resolve() : reject(new Error('xdotool paste failed: ' + stderr.trim())));
+        typer.stderr?.on('data', chunk => { stderr += chunk.toString(); });
+        typer.on('error', reject);
+        typer.on('close', code => code === 0 ? resolve() : reject(new Error('xdotool type failed: ' + stderr.trim())));
       });
-      await finishSystemClipboard(clipboardOwner);
-      await page.waitForTimeout(500 + Math.floor(Math.random() * 401));
-      const verification = await verifyComposerMessage(composer, message, 'composer-human-paste-verification');
+      await page.waitForTimeout(600 + Math.floor(Math.random() * 401));
+      const verification = await verifyComposerMessage(composer, message, 'composer-human-x11-type-verification');
       if (verification.prefixMatches && verification.lengthLooksPlausible) {
-        console.log(`[github-playwright] composer-fill-strategy=human-clipboard-paste attempt=${attempt}`);
+        console.log('[github-playwright] composer-fill-strategy=human-x11-type attempt=' + attempt);
         return composer;
       }
       if (attempt < 2) {
@@ -456,8 +454,8 @@ async function fillComposer(page, message) {
       }
     }
     throw new BrowserAgentError(
-      'COMPOSER_PASTE_MISMATCH',
-      'Composer did not retain the normalized wake marker after human clipboard paste',
+      'COMPOSER_X11_TYPE_MISMATCH',
+      'Composer did not retain the normalized wake marker after X11 typing',
       true
     );
   }
