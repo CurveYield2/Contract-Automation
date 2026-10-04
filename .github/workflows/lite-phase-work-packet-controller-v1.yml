@@ -205,9 +205,16 @@ jobs:
           supplied_directory="${{ steps.request.outputs.supplied_directory_path }}"
           [ -z "$supplied_campaign" ] || test "$supplied_campaign" = "$campaign_path"
           [ -z "$supplied_directory" ] || test "$supplied_directory" = "$directory_path"
+          effective_hold="${{ steps.request.outputs.hold_delivery }}"
+          persistent_hold_file=".audit-controller/$campaign_path/controller/SUCCESSOR_DELIVERY_HOLD_v1.json"
+          if [ -s "$persistent_hold_file" ] && [ "$(jq -r '.status // empty' "$persistent_hold_file")" = ACTIVE ]; then
+            test "$(jq -r '.campaignId' "$persistent_hold_file")" = "${{ steps.request.outputs.campaign_id }}"
+            effective_hold=true
+          fi
           {
             echo "campaign_path=$campaign_path"
             echo "campaign_directory_path=$directory_path"
+            echo "effective_hold=$effective_hold"
           } >> "$GITHUB_OUTPUT"
 
       - name: Generate packet/report, validate semantic work, then bookkeep after PASS
@@ -256,7 +263,7 @@ jobs:
 
       - name: Resolve active reviewer chat
         id: chat
-        if: steps.request.outputs.hold_delivery != 'true' && (steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID' || steps.controller.outputs.same == 'true' || (steps.controller.outputs.status == 'PASS' && steps.controller.outputs.fresh == 'true') || (steps.controller.outputs.status == 'PASS' && steps.controller.outputs.next_phase == ''))
+        if: steps.routing.outputs.effective_hold != 'true' && (steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID' || steps.controller.outputs.same == 'true' || (steps.controller.outputs.status == 'PASS' && steps.controller.outputs.fresh == 'true') || (steps.controller.outputs.status == 'PASS' && steps.controller.outputs.next_phase == ''))
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -274,7 +281,7 @@ jobs:
           echo "chat_url=$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/registration.json)" >> "$GITHUB_OUTPUT"
 
       - name: Inform current reviewer of exact rework deficiencies
-        if: steps.request.outputs.hold_delivery != 'true' && steps.controller.outputs.status == 'NEEDS_REWORK' && steps.chat.outputs.chat_url != ''
+        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'NEEDS_REWORK' && steps.chat.outputs.chat_url != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -282,7 +289,7 @@ jobs:
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-phase-${{ steps.request.outputs.phase_sequence }}-packet-rework"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.request.outputs.phase_sequence }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="${{ steps.controller.outputs.feedback_b64 }}"             -f watchdog_enabled=true             -f worker_role=reviewer             -f gate_mode=LITE             -f gate_repository=CurveYield2/Audit-Controller             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}"             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"             -f gate_expected_phase_id="phase-${{ steps.request.outputs.phase_sequence }}"             -f gate_expected_milestone_id="PHASE_${{ steps.request.outputs.phase_sequence }}_WORK_PACKET"
 
       - name: Inform same reviewer that next phase is authorized
-        if: steps.request.outputs.hold_delivery != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.same == 'true' && steps.chat.outputs.chat_url != ''
+        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.same == 'true' && steps.chat.outputs.chat_url != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -292,7 +299,7 @@ jobs:
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-phase-${{ steps.controller.outputs.next_phase }}-continue"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=true             -f worker_role=reviewer             -f gate_mode=LITE             -f gate_repository=CurveYield2/Audit-Controller             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}"             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"             -f gate_expected_phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f gate_expected_milestone_id="PHASE_${{ steps.controller.outputs.next_phase }}_WORK_PACKET"
 
       - name: Dispatch fresh successor after controller PASS
-        if: steps.request.outputs.hold_delivery != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.fresh == 'true'
+        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.fresh == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -300,7 +307,7 @@ jobs:
           gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f campaign_name="${{ steps.controller.outputs.campaign_name }}"             -f campaign_path="${{ steps.routing.outputs.campaign_path }}"             -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
 
       - name: Authorize final reviewer retirement
-        if: steps.request.outputs.hold_delivery != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.next_phase == '' && steps.chat.outputs.chat_url != '' && (steps.request.outputs.review_kind == 'phase' || steps.controller.outputs.master_accepted == 'true')
+        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.next_phase == '' && steps.chat.outputs.chat_url != '' && (steps.request.outputs.review_kind == 'phase' || steps.controller.outputs.master_accepted == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -310,7 +317,7 @@ jobs:
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-complete"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id=phase-10             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=false             -f worker_role=reviewer             -f gate_mode=LITE
 
       - name: Wake persistent Maximum master reviewer
-        if: steps.request.outputs.hold_delivery != 'true' && (steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'MASTER_REPAIR_READY_FOR_VERIFICATION' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID') && steps.controller.outputs.master_chat_url != ''
+        if: steps.routing.outputs.effective_hold != 'true' && (steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'MASTER_REPAIR_READY_FOR_VERIFICATION' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID') && steps.controller.outputs.master_chat_url != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -329,7 +336,7 @@ jobs:
             -f browser_context_b64="$context"
 
       - name: Block unverified fresh Sol repair-child transport
-        if: steps.request.outputs.hold_delivery != 'true' && steps.controller.outputs.status == 'MASTER_REVIEW_REWORK_REQUIRED'
+        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'MASTER_REVIEW_REWORK_REQUIRED'
         shell: bash
         run: |
           set -euo pipefail
@@ -344,7 +351,7 @@ jobs:
             echo "- review kind: ${{ steps.request.outputs.review_kind }}"
             echo "- phase: ${{ steps.request.outputs.phase_sequence }}"
             echo "- segment: ${{ steps.controller.outputs.segment_id }}"
-            echo "- delivery hold: ${{ steps.request.outputs.hold_delivery }}"
+            echo "- delivery hold: ${{ steps.routing.outputs.effective_hold }}"
             echo "- result: ${{ steps.controller.outputs.status }}"
             echo "- packet/report ownership: controller-generated"
             echo "- bookkeeping before validation PASS: prohibited"
