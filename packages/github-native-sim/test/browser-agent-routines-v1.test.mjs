@@ -471,7 +471,7 @@ test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualifi
 });
 
 
-test('reviewer wake uses only visible human pointer, keyboard, and clipboard-paste submission primitives', () => {
+test('reviewer wake uses only visible human pointer and keyboard submission primitives', () => {
   const wake = read('scripts/browser-agent-wake.mjs');
   const fillStart = wake.indexOf('async function fillComposer(page, message)');
   const fillEnd = wake.indexOf('async function persistedWakeVisible', fillStart);
@@ -479,8 +479,6 @@ test('reviewer wake uses only visible human pointer, keyboard, and clipboard-pas
 
   assert.match(sendBlock, /humanPointerClick\(page, composer/);
   assert.match(sendBlock, /messagePurpose === 'initial_wake'/);
-  assert.match(sendBlock, /startSystemClipboard\(message\)/);
-  assert.match(sendBlock, /finishSystemClipboard\(clipboardOwner\)/);
   assert.match(sendBlock, /spawn\('xdotool', \['type', '--clearmodifiers', '--delay', '8', humanText\]/);
   assert.match(sendBlock, /composer-fill-strategy=human-x11-type/);
   assert.match(sendBlock, /for \(const char of String\(message\)\)/);
