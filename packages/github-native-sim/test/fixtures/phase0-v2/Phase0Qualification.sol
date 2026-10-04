@@ -201,19 +201,15 @@ contract DelegateImplementation {
 }
 
 contract DelegateProxy {
-    bytes32 private constant IMPLEMENTATION_SLOT = bytes32(uint256(keccak256("phase0.v2.implementation")) - 1);
+    address public implementation;
 
     constructor(address impl) {
-        assembly { sstore(IMPLEMENTATION_SLOT, impl) }
-    }
-
-    function implementation() external view returns (address impl) {
-        assembly { impl := sload(IMPLEMENTATION_SLOT) }
+        implementation = impl;
     }
 
     fallback() external payable {
+        address impl = implementation;
         assembly {
-            let impl := sload(IMPLEMENTATION_SLOT)
             calldatacopy(0, 0, calldatasize())
             let ok := delegatecall(gas(), impl, 0, calldatasize(), 0, 0)
             returndatacopy(0, 0, returndatasize())
