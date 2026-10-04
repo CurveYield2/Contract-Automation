@@ -1,9 +1,8 @@
 {
   "version": 10,
-  "run_id": "37168790169",
-  "run_url": "https://github.com/CurveYield2/Contract-Automation/actions/runs/37168790169",
-  "browser_view_url": "http://100.87.222.11:6080/vnc.html?autoconnect=1&resize=scale",
-  "status": "FAILED",
-  "updated_at": "2026-10-04T01:44:13.426Z",
-  "error": "Rendered Projects label was not found"
+  "run_id": "37168992117",
+  "run_url": "https://github.com/CurveYield2/Contract-Automation/actions/runs/37168992117",
+  "browser_view_url": "http://100.102.182.73:6080/vnc.html?autoconnect=1&resize=scale",
+  "status": "AUTOMATION_RUNNING",
+  "updated_at": "2026-10-04T01:46:48Z"
 }
