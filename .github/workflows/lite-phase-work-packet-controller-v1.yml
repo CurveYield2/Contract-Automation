@@ -206,6 +206,10 @@ jobs:
           [ -z "$supplied_campaign" ] || test "$supplied_campaign" = "$campaign_path"
           [ -z "$supplied_directory" ] || test "$supplied_directory" = "$directory_path"
           effective_hold="${{ steps.request.outputs.hold_delivery }}"
+          campaign_status="$(jq -r '.campaignStatus // empty' "$directory_file")"
+          if [ "$campaign_status" = STOPPED_BY_HUMAN ] || [ "$campaign_status" = BLOCKED ]; then
+            effective_hold=true
+          fi
           persistent_hold_file=".audit-controller/$campaign_path/controller/SUCCESSOR_DELIVERY_HOLD_v1.json"
           if [ -s "$persistent_hold_file" ] && [ "$(jq -r '.status // empty' "$persistent_hold_file")" = ACTIVE ]; then
             test "$(jq -r '.campaignId' "$persistent_hold_file")" = "${{ steps.request.outputs.campaign_id }}"
@@ -217,12 +221,32 @@ jobs:
             echo "effective_hold=$effective_hold"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Resolve registered reviewer identity exclusions
+        id: reviewer_identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "${{ steps.request.outputs.campaign_id }}" | tr -c 'A-Za-z0-9._-' '_')"
+          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content' 2>/dev/null || true)"
+          if [ -n "$encoded" ]; then
+            printf '%s' "$encoded" | base64 -d > /tmp/lite-reviewer-registration.json
+            echo "path=/tmp/lite-reviewer-registration.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate packet/report, validate semantic work, then bookkeep after PASS
         id: controller
         shell: bash
         run: |
           set -euo pipefail
           args=(--controller-root .audit-controller --campaign-id "${{ steps.request.outputs.campaign_id }}" --campaign-path "${{ steps.routing.outputs.campaign_path }}" --campaign-directory-path "${{ steps.routing.outputs.campaign_directory_path }}" --review-kind "${{ steps.request.outputs.review_kind }}")
+          if [ -n "${{ steps.reviewer_identity.outputs.path }}" ]; then
+            args+=(--reviewer-registration-path "${{ steps.reviewer_identity.outputs.path }}")
+          fi
           if [ "${{ steps.request.outputs.review_kind }}" = master ]; then
             args+=(--segment-id "${{ steps.request.outputs.segment_id }}")
           else
