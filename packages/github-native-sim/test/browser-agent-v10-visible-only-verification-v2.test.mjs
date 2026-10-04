@@ -300,7 +300,7 @@ test('v10 reuses a persisted Project URL before sidebar recovery or duplicate cr
   assert.match(workflow, /INPUT_PROJECT_URL: \$\{\{ inputs\.project_url \}\}/);
   assert.match(workflow, /PROJECT_URL: \$\{\{ steps\.request\.outputs\.project_url \}\}/);
 
-  assert.equal(request.project_url, '');
+  assert.match(request.project_url, /^https:\/\/chatgpt\.com\/g\/g-p-[A-Za-z0-9]+\/project\/?$/);
   assert.equal(request.project_id, undefined);
   assert.equal(request.recovery_chat_title, 'VERIFY PROJECT WAKE SIGNAL');
 });
