@@ -507,16 +507,36 @@ export function admitSealedPhaseRework({root,campaignPath,directory,requestPath,
   if(request.authority?.expectedManifestSha256!=='846be5f90d6e00757b817b1218dfabeb2aa4dff6c92b8e9ff47335d2db83703a')throw new Error('sealed rework authority manifest digest mismatch');
   requiredFile(root,path.posix.join(expectedRoot,'SKILL.md'),'bound v10.3 authority root');
   requiredFile(root,path.posix.join(expectedRoot,'MANIFEST.json'),'bound v10.3 authority manifest');
+  if(directory.lastSealedReceiptPath!==request.priorReceipt?.path)throw new Error('sealed rework priorReceipt must equal directory.lastSealedReceiptPath');
   const priorReceiptFile=assertDigest(root,request.priorReceipt,'prior Phase-1 receipt');
   const priorReceipt=readJson(priorReceiptFile);
   if(priorReceipt.phase?.sequence!==1||priorReceipt.phase?.revision!==2||priorReceipt.phase?.status!=='SEALED')throw new Error('prior receipt is not sealed Phase-1 revision2');
   if(priorReceipt.source?.sha256!==directory.sourceSha256&&priorReceipt.sourceSha256!==directory.sourceSha256)throw new Error('prior receipt source mismatch');
   if(path.posix.dirname(priorReceipt.authority?.homepagePath??'')!==expectedRoot)throw new Error('prior receipt authority mismatch');
+  const priorFormRef=[...(priorReceipt.evidence??[]),...(priorReceipt.outputs??[])].find(x=>x?.role==='PHASE_WORK_FORM');
+  const normalizeReceiptPath=value=>String(value??'').startsWith(campaignPath+'/')?String(value):path.posix.join(campaignPath,String(value??''));
+  if(!priorFormRef||normalizeReceiptPath(priorFormRef.path)!==request.priorWorkForm?.path||priorFormRef.sha256!==request.priorWorkForm?.sha256)throw new Error('sealed rework priorWorkForm is not the exact form bound by the prior receipt');
   const priorFormFile=assertDigest(root,request.priorWorkForm,'prior Phase-1 work form');
   const repairedFormFile=assertDigest(root,request.repairedWorkForm,'repaired Phase-1 work form');
   assertDigest(root,request.qualityReview,'Phase-1 quality review');
   if(!request.humanAuthorization?.scopeId||!request.humanAuthorization?.authorizedAt)throw new Error('explicit human rework authorization metadata is required');
-  assertDigest(root,{path:request.humanAuthorization.recordPath,sha256:request.humanAuthorization.recordSha256},'human rework authorization record');
+  const authorizationFile=assertDigest(root,{path:request.humanAuthorization.recordPath,sha256:request.humanAuthorization.recordSha256},'human rework authorization record');
+  const authorization=readJson(authorizationFile);
+  const authorizationMatches=
+    authorization.schemaVersion==='curveyield-human-rework-authorization-v1'
+    && authorization.scopeId===request.humanAuthorization.scopeId
+    && authorization.campaignId===directory.campaignId
+    && authorization.campaignGenerationId===directory.campaignGenerationId
+    && authorization.phaseSequence===1
+    && authorization.fromRevision===2
+    && authorization.toRevision===3
+    && authorization.sourceSha256===directory.sourceSha256
+    && authorization.authorityLogicalRoot===expectedRoot
+    && authorization.deliveryHold===true
+    && authorization.mainCodeMergeAuthorized===false
+    && authorization.recordedAt===request.humanAuthorization.authorizedAt
+    && exactJson(authorization.allowedSemanticPaths,request.allowedSemanticPaths);
+  if(!authorizationMatches)throw new Error('human rework authorization record does not exactly authorize this campaign/source/scope/path set');
   const allowed=request.allowedSemanticPaths;
   if(!Array.isArray(allowed)||allowed.length===0)throw new Error('allowedSemanticPaths must be non-empty');
   const allowedFailures=validateAllowedSemanticPaths(root,expectedRoot,1,allowed);
