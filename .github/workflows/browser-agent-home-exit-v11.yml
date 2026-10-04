@@ -153,21 +153,8 @@ jobs:
           echo "TAILSCALE_VNC=$ts_ip:5900"
           echo "Connect your VNC viewer from the Windows PC to $ts_ip:5900."
 
-      - name: Publish manual VNC session address
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          path="process/browser-agent-home-exit-v11/current-session-v11.json"
-          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          payload="$(jq -n             --arg schemaVersion "curveyield-browser-home-exit-session-v11"             --arg runId "$GITHUB_RUN_ID"             --arg runUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"             --arg vnc "$TAILSCALE_RUNNER_IP:5900"             --arg publishedAt "$now"             --arg projectName "${{ steps.request.outputs.project_name }}"             --arg chatName "${{ steps.request.outputs.chat_name }}"             '{schemaVersion:$schemaVersion,run_id:$runId,run_url:$runUrl,vnc:$vnc,published_at:$publishedAt,project_name:$projectName,chat_name:$chatName,status:"manual_session_ready"}')"
-          sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=main" --jq '.sha')"
-          content="$(printf '%s\n' "$payload" | base64 -w0)"
-          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$path"             -f message="chore(browser): publish active manual VNC session v11"             -f content="$content"             -f sha="$sha"             -f branch="main" >/dev/null
-          echo "Published current manual VNC session address."
-
       - name: Route browser phase through home exit node
+        timeout-minutes: 2
         shell: bash
         env:
           HOME_EXIT_NODE: ${{ steps.request.outputs.home_exit_node }}
@@ -195,30 +182,64 @@ jobs:
           fi
           echo "HOME_EXIT_EGRESS_ACTIVE=true"
 
-      - name: Start manual-only browser session
+      - name: Start manual-only browser process
         shell: bash
         env:
           MANUAL_SESSION_MINUTES: ${{ steps.request.outputs.manual_session_minutes }}
           WAKE_ID: manual-home-exit-v11-${{ github.run_id }}
         run: |
           set -euo pipefail
+          node packages/browser-agent-manual-only-v11/browser-agent-manual-v11.mjs >/tmp/browser-manual-v11.log 2>&1 &
+          echo $! >/tmp/browser-manual-v11.pid
+          sleep 3
+          kill -0 "$(cat /tmp/browser-manual-v11.pid)"
+          test -s "$MANUAL_RESULT_PATH"
+          echo "Manual-only blank Chrome process is alive."
 
+      - name: Publish ready manual VNC session address
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          path="process/browser-agent-home-exit-v11/current-session-v11.json"
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          payload="$(jq -n \
+            --arg schemaVersion "curveyield-browser-home-exit-session-v11" \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg vnc "$TAILSCALE_RUNNER_IP:5900" \
+            --arg publishedAt "$now" \
+            --arg projectName "${{ steps.request.outputs.project_name }}" \
+            --arg chatName "${{ steps.request.outputs.chat_name }}" \
+            '{schemaVersion:$schemaVersion,run_id:$runId,run_url:$runUrl,vnc:$vnc,published_at:$publishedAt,project_name:$projectName,chat_name:$chatName,status:"manual_session_ready"}')"
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=main" --jq '.sha')"
+          content="$(printf '%s\n' "$payload" | base64 -w0)"
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$path" \
+            -f message="chore(browser): publish ready manual VNC session v11" \
+            -f content="$content" \
+            -f sha="$sha" \
+            -f branch="main" >/dev/null
+          echo "Published ready manual VNC session address."
+
+      - name: Keep manual-only session alive
+        shell: bash
+        env:
+          MANUAL_SESSION_MINUTES: ${{ steps.request.outputs.manual_session_minutes }}
+        run: |
+          set -euo pipefail
           echo "============================================================"
-          echo "MANUAL-ONLY CHATGPT SESSION"
+          echo "MANUAL-ONLY CHATGPT SESSION READY"
           echo "Private VNC: $TAILSCALE_RUNNER_IP:5900"
           echo "Project to create: ${{ steps.request.outputs.project_name }}"
           echo "Chat to create: ${{ steps.request.outputs.chat_name }}"
           echo "Wake message to send:"
           printf '%s\n' "${{ steps.request.outputs.wake_message }}"
           echo ""
-          echo "All ChatGPT interaction is manual through VNC."
-          echo "The automation performs no ChatGPT DOM reads, URL/title reads,"
-          echo "automated ChatGPT navigation, clicks, typing, or verification handling."
-          echo "If Cloudflare appears, complete it yourself in the visible browser,"
-          echo "then continue normally after the page finishes loading."
+          echo "Navigate and interact only by hand through VNC."
+          echo "If Cloudflare appears, complete it manually and wait for the normal page."
           echo "============================================================"
-
-          node packages/browser-agent-manual-only-v11/browser-agent-manual-v11.mjs
+          sleep "$((MANUAL_SESSION_MINUTES * 60))"
 
       - name: Show manual-session result
         if: always()
@@ -240,5 +261,6 @@ jobs:
         shell: bash
         run: |
           set +e
+          [ -f /tmp/browser-manual-v11.pid ] && kill "$(cat /tmp/browser-manual-v11.pid)" 2>/dev/null
           [ -f /tmp/x11vnc-v11.pid ] && kill "$(cat /tmp/x11vnc-v11.pid)" 2>/dev/null
           [ -f /tmp/xvfb-v11.pid ] && kill "$(cat /tmp/xvfb-v11.pid)" 2>/dev/null
