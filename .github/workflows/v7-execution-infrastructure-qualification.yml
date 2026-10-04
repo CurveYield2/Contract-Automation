@@ -182,6 +182,117 @@ jobs:
             printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{for(const p of JSON.parse(s).paths??[]) console.log('- '+p)})"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Resolve exact paired Audit-Controller candidate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EXPLICIT_CONTROLLER_REF: ${{ inputs.controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
+          let ref=String(process.env.EXPLICIT_CONTROLLER_REF??'').trim();
+          if(process.env.EVENT_NAME==='pull_request'){
+            const body=String(event.pull_request?.body??'');
+            const declared=body.split(/\r?\n/).map(line=>line.trim()).filter(line=>/^controller_ref\s*=/.test(line));
+            if(declared.length>1)throw new Error('PR body must contain at most one controller_ref declaration');
+            if(declared.length===1){
+              const match=declared[0].match(/^controller_ref=([0-9a-fA-F]{40})$/);
+              if(!match)throw new Error('controller_ref PR trailer must be exactly controller_ref=<40-hex>');
+              ref=match[1];
+            }else ref='main';
+          }
+          if(!ref)ref='main';
+          if(ref!=='main'&&!/^[0-9a-fA-F]{40}$/.test(ref))throw new Error('controller_ref must be main or an exact 40-hex commit');
+          fs.appendFileSync(process.env.GITHUB_ENV,'CONTROLLER_REF_TO_TEST='+ref+'\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,'paired_controller_ref='+ref+'\n');
+          NODE
+
+      - name: Select working Audit-Controller credential
+        if: env.CONTROLLER_REF_TO_TEST != ''
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Checkout exact private Audit-Controller candidate
+        if: env.CONTROLLER_REF_TO_TEST != ''
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CONTROLLER_REF: ${{ env.CONTROLLER_REF_TO_TEST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          gh api repos/CurveYield2/Audit-Controller --silent
+          rm -rf .controller-under-test
+          gh auth setup-git
+          gh repo clone CurveYield2/Audit-Controller .controller-under-test -- --filter=blob:none --no-checkout
+          cd .controller-under-test
+          git fetch --depth=1 origin "$CONTROLLER_REF"
+          expected_controller_commit="$(git rev-parse FETCH_HEAD)"
+          git checkout --detach "$expected_controller_commit"
+          test "$(git rev-parse HEAD)" = "$expected_controller_commit"
+
+      - name: Verify private Audit-Controller v26 suite
+        if: env.CONTROLLER_REF_TO_TEST != ''
+        working-directory: .controller-under-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          npm run check
+
+      - name: Record private Audit-Controller qualification evidence
+        if: env.CONTROLLER_REF_TO_TEST != ''
+        env:
+          CONTROLLER_REF_TO_TEST: ${{ env.CONTROLLER_REF_TO_TEST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          controller_commit="$(git -C .controller-under-test rev-parse HEAD)"
+          qualified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          runner_commit="${V7_BASELINE_QUALIFIED_COMMIT:-$(git rev-parse HEAD)}"
+          runner_run="${V7_BASELINE_QUALIFICATION_RUN_ID:-$GITHUB_RUN_ID}"
+          cat > .audit-evidence/v7-infrastructure-qualification/controller.json <<JSON
+          {
+            "schemaVersion": "v26-controller-qualification-v1",
+            "controllerCommit": "$controller_commit",
+            "controllerRef": "$CONTROLLER_REF_TO_TEST",
+            "status": "PASS",
+            "qualificationRunId": "$GITHUB_RUN_ID",
+            "qualifiedAt": "$qualified_at",
+            "runnerQualifiedCommit": "$runner_commit",
+            "runnerQualificationRunId": "$runner_run",
+            "testedSchemas": [
+              "audit-v7-sequential-review-state-v3",
+              "v26-phase-contract-v1",
+              "v26-successor-handoff-v1",
+              "v26-security-traceability-graph-v1",
+              "v26-obligation-ledger-v1",
+              "v26-domain-applicability-v1",
+              "v26-evidence-invalidation-v1",
+              "v26-phase6-subgate-state-v1",
+              "v26-audit-closure-manifest-v1"
+            ],
+            "testedGates": [
+              "reviewer-lineage",
+              "successor-handoffs",
+              "phase-contracts",
+              "traceability",
+              "obligations",
+              "domains",
+              "evidence-invalidation",
+              "P6.0-P6.8",
+              "Phase-10-closure",
+              "v26-machine-conformance"
+            ]
+          }
+          JSON
+
       - name: Validate controller-only runner baseline
         if: env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
         shell: bash
@@ -277,88 +388,6 @@ jobs:
         if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: npm run lint
 
-
-      - name: Select working Audit-Controller credential
-        if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
-        env:
-          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
-        shell: bash
-        run: bash scripts/select-audit-controller-token.sh
-
-      - name: Checkout exact private Audit-Controller candidate
-        if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          CONTROLLER_REF: ${{ inputs.controller_ref || 'main' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${GH_TOKEN:-}"
-          gh api repos/CurveYield2/Audit-Controller --silent
-          rm -rf .controller-under-test
-          gh auth setup-git
-          gh repo clone CurveYield2/Audit-Controller .controller-under-test -- --filter=blob:none --no-checkout
-          cd .controller-under-test
-          git fetch --depth=1 origin "$CONTROLLER_REF"
-          expected_controller_commit="$(git rev-parse FETCH_HEAD)"
-          git checkout --detach "$expected_controller_commit"
-          test "$(git rev-parse HEAD)" = "$expected_controller_commit"
-
-      - name: Verify private Audit-Controller v26 suite
-        if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
-        working-directory: .controller-under-test
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm test
-          npm run check
-
-      - name: Record private Audit-Controller qualification evidence
-        if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
-        shell: bash
-        run: |
-          set -euo pipefail
-          controller_commit="$(git -C .controller-under-test rev-parse HEAD)"
-          qualified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          runner_commit="${V7_BASELINE_QUALIFIED_COMMIT:-$(git rev-parse HEAD)}"
-          runner_run="${V7_BASELINE_QUALIFICATION_RUN_ID:-$GITHUB_RUN_ID}"
-          cat > .audit-evidence/v7-infrastructure-qualification/controller.json <<JSON
-          {
-            "schemaVersion": "v26-controller-qualification-v1",
-            "controllerCommit": "$controller_commit",
-            "controllerRef": "${{ inputs.controller_ref || 'main' }}",
-            "status": "PASS",
-            "qualificationRunId": "$GITHUB_RUN_ID",
-            "qualifiedAt": "$qualified_at",
-            "runnerQualifiedCommit": "$runner_commit",
-            "runnerQualificationRunId": "$runner_run",
-            "testedSchemas": [
-              "audit-v7-sequential-review-state-v3",
-              "v26-phase-contract-v1",
-              "v26-successor-handoff-v1",
-              "v26-security-traceability-graph-v1",
-              "v26-obligation-ledger-v1",
-              "v26-domain-applicability-v1",
-              "v26-evidence-invalidation-v1",
-              "v26-phase6-subgate-state-v1",
-              "v26-audit-closure-manifest-v1"
-            ],
-            "testedGates": [
-              "reviewer-lineage",
-              "successor-handoffs",
-              "phase-contracts",
-              "traceability",
-              "obligations",
-              "domains",
-              "evidence-invalidation",
-              "P6.0-P6.8",
-              "Phase-10-closure",
-              "v26-machine-conformance"
-            ]
-          }
-          JSON
 
       - name: Publish controller-only qualification into canonical status
         if: success() && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && github.ref == 'refs/heads/main' && env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
