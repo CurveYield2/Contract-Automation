@@ -325,6 +325,21 @@ async function humanPointerClick(page, locator) {
   await humanActionPause(page);
 }
 
+async function humanShortPointerClick(page, locator) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await humanActionPause(page);
+  const box = await locator.boundingBox();
+  if (!box) throw new BrowserAgentError('VISIBLE_CONTROL_NOT_CLICKABLE', 'Visible short-click target has no clickable bounding box', true);
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y, { steps: 18 });
+  await page.waitForTimeout(randomDelayMs(120, 280));
+  await page.mouse.down();
+  await page.waitForTimeout(randomDelayMs(70, 160));
+  await page.mouse.up();
+  await humanActionPause(page);
+}
+
 async function composerDiagnostics(page) {
   return page.evaluate(() => {
     const buttons = [...document.querySelectorAll('button')].slice(-50).map((b, i) => ({
@@ -477,8 +492,33 @@ async function post(page, message) {
   ]);
 
   if (send) {
-    console.log('[github-playwright] send-strategy=human-pointer-click');
-    await humanPointerClick(page, send, { hoverMs: 180, downMs: 65, settleMs: 320 });
+    console.log('[github-playwright] send-strategy=human-short-pointer-click');
+    await humanShortPointerClick(page, send);
+    await page.waitForTimeout(randomDelayMs(1400, 2200));
+
+    const quickVisible = await wakeMarkerVisible(page, marker);
+    if (!quickVisible.visible) {
+      composer = await ensureComposer(page);
+      const composerAfterFirstClick = await composer.inputValue().catch(async () => {
+        return await composer.innerText().catch(() => '');
+      });
+      const normalizedAfterFirstClick = normalizeVisibleText(composerAfterFirstClick);
+      if (normalizedAfterFirstClick.includes(marker)) {
+        const retrySend = await firstVisible(page, [
+          'button[data-testid="send-button"]',
+          'button[data-testid="composer-submit-button"]',
+          'button[aria-label="Send prompt"]',
+          'button[aria-label="Send"]',
+          'button[aria-label*="Send"]'
+        ]);
+        if (!retrySend) {
+          throw new BrowserAgentError('SEND_CONTROL_MISSING_ON_RETRY', 'Wake remained in composer after first Send click and no visible Send control was available for retry', true);
+        }
+        console.log('[github-playwright] send-retry=human-short-pointer-click reason=message-still-in-composer');
+        await humanShortPointerClick(page, retrySend);
+        await page.waitForTimeout(randomDelayMs(900, 1500));
+      }
+    }
   } else {
     composer = await ensureComposer(page);
     console.log('[github-playwright] send-strategy=human-x11-keyboard-enter');
@@ -545,8 +585,8 @@ async function waitForDurableChatUrl(page, timeoutMs = 300000) {
 }
 
 async function humanReload(page) {
-  console.log('[github-playwright] verification-reload=human-keyboard-control-r');
-  await page.keyboard.press('Control+R');
+  console.log('[github-playwright] verification-reload=human-x11-control-r');
+  await x11Key(['key', '--clearmodifiers', 'ctrl+r'], 'x11-reload');
   await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
   await page.waitForTimeout(1500);
 }
