@@ -8,6 +8,7 @@ import { buildProject } from '../../runner/src/build-dispatch.mjs';
 import { runSlitherAnalysis } from './analysis.mjs';
 import { generateBuildSbomV1 } from './sbom-v1.mjs';
 import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligence-technical-v1.mjs';
+import { buildExecutionArtifactBundleV2 } from './phase0-execution-input-v2.mjs';
 
 function parseArgs(argv){const o={};for(let i=0;i<argv.length;i++){const t=argv[i];if(!t.startsWith('--'))continue;const k=t.slice(2);const n=argv[i+1];if(n!==undefined&&!n.startsWith('--')){o[k]=n;i++;}else o[k]=true;}return o;}
 function sha256(bytes){return createHash('sha256').update(bytes).digest('hex');}
@@ -644,6 +645,7 @@ async function main(){
   };
 
   const build=await buildProject({projectRoot:detected.absolute,request:pseudo});
+  const executionBuildArtifacts=buildExecutionArtifactBundleV2({request:pseudo,build});
   const effectiveCfg={...cfg,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
   const slither=await slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit});
   const sbom=await generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build});
@@ -666,6 +668,7 @@ async function main(){
 
   const files=[
     ['BUILD_AND_SOURCE_IDENTITY_v1.json',buildIdentity],
+    ['PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json',executionBuildArtifacts],
     ['SBOM_v1.json',sbom],
     ['SLITHER_v1.json',slither],
     ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence],
