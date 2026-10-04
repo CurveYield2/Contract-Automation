@@ -3,7 +3,7 @@
   "mode": "manual_only",
   "home_exit_node": "100.112.238.56",
   "manual_session_minutes": 25,
-  "requested_at": "2026-10-03T18:18:00-07:00",
+  "requested_at": "2026-10-03T18:24:00-07:00",
   "project_name": "HOME_EXIT_PROJECT_WAKE_VERIFY2",
   "chat_name": "VERIFY PROJECT WAKE SIGNAL 2",
   "wake_message": "[HOME_EXIT_PROJECT_WAKE_VERIFY2] Assistant: when you personally receive this as a new user message inside this new Project, reply exactly HOME_EXIT_PROJECT_WAKE_PERSONALLY_SEEN_VERIFY2"
