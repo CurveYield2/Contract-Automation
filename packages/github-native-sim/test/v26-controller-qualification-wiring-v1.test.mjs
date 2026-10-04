@@ -68,3 +68,17 @@ test('controller-only publication re-reads current remote qualification status b
   assert.match(workflow, /canonical runner qualification run changed during controller-only qualification/);
   assert.match(workflow, /-f sha="\$existing_sha"/);
 });
+
+test('same-repo PR qualification pins one exact private controller ref and runs it before public baseline checks', () => {
+  assert.match(workflow, /Resolve exact paired Audit-Controller candidate/);
+  assert.match(workflow, /event\.pull_request\?\.body/);
+  assert.match(workflow, /\^controller_ref=\(\[0-9a-fA-F\]\{40\}\)\$/);
+  assert.match(workflow, /CONTROLLER_REF_TO_TEST/);
+  assert.match(workflow, /PR body must contain at most one controller_ref declaration/);
+  assert.ok(workflow.indexOf('Verify private Audit-Controller v26 suite') < workflow.indexOf('Full repository Node test suite'));
+  const publishStart=workflow.indexOf('- name: Publish controller-only qualification into canonical status');
+  const publishEnd=workflow.indexOf('\n      - name:',publishStart+1);
+  const publishBlock=workflow.slice(publishStart,publishEnd);
+  assert.match(publishBlock,/github\.event_name == 'workflow_dispatch' \|\| github\.event_name == 'workflow_call'/);
+  assert.doesNotMatch(publishBlock,/github\.event_name == 'pull_request'/);
+});
