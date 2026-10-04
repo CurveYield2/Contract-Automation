@@ -590,6 +590,32 @@ async function createProjectExactHumanFlow(page, name) {
   await humanPointerClick(page, enabledCreate);
   console.log('[github-playwright-v10] project-flow=create-button-clicked');
 
+  await page.waitForTimeout(1000);
+  const postClickCreate = page.getByRole('button', { name: /^Create project$/i }).first();
+  const postClickCreateVisible = await postClickCreate.isVisible().catch(() => false);
+  const postClickCreateEnabled = postClickCreateVisible ? await postClickCreate.isEnabled().catch(() => false) : false;
+  const postClickEditorVisible = await controls.editor.isVisible().catch(() => false);
+  const postClickEditorValue = postClickEditorVisible
+    ? await controls.editor.inputValue().catch(async () => await controls.editor.innerText().catch(() => ''))
+    : '';
+  const alertTexts = [];
+  const alerts = page.locator('[role="alert"], [aria-live="assertive"]');
+  const alertCount = Math.min(await alerts.count().catch(() => 0), 8);
+  for (let i = 0; i < alertCount; i += 1) {
+    const alert = alerts.nth(i);
+    if (!await alert.isVisible().catch(() => false)) continue;
+    const text = (await alert.innerText().catch(() => '')).trim();
+    if (text) alertTexts.push(text.slice(0, 500));
+  }
+  console.log('[github-playwright-v10] project-flow=post-create-click-state=' + JSON.stringify({
+    url: page.url(),
+    createVisible: postClickCreateVisible,
+    createEnabled: postClickCreateEnabled,
+    editorVisible: postClickEditorVisible,
+    editorValue: postClickEditorValue,
+    alerts: alertTexts
+  }));
+
   // Successful Project creation automatically navigates the browser to the new
   // Project URL. A short human-scale wait is sufficient; capture that URL directly.
   await page.waitForTimeout(randomDelayMs(3000, 5000));
