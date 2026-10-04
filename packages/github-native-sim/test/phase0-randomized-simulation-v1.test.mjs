@@ -161,15 +161,16 @@ test('Phase-0 source-known compile groups preserve deployment entries separately
   assert.deepEqual(groups[1].contractNames,['Hook']);
 });
 
-test('Phase-0 randomized simulation compiles declared deployment-entry artifacts before starting Anvil',()=>{
+test('Phase-0 randomized simulation binds exported accepted build artifacts before starting Anvil without a second compile',()=>{
   const here=path.dirname(fileURLToPath(import.meta.url));
   const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  const compileAt=source.indexOf('compileSourceKnownDeploymentArtifactsV1');
+  const bindAt=source.indexOf('validateExecutionInputJoinV2');
   const anvilAt=source.indexOf('anvil=await startAnvil');
-  assert.ok(compileAt>=0);
-  assert.ok(anvilAt>compileAt);
-  assert.match(source,/sourceKnownCompiledTargets/);
-  assert.match(source,/sourceKnownMissingTargets/);
+  assert.ok(bindAt>=0);
+  assert.ok(anvilAt>bindAt);
+  assert.match(source,/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2\.json/);
+  assert.match(source,/EXACT_ACCEPTED_PHASE0_EXECUTION_BUILD_ARTIFACTS_V2/);
+  assert.doesNotMatch(source,/await buildProject\(/);
 });
 
 
@@ -236,13 +237,13 @@ test('Phase-0 rebind workflow assesses completeness non-fatally and enforces onl
 });
 
 
-test('Phase-0 randomized simulation reuses exact embedded-profile build artifacts instead of recompiling with one flattened profile',()=>{
+test('Phase-0 randomized simulation reuses exact accepted multi-profile artifacts instead of flattening or rebuilding',()=>{
   const here=path.dirname(fileURLToPath(import.meta.url));
   const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  assert.match(source,/build\.system==='embedded-profile-native'/);
-  assert.match(source,/EXACT_EMBEDDED_PROFILE_BUILD_FROM_PHASE0_BUILD_DISPATCH/);
-  assert.match(source,/compilerProfiles:build\.compilerProfiles/);
-  assert.match(source,/artifacts:build\.artifacts/);
+  assert.match(source,/executionBuildArtifacts\.buildIdentity\?\.compilerProfiles/);
+  assert.match(source,/EXACT_ACCEPTED_PHASE0_EXECUTION_BUILD_ARTIFACTS_V2/);
+  assert.match(source,/artifacts:sharedExecutionInputs\.artifacts/);
+  assert.doesNotMatch(source,/await buildProject\(/);
 });
 
 test('gas overrides bind to consumed environment keys, including WEI suffix',()=>{
