@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "curveyield-katana-cyvbwbtc-lifecycle-v10",
+  "status": "FAIL",
+  "fork": {
+    "engine": "anvil",
+    "chainId": 747474,
+    "upstreamRpcExposed": false
+  },
+  "routeConfiguration": {
+    "safe": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+    "safeOwnerUsed": "0x11b78837cadC8E894F1c6e13fA9f3A085a75FA35",
+    "safeThreshold": 1,
+    "targetFxUsdVbUsdcPool": "0x2D43e7931329dbB709F33d7049C937c6794Bae10",
+    "routes": [
+      {
+        "tokenIn": "0x4c03ff0f44A55e7098a09016E02a01d3cdC2FDF9",
+        "tokenOut": "0x203A662b0BD271A6ed5a60EdFbd04bFce608FD36",
+        "route": "0x4c03ff0f44a55e7098a09016e02a01d3cdc2fdf9000064203a662b0bd271a6ed5a60edfbd04bfce608fd36",
+        "routeFeeBpsConfigured": 0,
+        "twapWindow": 900,
+        "maxTwapDeviationBps": 200
+      },
+      {
+        "tokenIn": "0x203A662b0BD271A6ed5a60EdFbd04bFce608FD36",
+        "tokenOut": "0x4c03ff0f44A55e7098a09016E02a01d3cdC2FDF9",
+        "route": "0x203a662b0bd271a6ed5a60edfbd04bfce608fd360000644c03ff0f44a55e7098a09016e02a01d3cdc2fdf9",
+        "routeFeeBpsConfigured": 0,
+        "twapWindow": 900,
+        "maxTwapDeviationBps": 200
+      },
+      {
+        "tokenIn": "0x203A662b0BD271A6ed5a60EdFbd04bFce608FD36",
+        "tokenOut": "0x0913DA6Da4b42f538B445599b46Bb4622342Cf52",
+        "route": "0x203a662b0bd271a6ed5a60edfbd04bfce608fd360001f40913da6da4b42f538b445599b46bb4622342cf52",
+        "routeFeeBpsConfigured": 0,
+        "twapWindow": 900,
+        "maxTwapDeviationBps": 200
+      }
+    ]
+  },
+  "funding": {
+    "source": "0x3Ef3D8bA38EBe18DB133cEc108f4D14CE00Dd9Ae",
+    "sourceBalanceBefore": "1267760",
+    "fundedAccount": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+    "fundedBalanceAfter": "200000",
+    "amount": "200000"
+  },
+  "simulation": {
+    "exitCode": 1,
+    "stdoutTail": "",
+    "stderrTail": "Error: could not instantiate forked environment with provider 127.0.0.1\n\nContext:\n- Error #0: unsupported hardfork `Cancun` reported for `optimism`\n- Error #1: unknown optimism hardfork 'Cancun'\n"
+  },
+  "failures": [
+    {
+      "message": "SimulateCyvbWBTC_v9 failed",
+      "stack": "Error: SimulateCyvbWBTC_v9 failed\n    at assert (file:///home/runner/work/Contract-Automation/Contract-Automation/packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v10/run-v10.mjs:40:25)\n    at main (file:///home/runner/work/Contract-Automation/Contract-Automation/packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v10/run-v10.mjs:315:5)\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)"
+    }
+  ]
+}
