@@ -201,6 +201,21 @@ async function humanPointerHover(page, locator) {
   await humanActionPause(page);
 }
 
+async function humanShortPointerClick(page, locator) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await humanActionPause(page);
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('Visible short-click target has no bounding box');
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y, { steps: 18 });
+  await page.waitForTimeout(randomDelayMs(120, 280));
+  await page.mouse.down();
+  await page.waitForTimeout(randomDelayMs(70, 160));
+  await page.mouse.up();
+  await humanActionPause(page);
+}
+
 async function humanPointerClick(page, locator) {
   await locator.scrollIntoViewIfNeeded().catch(() => {});
   await humanActionPause(page);
@@ -575,10 +590,17 @@ async function createProjectExactHumanFlow(page, name) {
   console.log('[github-playwright-v10] project-flow=create-surface-visible');
   await humanTypeInto(page, controls.editor, name);
   console.log('[github-playwright-v10] project-flow=project-name-human-typed');
+  const observedProjectName = await controls.editor.inputValue().catch(async () => {
+    return await controls.editor.innerText().catch(() => '');
+  });
+  if (String(observedProjectName).trim() !== String(name).trim()) {
+    throw new Error('Project-name editor did not contain the exact requested Project name before Create');
+  }
+  console.log('[github-playwright-v10] project-flow=project-name-verified');
 
   // The visible Create project button is initially disabled. Give the UI a
-  // short human-scale moment to enable it after typing, then click only the
-  // enabled rendered control.
+  // short human-scale moment to enable it after typing, then perform an ordinary
+  // short human click on the enabled rendered control.
   await page.waitForTimeout(randomDelayMs(1200, 2500));
   const enabledCreate = await findEnabledProjectCreateButton(page, 8000);
   if (!enabledCreate) {
@@ -587,8 +609,8 @@ async function createProjectExactHumanFlow(page, name) {
 
   const beforeCreateUrl = page.url();
   console.log('[github-playwright-v10] project-flow=create-button-enabled');
-  await humanPointerClick(page, enabledCreate);
-  console.log('[github-playwright-v10] project-flow=create-button-clicked');
+  await humanShortPointerClick(page, enabledCreate);
+  console.log('[github-playwright-v10] project-flow=create-button-short-clicked');
 
   await page.waitForTimeout(1000);
   const postClickCreate = page.getByRole('button', { name: /^Create project$/i }).first();
