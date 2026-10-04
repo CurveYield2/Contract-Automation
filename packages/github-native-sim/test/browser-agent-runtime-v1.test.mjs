@@ -175,11 +175,12 @@ test('wake workflow retries retryable browser failures on a bounded fresh runner
   assert.match(workflow, /steps\.fresh-runner-retry\.outputs\.dispatched != 'true'/);
 
   assert.doesNotMatch(workflow, /Detect refreshed encrypted ChatGPT session state|actions\/cache\/(?:restore|save)@v4|chatgpt-session-state-v1-/);
+  assert.doesNotMatch(workflow, /Persist captured Phase-1 Project URL|Persist fresh-chat URL into campaign registration|PROJECT_SHARE_URL_REQUIRED/);
 
   for (const stepName of [
     'Create watchdog state',
     'Persist watchdog state',
-    'Persist fresh-chat URL into campaign registration',
+    'Persist existing-chat reviewer wake into campaign registration',
     'Arm immediate watchdog observation',
   ]) {
     const start = workflow.indexOf('- name: ' + stepName);
