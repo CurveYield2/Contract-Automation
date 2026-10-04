@@ -87,7 +87,7 @@ async function deploy(artifacts,provider,contractName,args=[]){
   return{contract:c,address:await c.getAddress(),artifact:a};
 }
 function siFixture(){
-  const names=['ERC20','QualifiedToken','ERC4626','QualifiedVault','IERC3156FlashLender','FlashLender','FlashBorrower','DelegateImplementation','DelegateProxy','TupleArrayRouter','LookalikeToken','PropertyControls','NeverReachProperty','BrokenObservationToken'];
+  const names=['ERC20','QualifiedToken','ERC4626','QualifiedVault','IERC3156FlashLender','FlashLender','FlashBorrower','DelegateImplementation','DelegateProxy','TupleArrayRouter','LookalikeToken','PropertyControls','LowLevelControls','NoopMulticall','NeverReachProperty','BrokenObservationToken'];
   const contracts=names.map((name,i)=>({contractId:`C${i+1}`,qualifiedName:`${sourceName}:${name}`}));
   const id=n=>contracts.find(x=>x.qualifiedName.endsWith(':'+n)).contractId;
   const inheritanceGraph=[
@@ -186,9 +186,11 @@ console.log(fs.readFileSync('/etc/passwd','utf8'));
   const router=await deploy(artifacts,provider,'TupleArrayRouter');
   const lookalike=await deploy(artifacts,provider,'LookalikeToken');
   const controls=await deploy(artifacts,provider,'PropertyControls');
+  const lowLevel=await deploy(artifacts,provider,'LowLevelControls');
+  const noopMulticall=await deploy(artifacts,provider,'NoopMulticall');
   const neverReach=await deploy(artifacts,provider,'NeverReachProperty');
   const brokenObservation=await deploy(artifacts,provider,'BrokenObservationToken',[actors[0]]);
-  const deployed=[token,vault,lender,borrower,impl,facade,router,lookalike,controls,neverReach,brokenObservation].map(x=>({address:x.address,qualifiedName:`${sourceName}:${x.artifact.contractName}`,contractName:x.artifact.contractName,sourceName}));
+  const deployed=[token,vault,lender,borrower,impl,facade,router,lookalike,controls,lowLevel,noopMulticall,neverReach,brokenObservation].map(x=>({address:x.address,qualifiedName:`${sourceName}:${x.artifact.contractName}`,contractName:x.artifact.contractName,sourceName}));
 
   let targets=targetObjects(ethers,artifacts,deployed,siFixture());
   const contexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence:siFixture()});
@@ -222,7 +224,21 @@ console.log(fs.readFileSync('/etc/passwd','utf8'));
   const observationGap=await runMedusa({projectRoot:root,anvilUrl:proxy.url,blockNumber:Number(await provider.getBlockNumber()),ethers,targets:[brokenObservationTarget],outRoot,callLimit:2500,minimumRequiredCalls:500,runId:'medusa-observation-gap-control-v2'});
   assertThat(observationGap.propertyRegistry?.some(x=>x.result==='OBSERVATION_GAP'),'A16 missing required balance observation was not labeled OBSERVATION_GAP');
 
-  const excludedFromMain=new Set(['PropertyControls','NeverReachProperty','BrokenObservationToken'].map(name=>`${sourceName}:${name}`));
+  const lowLevelTarget=byLogical('LowLevelControls')[0];
+  const lowLevelBaseline=await provider.send('evm_snapshot',[]);
+  const lowLevelTelemetry=await runTelemetry({provider,ethers,targets:[lowLevelTarget],actors,outRoot,baselineSnapshot:lowLevelBaseline,telemetryRuns:1,callsPerRun:72,seedSalt:'a21-low-level-v2',runPrefix:'a21-low-level'});
+  const lowRows=await readRows(outRoot,lowLevelTelemetry);
+  assertThat(lowRows.some(r=>r.functionSignature==='returnsFalse()'&&r.stages?.PREFLIGHT?.callProbe?.status==='RETURNED'&&r.stages.PREFLIGHT.callProbe.decodedReturn?.[0]===false),'A21 low-level false return was not retained');
+  assertThat(lowRows.some(r=>r.functionSignature==='revertReason()'&&r.stages?.PREFLIGHT?.callProbe?.status==='REVERTED'&&String(r.stages.PREFLIGHT.callProbe.error?.data??'').startsWith('0x08c379a0')),'A21 revert reason data was not retained');
+  assertThat(lowRows.some(r=>r.functionSignature==='panicNow()'&&r.stages?.PREFLIGHT?.callProbe?.status==='REVERTED'&&String(r.stages.PREFLIGHT.callProbe.error?.data??'').startsWith('0x4e487b71')),'A21 panic data was not retained');
+
+  const noopContract=noopMulticall.contract.connect(await provider.getSigner(0));
+  const noopBefore=BigInt(await noopContract.totalCalls());
+  const noopTx=await noopContract.multicall([]),noopReceipt=await noopTx.wait();
+  const noopAfter=BigInt(await noopContract.totalCalls());
+  assertThat(Number(noopReceipt.status)===1&&noopBefore===noopAfter,'A22 empty multicall did not remain a successful no-op');
+
+  const excludedFromMain=new Set(['PropertyControls','LowLevelControls','NeverReachProperty','BrokenObservationToken'].map(name=>`${sourceName}:${name}`));
   const mainTargets=targets.filter(t=>!excludedFromMain.has(t.logicalQualifiedName??t.qualifiedName));
   const performance=[];
   let baseline=await provider.send('evm_snapshot',[]);
@@ -316,6 +332,8 @@ console.log(fs.readFileSync('/etc/passwd','utf8'));
       unexercised:{status:unexercised.status,checkStatus:unexercised.checkStatus,propertyRegistry:unexercised.propertyRegistry},
       observationGap:{status:observationGap.status,checkStatus:observationGap.checkStatus,propertyRegistry:observationGap.propertyRegistry}
     },
+    lowLevelControl:{summary:lowLevelTelemetry,rows:lowRows.filter(r=>['returnsFalse()','revertReason()','panicNow()'].includes(r.functionSignature)).slice(0,12)},
+    noopControl:{transactionHash:noopReceipt.hash,status:noopReceipt.status,before:noopBefore.toString(),after:noopAfter.toString(),semanticFamily:'OTHER_MUTATION',observedEffect:'NO_OP'},
     telemetry,
     acceptanceWitnesses:{directDelegate,proxyDelegate,callback,callbackDirect,tuple},
     replayControl:{status:'PASS',runs:replay.map(x=>({runId:x.runId,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256}))},
