@@ -256,12 +256,44 @@ jobs:
           if [ "$INTERACTIVE_VIEW" = "true" ]; then
             x11vnc -display :99 -rfbport 5900 -listen "$ts_ip" -nopw -forever -shared -quiet >/tmp/x11vnc-v10.log 2>&1 &
             echo $! >/tmp/x11vnc-v10.pid
-            websockify --web=/usr/share/novnc "$ts_ip:6080" localhost:5900 >/tmp/novnc-v10.log 2>&1 &
+
+            # x11vnc is intentionally bound to the private Tailscale address,
+            # so websockify must proxy to that same address rather than localhost.
+            websockify --web=/usr/share/novnc "$ts_ip:6080" "$ts_ip:5900" >/tmp/novnc-v10.log 2>&1 &
             echo $! >/tmp/novnc-v10.pid
+
+            vnc_ready=false
+            for i in {1..20}; do
+              if timeout 2 bash -c "</dev/tcp/$ts_ip/5900" 2>/dev/null; then
+                vnc_ready=true
+                break
+              fi
+              sleep 1
+            done
+            if [ "$vnc_ready" != "true" ]; then
+              echo "::error::Private VNC server did not become reachable on $ts_ip:5900."
+              cat /tmp/x11vnc-v10.log || true
+              exit 1
+            fi
+
+            novnc_ready=false
+            for i in {1..20}; do
+              if curl -fsS --connect-timeout 2 --max-time 3 "http://$ts_ip:6080/vnc.html" >/dev/null; then
+                novnc_ready=true
+                break
+              fi
+              sleep 1
+            done
+            if [ "$novnc_ready" != "true" ]; then
+              echo "::error::Private noVNC monitor did not become reachable on $ts_ip:6080."
+              cat /tmp/novnc-v10.log || true
+              exit 1
+            fi
+
             browser_view_url="http://$ts_ip:6080/vnc.html?autoconnect=1&resize=scale"
             echo "TAILSCALE_VNC=$ts_ip:5900"
             echo "BROWSER_VIEW_URL=$browser_view_url" >> "$GITHUB_ENV"
-            echo "Private browser view: $browser_view_url"
+            echo "Private browser view verified live: $browser_view_url"
           fi
 
       - name: Route browser phase through home exit node
