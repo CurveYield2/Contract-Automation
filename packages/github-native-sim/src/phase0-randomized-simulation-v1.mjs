@@ -76,7 +76,11 @@ function redactExecutionSecretsV2(value,secrets=[]){
   return text;
 }
 function deploymentScriptKeyV2(item){
-  return [item.framework??'GENERIC_NODE',item.path??item.entry??item.script??item.name??'UNKNOWN'].join(':');
+  const framework=item.framework??'GENERIC_NODE';
+  const identity=framework==='GENERIC_NODE'
+    ? (item.script??item.name??item.path??item.entry??'UNKNOWN')
+    : (item.path??item.entry??item.script??item.name??'UNKNOWN');
+  return [framework,identity].join(':');
 }
 async function rpc(url,method,params=[]){
   const res=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
@@ -333,7 +337,7 @@ export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,lo
       originalSha256,adaptedSha256,adaptedContentChanged:originalSha256!==adaptedSha256,
       adaptation,executionOverrides:executionOverrides.adaptations,localChainId:1,localSigner:localSigner.address,
       sandbox:{filesystem:'NODE_PERMISSION_PROJECT_ROOT_READ_WRITE_ONLY',childProcess:'DENIED_BY_DEFAULT',worker:'DENIED_BY_DEFAULT',network:'ENVIRONMENT_SECRET_ISOLATION_ONLY',productionHandoffEligible:false},
-      command:[process.execPath,...nodePermissionArgs,adaptedRel,...args.slice(5)].join(' '),
+      command:[process.execPath,...nodePermissionArgs,adaptedRel,...args.slice(6)].join(' '),
       exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],
       stdout:retainedStdout.slice(-24000),stderr:retainedStderr.slice(-24000)
     });
