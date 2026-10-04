@@ -341,7 +341,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          sudo tailscale set --exit-node=""
+          timeout -k 5s 20s sudo tailscale set --exit-node=""
           echo "Home exit-node routing disabled for post-browser workflow steps."
 
       - name: Dispatch fresh-runner retry for retryable pre-post failure
