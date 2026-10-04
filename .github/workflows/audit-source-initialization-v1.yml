@@ -23,6 +23,10 @@ on:
         description: Existing ChatGPT conversation URL for reviewer-4
         required: true
         type: string
+      master_chat_url:
+        description: Persistent ChatGPT conversation URL for the Maximum master reviewer
+        required: true
+        type: string
   push:
     branches: [main]
     paths:
@@ -57,6 +61,7 @@ jobs:
           DISPATCH_CHAT_2_URL: ${{ inputs.agent_chat_2_url }}
           DISPATCH_CHAT_3_URL: ${{ inputs.agent_chat_3_url }}
           DISPATCH_CHAT_4_URL: ${{ inputs.agent_chat_4_url }}
+          DISPATCH_MASTER_CHAT_URL: ${{ inputs.master_chat_url }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
@@ -68,6 +73,7 @@ jobs:
             agent_chat_2_url="$DISPATCH_CHAT_2_URL"
             agent_chat_3_url="$DISPATCH_CHAT_3_URL"
             agent_chat_4_url="$DISPATCH_CHAT_4_URL"
+            master_chat_url="$DISPATCH_MASTER_CHAT_URL"
             request_id="dispatch-$GITHUB_RUN_ID"
           else
             mapfile -t requests < <(
@@ -84,6 +90,7 @@ jobs:
             agent_chat_2_url="$(jq -r '.agent_chat_2_url // empty' "$request")"
             agent_chat_3_url="$(jq -r '.agent_chat_3_url // empty' "$request")"
             agent_chat_4_url="$(jq -r '.agent_chat_4_url // empty' "$request")"
+            master_chat_url="$(jq -r '.master_chat_url // empty' "$request")"
             request_id="push-$GITHUB_SHA"
           fi
 
@@ -115,6 +122,7 @@ jobs:
           validate_chat_url agent_chat_2_url "$agent_chat_2_url"
           validate_chat_url agent_chat_3_url "$agent_chat_3_url"
           validate_chat_url agent_chat_4_url "$agent_chat_4_url"
+          validate_chat_url master_chat_url "$master_chat_url"
 
           {
             echo "source_url=$source_url"
@@ -122,6 +130,7 @@ jobs:
             echo "agent_chat_2_url=$agent_chat_2_url"
             echo "agent_chat_3_url=$agent_chat_3_url"
             echo "agent_chat_4_url=$agent_chat_4_url"
+            echo "master_chat_url=$master_chat_url"
             echo "request_id=$request_id"
           } >> "$GITHUB_OUTPUT"
 
@@ -143,6 +152,7 @@ jobs:
           AGENT_CHAT_2_URL: ${{ steps.request.outputs.agent_chat_2_url }}
           AGENT_CHAT_3_URL: ${{ steps.request.outputs.agent_chat_3_url }}
           AGENT_CHAT_4_URL: ${{ steps.request.outputs.agent_chat_4_url }}
+          MASTER_CHAT_URL: ${{ steps.request.outputs.master_chat_url }}
           REQUEST_ID: ${{ steps.request.outputs.request_id }}
         shell: bash
         run: bash scripts/audit-source-initialization/run-v1.sh
