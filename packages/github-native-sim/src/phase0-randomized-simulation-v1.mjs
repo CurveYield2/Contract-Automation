@@ -711,7 +711,9 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
       for(const burst of schedule){
         const target=targets[burst.targetIndex];
         for(let k=0;k<burst.count;k++){
-          const selected=pickFn(target,rng,burst.actionClass),f=selected.fragment,sender=actors[ri(rng,actors.length)],iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
+          const selected=pickFn(target,rng,burst.actionClass),f=selected.fragment,iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
+          const qualifiedAction=qualifiedActionV2({target,selected,actors,rng});
+          let sender=qualifiedAction?.sender??actors[ri(rng,actors.length)];
           const rec={
             schemaVersion:'curveyield-phase0-raw-simulation-call-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
             runId,callIndex:stats.calls+1,target:{qualifiedName:target.qualifiedName,address:target.address,recipeId:target.recipe?.recipeId??null},
@@ -728,7 +730,12 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
           const fk=`${target.qualifiedName}::${selected.signature}`;stats.byFunction[fk]=(stats.byFunction[fk]??0)+1;
 
           let args=null,argError=null;
-          try{args=f.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));rec.decodedInputs=normalize(args);rec.stages.ARG_GEN={status:'PASS'};}
+          try{
+            args=qualifiedAction?.args??f.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));
+            rec.decodedInputs=normalize(args);
+            rec.stages.ARG_GEN={status:'PASS',basis:qualifiedAction?.basis??'BOUNDED_RECURSIVE_ABI_GENERATION'};
+            if(qualifiedAction)rec.recipeAction={basis:qualifiedAction.basis};
+          }
           catch(error){argError=error;rec.stages.ARG_GEN={status:'FAILED',error:{code:error?.code??'ABI_ARGUMENT_GENERATION_LIMITATION',message:String(error?.message??error),limitation:error?.limitation??null}};}
           if(argError){
             rec.executionOutcome=classifyExecutionOutcomeV2({argumentGeneration:{success:false}});
@@ -737,7 +744,7 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
             const before=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
             rec.observations.before=observationRowsV2(before,target.recipe,'BEFORE');
             const data=iface.encodeFunctionData(selected.signature,args);
-            const value=f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n;
+            const value=qualifiedAction?.value??(f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n);
             let estimate=null,preflightError=null;
             try{
               estimate=await provider.estimateGas({from:sender,to:target.address,data,value});
@@ -1140,8 +1147,11 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const sourcePlan=nativeScriptComplete
       ? {status:'SKIPPED_PACKAGE_DEPLOYMENT_SCRIPT_COMPLETE',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0}
       : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
-    const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows],targets=targetObjects(ethers,artifacts,deployed,sourceIntelligence);
-    const deploymentCombined={detectedScripts:detected,attempts:[...deployment.attempts,...sourcePlan.attempts],limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
+    const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows];
+    let targets=targetObjects(ethers,artifacts,deployed,sourceIntelligence);
+    const runtimePreparation=await prepareQualifiedRuntimeV2({provider,ethers,targets,actors});
+    targets=runtimePreparation.targets;
+    const deploymentCombined={detectedScripts:detected,attempts:[...deployment.attempts,...sourcePlan.attempts],runtimePreparation,limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
     // Persist deployment diagnostics before any expensive randomized stage.
     deploymentEvidence={...deploymentCombined,packageDependencyInstall,policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS'};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deploymentEvidence,null,2)+'\n');
