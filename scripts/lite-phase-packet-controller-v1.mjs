@@ -461,7 +461,7 @@ function applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,auth
       schemaVersion:'curveyield-lite-master-repair-refresh-v1',
       scopeId:result.pending.repairScopeId,
       repairSpecSha256:result.pending.repairSpecSha256,
-      refreshedPhases,
+      refreshedPhases:refreshPhases,
       artifacts:postRepairArtifacts,
       manifestSha256:createHash('sha256').update(JSON.stringify(postRepairArtifacts)).digest('hex'),
       refreshedAt:now
@@ -469,7 +469,7 @@ function applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,auth
     masterForm.updatedAt=now;
     writeJson(repoFile(root,result.pending.workFormPath),masterForm);
     return {
-      refreshedPhases,
+      refreshedPhases:refreshPhases,
       postRepairArtifacts,
       postRepairManifestSha256:masterForm.postRepair.manifestSha256,
       bindingsSha256:createHash('sha256').update(JSON.stringify(masterForm.bindings)).digest('hex'),
@@ -853,7 +853,7 @@ if(sequence===6){
   const markerRel=receiptLib.phaseReceiptPath(campaignPath,7,markerRevision);
   const markerEvidence=[receiptRef(root,campaignPath,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,campaignPath,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,campaignPath,x,'DERIVED_DOWNSTREAM_DATA'))];
   const markerHandoff=gatedMasterReview?{required:true,boundary:'MASTER_REVIEW_SEGMENT_06_07',incomingReviewer:'master-reviewer',assignedWork:'Review reviewer-3L segment Phases 6-7',nextPhaseSequence:8,sameReviewer:false,status:'MASTER_REVIEW_PENDING'}:{required:true,boundary:'P67_TO_P8',incomingReviewer:'reviewer-4',assignedWork:'Combined Lite Phases 8-10',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'};
-  const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,revision:markerRevision,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],evidence:markerEvidence,outputs:markerEvidence,globalControls:receipt.globalControls,validation:{status:'PASS',validatedAt:now,failures:[]},handoff:markerHandoff,now});
+  const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,executorType:'GITHUB_ACTIONS',revision:markerRevision,executorLineage:'phase7-automation',authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],evidence:markerEvidence,outputs:markerEvidence,globalControls:receipt.globalControls,validation:{status:'PASS',validatedAt:now,failures:[]},handoff:markerHandoff,now});
   marker.sealedAt=now;if(masterRepairRefreshSha)marker.masterRepair={schemaVersion:'curveyield-lite-master-repair-receipt-v1',scopeId:directory.pendingMasterReview.repairScopeId,repairSpecSha256:masterRepairRefreshSha,priorRevision:markerRevision-1,controllerDependentRefresh:true};writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=true;nextSequence=8;nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:8,immediate:[...derivedRels,...derived7,...boundaryArtifactRels]});
 }
 if(sequence===8&&nextSequence===10){
