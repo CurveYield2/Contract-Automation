@@ -626,6 +626,11 @@ async function openSavedProjectUrl(page, name, projectUrl) {
       const visible = visibleBrowserStateText(bodyText, title);
 
       if (visible.humanChallenge) {
+        console.log('[github-playwright-v10] project-navigation-challenge=' + JSON.stringify({
+          url: currentProjectUrl,
+          title,
+          evidence: visibleHumanChallengeEvidence(bodyText, title)
+        }));
         const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected while opening saved Project URL; aborting immediately');
         error.code = 'BROWSER_CHALLENGE';
         throw error;
@@ -851,15 +856,22 @@ async function post(page, message, composerOverride = null) {
   return { strategy: 'human-pointer-click' };
 }
 
+function visibleHumanChallengeEvidence(bodyText = '', title = '') {
+  const evidence = [];
+  if (/Verify you are human|Verifying you are human/i.test(bodyText)) evidence.push('verify-human-body');
+  if (/Checking your browser/i.test(bodyText)) evidence.push('checking-browser-body');
+  if (/Performing security verification|security verification/i.test(bodyText)) evidence.push('security-verification-body');
+  if (/Enable JavaScript and cookies to continue/i.test(bodyText)) evidence.push('enable-js-cookies-body');
+  if (/Ray ID/i.test(bodyText)) evidence.push('ray-id-body');
+  if (/Just a moment/i.test(title)) evidence.push('just-a-moment-title');
+  if (/Attention Required/i.test(title)) evidence.push('attention-required-title');
+  if (/Verify you are human/i.test(title)) evidence.push('verify-human-title');
+  if (/Cloudflare.*(?:verification|challenge)/i.test(title)) evidence.push('cloudflare-challenge-title');
+  return evidence;
+}
+
 function visibleHumanChallenge(bodyText = '', title = '') {
-  const bodyChallenge =
-    /Verify you are human|Verifying you are human|Checking your browser|Performing security verification|security verification|Enable JavaScript and cookies to continue|Ray ID/i.test(bodyText);
-  const titleChallenge =
-    /Just a moment|Attention Required|Verify you are human|Cloudflare.*(?:verification|challenge)/i.test(title);
-  const brandedChallenge =
-    /Cloudflare/i.test(bodyText) &&
-    /Verify you are human|Verifying you are human|Checking your browser|security verification|Enable JavaScript and cookies to continue|Ray ID/i.test(bodyText);
-  return bodyChallenge || titleChallenge || brandedChallenge;
+  return visibleHumanChallengeEvidence(bodyText, title).length > 0;
 }
 
 function visibleBrowserStateText(bodyText = '', title = '') {
