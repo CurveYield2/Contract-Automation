@@ -684,9 +684,31 @@ async function createProjectExactHumanFlow(page, name) {
   }));
   await page.mouse.move(finalCreateX, finalCreateY, { steps: 12 });
   await humanActionPause(page);
+
+  // Final Create activation must mimic the exact human recovery sequence:
+  // single click -> 0.2-0.5s -> double click -> 0.2-0.5s -> long click.
   await page.mouse.click(finalCreateX, finalCreateY, { delay: randomDelayMs(70, 150) });
+  console.log('[github-playwright-v10] project-flow=create-button-human-single-clicked');
+
+  await page.waitForTimeout(randomDelayMs(200, 500));
+  if (page.url() === beforeCreateUrl) {
+    await page.mouse.click(finalCreateX, finalCreateY, {
+      clickCount: 2,
+      delay: randomDelayMs(70, 150)
+    });
+    console.log('[github-playwright-v10] project-flow=create-button-human-double-clicked');
+  }
+
+  await page.waitForTimeout(randomDelayMs(200, 500));
+  if (page.url() === beforeCreateUrl) {
+    await page.mouse.move(finalCreateX, finalCreateY, { steps: 6 });
+    await page.mouse.down();
+    await page.waitForTimeout(randomDelayMs(550, 900));
+    await page.mouse.up();
+    console.log('[github-playwright-v10] project-flow=create-button-human-long-clicked');
+  }
+
   await humanActionPause(page);
-  console.log('[github-playwright-v10] project-flow=create-button-rendered-mouse-clicked');
 
   await page.waitForTimeout(1000);
   const postClickCreate = page.getByRole('button', { name: /^Create project$/i }).first();
