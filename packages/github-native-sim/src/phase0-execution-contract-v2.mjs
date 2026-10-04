@@ -159,9 +159,16 @@ export function qualifyRecipeV2({qualifiedName=null,abi=[],declaredStandards=[],
   const evidence=[];
   if(declared.has('ERC20'))evidence.push({kind:'DECLARED_STANDARD',standard:'ERC20'});
   if(declared.has('ERC4626'))evidence.push({kind:'DECLARED_STANDARD',standard:'ERC4626'});
+  if(declared.has('ERC3156FLASHLENDER'))evidence.push({kind:'DECLARED_STANDARD',standard:'ERC3156FLASHLENDER'});
   if(implementationIdentity)evidence.push({kind:'IMPLEMENTATION_IDENTITY',value:implementationIdentity});
   const erc20=hasAll(sigs,['totalSupply()','balanceOf(address)','transfer(address,uint256)','approve(address,uint256)','allowance(address,address)','transferFrom(address,address,uint256)']);
   const erc4626=hasAll(sigs,['asset()','totalAssets()','deposit(uint256,address)','mint(uint256,address)','withdraw(uint256,address,address)','redeem(uint256,address,address)']);
+  const erc3156=hasAll(sigs,['maxFlashLoan(address)','flashFee(address,uint256)','flashLoan(address,address,uint256,bytes)']);
+  if(erc3156&&declared.has('ERC3156FLASHLENDER'))return{
+    status:'QUALIFIED',recipeId:'erc3156-flash-lender-v1',qualifiedName,evidence,
+    functionFamilies:{'flashLoan(address,address,uint256,bytes)':'ECONOMIC'},
+    observationFamilies:['TOKEN_BALANCE','CALLBACK_RECEIPT','TOTAL_SUPPLY']
+  };
   if(erc4626&&declared.has('ERC4626'))return{
     status:'QUALIFIED',recipeId:'erc4626-standard-v1',qualifiedName,evidence,
     functionFamilies:{
