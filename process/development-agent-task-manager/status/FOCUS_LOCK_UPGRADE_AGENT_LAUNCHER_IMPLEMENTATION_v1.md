@@ -12,7 +12,7 @@
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `5b73c30a477f3bf0af707a94bbd097ace8c0dd4d`.
+- Base: current `main` at `f7e167fdcd2ff32938f7a620511caf416b82bb64`.
 - PR #508 through PR #514 are merged; their required validation lanes passed before merge.
 - Recovery-only run `37158898640` proves:
   - fresh immutable browser state loads normally without a Cloudflare challenge;
@@ -51,39 +51,34 @@
 
 ## ACTIVE BLOCKER
 
-**Merged live run `37162936420` revealed that the exact Project title selector is correct, but the selected title was not actually on-screen when chosen.**
+**The recovery architecture is using discovery when it should be using a saved chat URL.**
 
-Critical evidence:
-- selector matched `HOME_EXIT_PROJECT_WAKE_VERIFY1`;
-- logged title box before click preparation: `x=42, y=-522, width=261, height=20`;
-- Playwright `isVisible()` treated that off-viewport element as visible;
-- the click helper then used programmatic `scrollIntoViewIfNeeded()`, after which gestures fired around `y=373`;
-- real double-click semantics were confirmed (`clickCountSequence:[1,2]`) but URL still did not navigate;
-- no Cloudflare challenge and no wake resend occurred.
+The browser worker already emits `chatUrl` in successful results, and earlier live runs proved it can observe Project-scoped chat routes. The defect is that the standalone v10 workflow does not durably preserve that chat URL for the next run. This caused later recovery attempts to rediscover the Project/chat through UI paths that should never have been necessary.
 
-The exact title selector and user-directed click sequence remain locked. The next repair changes only human-visible viewport handling: Projects/title must be physically on-screen before selection, sidebar movement must use human mouse-wheel scrolling, and Project recovery must not use `scrollIntoViewIfNeeded()`.
+Locked invariant:
+- as soon as a durable ChatGPT chat URL exists, capture it immediately;
+- persist it outside ephemeral run state;
+- on later recovery, open that saved `chatUrl` directly;
+- if a saved `projectUrl` is also available, persist it alongside the chat URL;
+- do not search the sidebar or scroll to rediscover an already-known Project/chat;
+- Project-page chat-title selection is fallback only when no durable chat URL has ever been captured.
 
 
 ## REMAINING DELTA
 
-1. Validate the current gesture-sequence candidate in the required repository lanes. The unrelated `run-v5.mjs` / `run-v6.mjs` syntax defect may be normalized only in a validation-only branch and must not be merged with browser work.
-2. Merge the production browser candidate only after the browser candidate itself is proven green.
-3. Run the merged recovery workflow and prove:
-   - correct existing Project opens;
-   - Project URL is captured;
-   - existing `VERIFY PROJECT WAKE SIGNAL` chat opens from the Project page;
-   - exact original wake is visibly present;
-   - no wake is resent.
-4. Inspect the audit process wake/watch pathway and replace only its broken browser implementation with the proven routine. Preserve controller/orchestrator/audit semantics.
-5. Run end-to-end audit-path validation for a Phase 1 wake.
-6. Locate the most recent CurveYield DEX v16 audit campaign in `CurveYield2/Audit-Controller`; recover its exact current durable state and do not restart sealed/completed phases.
-7. Initialize Phase 1 wake for that campaign using the current authority skill and required controller validation/campaign/Project links.
-8. Monitor every wake/watch/phase transition. Repair each concrete glitch, restart only the failed step, and continue until the audit reaches its defined completion state.
+1. Add a durable chat-state checkpoint file written immediately when a non-local durable `chatUrl` is observed, before later verification/reload steps can fail.
+2. Upload that checkpoint as a GitHub Actions artifact even when a later browser step fails.
+3. Restore the latest matching checkpoint at the beginning of later v10 runs when request `chat_url` / `project_url` are blank.
+4. Make `action=recover` open a restored durable `chatUrl` directly and visibly verify the original wake there. Do not rediscover the Project through the sidebar.
+5. Keep Project-page central chat-list recovery only as a no-chat-URL fallback when an explicit `projectUrl` is already known.
+6. Validate in the required repository lanes, merge the production-only browser changes, and live-prove chat URL capture + reuse.
+7. After proof, replace only the broken browser implementation in the audit wake/watch pathway with this proven routine.
+8. Resume the most recent CurveYield DEX v16 campaign at Phase 1 and continue diagnose -> repair -> retry -> verify -> continue until the audit is complete.
+
 
 ## NEXT ACTION
 
-Finish validation + merged live proof for the current Project-title gesture sequence. Immediately after success, transplant the proven browser routine into the audit wake/watch pathway and begin the latest DEX v16 campaign Phase 1 wake.
-
+Implement durable chat URL checkpoint + artifact restore + direct-chat recovery. Do not spend further time on sidebar Project discovery for an already-created chat.
 
 ## PARKED / OUT OF SCOPE
 
