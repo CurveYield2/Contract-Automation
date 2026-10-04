@@ -40,7 +40,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: manual-only-home-exit-browser-v11
+  group: manual-only-home-exit-browser-v11-ready2
   cancel-in-progress: true
 
 jobs:
