@@ -17,6 +17,7 @@ import {
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
+import {masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage} from './lib/lite-master-review-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
@@ -317,25 +318,61 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
 
 
 const a=parse(process.argv);
-for(const k of ['controller-root','campaign-id','campaign-path','campaign-directory-path','phase-sequence']) if(a[k]===undefined) throw new Error('missing --'+k);
+const reviewKind=a['review-kind']??'phase';
+for(const k of ['controller-root','campaign-id','campaign-path','campaign-directory-path']) if(a[k]===undefined) throw new Error('missing --'+k);
+if(reviewKind==='phase'&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
+if(!['phase','master'].includes(reviewKind)) throw new Error('review-kind must be phase or master');
 const root=path.resolve(a['controller-root']);
 const expectedCampaignId=a['campaign-id'];
 const campaignPath=a['campaign-path']; const campaignRoot=repoFile(root,campaignPath);
-const sequence=Number(a['phase-sequence']);
+const sequence=reviewKind==='phase'?Number(a['phase-sequence']):null;
 const directoryRel=a['campaign-directory-path']; const directoryFile=requiredFile(root,directoryRel,'campaign directory entry');
 const directory=readJson(directoryFile);
+const now=new Date().toISOString();
 if(directory.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2') throw new Error('packet controller requires Audit Campaign Directory v2');
 if(directory.campaignId!==expectedCampaignId) throw new Error('campaign-id does not match Audit Campaign Directory');
 if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does not match Audit Campaign Directory workspacePath');
+if(reviewKind==='master'){
+  const pending=directory.pendingMasterReview;
+  if(!pending) throw new Error('campaign has no pending master review');
+  const lastReceipt=readJson(requiredFile(root,pending.lastSealedReceiptPath??directory.lastSealedReceiptPath,'last sealed receipt'));
+  const masterAuthorityRoot=authorityRootFromReceipt(lastReceipt);
+  const result=processMasterReviewSubmission({root,campaignPath,directory,authorityRoot:masterAuthorityRoot,segmentId:a['segment-id']??null,now});
+  if(result.status==='MASTER_REVIEW_INVALID'){
+    const feedback=['Master-review submission is invalid. Repair only the exact items below.','',...result.failures.map(x=>'- '+x),'','Do not advance or complete the campaign.'].join('\n');
+    process.stdout.write(JSON.stringify({status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview?.chatUrl??null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+    process.exit(0);
+  }
+  if(result.status==='MASTER_REVIEW_REWORK_REQUIRED'){
+    writeJson(directoryFile,directory);
+    const feedback=childRepairWakeMessage({campaignId:directory.campaignId,pending,repairSpec:result.repairSpec});
+    process.stdout.write(JSON.stringify({status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview.chatUrl,repairModel:'SOL',repairReasoning:'HIGH',repairSpec:result.repairSpec,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+    process.exit(0);
+  }
+  const plan=result.successorPlan??{};
+  let nextAssignment=null;
+  if(plan.nextPhaseSequence===null||plan.nextPhaseSequence===undefined){
+    directory.campaignStatus='COMPLETE';directory.currentAssignment=null;
+  }else{
+    nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:plan.nextPhaseSequence,reviewer:assignmentReviewer(plan.nextPhaseSequence),predecessorReceiptPath:pending.lastSealedReceiptPath,derivedInputPaths:plan.derivedInputPaths??[],status:'WAITING_FOR_SUCCESSOR_AGENT',prefillContext:plan.prefillContext??{}});
+    directory.currentAssignment=nextAssignment;directory.campaignStatus='WAITING_FOR_SUCCESSOR_AGENT';
+  }
+  const acceptedSegment=pending.segmentId;
+  directory.lastAcceptedMasterReview={segmentId:acceptedSegment,workFormPath:pending.workFormPath,manifestSha256:pending.manifestSha256,acceptedAt:now,masterChatUrl:directory.masterReview.chatUrl};
+  directory.pendingMasterReview=null;directory.updatedAt=now;writeJson(directoryFile,directory);
+  const feedback='MASTER_REVIEW_ACCEPTED: '+acceptedSegment+' accepted.'+(nextAssignment?' Successor Phase '+nextAssignment.phaseSequence+' may now be launched.':' Campaign is now COMPLETE.');
+  process.stdout.write(JSON.stringify({status:'PASS',masterReviewAccepted:true,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:acceptedSegment,freshSuccessorRequired:Boolean(nextAssignment),sameReviewerAdvanced:false,nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+  process.exit(0);
+}
 const assignment=directory.currentAssignment;
 if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current assignment does not match submitted phase');
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'predecessor sealed receipt'));
 const authorityRoot=authorityRootFromReceipt(predecessor);
 const loaded=loadPhaseSchema(root,authorityRoot,sequence); const schema=loaded.schema;
+const gatedMasterReview=masterReviewRequired(directory,authorityRoot);
 if(assignment.workSchemaPath!==loaded.rel) throw new Error('assignment workSchemaPath mismatch');
 
 const packetFile=repoFile(root,assignment.packetPath);
-const now=new Date().toISOString();
 const existingPacket=fs.existsSync(packetFile)?readJson(packetFile):null;
 const packet=buildControllerPacket({directory,assignment,existing:existingPacket,now});
 let deficiencies=ensurePacketShape({packet,directory,assignment});
@@ -561,7 +598,7 @@ const ledgerAfter=maybeJson(root,controls.ledgerRel)??{};
 const receipt=receiptLib.createLitePhaseReceiptV1({
   campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,
   workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence,revision:phaseRevision,executorType:'AI_REVIEWER',executorLineage:assignment.reviewer,
-  authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:sequence===10?'COMPLETE':'SEALED',
+  authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:sequence===10&&!gatedMasterReview?'COMPLETE':'SEALED',
   inputs:[{role:'PREDECESSOR_RECEIPT',path:assignment.predecessorReceiptPath},{role:'CONTROLLER_GENERATED_PHASE_WORK_PACKET',path:assignment.packetPath}],
   evidence,outputs:evidence,
   globalControls:{securityTraceabilityGraph:path.posix.relative(campaignPath,controls.graphRel),carriedForwardObligationLedger:path.posix.relative(campaignPath,controls.ledgerRel),evidenceInvalidationMatrix:path.posix.relative(campaignPath,controls.invalidRel),sourceIntelligenceBundle:predecessor.globalControls?.sourceIntelligenceBundle??null},
@@ -586,7 +623,8 @@ if(sequence===6){
   const derived7=buildDerivedOutputs({root,campaignPath,schema:schema7,canonicalData:canonical7,canonicalRel:canonical7Rel,now});
   const markerRel=receiptLib.phaseReceiptPath(campaignPath,7,1);
   const markerEvidence=[receiptRef(root,campaignPath,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,campaignPath,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,campaignPath,x,'DERIVED_DOWNSTREAM_DATA'))];
-  const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],evidence:markerEvidence,outputs:markerEvidence,globalControls:receipt.globalControls,validation:{status:'PASS',validatedAt:now,failures:[]},handoff:{required:true,boundary:'P67_TO_P8',incomingReviewer:'reviewer-4',assignedWork:'Combined Lite Phases 8-10',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'},now});
+  const markerHandoff=gatedMasterReview?{required:true,boundary:'MASTER_REVIEW_SEGMENT_06_07',incomingReviewer:'master-reviewer',assignedWork:'Review reviewer-3L segment Phases 6-7',nextPhaseSequence:8,sameReviewer:false,status:'MASTER_REVIEW_PENDING'}:{required:true,boundary:'P67_TO_P8',incomingReviewer:'reviewer-4',assignedWork:'Combined Lite Phases 8-10',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'};
+  const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],evidence:markerEvidence,outputs:markerEvidence,globalControls:receipt.globalControls,validation:{status:'PASS',validatedAt:now,failures:[]},handoff:markerHandoff,now});
   marker.sealedAt=now;writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=true;nextSequence=8;nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:8,immediate:[...derivedRels,...derived7,...boundaryArtifactRels]});
 }
 if(sequence===8&&nextSequence===10){
@@ -595,9 +633,16 @@ if(sequence===8&&nextSequence===10){
   skipped.sealedAt=now;writeJson(repoFile(root,skippedRel),skipped);sealedReceiptRel=skippedRel;
 }
 directory.lastSealedReceiptPath=sealedReceiptRel;
-if(sequence===10){
-  directory.campaignStatus='COMPLETE';directory.currentAssignment=null;directory.updatedAt=now;
-}else{
+const masterBoundary=sequence===1?1:sequence===5?5:sequence===6?7:sequence===10?10:null;
+if(gatedMasterReview&&masterBoundary!==null){
+  const staged=stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase:masterBoundary,lastSealedReceiptPath:sealedReceiptRel,nextSequence,nextDerivedInputPaths:nextDerivedInputs,successorPrefillContext,now});
+  writeJson(directoryFile,directory);
+  const feedback=masterWakeMessage({campaignId:directory.campaignId,pending:staged.pending});
+  process.stdout.write(JSON.stringify({status:'WAITING_FOR_MASTER_REVIEW',controllerPassToken:'CONTROLLER_PHASE_PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,segmentId:staged.segment.segmentId,masterReviewRequired:true,masterChatUrl:directory.masterReview.chatUrl,masterReasoning:'MAXIMUM',workFormPath:staged.pending.workFormPath,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+  process.exit(0);
+}
+if(sequence===10){directory.campaignStatus='COMPLETE';directory.currentAssignment=null;directory.updatedAt=now;}
+else{
   const nextReviewer=assignmentReviewer(nextSequence);
   const nextStatus=fresh||isFreshBoundary(nextSequence)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
   nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
