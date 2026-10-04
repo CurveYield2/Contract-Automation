@@ -85,10 +85,24 @@ export async function buildProject({
       compilerVersion: compiler.version,
       compilerDiagnostics: compiled.diagnostics,
       compilerInput: compiled.input,
+      compilerInputSha256: compiled.compilerInputSha256,
+      compilerOutputSha256: compiled.compilerOutputSha256,
       sourceAsts: compiled.sourceAsts ?? {},
       artifacts: compiled.artifacts.all,
       sourceInventory: Object.keys(sources).sort(),
-      sourceInventoryFiles: Object.keys(sources).length
+      sourceInventoryFiles: Object.keys(sources).length,
+      compilationUnits:[{
+        unitId:'standard-json-1',
+        profile:'default',
+        compilerVersion:compiler.version,
+        compilerPackage:'solc',
+        settings:compiled.input?.settings??null,
+        compilerInputSha256:compiled.compilerInputSha256,
+        compilerOutputSha256:compiled.compilerOutputSha256,
+        sourceContents:sources,
+        sourceAsts:compiled.sourceAsts??{},
+        artifacts:compiled.artifacts.all
+      }]
     };
   }
 
