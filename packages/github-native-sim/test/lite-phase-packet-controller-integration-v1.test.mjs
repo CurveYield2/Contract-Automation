@@ -54,6 +54,7 @@ export function createLitePhaseReceiptV1(input){return {schemaVersion:'curveyiel
     globalControls:{sourceIntelligenceBundle:'evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json'},
     phase:{sequence:0,status:'SEALED'}
   });
+  writeJson(path.join(root,campaign,'evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json'),{schemaVersion:'fixture-source-intelligence-bundle-v1',sourceSha256:source});
   writeJson(path.join(root,campaign,'controller/SECURITY_TRACEABILITY_GRAPH_v1.json'),{nodes:[],edges:[]});
   writeJson(path.join(root,campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),{obligations:[]});
   writeJson(path.join(root,campaign,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json'),{events:[]});
