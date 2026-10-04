@@ -420,7 +420,7 @@ async function findProjectNameEditorFromVisibleCreateSurface(page) {
       for (let j = 0; j < buttonCount; j += 1) {
         const button = buttons.nth(j);
         if (await button.isVisible().catch(() => false)) {
-          return { create: button, editor };
+          return { create: button, editor, surface: region };
         }
       }
 
@@ -431,7 +431,7 @@ async function findProjectNameEditorFromVisibleCreateSurface(page) {
         if (!await label.isVisible().catch(() => false)) continue;
         const button = label.locator('xpath=ancestor-or-self::button[1]');
         if (await button.isVisible().catch(() => false)) {
-          return { create: button, editor };
+          return { create: button, editor, surface: region };
         }
       }
     }
@@ -455,7 +455,7 @@ async function findProjectNameEditorFromVisibleCreateSurface(page) {
       for (let j = 0; j < textboxCount; j += 1) {
         const editor = textboxes.nth(j);
         if (await editor.isVisible().catch(() => false)) {
-          return { create, editor };
+          return { create, editor, surface: region };
         }
       }
 
@@ -464,13 +464,13 @@ async function findProjectNameEditorFromVisibleCreateSurface(page) {
       for (let j = 0; j < editableCount; j += 1) {
         const editor = editables.nth(j);
         if (await editor.isVisible().catch(() => false)) {
-          return { create, editor };
+          return { create, editor, surface: region };
         }
       }
     }
   }
 
-  return { create: null, editor: null };
+  return { create: null, editor: null, surface: null };
 }
 
 function escapeRegExp(text) {
@@ -668,6 +668,13 @@ async function createProjectExactHumanFlow(page, name) {
   const postClickEditorValue = postClickEditorVisible
     ? await controls.editor.inputValue().catch(async () => await controls.editor.innerText().catch(() => ''))
     : '';
+  const createControlText = (await surfaceCreate.innerText().catch(() => '')).trim();
+  const createControlAria = (await surfaceCreate.getAttribute('aria-label').catch(() => '')) || '';
+  const createControlTitle = (await surfaceCreate.getAttribute('title').catch(() => '')) || '';
+  const createControlBox = await surfaceCreate.boundingBox().catch(() => null);
+  const createSurfaceText = controls.surface
+    ? (await controls.surface.innerText().catch(() => '')).trim().slice(0, 1500)
+    : '';
   const alertTexts = [];
   const alerts = page.locator('[role="alert"], [aria-live="assertive"]');
   const alertCount = Math.min(await alerts.count().catch(() => 0), 8);
@@ -683,6 +690,11 @@ async function createProjectExactHumanFlow(page, name) {
     createEnabled: postClickCreateEnabled,
     editorVisible: postClickEditorVisible,
     editorValue: postClickEditorValue,
+    createControlText,
+    createControlAria,
+    createControlTitle,
+    createControlBox,
+    createSurfaceText,
     alerts: alertTexts
   }));
 
