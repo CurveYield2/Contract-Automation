@@ -1,0 +1,59 @@
+name: cyvbWBTC Live Fork Stepper v1
+
+on:
+  push:
+    paths:
+      - 'packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/run-stepper-v1.mjs'
+      - 'packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/requests/request-stepper-v1.json'
+      - '.github/workflows/cyvbwbtc-live-fork-stepper-v1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stepper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Smart-Contracts
+          ref: 7978ea62c58f8efa49c91f37931cab267379e0ee
+          path: .smart-contracts
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --force
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - working-directory: .smart-contracts
+        run: forge install foundry-rs/forge-std --no-git
+      - name: Run live Katana Anvil strategy stepper
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf cyvbwbtc-live-fork-stepper-output-v1
+          node packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/run-stepper-v1.mjs \
+            --smart-contracts-root .smart-contracts \
+            --fork-url https://katana.drpc.org/ \
+            --output cyvbwbtc-live-fork-stepper-output-v1
+      - name: Show summary
+        if: always()
+        shell: bash
+        run: |
+          f=cyvbwbtc-live-fork-stepper-output-v1/CYVBWBTC_DEPLOYMENT_STEPPER_SUMMARY_v1.json
+          [ -f "$f" ] && cat "$f" || true
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyvbwbtc-live-fork-stepper-v1-${{ github.run_id }}
+          path: cyvbwbtc-live-fork-stepper-output-v1
+          if-no-files-found: warn
+          retention-days: 14
