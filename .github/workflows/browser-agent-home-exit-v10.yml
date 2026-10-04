@@ -218,24 +218,16 @@ jobs:
       - name: Publish browser monitor URL
         if: steps.request.outputs.interactive_view == 'true'
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          path="process/browser-agent-home-exit-v10/current-session-v10.json"
-          payload="$(jq -n \
-            --arg runId "$GITHUB_RUN_ID" \
-            --arg runUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --arg browserViewUrl "$BROWSER_VIEW_URL" \
-            --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{version:10,run_id:$runId,run_url:$runUrl,browser_view_url:$browserViewUrl,status:"AUTOMATION_RUNNING",updated_at:$updatedAt}')"
-          sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=main" --jq '.sha')"
-          content="$(printf '%s\n' "$payload" | base64 -w0)"
-          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$path" \
-            -f message="chore(browser): publish active v10 monitor URL" \
-            -f content="$content" \
-            -f sha="$sha" \
-            -f branch="main" >/dev/null
+          echo "::notice title=Browser Monitor::$BROWSER_VIEW_URL"
+          {
+            echo "### Live Browser Monitor"
+            echo ""
+            echo "$BROWSER_VIEW_URL"
+            echo ""
+            echo "If the browser hits human verification, the Playwright step will emit an INTERVENTION_REQUIRED warning with this same URL."
+          } >> "$GITHUB_STEP_SUMMARY"
           echo "Browser monitor: $BROWSER_VIEW_URL"
 
       - name: Run Playwright through home exit node
@@ -251,11 +243,7 @@ jobs:
           INTERACTIVE_VIEW_ENABLED: ${{ steps.request.outputs.interactive_view }}
           MANUAL_CHALLENGE_WAIT_MINUTES: ${{ steps.request.outputs.manual_wait }}
           BROWSER_VIEW_URL: ${{ env.BROWSER_VIEW_URL }}
-          GITHUB_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-          OPERATOR_STATUS_PATH: process/browser-agent-home-exit-v10/current-session-v10.json
         run: |
           set -euo pipefail
           export MANUAL_CHALLENGE_WAIT_MS=$((MANUAL_CHALLENGE_WAIT_MINUTES * 60000))
