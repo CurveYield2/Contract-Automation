@@ -101,14 +101,18 @@ test('A14/A16/A17 Medusa checked acceptance rejects zero tests, vacuity and miss
 
 test('A30 telemetry summary must exactly reconcile disjoint raw outcomes',()=>{
   const rows=[
-    {executionOutcome:'MINED_SUCCESS',semanticFamily:'ECONOMIC',positiveTransition:true},
-    {executionOutcome:'MINED_REVERT',semanticFamily:'ECONOMIC',positiveTransition:false},
-    {executionOutcome:'SIMULATED_REJECTION',semanticFamily:'AUTHORITY_CONFIG',positiveTransition:false},
-    {executionOutcome:'NOT_EXECUTED_ENCODING_OR_PLANNING',semanticFamily:'UNKNOWN',positiveTransition:false}
+    {runId:'r',callIndex:1,executionOutcome:'MINED_SUCCESS',semanticFamily:'ECONOMIC',positiveTransition:true,target:{qualifiedName:'A'},functionSignature:'x()',observations:{before:[],after:[]}},
+    {runId:'r',callIndex:2,executionOutcome:'MINED_REVERT',semanticFamily:'ECONOMIC',positiveTransition:false,target:{qualifiedName:'A'},functionSignature:'x()',observations:{before:[],after:[]}},
+    {runId:'r',callIndex:3,executionOutcome:'SIMULATED_REJECTION',semanticFamily:'AUTHORITY_CONFIG',positiveTransition:false,target:{qualifiedName:'B'},functionSignature:'y()',observations:{before:[],after:[]}},
+    {runId:'r',callIndex:4,executionOutcome:'NOT_EXECUTED_ENCODING_OR_PLANNING',semanticFamily:'UNKNOWN',positiveTransition:false,target:{qualifiedName:'B'},functionSignature:'z()',observations:{before:[],after:[]}}
   ];
-  const good={plannedActions:4,terminalActions:4,submittedActions:2,minedSuccess:1,minedRevert:1,simulatedRejection:1,notExecutedEncodingOrPlanning:1,positiveEconomicTransitions:1};
+  const good={runId:'r',calls:4,plannedActions:4,terminalActions:4,submittedActions:2,minedSuccess:1,successes:1,minedRevert:1,reverts:1,simulatedRejection:1,simulationInfrastructureError:0,submissionInfrastructureError:0,submittedOutcomeUnknown:0,notExecutedEncodingOrPlanning:1,errors:1,accountingActions:2,otherActions:2,positiveTransitions:1,positiveEconomicTransitions:1,observationReads:0,observationFailures:0,byContract:{A:2,B:2},byFunction:{'A::x()':2,'B::y()':1,'B::z()':1}};
   assert.equal(validateTelemetryCountersV2(good,rows).status,'PASS');
   assert.throws(()=>validateTelemetryCountersV2({...good,minedSuccess:2},rows));
+  const duplicate=structuredClone(rows);duplicate[3].callIndex=3;
+  assert.throws(()=>validateTelemetryCountersV2(good,duplicate),/duplicate telemetry callIndex/);
+  const missing=structuredClone(rows);missing[3].callIndex=5;
+  assert.throws(()=>validateTelemetryCountersV2(good,missing),/invalid or missing callIndex|missing telemetry callIndex/);
 });
 
 test('A31 legacy quantity-only PASS is retained as discovery-only and cannot satisfy v2 gates',()=>{
