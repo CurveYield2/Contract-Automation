@@ -682,6 +682,28 @@ async function createProjectExactHumanFlow(page, name) {
     y: finalCreateY,
     hit: finalHit
   }));
+
+  const createEvidenceDir = '/tmp/browser-project-create-evidence-v1';
+  await fs.mkdir(createEvidenceDir, { recursive: true });
+  await fs.writeFile(
+    path.join(createEvidenceDir, 'click-target-evidence-v1.json'),
+    JSON.stringify({
+      projectName: name,
+      pageUrl: page.url(),
+      clickCenter: { x: finalCreateX, y: finalCreateY },
+      createButtonBox: finalCreateBox,
+      hitTarget: finalHit
+    }, null, 2) + '\n'
+  );
+  await page.screenshot({
+    path: path.join(createEvidenceDir, '01-before-create-v1.png'),
+    fullPage: true
+  });
+  await surfaceCreate.screenshot({
+    path: path.join(createEvidenceDir, '02-create-button-target-v1.png')
+  });
+  console.log('[github-playwright-v10] project-flow=before-create-screenshots-saved');
+
   await page.mouse.move(finalCreateX, finalCreateY, { steps: 12 });
   await humanActionPause(page);
 
@@ -709,6 +731,19 @@ async function createProjectExactHumanFlow(page, name) {
   }
 
   await humanActionPause(page);
+
+  await page.screenshot({
+    path: path.join(createEvidenceDir, '03-immediately-after-create-sequence-v1.png'),
+    fullPage: true
+  });
+  console.log('[github-playwright-v10] project-flow=immediate-after-create-screenshot-saved');
+
+  await page.waitForTimeout(10000);
+  await page.screenshot({
+    path: path.join(createEvidenceDir, '04-ten-seconds-after-create-sequence-v1.png'),
+    fullPage: true
+  });
+  console.log('[github-playwright-v10] project-flow=ten-seconds-after-create-screenshot-saved');
 
   await page.waitForTimeout(1000);
   const postClickCreate = page.getByRole('button', { name: /^Create project$/i }).first();
