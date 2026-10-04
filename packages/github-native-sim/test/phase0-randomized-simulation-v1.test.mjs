@@ -197,7 +197,7 @@ test('Phase-0 telemetry emits five-minute progress heartbeats with live call cou
   const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
   assert.match(source,/\[phase0-telemetry\].*heartbeat every 300s/);
   assert.match(source,/\[phase0-telemetry\] heartbeat: run=/);
-  assert.match(source,/calls=\$\{stats\.calls\}\/\$\{PHASE0_TELEMETRY_CALLS_PER_RUN_V1\}/);
+  assert.match(source,/calls=\$\{stats\.calls\}\/\$\{callsPerRun\}/);
   assert.match(source,/clearInterval\(telemetryHeartbeat\)/);
 });
 
