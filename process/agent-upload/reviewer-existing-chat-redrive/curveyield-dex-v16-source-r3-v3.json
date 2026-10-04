@@ -1,0 +1,7 @@
+{
+  "schemaVersion": "curveyield-reviewer-existing-chat-redrive-v1",
+  "campaignId": "curveyield-dex-v16-source-r3",
+  "campaignName": "CurveYield DEX v16 Source r3",
+  "campaignPath": "campaigns/CurveYield DEX v16 Source r3",
+  "auditControllerRef": "main"
+}
