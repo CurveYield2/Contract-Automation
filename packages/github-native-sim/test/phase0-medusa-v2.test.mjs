@@ -53,5 +53,5 @@ test('A13/A17 router exposes explicit packet-declared property functions as targ
   assert.equal(router.properties.length,1);
   assert.equal(router.properties[0].category,'TARGET_BEHAVIOR');
   assert.equal(router.properties[0].targetSignature,'property_target_consistent()');
-  assert.match(router.source,/function property_p0_target_0\(\) external view returns\(bool\)/);
+  assert.match(router.source,/function property_p0_target_0\(\) external returns\(bool\)/);
 });
