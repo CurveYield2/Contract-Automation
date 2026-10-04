@@ -1191,7 +1191,23 @@ await hydrateBrowserContextFromRegistration();
 
 const { chromium } = await loadModules();
 
-if (mode === 'resume_existing' && (action === 'observe' || action === 'wake')) {
+if (mode === 'resume_existing' && action === 'observe') {
+  const failedResult = {
+    ok: false,
+    wakeId,
+    failures: [{
+      provider: 'normal-system-chrome-x11-phase1-fixed-point',
+      code: 'CHATGPT_PAGE_READS_DISABLED',
+      retryable: false,
+      error: 'Audit browser observation is disabled by policy; watchdog decisions must use controller/campaign state only.'
+    }]
+  };
+  await fs.writeFile(statePath, JSON.stringify(failedResult, null, 2) + '\n', 'utf8');
+  console.error('[audit-browser-policy] ChatGPT page reads are disabled.');
+  process.exit(1);
+}
+
+if (mode === 'resume_existing' && action === 'wake') {
   try {
     const result = await runNormalChromeExistingSession(chromium);
     console.log(JSON.stringify(result));
