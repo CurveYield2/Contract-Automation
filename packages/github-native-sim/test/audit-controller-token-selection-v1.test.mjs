@@ -125,9 +125,13 @@ test('Audit Source Initialization serializes revision allocation and never cance
   assert.match(workflow, /cancel-in-progress:\s*false/);
 });
 
-test('Audit Source Initialization resolves exactly one URL-only push request from the triggering commit', () => {
+test('Audit Source Initialization resolves exactly one five-input request from the triggering commit', () => {
   const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/audit-source-initialization-v1.yml'), 'utf8');
   assert.match(workflow, /gh api "repos\/\$GITHUB_REPOSITORY\/commits\/\$GITHUB_SHA"/);
-  assert.match(workflow, /Exactly one URL request file must change per trigger/);
+  assert.match(workflow, /Exactly one Audit Source Initialization request file must change per trigger/);
+  for (const field of ['source_url','agent_chat_1_url','agent_chat_2_url','agent_chat_3_url','agent_chat_4_url']) {
+    assert.match(workflow, new RegExp(field + ':'));
+  }
+  assert.match(workflow, /validate_chat_url/);
   assert.doesNotMatch(workflow, /git diff-tree/);
 });
