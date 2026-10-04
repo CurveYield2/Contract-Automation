@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-browser-home-exit-session-v11",
-  "run_id": "37167494609",
-  "run_url": "https://github.com/CurveYield2/Contract-Automation/actions/runs/37167494609",
-  "vnc": "100.125.231.86:5900",
-  "published_at": "2026-10-04T01:20:00Z",
+  "run_id": "37167881729",
+  "run_url": "https://github.com/CurveYield2/Contract-Automation/actions/runs/37167881729",
+  "vnc": "100.65.130.60:5900",
+  "published_at": "2026-10-04T01:24:41Z",
   "project_name": "HOME_EXIT_PROJECT_WAKE_VERIFY2",
   "chat_name": "VERIFY PROJECT WAKE SIGNAL 2",
   "status": "manual_session_ready"
