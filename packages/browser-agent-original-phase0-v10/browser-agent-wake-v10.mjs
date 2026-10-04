@@ -17,6 +17,51 @@ const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
+
+async function publishOperatorStatus(status, extra = {}) {
+  const token = env.GITHUB_TOKEN || '';
+  const repository = env.GITHUB_REPOSITORY || '';
+  const statusPath = env.OPERATOR_STATUS_PATH || '';
+  if (!token || !repository || !statusPath) return;
+
+  const api = 'https://api.github.com/repos/' + repository + '/contents/' + statusPath;
+  const headers = {
+    'Authorization': 'Bearer ' + token,
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'Content-Type': 'application/json'
+  };
+
+  let fileSha = '';
+  try {
+    const response = await fetch(api + '?ref=main', { headers });
+    if (response.ok) fileSha = (await response.json()).sha || '';
+  } catch {}
+
+  const payload = {
+    version: 10,
+    run_id: String(env.GITHUB_RUN_ID || ''),
+    run_url: env.GITHUB_SERVER_URL && repository && env.GITHUB_RUN_ID
+      ? env.GITHUB_SERVER_URL + '/' + repository + '/actions/runs/' + env.GITHUB_RUN_ID
+      : '',
+    browser_view_url: env.BROWSER_VIEW_URL || '',
+    status,
+    updated_at: new Date().toISOString(),
+    ...extra
+  };
+
+  const body = {
+    message: 'chore(browser): update v10 operator status',
+    content: Buffer.from(JSON.stringify(payload, null, 2) + '\n', 'utf8').toString('base64'),
+    branch: 'main'
+  };
+  if (fileSha) body.sha = fileSha;
+
+  try {
+    await fetch(api, { method: 'PUT', headers, body: JSON.stringify(body) });
+  } catch {}
+}
+
 function bool(v) { return String(v || '').toLowerCase() === 'true'; }
 
 async function importBrowserRuntimeModule(specifier) {
@@ -578,6 +623,7 @@ async function createProjectExactHumanFlow(page, name) {
 
   const composer = await ensureComposer(page);
   console.log('[github-playwright-v10] project-created-visible=' + JSON.stringify({ projectName: name, url: projectUrl }));
+  await publishOperatorStatus('PROJECT_URL_SAVED', { projectUrl });
   return { projectName: name, url: projectUrl, composer };
 }
 
@@ -652,11 +698,24 @@ async function waitForVisibleBrowserReady(page) {
     }));
 
     if (visible.humanChallenge) {
-      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected; aborting immediately');
-      error.code = 'BROWSER_CHALLENGE';
-      throw error;
+      await publishOperatorStatus('INTERVENTION_REQUIRED', {
+        stage: 'browser_ready',
+        message: 'Human verification is visible. Open browser_view_url, complete it manually, then wait for automation to resume.'
+      });
+      console.log('[github-playwright-v10] INTERVENTION_REQUIRED=' + JSON.stringify({
+        stage: 'browser_ready',
+        browserViewUrl: env.BROWSER_VIEW_URL || ''
+      }));
+      if (Date.now() >= deadline) {
+        throw new Error('Human verification was not cleared within the configured manual-verification window');
+      }
+      await page.waitForTimeout(5000);
+      continue;
     }
-    if (composer && !visible.loginPrompt && !visible.conversationUnavailable) return true;
+    if (composer && !visible.loginPrompt && !visible.conversationUnavailable) {
+      await publishOperatorStatus('AUTOMATION_RESUMED', { stage: 'browser_ready' });
+      return true;
+    }
     if (Date.now() >= deadline) {
       throw new Error('ChatGPT visible browser state did not become ready within the configured 5-minute wait');
     }
@@ -762,9 +821,16 @@ async function waitForDurableChatRoute(page, timeoutMs = 300000) {
     const bodyText = await page.locator('body').innerText().catch(() => '');
     const visible = visibleBrowserStateText(bodyText, title);
     if (visible.humanChallenge) {
-      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected while waiting for durable chat URL; aborting immediately');
-      error.code = 'BROWSER_CHALLENGE';
-      throw error;
+      await publishOperatorStatus('INTERVENTION_REQUIRED', {
+        stage: 'durable_chat_url',
+        message: 'Human verification is visible while the new chat URL is becoming durable. Open browser_view_url and complete it manually.'
+      });
+      console.log('[github-playwright-v10] INTERVENTION_REQUIRED=' + JSON.stringify({
+        stage: 'durable_chat_url',
+        browserViewUrl: env.BROWSER_VIEW_URL || ''
+      }));
+      await page.waitForTimeout(5000);
+      continue;
     }
 
     const current = page.url();
@@ -891,6 +957,7 @@ async function postWithVisibleVerification(page, message, composerOverride = nul
     chatUrl: route.url,
     projectScoped: route.projectScoped
   }));
+  await publishOperatorStatus('CHAT_URL_SAVED', { chatUrl: route.url, projectScoped: route.projectScoped });
 
   return {
     ...submitted,
