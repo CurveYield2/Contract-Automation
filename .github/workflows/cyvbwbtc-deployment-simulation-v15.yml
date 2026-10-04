@@ -1,0 +1,84 @@
+name: cyvbWBTC IPOR Native Live Fork v15
+
+on:
+  push:
+    paths:
+      - 'packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/run-v15.mjs'
+      - 'packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/requests/request-v15.json'
+      - '.github/workflows/cyvbwbtc-deployment-simulation-v15.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-fork:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact green Smart-Contracts candidate
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Smart-Contracts
+          ref: daeaa6c54cc51929d8ab0f961669a01970e8d1cf
+          path: .smart-contracts
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Contract-Automation simulation dependencies
+        run: npm ci --force
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Install forge-std in Smart-Contracts checkout
+        working-directory: .smart-contracts
+        run: forge install foundry-rs/forge-std --no-git
+
+      - name: Run cyvbUSDC then IPOR-native cyvbWBTC on live Katana Anvil fork
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf cyvbwbtc-ipor-native-live-fork-output-v15
+          node packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/run-v15.mjs \
+            --smart-contracts-root .smart-contracts \
+            --fork-url https://katana.drpc.org/ \
+            --output cyvbwbtc-ipor-native-live-fork-output-v15
+
+      - name: Show machine-readable summary
+        if: always()
+        shell: bash
+        run: |
+          summary=cyvbwbtc-ipor-native-live-fork-output-v15/CYVBWBTC_IPOR_NATIVE_LIVE_FORK_SUMMARY_v15.json
+          if [ -f "$summary" ]; then
+            cat "$summary"
+          else
+            echo "::error::cyvbWBTC live-fork summary missing"
+          fi
+
+      - name: Upload live-fork evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyvbwbtc-ipor-native-live-fork-v15-${{ github.run_id }}
+          path: cyvbwbtc-ipor-native-live-fork-output-v15
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Require full lifecycle PASS
+        shell: bash
+        run: |
+          jq -e '.status == "PASS"' \
+            cyvbwbtc-ipor-native-live-fork-output-v15/CYVBWBTC_IPOR_NATIVE_LIVE_FORK_SUMMARY_v15.json >/dev/null
