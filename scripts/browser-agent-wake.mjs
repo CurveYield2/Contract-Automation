@@ -135,12 +135,25 @@ async function snapshot(page) {
   ]);
   const assistant = page.locator('[data-message-author-role="assistant"]');
   const user = page.locator('[data-message-author-role="user"]');
-  const aCount = await assistant.count().catch(() => 0);
-  const uCount = await user.count().catch(() => 0);
+  let aCount = await assistant.count().catch(() => 0);
+  let uCount = await user.count().catch(() => 0);
   let last = '';
   if (aCount) last = await assistant.nth(aCount - 1).innerText().catch(() => '');
   const currentUrl = page.url();
   const bodyText = await page.locator('body').innerText().catch(() => '');
+
+  // Current ChatGPT UI variants do not always expose data-message-author-role.
+  // Fall back to the human-visible transcript labels used by the rendered UI.
+  const assistantLabelMatches = bodyText.match(/ChatGPT said:/gi) || [];
+  const userLabelMatches = bodyText.match(/You said:/gi) || [];
+  if (aCount === 0 && assistantLabelMatches.length) {
+    aCount = assistantLabelMatches.length;
+    const parts = bodyText.split(/ChatGPT said:/i);
+    last = String(parts[parts.length - 1] || '').split(/You said:/i)[0].trim();
+  }
+  if (uCount === 0 && userLabelMatches.length) {
+    uCount = userLabelMatches.length;
+  }
   const title = await page.title().catch(() => '');
   const conversationUnavailable =
     /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText);
@@ -165,7 +178,7 @@ async function snapshot(page) {
     pageTitle: title,
     mainDiagnostics,
     loadingText: /loading|opening chat|reconnecting|synchroniz/i.test(bodyText),
-    generating: !!stop,
+    generating: !!stop || /Stop generating/i.test(bodyText),
     composerVisible: !!composer,
     conversationUnavailable,
     loginPrompt,
