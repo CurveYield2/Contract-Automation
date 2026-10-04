@@ -226,7 +226,8 @@ function fileSha(file){return createHash('sha256').update(fs.readFileSync(file))
 function installMasterTransportProof(f,messagePurpose){
   const directory=readJson(path.join(f.root,f.dirRel));
   const pending=directory.pendingMasterReview;
-  const recordRel=path.posix.join(f.campaign,'work/master-review',pending.segmentId,'MASTER_REVIEW_TRANSPORT_PROOF_v1.json');
+  const proofName=messagePurpose==='REPAIR_VERIFICATION'?'MASTER_REVIEW_TRANSPORT_PROOF_REPAIR_VERIFICATION_v1.json':'MASTER_REVIEW_TRANSPORT_PROOF_INITIAL_v1.json';
+  const recordRel=path.posix.join(f.campaign,'work/master-review',pending.segmentId,proofName);
   const verifiedAt='2026-10-04T00:10:00Z';
   writeJson(path.join(f.root,recordRel),{
     schemaVersion:'curveyield-lite-master-review-transport-proof-v1',
