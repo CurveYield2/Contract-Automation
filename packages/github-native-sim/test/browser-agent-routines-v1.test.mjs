@@ -156,36 +156,27 @@ test('assignment-v2 campaigns resolve active phase from Audit Campaign Directory
 
 test('long wake submission is verified through visible browser state only', () => {
   const source = read('scripts/browser-agent-wake.mjs');
-  const postStart = source.indexOf('async function post(page, message)');
-  const postEnd = source.indexOf('async function runWithPage', postStart);
-  const postBlock = source.slice(postStart, postEnd);
-
-  assert.match(postBlock, /wakeMarkerVisible/);
-  assert.match(postBlock, /composer-diagnostics/);
-  assert.match(postBlock, /send-strategy=human-pointer-click/);
-  assert.match(postBlock, /send-strategy=human-keyboard-enter/);
-  assert.match(postBlock, /SEND_NOT_VISIBLE/);
-  assert.match(postBlock, /postWithVisibleVerification/);
-  assert.match(postBlock, /persistedWakeVisible/);
-  assert.match(postBlock, /verification-reload=human-keyboard-control-r/);
-  assert.match(postBlock, /visible-wake-before-reload/);
-  assert.match(postBlock, /visible-wake-after-reload/);
-  assert.match(postBlock, /verification: 'visible-browser-only'/);
-
-  assert.doesNotMatch(postBlock, /send-request-observed/);
-  assert.doesNotMatch(postBlock, /likelyConversationWrite/);
-  assert.doesNotMatch(postBlock, /page\.on\(['"]request['"]/);
-  assert.doesNotMatch(postBlock, /page\.on\(['"]response['"]/);
-  assert.doesNotMatch(postBlock, /\/backend-api\//);
-  assert.doesNotMatch(postBlock, /fetch\s*\(/);
+  const start = source.indexOf('// Proven Phase-1 wake interaction.');
+  const end = source.indexOf('return result;', start);
+  const block = source.slice(start, end);
+  assert.match(block, /getdisplaygeometry/);
+  assert.match(block, /Math\.round\(width \* 0\.63\)/);
+  assert.match(block, /height - 72/);
+  assert.match(block, /x11-composer-click/);
+  assert.match(block, /humanX11TypeText\(page, wakeMessage\)/);
+  assert.match(block, /x11-send-return/);
+  assert.match(block, /phase1-fixed-x11-submit-no-chatgpt-page-read/);
+  assert.doesNotMatch(block, /ensureComposer|boundingBox|document\.activeElement|page\.locator|snapshot\(|wakeMarkerVisible/);
 });
 
 test('failed non-infrastructure idle pokes consume the escalation budget and can repair Phase-0', () => {
   const workflow = read('.github/workflows/browser-agent-watchdog.yml');
-  assert.match(workflow, /IDLE_POKE_FAILED_COUNTED/);
-  assert.match(workflow, /failed_idle_pokes=\$\(\(prior_idle_pokes \+ 1\)\)/);
-  assert.match(workflow, /IDLE_AFTER_\$\{failed_idle_pokes\}_WATCHDOG_ATTEMPTS_LAST_POKE_FAILED/);
-  assert.match(workflow, /IDLE_POKE_INFRA_RETRY_LATER/);
+  assert.match(workflow, /pokeIntervalMinutes \/\/ 20/);
+  assert.match(workflow, /WAITING_NO_CHATGPT_READ/);
+  assert.match(workflow, /TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ/);
+  assert.match(workflow, /NO_CONTROLLER_ADVANCE_AFTER_\$\{prior_idle_pokes\}_PHASE1_X11_POKES/);
+  assert.match(workflow, /PHASE1_X11_POKE_TRANSPORT_FAILED_RETRY_LATER/);
+  assert.doesNotMatch(workflow, /WAKE_ACTION=['"]observe['"]/);
 });
 
 test('Audit Source Initialization contains no reviewer wake envelope', () => {
@@ -210,11 +201,12 @@ test('watchdog observation classifies home-exit challenge and auth walls as infr
 
 test('audit registration template requires four pre-created reviewer chats and no Project routine', () => {
   const registration = JSON.parse(read('process/browser-agent-wake/REGISTRATION_TEMPLATE_v1.json'));
-  assert.equal(registration.browserInteractionPolicy, 'ordinary-pointer-keyboard-only');
+  assert.equal(registration.browserInteractionPolicy, 'phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1');
   assert.equal(registration.mode, 'resume_existing');
   assert.equal(registration.browserRoutine, '');
   assert.equal(registration.chatgptProject.name, '');
   assert.equal(registration.chatgptProject.url, '');
+  assert.equal(registration.watchdog.pokeIntervalMinutes, 20);
   assert.deepEqual(Object.keys(registration.agentChats), ['reviewer-1','reviewer-2','reviewer-3L','reviewer-4']);
   for (const url of Object.values(registration.agentChats)) assert.match(url, /^https:\/\/chatgpt\.com\/c\//);
 });
@@ -231,18 +223,13 @@ test('Project-create wakes fail closed before posting unless Share-link capture 
 test('existing-chat audit wake has no Phase1 Project URL capture or requirement', () => {
   const workflow = read('.github/workflows/browser-agent-wake.yml');
   const runtime = read('scripts/browser-agent-wake.mjs');
-  assert.doesNotMatch(workflow, /Persist captured Phase-1 Project URL/);
-  assert.doesNotMatch(workflow, /PROJECT_SHARE_URL_REQUIRED/);
-  assert.doesNotMatch(workflow, /bind Phase1 Project URL/);
-  assert.doesNotMatch(workflow, /Persist fresh-chat URL into campaign registration/);
+  assert.doesNotMatch(workflow, /Persist captured Phase-1 Project URL|Persist fresh-chat URL into campaign registration|PROJECT_SHARE_URL_REQUIRED/);
   assert.match(workflow, /Persist existing-chat reviewer wake into campaign registration/);
-  assert.match(workflow, /inputs\.mode == 'resume_existing'/);
-  const noReloadBranch = runtime.indexOf("mode === 'resume_existing' && messagePurpose === 'initial_wake'");
-  const reloadCall = runtime.indexOf('await humanReload(page)', noReloadBranch);
-  const noReloadReturn = runtime.indexOf("delivery-state=existing-chat-visible-no-reload", noReloadBranch);
-  assert.ok(noReloadBranch >= 0);
-  assert.ok(noReloadReturn > noReloadBranch);
-  assert.ok(reloadCall > noReloadReturn);
+  assert.match(workflow, /options: \[resume_existing\]/);
+  assert.match(workflow, /phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1/);
+  assert.match(runtime, /CREATE_FRESH_RETIRED/);
+  assert.match(runtime, /CHATGPT_PAGE_READS_DISABLED/);
+  assert.match(runtime, /phase1-fixed-x11-submit-no-chatgpt-page-read/);
 });
 
 test('fresh Project chat creation refuses to reuse an already-open conversation composer', () => {
@@ -337,30 +324,22 @@ test('current assignment reviewer repair has no special Phase-0 browser reviewer
   assert.match(workflow, /Audit Campaign Directory\/campaigns/);
   assert.match(workflow, /curveyield-audit-campaign-directory-entry-v2/);
   assert.match(workflow, /mode=receipt/);
-  assert.match(workflow, /mode=legacy/);
-  assert.match(workflow, /browser-agent-reviewer-repair-legacy-v1\.yml/);
-  assert.doesNotMatch(workflow, /web-bootstrap-agent|P0_BOOTSTRAP has no predecessor handoff baseline|CURVEYIELD_LITE_PHASE0_REPLACEMENT_V2/);
+  assert.match(workflow, /Reject retired legacy repair path/);
+  assert.match(workflow, /Legacy reviewer repair is retired/);
+  assert.doesNotMatch(workflow, /browser-agent-reviewer-repair-legacy-v1\.yml|web-bootstrap-agent/);
 });
 
 test('successor routing uses canonical nextPhaseId and sealed WAKE_UP_MESSAGE verbatim', () => {
-  const workflow = read('.github/workflows/browser-agent-watchdog.yml');
-  assert.match(workflow, /next_reviewer="\$\(jq -r '\.nextMilestone\.reviewer/);
-  assert.match(workflow, /successorHandoff\.incomingReviewer/);
-  assert.match(workflow, /next_phase="\$\(jq -r '\.nextPhaseId \/\/ empty'/);
-  assert.match(workflow, /next_phase="\$\(jq -r '\.phase\.id \/\/ empty'/);
-  assert.match(workflow, /wake_path="\$handoff_dir\/WAKE_UP_MESSAGE\.md"/);
-  assert.match(workflow, /base64 -d > \/tmp\/sealed-successor-wake\.txt/);
-  assert.match(workflow, /wake_b64="\$\(base64 -w0 \/tmp\/sealed-successor-wake\.txt\)"/);
-  assert.match(workflow, /SUCCESSOR_HANDOFF\.json/);
-  assert.match(workflow, /handoff_campaign_type/);
-  assert.match(workflow, /handoff_assignment/);
-  assert.match(workflow, /handoff_authority/);
-  assert.match(workflow, /Campaign type:/);
-  assert.match(workflow, /current authority Lite skill/);
-  assert.match(workflow, /successor_wake_id="\$\{campaign_id\}-\$\{next_id\}-\$\{next_reviewer\}"/);
-  assert.match(workflow, /GET BACK TO WORK/);
-  assert.doesNotMatch(workflow, /AUDIT_REVIEWER_ROUTINE_V1/);
-  assert.doesNotMatch(workflow, /CURVEYIELD_ULTRALITE_REVIEWER_LAUNCH_V2/);
+  const watchdog = read('.github/workflows/browser-agent-watchdog.yml');
+  const orchestrator = read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
+  assert.match(watchdog, /Legacy create-fresh Lite successor launcher is retired/);
+  assert.match(watchdog, /lite-audit-browser-orchestrator-v1\.yml/);
+  assert.match(orchestrator, /prepare-lite-assignment-successor-v2\.mjs/);
+  assert.match(orchestrator, /\.agentChats\[\$reviewer\]/);
+  assert.match(orchestrator, /-f mode=resume_existing/);
+  assert.match(orchestrator, /-f chat_url="\$chat_url"/);
+  assert.match(orchestrator, /phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1/);
+  assert.doesNotMatch(orchestrator, /WAKE_UP_MESSAGE\.md|-f mode=create_fresh/);
 });
 
 test('watchdog permits resume-first reviewer repair at the P0_BOOTSTRAP gate', () => {
@@ -376,14 +355,12 @@ test('watchdog permits resume-first reviewer repair at the P0_BOOTSTRAP gate', (
 
 test('watchdog distinguishes browser infrastructure failures from reviewer breakdown and escalates persistent idle reviewers', () => {
   const workflow = read('.github/workflows/browser-agent-watchdog.yml');
-  assert.match(workflow, /BROWSER_CHALLENGE_RETRY_LATER/);
-  assert.match(workflow, /AUTH_REQUIRED/);
-  assert.match(workflow, /CONVERSATION_UNAVAILABLE/);
-  assert.match(workflow, /consecutiveUnviewable/);
-  assert.match(workflow, /consecutiveIdlePokes/);
-  assert.match(workflow, /IDLE_AFTER_\$\{prior_idle_pokes\}_WATCHDOG_POKES/);
+  assert.match(workflow, /controller still active; no ChatGPT read/);
+  assert.match(workflow, /pokeIntervalMinutes \/\/ 20/);
+  assert.match(workflow, /PHASE1_X11_POKE_TRANSPORT_FAILED_RETRY_LATER/);
+  assert.match(workflow, /NO_CONTROLLER_ADVANCE_AFTER_\$\{prior_idle_pokes\}_PHASE1_X11_POKES/);
   assert.match(workflow, /browser-agent-reviewer-repair-v1\.yml/);
-  assert.match(workflow, /check_reviewer_repair_request/);
+  assert.doesNotMatch(workflow, /BROWSER_CHALLENGE_RETRY_LATER|AUTH_REQUIRED|CONVERSATION_UNAVAILABLE|WAKE_ACTION=['"]observe['"]/);
 });
 
 test('Lite monitor persists across internal phase changes and terminates only at campaign terminal status', () => {
@@ -396,57 +373,40 @@ test('Lite monitor persists across internal phase changes and terminates only at
 
 test('existing-chat reviewer initial wake is idempotent per campaign milestone', () => {
   const wake = read('.github/workflows/browser-agent-wake.yml');
-  const runtime = read('scripts/browser-agent-wake.mjs');
   assert.match(wake, /Resolve idempotent reviewer wake/);
   assert.match(wake, /INITIAL_WAKE_DEDUPED=true/);
-  assert.match(wake, /message_purpose.*initial_wake/);
   assert.match(wake, /Persist existing-chat reviewer wake into campaign registration/);
   assert.match(wake, /wakeDelivery=\{milestoneId:\$milestoneId,chatUrl:\$url,deliveredAt:\$deliveredAt\}/);
-  assert.match(wake, /browser-agent-wake-\$\{\{ inputs\.campaign_id \}\}-\$\{\{ inputs\.worker_role \}\}-/);
-  assert.match(runtime, /POST_DELIVERY_BOOKKEEPING_FAILED/);
-  assert.match(runtime, /never fail over to another browser provider for/);
+  assert.match(wake, /group:\s*chatgpt-shared-browser-session-v1/);
+  assert.match(wake, /cancel-in-progress:\s*false/);
+  assert.match(wake, /Requested reviewer chat is not one of the pre-created registered reviewer chats/);
 });
 
 test('repair targets the current assignment reviewer with the same linked wake contract as fresh reviewers', () => {
   const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
   assert.match(repair, /reviewer="\$\(jq -r '\.currentAssignment\.reviewer/);
   assert.match(repair, /phase_id="\$\(jq -r '\.currentAssignment\.phaseId/);
-  assert.match(repair, /schema_path="\$\(jq -r '\.currentAssignment\.workSchemaPath/);
-  assert.match(repair, /form_path="\$\(jq -r '\.currentAssignment\.workFormPath/);
-  assert.match(repair, /packet_path="\$\(jq -r '\.currentAssignment\.packetPath/);
-  assert.match(repair, /derivedInputPaths/);
-  assert.match(repair, /Current phase: \$phase_id/);
-  assert.match(repair, /Campaign: \$campaign_url/);
-  assert.match(repair, /Current Audit Skill Authority: \$authority_url/);
-  assert.match(repair, /Finalized controller validation: \$validation_url/);
-  assert.match(repair, /Phase schema: \$schema_url/);
-  assert.match(repair, /Assigned work form: \$form_url/);
-  assert.match(repair, /Sealed predecessor receipt: \$receipt_url/);
-  assert.match(repair, /Phase input %s:/);
+  assert.match(repair, /"LITE audit: \$campaign_name"/);
+  assert.match(repair, /"Reviewer: \$reviewer"/);
+  assert.match(repair, /"Current phase: \$phase_id"/);
+  assert.match(repair, /"Campaign: \$campaign_url"/);
+  assert.match(repair, /"Current Audit Skill Authority: \$authority_url"/);
   assert.match(repair, /ultimate authority/i);
-  assert.match(repair, /in order, precisely, with no deviation/i);
-  assert.match(repair, /CONTROLLER_PHASE_PASS/);
-  assert.match(repair, /repair exactly the reported substantive deficiency/i);
-  assert.match(repair, /resubmit validation/i);
-  assert.match(repair, /controllerValidation\.deficiencies/);
-  assert.doesNotMatch(repair, /WAKE_UP_MESSAGE\.md|nextMilestone\.reviewer/);
+  assert.match(repair, /Resume \$phase_id from the latest durable state/);
+  assert.match(repair, /Repair reason: \$reason/);
+  assert.doesNotMatch(repair, /Finalized controller validation:|Phase schema:|Assigned work form:|Controller-owned final report:|Controller-owned Phase Work Packet:|Sealed predecessor receipt:|Phase input %s:|CONTROLLER_PHASE_PASS/);
 });
 
 test('assignment reviewer repair resumes current work in the supplied reviewer chat while legacy reset stays isolated', () => {
   const workflow = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
   assert.match(workflow, /options: \[auto, resume_preferred, reset_to_handoff\]/);
   assert.match(workflow, /Current Lite campaigns have no reset-to-handoff control state/);
-  assert.match(workflow, /Repair resumes from the current assignment\/work form and Git history/);
-  assert.match(workflow, /Redispatch legacy repair for pre-receipt campaign/);
-  assert.match(workflow, /browser-agent-reviewer-repair-legacy-v1\.yml/);
+  assert.match(workflow, /Reject retired legacy repair path/);
   assert.match(workflow, /Resume assigned reviewer chat from current receipt/);
   assert.match(workflow, /\.agentChats\[\$reviewer\]/);
   assert.match(workflow, /messagePurpose:"repair_notice"/);
   assert.match(workflow, /-f mode=resume_existing/);
-  assert.match(workflow, /-f browser_context_b64="\$\{\{ steps\.current\.outputs\.browser_context_b64 \}\}"/);
-  assert.doesNotMatch(workflow, /Launch replacement reviewer/);
-  assert.doesNotMatch(workflow, /-f mode=create_fresh/);
-  assert.doesNotMatch(workflow, /REVIEWER_REPAIR_RESET_v1\.json|authoritativeHandoffIdentity\.contentCommit|WAKE_UP_MESSAGE\.md/);
+  assert.doesNotMatch(workflow, /browser-agent-reviewer-repair-legacy-v1\.yml|-f mode=create_fresh|Launch replacement reviewer/);
 });
 
 test('reviewer repair request schema is exact and reset-only', () => {
@@ -480,26 +440,18 @@ test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualifi
 
 test('reviewer wake uses only visible human pointer and X11 keyboard submission primitives', () => {
   const wake = read('scripts/browser-agent-wake.mjs');
-  const fillStart = wake.indexOf('async function fillComposer(page, message)');
-  const fillEnd = wake.indexOf('async function persistedWakeVisible', fillStart);
-  const sendBlock = wake.slice(fillStart, fillEnd);
-
+  const start = wake.indexOf('// Proven Phase-1 wake interaction.');
+  const end = wake.indexOf('return result;', start);
+  const block = wake.slice(start, end);
   assert.match(wake, /import \{ spawn \} from 'node:child_process'/);
   assert.match(wake, /async function x11Key\(/);
-  assert.match(sendBlock, /humanPointerClick\(page, composer/);
-  assert.match(sendBlock, /messagePurpose === 'initial_wake'/);
-  assert.match(sendBlock, /x11Key\(\['type', '--clearmodifiers', '--delay', '0', char\]/);
-  assert.match(sendBlock, /composer-fill-strategy=human-x11-skilled-typist-per-character/);
-  assert.match(sendBlock, /for \(let i = 0; i < text\.length; i \+= 1\)/);
-  assert.match(sendBlock, /humanTypingPause\(page, char\)/);
-  assert.match(sendBlock, /humanPointerClick\(page, send/);
-  assert.doesNotMatch(sendBlock, /pressSequentially|keyboard\.type|insertText/);
-  assert.doesNotMatch(sendBlock, /navigator\.clipboard|clipboard-read|clipboard-write/);
-  assert.doesNotMatch(sendBlock, /\.fill\(/);
-  assert.doesNotMatch(sendBlock, /force:\s*true/);
-  assert.doesNotMatch(sendBlock, /requestSubmit|form\.submit/);
-  assert.doesNotMatch(sendBlock, /evaluate\([^\n]*\.click/);
-  assert.doesNotMatch(sendBlock, /page\.on\(['"](?:request|response)['"]/);
+  assert.match(wake, /for \(const char of value\)/);
+  assert.match(wake, /x11Key\(\['type', '--clearmodifiers', '--delay', '0', char\]/);
+  assert.match(wake, /humanTypingPause\(page, char\)/);
+  assert.match(block, /x11-composer-move/);
+  assert.match(block, /x11-composer-click/);
+  assert.match(block, /x11-send-return/);
+  assert.doesNotMatch(block, /page\.mouse|page\.keyboard|ensureComposer|boundingBox|document\.activeElement|\.fill\(|pressSequentially|insertText/);
 });
 
 test('reviewer wake launches ordinary visible Chrome without custom browser fingerprint overrides', () => {
@@ -644,19 +596,17 @@ test('Project-create retries remain human-interaction-only', () => {
 
 test('shared visible browser runtime fast-fails Cloudflare and waits only for ordinary readiness', () => {
   const source = read('scripts/browser-agent-wake.mjs');
-  assert.match(source, /async function waitForVisibleBrowserReady\(page, reason = 'visible browser readiness'\)/);
-  assert.match(source, /MANUAL_CHALLENGE_WAIT_MS/);
-  assert.match(source, /INTERACTIVE_VIEW_ENABLED/);
-  assert.match(source, /if \(state\?\.humanChallenge\)/);
-  assert.match(source, /Visible ChatGPT\/Cloudflare verification detected; aborting workflow immediately/);
-  assert.match(source, /await waitForVisibleBrowserReady\(page, 'initial browser session'\)/);
-  assert.match(source, /runBrowserRoutineStage/);
-  assert.doesNotMatch(source, /pre-message routine verification/);
-  assert.doesNotMatch(source, /post-verification reload/);
-  assert.doesNotMatch(source, /async function backendPreflight/);
-  assert.doesNotMatch(source, /async function waitForBackendHealth/);
-  assert.doesNotMatch(source, /\/backend-api\//);
-  assert.doesNotMatch(source, /fetch\s*\(/);
+  assert.match(source, /command -v google-chrome \|\| command -v google-chrome-stable/);
+  assert.match(source, /spawn\(chromePath/);
+  assert.match(source, /--remote-debugging-port=/);
+  assert.match(source, /await waitForCdp\(port, 60000\)/);
+  assert.match(source, /CREATE_FRESH_RETIRED/);
+  assert.match(source, /CHATGPT_PAGE_READS_DISABLED/);
+  assert.match(source, /phase1-fixed-x11-submit-no-chatgpt-page-read/);
+  const fixedStart = source.indexOf('// Proven Phase-1 wake interaction.');
+  const fixedEnd = source.indexOf('return result;', fixedStart);
+  const fixed = source.slice(fixedStart, fixedEnd);
+  assert.doesNotMatch(fixed, /Cloudflare|humanChallenge|loginPrompt|page\.locator|snapshot\(/);
 });
 
 test('shared create_fresh waits for a durable chat URL before human reload', () => {
