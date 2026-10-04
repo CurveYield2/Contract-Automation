@@ -1,0 +1,9 @@
+{
+  "schemaVersion":"curveyield-cyvbwbtc-deployment-simulation-request-v5",
+  "smartContractsRepository":"CurveYield2/Smart-Contracts",
+  "smartContractsCommit":"7514dbf326d7035a7bc64c0827c4b10ff515410d",
+  "chainId":747474,
+  "forkRpc":"https://katana.drpc.org/",
+  "runner":"packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/run-v5.mjs",
+  "productionBroadcast":false
+}
