@@ -128,10 +128,15 @@ async function snapshot(page) {
     'button:has-text("Stop generating")'
   ]);
   const composer = await firstVisible(page, [
-    '#prompt-textarea',
-    'textarea[placeholder*="Message"]',
-    '[contenteditable="true"][data-lexical-editor="true"]',
-    '[contenteditable="true"]'
+    'main #prompt-textarea',
+    'main textarea[placeholder*="Message"]',
+    'main textarea',
+    'main [contenteditable="true"][data-lexical-editor="true"]',
+    'main [contenteditable="true"]',
+    'main [contenteditable]:not([contenteditable="false"])',
+    'main [role="textbox"]',
+    'main .ProseMirror',
+    'main [data-placeholder*="Message" i]'
   ]);
   const assistant = page.locator('[data-message-author-role="assistant"]');
   const user = page.locator('[data-message-author-role="user"]');
@@ -200,10 +205,15 @@ async function snapshot(page) {
 
 async function ensureComposer(page) {
   const selectors = [
-    '#prompt-textarea',
-    'textarea[placeholder*="Message"]',
-    '[contenteditable="true"][data-lexical-editor="true"]',
-    '[contenteditable="true"]'
+    'main #prompt-textarea',
+    'main textarea[placeholder*="Message"]',
+    'main textarea',
+    'main [contenteditable="true"][data-lexical-editor="true"]',
+    'main [contenteditable="true"]',
+    'main [contenteditable]:not([contenteditable="false"])',
+    'main [role="textbox"]',
+    'main .ProseMirror',
+    'main [data-placeholder*="Message" i]'
   ];
 
   const deadline = Date.now() + 30000;
@@ -444,8 +454,19 @@ async function runNormalChromeExistingSession(chromium) {
 
     let before = await snapshot(page);
     if (action === 'observe') {
-      await page.waitForTimeout(4000);
-      const afterObserve = await snapshot(page);
+      const hydrateDeadline = Date.now() + 30000;
+      let afterObserve = before;
+      while (Date.now() < hydrateDeadline) {
+        if (
+          afterObserve.chatViewable ||
+          afterObserve.generating ||
+          afterObserve.loginPrompt ||
+          afterObserve.humanChallenge ||
+          afterObserve.conversationUnavailable
+        ) break;
+        await page.waitForTimeout(2000);
+        afterObserve = await snapshot(page);
+      }
       const result = {
         ok: true,
         provider: 'normal-system-chrome-x11',
