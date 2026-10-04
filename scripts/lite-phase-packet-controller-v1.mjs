@@ -526,10 +526,9 @@ packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],contr
 const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now});
 if(sealedRework){
   const invalid=readJson(requiredFile(root,controls.invalidRel,'evidence invalidation matrix'));
-  const events=invalid.events??invalid.invalidationEvents??[];
-  const event=events.find(x=>x?.eventId==='EIM-013'||x?.id==='EIM-013');
-  if(!event)throw new Error('EIM-013 disappeared before sealed rework commit');
-  event.status='RESOLVED_BY_PHASE_1_REVISION_3';event.resolvedAt=now;event.resolutionReceiptPath='PENDING_PHASE_1_REVISION_3_RECEIPT';event.resolutionScopeId=sealedRework.request.humanAuthorization.scopeId;
+  const events=invalid.events??(invalid.events=[]);
+  if(events.some(x=>x?.eventId==='INV-P1-REWORK-002'||x?.id==='INV-P1-REWORK-002'))throw new Error('INV-P1-REWORK-002 already exists');
+  events.push({eventId:'INV-P1-REWORK-002',ruleId:'EIM-013',status:'RESOLVED_BY_PHASE_1_REVISION_3',priorState:'SEALED_REVISION_2',fromRevision:2,toRevision:3,sourceSha256:directory.sourceSha256,scopeId:sealedRework.request.humanAuthorization.scopeId,authorizationRecordPath:sealedRework.request.humanAuthorization.recordPath,qualityReviewPath:sealedRework.request.qualityReview.path,resolutionReceiptPath:'PENDING_PHASE_1_REVISION_3_RECEIPT',resolvedAt:now});
   writeJson(repoFile(root,controls.invalidRel),invalid);
 }
 writeJson(repoFile(root,canonicalRel),canonical);
@@ -626,10 +625,10 @@ const receipt=receiptLib.createLitePhaseReceiptV1({
 });
 receipt.sealedAt=now;receipt.updatedAt=now;
 if(sealedRework){
-  receipt.rework={schemaVersion:'curveyield-lite-sealed-phase-rework-v1',fromRevision:2,toRevision:3,scopeId:sealedRework.request.humanAuthorization.scopeId,requestPath:a['rework-request-path'],qualityReviewPath:sealedRework.request.qualityReview.path,evidenceInvalidationEvent:'EIM-013',successorDeliveryHeld:true};
+  receipt.rework={schemaVersion:'curveyield-lite-sealed-phase-rework-v1',fromRevision:2,toRevision:3,scopeId:sealedRework.request.humanAuthorization.scopeId,requestPath:a['rework-request-path'],qualityReviewPath:sealedRework.request.qualityReview.path,evidenceInvalidationEvent:'INV-P1-REWORK-002',evidenceInvalidationRule:'EIM-013',successorDeliveryHeld:true};
   const invalid=readJson(requiredFile(root,controls.invalidRel,'evidence invalidation matrix'));
   const events=invalid.events??invalid.invalidationEvents??[];
-  const event=events.find(x=>x?.eventId==='EIM-013'||x?.id==='EIM-013');
+  const event=events.find(x=>x?.eventId==='INV-P1-REWORK-002'||x?.id==='INV-P1-REWORK-002');
   if(event)event.resolutionReceiptPath=receiptRel;
   writeJson(repoFile(root,controls.invalidRel),invalid);
 }
