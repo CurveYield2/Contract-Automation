@@ -564,16 +564,26 @@ async function createProjectExactHumanFlow(page, name) {
   const beforeCreateUrl = page.url();
   await humanPointerClick(page, enabledCreate);
 
-  // Successful Project creation automatically navigates the browser to the new
-  // Project URL. A short human-scale wait is sufficient; capture that URL directly.
-  await page.waitForTimeout(randomDelayMs(3000, 5000));
+  // Project creation can visibly complete before the SPA route is reflected by
+  // page.url(). Keep watching the browser route for the real Project URL instead
+  // of treating a short delay as a failed Create click.
+  const projectUrlDeadline = Date.now() + 30000;
   let projectUrl = page.url();
-  if (projectUrl === beforeCreateUrl) {
-    await page.waitForTimeout(randomDelayMs(2000, 3500));
+  while (Date.now() < projectUrlDeadline) {
+    if (
+      projectUrl !== beforeCreateUrl &&
+      /^https:\/\/chatgpt\.com\/g\/g-p-[^/]+\/project(?:[?#].*)?$/.test(projectUrl)
+    ) {
+      break;
+    }
+    await page.waitForTimeout(500);
     projectUrl = page.url();
   }
-  if (projectUrl === beforeCreateUrl) {
-    throw new Error('Create project did not navigate to a new Project URL after a short visible wait');
+  if (
+    projectUrl === beforeCreateUrl ||
+    !/^https:\/\/chatgpt\.com\/g\/g-p-[^/]+\/project(?:[?#].*)?$/.test(projectUrl)
+  ) {
+    throw new Error('Created Project did not expose its Project URL within 30 seconds after the visible Create click');
   }
 
   const composer = await ensureComposer(page);
