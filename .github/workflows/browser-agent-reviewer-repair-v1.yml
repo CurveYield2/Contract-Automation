@@ -139,6 +139,8 @@ jobs:
                 "The Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority." \
                 "" \
                 "Resume $phase_id from the latest durable state. Do not restart completed work or redo sealed earlier phases." \
+                "If controller validation reported deficiencies, repair exactly the reported substantive deficiency and resubmit controller validation; do not seal or advance." \
+                "$feedback" \
                 "" \
                 "Repair reason: $reason"
             } > /tmp/replacement-wake.txt
