@@ -233,7 +233,7 @@ test('v10 Create-project modal has visible-label fallbacks and a short render wa
   const start = source.indexOf('async function createProjectExactHumanFlow');
   const end = source.indexOf('\nasync function fillComposer', start);
   const block = source.slice(start, end);
-  assert.match(block, /randomDelayMs\(12000, 20000\)/);
+  assert.match(block, /randomDelayMs\(2500, 4500\)/);
 });
 
 test('v10 waits for the visible Create project button to become enabled after typing', () => {
@@ -453,7 +453,7 @@ test('saved Project direct recovery retries only the exact URL after transient h
   assert.match(block, /const settleDeadline = Date\.now\(\) \+ 20000/);
   assert.match(block, /findProjectLandingComposer\(page, name\)/);
   assert.match(block, /project-saved-url-retry=/);
-  assert.match(block, /randomDelayMs\(2500, 4500\)/);
+  assert.match(block, /randomDelayMs\(12000, 20000\)/);
   assert.match(block, /after human direct retries/);
   assert.doesNotMatch(block, /recoverExistingProjectExactHumanFlow|ensureSidebarOpenForProject|mouse\.wheel/);
 });
