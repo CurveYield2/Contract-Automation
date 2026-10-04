@@ -75,8 +75,10 @@ async function snapshot(page) {
   const bodyText = await page.locator('body').innerText().catch(() => '');
   const conversationUnavailable =
     /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText);
+  const route = chatRouteInfo(currentUrl);
   const chatViewable =
-    /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(currentUrl) &&
+    route.isChat &&
+    !route.isLocal &&
     !!composer &&
     !conversationUnavailable;
   return {
@@ -916,66 +918,42 @@ async function waitForVisibleBrowserReady(page) {
 function chatRouteInfo(value) {
   try {
     const url = new URL(value);
-    if (url.origin !== 'https://chatgpt.com') return { isChat: false, isLocal: false, id: '' };
-    const match = url.pathname.match(/^\/c\/([^/]+)\/?$/);
-    if (!match) return { isChat: false, isLocal: false, id: '' };
-    const id = decodeURIComponent(match[1]);
+    if (url.origin !== 'https://chatgpt.com') return { isChat: false, isLocal: false, id: '', projectScoped: false };
+    const rootMatch = url.pathname.match(/^\/c\/([^/]+)\/?$/);
+    const projectMatch = url.pathname.match(/^\/g\/(g-p-[^/]+)\/c\/([^/]+)\/?$/);
+    const id = decodeURIComponent(rootMatch?.[1] || projectMatch?.[2] || '');
     return {
       isChat: Boolean(id),
       isLocal: id.startsWith('local-chatgpt:'),
-      id
+      id,
+      projectScoped: Boolean(projectMatch),
+      projectId: projectMatch?.[1] || ''
     };
   } catch {
-    return { isChat: false, isLocal: false, id: '' };
+    return { isChat: false, isLocal: false, id: '', projectScoped: false };
   }
 }
 
 async function visibleWakePresent(page, message, timeoutMs = 90000) {
   const deadline = Date.now() + timeoutMs;
-  let last = null;
+  const marker = String(message || '').replace(/\s+/g, ' ').trim().slice(0, 180);
 
   while (Date.now() < deadline) {
     const users = page.locator('[data-message-author-role="user"]');
     const userCount = await users.count().catch(() => 0);
     for (let i = Math.max(0, userCount - 8); i < userCount; i += 1) {
-      const text = await users.nth(i).innerText().catch(() => '');
-      if (text.includes(message)) {
+      const text = (await users.nth(i).innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+      if (marker && text.includes(marker)) {
         return { visible: true, userCount, method: 'user-role' };
       }
     }
-
-    const composer = await firstVisible(page, [
-      '#prompt-textarea',
-      'textarea[placeholder*="Message"]',
-      '[contenteditable="true"][data-lexical-editor="true"]',
-      '[contenteditable="true"]'
-    ]);
-    const composerText = composer
-      ? await composer.inputValue().catch(async () => await composer.innerText().catch(() => ''))
-      : '';
-    const bodyText = await page.locator('body').innerText().catch(() => '');
-    const bodyHasMessage = bodyText.includes(message);
-    const composerHasMessage = composerText.includes(message);
-
-    last = {
-      visible: bodyHasMessage && !composerHasMessage,
-      userCount,
-      method: bodyHasMessage && !composerHasMessage ? 'rendered-page-text' : 'not-visible',
-      bodyHasMessage,
-      composerHasMessage,
-      url: page.url()
-    };
-    if (last.visible) return last;
-
     await page.waitForTimeout(750);
   }
 
-  return last || {
+  return {
     visible: false,
-    userCount: 0,
+    userCount: await page.locator('[data-message-author-role="user"]').count().catch(() => 0),
     method: 'not-visible',
-    bodyHasMessage: false,
-    composerHasMessage: false,
     url: page.url()
   };
 }
@@ -1156,7 +1134,10 @@ async function runWithPage(providerName, connect) {
   const { browser, context, page, close } = await connect();
   try {
     if (mode === 'resume_existing') {
-      if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(requestedUrl)) throw new Error('resume_existing requires a chatgpt.com/c/... URL');
+      const requestedRoute = chatRouteInfo(requestedUrl);
+      if (!requestedRoute.isChat || requestedRoute.isLocal) {
+        throw new Error('resume_existing requires a durable root or Project-scoped ChatGPT conversation URL');
+      }
       await page.goto(requestedUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     } else if (mode === 'create_fresh') {
       await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
