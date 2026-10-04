@@ -29,7 +29,7 @@ const logicalAuthorityHome=predecessor.authority?.homepagePath??assignment.workS
 let linkedAuthorityHome=logicalAuthorityHome;
 const legacyLogical='Audit Skill - Current Authority/Audit_Litemode_v10.3/SKILL.md';
 if(logicalAuthorityHome===legacyLogical&&!fs.existsSync(repoFile(root,legacyLogical)))linkedAuthorityHome='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3/SKILL.md';
-requiredFile(root,logicalAuthorityHome,'bound successor authority homepage');
+if(predecessor.authority?.homepagePath)requiredFile(root,logicalAuthorityHome,'bound successor authority homepage');
 const campaignUrl=controllerTreeUrl(directory.workspacePath);
 const requestPath='process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json';
 const artifactLines=[
