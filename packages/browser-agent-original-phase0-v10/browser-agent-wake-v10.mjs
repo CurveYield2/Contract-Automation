@@ -4,6 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { execFile as execFileCallback } from 'node:child_process';
+import { promisify } from 'node:util';
 import { validateStorageState } from './browser-session-state-v1.mjs';
 
 const env = process.env;
@@ -17,6 +19,7 @@ const requestedProjectUrl = env.PROJECT_URL || '';
 const recoveryChatTitle = env.RECOVERY_CHAT_TITLE || '';
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 const chatStatePath = env.CHAT_STATE_PATH || '/tmp/browser-agent-home-exit-v10-chat-state-v1.json';
+const execFile = promisify(execFileCallback);
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
@@ -312,26 +315,53 @@ async function humanTypeInto(page, locator, text) {
   await humanActionPause(page);
 }
 
+async function visibleChromeWindowId() {
+  const { stdout } = await execFile('xdotool', ['search', '--onlyvisible', '--class', 'google-chrome']);
+  const ids = String(stdout || '').trim().split(/\s+/).filter(Boolean);
+  if (!ids.length) {
+    throw new Error('Visible headed Chrome window was not found for human address navigation');
+  }
+  return ids[ids.length - 1];
+}
+
+async function humanOsKey(page, windowId, key) {
+  await humanActionPause(page);
+  await execFile('xdotool', ['windowfocus', '--sync', windowId]);
+  await humanActionPause(page);
+  await execFile('xdotool', ['key', '--window', windowId, '--clearmodifiers', key]);
+  await humanActionPause(page);
+}
+
 async function humanAddressNavigate(page, targetUrl) {
   const parsed = new URL(targetUrl);
   if (parsed.origin !== 'https://chatgpt.com') {
     throw new Error('Human address navigation only accepts chatgpt.com URLs');
   }
 
-  // Use the visible browser's normal address-bar keyboard path. Do not use a
-  // page-context redirect, backend call, or synthetic DOM navigation.
+  // Playwright page.keyboard targets the webpage renderer and cannot reliably
+  // focus Chrome's omnibox. Use real X11 keyboard events against the visible
+  // headed Chrome window: focus window -> Ctrl+L -> type URL -> Enter.
+  const windowId = await visibleChromeWindowId();
+  await humanOsKey(page, windowId, 'ctrl+l');
+
+  const perCharacterDelayMs = randomDelayMs(200, 400);
+  await execFile('xdotool', [
+    'type',
+    '--window', windowId,
+    '--clearmodifiers',
+    '--delay', String(perCharacterDelayMs),
+    String(targetUrl)
+  ]);
   await humanActionPause(page);
-  await page.keyboard.press('Control+L');
-  await humanActionPause(page);
-  for (const char of String(targetUrl)) {
-    await page.keyboard.type(char);
-    await humanTypingPause(page);
-  }
-  await humanActionPause(page);
-  await page.keyboard.press('Enter');
+  await execFile('xdotool', ['key', '--window', windowId, '--clearmodifiers', 'Return']);
+
   await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
   await page.waitForTimeout(randomDelayMs(3000, 5000));
-  console.log('[github-playwright-v10] human-address-navigation=' + JSON.stringify({ targetUrl }));
+  console.log('[github-playwright-v10] human-address-navigation=' + JSON.stringify({
+    targetUrl,
+    method: 'visible-x11-keyboard',
+    perCharacterDelayMs
+  }));
 }
 
 async function findVisibleSidebarSurface(page) {
