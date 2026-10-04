@@ -1097,6 +1097,42 @@ ${body.join('\n')}
   return{...plan,properties,structs:state.structs,source};
 }
 function maxMedusaCalls(text){let max=0;for(const m of String(text).matchAll(/calls:\s*([0-9][0-9,]*)/gi))max=Math.max(max,Number(m[1].replaceAll(',','')));return max;}
+function collectMethodSignaturesV2(value,out=[]){
+  if(Array.isArray(value)){for(const x of value)collectMethodSignaturesV2(x,out);return out;}
+  if(!value||typeof value!=='object')return out;
+  if(typeof value.methodSignature==='string')out.push(value.methodSignature);
+  for(const x of Object.values(value))collectMethodSignaturesV2(x,out);
+  return out;
+}
+async function medusaCorpusDispatchMetricsV2({corpusDest,routerRows}){
+  const byWrapper=new Map(routerRows.map(row=>[row.wrapperName,{
+    economic:row.selected?.semanticFamily==='ECONOMIC'||row.selected?.accounting===true,
+    logicalKey:`${row.target?.logicalQualifiedName??row.target?.qualifiedName}::${row.selected?.signature}`
+  }]));
+  let dispatches=0,economicDispatches=0,parsedFiles=0,parseFailures=0;
+  const wrapperCounts={},logicalCounts={};
+  if(!fss.existsSync(corpusDest))return{status:'UNAVAILABLE_NO_RETAINED_CORPUS',dispatches:0,economicDispatches:0,economicShare:null,parsedFiles:0,parseFailures:0,wrapperCounts,logicalCounts};
+  for(const rel of await walk(corpusDest)){
+    if(!rel.endsWith('.json'))continue;
+    try{
+      const parsed=JSON.parse(await fs.readFile(path.join(corpusDest,...rel.split('/')),'utf8'));parsedFiles++;
+      for(const signature of collectMethodSignaturesV2(parsed)){
+        const name=String(signature).split('(')[0],meta=byWrapper.get(name);
+        if(!meta)continue;
+        dispatches++;if(meta.economic)economicDispatches++;
+        wrapperCounts[name]=(wrapperCounts[name]??0)+1;
+        logicalCounts[meta.logicalKey]=(logicalCounts[meta.logicalKey]??0)+1;
+      }
+    }catch{parseFailures++;}
+  }
+  return{
+    status:dispatches>0?'MEASURED_FROM_RETAINED_CORPUS':'UNAVAILABLE_NO_ROUTER_DISPATCHES_IN_RETAINED_CORPUS',
+    dispatches,economicDispatches,economicShare:dispatches?economicDispatches/dispatches:null,
+    parsedFiles,parseFailures,wrapperCounts,logicalCounts,
+    observedLogicalFunctionCount:Object.keys(logicalCounts).length,
+    representedLogicalFunctionCount:new Set([...byWrapper.values()].map(x=>x.logicalKey)).size
+  };
+}
 export function buildMedusaConfigV2({anvilUrl,blockNumber,routerRows,checked,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1}){
   return{
     fuzzing:{
@@ -1206,7 +1242,8 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
     await fs.rm(corpusDest,{recursive:true,force:true});await fs.cp(corpusSource,corpusDest,{recursive:true});
     for(const rel of await walk(corpusDest)){const abs=path.join(corpusDest,...rel.split('/')),bytes=await fs.readFile(abs);corpusIndex.push({path:'corpus/'+rel,sha256:sha256(bytes),bytes:bytes.length});}
   }
-  await fs.writeFile(path.join(dir,'MEDUSA_CORPUS_INDEX_v1.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-corpus-index-v2',files:corpusIndex},null,2)+'\n');
+  const corpusDispatchMetrics=await medusaCorpusDispatchMetricsV2({corpusDest,routerRows:router.rows});
+  await fs.writeFile(path.join(dir,'MEDUSA_CORPUS_INDEX_v1.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-corpus-index-v2',files:corpusIndex,dispatchMetrics:corpusDispatchMetrics},null,2)+'\n');
 
   const observedCalls=maxMedusaCalls(raw),rawRef=`runs/${runId}/MEDUSA_RAW_OUTPUT_v1.log`;
   const witnessById=new Map(witnessRows.map(x=>[x.propertyId,x]));
@@ -1242,6 +1279,8 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
     callSequenceLength:100,workers:10,callerSemantics:'FUZZ_SENDER_PRESERVED_WITH_MEDUSA_PRANK_CHEATCODE',
     abiRouterGenerated:true,rawRandomBytes:false,targetContracts:targets.map(t=>({qualifiedName:t.qualifiedName,address:t.address,recipeId:t.recipe?.recipeId??null})),
     routerWrapperCount:router.rows.length,accountingWrapperShare:router.accountingWrapperShare,weightingStrategy:router.weightingStrategy,
+    achievedDispatchWeight:corpusDispatchMetrics,
+    achievedWeightBasis:corpusDispatchMetrics.status==='MEASURED_FROM_RETAINED_CORPUS'?'ACTUAL_RETAINED_MEDUSA_CORPUS_DISPATCHES':'UNAVAILABLE_WITH_TYPED_REASON',
     omittedFunctions:router.omitted,propertyRegistry:properties,engineProperties:parsed.properties??[],engineParseStatus:parsed.status,
     executionStatus:assurance.executionStatus,coverageStatus:assurance.coverageStatus,checkStatus:assurance.checkStatus,
     reachabilityStatus:assurance.reachabilityStatus,observationStatus:assurance.observationStatus,
