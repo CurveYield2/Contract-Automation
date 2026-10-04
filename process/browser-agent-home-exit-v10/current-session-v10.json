@@ -3,8 +3,7 @@
   "run_id": "37168790169",
   "run_url": "https://github.com/CurveYield2/Contract-Automation/actions/runs/37168790169",
   "browser_view_url": "http://100.87.222.11:6080/vnc.html?autoconnect=1&resize=scale",
-  "status": "FAILED_VISUAL_NAVIGATION",
-  "updated_at": "2026-10-04T01:44:11.262Z",
-  "stage": "find_projects",
-  "visibleLeftColumnText": "ChatGPT G New Pipeline Plan Check PR Merge S Download Skill Zip Map Phi Di oe ampaign s"
+  "status": "FAILED",
+  "updated_at": "2026-10-04T01:44:13.426Z",
+  "error": "Rendered Projects label was not found"
 }
