@@ -354,6 +354,26 @@ async function runNormalChromeExistingWake(chromium) {
       navigatorWebdriver: webdriverBefore
     });
 
+    if (action === 'observe') {
+      await page.waitForTimeout(12000);
+      await saveNormalChromeEvidence(page, '14-normal-chrome-observe-existing-v1', {
+        reason: 'read-only existing-chat state check',
+        navigatorWebdriver: webdriverBefore
+      });
+      const result = {
+        ok: true,
+        provider: 'normal-system-chrome-x11',
+        action,
+        wakeId,
+        posted: false,
+        navigatorWebdriver: webdriverBefore,
+        chatUrl: requestedUrl,
+        verification: 'read-only-visible-state'
+      };
+      await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n', 'utf8');
+      return result;
+    }
+
     const geometry = await x11Capture(['getdisplaygeometry'], 'x11-display-geometry');
     const [widthText, heightText] = geometry.stdout.trim().split(/\s+/);
     const width = Number.parseInt(widthText, 10);
@@ -377,18 +397,16 @@ async function runNormalChromeExistingWake(chromium) {
     console.log('[normal-chrome-v1] send=OS-X11-Return');
     await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-send-return');
     await page.waitForTimeout(15000);
-    await saveNormalChromeEvidence(page, '12-normal-chrome-after-send-v1');
-
-    await x11Key(['key', '--clearmodifiers', 'ctrl+r'], 'x11-human-reload');
-    await page.waitForTimeout(18000);
-    const bodyAfterReload = await page.locator('body').innerText().catch(() => '');
-    const normalizedBody = normalizeVisibleText(bodyAfterReload);
+    const bodyAfterSend = await page.locator('body').innerText().catch(() => '');
+    const normalizedBody = normalizeVisibleText(bodyAfterSend);
     const marker = normalizeVisibleText(wakeMessage).slice(0, 120);
     const persisted = marker.length > 0 && normalizedBody.includes(marker);
-    const cloudflareChallenge = /cloudflare_challenge|Verify you are human|Checking your browser|Just a moment/i.test(bodyAfterReload);
-    await saveNormalChromeEvidence(page, '13-normal-chrome-after-reload-v1', {
+    const cloudflareChallenge = /cloudflare_challenge|Verify you are human|Checking your browser|Just a moment/i.test(bodyAfterSend);
+    const assistantActivity = /Fetching Skills|Inspected GitHub|ChatGPT said:|Stop generating/i.test(bodyAfterSend);
+    await saveNormalChromeEvidence(page, '12-normal-chrome-after-send-v2', {
       persisted,
       cloudflareChallenge,
+      assistantActivity,
       marker
     });
 
@@ -400,9 +418,10 @@ async function runNormalChromeExistingWake(chromium) {
       posted: persisted,
       persisted,
       cloudflareChallenge,
+      assistantActivity,
       navigatorWebdriver: webdriverBefore,
       chatUrl: requestedUrl,
-      verification: 'human-reload-visible-text'
+      verification: 'visible-post-send-state-no-reload'
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n', 'utf8');
     if (!result.ok) {
@@ -1555,7 +1574,7 @@ async function localProvider(chromium) {
 
 const { chromium } = await loadModules();
 
-if (action === 'wake' && mode === 'resume_existing') {
+if ((action === 'wake' || action === 'observe') && mode === 'resume_existing') {
   try {
     const result = await runNormalChromeExistingWake(chromium);
     console.log(JSON.stringify(result));
