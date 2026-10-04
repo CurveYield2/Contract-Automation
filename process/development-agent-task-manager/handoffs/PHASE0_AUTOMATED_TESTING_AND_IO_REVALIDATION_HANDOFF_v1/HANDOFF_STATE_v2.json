@@ -1,0 +1,70 @@
+{
+  "schemaVersion": "curveyield-phase0-testing-io-handoff-v2",
+  "handoffId": "PHASE0_AUTOMATED_TESTING_AND_IO_REVALIDATION_HANDOFF_v1",
+  "updatedAt": "2026-10-04",
+  "status": "SPECIFICATIONS_READY_FOR_IMPLEMENTATION",
+  "authority": {
+    "repository": "CurveYield2/Audit-Controller",
+    "stableFolder": "Audit Skill - Current Authority/",
+    "snapshotRelease": "Audit_Litemode_v10.3",
+    "entrypoint": "Audit Skill - Current Authority/Audit_Litemode_v10.3/SKILL.md",
+    "commit": "78943917711d0c56ebedd2ddc4ec267d1b1efc89"
+  },
+  "implementation": {
+    "repository": "CurveYield2/Contract-Automation",
+    "snapshotCommit": "87664a72c125bb83827f114087fb6e38f99b6750",
+    "primaryEngine": "packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs",
+    "suggestedBranch": "repair/phase0-medusa-telemetry",
+    "implementationComplete": false,
+    "qualificationPerformed": false
+  },
+  "scope": "Repair existing universal automated Medusa and ABI telemetry consumers of upstream Phase-0 intelligence; synchronize only changed interfaces.",
+  "deliverables": [
+    "PHASE0_AUTOMATED_TESTING_SYSTEM_SPEC_v2.md",
+    "PHASE0_EXECUTION_DATA_CONTRACTS_v2.md",
+    "TEST_AND_ACCEPTANCE_PLAN_v2.md",
+    "PHASE0_AUTOMATED_TESTING_IMPLEMENTATION_PLAN_v2.md"
+  ],
+  "readOrder": [
+    "README_v2.md",
+    "CURRENT_LIVE_STATE_v2.md",
+    "PHASE0_AUTOMATED_TESTING_SYSTEM_SPEC_v2.md",
+    "PHASE0_EXECUTION_DATA_CONTRACTS_v2.md",
+    "TEST_AND_ACCEPTANCE_PLAN_v2.md",
+    "PHASE0_AUTOMATED_TESTING_IMPLEMENTATION_PLAN_v2.md",
+    "SOURCE_MAP_AND_REFERENCE_FILES_v2.md"
+  ],
+  "upstreamReuseRequired": [
+    "BUILD_AND_SOURCE_IDENTITY",
+    "FULL_BUILD_ARTIFACTS_WHEN_EXPORTED",
+    "SOURCE_INTELLIGENCE_AUTOMATED",
+    "ABI_FUNCTION_INDEX",
+    "SLITHER",
+    "SBOM",
+    "PROJECT_READINESS",
+    "AVAILABLE_RUNTIME_DEPLOYMENT"
+  ],
+  "hardRules": [
+    "Phase 0 remains fully automated; no manual packet-specific operating edits.",
+    "Reuse existing producer intelligence and stable IDs; no duplicate Slither/ABI/SI pass.",
+    "No local compilation or dependency installation.",
+    "Use existing Anvil execution/workflow/evidence infrastructure.",
+    "Separate call volume, reachability, observations and applicable property checks.",
+    "Never fabricate economic properties from ABI names or missing observations.",
+    "Preserve source and sealed evidence; capability-versioned reuse only.",
+    "No automatic campaign advancement, successor wake or production merge from this specification."
+  ],
+  "acceptanceCases": {
+    "first": "A01",
+    "last": "A34",
+    "count": 34,
+    "status": "NOT_EXECUTED"
+  },
+  "campaignDataRepair": {
+    "repository": "CurveYield2/Audit-Controller",
+    "draftPr": 113,
+    "candidateCommit": "40b680974c6bea5e4e4c031167fa1957291dced3",
+    "status": "UNSEALED_CANDIDATE_SEPARATE_FROM_INFRASTRUCTURE_REPAIR"
+  },
+  "nextAction": "Implement the shared upstream-input consumer against current main; execute the bounded v2 implementation plan."
+}
