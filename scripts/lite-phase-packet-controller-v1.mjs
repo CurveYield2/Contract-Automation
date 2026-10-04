@@ -527,6 +527,11 @@ if(reviewKind==='master'){
     process.stdout.write(JSON.stringify({status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview?.chatUrl??null,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
     process.exit(0);
   }
+  if(result.status==='MASTER_REVIEW_TRANSPORT_BLOCKED'){
+    const feedback=['MASTER_REVIEW_TRANSPORT_BLOCKED: trusted Maximum master capability and delivery evidence is required.','',...result.failures.map(x=>'- '+x),'','No master decision was admitted and no successor may advance.'].join('\n');
+    process.stdout.write(JSON.stringify({status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview?.chatUrl??null,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+    process.exit(0);
+  }
   if(result.status==='MASTER_REPAIR_TRANSPORT_BLOCKED'){
     const feedback=['MASTER_REPAIR_TRANSPORT_BLOCKED: trusted Maximum/Sol capability and delivery evidence is required.','',...result.failures.map(x=>'- '+x),'','No repair result was admitted, no dependent product was refreshed, and no successor may advance.'].join('\n');
     process.stdout.write(JSON.stringify({status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview?.chatUrl??null,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
