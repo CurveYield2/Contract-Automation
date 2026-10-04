@@ -362,7 +362,7 @@ function validateRepairCompletion({root,campaignPath,form,pending,cfg}){
 function validateRefreshedRepairVerification({root,campaignPath,form,pending,segment}){
   const failures=[];
   if(digestJson(form.review?.repairSpec)!==pending.repairSpecSha256)failures.push('repairSpec changed after controller refresh');
-  if(digestJson(form.childRepair)!==form.postRepair?.childRepairSha256)failures.push('childRepair evidence changed after controller refresh');
+  if(digestJson(form.childRepair)!==form.bindings?.repairChildSha256)failures.push('childRepair evidence changed after controller refresh');
   const post=form.postRepair;
   if(!post||post.schemaVersion!=='curveyield-lite-master-repair-refresh-v1')failures.push('controller postRepair record is missing');
   else{
