@@ -10,6 +10,10 @@ source "$ROOT/scripts/audit-source-initialization/extract-v1.sh"
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${AUDIT_CONTROLLER_TOKEN:?AUDIT_CONTROLLER_TOKEN is required}"
 : "${CONTRACT_AUTOMATION_TOKEN:?CONTRACT_AUTOMATION_TOKEN is required}"
+: "${AGENT_CHAT_1_URL:?AGENT_CHAT_1_URL is required}"
+: "${AGENT_CHAT_2_URL:?AGENT_CHAT_2_URL is required}"
+: "${AGENT_CHAT_3_URL:?AGENT_CHAT_3_URL is required}"
+: "${AGENT_CHAT_4_URL:?AGENT_CHAT_4_URL is required}"
 
 safe_request="$(printf '%s' "$REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
 report_path="process/audit-source-initialization/reports/$safe_request.json"
@@ -21,10 +25,17 @@ report_sha="$(gh api "$report_api?ref=main" --jq '.sha // empty' 2>/dev/null || 
 if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   encoded="$(gh api "$report_api?ref=main" --jq '.content')"
   printf '%s' "$encoded" | base64 -d > /tmp/prior-source-init.json
-  jq -e --arg u "$SOURCE_URL" \
+  jq -e \
+    --arg u "$SOURCE_URL" \
+    --arg c1 "$AGENT_CHAT_1_URL" --arg c2 "$AGENT_CHAT_2_URL" \
+    --arg c3 "$AGENT_CHAT_3_URL" --arg c4 "$AGENT_CHAT_4_URL" \
     '.schemaVersion=="curveyield-audit-source-initialization-report-v1"
      and .status=="PASS"
-     and .request.sourceUrl==$u' \
+     and .request.sourceUrl==$u
+     and .request.agentChats["reviewer-1"]==$c1
+     and .request.agentChats["reviewer-2"]==$c2
+     and .request.agentChats["reviewer-3"]==$c3
+     and .request.agentChats["reviewer-4"]==$c4' \
     /tmp/prior-source-init.json >/dev/null
   campaign_id="$(jq -r '.campaign.campaignId' /tmp/prior-source-init.json)"
   generation_id="$(jq -r '.campaign.campaignGenerationId' /tmp/prior-source-init.json)"
@@ -131,9 +142,20 @@ else
     --arg campaignName "$campaign_name" --arg workspace "$campaign_root" --arg sourcePath "$source_path" \
     --arg admission "$admission_commit" --arg blob "$source_blob" --arg tree "$tree_sha" \
     --arg init "$init_commit" --arg run "$GITHUB_RUN_ID" \
+    --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" \
     '{
       schemaVersion:"curveyield-audit-source-initialization-report-v1",
-      request:{requestId:$requestId,sourceUrl:$sourceUrl},
+      request:{
+        requestId:$requestId,
+        sourceUrl:$sourceUrl,
+        agentChats:{
+          "reviewer-1":$chat1,
+          "reviewer-2":$chat2,
+          "reviewer-3":$chat3,
+          "reviewer-4":$chat4
+        }
+      },
       status:"PASS",
       source:{
         provider:$provider,canonicalUrl:$canonicalUrl,filename:$filename,sha256:$sha,byteLength:$size,
@@ -160,6 +182,52 @@ else
 fi
 
 export GH_TOKEN="$CONTRACT_AUTOMATION_TOKEN"
+
+safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
+registration_path="process/browser-agent-wake/registrations/$safe_campaign.json"
+registration_api="repos/$GITHUB_REPOSITORY/contents/$registration_path"
+existing_registration_payload="$(gh api "$registration_api?ref=main" 2>/dev/null || true)"
+existing_registration_sha="$(printf '%s' "$existing_registration_payload" | jq -r '.sha // empty' 2>/dev/null || true)"
+
+jq -n \
+  --arg campaignId "$campaign_id" \
+  --arg campaignName "$campaign_name" \
+  --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
+  --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" \
+  '{
+    schemaVersion:"curveyield-browser-agent-wake-registration-v1",
+    campaignId:$campaignId,
+    mode:"resume_existing",
+    chatUrl:"",
+    browserRoutine:"",
+    agentChats:{
+      "reviewer-1":$chat1,
+      "reviewer-2":$chat2,
+      "reviewer-3":$chat3,
+      "reviewer-4":$chat4
+    },
+    chatgptProject:{name:"",url:""},
+    activeChat:{name:"",url:""},
+    wakeMessage:"",
+    thinkingEffort:"high",
+    browserInteractionPolicy:"ordinary-pointer-keyboard-only",
+    activeAssignment:{},
+    watchdog:{enabled:true,idleMessage:"GET BACK TO WORK"},
+    repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},
+    updatedAt:(now|todate)
+  }' > /tmp/audit-browser-registration.json
+
+registration_body="$(base64 -w0 /tmp/audit-browser-registration.json)"
+if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  gh api --method PUT "$registration_api" \
+    -f message="chore(audit): bind four reviewer chats for $campaign_id" \
+    -f content="$registration_body" -f sha="$existing_registration_sha" -f branch=main >/dev/null
+else
+  gh api --method PUT "$registration_api" \
+    -f message="chore(audit): bind four reviewer chats for $campaign_id" \
+    -f content="$registration_body" -f branch=main >/dev/null
+fi
+
 gh workflow run lite-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
   -f campaign_id="$campaign_id" \
   -f campaign_path="$campaign_root" \
@@ -175,5 +243,6 @@ gh workflow run lite-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref m
   echo '- Source ZIP and unpacked source are both under campaign source/.'
   echo '- Audit-Controller ref: main'
   echo '- Fully automated Phase 0: dispatched'
-  echo '- First browser agent is created only after validated P0_TO_P1 completion.'
+  echo '- Four pre-created reviewer chats are bound to reviewer-1 through reviewer-4.'
+  echo '- After validated P0_TO_P1 completion, the phase wake opens the assigned existing chat and then arms the watchdog.'
 } >> "$GITHUB_STEP_SUMMARY"
