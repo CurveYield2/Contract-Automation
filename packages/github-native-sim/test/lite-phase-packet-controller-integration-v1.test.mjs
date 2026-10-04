@@ -228,7 +228,7 @@ test('v11-configured Phase 1 seals but cannot create Phase 2 until exact master 
   directory.masterReview={chatUrl:'https://chatgpt.com/c/master-review-chat',reasoning:'MAXIMUM',repairModel:'SOL',repairReasoning:'HIGH'};
   writeJson(path.join(f.root,f.dirRel),directory);
   const predecessor=readJson(path.join(f.root,directory.lastSealedReceiptPath));
-  predecessor.authority.liteSkillSha256='b'.repeat(64);
+  predecessor.authority.liteSkillSha256=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.authority,'SKILL.md'))).digest('hex');
   predecessor.authority.liteRelease='Audit_Litemode_v11';
   writeJson(path.join(f.root,directory.lastSealedReceiptPath),predecessor);
   writeJson(path.join(f.root,f.campaign,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),{source:{archiveSha256:'a'.repeat(64)}});
@@ -278,7 +278,7 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
   directory.masterReview={chatUrl:'https://chatgpt.com/c/master-review-chat',reasoning:'MAXIMUM',repairModel:'SOL',repairReasoning:'HIGH'};
   writeJson(path.join(f.root,f.dirRel),directory);
   const predecessor=readJson(path.join(f.root,directory.lastSealedReceiptPath));
-  predecessor.authority.liteSkillSha256='b'.repeat(64);
+  predecessor.authority.liteSkillSha256=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.authority,'SKILL.md'))).digest('hex');
   writeJson(path.join(f.root,directory.lastSealedReceiptPath),predecessor);
   writeJson(path.join(f.root,f.campaign,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),{});
   const form=readJson(path.join(f.root,f.formRel));
