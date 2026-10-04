@@ -140,7 +140,7 @@ jobs:
 
           printf '%s' "$current_payload" | jq -r '.content' | tr -d '\n' | base64 -d > /tmp/existing-registration.json
           case "$reviewer" in
-            reviewer-1|reviewer-2|reviewer-3|reviewer-4) ;;
+            reviewer-1|reviewer-2|reviewer-3L|reviewer-4) ;;
             *) echo "::error::Unsupported reviewer identity: $reviewer. Expected reviewer-1 through reviewer-4."; exit 1 ;;
           esac
 
