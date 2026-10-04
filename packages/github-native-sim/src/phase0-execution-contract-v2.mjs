@@ -167,7 +167,9 @@ export function qualifyRecipeV2({qualifiedName=null,abi=[],declaredStandards=[],
   if(erc3156&&declared.has('ERC3156FLASHLENDER'))return{
     status:'QUALIFIED',recipeId:'erc3156-flash-lender-v1',qualifiedName,evidence,
     functionFamilies:{'flashLoan(address,address,uint256,bytes)':'ECONOMIC'},
-    observationFamilies:['TOKEN_BALANCE','CALLBACK_RECEIPT','TOTAL_SUPPLY']
+    observationFamilies:['TOKEN_BALANCE','CALLBACK_RECEIPT','TOTAL_SUPPLY'],
+    requiredObservationFamilies:['TOKEN_BALANCE','TOTAL_SUPPLY'],
+    semanticLimitations:['NO_ASSUMED_FEE_OR_BALANCE_CONSERVATION_BEYOND_OBSERVED_RECEIPTS']
   };
   if(erc4626&&declared.has('ERC4626'))return{
     status:'QUALIFIED',recipeId:'erc4626-standard-v1',qualifiedName,evidence,
@@ -175,16 +177,25 @@ export function qualifyRecipeV2({qualifiedName=null,abi=[],declaredStandards=[],
       'deposit(uint256,address)':'ECONOMIC','mint(uint256,address)':'ECONOMIC',
       'withdraw(uint256,address,address)':'ECONOMIC','redeem(uint256,address,address)':'ECONOMIC'
     },
-    observationFamilies:['ASSET_BALANCE','SHARE_BALANCE','TOTAL_ASSETS','TOTAL_SUPPLY']
+    observationFamilies:['TOKEN_BALANCE','SHARE_BALANCE','TOTAL_ASSETS','TOTAL_SUPPLY'],
+    requiredObservationFamilies:['TOKEN_BALANCE','SHARE_BALANCE','TOTAL_ASSETS','TOTAL_SUPPLY'],
+    semanticLimitations:['NO_UNIVERSAL_PRICE_OR_ASSET_SHARE_CONSERVATION_ASSERTION','YIELD_AND_FEES_REQUIRE_OBSERVED_TYPED_DELTAS']
   };
-  if(erc20&&declared.has('ERC20'))return{
-    status:'QUALIFIED',recipeId:'erc20-standard-v1',qualifiedName,evidence,
-    functionFamilies:{
+  if(erc20&&declared.has('ERC20')){
+    const functionFamilies={
       'transfer(address,uint256)':'ECONOMIC','transferFrom(address,address,uint256)':'ECONOMIC',
       'approve(address,uint256)':'AUTHORITY_CONFIG'
-    },
-    observationFamilies:['TOKEN_BALANCE','ALLOWANCE','TOTAL_SUPPLY']
-  };
+    };
+    if(sigs.has('burn(uint256)'))functionFamilies['burn(uint256)']='ECONOMIC';
+    if(sigs.has('burnFrom(address,uint256)'))functionFamilies['burnFrom(address,uint256)']='ECONOMIC';
+    return{
+      status:'QUALIFIED',recipeId:'erc20-standard-v1',qualifiedName,evidence,
+      functionFamilies,
+      observationFamilies:['TOKEN_BALANCE','ALLOWANCE','TOTAL_SUPPLY'],
+      requiredObservationFamilies:['TOKEN_BALANCE','TOTAL_SUPPLY'],
+      semanticLimitations:['BURNS_ARE_ALLOWED_WHEN_EXPLICITLY_EXPOSED','NO_FIXED_SUPPLY_OR_FEELESS_TRANSFER_ASSUMPTION']
+    };
+  }
   return{
     status:'ORACLE_GAP',recipeId:null,qualifiedName,evidence,
     reason:(erc20||erc4626)?'STANDARD_LOOKING_ABI_WITHOUT_QUALIFYING_SEMANTIC_EVIDENCE':'NO_TRUSTED_RECIPE_MATCH'
