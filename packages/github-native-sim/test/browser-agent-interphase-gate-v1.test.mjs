@@ -170,26 +170,10 @@ verify_lite_interphase_completion "$PACKET_PATH" "$COMPLETION_PATH" "$HANDOFF_PA
 
 test('sealed P0 synthetic packet validates and dispatches one successor with verified mechanical context', () => {
   const { result, dispatched } = exercise(() => {}, true);
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(dispatched, /browser-agent-wake.yml/);
-  assert.match(dispatched, /phase_id=phase-1/);
-
-  const encoded = dispatched.match(/wake_message_b64=([A-Za-z0-9+/=]+)/)?.[1];
-  assert.ok(encoded, dispatched);
-  const message = Buffer.from(encoded, 'base64').toString('utf8');
-  assert.match(message, /Campaign type: \*\*LITE\*\*/);
-  assert.match(message, /Campaign name: Synthetic Audit/);
-  assert.match(message, /Incoming reviewer: `reviewer-1`/);
-  assert.match(message, /Assigned Lite phase\/milestone: `Phase 1`/);
-  const browserContextEncoded = dispatched.match(/browser_context_b64=([A-Za-z0-9+/=]+)/)?.[1];
-  assert.ok(browserContextEncoded, dispatched);
-  const browserContext = JSON.parse(Buffer.from(browserContextEncoded, 'base64').toString('utf8'));
-  assert.equal(browserContext.routineId, 'audit-lite-reviewer-v1');
-  assert.equal(browserContext.projectName, 'Synthetic Audit');
-  assert.equal(browserContext.chatName, 'Synthetic Audit reviewer-1');
-  assert.equal(browserContext.repair.enabled, true);
-  assert.doesNotMatch(message, /AUDIT_REVIEWER_ROUTINE/);
-  assert.doesNotMatch(message, /VERIFIED_INTERPHASE_MECHANICAL_RESULTS/);
+  assert.notEqual(result.status, 0);
+  assert.equal(dispatched, '');
+  assert.match(result.stdout, /Legacy create-fresh Lite successor launcher is retired/);
+  assert.match(result.stdout, /pre-created reviewer chats and the Phase-1 fixed X11 sender/);
 });
 
 test('interphase gate fails closed across packet and receipt mutations', () => {
@@ -223,19 +207,7 @@ test('sealed P0 dispatches a bounded mechanical wake before a receipt exists', (
   const { result, dispatched } = exercise((packet, files) => {
     files.missingReceipt = true;
   }, 'mechanical');
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(dispatched, /worker_role=interphase_mechanical/);
-  assert.doesNotMatch(dispatched, /phase_id=phase-1/);
-  const encoded = dispatched.match(/wake_message_b64=([A-Za-z0-9+/=]+)/)?.[1];
-  assert.ok(encoded, dispatched);
-  const message = Buffer.from(encoded, 'base64').toString('utf8');
-  assert.match(message, /repository=CurveYield2\/Audit-Controller/);
-  assert.match(message, /work_packet_sha256=[a-f0-9]{64}/);
-  assert.match(message, /work_units:[\s\S]*unit-01[\s\S]*unit-10/);
-  assert.match(message, /required_outputs:[\s\S]*MECHANICAL\/UNIT_01_v2\.json[\s\S]*FINAL_RECONCILIATION_v2\.json/);
-  assert.match(message, /do_not_repeat=/);
-  assert.match(message, /prohibited_semantic_work=/);
-  assert.match(message, /Do not make, promote, reject, grade, or remediate security findings/);
-  assert.match(message, /Complete all ten synthetic evidence reconciliation units/);
-  assert.doesNotMatch(message, /VERIFIED_INTERPHASE_MECHANICAL_RESULTS_V2/);
+  assert.notEqual(result.status, 0);
+  assert.equal(dispatched, '');
+  assert.match(result.stdout, /Legacy create-fresh Lite successor launcher is retired/);
 });
