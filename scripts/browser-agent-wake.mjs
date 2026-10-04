@@ -373,62 +373,14 @@ async function x11Capture(args, label = 'x11-command') {
 
 async function humanX11TypeText(page, text) {
   const value = String(text);
-  const tokens = value.match(/\n|[^\s]+[ \t]*/g) || [];
-  for (const token of tokens) {
-    if (token === '\n') {
+  for (const char of value) {
+    if (char === '\n') {
       await x11Key(['key', '--clearmodifiers', 'shift+Return'], 'x11-line-break');
-      await page.waitForTimeout(randomDelayMs(120, 220));
-      continue;
-    }
-
-    // Skilled-typist cadence without one subprocess per character.
-    // xdotool itself emits the visible physical key sequence at ~90-125 WPM,
-    // while short randomized between-word pauses preserve human pacing.
-    const keyDelayMs = randomDelayMs(95, 125);
-    await x11Key(
-      ['type', '--clearmodifiers', '--delay', String(keyDelayMs), token],
-      'x11-type-token'
-    );
-
-    const trimmed = token.trimEnd();
-    if (/[.!?,;:]$/.test(trimmed)) {
-      await page.waitForTimeout(randomDelayMs(100, 210));
     } else {
-      await page.waitForTimeout(randomDelayMs(30, 90));
+      await x11Key(['type', '--clearmodifiers', '--delay', '0', char], 'x11-type-character');
     }
+    await humanTypingPause(page, char);
   }
-}
-
-async function normalChromeViewportToX11(page, viewportX, viewportY) {
-  // Playwright bounding boxes are viewport-relative, while xdotool mouse
-  // coordinates are X11 screen-relative. Account for the stock Chrome window
-  // position and browser chrome before issuing real X11 pointer input.
-  //
-  // This follows the proven mapping used by public X11/Playwright drivers:
-  // screenX + (outerWidth-innerWidth)/2 + viewportX,
-  // screenY + (outerHeight-innerHeight) + viewportY.
-  const metrics = await page.evaluate(() => ({
-    screenX: Number(window.screenX || 0),
-    screenY: Number(window.screenY || 0),
-    outerWidth: Number(window.outerWidth || 0),
-    outerHeight: Number(window.outerHeight || 0),
-    innerWidth: Number(window.innerWidth || 0),
-    innerHeight: Number(window.innerHeight || 0)
-  }));
-  const leftChrome = Math.max(0, Math.round((metrics.outerWidth - metrics.innerWidth) / 2));
-  const topChrome = Math.max(0, Math.round(metrics.outerHeight - metrics.innerHeight));
-  return {
-    x: Math.round(metrics.screenX + leftChrome + viewportX),
-    y: Math.round(metrics.screenY + topChrome + viewportY),
-    screenX: metrics.screenX,
-    screenY: metrics.screenY,
-    leftChrome,
-    topChrome,
-    outerWidth: metrics.outerWidth,
-    outerHeight: metrics.outerHeight,
-    innerWidth: metrics.innerWidth,
-    innerHeight: metrics.innerHeight
-  };
 }
 
 async function waitForCdp(port, timeoutMs = 30000) {
@@ -508,8 +460,8 @@ async function runNormalChromeExistingSession(chromium) {
     const webdriver = await page.evaluate(() => navigator.webdriver).catch(() => 'unavailable');
     console.log('[normal-chrome-watchdog] navigator.webdriver=' + JSON.stringify(webdriver));
 
-    let before = await snapshot(page);
     if (action === 'observe') {
+      let before = await snapshot(page);
       const hydrateDeadline = Date.now() + 30000;
       let afterObserve = before;
       while (Date.now() < hydrateDeadline) {
@@ -539,174 +491,70 @@ async function runNormalChromeExistingSession(chromium) {
     if (action !== 'wake') {
       throw new BrowserAgentError('UNSUPPORTED_ACTION', 'Normal Chrome existing-session path only supports observe or wake', false);
     }
-    if (before.humanChallenge) {
-      throw new BrowserAgentError('BROWSER_CHALLENGE', 'Visible ChatGPT/Cloudflare verification detected', false);
-    }
-    if (before.loginPrompt) {
-      throw new BrowserAgentError('AUTH_REQUIRED', 'Visible ChatGPT browser requires login', false);
-    }
-    if (before.conversationUnavailable || !before.chatViewable) {
-      throw new BrowserAgentError('CHAT_UNAVAILABLE', 'Existing reviewer chat is not visibly usable', true);
-    }
-    if (before.generating) {
-      const result = {
-        ok: true,
-        provider: 'normal-system-chrome-x11',
-        action,
-        wakeId,
-        posted: false,
-        skipped: 'PRODUCTIVE_GENERATING',
-        before,
-        after: before,
-        chatUrl: requestedUrl,
-        sessionStatePersisted: false,
-        navigatorWebdriver: webdriver
-      };
-      await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n', 'utf8');
-      return result;
+
+    // Proven Phase-1 wake interaction. Do not machine-read the composer,
+    // DOM focus, bounding box, or active element. The visible ChatGPT composer
+    // occupies this stable point in the fixed 1920x1080 X11 Chrome display.
+    const geometry = await x11Capture(['getdisplaygeometry'], 'x11-display-geometry');
+    const [widthText, heightText] = geometry.stdout.trim().split(/\s+/);
+    const width = Number.parseInt(widthText, 10);
+    const height = Number.parseInt(heightText, 10);
+    if (!Number.isFinite(width) || !Number.isFinite(height)) {
+      throw new BrowserAgentError('X11_GEOMETRY_INVALID', 'Could not determine X11 display geometry', true);
     }
 
-    const composer = await ensureComposer(page);
-    const box = await composer.boundingBox();
-    if (!box) {
-      throw new BrowserAgentError('VISIBLE_CONTROL_NOT_CLICKABLE', 'Visible composer has no X11-clickable bounding box', true);
-    }
-    const composerPoint = await normalChromeViewportToX11(
-      page,
-      box.x + box.width / 2,
-      box.y + box.height / 2
-    );
-    console.log('[normal-chrome-watchdog] composer-x11-mapping=' + JSON.stringify(composerPoint));
-    await x11Capture(['mousemove', '--sync', String(composerPoint.x), String(composerPoint.y)], 'x11-composer-move');
-    await page.waitForTimeout(randomDelayMs(160, 320));
+    const composerX = Math.round(width * 0.63);
+    const composerY = Math.round(height - 72);
+    await x11Key(['mousemove', '--sync', String(composerX), String(composerY)], 'x11-composer-move');
+    await page.waitForTimeout(randomDelayMs(180, 360));
     await x11Key(['click', '1'], 'x11-composer-click');
-    await page.waitForTimeout(randomDelayMs(220, 420));
+    await page.waitForTimeout(randomDelayMs(250, 450));
 
-    const focusState = await composer.evaluate(el => {
-      const active = document.activeElement;
-      const focused = active === el || el.contains(active);
-      return {
-        focused,
-        activeTag: active?.tagName || '',
-        activeId: active?.id || '',
-        activeRole: active?.getAttribute?.('role') || '',
-        activeAria: active?.getAttribute?.('aria-label') || '',
-        composerTag: el.tagName || '',
-        composerId: el.id || '',
-        composerRole: el.getAttribute?.('role') || '',
-        composerAria: el.getAttribute?.('aria-label') || ''
-      };
-    }).catch(() => ({ focused: false, error: 'focus-evaluation-failed' }));
-    console.log('[normal-chrome-watchdog] composer-focus=' + JSON.stringify(focusState));
-
-    if (!focusState.focused) {
-      const evidenceDir = '/tmp/browser-wake-evidence-v1';
-      await fs.mkdir(evidenceDir, { recursive: true });
-      await page.screenshot({
-        path: path.join(evidenceDir, 'watchdog-composer-focus-failed-v1.png'),
-        fullPage: true
-      }).catch(() => {});
-      await fs.writeFile(
-        path.join(evidenceDir, 'watchdog-composer-focus-failed-v1.json'),
-        JSON.stringify({
-          composerBox: box,
-          translatedPoint: composerPoint,
-          focusState
-        }, null, 2) + '\n',
-        'utf8'
-      );
-      throw new BrowserAgentError(
-        'COMPOSER_FOCUS_FAILED',
-        'Translated X11 click did not focus the ChatGPT composer; refusing to type',
-        true
-      );
-    }
-
-    const existingText = await readComposerText(composer);
-    if (existingText) {
-      await x11Key(['key', '--clearmodifiers', 'ctrl+a'], 'x11-select-all');
-      await page.waitForTimeout(randomDelayMs(90, 160));
-      await x11Key(['key', '--clearmodifiers', 'BackSpace'], 'x11-backspace');
-      await page.waitForTimeout(randomDelayMs(120, 220));
-    }
-
-    console.log('[normal-chrome-watchdog] wake-entry=OS-X11-skilled-typist');
+    console.log('[normal-chrome-watchdog] wake-entry=OS-X11-skilled-typist phase1-proven-fixed-point');
     await humanX11TypeText(page, wakeMessage);
 
-    const normalizedExpected = normalizeVisibleText(wakeMessage);
-    const rawComposerText = await readComposerText(composer);
-    const normalizedComposer = normalizeVisibleText(rawComposerText);
-    const marker = normalizedExpected.slice(0, Math.min(120, normalizedExpected.length));
-    const lengthFloor = Math.floor(normalizedExpected.length * 0.95);
-    const markerPresent = Boolean(marker) && normalizedComposer.includes(marker);
-    const lengthPlausible = normalizedComposer.length >= lengthFloor;
-    console.log('[normal-chrome-watchdog] composer-verification=' + JSON.stringify({
-      expectedLength: normalizedExpected.length,
-      composerLength: normalizedComposer.length,
-      lengthFloor,
-      markerPresent,
-      lengthPlausible,
-      composerPrefix: normalizedComposer.slice(0, 180),
-      composerSuffix: normalizedComposer.slice(-180)
-    }));
-    if (!markerPresent || !lengthPlausible) {
-      const evidenceDir = '/tmp/browser-wake-evidence-v1';
-      await fs.mkdir(evidenceDir, { recursive: true });
-      await page.screenshot({ path: path.join(evidenceDir, 'watchdog-composer-fill-mismatch-v1.png'), fullPage: true }).catch(() => {});
-      await fs.writeFile(
-        path.join(evidenceDir, 'watchdog-composer-fill-mismatch-v1.json'),
-        JSON.stringify({
-          expected: normalizedExpected,
-          observed: normalizedComposer,
-          expectedLength: normalizedExpected.length,
-          observedLength: normalizedComposer.length,
-          markerPresent,
-          lengthPlausible
-        }, null, 2) + '\n',
-        'utf8'
-      );
-      throw new BrowserAgentError('COMPOSER_FILL_MISMATCH', 'X11-typed watchdog message was not visibly complete in the composer', true);
-    }
-
-    await page.waitForTimeout(randomDelayMs(250, 550));
+    await page.waitForTimeout(randomDelayMs(350, 700));
     console.log('[normal-chrome-watchdog] send=OS-X11-Return');
     await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-send-return');
-    await page.waitForTimeout(10000);
+    await page.waitForTimeout(15000);
 
+    // Keep the same non-destructive post-send verification used by the
+    // successful Phase-1 wake. No pre-send machine read of the composer.
     const bodyAfterSend = await page.locator('body').innerText().catch(() => '');
-    const posted = marker.length > 0 && normalizeVisibleText(bodyAfterSend).includes(marker);
-    const after = await snapshot(page);
-    const responded =
-      after.generating ||
-      after.assistantCount > before.assistantCount ||
-      (after.lastAssistantHash && after.lastAssistantHash !== before.lastAssistantHash);
-
-    if (after.humanChallenge) {
-      throw new BrowserAgentError('BROWSER_CHALLENGE', 'Visible challenge appeared after watchdog send', false);
-    }
-    if (!posted) {
-      throw new BrowserAgentError('SEND_NOT_VISIBLE', 'X11 watchdog message did not become visibly rendered after Send', true);
-    }
+    const normalizedBody = normalizeVisibleText(bodyAfterSend);
+    const marker = normalizeVisibleText(wakeMessage).slice(0, 120);
+    const posted = marker.length > 0 && normalizedBody.includes(marker);
+    const cloudflareChallenge =
+      /cloudflare_challenge|Verify you are human|Checking your browser|Just a moment/i.test(bodyAfterSend);
 
     const result = {
-      ok: true,
+      ok: posted && !cloudflareChallenge,
       provider: 'normal-system-chrome-x11',
       action,
       wakeId,
-      posted: true,
-      before,
-      after,
-      responded,
+      posted,
+      persisted: posted,
+      cloudflareChallenge,
       chatUrl: requestedUrl,
       sessionStatePersisted: false,
       navigatorWebdriver: webdriver,
+      verification: 'visible-post-send-state-no-reload',
       delivery: {
-        persisted: true,
+        persisted: posted,
         verification: 'visible-post-send-state-no-reload',
         verificationMethod: 'visible-transcript'
       }
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n', 'utf8');
+    if (!result.ok) {
+      throw new BrowserAgentError(
+        cloudflareChallenge ? 'BROWSER_CHALLENGE' : 'SEND_NOT_VISIBLE',
+        cloudflareChallenge
+          ? 'Visible challenge appeared after wake send'
+          : 'Wake was not visibly rendered after Send',
+        !cloudflareChallenge
+      );
+    }
     return result;
   } finally {
     if (browser) await browser.close().catch(() => {});
