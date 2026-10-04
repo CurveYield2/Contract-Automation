@@ -115,11 +115,16 @@ test('browser wake allows bounded time for ChatGPT browser challenge to resolve'
 
 test('audit browser wake and watchdog use visible Xvfb Chrome through the private home-exit route', () => {
   const source = read('scripts/browser-agent-wake.mjs');
-  assert.match(source, /headless:\s*env\.BROWSER_HEADLESS !== 'false'/);
-  assert.match(source, /--disable-quic/);
-  assert.match(source, /--window-size=1920,1080/);
-  assert.match(source, /viewport:\s*\{ width: 1920, height: 1080 \}/);
-  assert.match(source, /screen:\s*\{ width: 1920, height: 1080 \}/);
+  assert.match(source, /command -v google-chrome \|\| command -v google-chrome-stable/);
+  assert.match(source, /spawn\(chromePath/);
+  assert.match(source, /--remote-debugging-port=/);
+  assert.match(source, /await waitForCdp\(port, 60000\)/);
+  assert.match(source, /getdisplaygeometry/);
+  assert.match(source, /Math\.round\(width \* 0\.63\)/);
+  assert.match(source, /height - 72/);
+  assert.match(source, /x11-composer-click/);
+  assert.match(source, /x11-send-return/);
+  assert.doesNotMatch(source.slice(source.indexOf('// Proven Phase-1 wake interaction.'), source.indexOf('return result;', source.indexOf('// Proven Phase-1 wake interaction.'))), /page\.mouse|page\.keyboard|ensureComposer|boundingBox|page\.locator/);
 
   for (const relative of [
     '.github/workflows/browser-agent-wake.yml',
@@ -133,11 +138,9 @@ test('audit browser wake and watchdog use visible Xvfb Chrome through the privat
     assert.match(workflow, /tailscale set --exit-node=/);
     assert.match(workflow, /x11vnc/);
     assert.match(workflow, /node scripts\/browser-agent-wake\.mjs/);
-    assert.doesNotMatch(workflow, /xvfb-run -a node scripts\/browser-agent-wake\.mjs/);
     assert.doesNotMatch(workflow, /BROWSERLESS_|BROWSERBASE_/);
   }
 });
-
 
 test('browser runtime classifies only pre-send failures as fresh-runner retryable', () => {
   const source = read('scripts/browser-agent-wake.mjs');
@@ -169,13 +172,12 @@ test('wake workflow retries retryable browser failures on a bounded fresh runner
   assert.match(workflow, /runner_retry_attempt:[\s\S]*default:\s*'0'/);
   assert.doesNotMatch(workflow, /runner_retry_max:/);
   assert.match(workflow, /max=3/);
-  assert.match(workflow, /select\(\.provider=="github-playwright" and \.retryable==true\)/);
+  assert.match(workflow, /select\(\.retryable==true\)/);
   assert.match(workflow, /gh workflow run browser-agent-wake\.yml/);
   assert.match(workflow, /--json/);
   assert.match(workflow, /steps\.fresh-runner-retry\.outputs\.dispatched != 'true'/);
-
-  assert.doesNotMatch(workflow, /Detect refreshed encrypted ChatGPT session state|actions\/cache\/(?:restore|save)@v4|chatgpt-session-state-v1-/);
-  assert.doesNotMatch(workflow, /Persist captured Phase-1 Project URL|Persist fresh-chat URL into campaign registration|PROJECT_SHARE_URL_REQUIRED/);
+  assert.match(workflow, /options: \[resume_existing\]/);
+  assert.match(workflow, /group:\s*chatgpt-shared-browser-session-v1/);
 
   for (const stepName of [
     'Create watchdog state',
