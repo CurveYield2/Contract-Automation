@@ -561,49 +561,187 @@ export function buildBurstSchedule(targets,calls,rng){
   }
   return out;
 }
+function observationRowsV2(snapshotValue,recipe,phase){
+  const rows=[];
+  const recipeId=recipe?.status==='QUALIFIED'?recipe.recipeId:null;
+  const push=(quantityId,family,value,status='OK',error=null)=>rows.push({phase,quantityId,family,unit:'integer',status,value:status==='OK'?String(value):null,error});
+  for(const [who,value] of Object.entries(snapshotValue?.native??{}))push(`native:${who}`,'NATIVE_BALANCE',value);
+  for(const [address,value] of Object.entries(snapshotValue?.systemNative??{}))push(`system-native:${address.toLowerCase()}`,'NATIVE_BALANCE',value);
+  for(const [key,result] of Object.entries(snapshotValue?.views??{})){
+    let family='ABI_VIEW';
+    if(recipeId&&key.startsWith('balanceOf(address)'))family=recipeId==='erc4626-standard-v1'?'SHARE_BALANCE':'TOKEN_BALANCE';
+    else if(recipeId&&key.startsWith('allowance(address,address)'))family='ALLOWANCE';
+    else if(recipeId&&key.startsWith('totalSupply()'))family='TOTAL_SUPPLY';
+    else if(recipeId==='erc4626-standard-v1'&&key.startsWith('totalAssets()'))family='TOTAL_ASSETS';
+    if(result?.ok!==true){rows.push({phase,quantityId:`view:${key}`,family,unit:'integer',status:'FAILED',value:null,error:result?.error??'OBSERVATION_FAILED'});continue;}
+    const value=result.value;
+    if(typeof value==='string'&&/^-?\d+$/.test(value))push(`view:${key}`,family,value);
+    else rows.push({phase,quantityId:`view:${key}`,family,unit:'opaque',status:'OK',value:normalize(value),error:null});
+  }
+  return rows;
+}
+function observationDeltasV2(beforeRows,afterRows,{receipt,sender}={}){
+  const afterById=new Map(afterRows.map(x=>[x.quantityId,x])),rows=[];
+  const gasUsed=receipt?.gasUsed!=null?BigInt(receipt.gasUsed):null;
+  const gasPrice=receipt?.gasPrice!=null?BigInt(receipt.gasPrice):(receipt?.effectiveGasPrice!=null?BigInt(receipt.effectiveGasPrice):null);
+  const gasFee=gasUsed!=null&&gasPrice!=null?gasUsed*gasPrice:null;
+  for(const before of beforeRows){
+    const after=afterById.get(before.quantityId);
+    if(!after){rows.push({quantityId:before.quantityId,family:before.family,status:'UNKNOWN',reason:'POST_OBSERVATION_MISSING'});continue;}
+    if(before.unit!=='integer'||after.unit!=='integer'){rows.push({quantityId:before.quantityId,family:before.family,status:'UNKNOWN',reason:'NON_INTEGER_OR_INCOMPARABLE_QUANTITY'});continue;}
+    const delta=observationDeltaV2(before,after);
+    const row={quantityId:before.quantityId,family:before.family,...delta};
+    if(delta.status==='KNOWN'&&before.quantityId==='native:sender'&&gasFee!=null){
+      row.rawValue=delta.value;
+      row.transactionFeeWei=gasFee.toString();
+      row.value=(BigInt(delta.value)+gasFee).toString();
+      row.feeAdjusted=true;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+function preflightKindV2(error){
+  const text=String(error?.shortMessage??error?.message??error??'');
+  return error?.code==='CALL_EXCEPTION'||/revert|execution reverted|panic/i.test(text)?'PROTOCOL_REJECTION':'INFRASTRUCTURE';
+}
 async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot}){
   const summaries=[];
   let snapshotId=baselineSnapshot;
   for(let run=1;run<=PHASE0_TELEMETRY_RUNS_V1;run++){
     if(run>1){await provider.send('evm_revert',[snapshotId]);snapshotId=await provider.send('evm_snapshot',[]);}
     const runId=`abi-telemetry-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
-    const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(`${runId}-phase0-v1`);
+    const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(`${runId}-phase0-v2`);
     const schedule=buildBurstSchedule(targets,PHASE0_TELEMETRY_CALLS_PER_RUN_V1,rng);
-    const accountingFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.accounting).length,0);
-    const otherFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>!x.accounting).length,0);
-    const stats={calls:0,accountingActions:0,otherActions:0,accountingFunctionCount,otherFunctionCount,weightingLimitation:accountingFunctionCount===0?'NO_ACCOUNTING_STATE_CHANGE_FUNCTIONS_DETECTED':null,successes:0,reverts:0,errors:0,byContract:{},byFunction:{},burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))};
+    const accountingFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.semanticFamily==='ECONOMIC').length,0);
+    const otherFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.semanticFamily!=='ECONOMIC').length,0);
+    const stats={
+      calls:0,plannedActions:PHASE0_TELEMETRY_CALLS_PER_RUN_V1,terminalActions:0,submittedActions:0,
+      accountingActions:0,otherActions:0,accountingFunctionCount,otherFunctionCount,
+      weightingLimitation:accountingFunctionCount===0?'NO_QUALIFIED_ECONOMIC_STATE_CHANGE_FUNCTIONS':null,
+      successes:0,reverts:0,errors:0,minedSuccess:0,minedRevert:0,simulatedRejection:0,
+      simulationInfrastructureError:0,submissionInfrastructureError:0,submittedOutcomeUnknown:0,
+      notExecutedEncodingOrPlanning:0,positiveTransitions:0,positiveEconomicTransitions:0,
+      observationFailures:0,observationReads:0,byContract:{},byFunction:{},
+      burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
+    };
+    const terminalRows=[];
     const telemetryStartedAt=Date.now();
-    console.log(`[phase0-telemetry] ${runId} started; targetCalls=${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; heartbeat every 300s`);
-    const telemetryHeartbeat=setInterval(()=>{
-      const elapsedSeconds=Math.floor((Date.now()-telemetryStartedAt)/1000);
-      console.log(`[phase0-telemetry] heartbeat: run=${runId}; elapsed=${elapsedSeconds}s; calls=${stats.calls}/${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; successes=${stats.successes}; reverts=${stats.reverts}; errors=${stats.errors}`);
-    },300000);
+    console.log(`[phase0-telemetry] ${runId} started; targetCalls=${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; lifecycle=v2`);
+    const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),300000);
     telemetryHeartbeat.unref?.();
     try{
       for(const burst of schedule){
         const target=targets[burst.targetIndex];
         for(let k=0;k<burst.count;k++){
           const selected=pickFn(target,rng,burst.actionClass),f=selected.fragment,sender=actors[ri(rng,actors.length)],iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
-          let args=[],argError=null;try{args=f.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));}catch(e){argError=e;}
-          const before=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
-          const rec={schemaVersion:'curveyield-phase0-raw-simulation-call-v1',runId,callIndex:stats.calls+1,target:{qualifiedName:target.qualifiedName,address:target.address},sender,functionSignature:selected.signature,actionClass:selected.accounting?'ACCOUNTING_STATE_CHANGE':'OTHER_STATE_CHANGE',decodedInputs:argError?null:normalize(args),abiGenerated:true,rawRandomBytes:false,beforeAccounting:before,transaction:null,error:null,afterAccounting:null,accountingDeltas:{}};
-          stats.calls++;if(selected.accounting)stats.accountingActions++;else stats.otherActions++;
-          stats.byContract[target.qualifiedName]=(stats.byContract[target.qualifiedName]??0)+1;const fk=`${target.qualifiedName}::${selected.signature}`;stats.byFunction[fk]=(stats.byFunction[fk]??0)+1;
-          if(argError){rec.error={name:'ABI_ARGUMENT_GENERATION_LIMITATION',message:String(argError.message??argError)};stats.errors++;}
-          else{
+          const rec={
+            schemaVersion:'curveyield-phase0-raw-simulation-call-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
+            runId,callIndex:stats.calls+1,target:{qualifiedName:target.qualifiedName,address:target.address,recipeId:target.recipe?.recipeId??null},
+            sender,functionSignature:selected.signature,declaredMutability:f.stateMutability,
+            semanticFamily:selected.semanticFamily??'UNKNOWN',semanticBasis:selected.semanticBasis??'NO_QUALIFIED_SEMANTIC_RECIPE',
+            actionClass:selected.semanticFamily==='ECONOMIC'?'ECONOMIC_STATE_CHANGE':'OTHER_STATE_CHANGE',
+            stages:{ARG_GEN:null,PREFLIGHT:null,SUBMISSION:null,RECEIPT:null,OBSERVATION:null},
+            decodedInputs:null,abiGenerated:true,rawRandomBytes:false,executionOutcome:null,
+            observations:{before:[],after:[],deltas:[]},effectClassification:'NOT_EXECUTED',positiveTransition:false,
+            transaction:null,error:null
+          };
+          stats.calls++; if(selected.semanticFamily==='ECONOMIC')stats.accountingActions++;else stats.otherActions++;
+          stats.byContract[target.qualifiedName]=(stats.byContract[target.qualifiedName]??0)+1;
+          const fk=`${target.qualifiedName}::${selected.signature}`;stats.byFunction[fk]=(stats.byFunction[fk]??0)+1;
+
+          let args=null,argError=null;
+          try{args=f.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));rec.decodedInputs=normalize(args);rec.stages.ARG_GEN={status:'PASS'};}
+          catch(error){argError=error;rec.stages.ARG_GEN={status:'FAILED',error:{code:error?.code??'ABI_ARGUMENT_GENERATION_LIMITATION',message:String(error?.message??error),limitation:error?.limitation??null}};}
+          if(argError){
+            rec.executionOutcome=classifyExecutionOutcomeV2({argumentGeneration:{success:false}});
+            rec.error=rec.stages.ARG_GEN.error;
+          }else{
+            const before=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
+            rec.observations.before=observationRowsV2(before,target.recipe,'BEFORE');
+            const data=iface.encodeFunctionData(selected.signature,args);
+            const value=f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n;
+            let estimate=null,preflightError=null;
             try{
-              const signer=await provider.getSigner(sender),c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),signer),fn=c.getFunction(selected.signature),overrides=f.stateMutability==='payable'?{value:BigInt(ri(rng,1000000))}:{};
-              const tx=await fn.send(...args,overrides),receipt=await tx.wait();
-              rec.transaction={hash:receipt.hash,blockNumber:receipt.blockNumber,status:receipt.status,gasUsed:receipt.gasUsed?.toString()??null,value:overrides.value?.toString()??'0',logs:(receipt.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))};stats.successes++;
-            }catch(e){rec.error=errorInfo(e,iface);if(e?.code==='CALL_EXCEPTION'||/revert/i.test(String(e?.shortMessage??e?.message??'')))stats.reverts++;else stats.errors++;}
+              estimate=await provider.estimateGas({from:sender,to:target.address,data,value});
+              rec.stages.PREFLIGHT={status:'PASS',estimateGas:estimate.toString()};
+            }catch(error){
+              preflightError=error;
+              const kind=preflightKindV2(error);
+              rec.stages.PREFLIGHT={status:'FAILED',kind,error:errorInfo(error,iface)};
+            }
+            let tx=null,receipt=null,submissionError=null;
+            if(!preflightError){
+              try{
+                const signer=await provider.getSigner(sender);
+                const gasLimit=estimate+(estimate/2n)+100000n;
+                tx=await signer.sendTransaction({to:target.address,data,value,gasLimit});
+                rec.stages.SUBMISSION={status:'SUBMITTED',transactionHash:tx.hash,gasLimit:gasLimit.toString()};
+                try{
+                  receipt=await tx.wait();
+                  rec.stages.RECEIPT={status:'MINED',transactionHash:tx.hash,blockNumber:receipt?.blockNumber??null,receiptStatus:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,gasPrice:(receipt?.gasPrice??receipt?.effectiveGasPrice)?.toString?.()??null};
+                }catch(error){
+                  receipt=error?.receipt??null;
+                  if(receipt)rec.stages.RECEIPT={status:'MINED',transactionHash:tx.hash,blockNumber:receipt.blockNumber??null,receiptStatus:receipt.status??0,gasUsed:receipt.gasUsed?.toString()??null,gasPrice:(receipt?.gasPrice??receipt?.effectiveGasPrice)?.toString?.()??null,error:errorInfo(error,iface)};
+                  else rec.stages.RECEIPT={status:'OUTCOME_UNKNOWN',transactionHash:tx.hash,error:errorInfo(error,iface)};
+                }
+              }catch(error){
+                submissionError=error;
+                rec.stages.SUBMISSION={status:'FAILED',error:errorInfo(error,iface)};
+              }
+            }
+            rec.executionOutcome=classifyExecutionOutcomeV2({
+              argumentGeneration:{success:true},
+              preflight:preflightError?{success:false,kind:preflightKindV2(preflightError)}:{success:true},
+              submission:preflightError?null:(submissionError?{success:false}:{success:!!tx}),
+              receipt
+            });
+            const after=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
+            rec.observations.after=observationRowsV2(after,target.recipe,'AFTER');
+            rec.observations.deltas=observationDeltasV2(rec.observations.before,rec.observations.after,{receipt,sender});
+            rec.stages.OBSERVATION={
+              status:rec.observations.after.some(x=>x.status!=='OK')?'PARTIAL':'COMPLETE',
+              reads:rec.observations.after.length,
+              failedReads:rec.observations.after.filter(x=>x.status!=='OK').length
+            };
+            const knownNonzero=rec.observations.deltas.filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
+            rec.positiveTransition=rec.executionOutcome==='MINED_SUCCESS'&&knownNonzero.length>0;
+            rec.effectClassification=rec.positiveTransition?'OBSERVED_STATE_TRANSITION':(rec.executionOutcome==='MINED_SUCCESS'?'MINED_NO_OBSERVED_STATE_TRANSITION':'NO_MINED_SUCCESS');
+            rec.transaction=tx?{hash:tx.hash,blockNumber:receipt?.blockNumber??null,status:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,value:value.toString(),logs:(receipt?.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))}:null;
+            if(preflightError)rec.error=errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
           }
-          const after=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});rec.afterAccounting=after;rec.accountingDeltas=deltas(before,after);
+
+          stats.terminalActions++;
+          if(['MINED_SUCCESS','MINED_REVERT','SUBMITTED_OUTCOME_UNKNOWN'].includes(rec.executionOutcome))stats.submittedActions++;
+          if(rec.executionOutcome==='MINED_SUCCESS'){stats.minedSuccess++;stats.successes++;}
+          else if(rec.executionOutcome==='MINED_REVERT'){stats.minedRevert++;stats.reverts++;}
+          else if(rec.executionOutcome==='SIMULATED_REJECTION')stats.simulatedRejection++;
+          else if(rec.executionOutcome==='SIMULATION_INFRASTRUCTURE_ERROR')stats.simulationInfrastructureError++;
+          else if(rec.executionOutcome==='SUBMISSION_INFRASTRUCTURE_ERROR')stats.submissionInfrastructureError++;
+          else if(rec.executionOutcome==='SUBMITTED_OUTCOME_UNKNOWN')stats.submittedOutcomeUnknown++;
+          else if(rec.executionOutcome==='NOT_EXECUTED_ENCODING_OR_PLANNING')stats.notExecutedEncodingOrPlanning++;
+          if(rec.positiveTransition){stats.positiveTransitions++;if(rec.semanticFamily==='ECONOMIC')stats.positiveEconomicTransitions++;}
+          const observations=[...rec.observations.before,...rec.observations.after];stats.observationReads+=observations.length;stats.observationFailures+=observations.filter(x=>x.status!=='OK').length;
+          if(['SIMULATION_INFRASTRUCTURE_ERROR','SUBMISSION_INFRASTRUCTURE_ERROR','SUBMITTED_OUTCOME_UNKNOWN','NOT_EXECUTED_ENCODING_OR_PLANNING'].includes(rec.executionOutcome))stats.errors++;
+          terminalRows.push(rec);
           await h.write(JSON.stringify(rec)+'\n');
         }
       }
     }finally{clearInterval(telemetryHeartbeat);await h.close();}
-    console.log(`[phase0-telemetry] ${runId} completed; elapsed=${Math.floor((Date.now()-telemetryStartedAt)/1000)}s; calls=${stats.calls}; successes=${stats.successes}; reverts=${stats.reverts}; errors=${stats.errors}`);
-    const bytes=await fs.readFile(file),summary={schemaVersion:'curveyield-phase0-abi-telemetry-run-v1',runId,purpose:'INVESTIGATIVE_TELEMETRY_FOR_LATER_REVIEWERS_NOT_MANUAL_REVERIFICATION',...stats,accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,interleavedCrossContractBursts:true,rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,status:stats.calls===PHASE0_TELEMETRY_CALLS_PER_RUN_V1?'PASS':'INCOMPLETE'};
+    const reconciliation=validateTelemetryCountersV2(stats,terminalRows);
+    const observationStatus=stats.observationReads===0?'UNAVAILABLE':(stats.observationFailures===0?'COMPLETE':'PARTIAL');
+    const reachabilityStatus=stats.positiveTransitions>0?'REACHABLE':'REACHABILITY_GAP';
+    console.log(`[phase0-telemetry] ${runId} completed; calls=${stats.calls}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; positiveTransitions=${stats.positiveTransitions}`);
+    const bytes=await fs.readFile(file),summary={
+      schemaVersion:'curveyield-phase0-abi-telemetry-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
+      runId,purpose:'AUTOMATED_LIFECYCLE_TELEMETRY_WITH_TYPED_OUTCOMES_AND_ACCOUNTING_OBSERVATIONS',...stats,
+      accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,
+      interleavedCrossContractBursts:true,executionStatus:'EXECUTED',coverageStatus:stats.calls===PHASE0_TELEMETRY_CALLS_PER_RUN_V1?'COMPLETE':'INCOMPLETE',
+      checkStatus:'NOT_APPLICABLE',reachabilityStatus,observationStatus,reconciliation,
+      rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,
+      legacyCompatibility:{legacyRevertCounterWasPreflightDominated:true,currentRevertsAreMinedRevertsOnly:true},
+      status:stats.calls===PHASE0_TELEMETRY_CALLS_PER_RUN_V1&&stats.terminalActions===stats.plannedActions&&reconciliation.status==='PASS'?'PASS':'INCOMPLETE'
+    };
     await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');summaries.push(summary);
   }
   return summaries;
