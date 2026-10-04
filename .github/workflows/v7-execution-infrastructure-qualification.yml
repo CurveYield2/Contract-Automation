@@ -66,6 +66,7 @@ on:
       - 'protocol/schemas/curveyield-lite-interphase-*.schema.json'
       - '.github/actions/setup-v7-toolchain/**'
       - 'packages/github-native-sim/src/**'
+      - 'packages/github-native-sim/scripts/**'
       - 'packages/github-native-sim/test/**'
       - 'packages/runner/src/**'
       - 'packages/runner/test/**'
@@ -99,6 +100,7 @@ on:
       - 'protocol/schemas/curveyield-lite-interphase-*.schema.json'
       - '.github/actions/setup-v7-toolchain/**'
       - 'packages/github-native-sim/src/**'
+      - 'packages/github-native-sim/scripts/**'
       - 'packages/github-native-sim/test/**'
       - 'packages/runner/src/**'
       - 'packages/runner/test/**'
@@ -258,6 +260,13 @@ jobs:
         run: |
           set -euo pipefail
           node packages/github-native-sim/scripts/phase0-v2-live-qualification.mjs .audit-evidence/v7-infrastructure-qualification/phase0-v2 | tee .audit-evidence/v7-infrastructure-qualification/phase0-v2-console.json
+
+      - name: Phase-0 v2 held-out generalization qualification
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node packages/github-native-sim/scripts/phase0-v2-heldout-qualification.mjs .audit-evidence/v7-infrastructure-qualification/phase0-v2-heldout | tee .audit-evidence/v7-infrastructure-qualification/phase0-v2-heldout-console.json
 
       - name: V7 request and execution contract qualification
         if: env.V7_QUALIFICATION_LANE == 'FULL'

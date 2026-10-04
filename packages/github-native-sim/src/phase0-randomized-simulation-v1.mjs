@@ -220,7 +220,7 @@ export async function detectDeploymentScripts(projectRoot){
   }catch{}
   return{foundry,hardhat,unsafeHardhat,genericPackageScripts};
 }
-function canonicalEthereumExecutionOverrides(source){
+export function canonicalEthereumExecutionOverrides(source){
   const text=String(source??''),env={};
   const adaptations=[];
   const MAINNET_WETH='0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
@@ -511,7 +511,7 @@ function probePlan(ethers,abi){
   return{zero,address,addressPair};
 }
 async function safeStatic(contract,f,args){try{return{ok:true,value:normalize(await contract.getFunction(f.format('sighash')).staticCall(...args))};}catch(e){return{ok:false,error:String(e?.shortMessage??e?.message??e).slice(0,800)};}}
-async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
+export async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
   const out={native:{},views:{},systemNative:{},related:{}};
   const c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),provider);
   const relatedAddresses=[...new Set([target.recipeRuntime?.assetAddress,target.recipeRuntime?.tokenAddress].filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x))))];

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1} from '../src/phase0-randomized-simulation-v1.mjs';
+import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,canonicalEthereumExecutionOverrides,snapshot} from '../src/phase0-randomized-simulation-v1.mjs';
 import {extractSourceKnownDeployPlanV1,extractSourceKnownBindingsV1,extractSourceKnownCompileGroupsV1} from '../src/source-known-deployment-plan-v1.mjs';
 
 function rngSeq(values){let i=0;return()=>values[(i++)%values.length];}
@@ -247,16 +247,12 @@ test('Phase-0 randomized simulation reuses exact accepted multi-profile artifact
 });
 
 test('gas overrides bind to consumed environment keys, including WEI suffix',()=>{
-  const here=path.dirname(fileURLToPath(import.meta.url));
-  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  const body=source.slice(source.indexOf('function canonicalEthereumExecutionOverrides'),source.indexOf('async function executeDeploymentScripts'));
-  const overrides=new Function(body+';return canonicalEthereumExecutionOverrides;')();
-  const result=overrides('const MAX_FEE_PER_GAS=envBigInt("MAX_FEE_PER_GAS_WEI",1); const MAX_PRIORITY_FEE_PER_GAS=envBigInt("MAX_PRIORITY_FEE_PER_GAS_WEI",2);');
+  const result=canonicalEthereumExecutionOverrides('const MAX_FEE_PER_GAS=envBigInt("MAX_FEE_PER_GAS_WEI",1); const MAX_PRIORITY_FEE_PER_GAS=envBigInt("MAX_PRIORITY_FEE_PER_GAS_WEI",2);');
   assert.deepEqual(result.env,{MAX_FEE_PER_GAS_WEI:'1000000000000',MAX_PRIORITY_FEE_PER_GAS_WEI:'1000000000'});
   assert.deepEqual(result.adaptations.map(x=>x.env),Object.keys(result.env));
-  const legacy=overrides('const fee=process.env.MAX_FEE_PER_GAS; const tip=envBigInt("MAX_PRIORITY_FEE_PER_GAS",2);');
+  const legacy=canonicalEthereumExecutionOverrides('const fee=process.env.MAX_FEE_PER_GAS; const tip=envBigInt("MAX_PRIORITY_FEE_PER_GAS",2);');
   assert.deepEqual(legacy.env,{MAX_FEE_PER_GAS:'1000000000000',MAX_PRIORITY_FEE_PER_GAS:'1000000000'});
-  assert.deepEqual(overrides('const MAX_FEE_PER_GAS=1;').env,{});
+  assert.deepEqual(canonicalEthereumExecutionOverrides('const MAX_FEE_PER_GAS=1;').env,{});
 });
 
 test('summary telemetry projection preserves terminal status used by completeness gate',()=>{
@@ -301,11 +297,17 @@ test('Medusa compiles its standalone router without invoking production framewor
   assert.doesNotMatch(run,/cwd:projectRoot/);
 });
 test('batched accounting snapshots preserve all observations',async()=>{
-  const here=path.dirname(fileURLToPath(import.meta.url));
-  const s=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  const body=s.slice(s.indexOf('async function snapshot('),s.indexOf('function flattenNumbers'));
-  const snap=new Function('normalizedAbi','safeStatic',body+';return snapshot;')(x=>x,async(_c,f,args)=>f.format()+args.join(','));
-  const result=await snap({provider:{getBalance:async a=>BigInt(a)},ethers:{Contract:class{}},target:{address:'2',artifact:{abi:[]}},sender:'1',plan:{zero:[{format:()=> 'totalSupply()'}],address:[{format:()=> 'balanceOf(address)'}]},systemTargets:[{address:'2'},{address:'3'}]});
+  class FakeContract {
+    getFunction(signature){return{staticCall:async(...args)=>signature+args.join(',')};}
+  }
+  const result=await snapshot({
+    provider:{getBalance:async a=>BigInt(a)},
+    ethers:{Contract:FakeContract},
+    target:{address:'2',artifact:{abi:[]}},
+    sender:'1',
+    plan:{zero:[{format:()=> 'totalSupply()'}],address:[{format:()=> 'balanceOf(address)'}],addressPair:[]},
+    systemTargets:[{address:'2'},{address:'3'}]
+  });
   assert.deepEqual(result.native,{sender:'1',target:'2'});
   assert.deepEqual(result.systemNative,{'2':'2','3':'3'});
   assert.equal(Object.keys(result.views).length,3);
