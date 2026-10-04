@@ -61,12 +61,13 @@ export function masterReviewRequired(directory,authorityRoot){
   return Boolean(directory?.masterReview&&validateMasterReviewConfiguration(directory));
 }
 
-function referencedArtifact({root,campaignPath,phase,kind,reference}){
+function referencedArtifact({root,campaignPath,phase,kind,reference,requireDigest=true}){
   const raw=reference?.path;
   if(typeof raw!=='string'||!raw)return null;
+  if(requireDigest&&!SHA256.test(String(reference.sha256??'')))throw new Error('sealed receipt reference requires sha256: '+raw);
   const rel=existing(root,raw)?raw:path.posix.join(campaignPath,raw);
   const row=artifact(root,campaignPath,phase,kind,rel);
-  if(SHA256.test(String(reference.sha256??''))&&reference.sha256!==row.sha256)throw new Error('sealed receipt reference digest mismatch: '+raw);
+  if(requireDigest&&reference.sha256!==row.sha256)throw new Error('sealed receipt reference digest mismatch: '+raw);
   return row;
 }
 function pushUniqueArtifact(rows,seen,row){
@@ -101,7 +102,7 @@ export function collectSegmentArtifacts({root,campaignPath,segment}){
     }
     for(const [name,value] of Object.entries(receipt.globalControls??{})){
       if(typeof value!=='string'||!value)continue;
-      pushUniqueArtifact(artifacts,seen,referencedArtifact({root,campaignPath,phase,kind:'GLOBAL_CONTROL_'+name.replace(/[^A-Za-z0-9_-]+/g,'_').toUpperCase(),reference:{path:value}}));
+      pushUniqueArtifact(artifacts,seen,referencedArtifact({root,campaignPath,phase,kind:'GLOBAL_CONTROL_'+name.replace(/[^A-Za-z0-9_-]+/g,'_').toUpperCase(),reference:{path:value},requireDigest:false}));
     }
     pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,receiptKind,receiptInfo.rel,{receiptRevision:receiptInfo.revision}));
   }
@@ -259,11 +260,23 @@ function currentBindingFailures(root,campaignPath,form){
   }
   return failures;
 }
+function substantiveText(value){return typeof value==='string'&&value.trim().length>=8&&!/^<REQUIRED/.test(value.trim());}
 function validateRepairSpec({root,authorityRoot,segment,form}){
   const failures=[];
   const deficiencies=form.review?.deficiencies;
   const spec=form.review?.repairSpec;
+  if(!substantiveText(form.review?.summary))failures.push('REWORK requires a substantive review.summary');
   if(!Array.isArray(deficiencies)||deficiencies.length===0)failures.push('REWORK requires at least one bounded deficiency');
+  const deficiencyIds=new Set();
+  for(const deficiency of Array.isArray(deficiencies)?deficiencies:[]){
+    if(!deficiency||typeof deficiency!=='object'){failures.push('REWORK deficiencies must be objects');continue;}
+    if(typeof deficiency.id!=='string'||!deficiency.id||deficiencyIds.has(deficiency.id))failures.push('REWORK deficiency IDs must be non-empty and unique');
+    else deficiencyIds.add(deficiency.id);
+    if(!segment.phases.includes(Number(deficiency.phase)))failures.push('REWORK deficiency phase is outside the reviewed segment: '+String(deficiency.id));
+    if(!substantiveText(deficiency.description))failures.push('REWORK deficiency description must be substantive: '+String(deficiency.id));
+    if(!Array.isArray(deficiency.ownedPaths)||deficiency.ownedPaths.length===0||deficiency.ownedPaths.some(x=>typeof x!=='string'||!x))failures.push('REWORK deficiency ownedPaths must be non-empty: '+String(deficiency.id));
+    if(!Array.isArray(deficiency.evidenceRefs)||deficiency.evidenceRefs.length===0||deficiency.evidenceRefs.some(x=>typeof x!=='string'||!x))failures.push('REWORK deficiency evidenceRefs must be non-empty: '+String(deficiency.id));
+  }
   if(!spec||typeof spec!=='object')return [...failures,'REWORK requires repairSpec'];
   if(typeof spec.scopeId!=='string'||!spec.scopeId)failures.push('repairSpec.scopeId is required');
   if(!Array.isArray(spec.allowedFiles)||spec.allowedFiles.length===0)failures.push('repairSpec.allowedFiles must be non-empty');
@@ -271,6 +284,8 @@ function validateRepairSpec({root,authorityRoot,segment,form}){
   const workFiles=new Map((form.reviewedArtifacts??[]).filter(x=>x.kind==='WORK_FORM').map(x=>[x.path,x.phase]));
   for(const file of spec.allowedFiles??[])if(!workFiles.has(file))failures.push('repairSpec.allowedFiles is outside reviewed work forms: '+file);
   const allowedFileSet=new Set(spec.allowedFiles??[]);
+  const allowedSemanticPathSet=new Set((spec.allowedSemanticPaths??[]).map(x=>x?.path));
+  for(const deficiency of Array.isArray(deficiencies)?deficiencies:[])for(const ownedPath of deficiency?.ownedPaths??[])if(!allowedSemanticPathSet.has(ownedPath))failures.push('repairSpec does not admit deficiency owned path: '+ownedPath);
   for(const entry of spec.allowedSemanticPaths??[]){
     if(!entry||typeof entry!=='object'){failures.push('repairSpec.allowedSemanticPaths entries must be objects');continue;}
     if(!allowedFileSet.has(entry.file)){failures.push('repair semantic path file is not listed in repairSpec.allowedFiles: '+String(entry.file));continue;}
@@ -326,6 +341,7 @@ function validateRepairCompletion({root,campaignPath,form,pending,cfg}){
   const failures=[];
   const spec=form.review?.repairSpec;
   if(!spec||digestJson(spec)!==pending.repairSpecSha256)failures.push('repairSpec changed after bounded REWORK admission');
+  if(digestJson(form.review?.deficiencies)!==form.bindings?.reviewDeficienciesSha256)failures.push('review deficiencies changed after bounded REWORK admission');
   if(spec?.scopeId!==pending.repairScopeId)failures.push('repair scopeId changed after bounded REWORK admission');
   const baseline=pending.repairBaseline;
   if(!Array.isArray(baseline)||baseline.length===0)failures.push('pending repair baseline is missing');
@@ -362,6 +378,7 @@ function validateRepairCompletion({root,campaignPath,form,pending,cfg}){
 function validateRefreshedRepairVerification({root,campaignPath,form,pending,segment}){
   const failures=[];
   if(digestJson(form.review?.repairSpec)!==pending.repairSpecSha256)failures.push('repairSpec changed after controller refresh');
+  if(digestJson(form.review?.deficiencies)!==form.bindings?.reviewDeficienciesSha256)failures.push('review deficiencies changed after controller refresh');
   if(digestJson(form.childRepair)!==form.bindings?.repairChildSha256)failures.push('childRepair evidence changed after controller refresh');
   const post=form.postRepair;
   if(!post||post.schemaVersion!=='curveyield-lite-master-repair-refresh-v1')failures.push('controller postRepair record is missing');
@@ -426,6 +443,9 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   if(outcome==='REWORK'){
     failures.push(...validateRepairSpec({root,authorityRoot,segment,form}));
     if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
+    form.bindings={...form.bindings,reviewDeficienciesSha256:digestJson(form.review.deficiencies)};
+    writeJson(repoFile(root,pending.workFormPath),form);
+    pending.bindingsSha256=digestJson(form.bindings);
     pending.status='MASTER_REVIEW_REWORK_REQUIRED';
     pending.reviewAttempt=Number(pending.reviewAttempt??1);
     pending.repairScopeId=form.review.repairSpec.scopeId;
@@ -437,13 +457,16 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
     return {status:'MASTER_REVIEW_REWORK_REQUIRED',failures:[],form,pending,repairSpec:form.review.repairSpec};
   }
   if(outcome!=='ACCEPT')return {status:'MASTER_REVIEW_INVALID',failures:['review.outcome must be ACCEPT or REWORK'],form,pending};
-  if((form.review?.deficiencies??[]).length)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT cannot retain deficiencies'],form,pending};
+  if(!substantiveText(form.review?.summary))return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT requires a substantive review.summary'],form,pending};
+  if(!Array.isArray(form.review?.deficiencies)||form.review.deficiencies.length)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT requires deficiencies to be an empty array'],form,pending};
   if(form.review?.repairSpec!==null&&form.review?.repairSpec!==undefined)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT cannot retain repairSpec'],form,pending};
   if(form.childRepair!==null&&form.childRepair!==undefined)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT without a REWORK cycle cannot retain childRepair evidence'],form,pending};
   const verification=form.masterVerification;
   if(verification?.outcome!=='ACCEPT')return {status:'MASTER_REVIEW_INVALID',failures:['masterVerification.outcome must be ACCEPT'],form,pending};
   const expected=(form.reviewedArtifacts??[]).map(x=>({path:x.path,sha256:x.sha256}));
   if(!exactJson(verification.verifiedArtifactDigests,expected))return {status:'MASTER_REVIEW_INVALID',failures:['masterVerification.verifiedArtifactDigests must exactly match the current segment manifest'],form,pending};
+  if(!Array.isArray(verification.deficiencyDispositions)||verification.deficiencyDispositions.length)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT requires empty masterVerification.deficiencyDispositions'],form,pending};
+  if(!substantiveText(verification.notes))return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT requires substantive masterVerification.notes'],form,pending};
   if(typeof verification.verifiedAt!=='string'||!verification.verifiedAt)return {status:'MASTER_REVIEW_INVALID',failures:['masterVerification.verifiedAt is required'],form,pending};
   return {status:'MASTER_REVIEW_ACCEPTED',failures:[],form,pending,successorPlan:pending.successorPlan};
 }
