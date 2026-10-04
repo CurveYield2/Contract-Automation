@@ -33,5 +33,10 @@ jobs:
           request="${changed[0]}"
           run_id="$(jq -r '.run_id // empty' "$request")"
           [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "::error::run_id must be numeric"; exit 1; }
-          gh run cancel "$run_id" --repo "$GITHUB_REPOSITORY"
-          echo "Cancelled run $run_id" >> "$GITHUB_STEP_SUMMARY"
+          gh run cancel "$run_id" --repo "$GITHUB_REPOSITORY" || true
+          sleep 2
+          state="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '.status + ":" + (.conclusion // "")')"
+          if [[ "$state" == in_progress:* || "$state" == queued:* || "$state" == pending:* ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/force-cancel" >/dev/null
+          fi
+          echo "Cancellation requested for run $run_id" >> "$GITHUB_STEP_SUMMARY"
