@@ -241,6 +241,8 @@ test('v11-configured Phase 1 seals but cannot create Phase 2 until exact master 
   assert.ok(master.reviewedArtifacts.some(x=>x.kind==='CANONICAL_DATA'));
   assert.ok(master.reviewedArtifacts.some(x=>x.kind==='PHASE_REPORT'));
   assert.ok(master.reviewedArtifacts.some(x=>x.kind==='SEALED_RECEIPT'));
+  assert.ok(master.reviewedArtifacts.some(x=>x.kind==='GLOBAL_CONTROL_SOURCEINTELLIGENCEBUNDLE'));
+  assert.ok(master.reviewedArtifacts.some(x=>x.kind==='INPUT_CONTROLLER_GENERATED_PHASE_WORK_PACKET'));
   master.review={outcome:'ACCEPT',summary:'Entire reviewer-1 segment accepted.',deficiencies:[],repairSpec:null};
   master.masterVerification={
     outcome:'ACCEPT',
