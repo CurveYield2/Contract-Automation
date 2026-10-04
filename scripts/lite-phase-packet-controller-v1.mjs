@@ -545,7 +545,7 @@ if(reviewKind==='master'){
   }
   const acceptedSegment=pending.segmentId;
   directory.lastSealedReceiptPath=pending.lastSealedReceiptPath;
-  directory.lastAcceptedMasterReview={segmentId:acceptedSegment,workFormPath:pending.workFormPath,manifestSha256:pending.manifestSha256,postRepairManifestSha256:pending.postRepairManifestSha256??null,acceptedAt:now,masterChatUrl:directory.masterReview.chatUrl};
+  directory.lastAcceptedMasterReview={segmentId:acceptedSegment,workFormPath:pending.workFormPath,manifestSha256:pending.manifestSha256,...(pending.postRepairManifestSha256?{postRepairManifestSha256:pending.postRepairManifestSha256}:{}),acceptedAt:now,masterChatUrl:directory.masterReview.chatUrl};
   directory.pendingMasterReview=null;directory.updatedAt=now;writeJson(directoryFile,directory);
   const feedback='MASTER_REVIEW_ACCEPTED: '+acceptedSegment+' accepted.'+(nextAssignment?' Successor Phase '+nextAssignment.phaseSequence+' may now be launched.':' Campaign is now COMPLETE.');
   process.stdout.write(JSON.stringify({status:'PASS',masterReviewAccepted:true,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:acceptedSegment,freshSuccessorRequired:Boolean(nextAssignment),sameReviewerAdvanced:false,nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
