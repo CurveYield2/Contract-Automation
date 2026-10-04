@@ -535,14 +535,10 @@ if(reviewKind==='master'){
     process.stdout.write(JSON.stringify({status:'MASTER_REPAIR_READY_FOR_VERIFICATION',campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview.chatUrl,masterReasoning:'MAXIMUM',workFormPath:pending.workFormPath,postRepairManifestSha256:pending.postRepairManifestSha256,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\\n');
     process.exit(0);
   }
-  const refresh=null;
   const plan=result.successorPlan??{};
   let nextAssignment=null;
   if(plan.nextPhaseSequence===null||plan.nextPhaseSequence===undefined){
     directory.campaignStatus='COMPLETE';directory.currentAssignment=null;
-  }else if(refresh?.nextAssignment?.phaseSequence===plan.nextPhaseSequence){
-    nextAssignment=refresh.nextAssignment;
-    nextAssignment.status='WAITING_FOR_SUCCESSOR_AGENT';
   }else{
     nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:plan.nextPhaseSequence,reviewer:assignmentReviewer(plan.nextPhaseSequence),predecessorReceiptPath:pending.lastSealedReceiptPath,derivedInputPaths:plan.derivedInputPaths??[],status:'WAITING_FOR_SUCCESSOR_AGENT',prefillContext:plan.prefillContext??{}});
     directory.currentAssignment=nextAssignment;directory.campaignStatus='WAITING_FOR_SUCCESSOR_AGENT';
