@@ -516,6 +516,7 @@ function sourceDeclaredStandardsV2(sourceIntelligence,qualifiedName){
   const out=[];
   if(normalized.has('IERC20')||normalized.has('ERC20'))out.push('ERC20');
   if(normalized.has('IERC4626')||normalized.has('ERC4626'))out.push('ERC4626');
+  if(normalized.has('IERC3156FLASHLENDER')||normalized.has('ERC3156FLASHLENDER'))out.push('ERC3156FLASHLENDER');
   return out;
 }
 function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
@@ -530,6 +531,82 @@ function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
     });
     return{...d,artifact,functions,plan:probePlan(ethers,artifact),declaredStandards,recipe};
   }).filter(t=>t.functions.length);
+}
+async function prepareQualifiedRuntimeV2({provider,ethers,targets,actors}){
+  const setupReceipts=[];
+  const erc20Abi=['function balanceOf(address) view returns (uint256)','function allowance(address,address) view returns (uint256)','function approve(address,uint256) returns (bool)'];
+  const callbackSig='onFlashLoan(address,address,uint256,uint256,bytes)';
+  const callbackTargets=targets.filter(t=>normalizedAbi(t.artifact.abi).some(x=>x?.type==='function'&&`${x.name}(${(x.inputs??[]).map(i=>i.type).join(',')})`===callbackSig));
+  for(const target of targets){
+    const recipeId=target.recipe?.recipeId;
+    const c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),provider);
+    if(recipeId==='erc20-standard-v1'){
+      const balances=[];
+      for(const actor of actors){try{balances.push({actor,balance:BigInt(await c.balanceOf(actor))});}catch{}}
+      balances.sort((a,b)=>a.balance===b.balance?0:(a.balance>b.balance?-1:1));
+      const primary=balances.find(x=>x.balance>0n)?.actor??actors[0];
+      const spender=actors.find(x=>x.toLowerCase()!==primary.toLowerCase())??actors[0];
+      target.recipeRuntime={primaryActor:primary,spenderActor:spender,balances:balances.map(x=>({actor:x.actor,balance:x.balance.toString()})),setupReceipts:[]};
+      try{
+        const signer=await provider.getSigner(primary),token=c.connect(signer),tx=await token.approve(spender,ethers.MaxUint256),receipt=await tx.wait();
+        target.recipeRuntime.setupReceipts.push({kind:'ERC20_ALLOWANCE',hash:receipt.hash,status:receipt.status});
+        setupReceipts.push({target:target.qualifiedName,...target.recipeRuntime.setupReceipts.at(-1)});
+      }catch(error){target.recipeRuntime.setupGap={type:'ERC20_ALLOWANCE_SETUP_GAP',message:String(error?.shortMessage??error?.message??error).slice(0,1200)};}
+    }else if(recipeId==='erc4626-standard-v1'){
+      try{
+        const assetAddress=await c.asset(),asset=new ethers.Contract(assetAddress,erc20Abi,provider),balances=[];
+        for(const actor of actors){try{balances.push({actor,balance:BigInt(await asset.balanceOf(actor))});}catch{}}
+        balances.sort((a,b)=>a.balance===b.balance?0:(a.balance>b.balance?-1:1));
+        const primary=balances.find(x=>x.balance>1n)?.actor??actors[0];
+        target.recipeRuntime={assetAddress,primaryActor:primary,balances:balances.map(x=>({actor:x.actor,balance:x.balance.toString()})),setupReceipts:[]};
+        const signer=await provider.getSigner(primary),assetSigner=asset.connect(signer);
+        const allowance=BigInt(await asset.allowance(primary,target.address));
+        if(allowance<1000n){
+          const tx=await assetSigner.approve(target.address,ethers.MaxUint256),receipt=await tx.wait();
+          target.recipeRuntime.setupReceipts.push({kind:'ERC4626_ASSET_ALLOWANCE',hash:receipt.hash,status:receipt.status});
+          setupReceipts.push({target:target.qualifiedName,...target.recipeRuntime.setupReceipts.at(-1)});
+        }
+        try{
+          const shares=BigInt(await c.balanceOf(primary));
+          const assetBal=BigInt(await asset.balanceOf(primary));
+          if(shares===0n&&assetBal>10n){
+            const vault=c.connect(signer),tx=await vault.deposit(10n,primary),receipt=await tx.wait();
+            target.recipeRuntime.setupReceipts.push({kind:'ERC4626_SEED_DEPOSIT',hash:receipt.hash,status:receipt.status});
+            setupReceipts.push({target:target.qualifiedName,...target.recipeRuntime.setupReceipts.at(-1)});
+          }
+        }catch(error){target.recipeRuntime.seedGap={type:'ERC4626_SEED_GAP',message:String(error?.shortMessage??error?.message??error).slice(0,1200)};}
+      }catch(error){target.recipeRuntime={setupGap:{type:'ERC4626_RUNTIME_BINDING_GAP',message:String(error?.shortMessage??error?.message??error).slice(0,1200)}};}
+    }else if(recipeId==='erc3156-flash-lender-v1'){
+      let tokenAddress=null;
+      for(const getter of ['token','asset']){
+        try{tokenAddress=await c.getFunction(`${getter}()`).staticCall();if(tokenAddress)break;}catch{}
+      }
+      const borrower=callbackTargets.find(x=>x.address.toLowerCase()!==target.address.toLowerCase())?.address??null;
+      target.recipeRuntime={tokenAddress,borrowerAddress:borrower,primaryActor:actors[0],setupReceipts:[]};
+      if(!tokenAddress||!borrower)target.recipeRuntime.setupGap={type:'ERC3156_RUNTIME_BINDING_GAP',missing:[!tokenAddress?'TOKEN':null,!borrower?'BORROWER':null].filter(Boolean)};
+    }
+  }
+  return{targets,setupReceipts};
+}
+function qualifiedActionV2({target,selected,actors,rng}){
+  const recipeId=target.recipe?.recipeId,runtime=target.recipeRuntime??{},sig=selected.signature;
+  if(recipeId==='erc20-standard-v1'&&runtime.primaryActor){
+    const primary=runtime.primaryActor,spender=runtime.spenderActor??actors[1]??actors[0],receiver=actors.find(x=>x.toLowerCase()!==primary.toLowerCase()&&x.toLowerCase()!==spender.toLowerCase())??spender;
+    if(sig==='transfer(address,uint256)')return{sender:primary,args:[receiver,1n],value:0n,basis:'ERC20_FUNDED_ACTOR_RECIPE'};
+    if(sig==='approve(address,uint256)')return{sender:primary,args:[spender,2n],value:0n,basis:'ERC20_ALLOWANCE_RECIPE'};
+    if(sig==='transferFrom(address,address,uint256)')return{sender:spender,args:[primary,receiver,1n],value:0n,basis:'ERC20_ALLOWANCE_RECIPE'};
+  }
+  if(recipeId==='erc4626-standard-v1'&&runtime.primaryActor){
+    const a=runtime.primaryActor;
+    if(sig==='deposit(uint256,address)')return{sender:a,args:[1n,a],value:0n,basis:'ERC4626_ASSET_ALLOWANCE_RECIPE'};
+    if(sig==='mint(uint256,address)')return{sender:a,args:[1n,a],value:0n,basis:'ERC4626_ASSET_ALLOWANCE_RECIPE'};
+    if(sig==='withdraw(uint256,address,address)')return{sender:a,args:[1n,a,a],value:0n,basis:'ERC4626_SEEDED_POSITION_RECIPE'};
+    if(sig==='redeem(uint256,address,address)')return{sender:a,args:[1n,a,a],value:0n,basis:'ERC4626_SEEDED_POSITION_RECIPE'};
+  }
+  if(recipeId==='erc3156-flash-lender-v1'&&runtime.tokenAddress&&runtime.borrowerAddress&&sig==='flashLoan(address,address,uint256,bytes)'){
+    return{sender:runtime.primaryActor??actors[0],args:[runtime.borrowerAddress,runtime.tokenAddress,1n,'0x'],value:0n,basis:'ERC3156_CALLBACK_FLOW_RECIPE'};
+  }
+  return null;
 }
 function pickFn(target,rng,actionClass){
   const accounting=target.functions.filter(x=>x.accounting),other=target.functions.filter(x=>!x.accounting);
