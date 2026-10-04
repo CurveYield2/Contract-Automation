@@ -13,13 +13,12 @@ const watchdogPath = path.join(repoRoot, '.github/workflows/browser-agent-watchd
 test('interphase mechanical work reuses the existing wake/watchdog workflows', () => {
   const workflows = fs.readdirSync(path.join(repoRoot, '.github/workflows'));
   assert.equal(workflows.some((name) => /interphase/i.test(name)), false, 'must not create a parallel interphase workflow');
-
   const wake = fs.readFileSync(wakePath, 'utf8');
   const watchdog = fs.readFileSync(watchdogPath, 'utf8');
-  assert.match(wake, /worker_role:/);
-  assert.match(wake, /options: \[reviewer, interphase_mechanical\]/);
+  assert.match(wake, /options: \[resume_existing\]/);
   assert.match(watchdog, /MECHANICAL_WORK_PACKET_v2\.json/);
   assert.match(watchdog, /MECHANICAL_WORK_COMPLETION_v2\.json/);
+  assert.match(watchdog, /Legacy create-fresh Lite successor launcher is retired/);
 });
 
 test('interphase mechanical wakes never replace the campaign reviewer chat registration', () => {
@@ -51,11 +50,13 @@ test('mechanical completion is bound to exact work packet and required output by
 
 test('successor launch is gated behind optional mechanical completion', () => {
   const watchdog = fs.readFileSync(watchdogPath, 'utf8');
-  assert.match(watchdog, /worker_role" = "interphase_mechanical"/);
-  assert.match(watchdog, /verify_lite_interphase_completion/);
-  assert.match(watchdog, /return 4/);
-  assert.match(watchdog, /LITE_INTERPHASE_DISPATCHED_/);
-  assert.match(watchdog, /LITE_INTERPHASE_COMPLETE_SUCCESSOR_DISPATCHED_/);
+  assert.match(watchdog, /verify_lite_interphase_completion\(\)/);
+  const start = watchdog.indexOf('launch_lite_successor() {');
+  const end = watchdog.indexOf('\n          if ! fetch_state; then', start);
+  const launch = watchdog.slice(start, end);
+  assert.match(launch, /Legacy create-fresh Lite successor launcher is retired/);
+  assert.match(launch, /return 2/);
+  assert.doesNotMatch(launch, /gh workflow run browser-agent-wake\.yml/);
 });
 
 test('interphase work packet and completion schemas are strict machine contracts', () => {
@@ -81,8 +82,11 @@ test('interphase work packet and completion schemas are strict machine contracts
 
 test('mechanical wake payload is encoded from the generated packet file', () => {
   const watchdog = fs.readFileSync(watchdogPath, 'utf8');
-  assert.match(watchdog, /mechanical_b64="\$\(base64 -w0 \/tmp\/lite-interphase-wake\.txt\)"/);
-  assert.doesNotMatch(watchdog, /mechanical_b64="\$\(printf '%s' "\$mechanical_message" \| base64 -w0\)"/);
+  const start = watchdog.indexOf('launch_lite_successor() {');
+  const end = watchdog.indexOf('\n          if ! fetch_state; then', start);
+  const launch = watchdog.slice(start, end);
+  assert.doesNotMatch(launch, /mechanical_b64|lite-interphase-wake\.txt|browser-agent-wake\.yml/);
+  assert.match(launch, /pre-created reviewer chats and the Phase-1 fixed X11 sender/);
 });
 
 test('watchdog state builder binds every jq variable it references', () => {
@@ -122,16 +126,12 @@ test('v2 requires a real extended mechanical batch rather than a trivial one-fil
   assert.equal(packet.properties.requiredOutputs.minItems, 11);
   assert.equal(completion.properties.workUnitReceipts.minItems, 10);
   assert.equal(completion.properties.outputs.minItems, 11);
-
   const watchdog = fs.readFileSync(watchdogPath, 'utf8');
   assert.match(watchdog, /unit_total/);
   assert.match(watchdog, /\[ "\$unit_total" -ge 10 \]/);
-  assert.match(watchdog, /packet_units/);
-  assert.match(watchdog, /receipt_units/);
   assert.match(watchdog, /reconciliationOutputPath/);
-  assert.match(watchdog, /Legacy inter-phase packet v1 is no longer admitted/);
+  assert.match(watchdog, /launch_lite_successor\(\) \{[\s\S]*Legacy create-fresh Lite successor launcher is retired/);
 });
-
 
 test('qualification classifier keeps docs and watchdog runtime state in control-light lane', () => {
   const result = classifyV7QualificationChanges([
