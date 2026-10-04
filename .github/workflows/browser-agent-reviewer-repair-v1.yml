@@ -73,17 +73,13 @@ jobs:
           fi
           echo "registration=$registration" >> "$GITHUB_OUTPUT"
 
-      - name: Redispatch legacy repair for pre-receipt campaign
+      - name: Reject retired legacy repair path
         if: steps.route.outputs.mode == 'legacy'
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh workflow run browser-agent-reviewer-repair-legacy-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            -f campaign_id="$CAMPAIGN_ID" \
-            -f repair_mode="${{ inputs.repair_mode }}" \
-            -f force_reset="${{ inputs.force_reset }}" \
-            -f reason="${{ inputs.reason }}"
+          echo "::error::Legacy reviewer repair is retired because it can bypass the Phase-1 fixed X11 audit browser invariant."
+          echo "::error::Migrate the campaign to the current Audit Campaign Directory assignment-v2 registration before automated reviewer repair."
+          exit 1
 
       - name: Resolve current receipt reviewer
         if: steps.route.outputs.mode == 'receipt'
