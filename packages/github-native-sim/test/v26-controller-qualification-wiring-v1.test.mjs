@@ -86,6 +86,7 @@ test('same-repo PR qualification pins one exact private controller ref and runs 
 test('authorized same-repo PR may dry-run one typed held rework only in the detached private clone', () => {
   assert.match(workflow, /rework_request_path=\(campaigns/);
   assert.match(workflow, /held rework qualification requires an authorized same-repository PR/);
+  assert.match(workflow, /REWORK_REQUEST_PATH_TO_TEST/);
   assert.match(workflow, /Qualify authorized held sealed rework in detached private clone/);
   assert.match(workflow, /--review-kind','sealed-rework'/);
   assert.match(workflow, /request\.holdSuccessorDelivery!==true/);
