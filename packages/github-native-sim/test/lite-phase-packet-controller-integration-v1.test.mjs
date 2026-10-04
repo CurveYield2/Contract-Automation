@@ -424,7 +424,8 @@ test('typed held revision2-to-revision3 admission regenerates controller product
   const qualityRel=f.campaign+'/work/phase-01/review/PHASE_01_QUALITY_REVIEW_v2.md';
   const authRel=f.campaign+'/controller/HUMAN_REWORK_AUTHORIZATION_v1.json';
   write(path.join(f.root,qualityRel),'# Quality review\nBounded correction approved.\n');
-  writeJson(path.join(f.root,authRel),{scopeId:'phase1-r2-r3',authorizedAt:'2026-10-04T00:00:00Z'});
+  const allowedReworkPaths=['actions.step-1.outputs.analysis'];
+  writeJson(path.join(f.root,authRel),{schemaVersion:'curveyield-human-rework-authorization-v1',scopeId:'phase1-r2-r3',campaignId:'demo-r1',campaignGenerationId:'demo-r1-g1',phaseSequence:1,fromRevision:2,toRevision:3,sourceSha256:'a'.repeat(64),authorityLogicalRoot:authority,allowedSemanticPaths:allowedReworkPaths,deliveryHold:true,mainCodeMergeAuthorized:false,recordedAt:'2026-10-04T00:00:00Z'});
   writeJson(path.join(f.root,f.campaign,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json'),{events:[{eventId:'INV-P1-REWORK-001',ruleId:'EIM-013',status:'RESOLVED_BY_PHASE_1_REVISION_2'}]});
   const digest=rel=>createHash('sha256').update(fs.readFileSync(path.join(f.root,rel))).digest('hex');
   const requestRel=f.campaign+'/controller/SEALED_PHASE_REWORK_REQUEST_v1.json';
@@ -434,7 +435,7 @@ test('typed held revision2-to-revision3 admission regenerates controller product
     priorReceipt:{path:priorReceiptRel,sha256:digest(priorReceiptRel)},priorWorkForm:{path:priorFormRel,sha256:digest(priorFormRel)},repairedWorkForm:{path:repairedFormRel,sha256:digest(repairedFormRel)},
     qualityReview:{path:qualityRel,sha256:digest(qualityRel)},humanAuthorization:{scopeId:'phase1-r2-r3',recordPath:authRel,recordSha256:digest(authRel),authorizedAt:'2026-10-04T00:00:00Z'},
     generatedFinalReportPath:f.campaign+'/work/phase-01/PHASE_01_FINAL_REPORT_v3.md',generatedPacketPath:f.campaign+'/submissions/PHASE_01_WORK_PACKET_v3.json',
-    allowedSemanticPaths:['actions.step-1.outputs.analysis'],dependentRefresh:{regenerateCanonical:true,regenerateReport:true,regenerateDerived:true,resealReceipt:true,prepareSuccessorAssignment:true},
+    allowedSemanticPaths:allowedReworkPaths,dependentRefresh:{regenerateCanonical:true,regenerateReport:true,regenerateDerived:true,resealReceipt:true,prepareSuccessorAssignment:true},
     evidenceInvalidation:{eventId:'INV-P1-REWORK-002',ruleId:'EIM-013',requiredPriorStatus:'SEALED_REVISION_2',resolveTo:'RESOLVED_BY_PHASE_1_REVISION_3'},holdSuccessorDelivery:true
   });
   const out=execFileSync(process.execPath,['scripts/lite-phase-packet-controller-v1.mjs','--controller-root',f.root,'--campaign-id','demo-r1','--campaign-path',f.campaign,'--campaign-directory-path',f.dirRel,'--review-kind','sealed-rework','--phase-sequence','1','--rework-request-path',requestRel],{encoding:'utf8'});
