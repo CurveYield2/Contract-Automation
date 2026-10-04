@@ -63,7 +63,7 @@ export function masterReviewRequired(directory,authorityRoot){
 
 function referencedArtifact({root,campaignPath,phase,kind,reference,requireDigest=true}){
   const raw=reference?.path;
-  if(typeof raw!=='string'||!raw)return null;
+  if(typeof raw!=='string'||!raw)throw new Error('sealed receipt reference path is required for Phase '+phase+' '+kind);
   const suppliedDigest=reference.sha256;
   if(requireDigest&&suppliedDigest!==undefined&&suppliedDigest!==null&&suppliedDigest!==''&&!SHA256.test(String(suppliedDigest)))throw new Error('sealed receipt reference has invalid sha256: '+raw);
   const rel=existing(root,raw)?raw:path.posix.join(campaignPath,raw);
@@ -88,6 +88,8 @@ export function collectSegmentArtifacts({root,campaignPath,segment,directory,exp
     if(Number(receipt.phase?.sequence)!==phase||Number(receipt.phase?.revision)!==receiptInfo.revision)throw new Error('sealed receipt phase/revision binding mismatch for Phase '+phase);
     if(receipt.authority?.homepagePath!==expectedAuthority.homepagePath||receipt.authority?.liteSkillSha256!==expectedAuthority.liteSkillSha256)throw new Error('sealed receipt authority binding mismatch for Phase '+phase);
     const receiptKind=receipt.phase.status==='SKIPPED'?'SKIP_MARKER':'SEALED_RECEIPT';
+    if(!Array.isArray(receipt.inputs)||receipt.inputs.length===0)throw new Error('sealed receipt inputs are missing for Phase '+phase);
+    if(receiptKind!=='SKIP_MARKER'&&(!Array.isArray(receipt.evidence)||receipt.evidence.length===0||!Array.isArray(receipt.outputs)||receipt.outputs.length===0))throw new Error('sealed receipt evidence/outputs are missing for Phase '+phase);
     if(phase===7){
       const canonical=canonicalRel(campaignPath,phase);
       const canonicalData=readJson(requiredFile(root,canonical,'Phase-7 marker canonical data'));
@@ -96,6 +98,9 @@ export function collectSegmentArtifacts({root,campaignPath,segment,directory,exp
     }else if(receiptKind!=='SKIP_MARKER'){
       const canonical=canonicalRel(campaignPath,phase);
       const canonicalData=readJson(requiredFile(root,canonical,'Phase '+phase+' canonical data'));
+      const authorityRoot=path.posix.dirname(expectedAuthority.homepagePath);
+      const phaseSchema=loadPhaseSchema(root,authorityRoot,phase).schema;
+      if(phaseSchema.finalReport&&!canonicalData.finalReportPath)throw new Error('required Phase '+phase+' report path is missing from canonical data');
       pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,'CANONICAL_DATA',canonical));
       pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,'WORK_FORM',canonicalData.workFormPath));
       if(canonicalData.finalReportPath)pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,'PHASE_REPORT',canonicalData.finalReportPath));
@@ -352,6 +357,41 @@ function expectedPreRefreshRows({root,campaignPath,form,baseline}){
     return {...row,sha256:digestFile(file)};
   });
 }
+function repairTransportProofFailures({root,campaignPath,form,pending,cfg}){
+  const failures=[];
+  const pointer=pending.repairTransportProof;
+  const expectedPath=path.posix.join(campaignPath,'work/master-review',pending.segmentId,'MASTER_REPAIR_TRANSPORT_PROOF_v1.json');
+  if(!pointer||pointer.schemaVersion!=='curveyield-lite-master-repair-transport-proof-v1')return ['controller-bound repair transport proof is absent'];
+  if(pointer.recordPath!==expectedPath||!SHA256.test(String(pointer.sha256??''))||pointer.verifiedBy!=='BROWSER_AGENT_WAKE_CONTROLLER'||!substantiveText(pointer.verifiedAt))failures.push('controller-bound repair transport proof pointer is invalid');
+  let proof=null;
+  try{
+    const file=requiredFile(root,expectedPath,'master repair transport proof');
+    if(digestFile(file)!==pointer.sha256)failures.push('master repair transport proof digest mismatch');
+    proof=readJson(file);
+  }catch(error){failures.push(String(error.message||error));}
+  const child=form.childRepair;
+  if(proof){
+    const expected={
+      schemaVersion:'curveyield-lite-master-repair-transport-proof-v1',
+      campaignId:form.campaignId,
+      campaignGenerationId:form.campaignGenerationId,
+      segmentId:pending.segmentId,
+      reviewAttempt:pending.reviewAttempt,
+      masterChatUrl:cfg.chatUrl,
+      repairScopeId:pending.repairScopeId,
+      repairSpecSha256:pending.repairSpecSha256,
+      childChatUrl:child?.childChatUrl,
+      model:'SOL',
+      reasoning:'HIGH',
+      freshChild:true,
+      deliveryStatus:'VERIFIED'
+    };
+    for(const [key,value] of Object.entries(expected))if(!exactJson(proof[key],value))failures.push('master repair transport proof '+key+' mismatch');
+    if(proof.verifiedBy!=='BROWSER_AGENT_WAKE_CONTROLLER'||!substantiveText(proof.verifiedAt))failures.push('master repair transport proof lacks trusted verification identity/time');
+  }
+  return failures;
+}
+
 function validateRepairCompletion({root,campaignPath,form,pending,cfg,normalReviewerChatUrls=[]}){
   const failures=[];
   const spec=form.review?.repairSpec;
@@ -432,6 +472,8 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   ];
   const outcome=String(form.review?.outcome??'');
   if(pending.status==='MASTER_REVIEW_REWORK_REQUIRED'){
+    const transportFailures=repairTransportProofFailures({root,campaignPath,form,pending,cfg});
+    if(transportFailures.length)return {status:'MASTER_REPAIR_TRANSPORT_BLOCKED',failures:transportFailures,form,pending};
     const completed=validateRepairCompletion({root,campaignPath,form,pending,cfg,normalReviewerChatUrls});
     failures.push(...completed.failures);
     if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
