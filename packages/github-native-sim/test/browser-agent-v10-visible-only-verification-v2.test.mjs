@@ -108,8 +108,10 @@ test('recover action prefers saved durable chat URL and uses saved Project URL o
   assert.match(source, /async function recoverCreatedChatFromProjectPage/);
   assert.match(source, /Project-page recovery requires a saved Project URL; sidebar rediscovery is disabled/);
   assert.match(source, /const project = await openSavedProjectUrl\(page, projectName, requestedProjectUrl\)/);
-  assert.match(source, /projectMain\.getByText\(titlePattern, \{ exact: true \}\)/);
-  assert.match(source, /humanPointerClick\(page, chatControl\)/);
+  assert.match(source, /async function findVisibleCenterProjectChatTitle/);
+  assert.match(source, /async function clickVisibleCenterProjectChatTitle/);
+  assert.match(source, /await findVisibleCenterProjectChatTitle\(page, recoveryChatTitle\)/);
+  assert.match(source, /await clickVisibleCenterProjectChatTitle\(page, visibleTitle, beforeChatUrl\)/);
   assert.match(source, /await waitForDurableChatRoute\(page, 300000\)/);
   assert.match(source, /await visibleWakePresent\(page, message, 30000\)/);
   assert.match(source, /recovered-project-chat/);
@@ -298,7 +300,7 @@ test('v10 reuses a persisted Project URL before sidebar recovery or duplicate cr
   assert.match(workflow, /INPUT_PROJECT_URL: \$\{\{ inputs\.project_url \}\}/);
   assert.match(workflow, /PROJECT_URL: \$\{\{ steps\.request\.outputs\.project_url \}\}/);
 
-  assert.equal(request.project_url, '');
+  assert.match(request.project_url, /^https:\/\/chatgpt\.com\/g\/g-p-[A-Za-z0-9]+\/project\/?$/);
   assert.equal(request.project_id, undefined);
   assert.equal(request.recovery_chat_title, 'VERIFY PROJECT WAKE SIGNAL');
 });
@@ -312,21 +314,38 @@ test('v10 saved Project reuse accepts canonical Project root while rejecting cha
   assert.match(source, /observedUrl=/);
 });
 
-test('Project fallback recovery requires saved Project URL and uses only the central visible Project chat list', () => {
+test('Project fallback recovery requires saved Project URL and clicks only an already-visible center-page chat title', () => {
   const start = source.indexOf('async function recoverCreatedChatFromProjectPage');
   const end = source.indexOf('\nasync function postWithVisibleVerification', start);
   const block = source.slice(start, end);
 
   const requireSaved = block.indexOf('Project-page recovery requires a saved Project URL; sidebar rediscovery is disabled');
   const openSaved = block.indexOf('openSavedProjectUrl(page, projectName, requestedProjectUrl)');
-  const projectMain = block.indexOf("page.locator('main, [role=\"main\"]').first()");
-  const title = block.indexOf('projectMain.getByText(titlePattern, { exact: true })');
-  const click = block.indexOf('humanPointerClick(page, chatControl)');
-  assert.ok(requireSaved >= 0 && openSaved > requireSaved && projectMain > openSaved && title > projectMain && click > title);
-  assert.match(block, /recoveryChatTitle/);
-  assert.match(block, /ancestor-or-self::a\[1\]/);
-  assert.match(block, /ancestor-or-self::button\[1\]/);
-  assert.doesNotMatch(block, /recoverExistingProjectExactHumanFlow|Search chats|Control\+K|humanTypeInto\(page, searchInput/);
+  const title = block.indexOf('findVisibleCenterProjectChatTitle(page, recoveryChatTitle)');
+  const click = block.indexOf('clickVisibleCenterProjectChatTitle(page, visibleTitle, beforeChatUrl)');
+  assert.ok(requireSaved >= 0 && openSaved > requireSaved && title > openSaved && click > title);
+  assert.match(block, /Visible center-page Project chat title was not found/);
+  assert.match(block, /Visible center-page Project chat title did not open after human click sequence/);
+  assert.doesNotMatch(block, /recoverExistingProjectExactHumanFlow|Search chats|Control\+K|humanTypeInto\(page, searchInput|scrollIntoViewIfNeeded/);
+});
+
+test('center Project chat title lookup is viewport-visible and performs zero scrolling', () => {
+  const findStart = source.indexOf('async function findVisibleCenterProjectChatTitle');
+  const findEnd = source.indexOf('\nasync function clickVisibleCenterProjectChatTitle', findStart);
+  const findBlock = source.slice(findStart, findEnd);
+  assert.match(findBlock, /page\.viewportSize\(\)/);
+  assert.match(findBlock, /page\.getByText\(titlePattern, \{ exact: true \}\)/);
+  assert.match(findBlock, /centerX >= viewport\.width \* 0\.22/);
+  assert.match(findBlock, /centerY <= viewport\.height \* 0\.68/);
+  assert.match(findBlock, /strategy: 'visible-center-page-title'/);
+  assert.doesNotMatch(findBlock, /mouse\.wheel|scrollIntoViewIfNeeded/);
+
+  const clickStart = source.indexOf('async function clickVisibleCenterProjectChatTitle');
+  const clickEnd = source.indexOf('\nasync function recoverCreatedChatFromProjectPage', clickStart);
+  const clickBlock = source.slice(clickStart, clickEnd);
+  assert.doesNotMatch(clickBlock, /mouse\.wheel|scrollIntoViewIfNeeded/);
+  assert.match(clickBlock, /clickCount: 2/);
+  assert.match(clickBlock, /randomDelayMs\(550, 900\)/);
 });
 
 test('visible Project-name recovery clicks the exact rendered Project title text directly', () => {
