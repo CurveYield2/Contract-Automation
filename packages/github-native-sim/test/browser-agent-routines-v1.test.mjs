@@ -586,6 +586,7 @@ test('only durable server chat URLs can activate a reviewer', async () => {
   assert.ok(start >= 0 && end > start);
   const valid = vm.runInNewContext(source.slice(start, end) + '; durableChatUrl', { URL });
   assert.equal(valid('https://chatgpt.com/c/ef676bc7-8c95-4fad-9262-bf4765c664dd'), true);
+  assert.equal(valid('https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da50-e3a0-83e8-88ea-843db6f426f0'), true);
   assert.equal(valid('https://chatgpt.com/c/local-chatgpt%3Aef676bc7-8c95-4fad-9262-bf4765c664dd'), false);
   assert.equal(valid('https://chatgpt.com/c/local-chatgpt'), false);
   assert.equal(valid('https://chatgpt.com/'), false);
