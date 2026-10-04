@@ -470,3 +470,19 @@ test('human address navigation uses the visible address bar and per-character ke
   assert.match(block, /page\.keyboard\.press\('Enter'\)/);
   assert.doesNotMatch(block, /page\.goto\(targetUrl|\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
 });
+
+
+test('challenge classification requires verification cues and not a generic Cloudflare mention', () => {
+  const start = source.indexOf('function visibleHumanChallenge');
+  const end = source.indexOf('\nfunction visibleBrowserStateText', start);
+  const block = source.slice(start, end);
+  assert.match(block, /Verify you are human/);
+  assert.match(block, /Verifying you are human/);
+  assert.match(block, /Checking your browser/);
+  assert.match(block, /security verification/);
+  assert.match(block, /Enable JavaScript and cookies to continue/);
+  assert.match(block, /Ray ID/);
+  assert.match(block, /Cloudflare.*bodyText/);
+  assert.doesNotMatch(block, /Just a moment\|Cloudflare\|security challenge/);
+  assert.match(source, /humanChallenge: visibleHumanChallenge\(bodyText, title\)/);
+});
