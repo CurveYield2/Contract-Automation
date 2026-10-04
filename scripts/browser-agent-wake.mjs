@@ -399,6 +399,38 @@ async function humanX11TypeText(page, text) {
   }
 }
 
+async function normalChromeViewportToX11(page, viewportX, viewportY) {
+  // Playwright bounding boxes are viewport-relative, while xdotool mouse
+  // coordinates are X11 screen-relative. Account for the stock Chrome window
+  // position and browser chrome before issuing real X11 pointer input.
+  //
+  // This follows the proven mapping used by public X11/Playwright drivers:
+  // screenX + (outerWidth-innerWidth)/2 + viewportX,
+  // screenY + (outerHeight-innerHeight) + viewportY.
+  const metrics = await page.evaluate(() => ({
+    screenX: Number(window.screenX || 0),
+    screenY: Number(window.screenY || 0),
+    outerWidth: Number(window.outerWidth || 0),
+    outerHeight: Number(window.outerHeight || 0),
+    innerWidth: Number(window.innerWidth || 0),
+    innerHeight: Number(window.innerHeight || 0)
+  }));
+  const leftChrome = Math.max(0, Math.round((metrics.outerWidth - metrics.innerWidth) / 2));
+  const topChrome = Math.max(0, Math.round(metrics.outerHeight - metrics.innerHeight));
+  return {
+    x: Math.round(metrics.screenX + leftChrome + viewportX),
+    y: Math.round(metrics.screenY + topChrome + viewportY),
+    screenX: metrics.screenX,
+    screenY: metrics.screenY,
+    leftChrome,
+    topChrome,
+    outerWidth: metrics.outerWidth,
+    outerHeight: metrics.outerHeight,
+    innerWidth: metrics.innerWidth,
+    innerHeight: metrics.innerHeight
+  };
+}
+
 async function waitForCdp(port, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -539,9 +571,13 @@ async function runNormalChromeExistingSession(chromium) {
     if (!box) {
       throw new BrowserAgentError('VISIBLE_CONTROL_NOT_CLICKABLE', 'Visible composer has no X11-clickable bounding box', true);
     }
-    const composerX = Math.round(box.x + box.width / 2);
-    const composerY = Math.round(box.y + box.height / 2);
-    await x11Capture(['mousemove', '--sync', String(composerX), String(composerY)], 'x11-composer-move');
+    const composerPoint = await normalChromeViewportToX11(
+      page,
+      box.x + box.width / 2,
+      box.y + box.height / 2
+    );
+    console.log('[normal-chrome-watchdog] composer-x11-mapping=' + JSON.stringify(composerPoint));
+    await x11Capture(['mousemove', '--sync', String(composerPoint.x), String(composerPoint.y)], 'x11-composer-move');
     await page.waitForTimeout(randomDelayMs(160, 320));
     await x11Key(['click', '1'], 'x11-composer-click');
     await page.waitForTimeout(randomDelayMs(220, 420));
