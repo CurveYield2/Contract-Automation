@@ -160,15 +160,6 @@ jobs:
             printf '%s' "$encoded" | base64 -d > /tmp/existing-registration.json
             existing_milestone="$(jq -r '.activeAssignment.milestoneId // empty' /tmp/existing-registration.json)"
             existing_chat="$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/existing-registration.json)"
-            if [ "$REQUESTED_MODE" = "create_fresh" ] \
-              && [ "$existing_milestone" = "$REQUESTED_MILESTONE" ] \
-              && [[ "$existing_chat" =~ ^https://chatgpt\.com/(c/[A-Za-z0-9_-]+|g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+)/?$ ]]; then
-              echo "Fresh launch deduplicated: reviewer chat already exists for $CAMPAIGN_ID / $REQUESTED_MILESTONE."
-              echo "WAKE_MODE=resume_existing" >> "$GITHUB_ENV"
-              echo "CHAT_URL=$existing_chat" >> "$GITHUB_ENV"
-              echo "DEDUPED_FRESH_LAUNCH=true" >> "$GITHUB_ENV"
-            fi
-
             delivered_milestone="$(jq -r '.wakeDelivery.milestoneId // empty' /tmp/existing-registration.json)"
             delivered_chat="$(jq -r '.wakeDelivery.chatUrl // empty' /tmp/existing-registration.json)"
             if [ "$REQUESTED_MODE" = "resume_existing" ] \
