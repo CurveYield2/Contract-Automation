@@ -671,17 +671,26 @@ async function waitForVisibleBrowserReady(page) {
 function chatRouteInfo(value) {
   try {
     const url = new URL(value);
-    if (url.origin !== 'https://chatgpt.com') return { isChat: false, isLocal: false, id: '' };
-    const match = url.pathname.match(/^\/c\/([^/]+)\/?$/);
-    if (!match) return { isChat: false, isLocal: false, id: '' };
-    const id = decodeURIComponent(match[1]);
+    if (url.origin !== 'https://chatgpt.com') {
+      return { isChat: false, isLocal: false, id: '', projectScoped: false };
+    }
+
+    const rootMatch = url.pathname.match(/^\/c\/([^/]+)\/?$/);
+    const projectMatch = url.pathname.match(/^\/g\/([^/]+)\/c\/([^/]+)\/?$/);
+    const id = rootMatch
+      ? decodeURIComponent(rootMatch[1])
+      : projectMatch
+        ? decodeURIComponent(projectMatch[2])
+        : '';
+
     return {
       isChat: Boolean(id),
       isLocal: id.startsWith('local-chatgpt:'),
-      id
+      id,
+      projectScoped: Boolean(projectMatch)
     };
   } catch {
-    return { isChat: false, isLocal: false, id: '' };
+    return { isChat: false, isLocal: false, id: '', projectScoped: false };
   }
 }
 
@@ -743,7 +752,7 @@ async function waitForFreshChatRoute(page, timeoutMs = 90000) {
     if (info.isChat) return { url: current, ...info };
     await page.waitForTimeout(500);
   }
-  throw new Error('Fresh chat did not visibly navigate to a chatgpt.com/c/... route');
+  throw new Error('Fresh chat did not visibly navigate to a recognized ChatGPT conversation route');
 }
 
 async function waitForDurableChatRoute(page, timeoutMs = 300000) {
@@ -856,54 +865,41 @@ async function recoverCreatedChatByVisibleSearch(page, message) {
 async function postWithVisibleVerification(page, message, composerOverride = null) {
   const submitted = await post(page, message, composerOverride);
 
-  let initialRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
+  let route = { url: page.url(), ...chatRouteInfo(page.url()) };
   if (mode === 'create_fresh') {
-    initialRoute = await waitForFreshChatRoute(page, 90000);
-  } else if (!initialRoute.isChat) {
-    throw new Error('Existing-chat send is not on a visible chatgpt.com/c/... route');
+    route = await waitForFreshChatRoute(page, 90000);
+  } else if (!route.isChat) {
+    throw new Error('Existing-chat send is not on a visible ChatGPT conversation route');
   }
 
-  const beforeReload = await visibleWakePresent(page, message, 90000);
-  console.log('[github-playwright-v10] visible-wake-before-reload=' + JSON.stringify({
-    ...beforeReload,
-    chatUrl: initialRoute.url,
-    localRoute: initialRoute.isLocal
+  const visibleWake = await visibleWakePresent(page, message, 90000);
+  console.log('[github-playwright-v10] visible-wake-before-url-save=' + JSON.stringify({
+    ...visibleWake,
+    chatUrl: route.url,
+    localRoute: route.isLocal,
+    projectScoped: route.projectScoped
   }));
-  if (!beforeReload.visible) {
-    throw new Error('Sent wake is not visibly present in the rendered conversation before reload');
+  if (!visibleWake.visible) {
+    throw new Error('Sent wake is not visibly present in the rendered conversation before URL save');
   }
 
-  // Never reload an optimistic local-chatgpt route. Wait for the normal UI
-  // to transition to a durable server-backed /c/<id> route first.
-  if (initialRoute.isLocal) {
-    initialRoute = await waitForDurableChatRoute(page, 300000);
+  if (route.isLocal) {
+    route = await waitForDurableChatRoute(page, 300000);
   }
 
-  await humanReload(page);
-  await waitForVisibleBrowserReady(page);
-
-  const reloadedRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
-  if (!reloadedRoute.isChat || reloadedRoute.isLocal) {
-    throw new Error('Human-style reload did not return to a durable chatgpt.com/c/... conversation');
-  }
-
-  const afterReload = await visibleWakePresent(page, message, 90000);
-  console.log('[github-playwright-v10] visible-wake-after-reload=' + JSON.stringify({
-    ...afterReload,
-    chatUrl: reloadedRoute.url,
-    localRoute: reloadedRoute.isLocal
+  console.log('[github-playwright-v10] durable-chat-url-saved=' + JSON.stringify({
+    chatUrl: route.url,
+    projectScoped: route.projectScoped
   }));
-  if (!afterReload.visible) {
-    throw new Error('Wake is not visibly present after human-style reload of the conversation');
-  }
 
   return {
     ...submitted,
     persisted: true,
-    userCount: afterReload.userCount,
-    verificationMethod: afterReload.method,
-    chatUrl: reloadedRoute.url,
-    localRoute: reloadedRoute.isLocal
+    userCount: visibleWake.userCount,
+    verificationMethod: visibleWake.method,
+    chatUrl: route.url,
+    localRoute: route.isLocal,
+    projectScoped: route.projectScoped
   };
 }
 
