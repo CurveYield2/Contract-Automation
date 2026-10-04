@@ -102,8 +102,8 @@ permissions:
   actions: write
 
 concurrency:
-  # Serialize every reviewer launch for the same campaign milestone. Retries,
-  # technical callbacks and repair races must never create parallel reviewer chats.
+  # Serialize every reviewer wake for the same campaign milestone. Retries,
+  # technical callbacks and repair races must never post in parallel.
   group: browser-agent-wake-${{ inputs.campaign_id }}-${{ inputs.worker_role }}-${{ inputs.gate_expected_milestone_id || inputs.phase_id }}
   cancel-in-progress: false
 
@@ -193,7 +193,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y x11vnc
+          sudo apt-get install -y x11vnc xclip
 
       - name: Record runner egress before home exit node
         shell: bash
@@ -292,6 +292,8 @@ jobs:
             and (((.chatName // "") | test("[\\r\\n]")) | not)
           ' /tmp/browser-context.json >/dev/null
 
+          echo "WAKE_MESSAGE_PURPOSE=$message_purpose" >> "$GITHUB_ENV"
+
           {
             echo "BROWSER_ROUTINE_ID=$(jq -r '.routineId // empty' /tmp/browser-context.json)"
             echo "CHATGPT_PROJECT_NAME=$(jq -r '.projectName // empty' /tmp/browser-context.json)"
@@ -322,20 +324,6 @@ jobs:
           ok="$(jq -r '.ok // false' "$WAKE_RESULT_PATH")"
           retryable="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true)] | length > 0' "$WAKE_RESULT_PATH")"
           retry_code="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true) | .code][0] // empty' "$WAKE_RESULT_PATH")"
-          project_url="$(jq -r '.projectUrl // empty' "$WAKE_RESULT_PATH")"
-
-          if [ "$PHASE_ID" = "phase-1" ] && [ "${BROWSER_ROUTINE_ID:-}" = "audit-lite-reviewer-project-create-v1" ]; then
-            if ! [[ "$project_url" =~ ^https://chatgpt\.com/.+ ]] || [[ "$project_url" =~ ^https://chatgpt\.com/c/ ]]; then
-              jq '.ok=false
-                  | .failures=((.failures // []) + [{provider:"github-playwright",code:"PROJECT_SHARE_URL_REQUIRED",retryable:true,error:"Phase 1 wake cannot complete without a persisted private ChatGPT Project share URL."}])' \
-                "$WAKE_RESULT_PATH" > /tmp/browser-agent-wake-result-phase1.json
-              mv /tmp/browser-agent-wake-result-phase1.json "$WAKE_RESULT_PATH"
-              ok=false
-              retryable=true
-              retry_code=PROJECT_SHARE_URL_REQUIRED
-            fi
-          fi
-
           echo "ok=$ok" >> "$GITHUB_OUTPUT"
           echo "retryable=$retryable" >> "$GITHUB_OUTPUT"
           echo "retry_code=$retry_code" >> "$GITHUB_OUTPUT"
@@ -343,36 +331,11 @@ jobs:
           echo "provider=$(jq -r '.provider // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
-          echo "project_url=$(jq -r '.projectUrl // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
-          echo "project_name=$(jq -r '.projectName // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
-          echo "chat_renamed=$(jq -r '.chatRenamed // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
 
           if [ "$ok" != true ]; then
             echo "::warning::Browser wake did not complete on this runner (retryable=$retryable code=$retry_code rc=$rc)."
           fi
 
-      - name: Persist captured Phase-1 Project URL
-        if: ${{ inputs.worker_role == 'reviewer' && inputs.phase_id == 'phase-1' && steps.deliver.outputs.project_url != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CAPTURED_PROJECT_URL: ${{ steps.deliver.outputs.project_url }}
-          CAPTURED_PROJECT_NAME: ${{ steps.deliver.outputs.project_name }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$CAPTURED_PROJECT_URL" =~ ^https://chatgpt\.com/.+ ]]
-          ! [[ "$CAPTURED_PROJECT_URL" =~ ^https://chatgpt\.com/c/ ]]
-          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
-          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
-          gh api "$api?ref=main" --jq '.content' | base64 -d > /tmp/project-registration.json
-          jq --arg name "$CAPTURED_PROJECT_NAME" --arg url "$CAPTURED_PROJECT_URL" \
-            '.chatgptProject=((.chatgptProject // {}) + {name:$name,url:$url}) | .updatedAt=(now|todate)' \
-            /tmp/project-registration.json > /tmp/project-registration-updated.json
-          sha="$(gh api "$api?ref=main" --jq '.sha')"
-          body="$(base64 -w0 /tmp/project-registration-updated.json)"
-          gh api --method PUT "$api" \
-            -f message="chore(wake): bind Phase1 Project URL for $CAMPAIGN_ID" \
-            -f content="$body" -f sha="$sha" -f branch=main >/dev/null
       - name: Disable home exit node
         if: always()
         shell: bash
@@ -580,61 +543,6 @@ jobs:
           gh api --method PUT "$api" \
             -f message="chore(wake): record existing-chat wake for $CAMPAIGN_ID $CURRENT_MILESTONE_ID" \
             -f content="$content" -f sha="$sha" -f branch=main >/dev/null
-
-      - name: Persist fresh-chat URL into campaign registration
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer' && env.DEDUPED_FRESH_LAUNCH != 'true' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          NEW_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}
-          PROJECT_NAME_RESOLVED: ${{ steps.deliver.outputs.project_name }}
-          PROJECT_URL_RESOLVED: ${{ steps.deliver.outputs.project_url }}
-          REQUESTED_CHAT_NAME: ${{ env.CHATGPT_CHAT_NAME }}
-          CURRENT_PHASE_ID: ${{ inputs.phase_id }}
-          CURRENT_MILESTONE_ID: ${{ inputs.gate_expected_milestone_id }}
-          CURRENT_WORKER_ROLE: ${{ inputs.worker_role }}
-          CURRENT_THINKING_EFFORT: ${{ inputs.thinking_effort }}
-          CURRENT_GATE_MODE: ${{ inputs.gate_mode }}
-          CURRENT_GATE_REPOSITORY: ${{ inputs.gate_repository }}
-          CURRENT_GATE_REF: ${{ inputs.gate_ref }}
-          CURRENT_GATE_STATE_PATH: ${{ inputs.gate_state_path }}
-          CURRENT_GATE_POINTER_PATH: ${{ inputs.gate_active_pointer_path }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
-          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
-          tmp=/tmp/registration.json
-          gh api "$api?ref=main" --jq '.content' | base64 -d > "$tmp"
-          jq \
-            --arg url "$NEW_CHAT_URL" \
-            --arg projectName "$PROJECT_NAME_RESOLVED" \
-            --arg projectUrl "$PROJECT_URL_RESOLVED" \
-            --arg chatName "$REQUESTED_CHAT_NAME" \
-            --arg phaseId "$CURRENT_PHASE_ID" \
-            --arg milestoneId "$CURRENT_MILESTONE_ID" \
-            --arg workerRole "$CURRENT_WORKER_ROLE" \
-            --arg thinkingEffort "$CURRENT_THINKING_EFFORT" \
-            --arg wakeMessage "$(cat /tmp/wake-message.txt)" \
-            --arg idleMessage "$(cat /tmp/watchdog-message.txt)" \
-            --arg gateMode "$CURRENT_GATE_MODE" \
-            --arg gateRepository "$CURRENT_GATE_REPOSITORY" \
-            --arg gateRef "$CURRENT_GATE_REF" \
-            --arg gateStatePath "$CURRENT_GATE_STATE_PATH" \
-            --arg gatePointerPath "$CURRENT_GATE_POINTER_PATH" \
-            '.mode="resume_existing"
-             | .chatUrl=$url
-             | .wakeMessage=$wakeMessage
-             | .thinkingEffort=$thinkingEffort
-             | .activeAssignment={phaseId:$phaseId,milestoneId:$milestoneId,workerRole:$workerRole,thinkingEffort:$thinkingEffort}
-             | .chatgptProject=((.chatgptProject // {}) + {name:$projectName,url:$projectUrl})
-             | .activeChat=((.activeChat // {}) + {name:$chatName,url:$url})
-             | .watchdog=((.watchdog // {}) + {idleMessage:$idleMessage})
-             | .watchdog.gate=((.watchdog.gate // {}) + {mode:$gateMode,repository:$gateRepository,ref:$gateRef,statePath:$gateStatePath,expectedPhaseId:$phaseId,expectedMilestoneId:$milestoneId,activePointerPath:$gatePointerPath})
-             | .updatedAt=(now|todate)' \
-            "$tmp" > /tmp/registration-updated.json
-          sha="$(gh api "$api?ref=main" --jq '.sha')"
-          content="$(base64 -w0 /tmp/registration-updated.json)"
-          gh api --method PUT "$api" -f message="chore(wake): bind fresh chat for $CAMPAIGN_ID" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
 
       - name: Activate prepared Lite receipt successor
         if: ${{ steps.deliver.outputs.ok == 'true' && inputs.worker_role == 'reviewer' && inputs.gate_mode == 'LITE' }}
