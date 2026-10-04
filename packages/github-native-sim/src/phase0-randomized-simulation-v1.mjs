@@ -1274,9 +1274,18 @@ async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
           const beforeRows=observationRowsV2(before,target.recipe,'BEFORE'),afterRows=observationRowsV2(after,target.recipe,'AFTER');
           const deltaRows=observationDeltasV2(beforeRows,afterRows,{receipt,sender:actor});
           const nonGasDelta=deltaRows.filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
+          const requiredFamilies=new Set(target?.recipe?.requiredObservationFamilies??[]);
+          const requiredObservationFailures=[...beforeRows,...afterRows].filter(x=>x.status!=='OK'&&requiredFamilies.has(x.family));
           const afterProperty=await readTargetPropertyV2({provider,ethers,property,from:actor});
-          if(Number(receipt?.status)===1&&nonGasDelta.length){
-            witness={propertyId:property.propertyId,targetSignature:property.targetSignature,actionSignature:selected.signature,actor,receipt:{status:receipt.status,gasUsed:receipt.gasUsed?.toString()??null},initialProperty:initial,afterProperty,observedTransitionDeltas:nonGasDelta};
+          if(Number(receipt?.status)===1&&nonGasDelta.length&&requiredObservationFailures.length){
+            witness={
+              status:'OBSERVATION_GAP',propertyId:property.propertyId,targetSignature:property.targetSignature,
+              actionSignature:selected.signature,actor,receipt:{status:receipt.status,gasUsed:receipt.gasUsed?.toString()??null},
+              initialProperty:initial,afterProperty,observedTransitionDeltas:nonGasDelta,
+              missingRequiredObservations:requiredObservationFailures.map(x=>({quantityId:x.quantityId,family:x.family,error:x.error??null}))
+            };
+          }else if(Number(receipt?.status)===1&&nonGasDelta.length){
+            witness={status:'WITNESSED',propertyId:property.propertyId,targetSignature:property.targetSignature,actionSignature:selected.signature,actor,receipt:{status:receipt.status,gasUsed:receipt.gasUsed?.toString()??null},initialProperty:initial,afterProperty,observedTransitionDeltas:nonGasDelta};
           }
         }catch{}
         await provider.send('evm_revert',[attemptSnapshot]).catch(()=>{});
@@ -1329,13 +1338,14 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
   const witnessById=new Map(witnessRows.map(x=>[x.propertyId,x]));
   const properties=router.properties.map(property=>{
     const engine=(parsed.properties??[]).find(x=>String(x.name??'').includes(property.wrapperName));
-    const witness=witnessById.get(property.propertyId),witnessed=witness&&witness.status!=='UNEXERCISED'&&Array.isArray(witness.observedTransitionDeltas)&&witness.observedTransitionDeltas.length>0;
+    const witness=witnessById.get(property.propertyId),witnessed=witness&&witness.status==='WITNESSED'&&Array.isArray(witness.observedTransitionDeltas)&&witness.observedTransitionDeltas.length>0;
     let result='ENGINE_FAILURE';
     if(property.category==='HARNESS_SELF_CHECK'){
       if(engine?.status==='failed')result='CONTROL_FALSE_OBSERVED';
       else if(engine?.status==='passed')result='CONTROL_TRUE_OBSERVED';
       else result='ENGINE_FAILURE';
     }else if(engine?.status==='failed')result='DEVIATION_OBSERVED';
+    else if(witness?.status==='OBSERVATION_GAP')result='OBSERVATION_GAP';
     else if(!witnessed)result='UNEXERCISED';
     else if(engine?.status==='passed')result='CHECKED_NO_DEVIATION_OBSERVED';
     else if(parsed.status==='no_tests')result='ENGINE_FAILURE';
