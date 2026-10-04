@@ -193,7 +193,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y x11vnc xclip
+          sudo apt-get install -y x11vnc xclip xdotool
 
       - name: Record runner egress before home exit node
         shell: bash
