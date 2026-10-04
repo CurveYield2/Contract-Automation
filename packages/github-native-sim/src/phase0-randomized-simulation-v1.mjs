@@ -4,10 +4,10 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {createHash} from 'node:crypto';
-import {buildProject} from '../../runner/src/build-dispatch.mjs';
 import {startRpcIdentityProxy} from '../../runner/src/rpc-identity-proxy-v1.mjs';
 import {stageExactArchiveSource,runProcess} from './execution.mjs';
-import {compileSourceKnownDeploymentArtifactsV1,deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
+import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
+import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
 export const PHASE0_MEDUSA_MIN_CALLS_V1=100001;
@@ -664,35 +664,48 @@ function baselineTargetRows({medusa,telemetry}){
   ];
 }
 export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl}){
-  const campaignRoot=path.join(controllerRoot,...campaignPath.split('/')),buildIdentity=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
+  const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
+  const buildIdentity=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
+  const executionBuildArtifacts=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'utf8'));
   const receipt=JSON.parse(await fs.readFile(path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json'),'utf8'));
   const readiness=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'utf8'));
+  const sourceIntelligence=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json'),'utf8'));
+  const slither=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/static-analysis/SLITHER_v1.json'),'utf8'));
+  const sharedExecutionInputs=validateExecutionInputJoinV2({receipt,buildIdentity,artifactBundle:executionBuildArtifacts,sourceIntelligence,slither,readiness});
   const targetChainIds=phase0DiscoveredTargetChainIdsV1(readiness);
   const archivePath=receipt.source.archivePath,archiveSha256=receipt.source.sha256,workspace=path.join(path.dirname(outputRoot),'.phase0-simulation-work');
   const staged=await stageExactArchiveSource({checkoutRoot:controllerRoot,workspaceRoot:workspace,archivePath,archiveSha256,projectPath:buildIdentity.discovery.projectPath});
   const cfg=buildIdentity.configurationDetection,pseudo={requestId:`phase0-sim-${receipt.campaign.campaignId}`,requestDigest:sha256(JSON.stringify(buildIdentity)),campaignId:receipt.campaign.campaignId,assignmentId:'phase0-simulation',phaseId:'phase-0',profileId:'github-native-compile-v2',source:{repository:'CurveYield2/Audit-Controller',commit:receipt.source.archiveCommit,projectPath:buildIdentity.discovery.projectPath,archivePath,archiveSha256},configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}};
   const packageDependencyInstall=await installPackageRuntimeDependenciesV1(staged.projectRoot);
-  const build=await buildProject({projectRoot:staged.projectRoot,request:pseudo}),ethers=await import('ethers');
+  const build={
+    status:'completed',
+    system:executionBuildArtifacts.buildIdentity?.system??buildIdentity.build?.system??null,
+    compilerVersion:executionBuildArtifacts.buildIdentity?.compilerVersion??buildIdentity.build?.compilerVersion??null,
+    compilerVersions:executionBuildArtifacts.buildIdentity?.compilerVersions??buildIdentity.build?.compilerVersions??[],
+    compilerProfiles:executionBuildArtifacts.buildIdentity?.compilerProfiles??buildIdentity.build?.compilerProfiles??[],
+    deploymentOrder:executionBuildArtifacts.buildIdentity?.deploymentOrder??[],
+    compileGroups:executionBuildArtifacts.buildIdentity?.compileGroups??[],
+    embeddedBuildContract:executionBuildArtifacts.buildIdentity?.embeddedBuildContract??null,
+    artifacts:sharedExecutionInputs.artifacts
+  },ethers=await import('ethers');
   await fs.rm(outputRoot,{recursive:true,force:true});await fs.mkdir(path.join(outputRoot,'runs'),{recursive:true});
   let anvil;
   let deploymentEvidence=null;
   try{
     const detected=await detectDeploymentScripts(staged.projectRoot);
-    const sourceKnownCompilation=build.system==='embedded-profile-native'
-      ? {
-          status:'PASS',
-          planPath:build.embeddedBuildContract?.deploymentSetModule??'tooling/lib/deploymentSet.mjs',
-          groups:build.compileGroups??[],
-          artifacts:build.artifacts??[],
-          selectedTargets:(build.artifacts??[]).map((artifact,index)=>({groupIndex:null,contractName:artifact.contractName,sourceName:artifact.sourceName,qualifiedName:`${artifact.sourceName}:${artifact.contractName}`,profile:artifact.profile??null,compilationUnitId:artifact.compilationUnitId??null,index})),
-          missingTargets:[],
-          limitations:[],
-          compilerProfiles:build.compilerProfiles??[],
-          reuseBasis:'EXACT_EMBEDDED_PROFILE_BUILD_FROM_PHASE0_BUILD_DISPATCH'
-        }
-      : await compileSourceKnownDeploymentArtifactsV1({projectRoot:staged.projectRoot,detected,request:pseudo});
+    const sourceKnownCompilation={
+      status:'PASS',
+      planPath:build.embeddedBuildContract?.deploymentSetModule??null,
+      groups:build.compileGroups??[],
+      artifacts:build.artifacts??[],
+      selectedTargets:(build.artifacts??[]).map((artifact,index)=>({groupIndex:null,contractName:artifact.contractName,sourceName:artifact.sourceName,qualifiedName:`${artifact.sourceName}:${artifact.contractName}`,profile:artifact.profile??null,compilationUnitId:artifact.compilationUnitId??null,index})),
+      missingTargets:[],
+      limitations:[],
+      compilerProfiles:build.compilerProfiles??[],
+      reuseBasis:'EXACT_ACCEPTED_PHASE0_EXECUTION_BUILD_ARTIFACTS_V2'
+    };
     const artifactByQualified=new Map();
-    for(const artifact of [...(build.artifacts??[]),...(sourceKnownCompilation.artifacts??[])])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
+    for(const artifact of build.artifacts??[])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
     const artifacts=[...artifactByQualified.values()];
     anvil=await startAnvil({forkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
     const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true,cacheTimeout:-1}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
