@@ -13,6 +13,7 @@ export function repoFile(root,rel){return path.join(root,...safeRel(rel).split('
 const LEGACY_V103_LOGICAL='Audit Skill - Current Authority/Audit_Litemode_v10.3';
 const LEGACY_V103_FROZEN='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3';
 const LEGACY_V103_SKILL_SHA256='bdb90107ea50580e67be91440ce47087de570c4f54b8474c5a3eb852af95ea27';
+const LEGACY_V103_MANIFEST_SHA256='846be5f90d6e00757b817b1218dfabeb2aa4dff6c92b8e9ff47335d2db83703a';
 function sha256File(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
 function frozenV103File(root,rel){
   if(rel!==LEGACY_V103_LOGICAL&&!rel.startsWith(LEGACY_V103_LOGICAL+'/'))return null;
@@ -21,7 +22,7 @@ function frozenV103File(root,rel){
   const skill=path.join(frozenRoot,'SKILL.md');
   if(!fs.existsSync(skill)||sha256File(skill)!==LEGACY_V103_SKILL_SHA256)throw new Error('frozen v10.3 authority root hash mismatch');
   const manifestFile=path.join(frozenRoot,'MANIFEST.json');
-  if(!fs.existsSync(manifestFile))throw new Error('frozen v10.3 authority manifest missing');
+  if(!fs.existsSync(manifestFile)||sha256File(manifestFile)!==LEGACY_V103_MANIFEST_SHA256)throw new Error('frozen v10.3 authority manifest digest mismatch');
   const manifest=readJson(manifestFile);
   if(manifest.release!=='Audit_Litemode_v10.3'||manifest.entrypoint!=='SKILL.md')throw new Error('frozen v10.3 authority manifest identity mismatch');
   const target=suffix?path.join(frozenRoot,...suffix.split('/')):frozenRoot;
