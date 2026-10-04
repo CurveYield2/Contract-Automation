@@ -613,6 +613,7 @@ async function createProjectExactHumanFlow(page, name) {
   if (!controls.editor) throw new Error('Project-name editor was not found on the visible Create-project surface');
 
   await humanTypeInto(page, controls.editor, name);
+  console.log('[github-playwright-v10] project-name-entered=' + JSON.stringify({ projectName: name }));
 
   // The visible Create project button is initially disabled. Give the UI a
   // short human-scale moment to enable it after typing, then click only the
@@ -622,6 +623,7 @@ async function createProjectExactHumanFlow(page, name) {
   if (!enabledCreate) {
     throw new Error('Create project control did not become visibly enabled after typing the Project name');
   }
+  console.log('[github-playwright-v10] create-project-control-enabled=' + JSON.stringify({ projectName: name }));
 
   const beforeCreateUrl = page.url();
   await humanPointerClick(page, enabledCreate);
