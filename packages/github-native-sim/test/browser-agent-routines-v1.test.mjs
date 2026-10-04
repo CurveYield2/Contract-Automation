@@ -40,15 +40,15 @@ test('Phase1 captures the private Project share URL through the human overflow/s
   assert.match(source, /project-share-url-captured/);
 });
 
-test('later and replacement reviewers open the persisted Project URL and never create a second Project', () => {
-  const openRoutine = read('process/browser-routines/audit-lite-reviewer-project-open-v1.json');
+test('audit reviewer repair reuses the pre-bound reviewer chat and never creates a replacement chat', () => {
   const repair = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
-  assert.match(openRoutine, /chatgpt\.open_project_url/);
-  assert.match(openRoutine, /chatgpt\.start_current_project_chat/);
-  assert.doesNotMatch(openRoutine, /chatgpt\.create_project/);
-  assert.match(repair, /audit-lite-reviewer-project-open-v1/);
-  assert.match(repair, /project_url=.*chatgptProject\.url/);
-  assert.match(repair, /projectUrl:\$projectUrl/);
+  assert.match(repair, /\.agentChats\[\$reviewer\]/);
+  assert.match(repair, /mode=resume_existing/);
+  assert.match(repair, /chat_url="\$\{\{ steps\.current\.outputs\.chat_url \}\}"/);
+  assert.match(repair, /messagePurpose:"repair_notice"/);
+  assert.match(repair, /Resume assigned reviewer chat from current receipt/);
+  assert.doesNotMatch(repair, /audit-lite-reviewer-project-open-v1/);
+  assert.doesNotMatch(repair, /-f mode=create_fresh/);
 });
 
 test('project creation is verified only through visible UI and never backend response telemetry', () => {
@@ -212,13 +212,15 @@ test('watchdog observation classifies home-exit challenge and auth walls as infr
   assert.match(source, /failures\.find\(\(entry\) => entry\.code === 'AUTH_REQUIRED'\)/);
 });
 
-test('V16 Phase1 registration requires the deterministic Project-create/share-link routine', () => {
-  const registration = JSON.parse(read('process/browser-agent-wake/registrations/curveyield-dex-v16-source-r2.json'));
+test('audit registration template requires four pre-created reviewer chats and no Project routine', () => {
+  const registration = JSON.parse(read('process/browser-agent-wake/REGISTRATION_TEMPLATE_v1.json'));
   assert.equal(registration.browserInteractionPolicy, 'ordinary-pointer-keyboard-only');
-  assert.equal(registration.browserRoutine, 'audit-lite-reviewer-project-create-v1');
-  assert.equal(registration.chatgptProject.name, 'CurveYield DEX v16 Source r2');
+  assert.equal(registration.mode, 'resume_existing');
+  assert.equal(registration.browserRoutine, '');
+  assert.equal(registration.chatgptProject.name, '');
   assert.equal(registration.chatgptProject.url, '');
-  assert.equal(registration.projectCreationPolicy, undefined);
+  assert.deepEqual(Object.keys(registration.agentChats), ['reviewer-1','reviewer-2','reviewer-3','reviewer-4']);
+  for (const url of Object.values(registration.agentChats)) assert.match(url, /^https:\/\/chatgpt\.com\/c\//);
 });
 
 test('Project-create wakes fail closed before posting unless Share-link capture returns a valid Project URL', () => {
@@ -293,7 +295,7 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.match(workflow, /activeChat=.*chatName/);
 });
 
-test('Lite browser orchestration launches assignment-v2 reviewers with the shared project routine context', () => {
+test('Lite browser orchestration routes each assignment reviewer to its supplied existing chat', () => {
   const workflow = read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
   assert.match(workflow, /Resolve campaign directory entry/);
   assert.match(workflow, /Audit Campaign Directory\/campaigns/);
@@ -301,13 +303,15 @@ test('Lite browser orchestration launches assignment-v2 reviewers with the share
   assert.match(workflow, /curveyield-audit-campaign-directory-entry-v2/);
   assert.match(workflow, /Publish legacy successor receipt preparation when applicable/);
   assert.match(workflow, /gh workflow run browser-agent-wake\.yml/);
-  assert.match(workflow, /audit-lite-reviewer-project-create-v1/);
-  assert.match(workflow, /audit-lite-reviewer-project-open-v1/);
-  assert.match(workflow, /phase_id.*phase-1/);
-  assert.match(workflow, /chatgptProject\.url/);
-  assert.match(workflow, /routineId:\$routine,projectName:\$project,projectUrl:\$projectUrl,chatName:\$chat/);
-  assert.match(workflow, /-f browser_context_b64="\$browser_context_b64"/);
-  assert.match(workflow, /browserInteractionPolicy/);
+  assert.match(workflow, /\.agentChats\[\$reviewer\]/);
+  assert.match(workflow, /reviewer-1\|reviewer-2\|reviewer-3\|reviewer-4/);
+  assert.match(workflow, /-f mode=resume_existing/);
+  assert.match(workflow, /-f chat_url="\$chat_url"/);
+  assert.match(workflow, /messagePurpose:"initial_wake"/);
+  assert.match(workflow, /watchdog_enabled=true/);
+  assert.doesNotMatch(workflow, /audit-lite-reviewer-project-create-v1/);
+  assert.doesNotMatch(workflow, /audit-lite-reviewer-project-open-v1/);
+  assert.doesNotMatch(workflow, /-f mode=create_fresh/);
   assert.doesNotMatch(workflow, /projectCreationPolicy/);
   assert.doesNotMatch(workflow, /CAMPAIGN_STATE_v1|ACTIVE_PHASE_POINTER|SOLO_AUDIT_STATE|web-bootstrap-agent/);
   assert.doesNotMatch(workflow, /SUCCESSOR_HANDOFF\.json|WAKE_UP_MESSAGE\.md|START_HERE_SUCCESSOR\.md/);
@@ -389,11 +393,14 @@ test('Lite monitor persists across internal phase changes and terminates only at
   assert.doesNotMatch(watchdog, /\[ "\$lite_campaign_status" = "COMPLETE" \] \|\| \[ "\$lite_phase_state" = "CLOSED" \]/);
 });
 
-test('fresh reviewer launch is idempotent per campaign milestone and post-delivery bookkeeping cannot duplicate a reviewer', () => {
+test('existing-chat reviewer initial wake is idempotent per campaign milestone', () => {
   const wake = read('.github/workflows/browser-agent-wake.yml');
   const runtime = read('scripts/browser-agent-wake.mjs');
-  assert.match(wake, /Resolve idempotent reviewer launch/);
-  assert.match(wake, /Fresh launch deduplicated/);
+  assert.match(wake, /Resolve idempotent reviewer wake/);
+  assert.match(wake, /INITIAL_WAKE_DEDUPED=true/);
+  assert.match(wake, /message_purpose.*initial_wake/);
+  assert.match(wake, /Persist existing-chat reviewer wake into campaign registration/);
+  assert.match(wake, /wakeDelivery=\{milestoneId:\$milestoneId,chatUrl:\$url,deliveredAt:\$deliveredAt\}/);
   assert.match(wake, /browser-agent-wake-\$\{\{ inputs\.campaign_id \}\}-\$\{\{ inputs\.worker_role \}\}-/);
   assert.match(runtime, /POST_DELIVERY_BOOKKEEPING_FAILED/);
   assert.match(runtime, /never fail over to another browser provider for/);
@@ -424,15 +431,20 @@ test('repair targets the current assignment reviewer with the same linked wake c
   assert.doesNotMatch(repair, /WAKE_UP_MESSAGE\.md|nextMilestone\.reviewer/);
 });
 
-test('assignment reviewer repair resumes current work while legacy reset behavior stays isolated', () => {
+test('assignment reviewer repair resumes current work in the supplied reviewer chat while legacy reset stays isolated', () => {
   const workflow = read('.github/workflows/browser-agent-reviewer-repair-v1.yml');
   assert.match(workflow, /options: \[auto, resume_preferred, reset_to_handoff\]/);
   assert.match(workflow, /Current Lite campaigns have no reset-to-handoff control state/);
   assert.match(workflow, /Repair resumes from the current assignment\/work form and Git history/);
   assert.match(workflow, /Redispatch legacy repair for pre-receipt campaign/);
   assert.match(workflow, /browser-agent-reviewer-repair-legacy-v1\.yml/);
-  assert.match(workflow, /Launch replacement reviewer/);
+  assert.match(workflow, /Resume assigned reviewer chat from current receipt/);
+  assert.match(workflow, /\.agentChats\[\$reviewer\]/);
+  assert.match(workflow, /messagePurpose:"repair_notice"/);
+  assert.match(workflow, /-f mode=resume_existing/);
   assert.match(workflow, /-f browser_context_b64="\$\{\{ steps\.current\.outputs\.browser_context_b64 \}\}"/);
+  assert.doesNotMatch(workflow, /Launch replacement reviewer/);
+  assert.doesNotMatch(workflow, /-f mode=create_fresh/);
   assert.doesNotMatch(workflow, /REVIEWER_REPAIR_RESET_v1\.json|authoritativeHandoffIdentity\.contentCommit|WAKE_UP_MESSAGE\.md/);
 });
 
