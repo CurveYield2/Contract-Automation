@@ -1,0 +1,230 @@
+name: Manual-Only Home-Exit Browser v11
+
+on:
+  workflow_dispatch:
+    inputs:
+      home_exit_node:
+        description: Windows PC Tailscale IP or MagicDNS name
+        required: true
+        default: 100.112.238.56
+        type: string
+      manual_session_minutes:
+        description: Keep the private manual Chrome/VNC session alive
+        required: true
+        default: "25"
+        type: string
+      project_name:
+        description: Project name for the human operator to create
+        required: true
+        default: "HOME_EXIT_PROJECT_WAKE_VERIFY2"
+        type: string
+      chat_name:
+        description: Chat title for the human operator to create inside the Project
+        required: true
+        default: "VERIFY PROJECT WAKE SIGNAL 2"
+        type: string
+      wake_message:
+        description: Exact message for the human operator to send
+        required: true
+        default: "[HOME_EXIT_PROJECT_WAKE_VERIFY2] Assistant: when you personally receive this as a new user message inside this new Project, reply exactly HOME_EXIT_PROJECT_WAKE_PERSONALLY_SEEN_VERIFY2"
+        type: string
+
+  push:
+    branches:
+      - main
+    paths:
+      - 'process/browser-agent-home-exit-v11/current-request-v11.json'
+      - 'packages/browser-agent-manual-only-v11/browser-agent-manual-v11.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-only-home-exit-browser-v11
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
+      DISPLAY: ":99"
+      BROWSER_HEADLESS: "false"
+      MANUAL_RESULT_PATH: /tmp/browser-agent-home-exit-v11-result.json
+
+    steps:
+      - name: Checkout trusted browser package
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Resolve manual browser request
+        id: request
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_HOME_EXIT_NODE: ${{ inputs.home_exit_node }}
+          INPUT_MANUAL_SESSION_MINUTES: ${{ inputs.manual_session_minutes }}
+          INPUT_PROJECT_NAME: ${{ inputs.project_name }}
+          INPUT_CHAT_NAME: ${{ inputs.chat_name }}
+          INPUT_WAKE_MESSAGE: ${{ inputs.wake_message }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "push" ]; then
+            request="process/browser-agent-home-exit-v11/current-request-v11.json"
+            test -s "$request"
+            home_exit_node="$(jq -r '.home_exit_node' "$request")"
+            manual_session_minutes="$(jq -r '.manual_session_minutes // 25' "$request")"
+            project_name="$(jq -r '.project_name' "$request")"
+            chat_name="$(jq -r '.chat_name' "$request")"
+            wake_message="$(jq -r '.wake_message' "$request")"
+          else
+            home_exit_node="$INPUT_HOME_EXIT_NODE"
+            manual_session_minutes="$INPUT_MANUAL_SESSION_MINUTES"
+            project_name="$INPUT_PROJECT_NAME"
+            chat_name="$INPUT_CHAT_NAME"
+            wake_message="$INPUT_WAKE_MESSAGE"
+          fi
+
+          {
+            echo "home_exit_node=$home_exit_node"
+            echo "manual_session_minutes=$manual_session_minutes"
+            echo "project_name=$project_name"
+            echo "chat_name=$chat_name"
+            echo "wake_message=$wake_message"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up isolated Playwright runtime
+        uses: ./packages/browser-agent-original-phase0-v10/runtime-v10
+
+      - name: Install private VNC helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y x11vnc
+
+      - name: Record runner egress before home exit node
+        shell: bash
+        run: |
+          set -euo pipefail
+          direct="$(curl -fsS --max-time 15 https://api.ipify.org)"
+          test -n "$direct"
+          printf '%s' "$direct" | sha256sum | awk '{print "DIRECT_EGRESS_HASH="$1}' >> "$GITHUB_ENV"
+          echo "Recorded runner egress fingerprint without logging the address."
+
+      - name: Connect runner to tailnet
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          ping: ${{ steps.request.outputs.home_exit_node }}
+
+      - name: Start visible Chrome display and private tailnet VNC
+        shell: bash
+        run: |
+          set -euo pipefail
+          Xvfb :99 -screen 0 1920x1080x24 -ac +extension RANDR >/tmp/xvfb-v11.log 2>&1 &
+          echo $! >/tmp/xvfb-v11.pid
+          for i in {1..20}; do
+            xdpyinfo -display :99 >/dev/null 2>&1 && break
+            sleep 1
+          done
+          xdpyinfo -display :99 >/dev/null 2>&1 || {
+            echo "::error::Xvfb did not become ready."
+            cat /tmp/xvfb-v11.log || true
+            exit 1
+          }
+
+          ts_ip="$(tailscale ip -4 | head -n1)"
+          test -n "$ts_ip"
+          echo "TAILSCALE_RUNNER_IP=$ts_ip" >> "$GITHUB_ENV"
+
+          x11vnc -display :99 -rfbport 5900 -listen "$ts_ip" -nopw -forever -shared -quiet >/tmp/x11vnc-v11.log 2>&1 &
+          echo $! >/tmp/x11vnc-v11.pid
+          echo "TAILSCALE_VNC=$ts_ip:5900"
+          echo "Connect your VNC viewer from the Windows PC to $ts_ip:5900."
+
+      - name: Route browser phase through home exit node
+        shell: bash
+        env:
+          HOME_EXIT_NODE: ${{ steps.request.outputs.home_exit_node }}
+        run: |
+          set -euo pipefail
+          timeout -k 3s 10s tailscale status
+          timeout -k 5s 20s sudo tailscale set --exit-node="$HOME_EXIT_NODE"
+
+          changed=false
+          for i in {1..8}; do
+            current="$(curl -fsS --connect-timeout 3 --max-time 5 https://api.ipify.org || true)"
+            if [ -n "$current" ]; then
+              current_hash="$(printf '%s' "$current" | sha256sum | awk '{print $1}')"
+              if [ "$current_hash" != "$DIRECT_EGRESS_HASH" ]; then
+                changed=true
+                break
+              fi
+            fi
+            sleep 2
+          done
+
+          if [ "$changed" != "true" ]; then
+            echo "::error::Tailscale exit node did not change runner egress."
+            exit 1
+          fi
+          echo "HOME_EXIT_EGRESS_ACTIVE=true"
+
+      - name: Start manual-only browser session
+        shell: bash
+        env:
+          MANUAL_SESSION_MINUTES: ${{ steps.request.outputs.manual_session_minutes }}
+          WAKE_ID: manual-home-exit-v11-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          echo "============================================================"
+          echo "MANUAL-ONLY CHATGPT SESSION"
+          echo "Private VNC: $TAILSCALE_RUNNER_IP:5900"
+          echo "Project to create: ${{ steps.request.outputs.project_name }}"
+          echo "Chat to create: ${{ steps.request.outputs.chat_name }}"
+          echo "Wake message to send:"
+          printf '%s\n' "${{ steps.request.outputs.wake_message }}"
+          echo ""
+          echo "All ChatGPT interaction is manual through VNC."
+          echo "The automation performs no ChatGPT DOM reads, URL/title reads,"
+          echo "automated ChatGPT navigation, clicks, typing, or verification handling."
+          echo "If Cloudflare appears, complete it yourself in the visible browser,"
+          echo "then continue normally after the page finishes loading."
+          echo "============================================================"
+
+          node packages/browser-agent-manual-only-v11/browser-agent-manual-v11.mjs
+
+      - name: Show manual-session result
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          [ -s "$MANUAL_RESULT_PATH" ] && cat "$MANUAL_RESULT_PATH" || true
+
+      - name: Disable home exit node
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          sudo tailscale set --exit-node=""
+          echo "Home exit-node routing disabled for post-browser workflow steps."
+
+      - name: Cleanup browser display
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          [ -f /tmp/x11vnc-v11.pid ] && kill "$(cat /tmp/x11vnc-v11.pid)" 2>/dev/null
+          [ -f /tmp/xvfb-v11.pid ] && kill "$(cat /tmp/xvfb-v11.pid)" 2>/dev/null
