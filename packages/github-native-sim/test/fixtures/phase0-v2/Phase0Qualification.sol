@@ -248,3 +248,51 @@ contract PropertyControls {
     function property_control_true() external pure returns (bool) { return true; }
     function property_control_false() external pure returns (bool) { return false; }
 }
+
+contract NeverReachProperty {
+    function touch(uint256) external {}
+    function property_requires_transition() external pure returns (bool) { return true; }
+}
+
+contract BrokenObservationToken is ERC20 {
+    uint256 private _totalSupply;
+    uint256 public totalMoves;
+    mapping(address => uint256) private _balance;
+    mapping(address => mapping(address => uint256)) private _allowance;
+
+    constructor(address owner) {
+        _totalSupply = 1_000_000 ether;
+        _balance[owner] = _totalSupply;
+    }
+
+    function totalSupply() public view override returns (uint256) { return _totalSupply; }
+    function balanceOf(address) public pure override returns (uint256) { revert("OBSERVATION_DISABLED"); }
+    function allowance(address owner, address spender) public view override returns (uint256) { return _allowance[owner][spender]; }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        require(_balance[msg.sender] >= amount, "BAL");
+        _balance[msg.sender] -= amount;
+        _balance[to] += amount;
+        totalMoves += 1;
+        return true;
+    }
+
+    function approve(address spender, uint256 amount) public override returns (bool) {
+        _allowance[msg.sender][spender] = amount;
+        return true;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        require(_allowance[from][msg.sender] >= amount, "ALLOW");
+        require(_balance[from] >= amount, "BAL");
+        _allowance[from][msg.sender] -= amount;
+        _balance[from] -= amount;
+        _balance[to] += amount;
+        totalMoves += 1;
+        return true;
+    }
+
+    function property_supply_nonzero_but_balance_unobservable() external view returns (bool) {
+        return _totalSupply > 0;
+    }
+}
