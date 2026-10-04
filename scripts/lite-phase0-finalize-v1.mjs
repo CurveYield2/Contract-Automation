@@ -101,15 +101,21 @@ for(const t of telemetry){
   if(Number(t.simulationInfrastructureError??0)!==0||Number(t.submissionInfrastructureError??0)!==0||Number(t.submittedOutcomeUnknown??0)!==0)throw new Error('Phase-0 telemetry contains unresolved infrastructure/submission outcomes in '+String(t.runId));
   if(Number(t.accountingFunctionCount??0)>0&&Number(t.positiveEconomicTransitions??0)===0)throw new Error('Phase-0 telemetry failed to demonstrate a successful relevant economic transition in '+String(t.runId));
   if(t.reconciliation?.status!=='PASS')throw new Error('Phase-0 telemetry summary reconciliation is not PASS in '+String(t.runId));
+  if(t.resetEvidence?.revertAccepted!==true||t.resetEvidence?.sentinelMatch!==true)throw new Error('Phase-0 telemetry baseline reset/sentinel evidence is not verified in '+String(t.runId));
+  if(Number(t.positiveTransitions??0)>0&&t.feedbackStatus!=='ACTIVE')throw new Error('Phase-0 telemetry observed useful transitions without demonstrating feedback-driven later selection in '+String(t.runId));
+  if(!/^[0-9a-f]{64}$/.test(String(t.actionSequenceDigestSha256??''))||!/^[0-9a-f]{64}$/.test(String(t.outcomeSequenceDigestSha256??'')))throw new Error('Phase-0 telemetry sequence digests are missing in '+String(t.runId));
 }
 for(const run of runIndex.runs??[]){
   if(run.type!=='ABI_ACCOUNTING_TELEMETRY')continue;
   const ref=run.rawTranscriptRef;
   if(typeof ref!=='string'||!ref.startsWith('runs/'))throw new Error('Phase-0 ABI telemetry run is missing raw transcript reference: '+String(run.runId));
   const transcriptPath=required(path.join(campaignRoot,'evidence/phase0/simulations',...ref.split('/')),'raw Phase-0 simulation transcript '+String(run.runId));
-  const rows=fs.readFileSync(transcriptPath,'utf8').trim().split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line));
+  const transcriptBytes=fs.readFileSync(transcriptPath);
+  const rows=transcriptBytes.toString('utf8').trim().split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line));
   const shard=telemetry.find(x=>x.runId===run.runId);
   if(!shard)throw new Error('raw telemetry transcript has no matching summary shard: '+String(run.runId));
+  if(run.rawTranscriptRef!==shard.rawTranscriptRef)throw new Error('telemetry raw transcript reference mismatch: '+String(run.runId));
+  if(sha(transcriptBytes)!==shard.rawTranscriptSha256)throw new Error('telemetry raw transcript digest mismatch: '+String(run.runId));
   if(rows.length!==Number(shard.calls))throw new Error('raw telemetry transcript count mismatch: '+String(run.runId));
   validateTelemetryCountersV2(shard,rows);
   for(const row of rows){
