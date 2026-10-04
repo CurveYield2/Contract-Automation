@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "katana-network-specific-anvil-simulator-request-v5",
+  "purpose": "Robustly discover the current Katana vbWBTC f(x) pool for fxUSD 0x4c03...FDF9 using live PoolManager logs before any fork-only router writes",
+  "katanaFxUsd": "0x4c03ff0f44A55e7098a09016E02a01d3cdC2FDF9",
+  "poolManager": "0x27b3eE81DF2Dd7356D5ac282e2416991A616f96a",
+  "vbWbtc": "0x0913DA6Da4b42f538B445599b46Bb4622342Cf52",
+  "targetSushiPool": "0x2d43e7931329dbb709f33d7049c937c6794bae10",
+  "router": "0x01F9894f92ea9224fECc8C35482E20a05De13582",
+  "routerOwnerSafe": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "requirements": {
+    "safeExecutionOnly": true,
+    "bothDirections": true,
+    "globalAdminFeeBps": 0,
+    "perRouteFeeBps": 0,
+    "productionWritesAllowed": false
+  }
+}
