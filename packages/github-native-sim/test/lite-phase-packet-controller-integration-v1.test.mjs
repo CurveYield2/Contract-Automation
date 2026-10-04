@@ -333,7 +333,7 @@ test('typed held revision2-to-revision3 admission regenerates controller product
   const authRel=f.campaign+'/controller/HUMAN_REWORK_AUTHORIZATION_v1.json';
   write(path.join(f.root,qualityRel),'# Quality review\nBounded correction approved.\n');
   writeJson(path.join(f.root,authRel),{scopeId:'phase1-r2-r3',authorizedAt:'2026-10-04T00:00:00Z'});
-  writeJson(path.join(f.root,f.campaign,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json'),{events:[{eventId:'EIM-013',status:'OPEN'}]});
+  writeJson(path.join(f.root,f.campaign,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json'),{events:[{eventId:'INV-P1-REWORK-001',ruleId:'EIM-013',status:'RESOLVED_BY_PHASE_1_REVISION_2'}]});
   const digest=rel=>createHash('sha256').update(fs.readFileSync(path.join(f.root,rel))).digest('hex');
   const requestRel=f.campaign+'/controller/SEALED_PHASE_REWORK_REQUEST_v1.json';
   writeJson(path.join(f.root,requestRel),{
@@ -341,8 +341,9 @@ test('typed held revision2-to-revision3 admission regenerates controller product
     authority:{logicalRoot:authority,expectedRootSha256:'bdb90107ea50580e67be91440ce47087de570c4f54b8474c5a3eb852af95ea27',expectedManifestSha256:'846be5f90d6e00757b817b1218dfabeb2aa4dff6c92b8e9ff47335d2db83703a'},
     priorReceipt:{path:priorReceiptRel,sha256:digest(priorReceiptRel)},priorWorkForm:{path:priorFormRel,sha256:digest(priorFormRel)},repairedWorkForm:{path:repairedFormRel,sha256:digest(repairedFormRel)},
     qualityReview:{path:qualityRel,sha256:digest(qualityRel)},humanAuthorization:{scopeId:'phase1-r2-r3',recordPath:authRel,recordSha256:digest(authRel),authorizedAt:'2026-10-04T00:00:00Z'},
+    generatedFinalReportPath:f.campaign+'/work/phase-01/PHASE_01_FINAL_REPORT_v3.md',generatedPacketPath:f.campaign+'/submissions/PHASE_01_WORK_PACKET_v3.json',
     allowedSemanticPaths:['actions.step-1.outputs.analysis'],dependentRefresh:{regenerateCanonical:true,regenerateReport:true,regenerateDerived:true,resealReceipt:true,prepareSuccessorAssignment:true},
-    evidenceInvalidation:{eventId:'EIM-013',requiredPriorStatus:'OPEN',resolveTo:'RESOLVED_BY_PHASE_1_REVISION_3'},holdSuccessorDelivery:true
+    evidenceInvalidation:{eventId:'INV-P1-REWORK-002',ruleId:'EIM-013',requiredPriorStatus:'SEALED_REVISION_2',resolveTo:'RESOLVED_BY_PHASE_1_REVISION_3'},holdSuccessorDelivery:true
   });
   const out=execFileSync(process.execPath,['scripts/lite-phase-packet-controller-v1.mjs','--controller-root',f.root,'--campaign-id','demo-r1','--campaign-path',f.campaign,'--campaign-directory-path',f.dirRel,'--review-kind','sealed-rework','--phase-sequence','1','--rework-request-path',requestRel],{encoding:'utf8'});
   const result=JSON.parse(out.trim());
@@ -352,7 +353,11 @@ test('typed held revision2-to-revision3 admission regenerates controller product
   const canonical=readJson(path.join(f.root,f.campaign,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json'));
   assert.equal(canonical.actions['step-1'].outputs.analysis,'Corrected, source-bound interpretation.');
   const invalid=readJson(path.join(f.root,f.campaign,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json'));
-  assert.equal(invalid.events[0].status,'RESOLVED_BY_PHASE_1_REVISION_3');
+  assert.equal(invalid.events[0].status,'RESOLVED_BY_PHASE_1_REVISION_2');
+  assert.equal(invalid.events[1].eventId,'INV-P1-REWORK-002');
+  assert.equal(invalid.events[1].status,'RESOLVED_BY_PHASE_1_REVISION_3');
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'work/phase-01/PHASE_01_FINAL_REPORT_v3.md')),true);
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'submissions/PHASE_01_WORK_PACKET_v3.json')),true);
   assert.equal(readJson(path.join(f.root,f.dirRel)).currentAssignment.phaseSequence,2);
 });
 
