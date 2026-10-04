@@ -102,8 +102,6 @@ jobs:
           gate_ref="$(jq -r '.watchdog.gate.ref // "main"' "$REGISTRATION")"
           directory_path="$(jq -r '.watchdog.gate.statePath' "$REGISTRATION")"
           milestone="$(jq -r '.watchdog.gate.expectedMilestoneId // empty' "$REGISTRATION")"
-          project_name="$(jq -r '.chatgptProject.name // empty' "$REGISTRATION")"
-          project_url="$(jq -r '.chatgptProject.url // empty' "$REGISTRATION")"
           gh api "repos/$gate_repo/contents/$directory_path?ref=$gate_ref" --jq '.content' | base64 -d > /tmp/campaign-directory.json
           test "$(jq -r '.campaignId' /tmp/campaign-directory.json)" = "$CAMPAIGN_ID"
           directory_schema="$(jq -r '.schemaVersion // empty' /tmp/campaign-directory.json)"
@@ -131,7 +129,6 @@ jobs:
                 feedback="$(jq -r '.controllerValidation.deficiencies // [] | map("- "+.) | join("\n")' /tmp/current-packet.json)"
               fi
             fi
-            [ -n "$project_name" ] || project_name="$campaign_name"
             encode_path() { printf '%s' "$1" | sed 's/ /%20/g'; }
             campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(encode_path "$workspace")"
             authority_url="https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority"
@@ -189,7 +186,6 @@ jobs:
             phase_id="$(jq -r '.phase.id' /tmp/current-receipt.json)"
             campaign_name="$(jq -r '.campaign.campaignName' /tmp/current-receipt.json)"
             workspace="$(jq -r '.campaign.workspacePath' /tmp/current-receipt.json)"
-            [ -n "$project_name" ] || project_name="$campaign_name"
             printf '%s\n' \
               "Campaign type: LITE" \
               "Campaign name: $campaign_name" \
@@ -203,12 +199,19 @@ jobs:
               "Resume from the latest durable evidence and the current phase receipt. Do not restart completed work." \
               "Repair reason: $reason" > /tmp/replacement-wake.txt
           fi
+          case "$reviewer" in
+            reviewer-1|reviewer-2|reviewer-3|reviewer-4) ;;
+            *) echo "::error::Unsupported reviewer identity for pre-bound chat repair: $reviewer"; exit 1 ;;
+          esac
+          chat_url="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // empty' "$REGISTRATION")"
+          [[ "$chat_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$chat_url" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || {
+            echo "::error::No valid pre-created ChatGPT chat is bound for $reviewer."
+            exit 1
+          }
+
           jq -cn \
-            --arg routine 'audit-lite-reviewer-project-open-v1' \
-            --arg project "$project_name" \
-            --arg projectUrl "$project_url" \
-            --arg chat "$campaign_name $reviewer replacement" \
-            '{routineId:$routine,projectName:$project,projectUrl:$projectUrl,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"standard"}' \
+            --arg chat "$reviewer" \
+            '{routineId:"",projectName:"",projectUrl:"",chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"repair_notice"}' \
             > /tmp/replacement-browser-context.json
           {
             echo "gate_repo=$gate_repo"
@@ -218,6 +221,7 @@ jobs:
             echo "reviewer=$reviewer"
             echo "phase_id=$phase_id"
             echo "milestone=$milestone"
+            echo "chat_url=$chat_url"
             echo "wake_b64=$(base64 -w0 /tmp/replacement-wake.txt)"
             echo "browser_context_b64=$(base64 -w0 /tmp/replacement-browser-context.json)"
           } >> "$GITHUB_OUTPUT"
@@ -246,25 +250,32 @@ jobs:
             fi
           done < <(printf '%s' "$listing" | jq -r '.[]? | select(.type=="file") | [.path,.sha] | @tsv')
 
-      - name: Clear confirmed dead reviewer chat binding
+      - name: Restore assigned reviewer chat binding
         if: steps.route.outputs.mode == 'receipt'
         env:
           GH_TOKEN: ${{ github.token }}
           REGISTRATION: ${{ steps.route.outputs.registration }}
+          REVIEWER: ${{ steps.current.outputs.reviewer }}
+          CHAT_URL: ${{ steps.current.outputs.chat_url }}
         shell: bash
         run: |
           set -euo pipefail
           api="repos/$GITHUB_REPOSITORY/contents/$REGISTRATION"
           sha="$(gh api "$api?ref=main" --jq '.sha')"
           gh api "$api?ref=main" --jq '.content' | base64 -d > /tmp/registration.json
-          jq '.repairPreviousChat=((.activeChat // {}) + {retiredAt:(now|todate),reason:"CONFIRMED_REVIEWER_REPAIR"})
-              | .chatUrl=""
-              | .activeChat=((.activeChat // {}) + {url:""})
-              | .updatedAt=(now|todate)' /tmp/registration.json > /tmp/registration-updated.json
+          jq --arg reviewer "$REVIEWER" --arg chat "$CHAT_URL" \
+            '.mode="resume_existing"
+             | .chatUrl=$chat
+             | .browserRoutine=""
+             | .activeChat={name:$reviewer,url:$chat}
+             | .updatedAt=(now|todate)' \
+            /tmp/registration.json > /tmp/registration-updated.json
           body="$(base64 -w0 /tmp/registration-updated.json)"
-          gh api --method PUT "$api" -f message="chore(repair): retire dead reviewer chat $CAMPAIGN_ID" -f content="$body" -f sha="$sha" -f branch=main >/dev/null
+          gh api --method PUT "$api" \
+            -f message="chore(repair): restore assigned chat for $CAMPAIGN_ID $REVIEWER" \
+            -f content="$body" -f sha="$sha" -f branch=main >/dev/null
 
-      - name: Launch replacement reviewer from current receipt
+      - name: Resume assigned reviewer chat from current receipt
         if: steps.route.outputs.mode == 'receipt'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -272,13 +283,13 @@ jobs:
         run: |
           set -euo pipefail
           poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
-          wake_id="$CAMPAIGN_ID-${{ steps.current.outputs.phase_id }}-${{ steps.current.outputs.reviewer }}-replacement"
+          wake_id="$CAMPAIGN_ID-${{ steps.current.outputs.phase_id }}-${{ steps.current.outputs.reviewer }}-repair"
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="$wake_id" \
             -f campaign_id="$CAMPAIGN_ID" \
             -f phase_id="${{ steps.current.outputs.phase_id }}" \
-            -f mode=create_fresh \
-            -f chat_url="" \
+            -f mode=resume_existing \
+            -f chat_url="${{ steps.current.outputs.chat_url }}" \
             -f wake_message_b64="${{ steps.current.outputs.wake_b64 }}" \
             -f watchdog_enabled=true \
             -f worker_role=reviewer \
@@ -306,6 +317,8 @@ jobs:
               echo "- Reviewer: ${{ steps.current.outputs.reviewer }}"
               echo "- Phase: ${{ steps.current.outputs.phase_id }}"
               echo "- Durable baseline: ${{ steps.current.outputs.receipt_path }}"
+              echo "- Existing reviewer chat: ${{ steps.current.outputs.chat_url }}"
+              echo "- Chat creation: disabled"
               echo "- Additional repair/reset receipt: none"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
