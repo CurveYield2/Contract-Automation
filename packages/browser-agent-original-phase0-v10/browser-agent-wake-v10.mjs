@@ -4,7 +4,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { validateStorageState } from './browser-session-state-v1.mjs';
+
+const execFileAsync = promisify(execFile);
 
 const env = process.env;
 const action = env.WAKE_ACTION || 'wake';
@@ -213,6 +217,46 @@ async function humanShortPointerClick(page, locator) {
   await page.mouse.down();
   await page.waitForTimeout(randomDelayMs(70, 160));
   await page.mouse.up();
+  await humanActionPause(page);
+}
+
+async function x11HumanPointerClick(page, locator) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await humanActionPause(page);
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('Visible X11 click target has no bounding box');
+
+  const metrics = await page.evaluate(() => ({
+    screenX: window.screenX,
+    screenY: window.screenY,
+    outerWidth: window.outerWidth,
+    outerHeight: window.outerHeight,
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio || 1
+  }));
+
+  const sideInset = Math.max(0, (metrics.outerWidth - metrics.innerWidth) / 2);
+  const topInset = Math.max(0, metrics.outerHeight - metrics.innerHeight - sideInset);
+  const dpr = metrics.devicePixelRatio || 1;
+  const screenX = Math.round((metrics.screenX + sideInset + box.x + box.width / 2) * dpr);
+  const screenY = Math.round((metrics.screenY + topInset + box.y + box.height / 2) * dpr);
+
+  console.log('[github-playwright-v10] project-flow=x11-create-click-coordinates=' + JSON.stringify({
+    screenX,
+    screenY,
+    box,
+    metrics,
+    sideInset,
+    topInset
+  }));
+
+  const x11Env = { ...process.env, DISPLAY: process.env.DISPLAY || ':99' };
+  await execFileAsync('xdotool', ['mousemove', '--sync', String(screenX), String(screenY)], { env: x11Env });
+  await page.waitForTimeout(randomDelayMs(300, 700));
+  await execFileAsync('xdotool', ['mousedown', '1'], { env: x11Env });
+  await page.waitForTimeout(randomDelayMs(70, 150));
+  await execFileAsync('xdotool', ['mouseup', '1'], { env: x11Env });
   await humanActionPause(page);
 }
 
@@ -622,8 +666,8 @@ async function createProjectExactHumanFlow(page, name) {
 
   const beforeCreateUrl = page.url();
   console.log('[github-playwright-v10] project-flow=create-button-same-surface-enabled');
-  await humanShortPointerClick(page, surfaceCreate);
-  console.log('[github-playwright-v10] project-flow=create-button-same-surface-short-clicked');
+  await x11HumanPointerClick(page, surfaceCreate);
+  console.log('[github-playwright-v10] project-flow=create-button-same-surface-x11-clicked');
 
   await page.waitForTimeout(1000);
   const postClickCreate = page.getByRole('button', { name: /^Create project$/i }).first();
