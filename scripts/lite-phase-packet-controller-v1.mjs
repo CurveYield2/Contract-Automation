@@ -457,8 +457,8 @@ function applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,auth
       if(parsed.status!=='PASS'||parsed.masterRepairRefresh!==true)throw new Error('controller dependent refresh failed for Phase '+phase+': '+String(parsed.feedbackText??parsed.status));
       shadowDirectory=readJson(repoFile(shadowRoot,directoryRel));
     }
-    const postRepairArtifacts=collectSegmentArtifacts({root:shadowRoot,campaignPath,segment});
     const refreshedDirectory=readJson(repoFile(shadowRoot,directoryRel));
+    const postRepairArtifacts=collectSegmentArtifacts({root:shadowRoot,campaignPath,segment,directory:refreshedDirectory,expectedAuthority:{homepagePath:result.form.bindings.authority.homepagePath,liteSkillSha256:result.form.bindings.authority.sha256}});
     fs.cpSync(repoFile(shadowRoot,campaignPath),repoFile(root,campaignPath),{recursive:true,force:true});
     const masterForm=readJson(requiredFile(root,result.pending.workFormPath,'master review work form'));
     masterForm.bindings={...masterForm.bindings,repairChildSha256:createHash('sha256').update(JSON.stringify(result.form.childRepair)).digest('hex')};
