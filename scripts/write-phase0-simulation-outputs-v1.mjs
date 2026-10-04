@@ -44,10 +44,11 @@ const baselineRows=[
     setup:'Canonical Ethereum Anvil execution baseline after supported source deployment-script simulation and deterministic fallback deployment; original target EVM chain IDs remain provenance metadata',
     transactionSequence:'Medusa internal randomized sequence; configured call limit '+String(summary.medusa?.configuredCallLimit??'UNRESOLVED')+'; observed '+String(summary.medusa?.observedCalls??0),
     expectedSecureOutcome:'INVESTIGATIVE_BASELINE_NO_PREDECIDED_SECURITY_CONCLUSION',
-    oracle:'Mechanical completion, coverage/revert telemetry, later-reviewer investigation',
+    oracle:'Separate execution volume, property applicability/results, reachability, observation quality, and typed oracle gaps; later-reviewer interpretation',
     requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',simulationResult:summary.medusa?.status??'UNRESOLVED',
     fuzzVariablesAndBounds:'ABI-valid generated arguments; underlying source-contract calls routed through generated Medusa ABI wrappers; no raw random calldata',
     result:summary.medusa?.status??'UNRESOLVED',
+    executionStatus:summary.medusa?.executionStatus??'UNKNOWN',checkStatus:summary.medusa?.checkStatus??'UNKNOWN',reachabilityStatus:summary.medusa?.reachabilityStatus??'UNKNOWN',observationStatus:summary.medusa?.observationStatus??'UNKNOWN',mode:summary.medusa?.mode??'UNKNOWN',propertyRegistry:summary.medusa?.propertyRegistry??[],
     evidenceRefs:[summary.medusa?.rawOutputRef?('evidence/phase0/simulations/'+summary.medusa.rawOutputRef):summaryRef,summaryRef]
   },
   {
@@ -56,19 +57,20 @@ const baselineRows=[
     setup:summary.executionMode==='REUSED_COMPLETED_STAGES'?'Separate retained Ethereum Anvil telemetry attempt; shards reset to that attempt baseline. Medusa keeps its own original fork and deployment addresses.':'Same canonical Ethereum Anvil execution baseline; independent stateful shards reset to the common baseline',
     transactionSequence:'Randomized cross-contract bursts that repeatedly revisit contracts rather than exhausting one contract at a time',
     expectedSecureOutcome:'INVESTIGATIVE_BASELINE_NO_PREDECIDED_SECURITY_CONCLUSION',
-    oracle:'Per-call pre/post accounting state, deltas, receipts/logs, success/revert/error telemetry',
+    oracle:'Per-call ARG_GEN/PREFLIGHT/SUBMISSION/RECEIPT/OBSERVATION lifecycle, typed terminal outcomes, comparable deltas, receipts/logs, and reachability witnesses',
     requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',
     simulationResult:telemetryRows.length?(telemetryRows.every(x=>x.status==='PASS')?'PASS':'INCOMPLETE'):'NOT_EXECUTED',
     fuzzVariablesAndBounds:observedAccountingShare===null?'No telemetry run executed':'Real ABI functions only; observed accounting/state-changing share '+String(observedAccountingShare)+'%; configured policy 80%',
     result:telemetryRows.length?'INVESTIGATIVE_TELEMETRY_GENERATED':'NOT_EXECUTED',
+    executionStatus:telemetryRows.length?'EXECUTED':'NOT_EXECUTED',checkStatus:'NOT_APPLICABLE',reachabilityStatus:telemetryRows.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetryRows.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetryRows.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),
     evidenceRefs:[runIndexRef,...telemetryRows.map(x=>'evidence/phase0/simulations/'+x.rawTranscriptRef)]
   }
 ];
 
 const phase5={schemaVersion:'curveyield-lite-phase0-phase5-simulation-baseline-input-v1',data:{automationInputs:{phase0BaselineSimulation:{
   purpose:'USE_PHASE0_RANDOMIZED_EVIDENCE_TO_DESIGN_HIGHER_VALUE_PHASE5_TARGETED_TESTS',summaryRef,runIndexRef,deployEvidenceRef:deployRef,
-  medusa:{status:summary.medusa?.status??'UNRESOLVED',configuredCallLimit:summary.medusa?.configuredCallLimit??null,observedCalls:summary.medusa?.observedCalls??0,minimumRequiredCalls:summary.medusa?.minimumRequiredCalls??100001},
-  telemetry:(summary.telemetry??[]).map(x=>({runId:x.runId,calls:x.calls,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:'evidence/phase0/simulations/'+x.rawTranscriptRef,burstSchedule:x.burstSchedule})),
+  medusa:{status:summary.medusa?.status??'UNRESOLVED',mode:summary.medusa?.mode??null,executionStatus:summary.medusa?.executionStatus??null,coverageStatus:summary.medusa?.coverageStatus??null,checkStatus:summary.medusa?.checkStatus??null,reachabilityStatus:summary.medusa?.reachabilityStatus??null,observationStatus:summary.medusa?.observationStatus??null,configuredCallLimit:summary.medusa?.configuredCallLimit??null,observedCalls:summary.medusa?.observedCalls??0,minimumRequiredCalls:summary.medusa?.minimumRequiredCalls??100001,propertyRegistry:summary.medusa?.propertyRegistry??[]},
+  telemetry:(summary.telemetry??[]).map(x=>({runId:x.runId,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,rawTranscriptRef:'evidence/phase0/simulations/'+x.rawTranscriptRef,burstSchedule:x.burstSchedule})),
   limitations:summary.limitations??[],
   reviewerUse:'Investigate patterns/anomalies and use them to design Phase-5 candidate-specific simulations. Raw transcripts are investigative telemetry, not a manual reverification obligation.'
 }}}};
