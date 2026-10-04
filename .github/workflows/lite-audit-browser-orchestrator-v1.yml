@@ -117,7 +117,8 @@ jobs:
             git push origin "HEAD:$AUDIT_CONTROLLER_REF"
           fi
 
-      - name: Create or refresh campaign browser registration
+      - name: Bind current reviewer to supplied existing chat
+        id: registration
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -126,54 +127,64 @@ jobs:
           safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
           registration="process/browser-agent-wake/registrations/$safe_campaign.json"
           api="repos/$GITHUB_REPOSITORY/contents/$registration"
+          reviewer="${{ steps.successor.outputs.incoming_reviewer }}"
           phase_id="${{ steps.successor.outputs.incoming_phase }}"
-          if [ "$phase_id" = "phase-1" ]; then
-            routine="audit-lite-reviewer-project-create-v1"
-          else
-            routine="audit-lite-reviewer-project-open-v1"
-          fi
+          boundary="${{ steps.successor.outputs.boundary }}"
 
           current_payload="$(gh api "$api?ref=main" 2>/dev/null || true)"
           current="$(printf '%s' "$current_payload" | jq -r '.sha // empty')"
-          project_url=""
-          interaction_policy="ordinary-pointer-keyboard-only"
-          if [ -n "$current" ]; then
-            printf '%s' "$current_payload" | jq -r '.content' | tr -d '\n' | base64 -d > /tmp/existing-registration.json
-            project_url="$(jq -r '.chatgptProject.url // empty' /tmp/existing-registration.json)"
-            existing_policy="$(jq -r '.browserInteractionPolicy // empty' /tmp/existing-registration.json)"
-            [ -z "$existing_policy" ] || interaction_policy="$existing_policy"
-          fi
+          [[ "$current" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::Campaign browser registration is missing. Start the audit through Audit Source Initialization with all four agent chat URLs."
+            exit 1
+          }
 
-          jq -n \
-            --arg campaignId "$CAMPAIGN_ID" \
-            --arg projectName "$CAMPAIGN_NAME" \
-            --arg projectUrl "$project_url" \
-            --arg routine "$routine" \
+          printf '%s' "$current_payload" | jq -r '.content' | tr -d '\n' | base64 -d > /tmp/existing-registration.json
+          case "$reviewer" in
+            reviewer-1|reviewer-2|reviewer-3|reviewer-4) ;;
+            *) echo "::error::Unsupported reviewer identity: $reviewer. Expected reviewer-1 through reviewer-4."; exit 1 ;;
+          esac
+
+          chat_url="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // empty' /tmp/existing-registration.json)"
+          [[ "$chat_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$chat_url" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || {
+            echo "::error::No valid pre-created ChatGPT chat is bound for $reviewer."
+            exit 1
+          }
+
+          interaction_policy="$(jq -r '.browserInteractionPolicy // "ordinary-pointer-keyboard-only"' /tmp/existing-registration.json)"
+          jq \
+            --arg chat "$chat_url" \
+            --arg reviewer "$reviewer" \
+            --arg phaseId "$phase_id" \
+            --arg boundary "$boundary" \
             --arg interactionPolicy "$interaction_policy" \
             --arg ref "$AUDIT_CONTROLLER_REF" \
             --arg directoryPath "${{ steps.directory.outputs.path }}" \
-            --arg phaseId "$phase_id" \
-            --arg boundary "${{ steps.successor.outputs.boundary }}" \
-            --arg reviewer "${{ steps.successor.outputs.incoming_reviewer }}" \
-            '{
-              schemaVersion:"curveyield-browser-agent-wake-registration-v1",
-              campaignId:$campaignId,mode:"create_fresh",chatUrl:"",
-              browserRoutine:$routine,
-              chatgptProject:{name:$projectName,url:$projectUrl},
-              activeChat:{name:"",url:""},wakeMessage:"",thinkingEffort:"high",
-              browserInteractionPolicy:$interactionPolicy,
-              activeAssignment:{phaseId:$phaseId,milestoneId:$boundary,workerRole:"reviewer",reviewer:$reviewer,thinkingEffort:"high"},
-              watchdog:{enabled:true,idleMessage:"GET BACK TO WORK",gate:{mode:"LITE",repository:"CurveYield2/Audit-Controller",ref:$ref,statePath:$directoryPath,expectedPhaseId:$phaseId,expectedMilestoneId:$boundary,activePointerPath:"",stopStates:["STOPPED_BY_HUMAN"],stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]}}
-            }' > /tmp/registration.json
+            '.schemaVersion="curveyield-browser-agent-wake-registration-v1"
+             | .campaignId=$ENV.CAMPAIGN_ID
+             | .mode="resume_existing"
+             | .chatUrl=$chat
+             | .browserRoutine=""
+             | .chatgptProject={name:"",url:""}
+             | .activeChat={name:$reviewer,url:$chat}
+             | .wakeMessage=""
+             | .thinkingEffort="high"
+             | .browserInteractionPolicy=$interactionPolicy
+             | .activeAssignment={phaseId:$phaseId,milestoneId:$boundary,workerRole:"reviewer",reviewer:$reviewer,thinkingEffort:"high"}
+             | .watchdog=((.watchdog // {}) + {enabled:true,idleMessage:"GET BACK TO WORK"})
+             | .watchdog.gate={mode:"LITE",repository:"CurveYield2/Audit-Controller",ref:$ref,statePath:$directoryPath,expectedPhaseId:$phaseId,expectedMilestoneId:$boundary,activePointerPath:"",stopStates:["STOPPED_BY_HUMAN"],stopCampaignStatuses:["COMPLETE","STOPPED_BY_HUMAN"]}
+             | .repair=((.repair // {}) + {enabled:true,idlePokeThreshold:3,unviewableThreshold:2})
+             | .updatedAt=(now|todate)' \
+            /tmp/existing-registration.json > /tmp/registration.json
 
           body="$(base64 -w0 /tmp/registration.json)"
-          if [ -n "$current" ]; then
-            gh api --method PUT "$api" -f message="chore(wake): prepare $CAMPAIGN_ID ${{ steps.successor.outputs.boundary }}" -f content="$body" -f sha="$current" -f branch=main >/dev/null
-          else
-            gh api --method PUT "$api" -f message="chore(wake): register $CAMPAIGN_ID ${{ steps.successor.outputs.boundary }}" -f content="$body" -f branch=main >/dev/null
-          fi
+          gh api --method PUT "$api" \
+            -f message="chore(wake): bind $CAMPAIGN_ID $reviewer to existing chat" \
+            -f content="$body" -f sha="$current" -f branch=main >/dev/null
 
-      - name: Launch fresh reviewer
+          echo "chat_url=$chat_url" >> "$GITHUB_OUTPUT"
+          echo "reviewer=$reviewer" >> "$GITHUB_OUTPUT"
+
+      - name: Wake assigned existing reviewer chat
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -181,30 +192,19 @@ jobs:
           set -euo pipefail
           poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
           wake_id="$CAMPAIGN_ID-${{ steps.successor.outputs.boundary }}-${{ steps.successor.outputs.incoming_reviewer }}"
-          chat_name="$CAMPAIGN_NAME ${{ steps.successor.outputs.incoming_reviewer }}"
           phase_id="${{ steps.successor.outputs.incoming_phase }}"
-          if [ "$phase_id" = "phase-1" ]; then
-            routine="audit-lite-reviewer-project-create-v1"
-          else
-            routine="audit-lite-reviewer-project-open-v1"
-          fi
-          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
-          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
-          api="repos/$GITHUB_REPOSITORY/contents/$registration"
-          project_url="$(gh api "$api?ref=main" --jq '.content' | base64 -d | jq -r '.chatgptProject.url // empty')"
+          chat_url="${{ steps.registration.outputs.chat_url }}"
 
           browser_context_b64="$(jq -cn \
-            --arg routine "$routine" \
-            --arg project "$CAMPAIGN_NAME" \
-            --arg projectUrl "$project_url" \
-            --arg chat "$chat_name" \
-            '{routineId:$routine,projectName:$project,projectUrl:$projectUrl,chatName:$chat,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"standard"}' | base64 -w0)"
+            --arg reviewer "${{ steps.successor.outputs.incoming_reviewer }}" \
+            '{routineId:"",projectName:"",projectUrl:"",chatName:$reviewer,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"initial_wake"}' | base64 -w0)"
+
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="$wake_id" \
             -f campaign_id="$CAMPAIGN_ID" \
             -f phase_id="$phase_id" \
-            -f mode=create_fresh \
-            -f chat_url="" \
+            -f mode=resume_existing \
+            -f chat_url="$chat_url" \
             -f wake_message_b64="${{ steps.successor.outputs.wake_b64 }}" \
             -f watchdog_enabled=true \
             -f worker_role=reviewer \
@@ -228,6 +228,8 @@ jobs:
             echo "- Directory: ${{ steps.directory.outputs.path }}"
             echo "- Incoming phase: ${{ steps.successor.outputs.incoming_phase }}"
             echo "- Incoming reviewer: ${{ steps.successor.outputs.incoming_reviewer }}"
+            echo "- Existing reviewer chat: ${{ steps.registration.outputs.chat_url }}"
+            echo "- Launch mode: resume_existing (no Project or chat creation)"
             echo "- Stored handoff/wake/start files: none"
             echo "- Active-phase receipt for assignment-v2 campaigns: none"
           } >> "$GITHUB_STEP_SUMMARY"
