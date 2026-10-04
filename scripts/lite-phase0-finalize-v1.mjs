@@ -74,9 +74,9 @@ if(runIndex.policy?.crossContractBursts!==true)throw new Error('Phase-0 ABI tele
 
 if(medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS'){
   if(Number(medusa.observedCalls??0)<100001)throw new Error('Phase-0 Medusa simulation did not exceed 100,000 randomized ABI calls');
-  if(medusa.executionStatus!=='EXECUTED')throw new Error('Phase-0 Medusa did not record executable engine activity');
+  if(medusa.executionStatus!=='COMPLETED')throw new Error('Phase-0 Medusa did not record executable engine activity');
   if(medusa.mode==='CHECKED_DISCOVERY'){
-    if(!['CHECKED','CHECKED_WITH_DEVIATION'].includes(medusa.checkStatus))throw new Error('CHECKED_DISCOVERY Medusa evidence did not execute every applicable target-behavior property with non-vacuous witnesses');
+    if(!['CHECKED','CHECK_DEVIATIONS_OBSERVED'].includes(medusa.checkStatus))throw new Error('CHECKED_DISCOVERY Medusa evidence did not execute every applicable target-behavior property with non-vacuous witnesses');
     const properties=medusa.propertyRegistry??[];
     if(!properties.length)throw new Error('CHECKED_DISCOVERY Medusa evidence has no property registry');
     for(const property of properties){
@@ -95,7 +95,7 @@ const telemetry=simulation.telemetry??[];
 if(medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS'&&telemetry.length!==4)throw new Error('Phase-0 requires four complete telemetry shards');
 for(const t of telemetry){
   if(t.status!=='PASS'||Number(t.calls)!==1200||Number(t.plannedActions)!==1200||Number(t.terminalActions)!==1200)throw new Error('Phase-0 telemetry shard is incomplete: '+String(t.runId));
-  if(t.executionStatus!=='EXECUTED'||!['COMPLETE','PARTIAL'].includes(t.observationStatus))throw new Error('Phase-0 telemetry shard lacks execution/observation evidence: '+String(t.runId));
+  if(t.executionStatus!=='COMPLETED'||!['COMPLETE','PARTIAL'].includes(t.observationStatus))throw new Error('Phase-0 telemetry shard lacks execution/observation evidence: '+String(t.runId));
   if(Number(t.accountingFunctionCount??0)>0&&Number(t.accountingActionShare??0)<0.79)throw new Error('Phase-0 ABI telemetry materially missed the 80% qualified-economic action target in '+String(t.runId));
   if(Number(t.accountingFunctionCount??0)===0&&t.weightingLimitation!=='NO_QUALIFIED_ECONOMIC_STATE_CHANGE_FUNCTIONS')throw new Error('Phase-0 telemetry without qualified economic functions must carry the typed weighting limitation');
   if(Number(t.simulationInfrastructureError??0)!==0||Number(t.submissionInfrastructureError??0)!==0||Number(t.submittedOutcomeUnknown??0)!==0)throw new Error('Phase-0 telemetry contains unresolved infrastructure/submission outcomes in '+String(t.runId));
