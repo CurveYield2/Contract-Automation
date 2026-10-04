@@ -715,8 +715,34 @@ export async function prepareQualifiedRuntimeV2({provider,ethers,targets,actors}
         try{tokenAddress=await c.getFunction(`${getter}()`).staticCall();if(tokenAddress)break;}catch{}
       }
       const borrower=callbackTargets.find(x=>x.address.toLowerCase()!==target.address.toLowerCase())?.address??null;
-      target.recipeRuntime={tokenAddress,borrowerAddress:borrower,primaryActor:actors[0],setupReceipts:[]};
-      if(!tokenAddress||!borrower)target.recipeRuntime.setupGap={type:'ERC3156_RUNTIME_BINDING_GAP',missing:[!tokenAddress?'TOKEN':null,!borrower?'BORROWER':null].filter(Boolean)};
+      const primaryActor=actors[0];
+      target.recipeRuntime={tokenAddress,borrowerAddress:borrower,primaryActor,setupReceipts:[],lifecycleWitnesses:[]};
+      if(!tokenAddress||!borrower){
+        target.recipeRuntime.setupGap={type:'ERC3156_RUNTIME_BINDING_GAP',missing:[!tokenAddress?'TOKEN':null,!borrower?'BORROWER':null].filter(Boolean)};
+      }else{
+        try{
+          const before=await snapshot({provider,ethers,target,sender:primaryActor,plan:target.plan,systemTargets:targets});
+          const signer=await provider.getSigner(primaryActor);
+          const lender=c.connect(signer);
+          const tx=await lender.getFunction('flashLoan(address,address,uint256,bytes)').send(borrower,tokenAddress,1n,'0x');
+          const receipt=await tx.wait();
+          const after=await snapshot({provider,ethers,target,sender:primaryActor,plan:target.plan,systemTargets:targets});
+          const beforeRows=observationRowsV2(before,target.recipe,'BEFORE');
+          const afterRows=observationRowsV2(after,target.recipe,'AFTER');
+          const transitionDeltas=observationDeltasV2(beforeRows,afterRows,{receipt,sender:primaryActor})
+            .filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
+          const witness={
+            kind:'ERC3156_SEED_FLASH_LOAN',actionSignature:'flashLoan(address,address,uint256,bytes)',actor:primaryActor,
+            receipt:{hash:receipt.hash,status:receipt.status,gasUsed:receipt.gasUsed?.toString()??null},
+            observedTransitionDeltas:transitionDeltas
+          };
+          target.recipeRuntime.setupReceipts.push(witness.receipt);
+          target.recipeRuntime.lifecycleWitnesses.push(witness);
+          setupReceipts.push({target:target.qualifiedName,kind:witness.kind,...witness.receipt});
+        }catch(error){
+          target.recipeRuntime.setupGap={type:'ERC3156_SEED_FLOW_GAP',message:String(error?.shortMessage??error?.message??error).slice(0,1200)};
+        }
+      }
     }
   }
   return{targets,setupReceipts};
@@ -1124,7 +1150,11 @@ export function medusaWrappers(ethers,targets){
     }
   }
   const rows=[];let id=0;
-  const accCopies=accounting.length?Math.max(4,Math.ceil((4*other.length)/accounting.length)):0;
+  // Wrapper population is only a selection mechanism; achieved share is still measured from retained corpus calls.
+  // Target 85% here to leave stochastic headroom above the 80% acceptance floor.
+  const desiredEconomicShare=0.85;
+  const odds=desiredEconomicShare/(1-desiredEconomicShare);
+  const accCopies=accounting.length?Math.max(6,Math.ceil((odds*other.length)/accounting.length)):0;
   for(const x of accounting)for(let n=0;n<accCopies;n++)rows.push({...x,wrapperName:`p0_acc_${id++}_${n}`});
   for(const x of other)rows.push({...x,wrapperName:`p0_other_${id++}`});
   if(!accounting.length)omitted.push({qualifiedName:'ALL_TARGETS',signature:'N/A',reason:'NO_QUALIFIED_ECONOMIC_STATE_CHANGE_FUNCTIONS_FOR_MEDUSA_WEIGHTING'});
@@ -1266,7 +1296,19 @@ async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
       const defaultActor=target?.recipeRuntime?.primaryActor??actors[0];
       const initial=await readTargetPropertyV2({provider,ethers,property,from:defaultActor});
       let witness=null;
-      for(const selected of target?.functions??[]){
+      const runtimeWitness=(target?.recipeRuntime?.lifecycleWitnesses??[])
+        .find(x=>Array.isArray(x?.observedTransitionDeltas)&&x.observedTransitionDeltas.length>0);
+      if(runtimeWitness){
+        witness={
+          status:'WITNESSED',propertyId:property.propertyId,targetSignature:property.targetSignature,
+          actionSignature:runtimeWitness.actionSignature,actor:runtimeWitness.actor??defaultActor,
+          receipt:runtimeWitness.receipt??null,initialProperty:initial,
+          afterProperty:await readTargetPropertyV2({provider,ethers,property,from:runtimeWitness.actor??defaultActor}),
+          observedTransitionDeltas:runtimeWitness.observedTransitionDeltas,
+          witnessBasis:'RUNTIME_RECIPE_PRECONDITION'
+        };
+      }
+      for(const selected of witness?[]:(target?.functions??[])){
         const attemptSnapshot=await provider.send('evm_snapshot',[]);
         try{
           const rng=seeded(`property-witness-v2:${property.propertyId}:${selected.signature}`);

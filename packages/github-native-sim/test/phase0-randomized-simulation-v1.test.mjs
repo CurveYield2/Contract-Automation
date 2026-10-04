@@ -50,7 +50,7 @@ test('Phase-0 burst schedule terminates and uses available mutable actions when 
   assert.ok(schedule.every(x=>x.actionClass==='OTHER_STATE_CHANGE'));
 });
 
-test('Medusa wrapper population gives accounting actions at least 80 percent target-function weight when both classes exist',()=>{
+test('Medusa wrapper population carries stochastic headroom above the 80 percent achieved-dispatch floor',()=>{
   const fakeEthers={};
   const targets=[
     {qualifiedName:'A',address:'0x0000000000000000000000000000000000000001',functions:[fn(true,'deposit()'),fn(false,'pause()')]},
@@ -59,7 +59,7 @@ test('Medusa wrapper population gives accounting actions at least 80 percent tar
   ];
   const plan=medusaWrappers(fakeEthers,targets);
   assert.ok(plan.rows.length>0);
-  assert.ok(plan.accountingWrapperShare>=0.8);
+  assert.ok(plan.accountingWrapperShare>=0.85);
 });
 
 
