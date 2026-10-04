@@ -3,12 +3,12 @@
   "action": "project_wake",
   "mode": "create_fresh",
   "chat_url": "",
-  "wake_message": "[HOME_EXIT_PROJECT_WAKE_VERIFY7] Assistant: when you personally receive this as a new user message inside this new Project, reply exactly HOME_EXIT_PROJECT_WAKE_PERSONALLY_SEEN_VERIFY7",
+  "wake_message": "[HOME_EXIT_PROJECT_WAKE_VERIFY8] Assistant: when you personally receive this as a new user message inside this new Project, reply exactly HOME_EXIT_PROJECT_WAKE_PERSONALLY_SEEN_VERIFY8",
   "home_exit_node": "100.112.238.56",
   "interactive_view": true,
   "manual_challenge_wait_minutes": 5,
-  "requested_at": "2026-10-03T19:30:00-07:00",
-  "project_name": "HOME_EXIT_PROJECT_WAKE_VERIFY7",
+  "requested_at": "2026-10-03T19:38:00-07:00",
+  "project_name": "HOME_EXIT_PROJECT_WAKE_VERIFY8",
   "project_url": "",
   "recovery_chat_title": ""
 }
