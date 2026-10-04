@@ -252,6 +252,23 @@ async function humanPointerClick(page, locator) {
   await humanActionPause(page);
 }
 
+async function shortHumanPointerClick(page, locator) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await humanActionPause(page);
+  await locator.hover().catch(() => {});
+  await humanActionPause(page);
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('Visible control has no clickable bounding box');
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y, { steps: 12 });
+  await page.waitForTimeout(randomDelayMs(100, 300));
+  await page.mouse.down();
+  await page.waitForTimeout(randomDelayMs(80, 160));
+  await page.mouse.up();
+  await page.waitForTimeout(randomDelayMs(300, 700));
+}
+
 async function humanTypeInto(page, locator, text) {
   await humanPointerClick(page, locator);
   const current = await locator.inputValue().catch(async () => {
@@ -609,16 +626,36 @@ async function createProjectExactHumanFlow(page, name) {
   const beforeCreateUrl = page.url();
   await humanPointerClick(page, enabledCreate);
 
-  // Successful Project creation automatically navigates the browser to the new
-  // Project URL. A short human-scale wait is sufficient; capture that URL directly.
-  await page.waitForTimeout(randomDelayMs(3000, 5000));
-  let projectUrl = page.url();
-  if (projectUrl === beforeCreateUrl) {
-    await page.waitForTimeout(randomDelayMs(2000, 3500));
+  // Preserve the proven create flow, but distinguish "slow navigation" from
+  // "the visible Create project click was ignored". If the modal is still
+  // visibly open with an enabled Create project button, retry that same control
+  // once with a shorter human-style click rather than aborting immediately.
+  let projectUrl = beforeCreateUrl;
+  let retriedCreateClick = false;
+  const projectCreateDeadline = Date.now() + 30000;
+
+  while (Date.now() < projectCreateDeadline) {
+    await page.waitForTimeout(randomDelayMs(900, 1500));
     projectUrl = page.url();
+    if (projectUrl !== beforeCreateUrl) break;
+
+    const stillEnabledCreate = await findEnabledProjectCreateButton(page, 600);
+    if (stillEnabledCreate && !retriedCreateClick) {
+      retriedCreateClick = true;
+      console.log('[github-playwright-v10] create-project-click-retry=short-human-pointer');
+      await shortHumanPointerClick(page, stillEnabledCreate);
+      continue;
+    }
   }
+
   if (projectUrl === beforeCreateUrl) {
-    throw new Error('Create project did not navigate to a new Project URL after a short visible wait');
+    const createStillVisible = Boolean(await findVisibleProjectCreateButton(page));
+    throw new Error(
+      'Create project did not navigate to a new Project URL within 30 seconds; createControlStillVisible=' +
+      String(createStillVisible) +
+      '; retriedCreateClick=' +
+      String(retriedCreateClick)
+    );
   }
 
   const composer = await ensureComposer(page);
