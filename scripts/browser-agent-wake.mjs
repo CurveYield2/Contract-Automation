@@ -383,7 +383,7 @@ async function humanX11TypeText(page, text) {
   }
 }
 
-async function waitForCdp(port, timeoutMs = 30000) {
+async function waitForCdp(port, timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -437,7 +437,7 @@ async function runNormalChromeExistingSession(chromium) {
 
   let browser;
   try {
-    await waitForCdp(port, 30000);
+    await waitForCdp(port, 60000);
     browser = await chromium.connectOverCDP('http://127.0.0.1:' + port);
     const contexts = browser.contexts();
     if (contexts.length !== 1) {
