@@ -558,10 +558,37 @@ async function runNormalChromeExistingSession(chromium) {
     await humanX11TypeText(page, wakeMessage);
 
     const normalizedExpected = normalizeVisibleText(wakeMessage);
-    const normalizedComposer = normalizeVisibleText(await readComposerText(composer));
+    const rawComposerText = await readComposerText(composer);
+    const normalizedComposer = normalizeVisibleText(rawComposerText);
     const marker = normalizedExpected.slice(0, Math.min(120, normalizedExpected.length));
     const lengthFloor = Math.floor(normalizedExpected.length * 0.95);
-    if (!marker || !normalizedComposer.includes(marker) || normalizedComposer.length < lengthFloor) {
+    const markerPresent = Boolean(marker) && normalizedComposer.includes(marker);
+    const lengthPlausible = normalizedComposer.length >= lengthFloor;
+    console.log('[normal-chrome-watchdog] composer-verification=' + JSON.stringify({
+      expectedLength: normalizedExpected.length,
+      composerLength: normalizedComposer.length,
+      lengthFloor,
+      markerPresent,
+      lengthPlausible,
+      composerPrefix: normalizedComposer.slice(0, 180),
+      composerSuffix: normalizedComposer.slice(-180)
+    }));
+    if (!markerPresent || !lengthPlausible) {
+      const evidenceDir = '/tmp/browser-wake-evidence-v1';
+      await fs.mkdir(evidenceDir, { recursive: true });
+      await page.screenshot({ path: path.join(evidenceDir, 'watchdog-composer-fill-mismatch-v1.png'), fullPage: true }).catch(() => {});
+      await fs.writeFile(
+        path.join(evidenceDir, 'watchdog-composer-fill-mismatch-v1.json'),
+        JSON.stringify({
+          expected: normalizedExpected,
+          observed: normalizedComposer,
+          expectedLength: normalizedExpected.length,
+          observedLength: normalizedComposer.length,
+          markerPresent,
+          lengthPlausible
+        }, null, 2) + '\n',
+        'utf8'
+      );
       throw new BrowserAgentError('COMPOSER_FILL_MISMATCH', 'X11-typed watchdog message was not visibly complete in the composer', true);
     }
 
