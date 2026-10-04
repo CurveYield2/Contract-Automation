@@ -54,15 +54,15 @@ on:
 
   push:
     branches:
-      - main
+      - 'test/monitor-only-v10-v1'
     paths:
-      - 'process/browser-agent-home-exit-v10/current-request-v10.json'
+      - '.github/workflows/browser-agent-home-exit-v10.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: original-phase0-home-exit-browser-v10
+  group: monitor-only-v10-v1
   cancel-in-progress: true
 
 jobs:
@@ -230,38 +230,22 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Browser monitor: $BROWSER_VIEW_URL"
 
-      - name: Run Playwright through home exit node
-        id: browser
+      - name: Verify and hold monitor only
         shell: bash
-        env:
-          WAKE_ACTION: ${{ steps.request.outputs.action }}
-          WAKE_MODE: ${{ steps.request.outputs.mode }}
-          CHAT_URL: ${{ steps.request.outputs.chat_url }}
-          WAKE_MESSAGE: ${{ steps.request.outputs.wake_message }}
-          PROJECT_NAME: ${{ steps.request.outputs.project_name }}
-          WAKE_ID: home-exit-playwright-v10-${{ github.run_id }}
-          INTERACTIVE_VIEW_ENABLED: ${{ steps.request.outputs.interactive_view }}
-          MANUAL_CHALLENGE_WAIT_MINUTES: ${{ steps.request.outputs.manual_wait }}
-          BROWSER_VIEW_URL: ${{ env.BROWSER_VIEW_URL }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          export MANUAL_CHALLENGE_WAIT_MS=$((MANUAL_CHALLENGE_WAIT_MINUTES * 60000))
-          if [ "$INTERACTIVE_VIEW_ENABLED" = "true" ]; then
-            echo "Private VNC: $TAILSCALE_RUNNER_IP:5900"
-          fi
 
-          node packages/browser-agent-original-phase0-v10/browser-agent-wake-v10.mjs
-          test -s "$WAKE_RESULT_PATH"
-          cat "$WAKE_RESULT_PATH"
+          echo "Testing private VNC listener..."
+          timeout 3 bash -c "</dev/tcp/$TAILSCALE_RUNNER_IP/5900"
 
-          if [ "$WAKE_ACTION" = "observe" ]; then
-            jq -e '.ok==true and .provider=="github-playwright"' "$WAKE_RESULT_PATH" >/dev/null
-          elif [ "$WAKE_ACTION" = "recover" ]; then
-            jq -e '.ok==true and .provider=="github-playwright" and .recovered==true and (.chatUrl|test("^https://chatgpt.com/c/"))' "$WAKE_RESULT_PATH" >/dev/null
-          else
-            jq -e '.ok==true and .provider=="github-playwright" and (.posted==true or .skipped=="PRODUCTIVE_GENERATING")' "$WAKE_RESULT_PATH" >/dev/null
-          fi
+          echo "Testing noVNC HTTP surface..."
+          curl -fsS --connect-timeout 3 --max-time 5 "$BROWSER_VIEW_URL" >/dev/null
+
+          echo "::notice title=MONITOR_ONLY_READY::$BROWSER_VIEW_URL"
+          echo "MONITOR_ONLY_READY=$BROWSER_VIEW_URL"
+          echo "Monitor-only connectivity test passed on runner."
+          echo "Holding the monitor open for 10 minutes for external Tailscale testing."
+          sleep 600
 
       - name: Disable home exit node
         if: always()
