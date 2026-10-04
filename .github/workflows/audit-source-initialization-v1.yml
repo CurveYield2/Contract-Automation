@@ -16,7 +16,7 @@ on:
         required: true
         type: string
       agent_chat_3_url:
-        description: Existing ChatGPT conversation URL for reviewer-3
+        description: Existing ChatGPT conversation URL for reviewer-3L
         required: true
         type: string
       agent_chat_4_url:
