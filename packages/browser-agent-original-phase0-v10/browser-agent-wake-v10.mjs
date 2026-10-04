@@ -1251,6 +1251,13 @@ async function runWithPage(providerName, connect) {
     const before = await snapshot(page);
 
     if (action === 'observe') {
+      for (let i = 0; i < 5; i += 1) {
+        await page.mouse.wheel(0, 720);
+        await page.waitForTimeout(randomDelayMs(220, 480));
+      }
+      await saveWakeEvidence(page, '05-observe-bottom-v1', {
+        reason: 'read-only bottom-of-chat diagnostic'
+      });
       const sessionStatePersisted = false;
       const result = { ok: true, provider: providerName, action, wakeId, sessionStatePersisted, ...before };
       await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
