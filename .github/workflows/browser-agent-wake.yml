@@ -143,11 +143,13 @@ jobs:
         shell: bash
         run: bash scripts/select-audit-controller-token.sh
 
-      - name: Resolve idempotent reviewer launch
-        if: inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer'
+      - name: Resolve idempotent reviewer wake
+        if: inputs.worker_role == 'reviewer'
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_MILESTONE: ${{ inputs.gate_expected_milestone_id }}
+          REQUESTED_MODE: ${{ inputs.mode }}
+          REQUESTED_CHAT_URL: ${{ inputs.chat_url }}
         shell: bash
         run: |
           set -euo pipefail
@@ -158,11 +160,23 @@ jobs:
             printf '%s' "$encoded" | base64 -d > /tmp/existing-registration.json
             existing_milestone="$(jq -r '.activeAssignment.milestoneId // empty' /tmp/existing-registration.json)"
             existing_chat="$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/existing-registration.json)"
-            if [ "$existing_milestone" = "$REQUESTED_MILESTONE" ]                && [[ "$existing_chat" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+ ]]; then
+            if [ "$REQUESTED_MODE" = "create_fresh" ] \
+              && [ "$existing_milestone" = "$REQUESTED_MILESTONE" ] \
+              && [[ "$existing_chat" =~ ^https://chatgpt\.com/(c/[A-Za-z0-9_-]+|g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+)/?$ ]]; then
               echo "Fresh launch deduplicated: reviewer chat already exists for $CAMPAIGN_ID / $REQUESTED_MILESTONE."
               echo "WAKE_MODE=resume_existing" >> "$GITHUB_ENV"
               echo "CHAT_URL=$existing_chat" >> "$GITHUB_ENV"
               echo "DEDUPED_FRESH_LAUNCH=true" >> "$GITHUB_ENV"
+            fi
+
+            delivered_milestone="$(jq -r '.wakeDelivery.milestoneId // empty' /tmp/existing-registration.json)"
+            delivered_chat="$(jq -r '.wakeDelivery.chatUrl // empty' /tmp/existing-registration.json)"
+            if [ "$REQUESTED_MODE" = "resume_existing" ] \
+              && [ "$delivered_milestone" = "$REQUESTED_MILESTONE" ] \
+              && [ -n "$REQUESTED_CHAT_URL" ] \
+              && [ "$delivered_chat" = "$REQUESTED_CHAT_URL" ]; then
+              echo "Initial existing-chat wake already delivered for $CAMPAIGN_ID / $REQUESTED_MILESTONE; this run will use the watchdog poke message."
+              echo "INITIAL_WAKE_DEDUPED=true" >> "$GITHUB_ENV"
             fi
           fi
 
@@ -253,6 +267,9 @@ jobs:
           if [ "$WAKE_MODE" = "create_fresh" ]; then
             printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
             test -s /tmp/wake-message.txt
+          elif [ "$message_purpose" = "initial_wake" ] && [ "${INITIAL_WAKE_DEDUPED:-false}" != "true" ]; then
+            printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
+            test -s /tmp/wake-message.txt
           elif [ "$message_purpose" = "repair_notice" ]; then
             printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
             test -s /tmp/wake-message.txt
@@ -268,7 +285,7 @@ jobs:
             and ((.projectUrl // "")|type=="string")
             and ((.chatName // "")|type=="string")
             and ((.repair // {})|type=="object")
-            and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="repair_notice")
+            and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="repair_notice" or (.messagePurpose // "standard")=="initial_wake")
             and (((.routineId // "") | test("[\\r\\n]")) | not)
             and (((.projectName // "") | test("[\\r\\n]")) | not)
             and (((.projectUrl // "") | test("[\\r\\n]")) | not)
@@ -506,6 +523,63 @@ jobs:
           else
             gh api --method PUT "$api" -f message="chore(watchdog): arm $WAKE_ID" -f content="$content" -f branch=main >/dev/null
           fi
+
+      - name: Persist existing-chat reviewer wake into campaign registration
+        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.mode == 'resume_existing' && inputs.worker_role == 'reviewer' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESOLVED_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}
+          CURRENT_REVIEWER: ${{ env.CHATGPT_CHAT_NAME }}
+          CURRENT_PHASE_ID: ${{ inputs.phase_id }}
+          CURRENT_MILESTONE_ID: ${{ inputs.gate_expected_milestone_id }}
+          CURRENT_THINKING_EFFORT: ${{ inputs.thinking_effort }}
+          CURRENT_GATE_MODE: ${{ inputs.gate_mode }}
+          CURRENT_GATE_REPOSITORY: ${{ inputs.gate_repository }}
+          CURRENT_GATE_REF: ${{ inputs.gate_ref }}
+          CURRENT_GATE_STATE_PATH: ${{ inputs.gate_state_path }}
+          CURRENT_GATE_POINTER_PATH: ${{ inputs.gate_active_pointer_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
+          gh api "$api?ref=main" --jq '.content' | base64 -d > /tmp/existing-chat-registration.json
+          delivered_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          jq \
+            --arg url "$RESOLVED_CHAT_URL" \
+            --arg reviewer "$CURRENT_REVIEWER" \
+            --arg phaseId "$CURRENT_PHASE_ID" \
+            --arg milestoneId "$CURRENT_MILESTONE_ID" \
+            --arg workerRole "$WORKER_ROLE" \
+            --arg thinkingEffort "$CURRENT_THINKING_EFFORT" \
+            --arg wakeMessage "$(cat /tmp/wake-message.txt)" \
+            --arg idleMessage "$(cat /tmp/watchdog-message.txt)" \
+            --arg gateMode "$CURRENT_GATE_MODE" \
+            --arg gateRepository "$CURRENT_GATE_REPOSITORY" \
+            --arg gateRef "$CURRENT_GATE_REF" \
+            --arg gateStatePath "$CURRENT_GATE_STATE_PATH" \
+            --arg gatePointerPath "$CURRENT_GATE_POINTER_PATH" \
+            --arg deliveredAt "$delivered_at" \
+            '.mode="resume_existing"
+             | .chatUrl=$url
+             | .browserRoutine=""
+             | .chatgptProject={name:"",url:""}
+             | .activeChat={name:$reviewer,url:$url}
+             | .wakeMessage=$wakeMessage
+             | .thinkingEffort=$thinkingEffort
+             | .activeAssignment={phaseId:$phaseId,milestoneId:$milestoneId,workerRole:$workerRole,reviewer:$reviewer,thinkingEffort:$thinkingEffort}
+             | .wakeDelivery={milestoneId:$milestoneId,chatUrl:$url,deliveredAt:$deliveredAt}
+             | .watchdog=((.watchdog // {}) + {idleMessage:$idleMessage})
+             | .watchdog.gate=((.watchdog.gate // {}) + {mode:$gateMode,repository:$gateRepository,ref:$gateRef,statePath:$gateStatePath,expectedPhaseId:$phaseId,expectedMilestoneId:$milestoneId,activePointerPath:$gatePointerPath})
+             | .updatedAt=(now|todate)' \
+            /tmp/existing-chat-registration.json > /tmp/existing-chat-registration-updated.json
+
+          sha="$(gh api "$api?ref=main" --jq '.sha')"
+          content="$(base64 -w0 /tmp/existing-chat-registration-updated.json)"
+          gh api --method PUT "$api" \
+            -f message="chore(wake): record existing-chat wake for $CAMPAIGN_ID $CURRENT_MILESTONE_ID" \
+            -f content="$content" -f sha="$sha" -f branch=main >/dev/null
 
       - name: Persist fresh-chat URL into campaign registration
         if: ${{ steps.deliver.outputs.ok == 'true' && inputs.mode == 'create_fresh' && inputs.worker_role == 'reviewer' && env.DEDUPED_FRESH_LAUNCH != 'true' }}
