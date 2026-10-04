@@ -249,6 +249,20 @@ contract PropertyControls {
     function property_control_false() external pure returns (bool) { return false; }
 }
 
+contract LowLevelControls {
+    function returnsFalse() external returns (bool) { return false; }
+    function revertReason() external { revert("EXPECTED_REJECTION"); }
+    function panicNow() external { assert(false); }
+}
+
+contract NoopMulticall {
+    uint256 public totalCalls;
+    function multicall(bytes[] calldata calls) external {
+        if (calls.length == 0) return;
+        totalCalls += calls.length;
+    }
+}
+
 contract NeverReachProperty {
     function touch(uint256) external {}
     function property_requires_transition() external pure returns (bool) { return true; }
