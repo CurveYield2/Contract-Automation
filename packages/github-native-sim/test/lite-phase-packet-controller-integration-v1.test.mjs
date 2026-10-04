@@ -222,6 +222,40 @@ function runMaster(f,segmentId='reviewer-1-phase-01'){
   return JSON.parse(out.trim());
 }
 
+function fileSha(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
+function installMasterTransportProof(f,messagePurpose){
+  const directory=readJson(path.join(f.root,f.dirRel));
+  const pending=directory.pendingMasterReview;
+  const recordRel=path.posix.join(f.campaign,'work/master-review',pending.segmentId,'MASTER_REVIEW_TRANSPORT_PROOF_v1.json');
+  const verifiedAt='2026-10-04T00:10:00Z';
+  writeJson(path.join(f.root,recordRel),{
+    schemaVersion:'curveyield-lite-master-review-transport-proof-v1',
+    campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
+    segmentId:pending.segmentId,reviewAttempt:pending.reviewAttempt,masterChatUrl:directory.masterReview.chatUrl,
+    observedModel:'MASTER',observedReasoning:'MAXIMUM',controlVerification:'VISIBLE_UI_VERIFIED',deliveryStatus:'VERIFIED',
+    messagePurpose,reviewManifestSha256:messagePurpose==='REPAIR_VERIFICATION'?pending.postRepairManifestSha256:pending.manifestSha256,
+    verifiedBy:'BROWSER_AGENT_WAKE_CONTROLLER',verifiedAt
+  });
+  pending.masterTransportProof={schemaVersion:'curveyield-lite-master-review-transport-proof-v1',recordPath:recordRel,sha256:fileSha(path.join(f.root,recordRel)),verifiedBy:'BROWSER_AGENT_WAKE_CONTROLLER',verifiedAt};
+  writeJson(path.join(f.root,f.dirRel),directory);
+}
+function installRepairTransportProof(f,childChatUrl='https://chatgpt.com/c/fresh-sol-child'){
+  const directory=readJson(path.join(f.root,f.dirRel));
+  const pending=directory.pendingMasterReview;
+  const recordRel=path.posix.join(f.campaign,'work/master-review',pending.segmentId,'MASTER_REPAIR_TRANSPORT_PROOF_v1.json');
+  const verifiedAt='2026-10-04T00:40:00Z';
+  writeJson(path.join(f.root,recordRel),{
+    schemaVersion:'curveyield-lite-master-repair-transport-proof-v1',
+    campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
+    segmentId:pending.segmentId,reviewAttempt:pending.reviewAttempt,masterChatUrl:directory.masterReview.chatUrl,
+    repairScopeId:pending.repairScopeId,repairSpecSha256:pending.repairSpecSha256,childChatUrl,
+    observedModel:'SOL',observedReasoning:'HIGH',controlVerification:'VISIBLE_UI_VERIFIED',freshChild:true,deliveryStatus:'VERIFIED',
+    verifiedBy:'BROWSER_AGENT_WAKE_CONTROLLER',verifiedAt
+  });
+  pending.repairTransportProof={schemaVersion:'curveyield-lite-master-repair-transport-proof-v1',recordPath:recordRel,sha256:fileSha(path.join(f.root,recordRel)),verifiedBy:'BROWSER_AGENT_WAKE_CONTROLLER',verifiedAt};
+  writeJson(path.join(f.root,f.dirRel),directory);
+}
+
 test('v11-configured Phase 1 seals but cannot create Phase 2 until exact master ACCEPT',()=>{
   const f=fixture();
   const directory=readJson(path.join(f.root,f.dirRel));
@@ -262,6 +296,9 @@ test('v11-configured Phase 1 seals but cannot create Phase 2 until exact master 
     verifiedAt:'2026-10-04T00:00:00Z'
   };
   writeJson(masterPath,master);
+  const unverifiedMaster=runMaster(f);
+  assert.equal(unverifiedMaster.status,'MASTER_REVIEW_TRANSPORT_BLOCKED');
+  installMasterTransportProof(f,'INITIAL_REVIEW');
   const placeholderRejected=runMaster(f);
   assert.equal(placeholderRejected.status,'MASTER_REVIEW_INVALID');
   assert.match(placeholderRejected.feedbackText,/substantive review.summary/);
@@ -342,6 +379,9 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
     }
   };
   writeJson(masterPath,master);
+  const unverifiedMaster=runMaster(f);
+  assert.equal(unverifiedMaster.status,'MASTER_REVIEW_TRANSPORT_BLOCKED');
+  installMasterTransportProof(f,'INITIAL_REVIEW');
   const result=runMaster(f);
   assert.equal(result.status,'MASTER_REVIEW_REWORK_REQUIRED');
   assert.equal(result.repairModel,'SOL');
@@ -377,6 +417,9 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
     completedAt:'2026-10-04T00:30:00Z'
   };
   writeJson(masterPath,tamperedSubmission);
+  const unverifiedChild=runMaster(f);
+  assert.equal(unverifiedChild.status,'MASTER_REPAIR_TRANSPORT_BLOCKED');
+  installRepairTransportProof(f);
   const rejectedTamper=runMaster(f);
   assert.equal(rejectedTamper.status,'MASTER_REVIEW_INVALID');
   assert.match(rejectedTamper.feedbackText,/modified prefills or evidence outside allowed semantic paths/);
@@ -436,6 +479,9 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
     verifiedAt:'2026-10-04T02:00:00Z'
   };
   writeJson(masterPath,verifiedForm);
+  const unverifiedFinalMaster=runMaster(f);
+  assert.equal(unverifiedFinalMaster.status,'MASTER_REVIEW_TRANSPORT_BLOCKED');
+  installMasterTransportProof(f,'REPAIR_VERIFICATION');
   const accepted=runMaster(f);
   assert.equal(accepted.status,'PASS');
   assert.equal(accepted.masterReviewAccepted,true);
