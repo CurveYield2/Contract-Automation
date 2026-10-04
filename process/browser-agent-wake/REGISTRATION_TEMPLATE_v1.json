@@ -7,7 +7,7 @@
   "agentChats": {
     "reviewer-1": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_1_CHAT_ID",
     "reviewer-2": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_2_CHAT_ID",
-    "reviewer-3": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_3_CHAT_ID",
+    "reviewer-3L": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_3L_CHAT_ID",
     "reviewer-4": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_4_CHAT_ID"
   },
   "chatgptProject": {
