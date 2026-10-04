@@ -103,10 +103,11 @@ test('send path uses visible pointer and keyboard primitives only', () => {
 });
 
 
-test('recover action reopens the already-posted Project chat through visible UI without resending', () => {
+test('recover action prefers saved durable chat URL and uses saved Project URL only as fallback', () => {
+  assert.match(source, /async function recoverCreatedChatDirect/);
   assert.match(source, /async function recoverCreatedChatFromProjectPage/);
-  assert.match(source, /requestedProjectUrl\s*\?\s*await openSavedProjectUrl\(page, projectName, requestedProjectUrl\)/);
-  assert.match(source, /:\s*await recoverExistingProjectExactHumanFlow\(page, projectName\)/);
+  assert.match(source, /Project-page recovery requires a saved Project URL; sidebar rediscovery is disabled/);
+  assert.match(source, /const project = await openSavedProjectUrl\(page, projectName, requestedProjectUrl\)/);
   assert.match(source, /projectMain\.getByText\(titlePattern, \{ exact: true \}\)/);
   assert.match(source, /humanPointerClick\(page, chatControl\)/);
   assert.match(source, /await waitForDurableChatRoute\(page, 300000\)/);
@@ -311,21 +312,21 @@ test('v10 saved Project reuse accepts canonical Project root while rejecting cha
   assert.match(source, /observedUrl=/);
 });
 
-test('recover opens the Project first, then uses only the visible Project chat list', () => {
+test('Project fallback recovery requires saved Project URL and uses only the central visible Project chat list', () => {
   const start = source.indexOf('async function recoverCreatedChatFromProjectPage');
   const end = source.indexOf('\nasync function postWithVisibleVerification', start);
   const block = source.slice(start, end);
 
+  const requireSaved = block.indexOf('Project-page recovery requires a saved Project URL; sidebar rediscovery is disabled');
   const openSaved = block.indexOf('openSavedProjectUrl(page, projectName, requestedProjectUrl)');
-  const openByName = block.indexOf('recoverExistingProjectExactHumanFlow(page, projectName)');
   const projectMain = block.indexOf("page.locator('main, [role=\"main\"]').first()");
   const title = block.indexOf('projectMain.getByText(titlePattern, { exact: true })');
   const click = block.indexOf('humanPointerClick(page, chatControl)');
-  assert.ok(openSaved >= 0 && openByName > openSaved && projectMain > openByName && title > projectMain && click > title);
+  assert.ok(requireSaved >= 0 && openSaved > requireSaved && projectMain > openSaved && title > projectMain && click > title);
   assert.match(block, /recoveryChatTitle/);
   assert.match(block, /ancestor-or-self::a\[1\]/);
   assert.match(block, /ancestor-or-self::button\[1\]/);
-  assert.doesNotMatch(block, /Search chats|Control\+K|humanTypeInto\(page, searchInput/);
+  assert.doesNotMatch(block, /recoverExistingProjectExactHumanFlow|Search chats|Control\+K|humanTypeInto\(page, searchInput/);
 });
 
 test('visible Project-name recovery clicks the exact rendered Project title text directly', () => {
