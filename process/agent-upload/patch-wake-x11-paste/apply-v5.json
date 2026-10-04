@@ -1,5 +1,0 @@
-{
-  "apply": true,
-  "attempt": 5,
-  "mode": "skip-existing-chat-reload"
-}
