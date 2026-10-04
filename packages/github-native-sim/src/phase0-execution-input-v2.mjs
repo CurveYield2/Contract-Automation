@@ -60,8 +60,29 @@ function compactCompilationUnits(units=[]){
 export function buildExecutionArtifactBundleV2({request,build}={}){
   if(!request?.source?.archiveSha256||!SHA256.test(request.source.archiveSha256))throw new Error('execution artifact export requires exact source SHA-256');
   if(!build||build.status!=='completed')throw new Error('execution artifact export requires the accepted completed Phase-0 build');
-  const artifacts=(build.artifacts??[]).map(normalizedArtifact).sort((a,b)=>a.qualifiedName.localeCompare(b.qualifiedName));
+  const compilationUnits=compactCompilationUnits(build.compilationUnits??[]);
+  if(!compilationUnits.length)throw new Error('execution artifact export requires exact compiler-unit identity');
+  for(const unit of compilationUnits){
+    if(!unit.unitId||!SHA256.test(String(unit.compilerInputSha256??''))||!SHA256.test(String(unit.compilerOutputSha256??''))){
+      throw new Error(`execution artifact export cannot promote compiler unit ${unit.unitId??'UNKNOWN'} to exactness with null input/output identity`);
+    }
+  }
+  const unitByArtifact=new Map();
+  for(const unit of compilationUnits)for(const qualifiedName of unit.artifactQualifiedNames??[]){
+    if(unitByArtifact.has(qualifiedName))throw new Error(`compiler artifact appears in multiple exact units: ${qualifiedName}`);
+    unitByArtifact.set(qualifiedName,unit);
+  }
+  const artifacts=(build.artifacts??[]).map(raw=>{
+    const qualifiedName=`${raw.sourceName}:${raw.contractName}`,unit=unitByArtifact.get(qualifiedName);
+    return normalizedArtifact({
+      ...raw,
+      compilationUnitId:raw.compilationUnitId??unit?.unitId??null,
+      profile:raw.profile??unit?.profile??null,
+      compilerVersion:raw.compilerVersion??unit?.compilerVersion??build.compilerVersion??null
+    });
+  }).sort((a,b)=>a.qualifiedName.localeCompare(b.qualifiedName));
   if(!artifacts.length)throw new Error('execution artifact export requires at least one compiler artifact');
+  for(const artifact of artifacts)if(!artifact.compilationUnitId)throw new Error(`compiler artifact lacks exact compilation-unit identity: ${artifact.qualifiedName}`);
   const identityRows=artifacts.map(a=>({
     qualifiedName:a.qualifiedName,
     abiDigestSha256:a.abiDigestSha256,
@@ -71,6 +92,14 @@ export function buildExecutionArtifactBundleV2({request,build}={}){
     profile:a.profile,
     compilerVersion:a.compilerVersion
   }));
+  const buildConfigurationIdentity={
+    system:build.system??null,
+    compilerVersion:build.compilerVersion??null,
+    compilerVersions:clone(build.compilerVersions??[]),
+    compilerProfiles:clone(build.compilerProfiles??[]),
+    compilationUnits
+  };
+  const buildConfigurationDigestSha256=digestCanonicalV1(buildConfigurationIdentity);
   return {
     schemaVersion:'curveyield-phase0-execution-build-artifacts-v2',
     artifactType:'PHASE0_EXECUTION_BUILD_ARTIFACTS',
@@ -84,7 +113,8 @@ export function buildExecutionArtifactBundleV2({request,build}={}){
     requestIdentity:{
       requestId:request.requestId??null,
       requestDigest:request.requestDigest??null,
-      campaignId:request.campaignId??null
+      campaignId:request.campaignId??null,
+      campaignGenerationId:request.campaignGenerationId??null
     },
     buildIdentity:{
       system:build.system??null,
@@ -95,10 +125,12 @@ export function buildExecutionArtifactBundleV2({request,build}={}){
       deploymentOrder:clone(build.deploymentOrder??[]),
       compileGroups:clone(build.compileGroups??[]),
       embeddedBuildContract:clone(build.embeddedBuildContract??null),
-      compilationUnits:compactCompilationUnits(build.compilationUnits??[])
+      compilationUnits,
+      buildConfigurationDigestSha256
     },
     artifacts,
     artifactSetDigestSha256:digestCanonicalV1(identityRows),
+    buildConfigurationDigestSha256,
     reuseContract:{
       secondBuildRequired:false,
       exactCompilerArtifactsExported:true,
