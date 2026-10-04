@@ -143,9 +143,7 @@ async function ensureComposer(page) {
   const title = await page.title().catch(() => '');
   const bodyText = await page.locator('body').innerText().catch(() => '');
   const loginPrompt = /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText);
-  const humanChallenge =
-    /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText) ||
-    /Just a moment|Cloudflare/i.test(title);
+  const humanChallenge = visibleHumanChallenge(bodyText, title);
   const conversationUnavailable = /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText);
   const textareaCount = await page.locator('textarea').count().catch(() => 0);
   const editableCount = await page.locator('[contenteditable="true"]').count().catch(() => 0);
@@ -823,12 +821,21 @@ async function post(page, message, composerOverride = null) {
   return { strategy: 'human-pointer-click' };
 }
 
+function visibleHumanChallenge(bodyText = '', title = '') {
+  const bodyChallenge =
+    /Verify you are human|Verifying you are human|Checking your browser|Performing security verification|security verification|Enable JavaScript and cookies to continue|Ray ID/i.test(bodyText);
+  const titleChallenge =
+    /Just a moment|Attention Required|Verify you are human|Cloudflare.*(?:verification|challenge)/i.test(title);
+  const brandedChallenge =
+    /Cloudflare/i.test(bodyText) &&
+    /Verify you are human|Verifying you are human|Checking your browser|security verification|Enable JavaScript and cookies to continue|Ray ID/i.test(bodyText);
+  return bodyChallenge || titleChallenge || brandedChallenge;
+}
+
 function visibleBrowserStateText(bodyText = '', title = '') {
   return {
     loginPrompt: /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText),
-    humanChallenge:
-      /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText) ||
-      /Just a moment|Cloudflare/i.test(title),
+    humanChallenge: visibleHumanChallenge(bodyText, title),
     conversationUnavailable:
       /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText)
   };
