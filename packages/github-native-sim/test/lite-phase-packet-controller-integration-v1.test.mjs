@@ -288,6 +288,30 @@ test('v11-configured Phase 1 seals but cannot create Phase 2 until exact master 
   assert.equal(advanced.campaignStatus,'WAITING_FOR_SUCCESSOR_AGENT');
 });
 
+test('segment collection binds legacy missing digests but rejects a supplied malformed receipt digest',()=>{
+  const f=fixture();
+  const directory=readJson(path.join(f.root,f.dirRel));
+  directory.masterReview={chatUrl:'https://chatgpt.com/c/master-review-chat',reasoning:'MAXIMUM',repairModel:'SOL',repairReasoning:'HIGH'};
+  writeJson(path.join(f.root,f.dirRel),directory);
+  const predecessor=readJson(path.join(f.root,directory.lastSealedReceiptPath));
+  predecessor.authority.liteSkillSha256=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.authority,'SKILL.md'))).digest('hex');
+  writeJson(path.join(f.root,directory.lastSealedReceiptPath),predecessor);
+  writeJson(path.join(f.root,f.campaign,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),{});
+  const form=readJson(path.join(f.root,f.formRel));
+  form.actions['step-1'].outputs.analysis='Digest-bound Phase-1 analysis.';
+  writeJson(path.join(f.root,f.formRel),form);
+  run(f);
+  const waiting=readJson(path.join(f.root,f.dirRel));
+  const receipt=readJson(path.join(f.root,waiting.lastSealedReceiptPath));
+  assert.equal(receipt.inputs[0].sha256,undefined);
+  receipt.inputs[0].sha256='not-a-sha256';
+  writeJson(path.join(f.root,waiting.lastSealedReceiptPath),receipt);
+  assert.throws(
+    ()=>collectSegmentArtifacts({root:f.root,campaignPath:f.campaign,segment:MASTER_REVIEW_SEGMENTS_V1[0],directory:waiting,expectedAuthority:receipt.authority}),
+    /invalid sha256/
+  );
+});
+
 test('master REWORK produces bounded Sol/High scope and leaves successor blocked',()=>{
   const f=fixture();
   const directory=readJson(path.join(f.root,f.dirRel));
