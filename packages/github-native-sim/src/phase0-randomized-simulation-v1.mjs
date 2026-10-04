@@ -1063,11 +1063,11 @@ async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
   }finally{await provider.destroy();}
   return out;
 }
-export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot}){
-  const dir=path.join(outRoot,'runs','medusa-anvil-fork-001');await fs.mkdir(dir,{recursive:true});
+export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,runId=runId}){
+  const dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
   const router=renderMedusaRouterV2(ethers,targets);
   if(!router.rows.length){
-    const s={schemaVersion:'curveyield-phase0-medusa-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,runId:'medusa-anvil-fork-001',mode:'DISCOVERY_WITH_ORACLE_GAPS',executionStatus:'NOT_EXECUTED',coverageStatus:'NO_ROUTABLE_FUNCTIONS',checkStatus:'ORACLE_GAP',reachabilityStatus:'UNKNOWN',observationStatus:'UNAVAILABLE',status:'BLOCKED_NO_ROUTABLE_ABI_FUNCTIONS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,observedCalls:0,limitations:router.omitted};
+    const s={schemaVersion:'curveyield-phase0-medusa-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,runId:runId,mode:'DISCOVERY_WITH_ORACLE_GAPS',executionStatus:'NOT_EXECUTED',coverageStatus:'NO_ROUTABLE_FUNCTIONS',checkStatus:'ORACLE_GAP',reachabilityStatus:'UNKNOWN',observationStatus:'UNAVAILABLE',status:'BLOCKED_NO_ROUTABLE_ABI_FUNCTIONS',configuredCallLimit:callLimit,observedCalls:0,limitations:router.omitted};
     await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(s,null,2)+'\n');return s;
   }
   const checked=router.properties.length>0,mode=checked?'CHECKED_DISCOVERY':'DISCOVERY_WITH_ORACLE_GAPS';
@@ -1075,7 +1075,7 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
   const harnessAbs=path.join(medusaProject,'src','Phase0MedusaRouterV1.sol');
   await fs.writeFile(harnessAbs,router.source);
   await fs.writeFile(path.join(medusaProject,'foundry.toml'),'[profile.default]\nsrc = "src"\nout = "out"\nlibs = []\nsolc_version = "0.8.28"\nevm_version = "cancun"\noptimizer = true\noptimizer_runs = 200\n');
-  const cfg=buildMedusaConfigV2({anvilUrl,blockNumber,routerRows:router.rows,checked,callLimit:PHASE0_MEDUSA_CALL_LIMIT_V1});
+  const cfg=buildMedusaConfigV2({anvilUrl,blockNumber,routerRows:router.rows,checked,callLimit});
   const cfgPath=path.join(medusaProject,'medusa.json');await fs.writeFile(cfgPath,JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_CONFIG_v1.json'),JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_ROUTER_v1.sol'),router.source);
@@ -1083,8 +1083,8 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
   await fs.writeFile(path.join(dir,'PROPERTY_WITNESSES_v2.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-property-witnesses-v2',properties:witnessRows},null,2)+'\n');
 
   const medusaStartedAt=Date.now();
-  console.log(`[phase0-medusa] started; mode=${mode}; timeout=1800s; configuredCallLimit=${PHASE0_MEDUSA_CALL_LIMIT_V1}; progress heartbeat every 300s`);
-  const heartbeat=setInterval(()=>console.log(`[phase0-medusa] heartbeat: mode=${mode}; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; configuredCallLimit=${PHASE0_MEDUSA_CALL_LIMIT_V1}`),300000);
+  console.log(`[phase0-medusa] started; mode=${mode}; timeout=1800s; configuredCallLimit=${callLimit}; progress heartbeat every 300s`);
+  const heartbeat=setInterval(()=>console.log(`[phase0-medusa] heartbeat: mode=${mode}; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; configuredCallLimit=${callLimit}`),300000);
   heartbeat.unref?.();
   let r;
   try{r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv()});}
@@ -1122,15 +1122,15 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
     };
   });
   const assurance=assessMedusaV2({mode,observedCalls,engineProperties:parsed.properties??[],properties});
-  const callVolumeMet=observedCalls>=PHASE0_MEDUSA_MIN_CALLS_V1;
+  const callVolumeMet=observedCalls>=minimumRequiredCalls;
   let status;
   if(checked)status=r.exitCode===0&&callVolumeMet&&assurance.checkStatus==='CHECKED'?'PASS':'COMPLETE_WITH_FAILURES';
   else status=r.exitCode===0&&callVolumeMet?'COMPLETE_WITH_ORACLE_GAPS':'INCOMPLETE_CALL_REQUIREMENT';
   const summary={
-    schemaVersion:'curveyield-phase0-medusa-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,runId:'medusa-anvil-fork-001',
+    schemaVersion:'curveyield-phase0-medusa-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,runId:runId,
     mode,purpose:'BROAD_PHASE0_STATEFUL_RANDOMIZED_DISCOVERY_WITH_CHECKED_PACKET_PROPERTIES_WHEN_AVAILABLE',
     fork:{engine:'anvil',rpcUrlExposed:false,rpcBlock:blockNumber,chain:'ethereum',chainId:1},
-    configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls,
+    configuredCallLimit:callLimit,minimumRequiredCalls:minimumRequiredCalls,observedCalls,
     callSequenceLength:100,workers:10,callerSemantics:'FUZZ_SENDER_PRESERVED_WITH_MEDUSA_PRANK_CHEATCODE',
     abiRouterGenerated:true,rawRandomBytes:false,targetContracts:targets.map(t=>({qualifiedName:t.qualifiedName,address:t.address,recipeId:t.recipe?.recipeId??null})),
     routerWrapperCount:router.rows.length,accountingWrapperShare:router.accountingWrapperShare,weightingStrategy:router.weightingStrategy,
@@ -1240,11 +1240,11 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         medusa=await runMedusa({projectRoot:staged.projectRoot,anvilUrl:anvil.url,blockNumber:baselineBlock,ethers,targets,outRoot:outputRoot});
       }catch(error){
         medusaExecutionFailure={type:'MEDUSA_EXECUTION_FAILURE',code:error?.code??null,message:String(error?.message??error).slice(0,3000)};
-        medusa={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'FAILED_EXECUTION',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0,limitations:[medusaExecutionFailure]};
+        medusa={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:runId,status:'FAILED_EXECUTION',configuredCallLimit:callLimit,minimumRequiredCalls:minimumRequiredCalls,observedCalls:0,limitations:[medusaExecutionFailure]};
         console.log(`[phase0-medusa] failed but workflow will continue to remaining executable stages: ${medusaExecutionFailure.message}`);
       }
     }else{
-      medusa={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_EXECUTABLE_TARGETS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0};
+      medusa={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:runId,status:'BLOCKED_NO_EXECUTABLE_TARGETS',configuredCallLimit:callLimit,minimumRequiredCalls:minimumRequiredCalls,observedCalls:0};
     }
     let telemetry=[];
     let telemetryExecutionFailure=null;
@@ -1275,7 +1275,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       targetEvmChainIds:targetChainIds,
       executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},
       limitations:[typed],
-      medusa:error.medusa??{status:'BLOCKED',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0},
+      medusa:error.medusa??{status:'BLOCKED',configuredCallLimit:callLimit,minimumRequiredCalls:minimumRequiredCalls,observedCalls:0},
       telemetry:[],
       deployment:deploymentEvidence,
       baselineTargetDispositions:[{
