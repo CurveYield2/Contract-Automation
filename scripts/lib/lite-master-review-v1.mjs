@@ -347,16 +347,18 @@ export function admitSealedPhaseRework({root,campaignPath,directory,requestPath,
   if(!exactJson(priorProtected,repairedProtected))throw new Error('repaired work form changed data outside allowedSemanticPaths');
   const refresh=request.dependentRefresh??{};
   for(const key of ['regenerateCanonical','regenerateReport','regenerateDerived','resealReceipt','prepareSuccessorAssignment'])if(refresh[key]!==true)throw new Error('dependentRefresh.'+key+' must be true');
-  if(request.evidenceInvalidation?.eventId!=='EIM-013'||request.evidenceInvalidation?.resolveTo!=='RESOLVED_BY_PHASE_1_REVISION_3')throw new Error('sealed rework must resolve EIM-013 with the authorized disposition');
+  const invalidation=request.evidenceInvalidation??{};
+  if(invalidation.eventId!=='INV-P1-REWORK-002'||invalidation.ruleId!=='EIM-013'||invalidation.requiredPriorStatus!=='SEALED_REVISION_2'||invalidation.resolveTo!=='RESOLVED_BY_PHASE_1_REVISION_3')throw new Error('sealed rework invalidation binding mismatch');
   const invalidRel=path.posix.join(campaignPath,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json');
   const invalid=readJson(requiredFile(root,invalidRel,'evidence invalidation matrix'));
   const events=invalid.events??invalid.invalidationEvents??[];
-  const event=events.find(x=>x?.eventId==='EIM-013'||x?.id==='EIM-013');
-  if(!event)throw new Error('EIM-013 does not exist');
-  if(request.evidenceInvalidation.requiredPriorStatus&&String(event.status)!==String(request.evidenceInvalidation.requiredPriorStatus))throw new Error('EIM-013 prior status mismatch');
+  if(events.some(x=>x?.eventId==='INV-P1-REWORK-002'||x?.id==='INV-P1-REWORK-002'))throw new Error('INV-P1-REWORK-002 already exists');
   const predecessorInput=(priorReceipt.inputs??[]).find(x=>x?.role==='PREDECESSOR_RECEIPT')?.path;
   if(!predecessorInput)throw new Error('prior Phase-1 receipt lacks predecessor receipt input');
   const loaded=loadPhaseSchema(root,expectedRoot,1);
+  const expectedReport=path.posix.join(campaignPath,'work/phase-01/PHASE_01_FINAL_REPORT_v3.md');
+  const expectedPacket=path.posix.join(campaignPath,'submissions/PHASE_01_WORK_PACKET_v3.json');
+  if(request.generatedFinalReportPath!==expectedReport||request.generatedPacketPath!==expectedPacket)throw new Error('sealed rework must preserve prior products and use report/packet v3 paths');
   if(repairedForm.schemaVersion!=='curveyield-lite-phase-work-form-v1'||repairedForm.phase!==1)throw new Error('repaired work form identity mismatch');
   const prefillDigest=repairedForm.automationInputs?.controllerPrefillDigestSha256;
   if(!SHA256.test(String(prefillDigest??'')))throw new Error('repaired work form lacks controller prefill digest');
@@ -367,8 +369,8 @@ export function admitSealedPhaseRework({root,campaignPath,directory,requestPath,
     assignment:{
       phaseSequence:1,phaseId:'phase-1',phaseRevision:3,reviewer:'reviewer-1',status:'ACTIVE',
       workSchemaPath:loaded.rel,workFormPath:request.repairedWorkForm.path,
-      finalReportPath:path.posix.join(campaignPath,loaded.schema.finalReport.campaignPath),
-      packetPath:path.posix.join(campaignPath,loaded.schema.submission.packetPath),
+      finalReportPath:request.generatedFinalReportPath,
+      packetPath:request.generatedPacketPath,
       predecessorReceiptPath:predecessorInput,derivedInputPaths:priorReceipt.inputs?.filter(x=>x?.role==='DERIVED_INPUT').map(x=>x.path)??[],
       controllerPrefillDigestSha256:prefillDigest,
       sealedRework:{scopeId:request.humanAuthorization.scopeId,requestPath,admittedAt:now}
