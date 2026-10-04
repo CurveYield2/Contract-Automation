@@ -519,7 +519,7 @@ function sourceDeclaredStandardsV2(sourceIntelligence,qualifiedName){
   if(normalized.has('IERC3156FLASHLENDER')||normalized.has('ERC3156FLASHLENDER'))out.push('ERC3156FLASHLENDER');
   return out;
 }
-function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
+export function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
   const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
   return deployed.filter(d=>d.qualifiedName&&byQ.has(d.qualifiedName)).map(d=>{
     const artifact=byQ.get(d.qualifiedName);
@@ -532,7 +532,7 @@ function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
     return{...d,artifact,functions,plan:probePlan(ethers,artifact),declaredStandards,recipe};
   }).filter(t=>t.functions.length);
 }
-async function prepareQualifiedRuntimeV2({provider,ethers,targets,actors}){
+export async function prepareQualifiedRuntimeV2({provider,ethers,targets,actors}){
   const setupReceipts=[];
   const erc20Abi=['function balanceOf(address) view returns (uint256)','function allowance(address,address) view returns (uint256)','function approve(address,uint256) returns (bool)'];
   const callbackSig='onFlashLoan(address,address,uint256,uint256,bytes)';
@@ -682,7 +682,7 @@ function preflightKindV2(error){
   const text=String(error?.shortMessage??error?.message??error??'');
   return error?.code==='CALL_EXCEPTION'||/revert|execution reverted|panic/i.test(text)?'PROTOCOL_REJECTION':'INFRASTRUCTURE';
 }
-async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot}){
+export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot}){
   const summaries=[];
   let snapshotId=baselineSnapshot;
   for(let run=1;run<=PHASE0_TELEMETRY_RUNS_V1;run++){
@@ -971,15 +971,19 @@ async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
   const targetByQ=new Map(targets.map(t=>[t.qualifiedName,t])),out=[];
   try{
     for(const property of properties){
-      const target=targetByQ.get(property.targetQualifiedName),actor=actors[0],initial=await readTargetPropertyV2({provider,ethers,property,from:actor});
+      const target=targetByQ.get(property.targetQualifiedName);
+      const defaultActor=target?.recipeRuntime?.primaryActor??actors[0];
+      const initial=await readTargetPropertyV2({provider,ethers,property,from:defaultActor});
       let witness=null;
       for(const selected of target?.functions??[]){
         const attemptSnapshot=await provider.send('evm_snapshot',[]);
         try{
           const rng=seeded(`property-witness-v2:${property.propertyId}:${selected.signature}`);
-          const args=selected.fragment.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));
+          const qualified=qualifiedActionV2({target,selected,actors,rng});
+          const actor=qualified?.sender??defaultActor;
+          const args=qualified?.args??selected.fragment.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));
           const iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
-          const data=iface.encodeFunctionData(selected.signature,args),value=selected.fragment.stateMutability==='payable'?1n:0n;
+          const data=iface.encodeFunctionData(selected.signature,args),value=qualified?.value??(selected.fragment.stateMutability==='payable'?1n:0n);
           const before=await snapshot({provider,ethers,target,sender:actor,plan:target.plan,systemTargets:targets});
           const estimate=await provider.estimateGas({from:actor,to:target.address,data,value});
           const signer=await provider.getSigner(actor),tx=await signer.sendTransaction({to:target.address,data,value,gasLimit:estimate+(estimate/2n)+100000n});
@@ -1001,7 +1005,7 @@ async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
   }finally{await provider.destroy();}
   return out;
 }
-async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot}){
+export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot}){
   const dir=path.join(outRoot,'runs','medusa-anvil-fork-001');await fs.mkdir(dir,{recursive:true});
   const router=renderMedusaRouterV2(ethers,targets);
   if(!router.rows.length){
