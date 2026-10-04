@@ -89,6 +89,7 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          TRIGGER_SHA: ${{ github.sha }}
           INPUT_ACTION: ${{ inputs.action }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_CHAT_URL: ${{ inputs.chat_url }}
@@ -100,8 +101,12 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "push" ]; then
-            request="process/browser-agent-home-exit-v10/current-request-v10.json"
+            request_path="process/browser-agent-home-exit-v10/current-request-v10.json"
+            request="/tmp/browser-home-exit-request-at-trigger.json"
+            git fetch --no-tags --depth=1 origin "$TRIGGER_SHA"
+            git show "$TRIGGER_SHA:$request_path" > "$request"
             test -s "$request"
+            echo "Resolved push request from triggering commit $TRIGGER_SHA, not mutable main."
             echo "action=$(jq -r '.action // "observe"' "$request")" >> "$GITHUB_OUTPUT"
             echo "mode=$(jq -r '.mode // "create_fresh"' "$request")" >> "$GITHUB_OUTPUT"
             echo "chat_url=$(jq -r '.chat_url // ""' "$request")" >> "$GITHUB_OUTPUT"
