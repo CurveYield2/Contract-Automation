@@ -367,6 +367,10 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
   assert.match(verificationPending.pendingMasterReview.postRepairManifestSha256,/^[0-9a-f]{64}$/);
   assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v1.json')),true);
   assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v2.json')),true);
+  assert.equal(fs.existsSync(path.join(f.root,f.reportRel)),true);
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'work/phase-01/PHASE_01_FINAL_REPORT_v2.md')),true);
+  assert.equal(fs.existsSync(path.join(f.root,f.packetRel)),true);
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'submissions/PHASE_01_WORK_PACKET_v2.json')),true);
 
   const verifiedForm=readJson(masterPath);
   assert.equal(verifiedForm.postRepair.scopeId,'MR-001-repair');
