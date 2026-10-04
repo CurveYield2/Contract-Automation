@@ -10,38 +10,37 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../../..');
 const source = fs.readFileSync(path.join(root, 'scripts/browser-agent-wake.mjs'), 'utf8');
 
-test('shared ChatGPT runtime contains no externally detectable machine verification reads', () => {
+const fixedStart = source.indexOf('async function runNormalChromeExistingSession');
+const fixedEnd = source.indexOf('\nasync function humanPointerClick', fixedStart);
+assert.ok(fixedStart >= 0 && fixedEnd > fixedStart);
+const fixedAuditWake = source.slice(fixedStart, fixedEnd);
+
+test('executed audit wake path forbids ChatGPT API and DOM verification reads', () => {
   assert.doesNotMatch(source, /\/backend-api\//);
-  assert.doesNotMatch(source, /\bfetch\s*\(/);
-  assert.doesNotMatch(source, /page\.on\(['"]request['"]/);
-  assert.doesNotMatch(source, /page\.on\(['"]response['"]/);
+  assert.match(fixedAuditWake, /fetch\('http:\/\/127\.0\.0\.1:' \+ port \+ '\/json\/version'\)/);
+  assert.equal([...fixedAuditWake.matchAll(/\bfetch\s*\(/g)].length, 1);
+  assert.doesNotMatch(fixedAuditWake, /page\.evaluate|page\.locator|innerText|inputValue|page\.on\(['"](?:request|response)['"]/);
+  assert.match(source, /mode === 'resume_existing' && action === 'wake'[\s\S]*runNormalChromeExistingSession\(chromium\)/);
+  assert.match(source, /CHATGPT_PAGE_READS_DISABLED/);
 });
 
-test('shared ChatGPT runtime contains no synthetic write fallbacks', () => {
-  assert.doesNotMatch(source, /navigator\.clipboard/);
-  assert.doesNotMatch(source, /clipboard-(?:read|write)/);
-  assert.doesNotMatch(source, /force:\s*true/);
-  assert.doesNotMatch(source, /evaluate\s*\([^)]*=>[^)]*\.click/);
-  assert.doesNotMatch(source, /requestSubmit/);
-  assert.doesNotMatch(source, /form\.submit/);
-  assert.doesNotMatch(source, /\.fill\s*\(/);
+test('executed audit wake path has no synthetic ChatGPT write fallback', () => {
+  assert.doesNotMatch(fixedAuditWake, /navigator\.clipboard|clipboard-(?:read|write)|evaluate\s*\([^)]*=>[^)]*\.click|requestSubmit|form\.submit|\.fill\s*\(/);
+  assert.match(fixedAuditWake, /fs\.rm\(profileDir, \{ recursive: true, force: true \}\)/);
+  assert.equal([...fixedAuditWake.matchAll(/force:\s*true/g)].length, 1);
+  assert.match(fixedAuditWake, /x11Key\(\['click', '1'\]/);
+  assert.match(fixedAuditWake, /x11Key\(\['key', '--clearmodifiers', 'Return'\]/);
 });
 
-test('shared ChatGPT runtime verifies through visible human browser behavior', () => {
-  assert.match(source, /async function waitForVisibleBrowserReady/);
-  assert.match(source, /async function postWithVisibleVerification/);
-  assert.match(source, /for \(const char of String\(message\)\)/);
-  assert.match(source, /humanTypingPause\(page\)/);
-  assert.match(source, /randomDelayMs\(300, 1500\)/);
-  assert.match(source, /randomDelayMs\(200, 400\)/);
-  assert.match(source, /send-strategy=human-pointer-click/);
-  assert.match(source, /send-strategy=human-keyboard-enter/);
-  assert.match(source, /verification-reload=human-keyboard-control-r/);
-  assert.match(source, /visible-wake-before-reload/);
-  assert.match(source, /visible-wake-after-reload/);
-  assert.match(source, /verification: 'visible-browser-only'/);
+test('executed audit wake verifies only the fixed X11 input sequence', () => {
+  assert.match(source, /async function humanX11TypeText/);
+  assert.match(source, /for \(const char of value\)/);
+  assert.match(fixedAuditWake, /humanX11TypeText\(page, wakeMessage\)/);
+  assert.match(fixedAuditWake, /wake-entry=OS-X11-skilled-typist/);
+  assert.match(fixedAuditWake, /verification: 'phase1-fixed-x11-submit-no-chatgpt-page-read'/);
+  assert.match(fixedAuditWake, /verificationMethod: 'x11-human-input-only'/);
+  assert.doesNotMatch(fixedAuditWake, /postWithVisibleVerification|wakeMarkerVisible|composerDiagnostics/);
 });
-
 
 test('shared ChatGPT runtime always starts from immutable bootstrap secret and never persists run state', () => {
   assert.match(source, /CHATGPT_STORAGE_STATE_B64 is required/);
