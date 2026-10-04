@@ -1,0 +1,84 @@
+name: cyvbWBTC Deployment Simulation v2
+
+on:
+  push:
+    paths:
+      - 'packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/run-v2.mjs'
+      - 'packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/requests/request-v2.json'
+      - '.github/workflows/cyvbwbtc-deployment-simulation-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deployment-simulation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Checkout exact Smart-Contracts candidate
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Smart-Contracts
+          ref: 7978ea62c58f8efa49c91f37931cab267379e0ee
+          path: .smart-contracts
+          persist-credentials: false
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Contract-Automation simulation dependencies
+        run: npm ci --force
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Install forge-std in Smart-Contracts runner checkout
+        working-directory: .smart-contracts
+        run: forge install foundry-rs/forge-std --no-git
+
+      - name: Execute cyvbWBTC deployment and strategy lifecycle on dRPC-backed Katana Anvil fork
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf cyvbwbtc-deployment-simulation-output-v2
+          node packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/run-v2.mjs \
+            --smart-contracts-root .smart-contracts \
+            --fork-url https://katana.drpc.org/ \
+            --output cyvbwbtc-deployment-simulation-output-v2
+
+      - name: Show deployment simulation summary
+        if: always()
+        shell: bash
+        run: |
+          summary=cyvbwbtc-deployment-simulation-output-v2/CYVBWBTC_DEPLOYMENT_SIMULATION_SUMMARY_v2.json
+          if [ -f "$summary" ]; then
+            cat "$summary"
+          else
+            echo "::error::Simulation summary missing"
+          fi
+
+      - name: Upload deployment simulation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyvbwbtc-deployment-simulation-v2-${{ github.run_id }}
+          path: cyvbwbtc-deployment-simulation-output-v2
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Require deployment simulation PASS
+        shell: bash
+        run: |
+          jq -e '.status == "PASS"' \
+            cyvbwbtc-deployment-simulation-output-v2/CYVBWBTC_DEPLOYMENT_SIMULATION_SUMMARY_v2.json >/dev/null
