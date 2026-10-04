@@ -51,13 +51,13 @@
 
 ## ACTIVE BLOCKER
 
-**Run `37165554868` proved the previous "human address" implementation was still targeting the webpage renderer: after Ctrl+L + URL typing it landed on `/c/local-chatgpt:...`, meaning the URL had been typed into the ChatGPT composer instead of Chrome's omnibox. The worker is now repaired to drive the visible headed Chrome window with OS-level X11 keyboard events (window focus -> Ctrl+L -> per-character URL typing -> Enter), and the workflow installs `xdotool`. Canonical recovery request commit `70e1015a2f59e4790fea4b0c1408677bac2a952b` is the fresh live proof.**
+**The real Chrome omnibox path is now proven: run `37165935536` used `visible-x11-keyboard` and navigated away from the homepage, but the destination immediately met the strong-cue challenge detector and failed closed. No bypass is permitted. Commit `3a3499cd1b438352667cbd55c90eea75b2b31a1c` adds non-content diagnostics that log only the observed URL/title plus named strong challenge cues before abort, so the next live run can distinguish an actual verification interstitial from any remaining classification edge case.**
 
-Latest repair commits:
+Current browser repair state:
 - `b1b3a01d192f4e2c72811b565131cbc930ab32db` — visible X11 Chrome omnibox control.
-- `c7a1e5702b698d3da444e8e1dfa2d54df8897f51` — install X11 keyboard helper in browser workflow.
-- `eb5bbb7525d4bc2b8b2948184abdbf361f6de7b7` — regression coverage for X11 omnibox navigation.
-- `70e1015a2f59e4790fea4b0c1408677bac2a952b` — canonical live recovery trigger.
+- `c7a1e5702b698d3da444e8e1dfa2d54df8897f51` — workflow installs `xdotool`.
+- `3a3499cd1b438352667cbd55c90eea75b2b31a1c` — strong-cue diagnostic before fail-closed abort.
+- Regression drift repairs continue in parallel and do not relax any browser invariant.
 
 ## REMAINING DELTA
 
@@ -73,7 +73,7 @@ Latest repair commits:
 
 ## NEXT ACTION
 
-Verify the canonical X11-omnibox recovery run opens the exact saved Project URL, then click the visible center chat title and capture the durable Project-scoped chat URL/artifact. Immediately trigger a second recovery with request chat_url blank and prove the workflow restores the artifact and opens that saved chat URL directly with the same visible omnibox path. Only then transplant the proven browser implementation into the existing audit wake/watch pathway and resume the latest DEX v16 campaign.
+Inspect the live diagnostic run from commit `3a3499cd1b438352667cbd55c90eea75b2b31a1c`. If it proves a genuine verification interstitial, keep aborting and retry only on a fresh runner after cooldown; do not bypass it. If classification is wrong, repair only that classifier. Once the saved Project opens, click the visible center chat title, capture the durable Project-scoped chat URL/artifact, then prove artifact-restored direct saved-chat recovery before audit integration.
 
 ## PARKED / OUT OF SCOPE
 
