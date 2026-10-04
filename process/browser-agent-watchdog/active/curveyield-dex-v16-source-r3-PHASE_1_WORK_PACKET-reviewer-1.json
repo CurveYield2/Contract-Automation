@@ -4,7 +4,7 @@
   "campaignId": "curveyield-dex-v16-source-r3",
   "phaseId": "phase-1",
   "workerRole": "reviewer",
-  "status": "ACTIVE",
+  "status": "PAUSED_WATCHDOG_REPAIR",
   "chatUrl": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da50-e3a0-83e8-88ea-843db6f426f0",
   "lastProvider": "normal-system-chrome-x11",
   "armedAt": "2026-10-04T12:05:21Z",
@@ -46,5 +46,7 @@
   },
   "watchdogRunId": "37200948757",
   "watchdogSweepStartedAt": "2026-10-04T12:06:39Z",
-  "lastDecision": "CHAT_UNVIEWABLE"
+  "lastDecision": "PAUSED_AFTER_FALSE_CHAT_UNVIEWABLE",
+  "pauseReason": "Normal Chrome watchdog transport is proven, but chat visibility classification requires repair before another sweep.",
+  "pausedAt": "2026-10-04T12:08:26Z"
 }
