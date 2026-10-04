@@ -82,3 +82,19 @@ test('same-repo PR qualification pins one exact private controller ref and runs 
   assert.match(publishBlock,/github\.event_name == 'workflow_dispatch' \|\| github\.event_name == 'workflow_call'/);
   assert.doesNotMatch(publishBlock,/github\.event_name == 'pull_request'/);
 });
+
+test('authorized same-repo PR may dry-run one typed held rework only in the detached private clone', () => {
+  assert.match(workflow, /rework_request_path=\(campaigns/);
+  assert.match(workflow, /held rework qualification requires an authorized same-repository PR/);
+  assert.match(workflow, /Qualify authorized held sealed rework in detached private clone/);
+  assert.match(workflow, /--review-kind','sealed-rework'/);
+  assert.match(workflow, /request\.holdSuccessorDelivery!==true/);
+  assert.match(workflow, /accepted receipt history changed/);
+  assert.match(workflow, /SUCCESSOR_DELIVERY_HOLD_v1\.json/);
+  assert.match(workflow, /held_rework_delivery=HELD/);
+  const start=workflow.indexOf('- name: Qualify authorized held sealed rework in detached private clone');
+  const next=workflow.indexOf('\n      - name:',start+1);
+  const block=workflow.slice(start,next);
+  assert.doesNotMatch(block,/git push|gh workflow run|gh api --method (?:POST|PUT|PATCH|DELETE)/);
+  assert.ok(start < workflow.indexOf('- name: Full repository Node test suite'));
+});
