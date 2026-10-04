@@ -1189,23 +1189,39 @@ async function localProvider(chromium) {
 
 await hydrateBrowserContextFromRegistration();
 
-const { chromium } = await loadModules();
-
-if (mode === 'resume_existing' && action === 'observe') {
+if (mode !== 'resume_existing') {
   const failedResult = {
     ok: false,
     wakeId,
     failures: [{
-      provider: 'normal-system-chrome-x11-phase1-fixed-point',
-      code: 'CHATGPT_PAGE_READS_DISABLED',
+      provider: 'audit-browser-policy',
+      code: 'CREATE_FRESH_RETIRED',
       retryable: false,
-      error: 'Audit browser observation is disabled by policy; watchdog decisions must use controller/campaign state only.'
+      error: 'Current audit automation is resume-existing only; create-fresh browser interaction is retired.'
     }]
   };
   await fs.writeFile(statePath, JSON.stringify(failedResult, null, 2) + '\n', 'utf8');
-  console.error('[audit-browser-policy] ChatGPT page reads are disabled.');
+  console.error('[audit-browser-policy] create-fresh mode is retired.');
   process.exit(1);
 }
+
+if (action !== 'wake') {
+  const failedResult = {
+    ok: false,
+    wakeId,
+    failures: [{
+      provider: 'audit-browser-policy',
+      code: 'CHATGPT_PAGE_READS_DISABLED',
+      retryable: false,
+      error: 'Current audit automation does not perform ChatGPT page observation/read actions.'
+    }]
+  };
+  await fs.writeFile(statePath, JSON.stringify(failedResult, null, 2) + '\n', 'utf8');
+  console.error('[audit-browser-policy] ChatGPT page observation is disabled.');
+  process.exit(1);
+}
+
+const { chromium } = await loadModules();
 
 if (mode === 'resume_existing' && action === 'wake') {
   try {
