@@ -477,16 +477,19 @@ test('human address navigation uses the visible Chrome omnibox through X11 keybo
 
 
 test('challenge classification requires verification cues and not a generic Cloudflare mention', () => {
-  const start = source.indexOf('function visibleHumanChallenge');
+  const start = source.indexOf('function visibleHumanChallengeEvidence');
   const end = source.indexOf('\nfunction visibleBrowserStateText', start);
   const block = source.slice(start, end);
-  assert.match(block, /Verify you are human/);
-  assert.match(block, /Verifying you are human/);
-  assert.match(block, /Checking your browser/);
-  assert.match(block, /security verification/);
-  assert.match(block, /Enable JavaScript and cookies to continue/);
-  assert.match(block, /Ray ID/);
-  assert.match(block, /Cloudflare.*bodyText/);
-  assert.doesNotMatch(block, /Just a moment\|Cloudflare\|security challenge/);
+  assert.match(block, /verify-human-body/);
+  assert.match(block, /checking-browser-body/);
+  assert.match(block, /security-verification-body/);
+  assert.match(block, /enable-js-cookies-body/);
+  assert.match(block, /ray-id-body/);
+  assert.match(block, /just-a-moment-title/);
+  assert.match(block, /attention-required-title/);
+  assert.match(block, /cloudflare-challenge-title/);
+  assert.doesNotMatch(block, /\/Cloudflare\/i\.test\(bodyText\)/);
+  assert.match(block, /visibleHumanChallengeEvidence\(bodyText, title\)\.length > 0/);
   assert.match(source, /humanChallenge: visibleHumanChallenge\(bodyText, title\)/);
+  assert.match(source, /project-navigation-challenge=/);
 });
