@@ -34,7 +34,7 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
      and .request.sourceUrl==$u
      and .request.agentChats["reviewer-1"]==$c1
      and .request.agentChats["reviewer-2"]==$c2
-     and .request.agentChats["reviewer-3"]==$c3
+     and .request.agentChats["reviewer-3L"]==$c3
      and .request.agentChats["reviewer-4"]==$c4' \
     /tmp/prior-source-init.json >/dev/null
   campaign_id="$(jq -r '.campaign.campaignId' /tmp/prior-source-init.json)"
@@ -152,7 +152,7 @@ else
         agentChats:{
           "reviewer-1":$chat1,
           "reviewer-2":$chat2,
-          "reviewer-3":$chat3,
+          "reviewer-3L":$chat3,
           "reviewer-4":$chat4
         }
       },
@@ -200,7 +200,7 @@ if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
      | .agentChats={
          "reviewer-1":$chat1,
          "reviewer-2":$chat2,
-         "reviewer-3":$chat3,
+         "reviewer-3L":$chat3,
          "reviewer-4":$chat4
        }
      | .browserInteractionPolicy=(.browserInteractionPolicy // "ordinary-pointer-keyboard-only")
@@ -222,7 +222,7 @@ else
       agentChats:{
         "reviewer-1":$chat1,
         "reviewer-2":$chat2,
-        "reviewer-3":$chat3,
+        "reviewer-3L":$chat3,
         "reviewer-4":$chat4
       },
       chatgptProject:{name:"",url:""},
