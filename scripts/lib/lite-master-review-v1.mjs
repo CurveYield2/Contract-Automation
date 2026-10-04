@@ -353,7 +353,7 @@ function expectedPreRefreshRows({root,campaignPath,form,baseline}){
     return {...row,sha256:digestFile(file)};
   });
 }
-function validateRepairCompletion({root,campaignPath,form,pending,cfg}){
+function validateRepairCompletion({root,campaignPath,form,pending,cfg,normalReviewerChatUrls=[]}){
   const failures=[];
   const spec=form.review?.repairSpec;
   if(!spec||digestJson(spec)!==pending.repairSpecSha256)failures.push('repairSpec changed after bounded REWORK admission');
@@ -367,7 +367,7 @@ function validateRepairCompletion({root,campaignPath,form,pending,cfg}){
     if(child.scopeId!==pending.repairScopeId)failures.push('childRepair.scopeId mismatch');
     if(child.model!=='SOL'||child.reasoning!=='HIGH')failures.push('childRepair must identify exact SOL / HIGH capability');
     if(child.freshChild!==true)failures.push('childRepair.freshChild must be true');
-    if(!CHAT_URL.test(String(child.childChatUrl??''))||child.childChatUrl===cfg.chatUrl)failures.push('childRepair requires a distinct durable fresh-child ChatGPT URL');
+    if(!CHAT_URL.test(String(child.childChatUrl??''))||child.childChatUrl===cfg.chatUrl||normalReviewerChatUrls.includes(child.childChatUrl))failures.push('childRepair requires a durable fresh-child ChatGPT URL distinct from the master and registered normal reviewers');
     if(child.result!=='COMPLETED')failures.push('childRepair.result must be COMPLETED');
     if(typeof child.completedAt!=='string'||!child.completedAt)failures.push('childRepair.completedAt is required');
   }
@@ -418,7 +418,7 @@ function validateRefreshedRepairVerification({root,campaignPath,form,pending,seg
   return failures;
 }
 
-export function processMasterReviewSubmission({root,campaignPath,directory,authorityRoot,segmentId,now}){
+export function processMasterReviewSubmission({root,campaignPath,directory,authorityRoot,segmentId,now,normalReviewerChatUrls=[]}){
   const cfg=validateMasterReviewConfiguration(directory,{required:true});
   const pending=directory.pendingMasterReview;
   if(!pending)throw new Error('campaign has no pending master review');
@@ -433,7 +433,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   ];
   const outcome=String(form.review?.outcome??'');
   if(pending.status==='MASTER_REVIEW_REWORK_REQUIRED'){
-    const completed=validateRepairCompletion({root,campaignPath,form,pending,cfg});
+    const completed=validateRepairCompletion({root,campaignPath,form,pending,cfg,normalReviewerChatUrls});
     failures.push(...completed.failures);
     if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
     return {
