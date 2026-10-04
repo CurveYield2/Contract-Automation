@@ -462,9 +462,13 @@ async function fillComposer(page, message) {
 async function post(page, message) {
   if (!message) throw new Error('Wake message is empty');
   const marker = visibleMessageMarker(message);
-  const requestedIdleWait = Number.parseInt(env.IDLE_WAIT_MS || '600000', 10);
-  const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
-  await waitForChatIdle(page, idleWaitMs);
+  if (messagePurpose === 'initial_wake') {
+    console.log('[github-playwright] chat-idle-wait=skipped-for-initial-wake');
+  } else {
+    const requestedIdleWait = Number.parseInt(env.IDLE_WAIT_MS || '600000', 10);
+    const idleWaitMs = Number.isFinite(requestedIdleWait) ? Math.max(30000, requestedIdleWait) : 600000;
+    await waitForChatIdle(page, idleWaitMs);
+  }
 
   let composer = await fillComposer(page, message);
   console.log('[github-playwright] composer-diagnostics=' + JSON.stringify(await composerDiagnostics(page)));
