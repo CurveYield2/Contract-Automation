@@ -341,12 +341,20 @@ test('segment collection binds legacy missing digests but rejects a supplied mal
   const waiting=readJson(path.join(f.root,f.dirRel));
   const receipt=readJson(path.join(f.root,waiting.lastSealedReceiptPath));
   assert.equal(receipt.inputs[0].sha256,undefined);
+  const originalReceipt=structuredClone(receipt);
   receipt.inputs[0].sha256='not-a-sha256';
   writeJson(path.join(f.root,waiting.lastSealedReceiptPath),receipt);
-  assert.throws(
-    ()=>collectSegmentArtifacts({root:f.root,campaignPath:f.campaign,segment:MASTER_REVIEW_SEGMENTS_V1[0],directory:waiting,expectedAuthority:receipt.authority}),
-    /invalid sha256/
-  );
+  const collect=()=>collectSegmentArtifacts({root:f.root,campaignPath:f.campaign,segment:MASTER_REVIEW_SEGMENTS_V1[0],directory:waiting,expectedAuthority:receipt.authority});
+  assert.throws(collect,/invalid sha256/);
+  receipt.inputs[0]={role:'PREDECESSOR_RECEIPT',path:''};
+  writeJson(path.join(f.root,waiting.lastSealedReceiptPath),receipt);
+  assert.throws(collect,/reference path is required/);
+  writeJson(path.join(f.root,waiting.lastSealedReceiptPath),originalReceipt);
+  const canonicalPath=path.join(f.root,f.campaign,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json');
+  const canonical=readJson(canonicalPath);
+  delete canonical.finalReportPath;
+  writeJson(canonicalPath,canonical);
+  assert.throws(collect,/required Phase 1 report path is missing/);
 });
 
 test('master REWORK produces bounded Sol/High scope and leaves successor blocked',()=>{
