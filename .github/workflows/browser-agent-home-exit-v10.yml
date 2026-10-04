@@ -129,13 +129,13 @@ jobs:
       - name: Set up isolated Playwright runtime
         uses: ./packages/browser-agent-original-phase0-v10/runtime-v10
 
-      - name: Install private VNC helper
+      - name: Install private browser-view helper
         if: steps.request.outputs.interactive_view == 'true'
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y x11vnc
+          sudo apt-get install -y x11vnc novnc websockify
 
       - name: Record runner egress before home exit node
         shell: bash
@@ -177,8 +177,14 @@ jobs:
           if [ "$INTERACTIVE_VIEW" = "true" ]; then
             x11vnc -display :99 -rfbport 5900 -listen "$ts_ip" -nopw -forever -shared -quiet >/tmp/x11vnc-v10.log 2>&1 &
             echo $! >/tmp/x11vnc-v10.pid
+
+            websockify --web=/usr/share/novnc "$ts_ip:6080" "$ts_ip:5900" >/tmp/novnc-v10.log 2>&1 &
+            echo $! >/tmp/novnc-v10.pid
+
+            browser_view_url="http://$ts_ip:6080/vnc.html?autoconnect=1&resize=scale"
             echo "TAILSCALE_VNC=$ts_ip:5900"
-            echo "Connect your VNC viewer from the Windows PC to $ts_ip:5900 while this job is running."
+            echo "BROWSER_VIEW_URL=$browser_view_url" >> "$GITHUB_ENV"
+            echo "Private browser view: $browser_view_url"
           fi
 
       - name: Route browser phase through home exit node
@@ -209,6 +215,29 @@ jobs:
           fi
           echo "HOME_EXIT_EGRESS_ACTIVE=true"
 
+      - name: Publish browser monitor URL
+        if: steps.request.outputs.interactive_view == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          path="process/browser-agent-home-exit-v10/current-session-v10.json"
+          payload="$(jq -n \
+            --arg runId "$GITHUB_RUN_ID" \
+            --arg runUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg browserViewUrl "$BROWSER_VIEW_URL" \
+            --arg updatedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{version:10,run_id:$runId,run_url:$runUrl,browser_view_url:$browserViewUrl,status:"AUTOMATION_RUNNING",updated_at:$updatedAt}')"
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=main" --jq '.sha')"
+          content="$(printf '%s\n' "$payload" | base64 -w0)"
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$path" \
+            -f message="chore(browser): publish active v10 monitor URL" \
+            -f content="$content" \
+            -f sha="$sha" \
+            -f branch="main" >/dev/null
+          echo "Browser monitor: $BROWSER_VIEW_URL"
+
       - name: Run Playwright through home exit node
         id: browser
         shell: bash
@@ -221,6 +250,12 @@ jobs:
           WAKE_ID: home-exit-playwright-v10-${{ github.run_id }}
           INTERACTIVE_VIEW_ENABLED: ${{ steps.request.outputs.interactive_view }}
           MANUAL_CHALLENGE_WAIT_MINUTES: ${{ steps.request.outputs.manual_wait }}
+          BROWSER_VIEW_URL: ${{ env.BROWSER_VIEW_URL }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          OPERATOR_STATUS_PATH: process/browser-agent-home-exit-v10/current-session-v10.json
         run: |
           set -euo pipefail
           export MANUAL_CHALLENGE_WAIT_MS=$((MANUAL_CHALLENGE_WAIT_MINUTES * 60000))
@@ -253,5 +288,6 @@ jobs:
         shell: bash
         run: |
           set +e
+          [ -f /tmp/novnc-v10.pid ] && kill "$(cat /tmp/novnc-v10.pid)" 2>/dev/null
           [ -f /tmp/x11vnc-v10.pid ] && kill "$(cat /tmp/x11vnc-v10.pid)" 2>/dev/null
           [ -f /tmp/xvfb-v10.pid ] && kill "$(cat /tmp/xvfb-v10.pid)" 2>/dev/null
