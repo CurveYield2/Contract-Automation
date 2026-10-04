@@ -102,9 +102,9 @@ permissions:
   actions: write
 
 concurrency:
-  # Serialize every reviewer wake for the same campaign milestone. Retries,
-  # technical callbacks and repair races must never post in parallel.
-  group: browser-agent-wake-${{ inputs.campaign_id }}-${{ inputs.worker_role }}-${{ inputs.gate_expected_milestone_id || inputs.phase_id }}
+  # WAKE owns the one shared ChatGPT browser state until delivery completes.
+  # WATCHDOG cannot run until WAKE releases this queue.
+  group: chatgpt-shared-browser-session-v1
   cancel-in-progress: false
 
 jobs:
