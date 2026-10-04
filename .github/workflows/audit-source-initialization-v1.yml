@@ -7,6 +7,22 @@ on:
         description: Direct URL to one ZIP file on Google Drive or GitHub
         required: true
         type: string
+      agent_chat_1_url:
+        description: Existing ChatGPT conversation URL for reviewer-1
+        required: true
+        type: string
+      agent_chat_2_url:
+        description: Existing ChatGPT conversation URL for reviewer-2
+        required: true
+        type: string
+      agent_chat_3_url:
+        description: Existing ChatGPT conversation URL for reviewer-3
+        required: true
+        type: string
+      agent_chat_4_url:
+        description: Existing ChatGPT conversation URL for reviewer-4
+        required: true
+        type: string
   push:
     branches: [main]
     paths:
@@ -37,12 +53,20 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           DISPATCH_URL: ${{ inputs.source_url }}
+          DISPATCH_CHAT_1_URL: ${{ inputs.agent_chat_1_url }}
+          DISPATCH_CHAT_2_URL: ${{ inputs.agent_chat_2_url }}
+          DISPATCH_CHAT_3_URL: ${{ inputs.agent_chat_3_url }}
+          DISPATCH_CHAT_4_URL: ${{ inputs.agent_chat_4_url }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = 'workflow_dispatch' ]; then
             source_url="$DISPATCH_URL"
+            agent_chat_1_url="$DISPATCH_CHAT_1_URL"
+            agent_chat_2_url="$DISPATCH_CHAT_2_URL"
+            agent_chat_3_url="$DISPATCH_CHAT_3_URL"
+            agent_chat_4_url="$DISPATCH_CHAT_4_URL"
             request_id="dispatch-$GITHUB_RUN_ID"
           else
             mapfile -t requests < <(
@@ -51,12 +75,112 @@ jobs:
             )
             [ "${#requests[@]}" -eq 1 ] || { echo "::error::Exactly one URL request file must change per trigger."; exit 1; }
             source_url="$(jq -r '.source_url // empty' "${requests[0]}")"
+            agent_chat_1_url="$(jq -r '.agent_chat_1_url // empty' "${requests[0]}")"
+            agent_chat_2_url="$(jq -r '.agent_chat_2_url // empty' "${requests[0]}")"
+            agent_chat_3_url="$(jq -r '.agent_chat_3_url // empty' "${requests[0]}")"
+            agent_chat_4_url="$(jq -r '.agent_chat_4_url // empty' "${requests[0]}")"
             request_id="push-$GITHUB_SHA"
           fi
           test -n "$source_url" || { echo "::error::source_url is required"; exit 1; }
-          case "$source_url" in *$'\n'*|*$'\r'*) echo "::error::source_url contains a line break"; exit 1;; esac
-          echo "source_url=$source_url" >> "$GITHUB_OUTPUT"
-          echo "request_id=$request_id" >> "$GITHUB_OUTPUT"
+          case "$source_url" in *
+      - name: Select working Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Initialize audit source and Lite campaign
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          SOURCE_URL: ${{ steps.request.outputs.source_url }}
+          AGENT_CHAT_1_URL: ${{ steps.request.outputs.agent_chat_1_url }}
+          AGENT_CHAT_2_URL: ${{ steps.request.outputs.agent_chat_2_url }}
+          AGENT_CHAT_3_URL: ${{ steps.request.outputs.agent_chat_3_url }}
+          AGENT_CHAT_4_URL: ${{ steps.request.outputs.agent_chat_4_url }}
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
+        shell: bash
+        run: bash scripts/audit-source-initialization/run-v1.sh
+\n'*|*
+      - name: Select working Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Initialize audit source and Lite campaign
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          SOURCE_URL: ${{ steps.request.outputs.source_url }}
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
+        shell: bash
+        run: bash scripts/audit-source-initialization/run-v1.sh
+\r'*) echo "::error::source_url contains a line break"; exit 1;; esac
+
+          validate_chat_url() {
+            local label="$1" value="$2"
+            case "$value" in *
+      - name: Select working Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Initialize audit source and Lite campaign
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          SOURCE_URL: ${{ steps.request.outputs.source_url }}
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
+        shell: bash
+        run: bash scripts/audit-source-initialization/run-v1.sh
+\n'*|*
+      - name: Select working Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Initialize audit source and Lite campaign
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          SOURCE_URL: ${{ steps.request.outputs.source_url }}
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
+        shell: bash
+        run: bash scripts/audit-source-initialization/run-v1.sh
+\r'*) echo "::error::$label contains a line break"; exit 1;; esac
+            [[ "$value" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$value" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || {
+              echo "::error::$label must be an existing durable ChatGPT conversation URL."
+              exit 1
+            }
+          }
+          validate_chat_url agent_chat_1_url "$agent_chat_1_url"
+          validate_chat_url agent_chat_2_url "$agent_chat_2_url"
+          validate_chat_url agent_chat_3_url "$agent_chat_3_url"
+          validate_chat_url agent_chat_4_url "$agent_chat_4_url"
+
+          {
+            echo "source_url=$source_url"
+            echo "agent_chat_1_url=$agent_chat_1_url"
+            echo "agent_chat_2_url=$agent_chat_2_url"
+            echo "agent_chat_3_url=$agent_chat_3_url"
+            echo "agent_chat_4_url=$agent_chat_4_url"
+            echo "request_id=$request_id"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Select working Audit-Controller credential
         env:
