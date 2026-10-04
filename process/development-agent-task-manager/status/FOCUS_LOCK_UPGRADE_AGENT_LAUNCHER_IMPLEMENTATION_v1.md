@@ -12,7 +12,7 @@
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `b1dd3ec138883a9585203f15715b6df47540a07c`.
+- Base: current `main` at `ff468b253f70098d1a9bae572840ba58e24909b9`.
 - PR #508 through PR #514 are merged; their required validation lanes passed before merge.
 - Recovery-only run `37158898640` proves:
   - fresh immutable browser state loads normally without a Cloudflare challenge;
@@ -51,37 +51,42 @@
 
 ## ACTIVE BLOCKER
 
-**Durable chat URL capture is now implemented and merged. Live recovery successfully opened the saved Project URL directly, with zero sidebar rediscovery, but the existing chat title lookup was too narrowly scoped to a `main/[role=main]` container.**
+**Center-page chat-title recovery is merged, but the latest merged live run did not reach the Project page: opening the persisted Project URL redirected back to the ChatGPT homepage.**
 
-Merged live run `37164061408` proved:
-- exact saved Project URL opened successfully;
-- no sidebar Project search/scroll occurred;
-- Project identity matched;
-- failure was only `Visible Project chat title was not found in the Project chat list`;
-- therefore the remaining step is to find the already-visible center-page chat title without assuming a specific semantic container.
+Latest merged production commit:
+- `ff468b253f70098d1a9bae572840ba58e24909b9` — `Recover Project chat from visible center title and capture URL v1`
 
-Locked UI fact from operator:
-- on the Project page the existing chat is in the top-center visible area;
-- no scrolling is needed;
-- click the visible chat title itself (or its visible subtitle area) to enter it;
-- once the durable chat route appears, checkpoint/upload `chatUrl` immediately.
+Latest live browser run:
+- `37164591468` — failed.
+- Home-exit routing, immutable bootstrap state, visible Chrome, and ordinary ChatGPT readiness all passed.
+- Recovery request contained the known Project and central chat title.
+- Terminal browser error:
+  `Persisted Project URL did not open the expected ChatGPT Project page (observedUrl=https://chatgpt.com/)`
+- The durable-state upload step completed successfully, but no artifact was produced because no durable chat URL had been reached/captured in this run.
+
+Locked invariants:
+- Do not search for this existing Project/chat through the sidebar.
+- Do not scroll to find the Project chat; the target chat is in the top-center Project page.
+- If a durable `chatUrl` exists, direct-chat recovery is always preferred.
+- As soon as a non-local durable chat route appears, checkpoint `chatUrl` immediately and upload it even if later verification fails.
+- Project-page title recovery is only the bootstrap fallback until a durable chat URL has been captured.
 
 
 ## REMAINING DELTA
 
-1. Add a durable chat-state checkpoint file written immediately when a non-local durable `chatUrl` is observed, before later verification/reload steps can fail.
-2. Upload that checkpoint as a GitHub Actions artifact even when a later browser step fails.
-3. Restore the latest matching checkpoint at the beginning of later v10 runs when request `chat_url` / `project_url` are blank.
-4. Make `action=recover` open a restored durable `chatUrl` directly and visibly verify the original wake there. Do not rediscover the Project through the sidebar.
-5. Keep Project-page central chat-list recovery only as a no-chat-URL fallback when an explicit `projectUrl` is already known.
-6. Validate in the required repository lanes, merge the production-only browser changes, and live-prove chat URL capture + reuse.
-7. After proof, replace only the broken browser implementation in the audit wake/watch pathway with this proven routine.
-8. Resume the most recent CurveYield DEX v16 campaign at Phase 1 and continue diagnose -> repair -> retry -> verify -> continue until the audit is complete.
+1. Diagnose why the known persisted Project URL redirected to `https://chatgpt.com/` in merged live run `37164591468`; do not reintroduce sidebar Project discovery.
+2. Preserve the merged center-page chat-title logic and zero-scroll invariant.
+3. Re-run recovery until the known Project URL opens successfully, then click the visible `VERIFY PROJECT WAKE SIGNAL` title in the top-center Project content.
+4. The moment the Project-scoped durable chat route appears, verify `durable-chat-state-captured` is logged and the Actions artifact `browser-agent-home-exit-v10-chat-state-v1` is actually created.
+5. On the following run, prove the artifact restores `chatUrl` and recovery opens that chat URL directly, bypassing Project discovery entirely.
+6. Once direct chat URL reuse is live-proven, replace only the broken browser wake/watch implementation in the audit process pathway with this proven routine.
+7. Locate the most recent CurveYield DEX v16 audit campaign in `CurveYield2/Audit-Controller`, recover its exact current state, and initialize Phase 1 without restarting completed/sealed work.
+8. Monitor and repair each audit wake/watch/phase-transition glitch using DIAGNOSE -> REPAIR -> RETRY -> VERIFY -> CONTINUE until the audit is complete.
 
 
 ## NEXT ACTION
 
-Broaden only the Project-page chat-title lookup to physically visible center-page text, with zero scrolling, click it humanly, and capture the durable chat URL immediately when the route appears.
+Start from current `main`. Diagnose only the direct persisted-Project navigation regression from run `37164591468`. Do not touch sidebar discovery. Once the Project opens, use the already-merged center-page title path to capture the durable chat URL and prove direct-chat reuse on the next run.
 
 ## PARKED / OUT OF SCOPE
 
