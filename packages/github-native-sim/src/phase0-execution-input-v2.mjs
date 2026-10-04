@@ -1,0 +1,222 @@
+import { createHash } from 'node:crypto';
+import { digestCanonicalV1 } from './canonical-json-v1.mjs';
+import { buildCallableInventoryV2 } from './phase0-execution-contract-v2.mjs';
+
+const SHA256=/^[0-9a-f]{64}$/i;
+const clone=(v)=>v===undefined?undefined:structuredClone(v);
+const sha256Bytes=(value)=>{
+  const text=String(value??'');
+  const hex=text.replace(/^0x/,'');
+  const bytes=hex && /^[0-9a-fA-F]+$/.test(hex) && hex.length%2===0 ? Buffer.from(hex,'hex') : Buffer.from(text);
+  return createHash('sha256').update(bytes).digest('hex');
+};
+
+function normalizedArtifact(a={}){
+  const abi=clone(a.abi??[]);
+  const row={
+    qualifiedName:`${a.sourceName}:${a.contractName}`,
+    sourceName:a.sourceName,
+    contractName:a.contractName,
+    language:a.language??null,
+    profile:a.profile??null,
+    compilerVersion:a.compilerVersion??null,
+    compilationUnitId:a.compilationUnitId??null,
+    abi,
+    metadata:a.metadata??null,
+    storageLayout:clone(a.storageLayout??null),
+    devdoc:clone(a.devdoc??{}),
+    userdoc:clone(a.userdoc??{}),
+    methodIdentifiers:clone(a.methodIdentifiers??{}),
+    gasEstimates:clone(a.gasEstimates??null),
+    bytecode:a.bytecode??'0x',
+    deployedBytecode:a.deployedBytecode??'0x',
+    bytecodeSourceMap:a.bytecodeSourceMap??'',
+    deployedBytecodeSourceMap:a.deployedBytecodeSourceMap??'',
+    linkReferences:clone(a.linkReferences??{}),
+    deployedLinkReferences:clone(a.deployedLinkReferences??{})
+  };
+  return {
+    ...row,
+    abiDigestSha256:digestCanonicalV1(row.abi),
+    creationBytecodeDigestSha256:sha256Bytes(row.bytecode),
+    deployedBytecodeDigestSha256:sha256Bytes(row.deployedBytecode)
+  };
+}
+
+function compactCompilationUnits(units=[]){
+  return units.map((u)=>({
+    unitId:u.unitId??null,
+    profile:u.profile??null,
+    compilerVersion:u.compilerVersion??null,
+    compilerPackage:u.compilerPackage??null,
+    settings:clone(u.settings??null),
+    compilerInputSha256:u.compilerInputSha256??null,
+    compilerOutputSha256:u.compilerOutputSha256??null,
+    sourceNames:Object.keys(u.sourceContents??u.sourceAsts??{}).sort(),
+    artifactQualifiedNames:(u.artifacts??[]).map(a=>`${a.sourceName}:${a.contractName}`).sort()
+  })).sort((a,b)=>String(a.unitId).localeCompare(String(b.unitId)));
+}
+
+export function buildExecutionArtifactBundleV2({request,build}={}){
+  if(!request?.source?.archiveSha256||!SHA256.test(request.source.archiveSha256))throw new Error('execution artifact export requires exact source SHA-256');
+  if(!build||build.status!=='completed')throw new Error('execution artifact export requires the accepted completed Phase-0 build');
+  const artifacts=(build.artifacts??[]).map(normalizedArtifact).sort((a,b)=>a.qualifiedName.localeCompare(b.qualifiedName));
+  if(!artifacts.length)throw new Error('execution artifact export requires at least one compiler artifact');
+  const identityRows=artifacts.map(a=>({
+    qualifiedName:a.qualifiedName,
+    abiDigestSha256:a.abiDigestSha256,
+    creationBytecodeDigestSha256:a.creationBytecodeDigestSha256,
+    deployedBytecodeDigestSha256:a.deployedBytecodeDigestSha256,
+    compilationUnitId:a.compilationUnitId,
+    profile:a.profile,
+    compilerVersion:a.compilerVersion
+  }));
+  return {
+    schemaVersion:'curveyield-phase0-execution-build-artifacts-v2',
+    artifactType:'PHASE0_EXECUTION_BUILD_ARTIFACTS',
+    source:{
+      repository:request.source.repository??null,
+      commit:request.source.commit??null,
+      projectPath:request.source.projectPath??null,
+      archivePath:request.source.archivePath??null,
+      archiveSha256:request.source.archiveSha256
+    },
+    requestIdentity:{
+      requestId:request.requestId??null,
+      requestDigest:request.requestDigest??null,
+      campaignId:request.campaignId??null
+    },
+    buildIdentity:{
+      system:build.system??null,
+      compilerVersion:build.compilerVersion??null,
+      compilerVersions:clone(build.compilerVersions??[]),
+      compilerProfiles:clone(build.compilerProfiles??[]),
+      sourceInventory:clone(build.sourceInventory??[]),
+      deploymentOrder:clone(build.deploymentOrder??[]),
+      compileGroups:clone(build.compileGroups??[]),
+      embeddedBuildContract:clone(build.embeddedBuildContract??null),
+      compilationUnits:compactCompilationUnits(build.compilationUnits??[])
+    },
+    artifacts,
+    artifactSetDigestSha256:digestCanonicalV1(identityRows),
+    reuseContract:{
+      secondBuildRequired:false,
+      exactCompilerArtifactsExported:true,
+      intendedConsumers:['PHASE0_RANDOMIZED_SIMULATION','PHASE0_MEDUSA','PHASE0_ABI_TELEMETRY'],
+      fallbackPolicy:'FAIL_CLOSED_OR_EXPLICIT_TYPED_LEGACY_LIMITATION'
+    }
+  };
+}
+
+function firstString(...values){
+  for(const v of values)if(typeof v==='string'&&v.length)return v;
+  return null;
+}
+function sourceShaFrom(value={}){
+  return firstString(
+    value?.source?.sha256,
+    value?.source?.archiveSha256,
+    value?.source?.archiveSha256Observed,
+    value?.sourceIdentity?.archiveSha256,
+    value?.sourceIdentity?.sourceDigestSha256,
+    value?.identity?.sourceDigestSha256,
+    value?.requestIdentity?.sourceSha256,
+    value?.requestIdentity?.archiveSha256,
+    value?.data?.source?.archiveSha256,
+    value?.data?.sourceIdentity?.archiveSha256
+  );
+}
+function siCompilerArtifacts(si={}){
+  return si.compilerArtifacts??si?.technical?.compilerArtifacts??si?.data?.compilerArtifacts??si?.data?.technical?.compilerArtifacts??[];
+}
+function siFunctions(si={}){
+  return si.functions??si?.technical?.functions??si?.data?.functions??si?.data?.technical?.functions??[];
+}
+function requireSameSource(label,value,expected,{optional=false}={}){
+  const observed=sourceShaFrom(value);
+  if(!observed&&optional)return null;
+  if(!observed)throw new Error(`source identity missing for ${label}`);
+  if(observed!==expected)throw new Error(`source identity mismatch for ${label}: expected ${expected}, observed ${observed}`);
+  return observed;
+}
+function compareCompilerInventory(artifactBundle,sourceIntelligence){
+  const exported=new Map((artifactBundle.artifacts??[]).map(a=>[a.qualifiedName,a]));
+  const siRows=siCompilerArtifacts(sourceIntelligence);
+  if(!siRows.length)throw new Error('Source Intelligence compiler artifact inventory is missing');
+  for(const row of siRows){
+    const a=exported.get(row.qualifiedName);
+    if(!a)throw new Error(`compiler artifact mismatch: Source Intelligence references missing exported artifact ${row.qualifiedName}`);
+    for(const key of ['abiDigestSha256','creationBytecodeDigestSha256','deployedBytecodeDigestSha256']){
+      if(row[key]&&a[key]!==row[key])throw new Error(`compiler artifact mismatch for ${row.qualifiedName} ${key}`);
+    }
+  }
+  const siNames=new Set(siRows.map(x=>x.qualifiedName));
+  const unexplained=[...exported.keys()].filter(x=>!siNames.has(x));
+  if(unexplained.length)throw new Error(`compiler artifact mismatch: exported artifacts absent from Source Intelligence: ${unexplained.join(', ')}`);
+}
+function callableInventory(artifactBundle,sourceIntelligence){
+  const functions=siFunctions(sourceIntelligence);
+  const bySignature=new Map(functions.map(f=>[`${f.contractId??''}|${f.signature}`,f]));
+  const rows=[];
+  const contracts=sourceIntelligence.contracts??sourceIntelligence?.technical?.contracts??sourceIntelligence?.data?.contracts??[];
+  const contractByQualified=new Map(contracts.map(c=>[c.qualifiedName,c]));
+  for(const artifact of artifactBundle.artifacts??[]){
+    const c=contractByQualified.get(artifact.qualifiedName);
+    const inv=buildCallableInventoryV2({
+      contractId:c?.contractId??artifact.qualifiedName,
+      qualifiedName:artifact.qualifiedName,
+      abi:artifact.abi,
+      instantiated:false
+    });
+    for(const row of inv){
+      const sourceFn=functions.find(f=>f.signature===row.signature&&(c?.contractId?f.contractId===c.contractId:true));
+      rows.push({...row,functionId:sourceFn?.functionId??null,sourceIntelligenceBasis:sourceFn?sourceFn.basis??'SOURCE_INTELLIGENCE_FUNCTION_INDEX':'COMPILER_ABI_ONLY'});
+    }
+  }
+  return rows;
+}
+
+export function validateExecutionInputJoinV2({receipt,buildIdentity,artifactBundle,sourceIntelligence,slither,readiness}={}){
+  const canonical=sourceShaFrom(receipt);
+  if(!canonical||!SHA256.test(canonical))throw new Error('canonical receipt source SHA-256 is missing');
+  requireSameSource('build identity',buildIdentity,canonical);
+  requireSameSource('execution artifact bundle',artifactBundle,canonical);
+  requireSameSource('Source Intelligence',sourceIntelligence,canonical);
+  // Some legacy Slither/readiness projections predate archive SHA fields. They are still joined as
+  // upstream evidence, but any source identity they do carry must match the canonical source.
+  if(sourceShaFrom(slither))requireSameSource('Slither',slither,canonical);
+  if(sourceShaFrom(readiness))requireSameSource('readiness',readiness,canonical);
+
+  if(artifactBundle?.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2')throw new Error('unsupported execution artifact bundle schema');
+  if(artifactBundle?.reuseContract?.secondBuildRequired!==false)throw new Error('execution artifact bundle does not authorize build reuse');
+  compareCompilerInventory(artifactBundle,sourceIntelligence);
+
+  const artifacts=clone(artifactBundle.artifacts??[]);
+  const callableFunctions=callableInventory(artifactBundle,sourceIntelligence);
+  return {
+    schemaVersion:'curveyield-phase0-shared-execution-inputs-v2',
+    status:'PASS',
+    sourceSha256:canonical,
+    campaignId:receipt?.campaign?.campaignId??artifactBundle?.requestIdentity?.campaignId??null,
+    artifactSetDigestSha256:artifactBundle.artifactSetDigestSha256,
+    artifacts,
+    callableFunctions,
+    sourceIntelligenceFunctions:clone(siFunctions(sourceIntelligence)),
+    slither:clone(slither??null),
+    readiness:clone(readiness??null),
+    upstreamInputs:[
+      {role:'BUILD_IDENTITY',status:'BOUND',sourceSha256:sourceShaFrom(buildIdentity)},
+      {role:'EXECUTION_BUILD_ARTIFACTS',status:'BOUND',sourceSha256:sourceShaFrom(artifactBundle),digest:artifactBundle.artifactSetDigestSha256},
+      {role:'SOURCE_INTELLIGENCE',status:'BOUND',sourceSha256:sourceShaFrom(sourceIntelligence)},
+      {role:'SLITHER',status:slither?'BOUND':'MISSING',sourceSha256:sourceShaFrom(slither)},
+      {role:'READINESS',status:readiness?'BOUND':'MISSING',sourceSha256:sourceShaFrom(readiness)}
+    ],
+    executionPreparation:{
+      joinedOnce:true,
+      secondBuildPerformed:false,
+      secondAbiIndexPerformed:false,
+      compilerArtifactCount:artifacts.length,
+      callableSurfaceCount:callableFunctions.length
+    }
+  };
+}
