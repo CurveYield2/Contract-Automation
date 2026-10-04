@@ -960,13 +960,22 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             const data=iface.encodeFunctionData(selected.signature,args);
             const value=qualifiedAction?.value??(f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n);
             let estimate=null,preflightError=null;
+            let callProbe;
+            try{
+              const rawReturn=await provider.call({from:sender,to:target.address,data,value});
+              let decodedReturn=null;
+              try{decodedReturn=normalize(iface.decodeFunctionResult(selected.signature,rawReturn));}catch{}
+              callProbe={status:'RETURNED',rawReturn,decodedReturn};
+            }catch(error){
+              callProbe={status:'REVERTED',error:errorInfo(error,iface)};
+            }
             try{
               estimate=await provider.estimateGas({from:sender,to:target.address,data,value});
-              rec.stages.PREFLIGHT={status:'PASS',estimateGas:estimate.toString()};
+              rec.stages.PREFLIGHT={status:'PASS',estimateGas:estimate.toString(),callProbe};
             }catch(error){
               preflightError=error;
               const kind=preflightKindV2(error);
-              rec.stages.PREFLIGHT={status:'FAILED',kind,error:errorInfo(error,iface)};
+              rec.stages.PREFLIGHT={status:'FAILED',kind,error:errorInfo(error,iface),callProbe};
             }
             let tx=null,receipt=null,submissionError=null;
             if(!preflightError){
