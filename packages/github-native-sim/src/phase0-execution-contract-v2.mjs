@@ -189,7 +189,7 @@ export function classifySemanticFamilyV2({signature='',stateMutability=null,reci
   if(mutability==='READ_ONLY')return{declaredMutability:mutability,semanticFamily:'VIEW',basis:'ABI_STATE_MUTABILITY'};
   if(recipe?.functionFamilies?.[signature])return{declaredMutability:mutability,semanticFamily:recipe.functionFamilies[signature],basis:'QUALIFIED_RECIPE'};
   if(AUTHORITY_CONFIG_SIGNATURES.has(signature)||/^set[A-Z_]/.test(signature)||/^configure[A-Z_(]/.test(signature))return{declaredMutability:mutability,semanticFamily:'AUTHORITY_CONFIG',basis:'EXACT_AUTHORITY_CONFIGURATION_SIGNATURE'};
-  if(/^multicall\\(/.test(signature))return{declaredMutability:mutability,semanticFamily:'OTHER_MUTATION',basis:'KNOWN_BATCH_DISPATCH_SURFACE'};
+  if(/^multicall\(/.test(signature))return{declaredMutability:mutability,semanticFamily:'OTHER_MUTATION',basis:'KNOWN_BATCH_DISPATCH_SURFACE'};
   return{declaredMutability:mutability,semanticFamily:'UNKNOWN',basis:'NO_QUALIFIED_SEMANTIC_RECIPE'};
 }
 
