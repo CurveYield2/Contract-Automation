@@ -230,12 +230,19 @@ test('Project-create wakes fail closed before posting unless Share-link capture 
 
 test('existing-chat audit wake has no Phase1 Project URL capture or requirement', () => {
   const workflow = read('.github/workflows/browser-agent-wake.yml');
+  const runtime = read('scripts/browser-agent-wake.mjs');
   assert.doesNotMatch(workflow, /Persist captured Phase-1 Project URL/);
   assert.doesNotMatch(workflow, /PROJECT_SHARE_URL_REQUIRED/);
   assert.doesNotMatch(workflow, /bind Phase1 Project URL/);
   assert.doesNotMatch(workflow, /Persist fresh-chat URL into campaign registration/);
   assert.match(workflow, /Persist existing-chat reviewer wake into campaign registration/);
   assert.match(workflow, /inputs\.mode == 'resume_existing'/);
+  const noReloadBranch = runtime.indexOf("mode === 'resume_existing' && messagePurpose === 'initial_wake'");
+  const reloadCall = runtime.indexOf('await humanReload(page)', noReloadBranch);
+  const noReloadReturn = runtime.indexOf("delivery-state=existing-chat-visible-no-reload", noReloadBranch);
+  assert.ok(noReloadBranch >= 0);
+  assert.ok(noReloadReturn > noReloadBranch);
+  assert.ok(reloadCall > noReloadReturn);
 });
 
 test('fresh Project chat creation refuses to reuse an already-open conversation composer', () => {
