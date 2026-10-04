@@ -444,24 +444,30 @@ function intValue(param,rng){
   const max=signed?(1n<<BigInt(bits-1))-1n:(1n<<BigInt(bits))-1n;if(v>max)v=max;if(signed&&rng()<0.15)v=-v;return v;
 }
 function randomValue(param,rng,ctx){
-  const type=String(param.type);
-  if(param.baseType==='array'){const len=param.arrayLength>=0?Math.min(param.arrayLength,4):ri(rng,4);return Array.from({length:len},()=>randomValue(param.arrayChildren,rng,ctx));}
-  if(param.baseType==='tuple')return (param.components??[]).map(p=>randomValue(p,rng,ctx));
-  if(/^u?int\d*$/.test(type))return intValue(param,rng);
-  if(type==='address'){const xs=[...ctx.actors,...ctx.targets];return rng()<0.03?'0x0000000000000000000000000000000000000000':xs[ri(rng,xs.length)];}
-  if(type==='bool')return rng()<0.5;
-  if(type==='string')return['','a','phase0','vault','randomized'][ri(rng,5)];
-  if(type==='bytes')return randHex(rng,ri(rng,33));
-  const m=type.match(/^bytes(\d+)$/);if(m)return randHex(rng,Number(m[1]));
-  throw new Error(`unsupported ABI input type ${type}`);
+  const generated=generateTypedValueV2(param,rng,{
+    addresses:[...(ctx.actors??[]),...(ctx.targets??[])],
+    limits:{maxDynamicArrayLength:3,maxDepth:8,maxTotalElements:96,maxDynamicBytes:32,maxStringBytes:64}
+  });
+  if(generated.limitation){
+    const error=new Error(generated.limitation.detail??generated.limitation.code??'ABI argument generation limitation');
+    error.code=generated.limitation.code??'ABI_ARGUMENT_GENERATION_LIMITATION';
+    error.limitation=generated.limitation;
+    throw error;
+  }
+  return generated.value;
 }
 function simpleView(f){return (f.outputs??[]).length>0&&(f.outputs??[]).every(x=>/^(?:u?int\d*|address|bool|bytes\d*|string)$/.test(x.type));}
 function probePlan(ethers,abi){
-  const iface=new ethers.Interface(normalizedAbi(abi)),zero=[],address=[];
-  for(const f of iface.fragments.filter(x=>x.type==='function'&&['view','pure'].includes(x.stateMutability)&&simpleView(x)&&ACCOUNTING_VIEW_RE.test(x.name))){
-    if(f.inputs.length===0&&zero.length<14)zero.push(f);else if(f.inputs.length===1&&f.inputs[0].type==='address'&&address.length<8)address.push(f);
+  const iface=new ethers.Interface(normalizedAbi(abi)),zero=[],address=[],addressPair=[];
+  for(const f of iface.fragments.filter(x=>x.type==='function'&&['view','pure'].includes(x.stateMutability)&&simpleView(x))){
+    const signature=f.format('sighash');
+    const admitted=ACCOUNTING_VIEW_RE.test(f.name)||['totalSupply()','totalAssets()','asset()','balanceOf(address)','allowance(address,address)'].includes(signature);
+    if(!admitted)continue;
+    if(f.inputs.length===0&&zero.length<18)zero.push(f);
+    else if(f.inputs.length===1&&f.inputs[0].type==='address'&&address.length<10)address.push(f);
+    else if(f.inputs.length===2&&f.inputs.every(x=>x.type==='address')&&addressPair.length<6)addressPair.push(f);
   }
-  return{zero,address};
+  return{zero,address,addressPair};
 }
 async function safeStatic(contract,f,args){try{return{ok:true,value:normalize(await contract.getFunction(f.format('sighash')).staticCall(...args))};}catch(e){return{ok:false,error:String(e?.shortMessage??e?.message??e).slice(0,800)};}}
 async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
@@ -476,7 +482,8 @@ async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
     ...plan.address.flatMap(f=>{const s=f.format('sighash');return[
       (async()=>{out.views[`${s}::sender`]=await safeStatic(c,f,[sender]);})(),
       (async()=>{out.views[`${s}::target`]=await safeStatic(c,f,[target.address]);})()
-    ];})
+    ];}),
+    ...(plan.addressPair??[]).map(async f=>{const s=f.format('sighash');out.views[`${s}::sender::target`]=await safeStatic(c,f,[sender,target.address]);})
   ]);
   return out;
 }
