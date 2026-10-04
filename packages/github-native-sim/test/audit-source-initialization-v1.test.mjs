@@ -35,6 +35,20 @@ test('Audit Source Initialization accepts source ZIP plus four pre-created revie
   assert.doesNotMatch(workflow, /audit_name:\n\s+description:/);
 });
 
+test('Audit Source Initialization binds reviewer-3L and preserves progressed browser state on exact retries', () => {
+  assert.match(workflow, /reviewer-3L/);
+  assert.match(run, /"reviewer-3L":\$chat3/);
+
+  const retryStart = run.indexOf('if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then');
+  const retryElse = run.indexOf('\nelse\n  jq -n', retryStart);
+  assert.ok(retryStart >= 0 && retryElse > retryStart);
+  const retryBlock = run.slice(retryStart, retryElse);
+  assert.match(retryBlock, /existing-audit-browser-registration\.json/);
+  assert.match(retryBlock, /\.agentChats=\{/);
+  assert.doesNotMatch(retryBlock, /\.activeAssignment\s*=/);
+  assert.doesNotMatch(retryBlock, /\.wakeDelivery\s*=/);
+});
+
 test('only direct single ZIP files on Google Drive or GitHub are accepted', () => {
   assert.match(resolve, /Google Drive folder submissions are not accepted/);
   assert.match(resolve, /GitHub folders\/repository archives are not accepted/);
