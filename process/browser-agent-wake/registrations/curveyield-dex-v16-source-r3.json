@@ -20,7 +20,7 @@
   },
   "wakeMessage": "",
   "thinkingEffort": "high",
-  "browserInteractionPolicy": "ordinary-pointer-keyboard-only",
+  "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
     "phaseId": "phase-2",
     "milestoneId": "PHASE_2_WORK_PACKET",
@@ -46,7 +46,8 @@
         "COMPLETE",
         "STOPPED_BY_HUMAN"
       ]
-    }
+    },
+    "pokeIntervalMinutes": 20
   },
   "repair": {
     "enabled": true,
