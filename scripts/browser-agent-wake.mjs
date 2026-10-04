@@ -4,7 +4,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { spawn } from 'node:child_process';
 import { validateStorageState } from './browser-session-state-v1.mjs';
 import { loadBrowserRoutine, runBrowserRoutineStage } from './browser-routine-engine-v1.mjs';
 import { executeBrowserOperation } from './browser-operations-v1.mjs';
@@ -279,8 +278,18 @@ async function humanActionPause(page) {
   await page.waitForTimeout(randomDelayMs(300, 1500));
 }
 
-async function humanTypingPause(page) {
-  await page.waitForTimeout(randomDelayMs(200, 400));
+async function humanTypingPause(page, char = '') {
+  let min = 55;
+  let max = 95;
+  if (/\s/.test(char)) {
+    min = 70;
+    max = 125;
+  }
+  if (/[.!?,;:]/.test(char)) {
+    min = 110;
+    max = 190;
+  }
+  await page.waitForTimeout(randomDelayMs(min, max));
 }
 
 async function humanPointerClick(page, locator) {
@@ -350,33 +359,6 @@ async function wakeMarkerVisible(page, marker) {
   };
 }
 
-async function startSystemClipboard(text) {
-  const child = spawn('xclip', ['-selection', 'clipboard', '-in', '-loops', '1'], {
-    env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
-    stdio: ['pipe', 'ignore', 'pipe']
-  });
-  let stderr = '';
-  child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
-  let spawnError = null;
-  child.on('error', (error) => { spawnError = error; });
-  child.stdin.end(String(text));
-  await new Promise((resolve) => setTimeout(resolve, 180));
-  if (spawnError) throw spawnError;
-  if (child.exitCode !== null && child.exitCode !== 0) {
-    throw new Error(`xclip exited before paste with code ${child.exitCode}: ${stderr.trim()}`);
-  }
-  return child;
-}
-
-async function finishSystemClipboard(child) {
-  if (!child || child.exitCode !== null) return;
-  await Promise.race([
-    new Promise((resolve) => child.once('close', resolve)),
-    new Promise((resolve) => setTimeout(resolve, 1200))
-  ]);
-  if (child.exitCode === null) child.kill('SIGTERM');
-}
-
 async function readComposerText(composer) {
   return await composer.inputValue().catch(async () => {
     return await composer.innerText().catch(() => '');
@@ -412,52 +394,42 @@ async function verifyComposerMessage(composer, message, label) {
 
 async function fillComposer(page, message) {
   const composer = await ensureComposer(page);
-  await humanPointerClick(page, composer, { hoverMs: 120, downMs: 55, settleMs: 180 });
+  await humanPointerClick(page, composer);
   await clearComposer(page, composer);
 
-  const useHumanPaste = messagePurpose === 'initial_wake' && String(message).length > 500;
-  if (useHumanPaste) {
-    const humanText = String(message).replace(/\s+/g, ' ').trim();
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      await new Promise((resolve, reject) => {
-        const typer = spawn('xdotool', ['type', '--clearmodifiers', '--delay', '8', humanText], {
-          env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
-          stdio: ['ignore', 'ignore', 'pipe']
-        });
-        let stderr = '';
-        typer.stderr?.on('data', chunk => { stderr += chunk.toString(); });
-        typer.on('error', reject);
-        typer.on('close', code => code === 0 ? resolve() : reject(new Error('xdotool type failed: ' + stderr.trim())));
-      });
-      await page.waitForTimeout(600 + Math.floor(Math.random() * 401));
-      const verification = await verifyComposerMessage(composer, message, 'composer-human-x11-type-verification');
-      if (verification.prefixMatches && verification.lengthLooksPlausible) {
-        console.log('[github-playwright] composer-fill-strategy=human-x11-type attempt=' + attempt);
-        return composer;
+  const text = String(message);
+  console.log('[github-playwright] composer-fill-strategy=human-keyboard-per-character length=' + text.length);
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    await composer.pressSequentially(char);
+    await humanTypingPause(page, char);
+
+    if ((i + 1) % 250 === 0 || i === text.length - 1) {
+      const visible = await readComposerText(composer);
+      const visibleLength = normalizeVisibleText(visible).length;
+      if (!visible || visibleLength === 0) {
+        throw new BrowserAgentError(
+          'COMPOSER_HUMAN_TYPE_LOST',
+          'Visible composer lost human-typed text during per-character entry',
+          true
+        );
       }
-      if (attempt < 2) {
-        await clearComposer(page, composer);
-        await humanActionPause(page);
-      }
+      console.log('[github-playwright] human-keyboard-progress=' + JSON.stringify({
+        typedCharacters: i + 1,
+        totalCharacters: text.length,
+        visibleLength
+      }));
     }
-    throw new BrowserAgentError(
-      'COMPOSER_X11_TYPE_MISMATCH',
-      'Composer did not retain the normalized wake marker after X11 typing',
-      true
-    );
   }
 
-  for (const char of String(message)) {
-    await composer.pressSequentially(char);
-    await humanTypingPause(page);
-  }
   await humanActionPause(page);
 
-  const verification = await verifyComposerMessage(composer, message, 'composer-keyboard-verification');
+  const verification = await verifyComposerMessage(composer, message, 'composer-human-keyboard-verification');
   if (!verification.prefixMatches || !verification.lengthLooksPlausible) {
     throw new BrowserAgentError(
       'COMPOSER_FILL_MISMATCH',
-      'Composer did not retain the normalized wake marker after keyboard entry',
+      'Composer did not retain the normalized wake marker after human per-character keyboard entry',
       true
     );
   }
