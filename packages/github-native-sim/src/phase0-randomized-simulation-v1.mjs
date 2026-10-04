@@ -504,7 +504,12 @@ async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
   ]);
   return out;
 }
-async function baselineSentinelV2({provider,ethers,targets,actors}){
+export function verifyBaselineResetV2({reverted,expectedDigestSha256,observedDigestSha256}){
+  if(reverted!==true){const error=new Error('Phase-0 telemetry baseline snapshot revert failed or expired');error.code='PHASE0_BASELINE_REVERT_FAILED';throw error;}
+  if(!expectedDigestSha256||observedDigestSha256!==expectedDigestSha256){const error=new Error('Phase-0 telemetry baseline sentinel changed after evm_revert');error.code='PHASE0_BASELINE_SENTINEL_MISMATCH';error.expected=expectedDigestSha256??null;error.observed=observedDigestSha256??null;throw error;}
+  return{status:'PASS',revertAccepted:true,sentinelMatch:true,expectedDigestSha256,observedDigestSha256};
+}
+export async function baselineSentinelV2({provider,ethers,targets,actors}){
   const blockNumber=Number(await provider.getBlockNumber());
   const block=await provider.getBlock(blockNumber);
   const actor=actors[0];
@@ -798,8 +803,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       const reverted=await provider.send('evm_revert',[snapshotId]);
       if(reverted!==true){const error=new Error('Phase-0 telemetry baseline snapshot revert failed or expired');error.code='PHASE0_BASELINE_REVERT_FAILED';throw error;}
       const observedBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
-      resetEvidence={required:true,revertAccepted:true,sentinelMatch:observedBaseline.digestSha256===canonicalBaseline.digestSha256,expectedDigestSha256:canonicalBaseline.digestSha256,observedDigestSha256:observedBaseline.digestSha256};
-      if(!resetEvidence.sentinelMatch){const error=new Error('Phase-0 telemetry baseline sentinel changed after evm_revert');error.code='PHASE0_BASELINE_SENTINEL_MISMATCH';error.expected=canonicalBaseline.digestSha256;error.observed=observedBaseline.digestSha256;throw error;}
+      resetEvidence={required:true,...verifyBaselineResetV2({reverted,expectedDigestSha256:canonicalBaseline.digestSha256,observedDigestSha256:observedBaseline.digestSha256})};
       snapshotId=await provider.send('evm_snapshot',[]);
     }
     const runId=`${runPrefix}-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
