@@ -1,0 +1,149 @@
+name: Browser Monitor Click POF v1
+
+on:
+  push:
+    branches:
+      - 'test/browser-monitor-pof-v1'
+    paths:
+      - 'process/browser-monitor-pof-v1/request-v1.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-monitor-click-pof-v1
+  cancel-in-progress: true
+
+jobs:
+  proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      DISPLAY: ":99"
+      POF_ROOT: "${{ github.workspace }}/process/browser-monitor-pof-v1"
+
+    steps:
+      - name: Checkout isolated POF branch
+        uses: actions/checkout@v4
+        with:
+          ref: test/browser-monitor-pof-v1
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install POF runtime and public monitor dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb fluxbox x11vnc websockify novnc socat curl
+          mkdir -p /tmp/browser-monitor-pof-node-v1
+          cd /tmp/browser-monitor-pof-node-v1
+          npm init -y >/dev/null 2>&1
+          npm install playwright-core@1.63.0 >/dev/null
+
+      - name: Connect isolated POF runner to tailnet
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+
+      - name: Start upstream-derived headed browser and interactive noVNC stack
+        id: stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x "$POF_ROOT/start-pof-v1.sh"
+          "$POF_ROOT/start-pof-v1.sh"
+
+          ts_ip="$(tailscale ip -4 | head -n1)"
+          test -n "$ts_ip"
+          url="http://$ts_ip:6080/vnc.html?autoconnect=true&resize=scale&view_only=0&shared=1"
+
+          echo "TAILSCALE_RUNNER_IP=$ts_ip" >> "$GITHUB_ENV"
+          echo "BROWSER_MONITOR_POF_URL=$url" >> "$GITHUB_ENV"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+          echo "::notice title=Interactive Browser POF::$url"
+          {
+            echo "### Browser Monitor Click POF v1"
+            echo ""
+            echo "$url"
+            echo ""
+            echo "This is an isolated interactive noVNC session with mouse and keyboard enabled."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify VNC and noVNC transport
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import socket
+          with socket.create_connection(("127.0.0.1", 5900), timeout=5) as s:
+              banner = s.recv(12)
+          if not banner.startswith(b"RFB "):
+              raise SystemExit(f"Unexpected VNC banner: {banner!r}")
+          print("VNC_RFB_HANDSHAKE_PASS", banner.decode(errors="replace").strip())
+          PY
+
+          curl -fsS --connect-timeout 3 --max-time 5 http://127.0.0.1:6080/vnc.html >/dev/null
+          curl -fsS --connect-timeout 3 --max-time 5 "http://$TAILSCALE_RUNNER_IP:6080/vnc.html" >/dev/null
+          echo "NOVNC_HTTP_PASS"
+
+          python3 - <<'PY'
+          import base64, os, socket
+          key = base64.b64encode(os.urandom(16)).decode()
+          request = (
+              "GET /websockify HTTP/1.1\r\n"
+              "Host: 127.0.0.1:6080\r\n"
+              "Upgrade: websocket\r\n"
+              "Connection: Upgrade\r\n"
+              f"Sec-WebSocket-Key: {key}\r\n"
+              "Sec-WebSocket-Version: 13\r\n\r\n"
+          ).encode()
+          with socket.create_connection(("127.0.0.1", 6080), timeout=5) as s:
+              s.sendall(request)
+              response = s.recv(4096)
+          first = response.split(b"\r\n", 1)[0]
+          if b"101" not in first:
+              raise SystemExit(f"WebSocket upgrade failed: {first!r}")
+          print("NOVNC_WEBSOCKET_PASS", first.decode(errors="replace"))
+          PY
+
+      - name: Prove click and keyboard input through noVNC
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "$POF_ROOT/verify-noVNC-input-v1.mjs"
+
+      - name: Hold proven interactive session for external use
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::notice title=POF PASSED - Interactive URL::$BROWSER_MONITOR_POF_URL"
+          {
+            echo ""
+            echo "### POF RESULT"
+            echo ""
+            echo "Internal end-to-end noVNC keyboard/click proof: PASS"
+            echo ""
+            echo "Interactive URL: $BROWSER_MONITOR_POF_URL"
+            echo ""
+            echo "Holding this proven session open for 15 minutes."
+          } >> "$GITHUB_STEP_SUMMARY"
+          sleep 900
+
+      - name: Cleanup isolated POF
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          for f in             /tmp/browser-monitor-pof-chrome-v1.pid             /tmp/browser-monitor-pof-websockify-v1.pid             /tmp/browser-monitor-pof-x11vnc-v1.pid             /tmp/browser-monitor-pof-fluxbox-v1.pid             /tmp/browser-monitor-pof-xvfb-v1.pid
+          do
+            [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null || true
+          done
