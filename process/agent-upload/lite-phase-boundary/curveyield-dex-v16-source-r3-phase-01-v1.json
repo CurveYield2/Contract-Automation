@@ -3,5 +3,6 @@
   "campaignId": "curveyield-dex-v16-source-r3",
   "phaseSequence": 1,
   "auditControllerRef": "main",
-  "attempt": 1
+  "attempt": 2,
+  "triggerRecovery": "attempt 1 push produced no Actions run; same canonical request retried after verifying workflow/path and current main"
 }
