@@ -219,7 +219,7 @@ test('audit registration template requires four pre-created reviewer chats and n
   assert.equal(registration.browserRoutine, '');
   assert.equal(registration.chatgptProject.name, '');
   assert.equal(registration.chatgptProject.url, '');
-  assert.deepEqual(Object.keys(registration.agentChats), ['reviewer-1','reviewer-2','reviewer-3','reviewer-4']);
+  assert.deepEqual(Object.keys(registration.agentChats), ['reviewer-1','reviewer-2','reviewer-3L','reviewer-4']);
   for (const url of Object.values(registration.agentChats)) assert.match(url, /^https:\/\/chatgpt\.com\/c\//);
 });
 
@@ -304,7 +304,7 @@ test('Lite browser orchestration routes each assignment reviewer to its supplied
   assert.match(workflow, /Publish legacy successor receipt preparation when applicable/);
   assert.match(workflow, /gh workflow run browser-agent-wake\.yml/);
   assert.match(workflow, /\.agentChats\[\$reviewer\]/);
-  assert.match(workflow, /reviewer-1\|reviewer-2\|reviewer-3\|reviewer-4/);
+  assert.match(workflow, /reviewer-1\|reviewer-2\|reviewer-3L\|reviewer-4/);
   assert.match(workflow, /-f mode=resume_existing/);
   assert.match(workflow, /-f chat_url="\$chat_url"/);
   assert.match(workflow, /messagePurpose:"initial_wake"/);
