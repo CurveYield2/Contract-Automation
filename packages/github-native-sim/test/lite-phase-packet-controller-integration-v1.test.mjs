@@ -349,6 +349,15 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
     completedAt:'2026-10-04T01:00:00Z'
   };
   writeJson(masterPath,childSubmission);
+  const canonicalPath=path.join(f.root,f.campaign,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json');
+  const acceptedCanonical=fs.readFileSync(canonicalPath,'utf8');
+  const forgedCanonical=JSON.parse(acceptedCanonical);
+  forgedCanonical.actions['step-1'].outputs.analysis='Unreviewed manual derived-product edit.';
+  writeJson(canonicalPath,forgedCanonical);
+  const rejectedProductEdit=runMaster(f);
+  assert.equal(rejectedProductEdit.status,'MASTER_REVIEW_INVALID');
+  assert.match(rejectedProductEdit.feedbackText,/reviewed artifact digest changed/);
+  fs.writeFileSync(canonicalPath,acceptedCanonical);
 
   const ready=runMaster(f);
   assert.equal(ready.status,'MASTER_REPAIR_READY_FOR_VERIFICATION');
