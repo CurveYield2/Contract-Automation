@@ -22,12 +22,17 @@ on:
         required: false
         default: phase
         type: choice
-        options: [phase, master]
+        options: [phase, master, sealed-rework]
       phase_sequence:
         required: false
         default: ''
         type: string
       segment_id:
+        required: false
+        default: ''
+        type: string
+      rework_request_path:
+        description: Private Audit-Controller path to typed sealed-phase rework admission
         required: false
         default: ''
         type: string
@@ -71,6 +76,7 @@ jobs:
           DISPATCH_REVIEW_KIND: ${{ inputs.review_kind }}
           DISPATCH_PHASE_SEQUENCE: ${{ inputs.phase_sequence }}
           DISPATCH_SEGMENT_ID: ${{ inputs.segment_id }}
+          DISPATCH_REWORK_REQUEST_PATH: ${{ inputs.rework_request_path }}
           DISPATCH_HOLD_DELIVERY: ${{ inputs.hold_successor_delivery }}
           DISPATCH_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
         shell: bash
@@ -81,6 +87,7 @@ jobs:
             review_kind="${DISPATCH_REVIEW_KIND:-phase}"
             phase_sequence="$DISPATCH_PHASE_SEQUENCE"
             segment_id="$DISPATCH_SEGMENT_ID"
+            rework_request_path="$DISPATCH_REWORK_REQUEST_PATH"
             hold_delivery="${DISPATCH_HOLD_DELIVERY:-false}"
             controller_ref="${DISPATCH_CONTROLLER_REF:-main}"
             supplied_campaign_path="$DISPATCH_CAMPAIGN_PATH"
@@ -98,7 +105,8 @@ jobs:
               .schemaVersion=="curveyield-lite-phase-boundary-request-v1" and
               ((.campaignId|type)=="string") and (.campaignId|length)>0 and
               (((.reviewKind // "phase")=="phase" and ((.phaseSequence|type)=="number") and ((.phaseSequence|floor)==.phaseSequence) and .phaseSequence>=1 and .phaseSequence<=10) or
-               ((.reviewKind // "phase")=="master" and ((.segmentId|type)=="string") and (.segmentId|length)>0)) and
+               ((.reviewKind // "phase")=="master" and ((.segmentId|type)=="string") and (.segmentId|length)>0) or
+               ((.reviewKind // "phase")=="sealed-rework" and ((.phaseSequence|type)=="number") and .phaseSequence==1 and ((.reworkRequestPath|type)=="string") and (.reworkRequestPath|length)>0 and .holdSuccessorDelivery==true)) and
               ((.auditControllerRef|type)=="string") and (.auditControllerRef|length)>0 and
               ((.attempt|type)=="number") and ((.attempt|floor)==.attempt) and .attempt>=1
             ' /tmp/lite-phase-boundary-request.json >/dev/null
@@ -106,15 +114,21 @@ jobs:
             review_kind="$(jq -r '.reviewKind // "phase"' /tmp/lite-phase-boundary-request.json)"
             phase_sequence="$(jq -r '.phaseSequence // empty' /tmp/lite-phase-boundary-request.json)"
             segment_id="$(jq -r '.segmentId // empty' /tmp/lite-phase-boundary-request.json)"
+            rework_request_path="$(jq -r '.reworkRequestPath // empty' /tmp/lite-phase-boundary-request.json)"
             hold_delivery="$(jq -r '.holdSuccessorDelivery // false' /tmp/lite-phase-boundary-request.json)"
             controller_ref="$(jq -r '.auditControllerRef' /tmp/lite-phase-boundary-request.json)"
             supplied_campaign_path=""
             supplied_directory_path=""
           fi
           [[ "$campaign_id" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || { echo "::error::Invalid campaign_id"; exit 1; }
-          case "$review_kind" in phase|master) ;; *) echo "::error::Invalid review_kind"; exit 1;; esac
+          case "$review_kind" in phase|master|sealed-rework) ;; *) echo "::error::Invalid review_kind"; exit 1;; esac
           if [ "$review_kind" = phase ]; then [[ "$phase_sequence" =~ ^([1-9]|10)$ ]] || { echo "::error::Invalid phase_sequence"; exit 1; }; fi
           if [ "$review_kind" = master ]; then [[ "$segment_id" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Invalid segment_id"; exit 1; }; fi
+          if [ "$review_kind" = sealed-rework ]; then
+            [ "$phase_sequence" = 1 ] || { echo "::error::sealed-rework is restricted to Phase 1"; exit 1; }
+            [[ "$rework_request_path" == campaigns/* ]] || { echo "::error::rework_request_path must be private campaign-relative state"; exit 1; }
+            [ "$hold_delivery" = true ] || { echo "::error::sealed-rework requires hold_successor_delivery"; exit 1; }
+          fi
           case "$hold_delivery" in true|false) ;; *) echo "::error::Invalid hold_successor_delivery"; exit 1;; esac
           [[ "$controller_ref" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::Invalid audit_controller_ref"; exit 1; }
           {
@@ -122,6 +136,7 @@ jobs:
             echo "review_kind=$review_kind"
             echo "phase_sequence=$phase_sequence"
             echo "segment_id=$segment_id"
+            echo "rework_request_path=$rework_request_path"
             echo "hold_delivery=$hold_delivery"
             echo "audit_controller_ref=$controller_ref"
             echo "supplied_campaign_path=$supplied_campaign_path"
@@ -178,8 +193,10 @@ jobs:
           test "$(jq -r '.campaignId' "$directory_file")" = "$campaign_id"
           if [ "${{ steps.request.outputs.review_kind }}" = phase ]; then
             test "$(jq -r '.currentAssignment.phaseSequence' "$directory_file")" = "${{ steps.request.outputs.phase_sequence }}"
-          else
+          elif [ "${{ steps.request.outputs.review_kind }}" = master ]; then
             test "$(jq -r '.pendingMasterReview.segmentId' "$directory_file")" = "${{ steps.request.outputs.segment_id }}"
+          else
+            test "${{ steps.request.outputs.hold_delivery }}" = true
           fi
           campaign_path="$(jq -r '.workspacePath' "$directory_file")"
           [[ "$campaign_path" == campaigns/* ]] || { echo "::error::Canonical workspacePath must be under campaigns/"; exit 1; }
@@ -198,10 +215,13 @@ jobs:
         run: |
           set -euo pipefail
           args=(--controller-root .audit-controller --campaign-id "${{ steps.request.outputs.campaign_id }}" --campaign-path "${{ steps.routing.outputs.campaign_path }}" --campaign-directory-path "${{ steps.routing.outputs.campaign_directory_path }}" --review-kind "${{ steps.request.outputs.review_kind }}")
-          if [ "${{ steps.request.outputs.review_kind }}" = phase ]; then
-            args+=(--phase-sequence "${{ steps.request.outputs.phase_sequence }}")
-          else
+          if [ "${{ steps.request.outputs.review_kind }}" = master ]; then
             args+=(--segment-id "${{ steps.request.outputs.segment_id }}")
+          else
+            args+=(--phase-sequence "${{ steps.request.outputs.phase_sequence }}")
+          fi
+          if [ "${{ steps.request.outputs.review_kind }}" = sealed-rework ]; then
+            args+=(--rework-request-path "${{ steps.request.outputs.rework_request_path }}")
           fi
           node scripts/lite-phase-packet-controller-v1.mjs "${args[@]}" | tee /tmp/lite-phase-packet-result.json
           {
