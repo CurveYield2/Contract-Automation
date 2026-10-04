@@ -1,14 +1,14 @@
 {
   "schemaVersion": "curveyield-browser-home-exit-request-v10",
-  "action": "recover",
+  "action": "project_wake",
   "mode": "create_fresh",
   "chat_url": "",
-  "wake_message": "[HOME_EXIT_PROJECT_WAKE_VERIFY1] Assistant: when you personally receive this as a new user message inside this new Project, reply exactly HOME_EXIT_PROJECT_WAKE_PERSONALLY_SEEN_VERIFY1",
+  "wake_message": "[HOME_EXIT_PROJECT_WAKE_VERIFY3] Assistant: when you personally receive this as a new user message inside this new Project, reply exactly HOME_EXIT_PROJECT_WAKE_PERSONALLY_SEEN_VERIFY3",
   "home_exit_node": "100.112.238.56",
   "interactive_view": true,
   "manual_challenge_wait_minutes": 5,
-  "requested_at": "2026-10-03T17:47:00-07:00",
-  "project_name": "HOME_EXIT_PROJECT_WAKE_VERIFY1",
-  "project_url": "https://chatgpt.com/g/g-p-6ac173c6f6648191969a8988d6b2d51a/project",
-  "recovery_chat_title": "VERIFY PROJECT WAKE SIGNAL"
+  "requested_at": "2026-10-03T18:42:00-07:00",
+  "project_name": "HOME_EXIT_PROJECT_WAKE_VERIFY3",
+  "project_url": "",
+  "recovery_chat_title": ""
 }
