@@ -31,6 +31,9 @@ test('Audit Source Initialization accepts source ZIP plus four pre-created revie
   assert.match(run, /"reviewer-1":\$chat1/);
   assert.match(run, /"reviewer-4":\$chat4/);
   assert.match(run, /mode:"resume_existing"/);
+  assert.match(run, /phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1/);
+  assert.match(run, /pokeIntervalMinutes:20/);
+  assert.doesNotMatch(run, /ordinary-pointer-keyboard-only/);
   assert.doesNotMatch(workflow, /campaign_id:\n\s+description:/);
   assert.doesNotMatch(workflow, /audit_name:\n\s+description:/);
 });
