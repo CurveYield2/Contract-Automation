@@ -770,7 +770,7 @@ jobs:
           # GET BACK TO WORK.
           mode="resume_existing"
           chat_url="$(jq -r '.activeChat.url // .chatUrl // empty' "$registration")"
-          if [[ ! "$chat_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+ ]]; then
+          if [[ ! "$chat_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ && ! "$chat_url" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]]; then
             gate_mode_probe="$(jq -r '.watchdog.gate.mode // empty' "$registration")"
             bootstrap_status="$(jq -r '.bootstrapMonitor.status // empty' "$registration")"
             if [ "$gate_mode_probe" = "LITE" ] && { [ "$bootstrap_status" = "ACTIVE" ] || [ "$bootstrap_status" = "NOT_APPLICABLE" ]; }; then
