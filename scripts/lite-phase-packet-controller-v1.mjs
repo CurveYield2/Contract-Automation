@@ -17,7 +17,7 @@ import {
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
-import {masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage} from './lib/lite-master-review-v1.mjs';
+import {masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage,admitSealedPhaseRework} from './lib/lite-master-review-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
@@ -320,12 +320,13 @@ function buildFinalIndexInput({root,campaignPath,directory,predecessor}){
 const a=parse(process.argv);
 const reviewKind=a['review-kind']??'phase';
 for(const k of ['controller-root','campaign-id','campaign-path','campaign-directory-path']) if(a[k]===undefined) throw new Error('missing --'+k);
-if(reviewKind==='phase'&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
-if(!['phase','master'].includes(reviewKind)) throw new Error('review-kind must be phase or master');
+if(['phase','sealed-rework'].includes(reviewKind)&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
+if(reviewKind==='sealed-rework'&&!a['rework-request-path']) throw new Error('missing --rework-request-path');
+if(!['phase','master','sealed-rework'].includes(reviewKind)) throw new Error('review-kind must be phase, master, or sealed-rework');
 const root=path.resolve(a['controller-root']);
 const expectedCampaignId=a['campaign-id'];
 const campaignPath=a['campaign-path']; const campaignRoot=repoFile(root,campaignPath);
-const sequence=reviewKind==='phase'?Number(a['phase-sequence']):null;
+const sequence=reviewKind==='master'?null:Number(a['phase-sequence']);
 const directoryRel=a['campaign-directory-path']; const directoryFile=requiredFile(root,directoryRel,'campaign directory entry');
 const directory=readJson(directoryFile);
 const now=new Date().toISOString();
@@ -363,6 +364,11 @@ if(reviewKind==='master'){
   const feedback='MASTER_REVIEW_ACCEPTED: '+acceptedSegment+' accepted.'+(nextAssignment?' Successor Phase '+nextAssignment.phaseSequence+' may now be launched.':' Campaign is now COMPLETE.');
   process.stdout.write(JSON.stringify({status:'PASS',masterReviewAccepted:true,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:acceptedSegment,freshSuccessorRequired:Boolean(nextAssignment),sameReviewerAdvanced:false,nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
   process.exit(0);
+}
+let sealedRework=null;
+if(reviewKind==='sealed-rework'){
+  sealedRework=admitSealedPhaseRework({root,campaignPath,directory,requestPath:a['rework-request-path'],now});
+  directory.currentAssignment=sealedRework.assignment;directory.campaignStatus='ACTIVE';directory.updatedAt=now;
 }
 const assignment=directory.currentAssignment;
 if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current assignment does not match submitted phase');
@@ -518,6 +524,14 @@ if(deficiencies.length) throw new Error('controller-generated report validation 
 
 packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS'};
 const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now});
+if(sealedRework){
+  const invalid=readJson(requiredFile(root,controls.invalidRel,'evidence invalidation matrix'));
+  const events=invalid.events??invalid.invalidationEvents??[];
+  const event=events.find(x=>x?.eventId==='EIM-013'||x?.id==='EIM-013');
+  if(!event)throw new Error('EIM-013 disappeared before sealed rework commit');
+  event.status='RESOLVED_BY_PHASE_1_REVISION_3';event.resolvedAt=now;event.resolutionReceiptPath='PENDING_PHASE_1_REVISION_3_RECEIPT';event.resolutionScopeId=sealedRework.request.humanAuthorization.scopeId;
+  writeJson(repoFile(root,controls.invalidRel),invalid);
+}
 writeJson(repoFile(root,canonicalRel),canonical);
 const derivedRels=buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical,canonicalRel,now});
 const boundaryArtifactRels=[];
@@ -578,6 +592,11 @@ const phaseRevision=Number(assignment.phaseRevision??1);
 if(!Number.isInteger(phaseRevision)||phaseRevision<1) throw new Error('assignment.phaseRevision must be an integer >= 1 when present');
 const receiptRel=receiptLib.phaseReceiptPath(campaignPath,sequence,phaseRevision);
 const evidence=[receiptRef(root,campaignPath,assignment.workFormPath,'PHASE_WORK_FORM')];
+if(sealedRework){
+  evidence.push(receiptRef(root,campaignPath,sealedRework.request.priorReceipt.path,'PRIOR_PHASE_REVISION'));
+  evidence.push(receiptRef(root,campaignPath,sealedRework.request.qualityReview.path,'HUMAN_QUALITY_REVIEW'));
+  evidence.push(receiptRef(root,campaignPath,sealedRework.request.humanAuthorization.recordPath,'HUMAN_REWORK_AUTHORIZATION'));
+}
 if(assignment.finalReportPath) evidence.push(receiptRef(root,campaignPath,assignment.finalReportPath,'PHASE_FINAL_REPORT'));
 evidence.push(receiptRef(root,campaignPath,canonicalRel,'PHASE_CANONICAL_DATA'));
 for(const rel of derivedRels) evidence.push(receiptRef(root,campaignPath,rel,'DERIVED_DOWNSTREAM_DATA'));
@@ -606,6 +625,14 @@ const receipt=receiptLib.createLitePhaseReceiptV1({
   validation:{status:'PASS',validatedAt:now,failures:[]},handoff,now
 });
 receipt.sealedAt=now;receipt.updatedAt=now;
+if(sealedRework){
+  receipt.rework={schemaVersion:'curveyield-lite-sealed-phase-rework-v1',fromRevision:2,toRevision:3,scopeId:sealedRework.request.humanAuthorization.scopeId,requestPath:a['rework-request-path'],qualityReviewPath:sealedRework.request.qualityReview.path,evidenceInvalidationEvent:'EIM-013',successorDeliveryHeld:true};
+  const invalid=readJson(requiredFile(root,controls.invalidRel,'evidence invalidation matrix'));
+  const events=invalid.events??invalid.invalidationEvents??[];
+  const event=events.find(x=>x?.eventId==='EIM-013'||x?.id==='EIM-013');
+  if(event)event.resolutionReceiptPath=receiptRel;
+  writeJson(repoFile(root,controls.invalidRel),invalid);
+}
 writeJson(repoFile(root,receiptRel),receipt);
 packet.status='ACCEPTED';packet.controllerValidation.receiptPath=receiptRel;packet.controllerValidation.canonicalDataPath=canonicalRel;packet.controllerValidation.derivedOutputPaths=derivedRels;packet.controllerValidation.boundaryMachineArtifactPaths=boundaryArtifactRels;
 writeJson(packetFile,packet);
@@ -650,4 +677,4 @@ else{
 }
 writeJson(directoryFile,directory);
 const feedback='CONTROLLER_PHASE_PASS: Phase '+sequence+' validated and sealed.'+(nextAssignment?' Next authorized assignment: Phase '+nextAssignment.phaseSequence+' / '+nextAssignment.reviewer+'.':' Campaign complete.');
-process.stdout.write(JSON.stringify({status:'PASS',controllerPassToken:'CONTROLLER_PHASE_PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:Boolean(nextAssignment&&nextAssignment.status==='WAITING_FOR_SUCCESSOR_AGENT'),sameReviewerAdvanced:Boolean(nextAssignment&&nextAssignment.status==='ACTIVE'),nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+process.stdout.write(JSON.stringify({status:'PASS',controllerPassToken:'CONTROLLER_PHASE_PASS',sealedRework:Boolean(sealedRework),campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:Boolean(nextAssignment&&nextAssignment.status==='WAITING_FOR_SUCCESSOR_AGENT'),sameReviewerAdvanced:Boolean(nextAssignment&&nextAssignment.status==='ACTIVE'),nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
