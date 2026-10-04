@@ -116,19 +116,15 @@ test('browser routine engine has separate deterministic Project-create and Proje
   assert.doesNotMatch(read('.github/workflows/lite-audit-browser-orchestrator-v1.yml'), /audit-lite-reviewer-v1/);
 });
 
-test('audit wakes enforce verified High reasoning effort and keep follow-up messages minimal', () => {
+test('existing-chat audit wakes preserve chat configuration and keep follow-up messages minimal', () => {
   const operations = read('scripts/browser-operations-v1.mjs');
   const runtime = read('scripts/browser-agent-wake.mjs');
   const wake = read('.github/workflows/browser-agent-wake.yml');
   assert.match(operations, /ensureThinkingEffort/);
-  assert.match(operations, /menuitemradio/);
-  assert.match(operations, /Thinking time/);
-  assert.match(operations, /button:has-text\("GPT-5\.6"\)/);
-  assert.match(operations, /THINKING_EFFORT_UI_CHANGED/);
-  assert.match(operations, /visibleControls=/);
-  assert.match(operations, /High thinking-effort control could not be selected and verified/);
   assert.match(runtime, /CHATGPT_THINKING_EFFORT/);
-  assert.match(runtime, /chatgpt\.ensure_thinking_effort/);
+  assert.match(runtime, /mode !== 'resume_existing'/);
+  assert.match(runtime, /preservedExistingChatConfiguration:\s*true/);
+  assert.match(runtime, /thinking-effort=preserve-existing-chat-configuration/);
   assert.match(wake, /default: high/);
   assert.match(wake, /message_purpose.*initial_wake/);
   assert.match(wake, /printf '%s\\n' 'GET BACK TO WORK' > \/tmp\/wake-message\.txt/);
