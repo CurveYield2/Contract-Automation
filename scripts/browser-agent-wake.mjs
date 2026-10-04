@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 import { validateStorageState } from './browser-session-state-v1.mjs';
 import { loadBrowserRoutine, runBrowserRoutineStage } from './browser-routine-engine-v1.mjs';
 import { executeBrowserOperation } from './browser-operations-v1.mjs';
@@ -13,6 +14,7 @@ const action = env.WAKE_ACTION || 'wake';
 const mode = env.WAKE_MODE || 'resume_existing';
 const wakeId = env.WAKE_ID || crypto.randomUUID();
 const wakeMessage = env.WAKE_MESSAGE || '';
+const messagePurpose = env.WAKE_MESSAGE_PURPOSE || 'standard';
 const requestedUrl = env.CHAT_URL || '';
 let browserRoutineId = env.BROWSER_ROUTINE_ID || '';
 let projectName = env.CHATGPT_PROJECT_NAME || '';
@@ -361,18 +363,83 @@ async function wakeMarkerVisible(page, marker) {
   };
 }
 
+async function setSystemClipboard(text) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn('xclip', ['-selection', 'clipboard', '-in'], {
+      env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
+      stdio: ['pipe', 'ignore', 'pipe']
+    });
+    let stderr = '';
+    child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`xclip exited with code ${code}: ${stderr.trim()}`));
+    });
+    child.stdin.end(String(text));
+  });
+}
+
+async function readComposerText(composer) {
+  return await composer.inputValue().catch(async () => {
+    return await composer.innerText().catch(() => '');
+  });
+}
+
+async function clearComposer(page, composer) {
+  const currentText = await readComposerText(composer);
+  if (!currentText) return;
+  await composer.press('Control+A').catch(async () => composer.press('Meta+A').catch(() => {}));
+  await page.waitForTimeout(120);
+  await composer.press('Backspace');
+  await page.waitForTimeout(150);
+}
+
+async function verifyComposerMessage(composer, message, label) {
+  const filledText = await readComposerText(composer);
+  const normalizedFilled = normalizeVisibleText(filledText);
+  const normalizedMessage = normalizeVisibleText(message);
+  const marker = visibleMessageMarker(message);
+  const minimumExpectedLength = Math.min(marker.length, Math.floor(normalizedMessage.length * 0.9));
+  const prefixMatches = marker.length > 0 && normalizedFilled.includes(marker);
+  const lengthLooksPlausible = normalizedFilled.length >= minimumExpectedLength;
+  console.log(`[github-playwright] ${label}=` + JSON.stringify({
+    normalizedFilledLength: normalizedFilled.length,
+    normalizedMessageLength: normalizedMessage.length,
+    markerLength: marker.length,
+    prefixMatches,
+    lengthLooksPlausible
+  }));
+  return { prefixMatches, lengthLooksPlausible };
+}
+
 async function fillComposer(page, message) {
   const composer = await ensureComposer(page);
   await humanPointerClick(page, composer, { hoverMs: 120, downMs: 55, settleMs: 180 });
+  await clearComposer(page, composer);
 
-  const currentText = await composer.inputValue().catch(async () => {
-    return await composer.innerText().catch(() => '');
-  });
-  if (currentText) {
-    await composer.press('Control+A').catch(async () => composer.press('Meta+A').catch(() => {}));
-    await page.waitForTimeout(120);
-    await composer.press('Backspace');
-    await page.waitForTimeout(150);
+  const useHumanPaste = messagePurpose === 'initial_wake' && String(message).length > 500;
+  if (useHumanPaste) {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      await setSystemClipboard(message);
+      await page.waitForTimeout(200 + Math.floor(Math.random() * 301));
+      await composer.press('Control+V');
+      await page.waitForTimeout(500 + Math.floor(Math.random() * 401));
+      const verification = await verifyComposerMessage(composer, message, 'composer-human-paste-verification');
+      if (verification.prefixMatches && verification.lengthLooksPlausible) {
+        console.log(`[github-playwright] composer-fill-strategy=human-clipboard-paste attempt=${attempt}`);
+        return composer;
+      }
+      if (attempt < 2) {
+        await clearComposer(page, composer);
+        await humanActionPause(page);
+      }
+    }
+    throw new BrowserAgentError(
+      'COMPOSER_PASTE_MISMATCH',
+      'Composer did not retain the normalized wake marker after human clipboard paste',
+      true
+    );
   }
 
   for (const char of String(message)) {
@@ -381,23 +448,8 @@ async function fillComposer(page, message) {
   }
   await humanActionPause(page);
 
-  const filledText = await composer.inputValue().catch(async () => {
-    return await composer.innerText().catch(() => '');
-  });
-  const normalizedFilled = normalizeVisibleText(filledText);
-  const normalizedMessage = normalizeVisibleText(message);
-  const marker = visibleMessageMarker(message);
-  const minimumExpectedLength = Math.min(marker.length, Math.floor(normalizedMessage.length * 0.65));
-  const prefixMatches = marker.length > 0 && normalizedFilled.includes(marker);
-  const lengthLooksPlausible = normalizedFilled.length >= minimumExpectedLength;
-  if (!prefixMatches || !lengthLooksPlausible) {
-    console.log('[github-playwright] composer-keyboard-verification=' + JSON.stringify({
-      normalizedFilledLength: normalizedFilled.length,
-      normalizedMessageLength: normalizedMessage.length,
-      markerLength: marker.length,
-      prefixMatches,
-      lengthLooksPlausible
-    }));
+  const verification = await verifyComposerMessage(composer, message, 'composer-keyboard-verification');
+  if (!verification.prefixMatches || !verification.lengthLooksPlausible) {
     throw new BrowserAgentError(
       'COMPOSER_FILL_MISMATCH',
       'Composer did not retain the normalized wake marker after keyboard entry',
