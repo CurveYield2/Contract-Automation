@@ -322,8 +322,8 @@ jobs:
           fi
 
           ok="$(jq -r '.ok // false' "$WAKE_RESULT_PATH")"
-          retryable="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true)] | length > 0' "$WAKE_RESULT_PATH")"
-          retry_code="$(jq -r '[.failures[]? | select(.provider=="github-playwright" and .retryable==true) | .code][0] // empty' "$WAKE_RESULT_PATH")"
+          retryable="$(jq -r '[.failures[]? | select(.retryable==true)] | length > 0' "$WAKE_RESULT_PATH")"
+          retry_code="$(jq -r '[.failures[]? | select(.retryable==true) | .code][0] // empty' "$WAKE_RESULT_PATH")"
           echo "ok=$ok" >> "$GITHUB_OUTPUT"
           echo "retryable=$retryable" >> "$GITHUB_OUTPUT"
           echo "retry_code=$retry_code" >> "$GITHUB_OUTPUT"
