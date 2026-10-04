@@ -311,7 +311,7 @@ test('v10 saved Project reuse accepts canonical Project root while rejecting cha
   assert.match(source, /const expectedProjectIdentity = savedProjectIdentity\(projectUrl\)/);
   assert.match(source, /const currentProjectIdentity = savedProjectIdentity\(currentProjectUrl\)/);
   assert.match(source, /currentProjectIdentity === expectedProjectIdentity/);
-  assert.match(source, /observedUrl=/);
+  assert.match(source, /observations=/);
 });
 
 test('Project fallback recovery requires saved Project URL and clicks only an already-visible center-page chat title', () => {
