@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { runProcess } from './execution.mjs';
 
 function md(value){
   if(value===null||value===undefined||value==='') return '—';
@@ -172,6 +171,7 @@ Rules:
 export async function executePhase5TargetsV1({controllerRoot,campaignPath,targetDesigns=[],expectedCampaignId=null,expectedSourceSha256=null}={}){
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
   const executionResults={};
+  let runProcessV1=null;
   for(const t of arr(targetDesigns)){
     const key=String(t?.candidateKey??'').trim();
     if(!key) continue;
@@ -202,7 +202,8 @@ export async function executePhase5TargetsV1({controllerRoot,campaignPath,target
     const evRel=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key));
     const evAbs=path.join(controllerRoot,...evRel.split('/'));
     const workspace=path.join(process.cwd(),'.audit-work','phase5-boundary',safePart(key));
-    const result=await runProcess({
+    if(!runProcessV1){({runProcess:runProcessV1}=await import('./execution.mjs'));}
+    const result=await runProcessV1({
       command:process.execPath,
       args:['packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace],
       cwd:process.cwd(),
