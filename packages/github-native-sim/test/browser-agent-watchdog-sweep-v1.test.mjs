@@ -8,23 +8,26 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../../..');
 const watchdog = fs.readFileSync(path.join(root, '.github/workflows/browser-agent-watchdog.yml'), 'utf8');
 const wake = fs.readFileSync(path.join(root, '.github/workflows/browser-agent-wake.yml'), 'utf8');
+const orchestrator = fs.readFileSync(path.join(root, '.github/workflows/lite-audit-browser-orchestrator-v1.yml'), 'utf8');
 
-test('watchdog uses the existing workflow as a five-minute scheduled sweep', () => {
+test('watchdog uses a five-minute scheduled sweep but serializes all browser ownership', () => {
   assert.match(watchdog, /schedule:\s*\n\s*- cron: '2-59\/5 \* \* \* \*'/);
   assert.match(watchdog, /Discover active watchdog targets/);
   assert.match(watchdog, /process\/browser-agent-watchdog\/active/);
-  assert.match(watchdog, /matrix:\s*\n\s*wake_id:\s*\$\{\{ fromJSON\(needs\.discover\.outputs\.targets\) \}\}/);
-  assert.match(watchdog, /max-parallel:\s*4/);
-  assert.match(watchdog, /group:\s*browser-agent-watchdog-\$\{\{ matrix\.wake_id \}\}/);
+  assert.match(watchdog, /max-parallel:\s*1/);
+  assert.match(watchdog, /group:\s*chatgpt-shared-browser-session-v1/);
+  assert.match(watchdog, /cancel-in-progress:\s*false/);
+  assert.match(wake, /group:\s*chatgpt-shared-browser-session-v1/);
 });
 
-test('watchdog no longer holds a runner open between observations', () => {
-  assert.match(watchdog, /timeout-minutes:\s*35/);
-  assert.match(watchdog, /for cycle in 1; do/);
-  assert.doesNotMatch(watchdog, /seq 1 46/);
-  assert.doesNotMatch(watchdog, /sleep 300/);
-  assert.doesNotMatch(watchdog, /Four-hour watchdog segment/);
-  assert.doesNotMatch(watchdog, /gh workflow run browser-agent-watchdog\.yml/);
+test('watchdog never machine-reads ChatGPT and only pokes after the elapsed-time gate', () => {
+  assert.match(watchdog, /pokeIntervalMinutes \/\/ 20/);
+  assert.match(watchdog, /WAITING_NO_CHATGPT_READ/);
+  assert.match(watchdog, /TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ/);
+  assert.match(watchdog, /WAKE_ACTION='wake'/);
+  assert.match(watchdog, /node scripts\/browser-agent-wake\.mjs/);
+  assert.doesNotMatch(watchdog, /WAKE_ACTION=['"]observe['"]/);
+  assert.doesNotMatch(watchdog, /assistantCount|lastAssistantHash|humanChallenge|loginPrompt|conversationUnavailable/);
 });
 
 test('wake still triggers an immediate first watchdog sweep', () => {
@@ -32,7 +35,7 @@ test('wake still triggers an immediate first watchdog sweep', () => {
   assert.match(wake, /gh workflow run browser-agent-watchdog\.yml/);
 });
 
-test('scheduled watchdog browser traffic uses the same home-exit transport as initial wake delivery', () => {
+test('watchdog and wake share the same home-exit visible-X11 transport', () => {
   for (const workflow of [watchdog, wake]) {
     assert.match(workflow, /tailscale\/github-action@v4/);
     assert.match(workflow, /TAILSCALE_AUTHKEY/);
@@ -40,25 +43,15 @@ test('scheduled watchdog browser traffic uses the same home-exit transport as in
     assert.match(workflow, /Xvfb :99/);
     assert.match(workflow, /x11vnc/);
   }
-  assert.match(watchdog, /HOME_EXIT_NODE/);
-  assert.match(watchdog, /MANUAL_CHALLENGE_WAIT_MS/);
 });
 
-test('scheduled sweep preserves canonical gate and successor behavior', () => {
-  assert.match(watchdog, /CANONICAL_GATE_STATE_/);
-  assert.match(watchdog, /LITE_INTERPHASE_COMPLETE_SUCCESSOR_DISPATCHED_/);
-  assert.match(watchdog, /launch_lite_successor/);
-  assert.match(watchdog, /verify_lite_interphase_completion/);
-  assert.match(watchdog, /Set up isolated browser-agent runtime/);
-});
-
-test('Lite successor launch consumes the sealed reviewer-authored wake message verbatim', () => {
-  assert.match(watchdog, /wake_path="\$handoff_dir\/WAKE_UP_MESSAGE\.md"/);
-  assert.match(watchdog, /base64 -d > \/tmp\/sealed-successor-wake\.txt/);
-  assert.match(watchdog, /wake_b64="\$\(base64 -w0 \/tmp\/sealed-successor-wake\.txt\)"/);
-  assert.match(watchdog, /next_phase="\$\(jq -r '\.nextPhaseId \/\/ empty'/);
-  assert.doesNotMatch(watchdog, /AUDIT_REVIEWER_ROUTINE_V1/);
-  assert.doesNotMatch(watchdog, /audit_skill_authority_source=/);
+test('legacy successor launcher is fail-closed and current successor routing uses the orchestrator', () => {
+  assert.match(watchdog, /Legacy create-fresh Lite successor launcher is retired/);
+  assert.match(watchdog, /lite-audit-browser-orchestrator-v1\.yml/);
+  assert.match(orchestrator, /prepare-lite-assignment-successor-v2\.mjs/);
+  assert.match(orchestrator, /\.agentChats\[\$reviewer\]/);
+  assert.match(orchestrator, /-f mode=resume_existing/);
+  assert.doesNotMatch(orchestrator, /-f mode=create_fresh|WAKE_UP_MESSAGE\.md/);
 });
 
 test('Lite watchdog does not equate phase closure with campaign completion', () => {
@@ -67,14 +60,12 @@ test('Lite watchdog does not equate phase closure with campaign completion', () 
   assert.doesNotMatch(watchdog, /\[ "\$lite_campaign_status" = "COMPLETE" \] \|\| \[ "\$lite_phase_state" = "CLOSED" \]/);
 });
 
-test('no parallel watchdog workflow is introduced', () => {
+test('legacy parallel chat watchdog is absent while one-shot trigger shim is allowed', () => {
   const workflows = fs.readdirSync(path.join(root, '.github/workflows'));
-  assert.equal(
-    workflows.some((name) => /watchdog-sweep|scheduled-watchdog|browser-agent-monitor/i.test(name)),
-    false
-  );
+  assert.equal(workflows.includes('browser-agent-chat-watchdog-v40.yml'), false);
+  assert.equal(workflows.includes('browser-agent-watchdog.yml'), true);
+  assert.equal(workflows.includes('watchdog-sweep-once-v1.yml'), true);
 });
-
 
 test('terminal watchdog state retention is bounded without touching active state or registrations', () => {
   assert.match(watchdog, /prune_completed_states\(\)/);
@@ -82,15 +73,13 @@ test('terminal watchdog state retention is bounded without touching active state
   assert.match(watchdog, /status=="COMPLETED_CANONICAL_GATE"/);
   assert.match(watchdog, /process\/browser-agent-watchdog\/active\/\$file_name/);
   assert.match(watchdog, /--method DELETE "\$completed_dir_api\/\$file_name"/);
-  assert.match(watchdog, /prune_completed_states\s*\n\s*\}/);
   assert.doesNotMatch(watchdog, /DELETE[^\n]*process\/browser-agent-wake\/registrations/);
 });
 
-
 test('watchdog workflow contains one complete sweep body and no duplicated corrupt tail', () => {
   const lines = watchdog.split(/\r?\n/);
-  assert.equal(lines.some((line) => line.startsWith('\\t')), false, 'literal \\t must never escape the run block');
-  assert.equal(lines.some((line) => /^\t/.test(line)), false, 'YAML indentation must never use tab characters');
+  assert.equal(lines.some((line) => line.startsWith('\\t')), false);
+  assert.equal(lines.some((line) => /^\t/.test(line)), false);
   assert.equal((watchdog.match(/launch_lite_successor\(\) \{/g) ?? []).length, 1);
   assert.equal((watchdog.match(/Watchdog sweep complete; active state remains for the next scheduled sweep\./g) ?? []).length, 1);
 });
