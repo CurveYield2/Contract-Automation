@@ -13,10 +13,7 @@ const wakeId = env.WAKE_ID || crypto.randomUUID();
 const wakeMessage = env.WAKE_MESSAGE || '';
 const requestedUrl = env.CHAT_URL || '';
 const projectName = env.PROJECT_NAME || '';
-const requestedProjectUrl = env.PROJECT_URL || '';
-const recoveryChatTitle = env.RECOVERY_CHAT_TITLE || '';
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
-const chatStatePath = env.CHAT_STATE_PATH || '/tmp/browser-agent-home-exit-v10-chat-state-v1.json';
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
@@ -253,92 +250,6 @@ async function humanPointerClick(page, locator) {
   await page.waitForTimeout(randomDelayMs(300, 700));
   await page.mouse.up();
   await humanActionPause(page);
-}
-
-async function visibleTitlePoint(locator, horizontalFraction) {
-  await locator.scrollIntoViewIfNeeded().catch(() => {});
-  const box = await locator.boundingBox();
-  if (!box) throw new Error('Visible Project title has no clickable bounding box');
-
-  const fraction = Math.max(0.18, Math.min(horizontalFraction, 0.82));
-  return {
-    x: box.x + Math.max(8, Math.min(box.width - 8, box.width * fraction)),
-    y: box.y + box.height / 2,
-    fraction
-  };
-}
-
-async function humanShortTitleClick(page, locator, horizontalFraction = 0.32) {
-  const point = await visibleTitlePoint(locator, horizontalFraction);
-  await page.mouse.move(point.x, point.y, { steps: 14 });
-  await page.mouse.down();
-  await page.waitForTimeout(randomDelayMs(70, 140));
-  await page.mouse.up();
-  console.log('[github-playwright-v10] project-title-gesture=' + JSON.stringify({
-    gesture: 'short-click',
-    x: Math.round(point.x),
-    y: Math.round(point.y),
-    fraction: Number(point.fraction.toFixed(2))
-  }));
-}
-
-async function humanDoubleTitleClick(page, locator, horizontalFraction = 0.5) {
-  const point = await visibleTitlePoint(locator, horizontalFraction);
-  await page.mouse.move(point.x, point.y, { steps: 12 });
-
-  // Chromium only emits genuine double-click semantics when the second physical
-  // click carries clickCount=2. Keep the two presses human-paced while preserving
-  // that browser event detail.
-  await page.mouse.down({ clickCount: 1 });
-  await page.waitForTimeout(randomDelayMs(70, 130));
-  await page.mouse.up({ clickCount: 1 });
-  await page.waitForTimeout(randomDelayMs(100, 220));
-  await page.mouse.down({ clickCount: 2 });
-  await page.waitForTimeout(randomDelayMs(70, 130));
-  await page.mouse.up({ clickCount: 2 });
-
-  console.log('[github-playwright-v10] project-title-gesture=' + JSON.stringify({
-    gesture: 'double-click',
-    clickCountSequence: [1, 2],
-    x: Math.round(point.x),
-    y: Math.round(point.y),
-    fraction: Number(point.fraction.toFixed(2))
-  }));
-}
-
-async function humanLongTitleClick(page, locator, horizontalFraction = 0.68) {
-  const point = await visibleTitlePoint(locator, horizontalFraction);
-  await page.mouse.move(point.x, point.y, { steps: 14 });
-  await page.mouse.down();
-  await page.waitForTimeout(randomDelayMs(550, 900));
-  await page.mouse.up();
-  console.log('[github-playwright-v10] project-title-gesture=' + JSON.stringify({
-    gesture: 'long-click',
-    x: Math.round(point.x),
-    y: Math.round(point.y),
-    fraction: Number(point.fraction.toFixed(2))
-  }));
-}
-
-async function runProjectTitleClickSequence(page, locator, beforeUrl) {
-  await humanShortTitleClick(page, locator, 0.32);
-  await page.waitForTimeout(randomDelayMs(100, 300));
-  let projectUrl = page.url();
-  if (projectUrl !== beforeUrl) return projectUrl;
-
-  await humanDoubleTitleClick(page, locator, 0.5);
-  await page.waitForTimeout(randomDelayMs(100, 300));
-  projectUrl = page.url();
-  if (projectUrl !== beforeUrl) return projectUrl;
-
-  await humanLongTitleClick(page, locator, 0.68);
-  await page.waitForTimeout(randomDelayMs(100, 300));
-  projectUrl = page.url();
-  if (projectUrl !== beforeUrl) return projectUrl;
-
-  // Allow the final long click a short navigation-settle window before failing.
-  await page.waitForTimeout(randomDelayMs(2500, 4500));
-  return page.url();
 }
 
 async function humanTypeInto(page, locator, text) {
@@ -581,83 +492,26 @@ async function findProjectLandingComposer(page, name) {
   return null;
 }
 
-function savedProjectIdentity(value) {
-  try {
-    const url = new URL(value);
-    if (url.origin !== 'https://chatgpt.com') return '';
-    const match = url.pathname.match(/^\/g\/(g-p-[A-Za-z0-9]+)(?:-[^/]+)?(?:\/project)?\/?$/);
-    return match?.[1] || '';
-  } catch {
-    return '';
-  }
-}
-
-function validSavedProjectUrl(value) {
-  return Boolean(savedProjectIdentity(value));
-}
-
-async function openSavedProjectUrl(page, name, projectUrl) {
-  if (!projectUrl) return null;
-  const expectedProjectIdentity = savedProjectIdentity(projectUrl);
-  if (!expectedProjectIdentity) {
-    throw new Error('Persisted Project URL is not a valid ChatGPT Project URL');
-  }
-
-  // This is navigation to a previously persisted Project identity, not a
-  // ChatGPT data read/write shortcut. All Project interaction after load stays
-  // on the visible human UI.
-  await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForTimeout(randomDelayMs(3000, 5000));
-
-  const currentProjectUrl = page.url();
-  const currentProjectIdentity = savedProjectIdentity(currentProjectUrl);
-  if (!currentProjectIdentity || currentProjectIdentity !== expectedProjectIdentity) {
-    throw new Error(
-      'Persisted Project URL did not open the expected ChatGPT Project page' +
-      ' (observedUrl=' + currentProjectUrl + ')'
-    );
-  }
-
-  const composer = await ensureComposer(page);
-  console.log('[github-playwright-v10] project-reused-saved-url=' + JSON.stringify({
-    projectName: name,
-    url: currentProjectUrl,
-    projectIdentity: currentProjectIdentity
-  }));
-  return { projectName: name, url: currentProjectUrl, composer, recoveredExisting: true, reusedSavedUrl: true };
-}
-
 async function findVisibleExactProjectEntry(page, projectsTitle, name) {
   const projectsBox = await projectsTitle.boundingBox().catch(() => null);
   if (!projectsBox) return null;
 
-  const namePattern = new RegExp('^' + escapeRegExp(name) + '$', 'i');
-  const matches = page.getByText(namePattern, { exact: true });
-  const count = Math.min(await matches.count().catch(() => 0), 20);
+  const chatsTitle = page.getByText('Chats', { exact: true }).first();
+  const chatsVisible = await chatsTitle.isVisible().catch(() => false);
+  const chatsBox = chatsVisible ? await chatsTitle.boundingBox().catch(() => null) : null;
 
+  const matches = page.getByText(name, { exact: true });
+  const count = Math.min(await matches.count().catch(() => 0), 20);
   for (let i = 0; i < count; i += 1) {
     const candidate = matches.nth(i);
     if (!await candidate.isVisible().catch(() => false)) continue;
     const box = await candidate.boundingBox().catch(() => null);
     if (!box) continue;
 
-    const inProjectBand =
-      box.x <= 460 &&
-      box.y >= projectsBox.y &&
-      box.y <= projectsBox.y + 420;
-
-    if (inProjectBand) {
-      console.log('[github-playwright-v10] project-title-target=' + JSON.stringify({
-        strategy: 'exact-visible-title-text',
-        box: {
-          x: Math.round(box.x),
-          y: Math.round(box.y),
-          width: Math.round(box.width),
-          height: Math.round(box.height)
-        }
-      }));
-      return candidate;
-    }
+    const inLeftSidebar = box.x <= 460;
+    const belowProjects = box.y >= projectsBox.y;
+    const aboveChats = !chatsBox || box.y < chatsBox.y;
+    if (inLeftSidebar && belowProjects && aboveChats) return candidate;
   }
 
   return null;
@@ -669,13 +523,16 @@ async function recoverExistingProjectExactHumanFlow(page, name) {
   if (!existing) return null;
 
   const beforeUrl = page.url();
+  await humanPointerClick(page, existing);
+  await page.waitForTimeout(randomDelayMs(3000, 5000));
 
-  // User-directed human gesture sequence on the exact visible Project title:
-  // short click -> 0.1-0.3s -> double-click -> 0.1-0.3s -> longer click.
-  // Stop immediately if any gesture causes Project URL navigation.
-  const projectUrl = await runProjectTitleClickSequence(page, existing, beforeUrl);
+  let projectUrl = page.url();
   if (projectUrl === beforeUrl) {
-    throw new Error('Existing exact-name Project title did not navigate after short-click, double-click, and long-click sequence');
+    await page.waitForTimeout(randomDelayMs(2000, 3500));
+    projectUrl = page.url();
+  }
+  if (projectUrl === beforeUrl) {
+    throw new Error('Existing exact-name Project did not navigate to its Project URL after a short visible wait');
   }
 
   const composer = await ensureComposer(page);
@@ -710,9 +567,6 @@ async function findSendControlNearComposer(page, composer) {
 
 async function createProjectExactHumanFlow(page, name) {
   if (!name) throw new Error('PROJECT_NAME is required for project_wake');
-
-  const saved = await openSavedProjectUrl(page, name, requestedProjectUrl);
-  if (saved) return saved;
 
   const recovered = await recoverExistingProjectExactHumanFlow(page, name);
   if (recovered) return recovered;
@@ -756,20 +610,19 @@ async function createProjectExactHumanFlow(page, name) {
   await humanPointerClick(page, enabledCreate);
 
   // Successful Project creation automatically navigates the browser to the new
-  // Project URL. Preserve the proven flow, but allow normal ChatGPT UI latency.
-  let projectUrl = beforeCreateUrl;
-  const projectNavigationDeadline = Date.now() + 30000;
-  while (Date.now() < projectNavigationDeadline && projectUrl === beforeCreateUrl) {
-    await page.waitForTimeout(randomDelayMs(1200, 2200));
+  // Project URL. A short human-scale wait is sufficient; capture that URL directly.
+  await page.waitForTimeout(randomDelayMs(3000, 5000));
+  let projectUrl = page.url();
+  if (projectUrl === beforeCreateUrl) {
+    await page.waitForTimeout(randomDelayMs(2000, 3500));
     projectUrl = page.url();
   }
   if (projectUrl === beforeCreateUrl) {
-    throw new Error('Create project did not navigate to a new Project URL within 30 seconds');
+    throw new Error('Create project did not navigate to a new Project URL after a short visible wait');
   }
 
   const composer = await ensureComposer(page);
   console.log('[github-playwright-v10] project-created-visible=' + JSON.stringify({ projectName: name, url: projectUrl }));
-  await publishOperatorStatus('PROJECT_URL_SAVED', { projectUrl });
   return { projectName: name, url: projectUrl, composer };
 }
 
@@ -867,7 +720,7 @@ async function waitForVisibleBrowserReady(page) {
     }
 
     if (bool(env.INTERACTIVE_VIEW_ENABLED)) {
-      console.log('[github-playwright-v10] Visible browser is not ready; waiting only for ordinary UI/login readiness. Cloudflare challenge will pause for manual verification.');
+      console.log('[github-playwright-v10] Visible browser is not ready; waiting only for ordinary UI/login readiness. Cloudflare challenge would abort immediately.');
     }
     await page.waitForTimeout(5000);
   }
@@ -877,74 +730,26 @@ function chatRouteInfo(value) {
   try {
     const url = new URL(value);
     if (url.origin !== 'https://chatgpt.com') {
-      return { isChat: false, isLocal: false, id: '', projectScoped: false, projectId: '' };
+      return { isChat: false, isLocal: false, id: '', projectScoped: false };
     }
 
     const rootMatch = url.pathname.match(/^\/c\/([^/]+)\/?$/);
-    const projectMatch = url.pathname.match(/^\/g\/(g-p-[^/]+)\/c\/([^/]+)\/?$/);
+    const projectMatch = url.pathname.match(/^\/g\/([^/]+)\/c\/([^/]+)\/?$/);
     const id = rootMatch
       ? decodeURIComponent(rootMatch[1])
       : projectMatch
         ? decodeURIComponent(projectMatch[2])
         : '';
-    const projectId = projectMatch ? decodeURIComponent(projectMatch[1]) : '';
 
     return {
       isChat: Boolean(id),
       isLocal: id.startsWith('local-chatgpt:'),
       id,
-      projectScoped: Boolean(projectMatch),
-      projectId
+      projectScoped: Boolean(projectMatch)
     };
   } catch {
-    return { isChat: false, isLocal: false, id: '', projectScoped: false, projectId: '' };
+    return { isChat: false, isLocal: false, id: '', projectScoped: false };
   }
-}
-
-async function persistDurableChatState(chatUrl, projectUrl = '') {
-  const route = chatRouteInfo(chatUrl);
-  if (!route.isChat || route.isLocal) return false;
-
-  const state = {
-    version: 1,
-    capturedAt: new Date().toISOString(),
-    wakeId,
-    action,
-    projectName,
-    projectUrl: projectUrl || requestedProjectUrl || '',
-    chatUrl,
-    chatTitle: recoveryChatTitle || ''
-  };
-  await fs.writeFile(chatStatePath, JSON.stringify(state, null, 2) + '\n');
-  console.log('[github-playwright-v10] durable-chat-state-captured=' + JSON.stringify({
-    chatUrl,
-    projectUrl: state.projectUrl,
-    projectName: state.projectName
-  }));
-  await publishOperatorStatus('CHAT_URL_SAVED', { chatUrl, projectUrl: state.projectUrl, projectName: state.projectName });
-  return true;
-}
-
-async function recoverCreatedChatDirect(page, message) {
-  const route = chatRouteInfo(page.url());
-  if (!route.isChat || route.isLocal) {
-    throw new Error('Direct recovery is not on a durable ChatGPT conversation route');
-  }
-
-  const wake = await visibleWakePresent(page, message, 30000);
-  if (!wake.visible) {
-    throw new Error('Directly recovered chat did not visibly contain the exact original wake message');
-  }
-
-  await persistDurableChatState(route.url || page.url(), requestedProjectUrl);
-  return {
-    recovered: true,
-    projectUrl: requestedProjectUrl || '',
-    chatUrl: page.url(),
-    chatTitle: recoveryChatTitle || '',
-    verificationMethod: wake.method,
-    userCount: wake.userCount
-  };
 }
 
 async function visibleWakePresent(page, message, timeoutMs = 90000) {
@@ -1005,7 +810,7 @@ async function waitForFreshChatRoute(page, timeoutMs = 90000) {
     if (info.isChat) return { url: current, ...info };
     await page.waitForTimeout(500);
   }
-  throw new Error('Fresh chat did not visibly navigate to a durable ChatGPT conversation route');
+  throw new Error('Fresh chat did not visibly navigate to a recognized ChatGPT conversation route');
 }
 
 async function waitForDurableChatRoute(page, timeoutMs = 300000) {
@@ -1017,7 +822,7 @@ async function waitForDurableChatRoute(page, timeoutMs = 300000) {
     if (visible.humanChallenge) {
       await publishOperatorStatus('INTERVENTION_REQUIRED', {
         stage: 'durable_chat_url',
-        message: 'Human verification is visible while the new Project chat is becoming durable. Open browser_view_url and complete it manually.'
+        message: 'Human verification is visible while the new chat URL is becoming durable. Open browser_view_url and complete it manually.'
       });
       console.log('[github-playwright-v10] INTERVENTION_REQUIRED=' + JSON.stringify({
         stage: 'durable_chat_url',
@@ -1051,134 +856,124 @@ function recoverySearchMarker(message) {
   return bracket ? bracket[0] : text.slice(0, 120);
 }
 
-async function recoverCreatedChatFromProjectPage(page, message) {
+async function recoverCreatedChatByVisibleSearch(page, message) {
   if (!message) throw new Error('recover action requires the original wake message');
-  if (!recoveryChatTitle) throw new Error('recover action requires the visible Project chat title');
-  if (!requestedProjectUrl) {
-    throw new Error('Project-page recovery requires a saved Project URL; sidebar rediscovery is disabled');
+  const marker = recoverySearchMarker(message);
+  if (!marker) throw new Error('recover action could not derive a visible search marker');
+
+  const filter = await firstVisible(page, [
+    'button[aria-label="Filter chats and work"]',
+    '[role="button"][aria-label="Filter chats and work"]',
+    'button[aria-label*="Filter chats" i]',
+    'button[aria-label*="Search chats" i]',
+    'button[aria-label*="Search" i]'
+  ]);
+  if (!filter) throw new Error('Visible ChatGPT chat-search control was not found');
+  await humanPointerClick(page, filter, { hoverMs: 180, downMs: 65, settleMs: 420 });
+
+  const searchInput = await firstVisible(page, [
+    '[role="dialog"] input[placeholder*="Search" i]',
+    '[role="dialog"] input[aria-label*="Search" i]',
+    'input[placeholder*="Search" i]',
+    'input[aria-label*="Search" i]',
+    '[role="searchbox"]'
+  ]);
+  if (!searchInput) throw new Error('Visible ChatGPT chat-search input was not found');
+  await humanTypeInto(page, searchInput, marker, { delay: 45 });
+
+  const normalizedMarker = marker.replace(/\s+/g, ' ').trim();
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const title = await page.title().catch(() => '');
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    const visible = visibleBrowserStateText(bodyText, title);
+    if (visible.humanChallenge) {
+      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected during read-only chat recovery; aborting immediately');
+      error.code = 'BROWSER_CHALLENGE';
+      throw error;
+    }
+
+    const candidates = page.locator(
+      '[role="dialog"] a, [role="dialog"] button, [role="option"], a[href^="/c/"], a[href*="chatgpt.com/c/"]'
+    );
+    const count = Math.min(await candidates.count().catch(() => 0), 120);
+    for (let i = 0; i < count; i += 1) {
+      const candidate = candidates.nth(i);
+      if (!await candidate.isVisible().catch(() => false)) continue;
+      const text = [
+        await candidate.innerText().catch(() => ''),
+        await candidate.getAttribute('aria-label').catch(() => ''),
+        await candidate.getAttribute('title').catch(() => '')
+      ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+      if (!text.includes(normalizedMarker)) continue;
+
+      await humanPointerClick(page, candidate, { hoverMs: 180, downMs: 65, settleMs: 650 });
+      const route = await waitForDurableChatRoute(page, 300000);
+      const wake = await visibleWakePresent(page, message, 30000);
+      if (!wake.visible) {
+        throw new Error('Recovered chat URL did not visibly contain the exact original wake message');
+      }
+
+      console.log('[github-playwright-v10] recovered-created-chat=' + JSON.stringify({
+        chatUrl: route.url,
+        verificationMethod: wake.method
+      }));
+      return { recovered: true, chatUrl: route.url, verificationMethod: wake.method, userCount: wake.userCount };
+    }
+
+    await page.waitForTimeout(750);
   }
 
-  const project = await openSavedProjectUrl(page, projectName, requestedProjectUrl);
-  if (!project) throw new Error('Saved Project URL could not be opened for recovery');
-
-  await page.waitForTimeout(randomDelayMs(1200, 2200));
-
-  const projectMain = page.locator('main, [role="main"]').first();
-  if (!await projectMain.isVisible().catch(() => false)) {
-    throw new Error('Visible Project main surface was not found after opening the persisted Project URL');
-  }
-
-  const titlePattern = new RegExp('^' + escapeRegExp(recoveryChatTitle) + '$', 'i');
-  const visibleTitle = projectMain.getByText(titlePattern, { exact: true }).first();
-  if (!await visibleTitle.isVisible().catch(() => false)) {
-    throw new Error('Visible Project chat title was not found in the Project chat list');
-  }
-
-  let chatControl = visibleTitle;
-  const link = visibleTitle.locator('xpath=ancestor-or-self::a[1]');
-  if (await link.isVisible().catch(() => false)) {
-    chatControl = link;
-  } else {
-    const button = visibleTitle.locator('xpath=ancestor-or-self::button[1]');
-    if (await button.isVisible().catch(() => false)) chatControl = button;
-  }
-
-  await humanPointerClick(page, chatControl);
-
-  const route = await waitForDurableChatRoute(page, 300000);
-  if (!route.projectScoped) {
-    throw new Error('Recovered Project chat did not open a Project-scoped durable conversation route');
-  }
-  await persistDurableChatState(route.url, project.url);
-
-  const wake = await visibleWakePresent(page, message, 30000);
-  if (!wake.visible) {
-    throw new Error('Recovered Project chat did not visibly contain the exact original wake message');
-  }
-
-  console.log('[github-playwright-v10] recovered-project-chat=' + JSON.stringify({
-    projectUrl: project.url,
-    chatUrl: route.url,
-    chatTitle: recoveryChatTitle,
-    verificationMethod: wake.method
-  }));
-  return {
-    recovered: true,
-    projectUrl: project.url,
-    chatUrl: route.url,
-    chatTitle: recoveryChatTitle,
-    verificationMethod: wake.method,
-    userCount: wake.userCount
-  };
+  throw new Error('No visible ChatGPT search result matched the unique wake marker within 30 seconds');
 }
 
-async function postWithVisibleVerification(page, message, composerOverride = null, projectUrlForState = '') {
+async function postWithVisibleVerification(page, message, composerOverride = null) {
   const submitted = await post(page, message, composerOverride);
 
-  let initialRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
+  let route = { url: page.url(), ...chatRouteInfo(page.url()) };
   if (mode === 'create_fresh') {
-    initialRoute = await waitForFreshChatRoute(page, 90000);
-  } else if (!initialRoute.isChat) {
-    throw new Error('Existing-chat send is not on a visible durable ChatGPT conversation route');
+    route = await waitForFreshChatRoute(page, 90000);
+  } else if (!route.isChat) {
+    throw new Error('Existing-chat send is not on a visible ChatGPT conversation route');
   }
 
-  const beforeReload = await visibleWakePresent(page, message, 90000);
-  console.log('[github-playwright-v10] visible-wake-before-reload=' + JSON.stringify({
-    ...beforeReload,
-    chatUrl: initialRoute.url,
-    localRoute: initialRoute.isLocal
+  const visibleWake = await visibleWakePresent(page, message, 90000);
+  console.log('[github-playwright-v10] visible-wake-before-url-save=' + JSON.stringify({
+    ...visibleWake,
+    chatUrl: route.url,
+    localRoute: route.isLocal,
+    projectScoped: route.projectScoped
   }));
-  if (!beforeReload.visible) {
-    throw new Error('Sent wake is not visibly present in the rendered conversation before reload');
+  if (!visibleWake.visible) {
+    throw new Error('Sent wake is not visibly present in the rendered conversation before URL save');
   }
 
-  // Never reload an optimistic local-chatgpt route. Wait for the normal UI
-  // to transition to a durable server-backed root or Project-scoped chat route first.
-  if (initialRoute.isLocal) {
-    initialRoute = await waitForDurableChatRoute(page, 300000);
-  }
-  await persistDurableChatState(initialRoute.url, projectUrlForState || requestedProjectUrl);
-
-  await humanReload(page);
-  await waitForVisibleBrowserReady(page);
-
-  const reloadedRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
-  if (!reloadedRoute.isChat || reloadedRoute.isLocal) {
-    throw new Error('Human-style reload did not return to a durable ChatGPT conversation');
+  if (route.isLocal) {
+    route = await waitForDurableChatRoute(page, 300000);
   }
 
-  await persistDurableChatState(reloadedRoute.url, projectUrlForState || requestedProjectUrl);
-  const afterReload = await visibleWakePresent(page, message, 90000);
-  console.log('[github-playwright-v10] visible-wake-after-reload=' + JSON.stringify({
-    ...afterReload,
-    chatUrl: reloadedRoute.url,
-    localRoute: reloadedRoute.isLocal
+  console.log('[github-playwright-v10] durable-chat-url-saved=' + JSON.stringify({
+    chatUrl: route.url,
+    projectScoped: route.projectScoped
   }));
-  if (!afterReload.visible) {
-    throw new Error('Wake is not visibly present after human-style reload of the conversation');
-  }
+  await publishOperatorStatus('CHAT_URL_SAVED', { chatUrl: route.url, projectScoped: route.projectScoped });
 
   return {
     ...submitted,
     persisted: true,
-    userCount: afterReload.userCount,
-    verificationMethod: afterReload.method,
-    chatUrl: reloadedRoute.url,
-    localRoute: reloadedRoute.isLocal
+    userCount: visibleWake.userCount,
+    verificationMethod: visibleWake.method,
+    chatUrl: route.url,
+    localRoute: route.isLocal,
+    projectScoped: route.projectScoped
   };
 }
 
 async function runWithPage(providerName, connect) {
   const { browser, context, page, close } = await connect();
   try {
-    const recoveryRoute = action === 'recover' ? chatRouteInfo(requestedUrl) : { isChat: false, isLocal: false };
-    if (action === 'recover' && recoveryRoute.isChat && !recoveryRoute.isLocal) {
-      await page.goto(requestedUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    } else if (mode === 'resume_existing') {
-      const requestedRoute = chatRouteInfo(requestedUrl);
-      if (!requestedRoute.isChat || requestedRoute.isLocal) {
-        throw new Error('resume_existing requires a durable root or Project-scoped ChatGPT conversation URL');
-      }
+    if (mode === 'resume_existing') {
+      if (!/^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(requestedUrl)) throw new Error('resume_existing requires a chatgpt.com/c/... URL');
       await page.goto(requestedUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
     } else if (mode === 'create_fresh') {
       await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -1198,6 +993,7 @@ async function runWithPage(providerName, connect) {
     if (action === 'project_wake') {
       if (mode !== 'create_fresh') throw new Error('project_wake requires create_fresh mode');
       project = await createProjectExactHumanFlow(page, projectName);
+      await publishOperatorStatus('PROJECT_URL_SAVED', { projectUrl: project.url });
     }
 
     const before = await snapshot(page);
@@ -1210,10 +1006,7 @@ async function runWithPage(providerName, connect) {
     }
 
     if (action === 'recover') {
-      const directRoute = chatRouteInfo(requestedUrl);
-      const recovered = directRoute.isChat && !directRoute.isLocal
-        ? await recoverCreatedChatDirect(page, wakeMessage)
-        : await recoverCreatedChatFromProjectPage(page, wakeMessage);
+      const recovered = await recoverCreatedChatByVisibleSearch(page, wakeMessage);
       const after = await snapshot(page);
       const sessionStatePersisted = false;
       const result = {
@@ -1226,7 +1019,6 @@ async function runWithPage(providerName, connect) {
         sessionStatePersisted,
         before,
         after,
-        projectUrl: recovered.projectUrl,
         chatUrl: recovered.chatUrl,
         verification: 'visible-browser-only',
         verificationMethod: recovered.verificationMethod
@@ -1252,7 +1044,7 @@ async function runWithPage(providerName, connect) {
       return result;
     }
 
-    const verifiedSend = await postWithVisibleVerification(page, wakeMessage, project?.composer || null, project?.url || requestedProjectUrl);
+    const verifiedSend = await postWithVisibleVerification(page, wakeMessage, project?.composer || null);
 
     let response = null;
     let after;
