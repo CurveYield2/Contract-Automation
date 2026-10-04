@@ -233,7 +233,7 @@ test('v10 Create-project modal has visible-label fallbacks and a short render wa
   const start = source.indexOf('async function createProjectExactHumanFlow');
   const end = source.indexOf('\nasync function fillComposer', start);
   const block = source.slice(start, end);
-  assert.match(block, /randomDelayMs\(2500, 4500\)/);
+  assert.match(block, /randomDelayMs\(12000, 20000\)/);
 });
 
 test('v10 waits for the visible Create project button to become enabled after typing', () => {
@@ -419,7 +419,7 @@ test('recover opens a saved durable chat URL directly and never rediscovers its 
   const runStart = source.indexOf('async function runWithPage');
   const runEnd = source.indexOf('\nasync function localProvider', runStart);
   const runBlock = source.slice(runStart, runEnd);
-  assert.match(runBlock, /await page\.goto\(requestedUrl/);
+  assert.match(runBlock, /await humanAddressNavigate\(page, deferredHumanUrl\)/);
   assert.match(runBlock, /await recoverCreatedChatDirect\(page, wakeMessage\)/);
 
   const projectRecoverStart = source.indexOf('async function recoverCreatedChatFromProjectPage');
@@ -447,13 +447,26 @@ test('saved Project direct recovery retries only the exact URL after transient h
   const end = source.indexOf('\nasync function findVisibleExactProjectEntry', start);
   const block = source.slice(start, end);
 
-  assert.match(block, /const maxAttempts = 4/);
+  assert.match(block, /const maxAttempts = 3/);
   assert.match(block, /for \(let attempt = 1; attempt <= maxAttempts; attempt \+= 1\)/);
-  assert.match(block, /await page\.goto\(projectUrl, \{ waitUntil: 'domcontentloaded', timeout: 60000 \}\)/);
+  assert.match(block, /await humanAddressNavigate\(page, projectUrl\)/);
   assert.match(block, /const settleDeadline = Date\.now\(\) \+ 20000/);
   assert.match(block, /findProjectLandingComposer\(page, name\)/);
   assert.match(block, /project-saved-url-retry=/);
   assert.match(block, /randomDelayMs\(2500, 4500\)/);
-  assert.match(block, /after direct retries/);
+  assert.match(block, /after human direct retries/);
   assert.doesNotMatch(block, /recoverExistingProjectExactHumanFlow|ensureSidebarOpenForProject|mouse\.wheel/);
+});
+
+
+test('human address navigation uses the visible address bar and per-character keyboard input', () => {
+  const start = source.indexOf('async function humanAddressNavigate');
+  const end = source.indexOf('\nasync function findVisibleSidebarSurface', start);
+  const block = source.slice(start, end);
+  assert.match(block, /page\.keyboard\.press\('Control\+L'\)/);
+  assert.match(block, /for \(const char of String\(targetUrl\)\)/);
+  assert.match(block, /page\.keyboard\.type\(char\)/);
+  assert.match(block, /humanTypingPause\(page\)/);
+  assert.match(block, /page\.keyboard\.press\('Enter'\)/);
+  assert.doesNotMatch(block, /page\.goto\(targetUrl|\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
 });
