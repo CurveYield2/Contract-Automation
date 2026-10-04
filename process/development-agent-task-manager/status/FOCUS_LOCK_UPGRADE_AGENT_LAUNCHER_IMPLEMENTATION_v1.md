@@ -11,6 +11,10 @@
 
 ## CURRENT STATE
 
+- Proven Project-creation baseline restored/pinned: branch `browser-v10-project-url-proven-v1` at commit `28497b4ae50485be8ab6e0a736dfd96f5994226a`, live run `37156159975`.
+- That run visibly created `HOME_EXIT_PROJECT_WAKE_VERIFY1` and captured Project URL `https://chatgpt.com/g/g-p-6ac177c98f0c81919e970bb2a69b8583/project`.
+- Verified current `main` runtime blobs for the v10 workflow, worker, session helper, runtime action, and runtime package are byte-identical to that proven commit. Do not alter those runtime files while using this restored baseline unless a new, separately validated change is explicitly required.
+
 - Active browser lane is now **Manual-Only Home-Exit Browser v11**.
 - Canonical workflow: `.github/workflows/browser-agent-home-exit-v11.yml`.
 - Canonical browser script: `packages/browser-agent-manual-only-v11/browser-agent-manual-v11.mjs`.
