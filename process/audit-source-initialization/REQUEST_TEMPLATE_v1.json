@@ -1,3 +1,7 @@
 {
-  "source_url": "REPLACE_WITH_DIRECT_SINGLE_ZIP_FILE_URL"
+  "source_url": "REPLACE_WITH_DIRECT_SINGLE_ZIP_FILE_URL",
+  "agent_chat_1_url": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_1_CHAT_ID",
+  "agent_chat_2_url": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_2_CHAT_ID",
+  "agent_chat_3_url": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_3_CHAT_ID",
+  "agent_chat_4_url": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_4_CHAT_ID"
 }
