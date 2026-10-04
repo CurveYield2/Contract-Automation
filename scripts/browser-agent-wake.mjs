@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 import { validateStorageState } from './browser-session-state-v1.mjs';
 import { loadBrowserRoutine, runBrowserRoutineStage } from './browser-routine-engine-v1.mjs';
 import { executeBrowserOperation } from './browser-operations-v1.mjs';
@@ -279,17 +280,34 @@ async function humanActionPause(page) {
 }
 
 async function humanTypingPause(page, char = '') {
-  let min = 55;
-  let max = 95;
+  // Skilled visible typist pacing: roughly 80-120 WPM in normal prose,
+  // with faster spaces and natural punctuation pauses.
+  let min = 90;
+  let max = 130;
   if (/\s/.test(char)) {
-    min = 70;
-    max = 125;
+    min = 55;
+    max = 95;
   }
   if (/[.!?,;:]/.test(char)) {
-    min = 110;
-    max = 190;
+    min = 145;
+    max = 230;
   }
   await page.waitForTimeout(randomDelayMs(min, max));
+}
+
+async function x11Key(args, label = 'x11-key') {
+  await new Promise((resolve, reject) => {
+    const child = spawn('xdotool', args, {
+      env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
+      stdio: ['ignore', 'ignore', 'pipe']
+    });
+    let stderr = '';
+    child.stderr?.on('data', chunk => { stderr += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', code => code === 0
+      ? resolve()
+      : reject(new Error(label + ' failed: ' + stderr.trim())));
+  });
 }
 
 async function humanPointerClick(page, locator) {
@@ -368,10 +386,10 @@ async function readComposerText(composer) {
 async function clearComposer(page, composer) {
   const currentText = await readComposerText(composer);
   if (!currentText) return;
-  await composer.press('Control+A').catch(async () => composer.press('Meta+A').catch(() => {}));
-  await page.waitForTimeout(120);
-  await composer.press('Backspace');
-  await page.waitForTimeout(150);
+  await x11Key(['key', '--clearmodifiers', 'ctrl+a'], 'x11-select-all');
+  await page.waitForTimeout(randomDelayMs(90, 160));
+  await x11Key(['key', '--clearmodifiers', 'BackSpace'], 'x11-backspace');
+  await page.waitForTimeout(randomDelayMs(120, 220));
 }
 
 async function verifyComposerMessage(composer, message, label) {
@@ -398,11 +416,11 @@ async function fillComposer(page, message) {
   await clearComposer(page, composer);
 
   const text = String(message);
-  console.log('[github-playwright] composer-fill-strategy=human-keyboard-per-character length=' + text.length);
+  console.log('[github-playwright] composer-fill-strategy=human-x11-skilled-typist-per-character length=' + text.length);
 
   for (let i = 0; i < text.length; i += 1) {
     const char = text[i];
-    await composer.pressSequentially(char);
+    await x11Key(['type', '--clearmodifiers', '--delay', '0', char], 'x11-type-character');
     await humanTypingPause(page, char);
 
     if ((i + 1) % 250 === 0 || i === text.length - 1) {
@@ -411,11 +429,11 @@ async function fillComposer(page, message) {
       if (!visible || visibleLength === 0) {
         throw new BrowserAgentError(
           'COMPOSER_HUMAN_TYPE_LOST',
-          'Visible composer lost human-typed text during per-character entry',
+          'Visible composer lost X11 human-typed text during per-character entry',
           true
         );
       }
-      console.log('[github-playwright] human-keyboard-progress=' + JSON.stringify({
+      console.log('[github-playwright] human-x11-keyboard-progress=' + JSON.stringify({
         typedCharacters: i + 1,
         totalCharacters: text.length,
         visibleLength
@@ -425,11 +443,11 @@ async function fillComposer(page, message) {
 
   await humanActionPause(page);
 
-  const verification = await verifyComposerMessage(composer, message, 'composer-human-keyboard-verification');
+  const verification = await verifyComposerMessage(composer, message, 'composer-human-x11-skilled-typist-verification');
   if (!verification.prefixMatches || !verification.lengthLooksPlausible) {
     throw new BrowserAgentError(
       'COMPOSER_FILL_MISMATCH',
-      'Composer did not retain the normalized wake marker after human per-character keyboard entry',
+      'Composer did not retain the normalized wake marker after visible X11 human typing',
       true
     );
   }
@@ -463,9 +481,9 @@ async function post(page, message) {
     await humanPointerClick(page, send, { hoverMs: 180, downMs: 65, settleMs: 320 });
   } else {
     composer = await ensureComposer(page);
-    console.log('[github-playwright] send-strategy=human-keyboard-enter');
-    await composer.press('Enter');
-    await page.waitForTimeout(320);
+    console.log('[github-playwright] send-strategy=human-x11-keyboard-enter');
+    await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-send-enter');
+    await page.waitForTimeout(randomDelayMs(280, 420));
   }
 
   const deadline = Date.now() + 90000;
@@ -879,15 +897,11 @@ async function localProvider(chromium) {
   }
   console.log('[github-playwright] Using immutable bootstrap-secret session state; run state will be discarded.');
   const browser = await chromium.launch({
-    headless: env.BROWSER_HEADLESS !== 'false',
-    channel: 'chrome',
-    args: ['--disable-quic', '--window-size=1920,1080']
+    headless: false,
+    channel: 'chrome'
   });
   const context = await browser.newContext({
-    storageState: storage,
-    viewport: { width: 1920, height: 1080 },
-    screen: { width: 1920, height: 1080 },
-    deviceScaleFactor: 1
+    storageState: storage
   });
   const page = await context.newPage();
   return { browser, context, page, close: () => browser.close() };
