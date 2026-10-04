@@ -309,10 +309,53 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
   assert.equal(blocked.currentAssignment,null);
   assert.equal(blocked.campaignStatus,'MASTER_REVIEW_REWORK_REQUIRED');
   assert.match(blocked.pendingMasterReview.repairSpecSha256,/^[0-9a-f]{64}$/);
-  const repeated=runMaster(f);
-  assert.equal(repeated.status,'MASTER_REVIEW_INVALID');
-  assert.match(repeated.feedbackText,/MASTER_REPAIR_TRANSPORT_BLOCKED/);
-  assert.equal(readJson(path.join(f.root,f.dirRel)).currentAssignment,null);
+  const repairPending=blocked.pendingMasterReview;
+  const repairedForm=readJson(path.join(f.root,f.formRel));
+  const beforeSha=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.formRel))).digest('hex');
+  repairedForm.actions['step-1'].outputs.analysis='Corrected evidence-bound Phase-1 analysis.';
+  writeJson(path.join(f.root,f.formRel),repairedForm);
+  const afterSha=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.formRel))).digest('hex');
+  const childSubmission=readJson(masterPath);
+  childSubmission.childRepair={
+    scopeId:'MR-001-repair',
+    model:'SOL',
+    reasoning:'HIGH',
+    freshChild:true,
+    childChatUrl:'https://chatgpt.com/c/fresh-sol-child',
+    result:'COMPLETED',
+    changedFiles:[{file:path.posix.relative(f.campaign,f.formRel),beforeSha256:beforeSha,afterSha256:afterSha}],
+    changedSemanticPaths:[{file:path.posix.relative(f.campaign,f.formRel),path:'actions.step-1.outputs.analysis'}],
+    completedAt:'2026-10-04T01:00:00Z'
+  };
+  writeJson(masterPath,childSubmission);
+
+  const ready=runMaster(f);
+  assert.equal(ready.status,'MASTER_REPAIR_READY_FOR_VERIFICATION');
+  const verificationPending=readJson(path.join(f.root,f.dirRel));
+  assert.equal(verificationPending.currentAssignment,null);
+  assert.equal(verificationPending.campaignStatus,'WAITING_FOR_MASTER_REVIEW');
+  assert.match(verificationPending.pendingMasterReview.postRepairManifestSha256,/^[0-9a-f]{64}$/);
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v1.json')),true);
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v2.json')),true);
+
+  const verifiedForm=readJson(masterPath);
+  assert.equal(verifiedForm.postRepair.scopeId,'MR-001-repair');
+  assert.deepEqual(verifiedForm.postRepair.refreshedPhases,[1]);
+  verifiedForm.masterVerification={
+    outcome:'ACCEPT',
+    verifiedArtifactDigests:verifiedForm.postRepair.artifacts.map(x=>({path:x.path,sha256:x.sha256})),
+    deficiencyDispositions:[{deficiencyId:'MR-001',disposition:'RESOLVED'}],
+    notes:'Same persistent master verified controller-refreshed artifacts.',
+    verifiedAt:'2026-10-04T02:00:00Z'
+  };
+  writeJson(masterPath,verifiedForm);
+  const accepted=runMaster(f);
+  assert.equal(accepted.status,'PASS');
+  assert.equal(accepted.masterReviewAccepted,true);
+  const advanced=readJson(path.join(f.root,f.dirRel));
+  assert.equal(advanced.pendingMasterReview,null);
+  assert.equal(advanced.currentAssignment.phaseSequence,2);
+  assert.equal(advanced.lastAcceptedMasterReview.postRepairManifestSha256,verifiedForm.postRepair.manifestSha256);
 });
 
 test('typed held revision2-to-revision3 admission regenerates controller products and resolves EIM-013',()=>{
