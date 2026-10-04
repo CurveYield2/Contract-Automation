@@ -37,11 +37,11 @@ const artifactLines=[
   'Bound authority homepage: '+controllerBlobUrl(linkedAuthorityHome),
   'Bound authority package: '+controllerTreeUrl(path.posix.dirname(linkedAuthorityHome)),
   'Phase schema: '+controllerBlobUrl(assignment.workSchemaPath),
-  'Phase work form: '+controllerBlobUrl(assignment.workFormPath),
-  'Controller-owned final report target: '+controllerBlobUrl(assignment.finalReportPath),
-  'Controller work packet: '+controllerBlobUrl(assignment.packetPath),
+  'Assigned work form: '+controllerBlobUrl(assignment.workFormPath),
+  'Controller-owned final report: '+controllerBlobUrl(assignment.finalReportPath),
+  'Controller-owned Phase Work Packet: '+controllerBlobUrl(assignment.packetPath),
   'Sealed predecessor receipt: '+controllerBlobUrl(assignment.predecessorReceiptPath),
-  ...(assignment.derivedInputPaths??[]).map(x=>'Controller-derived input: '+controllerBlobUrl(x))
+  ...(assignment.derivedInputPaths??[]).map((x,index)=>'Phase input '+(index+1)+': '+controllerBlobUrl(x))
 ];
 const lines=[
   'LITE audit: '+directory.campaignName,
