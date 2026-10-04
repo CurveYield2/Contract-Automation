@@ -582,6 +582,46 @@ async function runNormalChromeExistingSession(chromium) {
     await x11Key(['click', '1'], 'x11-composer-click');
     await page.waitForTimeout(randomDelayMs(220, 420));
 
+    const focusState = await composer.evaluate(el => {
+      const active = document.activeElement;
+      const focused = active === el || el.contains(active);
+      return {
+        focused,
+        activeTag: active?.tagName || '',
+        activeId: active?.id || '',
+        activeRole: active?.getAttribute?.('role') || '',
+        activeAria: active?.getAttribute?.('aria-label') || '',
+        composerTag: el.tagName || '',
+        composerId: el.id || '',
+        composerRole: el.getAttribute?.('role') || '',
+        composerAria: el.getAttribute?.('aria-label') || ''
+      };
+    }).catch(() => ({ focused: false, error: 'focus-evaluation-failed' }));
+    console.log('[normal-chrome-watchdog] composer-focus=' + JSON.stringify(focusState));
+
+    if (!focusState.focused) {
+      const evidenceDir = '/tmp/browser-wake-evidence-v1';
+      await fs.mkdir(evidenceDir, { recursive: true });
+      await page.screenshot({
+        path: path.join(evidenceDir, 'watchdog-composer-focus-failed-v1.png'),
+        fullPage: true
+      }).catch(() => {});
+      await fs.writeFile(
+        path.join(evidenceDir, 'watchdog-composer-focus-failed-v1.json'),
+        JSON.stringify({
+          composerBox: box,
+          translatedPoint: composerPoint,
+          focusState
+        }, null, 2) + '\n',
+        'utf8'
+      );
+      throw new BrowserAgentError(
+        'COMPOSER_FOCUS_FAILED',
+        'Translated X11 click did not focus the ChatGPT composer; refusing to type',
+        true
+      );
+    }
+
     const existingText = await readComposerText(composer);
     if (existingText) {
       await x11Key(['key', '--clearmodifiers', 'ctrl+a'], 'x11-select-all');
