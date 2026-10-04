@@ -789,6 +789,43 @@ function observationDeltasV2(beforeRows,afterRows,{receipt,sender}={}){
   }
   return rows;
 }
+function lifecycleReachabilityV2(targets,rows){
+  const families=[];
+  for(const target of targets){
+    for(const fn of target.functions??[]){
+      const logical=target.logicalQualifiedName??target.qualifiedName;
+      const contextType=target.contextType??'DIRECT';
+      const hasAlternate=targets.some(other=>
+        (other.logicalQualifiedName??other.qualifiedName)===logical&&
+        (other.contextType??'DIRECT')!==contextType&&
+        (other.functions??[]).some(x=>x.signature===fn.signature)
+      );
+      const requiresPositive=fn.semanticFamily==='ECONOMIC'||contextType==='DELEGATE_PROXY';
+      const expectsRejection=contextType==='DIRECT'&&hasAlternate;
+      if(!requiresPositive&&!expectsRejection)continue;
+      const id=`${logical}|${contextType}|${target.recipe?.recipeId??'NO_RECIPE'}|${fn.signature}`;
+      const attempts=rows.filter(row=>
+        (row.target?.logicalQualifiedName??row.target?.qualifiedName)===logical&&
+        (row.target?.contextType??'DIRECT')===contextType&&
+        row.functionSignature===fn.signature
+      );
+      const positive=attempts.find(row=>row.executionOutcome==='MINED_SUCCESS'&&row.positiveTransition===true);
+      const negative=attempts.find(row=>row.executionOutcome==='SIMULATED_REJECTION'||row.executionOutcome==='MINED_REVERT');
+      let status='INFORMATIONAL';
+      if(requiresPositive)status=positive?'POSITIVE_WITNESS':'REACHABILITY_GAP';
+      else if(expectsRejection)status=negative?'EXPECTED_REJECTION_WITNESS':'EXPECTED_REJECTION_GAP';
+      families.push({
+        lifecycleFamilyId:id,logicalQualifiedName:logical,contextType,recipeId:target.recipe?.recipeId??null,
+        functionSignature:fn.signature,semanticFamily:fn.semanticFamily,requiresPositive,expectsRejection,
+        attemptCount:attempts.length,status,
+        positiveWitness:positive?{runId:positive.runId,callIndex:positive.callIndex,transactionHash:positive.transaction?.hash??null}:null,
+        negativeWitness:negative?{runId:negative.runId,callIndex:negative.callIndex,outcome:negative.executionOutcome,error:negative.error??null}:null,
+        gapReason:status.endsWith('GAP')?(attempts.length?'NO_REQUIRED_WITNESS_OBSERVED':'NO_ATTEMPT_REACHED_FAMILY'):null
+      });
+    }
+  }
+  return families;
+}
 function preflightKindV2(error){
   const text=String(error?.shortMessage??error?.message??error??'');
   return error?.code==='CALL_EXCEPTION'||/revert|execution reverted|panic/i.test(text)?'PROTOCOL_REJECTION':'INFRASTRUCTURE';
@@ -970,8 +1007,10 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       }
     }finally{clearInterval(telemetryHeartbeat);await h.close();}
     const reconciliation=validateTelemetryCountersV2(stats,terminalRows);
+    const lifecycleFamilies=lifecycleReachabilityV2(targets,terminalRows);
+    const positiveRequired=lifecycleFamilies.filter(x=>x.requiresPositive);
     const observationStatus=stats.observationReads===0?'UNAVAILABLE':(stats.observationFailures===0?'COMPLETE':'PARTIAL');
-    const reachabilityStatus=stats.positiveTransitions>0?'REACHABLE':'REACHABILITY_GAP';
+    const reachabilityStatus=positiveRequired.length===0?'NO_QUALIFIED_LIFECYCLES':(positiveRequired.every(x=>x.status==='POSITIVE_WITNESS')?'REACHABLE':positiveRequired.some(x=>x.status==='POSITIVE_WITNESS')?'PARTIAL':'REACHABILITY_GAP');
     console.log(`[phase0-telemetry] ${runId} completed; calls=${stats.calls}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; positiveTransitions=${stats.positiveTransitions}`);
     const actionSequenceDigestSha256=sha256(Buffer.from(JSON.stringify(terminalRows.map(row=>({target:row.target,sender:row.sender,functionSignature:row.functionSignature,decodedInputs:row.decodedInputs,actionClass:row.actionClass})))));
     const outcomeSequenceDigestSha256=sha256(Buffer.from(JSON.stringify(terminalRows.map(row=>({callIndex:row.callIndex,executionOutcome:row.executionOutcome,positiveTransition:row.positiveTransition,effectClassification:row.effectClassification})))));
@@ -980,7 +1019,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       runId,purpose:'AUTOMATED_LIFECYCLE_TELEMETRY_WITH_TYPED_OUTCOMES_AND_ACCOUNTING_OBSERVATIONS',...stats,
       accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,
       interleavedCrossContractBursts:true,executionStatus:'COMPLETED',coverageStatus:stats.calls===callsPerRun?'COMPLETE':'INCOMPLETE',
-      checkStatus:'NOT_APPLICABLE',reachabilityStatus,observationStatus,reconciliation,resetEvidence,
+      checkStatus:'NOT_APPLICABLE',reachabilityStatus,observationStatus,reconciliation,lifecycleFamilies,resetEvidence,
       feedbackStatus:stats.feedbackUpdates>0&&stats.feedbackSelections>0?'ACTIVE':'NO_FEEDBACK_WITNESS',
       actionSequenceDigestSha256,outcomeSequenceDigestSha256,
       rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,
@@ -1407,7 +1446,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const simulationLimitations=[...deploymentCombined.limitations,...(telemetry.filter(x=>x.weightingLimitation).map(x=>({type:x.weightingLimitation,runId:x.runId})))];
     if(medusaExecutionFailure)simulationLimitations.push(medusaExecutionFailure);
     if(telemetryExecutionFailure)simulationLimitations.push(telemetryExecutionFailure);
-    if(medusa.status!=='PASS'&&medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS')simulationLimitations.push({type:'MEDUSA_BASELINE_'+String(medusa.status),runId:medusa.runId});const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode:'ALL_PHASE0_STAGES',status:medusa.status==='PASS'&&telemetry.length===PHASE0_TELEMETRY_RUNS_V1&&telemetry.every(x=>x.status==='PASS')?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:telemetry.length===PHASE0_TELEMETRY_RUNS_V1?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,observationReads:x.observationReads,observationFailures:x.observationFailures,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
+    if(medusa.status!=='PASS'&&medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS')simulationLimitations.push({type:'MEDUSA_BASELINE_'+String(medusa.status),runId:medusa.runId});const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode:'ALL_PHASE0_STAGES',status:medusa.status==='PASS'&&telemetry.length===PHASE0_TELEMETRY_RUNS_V1&&telemetry.every(x=>x.status==='PASS')?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:telemetry.length===PHASE0_TELEMETRY_RUNS_V1?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,lifecycleFamilies:x.lifecycleFamilies,observationReads:x.observationReads,observationFailures:x.observationFailures,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
     const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',packageDependencyInstall,fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deployEvidence,null,2)+'\n');await provider.destroy();
