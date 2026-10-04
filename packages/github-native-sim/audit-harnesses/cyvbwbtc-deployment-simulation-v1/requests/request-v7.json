@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "curveyield-cyvbwbtc-ipor-native-live-fork-request-v7",
+  "smartContractsRepository": "CurveYield2/Smart-Contracts",
+  "smartContractsCommit": "188177e32ba6dc7b6d5f8b60a43c93b685b54e88",
+  "chainId": 747474,
+  "forkRpc": "https://katana.drpc.org/",
+  "runner": "packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/run-v7.mjs",
+  "productionBroadcast": false,
+  "accountingMarketIds": {
+    "erc20AndFx": 7,
+    "erc4626": 100001,
+    "universalSwapperV2": 1202
+  }
+}
