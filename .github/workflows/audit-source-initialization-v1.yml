@@ -123,6 +123,9 @@ jobs:
           validate_chat_url agent_chat_3_url "$agent_chat_3_url"
           validate_chat_url agent_chat_4_url "$agent_chat_4_url"
           validate_chat_url master_chat_url "$master_chat_url"
+          for reviewer_chat_url in "$agent_chat_1_url" "$agent_chat_2_url" "$agent_chat_3_url" "$agent_chat_4_url"; do
+            [ "$master_chat_url" != "$reviewer_chat_url" ] || { echo "::error::master_chat_url must be distinct from every normal reviewer chat URL"; exit 1; }
+          done
 
           {
             echo "source_url=$source_url"
