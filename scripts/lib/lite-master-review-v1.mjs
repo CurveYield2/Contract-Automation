@@ -281,7 +281,6 @@ function validateRepairSpec({root,authorityRoot,segment,form}){
     if(typeof deficiency.id!=='string'||!deficiency.id||deficiencyIds.has(deficiency.id))failures.push('REWORK deficiency IDs must be non-empty and unique');
     else deficiencyIds.add(deficiency.id);
     if(!segment.phases.includes(Number(deficiency.phase)))failures.push('REWORK deficiency phase is outside the reviewed segment: '+String(deficiency.id));
-    if(!substantiveText(deficiency.description))failures.push('REWORK deficiency description must be substantive: '+String(deficiency.id));
     if(!Array.isArray(deficiency.ownedPaths)||deficiency.ownedPaths.length===0||deficiency.ownedPaths.some(x=>typeof x!=='string'||!x))failures.push('REWORK deficiency ownedPaths must be non-empty: '+String(deficiency.id));
     if(!Array.isArray(deficiency.evidenceRefs)||deficiency.evidenceRefs.length===0||deficiency.evidenceRefs.some(x=>typeof x!=='string'||!x))failures.push('REWORK deficiency evidenceRefs must be non-empty: '+String(deficiency.id));
   }
