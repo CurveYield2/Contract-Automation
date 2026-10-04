@@ -593,6 +593,7 @@ const IPOR_ERC4626_SUPPLY_FUSE = '0xb05770874500c7dC981AF26AFb95C7656e2545c5';
 const IPOR_ERC4626_BALANCE_FUSE = '0x5F8696C110Ccb3686c8B209Fc61dcf40daf88167';
 const IPOR_UNIVERSAL_SWAPPER_V2 = '0x2513bA6f5603217636973F130128fc0372084C1E';
 const IPOR_UNIVERSAL_SWAPPER_BALANCE_V2 = '0x87dF04464459Bfb377aFB130aD3Fd98A0957C0b1';
+const IPOR_BALANCE_FUSES_READER = '0xaBa54310aF826DFE3153f78dB2eaa27eC2Be6758';
 
 const ERC20_BALANCE_MARKET_ID = 7n;
 const UNIVERSAL_SWAPPER_V2_MARKET_ID = 1202n;
@@ -1089,9 +1090,32 @@ async function verifyCyvbWbtcV13({ ethers, deployment, nestedVault }) {
   assert(await deployment.balanceFuse.MARKET_ID() === ERC20_BALANCE_MARKET_ID, 'balance fuse custom market id detected');
   assert(await deployment.instantFuse.MARKET_ID() === ERC4626_MARKET_ID, 'instant fuse custom market id detected');
 
-  assert(lower(await vault.getBalanceFuse(ERC20_BALANCE_MARKET_ID)) === lower(await deployment.balanceFuse.getAddress()), 'market7 balance fuse mismatch');
-  assert(lower(await vault.getBalanceFuse(ERC4626_MARKET_ID)) === lower(IPOR_ERC4626_BALANCE_FUSE), 'canonical ERC4626 balance mismatch');
-  assert(lower(await vault.getBalanceFuse(UNIVERSAL_SWAPPER_V2_MARKET_ID)) === lower(IPOR_UNIVERSAL_SWAPPER_BALANCE_V2), 'canonical swapper balance mismatch');
+  const reader = new ethers.Contract(IPOR_BALANCE_FUSES_READER, [
+    'function getBalanceFuseInfo(address) view returns (uint256[] marketIds,address[] fuseAddresses)',
+  ], deployment.vault.runner);
+
+  const [balanceMarketIds, balanceFuseAddresses] =
+    await reader.getBalanceFuseInfo(deployment.vault.target);
+
+  const balanceFuseByMarket = new Map(
+    balanceMarketIds.map((id, i) => [id.toString(), balanceFuseAddresses[i]])
+  );
+
+  assert(
+    lower(balanceFuseByMarket.get(ERC20_BALANCE_MARKET_ID.toString())) ===
+      lower(await deployment.balanceFuse.getAddress()),
+    'market7 balance fuse mismatch'
+  );
+  assert(
+    lower(balanceFuseByMarket.get(ERC4626_MARKET_ID.toString())) ===
+      lower(IPOR_ERC4626_BALANCE_FUSE),
+    'canonical ERC4626 balance mismatch'
+  );
+  assert(
+    lower(balanceFuseByMarket.get(UNIVERSAL_SWAPPER_V2_MARKET_ID.toString())) ===
+      lower(IPOR_UNIVERSAL_SWAPPER_BALANCE_V2),
+    'canonical swapper balance mismatch'
+  );
 
   const market7 = await vault.getMarketSubstrates(ERC20_BALANCE_MARKET_ID);
   assert(market7.length === 3, 'market7 substrate count mismatch');
@@ -1719,6 +1743,7 @@ async function main() {
       VBWBTC, FXUSD, FX_POOL_MANAGER, FX_POOL, FX_POOL_CONFIGURATION, FXBASE,
       FX_PRICE_ORACLE, IPOR_ERC4626_SUPPLY_FUSE, IPOR_ERC4626_BALANCE_FUSE,
       IPOR_UNIVERSAL_SWAPPER_V2, IPOR_UNIVERSAL_SWAPPER_BALANCE_V2,
+      IPOR_BALANCE_FUSES_READER,
     ]) {
       assert((await provider.getCode(address)) !== '0x', 'cyvbWBTC dependency missing at ' + address);
     }
