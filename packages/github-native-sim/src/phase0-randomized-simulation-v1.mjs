@@ -391,9 +391,9 @@ async function discoverDeployments({provider,artifacts,startBlock,endBlock}){
 }
 function canonicalAbiParam(param={}){
   const next={...param},originalType=String(param.type??''),internalType=String(param.internalType??'');
-  const arraySuffix=originalType.match(/(?:\\[[0-9]*\\])+$/)?.[0]??'';
+  const arraySuffix=originalType.match(/(?:\[[0-9]*\])+$/)?.[0]??'';
   const baseType=arraySuffix?originalType.slice(0,-arraySuffix.length):originalType;
-  const internalBase=internalType.replace(/(?:\\[[0-9]*\\])+$/,'');
+  const internalBase=internalType.replace(/(?:\[[0-9]*\])+$/,'');
   if(internalBase.startsWith('enum ')&&!/^u?int(?:[0-9]+)?$/.test(baseType)) next.type=`uint8${arraySuffix}`;
   else if((internalBase.startsWith('contract ')||internalBase.startsWith('interface '))&&baseType!=='address') next.type=`address${arraySuffix}`;
   else if(internalBase.startsWith('struct ')&&baseType!=='tuple') next.type=`tuple${arraySuffix}`;
@@ -1240,11 +1240,11 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         medusa=await runMedusa({projectRoot:staged.projectRoot,anvilUrl:anvil.url,blockNumber:baselineBlock,ethers,targets,outRoot:outputRoot});
       }catch(error){
         medusaExecutionFailure={type:'MEDUSA_EXECUTION_FAILURE',code:error?.code??null,message:String(error?.message??error).slice(0,3000)};
-        medusa={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:runId,status:'FAILED_EXECUTION',configuredCallLimit:callLimit,minimumRequiredCalls:minimumRequiredCalls,observedCalls:0,limitations:[medusaExecutionFailure]};
+        medusa={schemaVersion:'curveyield-phase0-medusa-run-v2',runId:'medusa-anvil-fork-001',status:'FAILED_EXECUTION',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0,limitations:[medusaExecutionFailure]};
         console.log(`[phase0-medusa] failed but workflow will continue to remaining executable stages: ${medusaExecutionFailure.message}`);
       }
     }else{
-      medusa={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:runId,status:'BLOCKED_NO_EXECUTABLE_TARGETS',configuredCallLimit:callLimit,minimumRequiredCalls:minimumRequiredCalls,observedCalls:0};
+      medusa={schemaVersion:'curveyield-phase0-medusa-run-v2',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_EXECUTABLE_TARGETS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0};
     }
     let telemetry=[];
     let telemetryExecutionFailure=null;
@@ -1275,7 +1275,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       targetEvmChainIds:targetChainIds,
       executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},
       limitations:[typed],
-      medusa:error.medusa??{status:'BLOCKED',configuredCallLimit:callLimit,minimumRequiredCalls:minimumRequiredCalls,observedCalls:0},
+      medusa:error.medusa??{status:'BLOCKED',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0},
       telemetry:[],
       deployment:deploymentEvidence,
       baselineTargetDispositions:[{
