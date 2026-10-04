@@ -456,11 +456,11 @@ function applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,auth
     const refreshedDirectory=readJson(repoFile(shadowRoot,directoryRel));
     fs.cpSync(repoFile(shadowRoot,campaignPath),repoFile(root,campaignPath),{recursive:true,force:true});
     const masterForm=readJson(requiredFile(root,result.pending.workFormPath,'master review work form'));
+    masterForm.bindings={...masterForm.bindings,repairChildSha256:createHash('sha256').update(JSON.stringify(result.form.childRepair)).digest('hex')};
     masterForm.postRepair={
       schemaVersion:'curveyield-lite-master-repair-refresh-v1',
       scopeId:result.pending.repairScopeId,
       repairSpecSha256:result.pending.repairSpecSha256,
-      childRepairSha256:createHash('sha256').update(JSON.stringify(result.form.childRepair)).digest('hex'),
       refreshedPhases,
       artifacts:postRepairArtifacts,
       manifestSha256:createHash('sha256').update(JSON.stringify(postRepairArtifacts)).digest('hex'),
@@ -472,6 +472,7 @@ function applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,auth
       refreshedPhases,
       postRepairArtifacts,
       postRepairManifestSha256:masterForm.postRepair.manifestSha256,
+      bindingsSha256:createHash('sha256').update(JSON.stringify(masterForm.bindings)).digest('hex'),
       lastSealedReceiptPath:refreshedDirectory.lastSealedReceiptPath,
       nextAssignment:refreshedDirectory.currentAssignment,
       campaignStatus:refreshedDirectory.campaignStatus
@@ -526,6 +527,7 @@ if(reviewKind==='master'){
     pending.status='WAITING_FOR_MASTER_REVIEW';
     pending.lastSealedReceiptPath=refresh.lastSealedReceiptPath;
     pending.postRepairManifestSha256=refresh.postRepairManifestSha256;
+    pending.bindingsSha256=refresh.bindingsSha256;
     pending.updatedAt=now;
     directory.currentAssignment=null;
     directory.campaignStatus='WAITING_FOR_MASTER_REVIEW';
