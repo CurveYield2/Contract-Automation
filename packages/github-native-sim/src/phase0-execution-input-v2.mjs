@@ -59,6 +59,8 @@ function compactCompilationUnits(units=[]){
 
 export function buildExecutionArtifactBundleV2({request,build}={}){
   if(!request?.source?.archiveSha256||!SHA256.test(request.source.archiveSha256))throw new Error('execution artifact export requires exact source SHA-256');
+  if(!request?.campaignId||!request?.campaignGenerationId)throw new Error('execution artifact export requires campaign and generation identity');
+  if(!request?.requestDigest||!SHA256.test(String(request.requestDigest)))throw new Error('execution artifact export requires exact request digest');
   if(!build||build.status!=='completed')throw new Error('execution artifact export requires the accepted completed Phase-0 build');
   const compilationUnits=compactCompilationUnits(build.compilationUnits??[]);
   if(!compilationUnits.length)throw new Error('execution artifact export requires exact compiler-unit identity');
@@ -210,6 +212,9 @@ function callableInventory(artifactBundle,sourceIntelligence){
 
 export function validateExecutionInputJoinV2({receipt,buildIdentity,artifactBundle,sourceIntelligence,slither,readiness}={}){
   const canonical=sourceShaFrom(receipt);
+  const campaignId=receipt?.campaign?.campaignId;
+  const campaignGenerationId=receipt?.campaign?.campaignGenerationId;
+  if(!campaignId||!campaignGenerationId)throw new Error('canonical receipt campaign/generation identity is missing');
   if(!canonical||!SHA256.test(canonical))throw new Error('canonical receipt source SHA-256 is missing');
   requireSameSource('build identity',buildIdentity,canonical);
   requireSameSource('execution artifact bundle',artifactBundle,canonical);
@@ -220,6 +225,20 @@ export function validateExecutionInputJoinV2({receipt,buildIdentity,artifactBund
   if(sourceShaFrom(readiness))requireSameSource('readiness',readiness,canonical);
 
   if(artifactBundle?.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2')throw new Error('unsupported execution artifact bundle schema');
+  if(artifactBundle?.requestIdentity?.campaignId!==campaignId)throw new Error('campaign identity mismatch for execution artifact bundle');
+  if(artifactBundle?.requestIdentity?.campaignGenerationId!==campaignGenerationId)throw new Error('campaign generation mismatch for execution artifact bundle');
+  if(buildIdentity?.campaignId!==campaignId)throw new Error('campaign identity mismatch for build identity');
+  if(buildIdentity?.campaignGenerationId!==campaignGenerationId)throw new Error('campaign generation mismatch for build identity');
+  if(!SHA256.test(String(artifactBundle?.requestIdentity?.requestDigest??'')))throw new Error('execution artifact bundle request digest is not exact');
+  const units=artifactBundle?.buildIdentity?.compilationUnits??[];
+  if(!units.length)throw new Error('execution artifact bundle has no exact compiler units');
+  for(const unit of units){
+    if(!unit.unitId||!SHA256.test(String(unit.compilerInputSha256??''))||!SHA256.test(String(unit.compilerOutputSha256??''))){
+      throw new Error('null compiler input/output identity cannot be promoted to exactness');
+    }
+  }
+  if(!SHA256.test(String(artifactBundle?.buildConfigurationDigestSha256??'')))throw new Error('execution artifact build configuration digest is missing');
+  if(buildIdentity?.build?.buildConfigurationDigestSha256!==artifactBundle.buildConfigurationDigestSha256)throw new Error('build/profile identity mismatch between build evidence and execution artifacts');
   if(artifactBundle?.reuseContract?.secondBuildRequired!==false)throw new Error('execution artifact bundle does not authorize build reuse');
   compareCompilerInventory(artifactBundle,sourceIntelligence);
 
@@ -229,7 +248,8 @@ export function validateExecutionInputJoinV2({receipt,buildIdentity,artifactBund
     schemaVersion:'curveyield-phase0-shared-execution-inputs-v2',
     status:'PASS',
     sourceSha256:canonical,
-    campaignId:receipt?.campaign?.campaignId??artifactBundle?.requestIdentity?.campaignId??null,
+    campaignId,
+    campaignGenerationId,
     artifactSetDigestSha256:artifactBundle.artifactSetDigestSha256,
     artifacts,
     callableFunctions,
