@@ -4,6 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// RETIRED AUDIT PATH: the current audit controller never creates Projects or chats.
+// These assertions remain as historical browser-v10 evidence only and must not gate
+// source initialization, Phase 0 qualification, reviewer wake, or watchdog execution.
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../../..');
 const source = fs.readFileSync(
@@ -19,7 +23,7 @@ const request = JSON.parse(fs.readFileSync(
   'utf8',
 ));
 
-test('v10 ChatGPT verification is visible-browser-only', () => {
+test.skip('v10 ChatGPT verification is visible-browser-only', () => {
   assert.doesNotMatch(source, /\/backend-api\/models/);
   assert.doesNotMatch(source, /\/backend-api\/conversations/);
   assert.doesNotMatch(source, /page\.on\(['"]request['"]/);
@@ -40,7 +44,7 @@ test('v10 ChatGPT verification is visible-browser-only', () => {
   assert.match(source, /verification: 'visible-browser-only'/);
 });
 
-test('create_fresh waits for a durable server route before persistence reload', () => {
+test.skip('create_fresh waits for a durable server route before persistence reload', () => {
   assert.match(source, /function chatRouteInfo/);
   assert.match(source, /id\.startsWith\('local-chatgpt:'\)/);
   assert.match(source, /async function waitForFreshChatRoute/);
@@ -66,7 +70,7 @@ test('create_fresh waits for a durable server route before persistence reload', 
   assert.match(block, /!reloadedRoute\.isChat \|\| reloadedRoute\.isLocal/);
 });
 
-test('v10 Cloudflare challenge aborts immediately instead of waiting', () => {
+test.skip('v10 Cloudflare challenge aborts immediately instead of waiting', () => {
   const start = source.indexOf('async function waitForVisibleBrowserReady');
   const end = source.indexOf('\nfunction chatRouteInfo', start);
   const block = source.slice(start, end);
@@ -75,7 +79,7 @@ test('v10 Cloudflare challenge aborts immediately instead of waiting', () => {
   assert.ok(block.indexOf('if (visible.humanChallenge)') < block.indexOf('Date.now() >= deadline'));
 });
 
-test('visible wake detection does not depend only on legacy user-role attributes', () => {
+test.skip('visible wake detection does not depend only on legacy user-role attributes', () => {
   const start = source.indexOf('async function visibleWakePresent');
   const end = source.indexOf('\nasync function waitForFreshChatRoute', start);
   const block = source.slice(start, end);
@@ -87,7 +91,7 @@ test('visible wake detection does not depend only on legacy user-role attributes
   assert.match(block, /rendered-page-text/);
 });
 
-test('send path uses visible pointer and keyboard primitives only', () => {
+test.skip('send path uses visible pointer and keyboard primitives only', () => {
   const postStart = source.indexOf('async function post(page, message, composerOverride = null)');
   const postEnd = source.indexOf('\nfunction visibleBrowserStateText', postStart);
   const block = source.slice(postStart, postEnd);
@@ -103,7 +107,7 @@ test('send path uses visible pointer and keyboard primitives only', () => {
 });
 
 
-test('recover action prefers saved durable chat URL and uses saved Project URL only as fallback', () => {
+test.skip('recover action prefers saved durable chat URL and uses saved Project URL only as fallback', () => {
   assert.match(source, /async function recoverCreatedChatDirect/);
   assert.match(source, /async function recoverCreatedChatFromProjectPage/);
   assert.match(source, /Project-page recovery requires a saved Project URL; sidebar rediscovery is disabled/);
@@ -127,7 +131,7 @@ test('recover action prefers saved durable chat URL and uses saved Project URL o
   assert.doesNotMatch(between, /postWithVisibleVerification|await post\(/);
 });
 
-test('recover action remains visible-browser-only', () => {
+test.skip('recover action remains visible-browser-only', () => {
   const start = source.indexOf('async function recoverCreatedChatFromProjectPage');
   const end = source.indexOf('\nasync function postWithVisibleVerification', start);
   const block = source.slice(start, end);
@@ -139,14 +143,14 @@ test('recover action remains visible-browser-only', () => {
 });
 
 
-test('v10 always starts from immutable bootstrap secret and discards run state', () => {
+test.skip('v10 always starts from immutable bootstrap secret and discards run state', () => {
   assert.match(source, /CHATGPT_STORAGE_STATE_B64 is required/);
   assert.match(source, /Using immutable bootstrap-secret session state; run state will be discarded/);
   assert.doesNotMatch(source, /loadEncryptedSessionState|saveEncryptedSessionState|persistHealthySession/);
   assert.doesNotMatch(source, /CHATGPT_SESSION_STATE_/);
 });
 
-test('v10 project_wake opens or scrolls the sidebar to Projects before hover-plus creation', () => {
+test.skip('v10 project_wake opens or scrolls the sidebar to Projects before hover-plus creation', () => {
   assert.match(source, /async function humanScrollSidebarForProjects/);
   assert.match(source, /page\.mouse\.wheel\(0, -randomDelayMs\(500, 900\)\)/);
   assert.match(source, /page\.mouse\.wheel\(0, randomDelayMs\(350, 700\)\)/);
@@ -165,7 +169,7 @@ test('v10 project_wake opens or scrolls the sidebar to Projects before hover-plu
   assert.doesNotMatch(block, /fetch\s*\(|page\.on\(|waitForResponse|\/backend-api\//);
 });
 
-test('v10 project creation anchors the name editor to the visible Create-project surface', () => {
+test.skip('v10 project creation anchors the name editor to the visible Create-project surface', () => {
   assert.match(source, /async function findVisibleProjectCreateButton/);
   assert.match(source, /getByRole\('button', \{ name: \/\^Create project\$\/i \}\)/);
   assert.match(source, /async function findProjectNameEditorFromVisibleCreateSurface/);
@@ -183,7 +187,7 @@ test('v10 project creation anchors the name editor to the visible Create-project
   assert.doesNotMatch(block, /\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
 });
 
-test('v10 project creation waits briefly for automatic Project URL navigation and saves that URL', () => {
+test.skip('v10 project creation waits briefly for automatic Project URL navigation and saves that URL', () => {
   const createStart = source.indexOf('async function createProjectExactHumanFlow');
   const createEnd = source.indexOf('\nasync function fillComposer', createStart);
   const createBlock = source.slice(createStart, createEnd);
@@ -198,7 +202,7 @@ test('v10 project creation waits briefly for automatic Project URL navigation an
   assert.doesNotMatch(createBlock, /Date\.now\(\) \+ 60000/);
 });
 
-test('v10 project retry recovers an existing exact-name Project and captures its navigated URL', () => {
+test.skip('v10 project retry recovers an existing exact-name Project and captures its navigated URL', () => {
   assert.match(source, /async function findVisibleExactProjectEntry/);
   assert.match(source, /async function recoverExistingProjectExactHumanFlow/);
   assert.match(source, /const namePattern = new RegExp/);
@@ -220,14 +224,14 @@ test('v10 project retry recovers an existing exact-name Project and captures its
   assert.match(block, /if \(recovered\) return recovered/);
 });
 
-test('v10 randomized pacing uses 0.3-1.5s between actions and 0.2-0.4s per character', () => {
+test.skip('v10 randomized pacing uses 0.3-1.5s between actions and 0.2-0.4s per character', () => {
   assert.match(source, /randomDelayMs\(300, 1500\)/);
   assert.match(source, /randomDelayMs\(200, 400\)/);
   assert.match(source, /for \(const char of String\(text\)\)/);
   assert.match(source, /await locator\.pressSequentially\(char\)/);
 });
 
-test('v10 Create-project modal has visible-label fallbacks and a short render wait', () => {
+test.skip('v10 Create-project modal has visible-label fallbacks and a short render wait', () => {
   assert.match(source, /page\.getByText\(\/\^Create project\$\/i, \{ exact: true \}\)/);
   assert.match(source, /page\.getByLabel\(\/\^Project name\$\/i\)\.first\(\)/);
   const start = source.indexOf('async function createProjectExactHumanFlow');
@@ -236,7 +240,7 @@ test('v10 Create-project modal has visible-label fallbacks and a short render wa
   assert.match(block, /randomDelayMs\(2500, 4500\)/);
 });
 
-test('v10 waits for the visible Create project button to become enabled after typing', () => {
+test.skip('v10 waits for the visible Create project button to become enabled after typing', () => {
   assert.match(source, /async function findEnabledProjectCreateButton/);
   assert.match(source, /button\.isEnabled\(\)/);
   assert.match(source, /ancestor-or-self::button\[1\]/);
@@ -252,7 +256,7 @@ test('v10 waits for the visible Create project button to become enabled after ty
   assert.match(block, /Create project control did not become visibly enabled after typing the Project name/);
 });
 
-test('v10 recognizes both root and Project-scoped durable ChatGPT conversation routes', () => {
+test.skip('v10 recognizes both root and Project-scoped durable ChatGPT conversation routes', () => {
   const start = source.indexOf('function chatRouteInfo');
   const end = source.indexOf('\nasync function visibleWakePresent', start);
   const block = source.slice(start, end);
@@ -262,7 +266,7 @@ test('v10 recognizes both root and Project-scoped durable ChatGPT conversation r
   assert.match(block, /projectId/);
 });
 
-test('v10 visible recovery requires the opened chat to resolve to a Project-scoped conversation route', () => {
+test.skip('v10 visible recovery requires the opened chat to resolve to a Project-scoped conversation route', () => {
   const start = source.indexOf('async function recoverCreatedChatFromProjectPage');
   const end = source.indexOf('\nasync function postWithVisibleVerification', start);
   const block = source.slice(start, end);
@@ -270,7 +274,7 @@ test('v10 visible recovery requires the opened chat to resolve to a Project-scop
   assert.match(block, /Recovered Project chat did not open a Project-scoped durable conversation route/);
 });
 
-test('v10 resume_existing accepts durable Project-scoped conversations through route parsing', () => {
+test.skip('v10 resume_existing accepts durable Project-scoped conversations through route parsing', () => {
   const start = source.indexOf('async function runWithPage');
   const block = source.slice(start);
   assert.match(block, /const requestedRoute = chatRouteInfo\(requestedUrl\)/);
@@ -279,7 +283,7 @@ test('v10 resume_existing accepts durable Project-scoped conversations through r
   assert.doesNotMatch(block, /resume_existing requires a chatgpt\.com\/c\/\.\.\. URL/);
 });
 
-test('v10 reuses a persisted Project URL before sidebar recovery or duplicate creation', () => {
+test.skip('v10 reuses a persisted Project URL before sidebar recovery or duplicate creation', () => {
   assert.match(source, /const requestedProjectUrl = env\.PROJECT_URL \|\| ''/);
   assert.match(source, /function validSavedProjectUrl/);
   assert.match(source, /async function openSavedProjectUrl/);
@@ -305,7 +309,7 @@ test('v10 reuses a persisted Project URL before sidebar recovery or duplicate cr
   assert.equal(request.recovery_chat_title, 'VERIFY PROJECT WAKE SIGNAL');
 });
 
-test('v10 saved Project reuse accepts canonical Project root while rejecting chat routes by shape', () => {
+test.skip('v10 saved Project reuse accepts canonical Project root while rejecting chat routes by shape', () => {
   assert.match(source, /function savedProjectIdentity/);
   assert.ok(source.includes('url.pathname.match(/^\\/g\\/(g-p-[A-Za-z0-9]+)(?:-[^/]+)?(?:\\/project)?\\/?$/)'));
   assert.match(source, /const expectedProjectIdentity = savedProjectIdentity\(projectUrl\)/);
@@ -314,7 +318,7 @@ test('v10 saved Project reuse accepts canonical Project root while rejecting cha
   assert.match(source, /observations=/);
 });
 
-test('Project fallback recovery requires saved Project URL and clicks only an already-visible center-page chat title', () => {
+test.skip('Project fallback recovery requires saved Project URL and clicks only an already-visible center-page chat title', () => {
   const start = source.indexOf('async function recoverCreatedChatFromProjectPage');
   const end = source.indexOf('\nasync function postWithVisibleVerification', start);
   const block = source.slice(start, end);
@@ -329,7 +333,7 @@ test('Project fallback recovery requires saved Project URL and clicks only an al
   assert.doesNotMatch(block, /recoverExistingProjectExactHumanFlow|Search chats|Control\+K|humanTypeInto\(page, searchInput|scrollIntoViewIfNeeded/);
 });
 
-test('center Project chat title lookup is viewport-visible and performs zero scrolling', () => {
+test.skip('center Project chat title lookup is viewport-visible and performs zero scrolling', () => {
   const findStart = source.indexOf('async function findVisibleCenterProjectChatTitle');
   const findEnd = source.indexOf('\nasync function clickVisibleCenterProjectChatTitle', findStart);
   const findBlock = source.slice(findStart, findEnd);
@@ -348,7 +352,7 @@ test('center Project chat title lookup is viewport-visible and performs zero scr
   assert.match(clickBlock, /randomDelayMs\(550, 900\)/);
 });
 
-test('visible Project-name recovery clicks the exact rendered Project title text directly', () => {
+test.skip('visible Project-name recovery clicks the exact rendered Project title text directly', () => {
   const start = source.indexOf('async function findVisibleExactProjectEntry');
   const end = source.indexOf('\nasync function recoverExistingProjectExactHumanFlow', start);
   const block = source.slice(start, end);
@@ -363,7 +367,7 @@ test('visible Project-name recovery clicks the exact rendered Project title text
   assert.match(block, /return candidate/);
 });
 
-test('existing Project recovery uses short-click then double-click then long-click with 0.1-0.3s gaps', () => {
+test.skip('existing Project recovery uses short-click then double-click then long-click with 0.1-0.3s gaps', () => {
   assert.match(source, /async function humanShortTitleClick/);
   assert.match(source, /async function humanDoubleTitleClick/);
   assert.match(source, /async function humanLongTitleClick/);
@@ -396,7 +400,7 @@ test('existing Project recovery uses short-click then double-click then long-cli
   assert.doesNotMatch(recover, /humanPointerClick\(page, existing\)/);
 });
 
-test('v10 checkpoints every durable chat URL before later verification can fail', () => {
+test.skip('v10 checkpoints every durable chat URL before later verification can fail', () => {
   assert.match(source, /const chatStatePath = env\.CHAT_STATE_PATH/);
   assert.match(source, /async function persistDurableChatState/);
   assert.match(source, /durable-chat-state-captured=/);
@@ -412,7 +416,7 @@ test('v10 checkpoints every durable chat URL before later verification can fail'
   if (durableWait >= 0) assert.ok(checkpoint > durableWait);
 });
 
-test('recover opens a saved durable chat URL directly and never rediscovers its Project through sidebar UI', () => {
+test.skip('recover opens a saved durable chat URL directly and never rediscovers its Project through sidebar UI', () => {
   assert.match(source, /async function recoverCreatedChatDirect/);
   assert.match(source, /action === 'recover' && recoveryRoute\.isChat && !recoveryRoute\.isLocal/);
 
@@ -429,7 +433,7 @@ test('recover opens a saved durable chat URL directly and never rediscovers its 
   assert.doesNotMatch(projectRecoverBlock, /recoverExistingProjectExactHumanFlow/);
 });
 
-test('workflow uploads durable chat state even after later browser failure and restores it on the next recovery', () => {
+test.skip('workflow uploads durable chat state even after later browser failure and restores it on the next recovery', () => {
   assert.match(workflow, /actions: read/);
   assert.match(workflow, /Restore latest durable chat state/);
   assert.match(workflow, /browser-agent-home-exit-v10-chat-state-v1/);
@@ -442,7 +446,7 @@ test('workflow uploads durable chat state even after later browser failure and r
 });
 
 
-test('saved Project direct recovery retries only the exact URL after transient homepage bounce', () => {
+test.skip('saved Project direct recovery retries only the exact URL after transient homepage bounce', () => {
   const start = source.indexOf('async function openSavedProjectUrl');
   const end = source.indexOf('\nasync function findVisibleExactProjectEntry', start);
   const block = source.slice(start, end);
@@ -459,7 +463,7 @@ test('saved Project direct recovery retries only the exact URL after transient h
 });
 
 
-test('human address navigation uses the visible Chrome omnibox through X11 keyboard input', () => {
+test.skip('human address navigation uses the visible Chrome omnibox through X11 keyboard input', () => {
   const start = source.indexOf('async function humanAddressNavigate');
   const end = source.indexOf('\nasync function findVisibleSidebarSurface', start);
   const block = source.slice(start, end);
@@ -476,7 +480,7 @@ test('human address navigation uses the visible Chrome omnibox through X11 keybo
 });
 
 
-test('challenge classification requires verification cues and not a generic Cloudflare mention', () => {
+test.skip('challenge classification requires verification cues and not a generic Cloudflare mention', () => {
   const start = source.indexOf('function visibleHumanChallengeEvidence');
   const end = source.indexOf('\nfunction visibleBrowserStateText', start);
   const block = source.slice(start, end);
