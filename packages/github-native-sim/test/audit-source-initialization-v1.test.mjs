@@ -12,10 +12,25 @@ const extract = fs.readFileSync(path.join(root, 'scripts/audit-source-initializa
 const receipt = fs.readFileSync(path.join(root, 'scripts/audit-source-initialization/write-phase0-receipt-v1.py'), 'utf8');
 const request = JSON.parse(fs.readFileSync(path.join(root, 'process/audit-source-initialization/REQUEST_TEMPLATE_v1.json'), 'utf8'));
 
-test('Audit Source Initialization accepts only source_url as request payload', () => {
-  assert.deepEqual(Object.keys(request), ['source_url']);
-  assert.equal(typeof request.source_url, 'string');
+test('Audit Source Initialization accepts source ZIP plus four pre-created reviewer chats', () => {
+  assert.deepEqual(Object.keys(request), [
+    'source_url',
+    'agent_chat_1_url',
+    'agent_chat_2_url',
+    'agent_chat_3_url',
+    'agent_chat_4_url',
+  ]);
+  for (const key of Object.keys(request)) assert.equal(typeof request[key], 'string');
   assert.match(workflow, /source_url:/);
+  assert.match(workflow, /agent_chat_1_url:/);
+  assert.match(workflow, /agent_chat_2_url:/);
+  assert.match(workflow, /agent_chat_3_url:/);
+  assert.match(workflow, /agent_chat_4_url:/);
+  assert.match(workflow, /validate_chat_url/);
+  assert.match(run, /agentChats/);
+  assert.match(run, /"reviewer-1":\$chat1/);
+  assert.match(run, /"reviewer-4":\$chat4/);
+  assert.match(run, /mode:"resume_existing"/);
   assert.doesNotMatch(workflow, /campaign_id:\n\s+description:/);
   assert.doesNotMatch(workflow, /audit_name:\n\s+description:/);
 });
