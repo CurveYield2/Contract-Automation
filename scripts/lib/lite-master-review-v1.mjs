@@ -357,6 +357,41 @@ function expectedPreRefreshRows({root,campaignPath,form,baseline}){
     return {...row,sha256:digestFile(file)};
   });
 }
+function masterTransportProofFailures({root,campaignPath,form,pending,cfg}){
+  const failures=[];
+  const pointer=pending.masterTransportProof;
+  const expectedPath=path.posix.join(campaignPath,'work/master-review',pending.segmentId,'MASTER_REVIEW_TRANSPORT_PROOF_v1.json');
+  if(!pointer||pointer.schemaVersion!=='curveyield-lite-master-review-transport-proof-v1')return ['controller-bound master transport proof is absent'];
+  if(pointer.recordPath!==expectedPath||!SHA256.test(String(pointer.sha256??''))||pointer.verifiedBy!=='BROWSER_AGENT_WAKE_CONTROLLER'||!substantiveText(pointer.verifiedAt))failures.push('controller-bound master transport proof pointer is invalid');
+  let proof=null;
+  try{
+    const file=requiredFile(root,expectedPath,'master review transport proof');
+    if(digestFile(file)!==pointer.sha256)failures.push('master review transport proof digest mismatch');
+    proof=readJson(file);
+  }catch(error){failures.push(String(error.message||error));}
+  if(proof){
+    const repaired=Boolean(pending.postRepairManifestSha256);
+    const expected={
+      schemaVersion:'curveyield-lite-master-review-transport-proof-v1',
+      campaignId:form.campaignId,
+      campaignGenerationId:form.campaignGenerationId,
+      segmentId:pending.segmentId,
+      reviewAttempt:pending.reviewAttempt,
+      masterChatUrl:cfg.chatUrl,
+      observedModel:'MASTER',
+      observedReasoning:'MAXIMUM',
+      controlVerification:'VISIBLE_UI_VERIFIED',
+      deliveryStatus:'VERIFIED',
+      messagePurpose:repaired?'REPAIR_VERIFICATION':'INITIAL_REVIEW',
+      reviewManifestSha256:repaired?pending.postRepairManifestSha256:pending.manifestSha256,
+      verifiedBy:'BROWSER_AGENT_WAKE_CONTROLLER'
+    };
+    for(const [key,value] of Object.entries(expected))if(!exactJson(proof[key],value))failures.push('master review transport proof '+key+' mismatch');
+    if(!substantiveText(proof.verifiedAt)||proof.verifiedAt!==pointer.verifiedAt)failures.push('master review transport proof verifiedAt mismatch');
+  }
+  return failures;
+}
+
 function repairTransportProofFailures({root,campaignPath,form,pending,cfg}){
   const failures=[];
   const pointer=pending.repairTransportProof;
@@ -381,8 +416,9 @@ function repairTransportProofFailures({root,campaignPath,form,pending,cfg}){
       repairScopeId:pending.repairScopeId,
       repairSpecSha256:pending.repairSpecSha256,
       childChatUrl:child?.childChatUrl,
-      model:'SOL',
-      reasoning:'HIGH',
+      observedModel:'SOL',
+      observedReasoning:'HIGH',
+      controlVerification:'VISIBLE_UI_VERIFIED',
       freshChild:true,
       deliveryStatus:'VERIFIED'
     };
@@ -471,6 +507,11 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
     ...currentBindingFailures(root,campaignPath,form,directory)
   ];
   const outcome=String(form.review?.outcome??'');
+  if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
+  if(pending.status==='WAITING_FOR_MASTER_REVIEW'){
+    const transportFailures=masterTransportProofFailures({root,campaignPath,form,pending,cfg});
+    if(transportFailures.length)return {status:'MASTER_REVIEW_TRANSPORT_BLOCKED',failures:transportFailures,form,pending};
+  }
   if(pending.status==='MASTER_REVIEW_REWORK_REQUIRED'){
     const transportFailures=repairTransportProofFailures({root,campaignPath,form,pending,cfg});
     if(transportFailures.length)return {status:'MASTER_REPAIR_TRANSPORT_BLOCKED',failures:transportFailures,form,pending};
@@ -502,6 +543,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
     failures.push(...validateRepairSpec({root,authorityRoot,segment,form}));
     if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
     pending.originalDeficienciesSha256=digestJson(form.review.deficiencies);
+    delete pending.masterTransportProof;
     pending.status='MASTER_REVIEW_REWORK_REQUIRED';
     pending.reviewAttempt=Number(pending.reviewAttempt??1);
     pending.repairScopeId=form.review.repairSpec.scopeId;
