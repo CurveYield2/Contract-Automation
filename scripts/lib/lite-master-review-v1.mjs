@@ -462,7 +462,7 @@ export function childRepairWakeMessage({campaignId,pending,repairSpec}){
   return [
     'MASTER_REVIEW_BOUNDED_REPAIR.',
     'You are a fresh Sol agent at High reasoning for campaign '+campaignId+' and scope '+repairSpec.scopeId+'.',
-    'Modify only repairSpec.allowedFiles at repairSpec.allowedSemanticPaths, preserve controller prefills and accepted evidence, and perform only listed requiredDependentRefreshes.',
+    'Modify only repairSpec.allowedFiles at repairSpec.allowedSemanticPaths and preserve controller prefills and accepted evidence. The controller, not the child, performs every listed dependent refresh.',
     'Do not seal, advance, wake a successor, or broaden scope. Return changed paths and evidence to the same persistent master reviewer.',
     'Master work form: '+pending.workFormPath+'.'
   ].join(' ');
