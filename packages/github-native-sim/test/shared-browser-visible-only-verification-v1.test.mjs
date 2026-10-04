@@ -14,12 +14,18 @@ const fixedStart = source.indexOf('async function runNormalChromeExistingSession
 const fixedEnd = source.indexOf('\nasync function humanPointerClick', fixedStart);
 assert.ok(fixedStart >= 0 && fixedEnd > fixedStart);
 const fixedAuditWake = source.slice(fixedStart, fixedEnd);
+const fixedWakeStart = fixedAuditWake.indexOf("if (action !== 'wake')");
+const executedFixedWake = fixedAuditWake.slice(fixedWakeStart);
+const cdpStart = source.indexOf('async function waitForCdp');
+const cdpEnd = source.indexOf('\nasync function runNormalChromeExistingSession', cdpStart);
+const cdpBootstrap = source.slice(cdpStart, cdpEnd);
 
 test('executed audit wake path forbids ChatGPT API and DOM verification reads', () => {
   assert.doesNotMatch(source, /\/backend-api\//);
-  assert.match(fixedAuditWake, /fetch\('http:\/\/127\.0\.0\.1:' \+ port \+ '\/json\/version'\)/);
-  assert.equal([...fixedAuditWake.matchAll(/\bfetch\s*\(/g)].length, 1);
-  assert.doesNotMatch(fixedAuditWake, /page\.evaluate|page\.locator|innerText|inputValue|page\.on\(['"](?:request|response)['"]/);
+  assert.match(cdpBootstrap, /fetch\('http:\/\/127\.0\.0\.1:' \+ port \+ '\/json\/version'\)/);
+  assert.equal([...cdpBootstrap.matchAll(/\bfetch\s*\(/g)].length, 1);
+  assert.doesNotMatch(cdpBootstrap, /chatgpt\.com|backend-api/);
+  assert.doesNotMatch(executedFixedWake, /page\.evaluate|page\.locator|innerText|inputValue|page\.on\(['"](?:request|response)['"]/);
   assert.match(source, /mode === 'resume_existing' && action === 'wake'[\s\S]*runNormalChromeExistingSession\(chromium\)/);
   assert.match(source, /CHATGPT_PAGE_READS_DISABLED/);
 });
