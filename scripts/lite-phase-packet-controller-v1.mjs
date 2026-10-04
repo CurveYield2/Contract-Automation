@@ -460,6 +460,7 @@ function applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,auth
       schemaVersion:'curveyield-lite-master-repair-refresh-v1',
       scopeId:result.pending.repairScopeId,
       repairSpecSha256:result.pending.repairSpecSha256,
+      childRepairSha256:createHash('sha256').update(JSON.stringify(result.form.childRepair)).digest('hex'),
       refreshedPhases,
       artifacts:postRepairArtifacts,
       manifestSha256:createHash('sha256').update(JSON.stringify(postRepairArtifacts)).digest('hex'),
@@ -523,7 +524,6 @@ if(reviewKind==='master'){
   if(result.status==='MASTER_REPAIR_READY_FOR_REFRESH'){
     const refresh=applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,authorityRoot:masterAuthorityRoot,result,now});
     pending.status='WAITING_FOR_MASTER_REVIEW';
-    pending.childRepairSha256=createHash('sha256').update(JSON.stringify(result.form.childRepair)).digest('hex');
     pending.lastSealedReceiptPath=refresh.lastSealedReceiptPath;
     pending.postRepairManifestSha256=refresh.postRepairManifestSha256;
     pending.updatedAt=now;
