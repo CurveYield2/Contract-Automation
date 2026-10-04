@@ -943,15 +943,16 @@ function explicitTargetPropertiesV2(ethers,targets){
   for(const target of targets){
     const iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
     for(const f of iface.fragments.filter(x=>x.type==='function'&&/^property_/.test(x.name)&&['view','pure'].includes(x.stateMutability)&&x.inputs.length===0&&x.outputs.length===1&&x.outputs[0].type==='bool')){
+      const category=target.propertyCategory??'TARGET_BEHAVIOR';
       rows.push({
-        propertyId:`target-property-${rows.length+1}`,
-        category:'TARGET_BEHAVIOR',
+        propertyId:`${category==='HARNESS_SELF_CHECK'?'harness-control':'target-property'}-${rows.length+1}`,
+        category,
         targetQualifiedName:target.qualifiedName,
         targetAddress:target.address,
         targetSignature:f.format('sighash'),
-        wrapperName:`property_p0_target_${rows.length}`,
-        applicabilityBasis:'PACKET_DECLARED_PROPERTY_FUNCTION',
-        preconditionMode:'REQUIRES_RELEVANT_SUCCESSFUL_STATE_TRANSITION_WITNESS'
+        wrapperName:`property_p0_${category==='HARNESS_SELF_CHECK'?'control':'target'}_${rows.length}`,
+        applicabilityBasis:category==='HARNESS_SELF_CHECK'?'OWNED_QUALIFICATION_CONTROL':'PACKET_DECLARED_PROPERTY_FUNCTION',
+        preconditionMode:category==='HARNESS_SELF_CHECK'?'ENGINE_CAPABILITY_CONTROL':'REQUIRES_RELEVANT_SUCCESSFUL_STATE_TRANSITION_WITNESS'
       });
     }
   }
@@ -1024,6 +1025,10 @@ async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
   const targetByQ=new Map(targets.map(t=>[t.qualifiedName,t])),out=[];
   try{
     for(const property of properties){
+      if(property.category==='HARNESS_SELF_CHECK'){
+        out.push({propertyId:property.propertyId,targetSignature:property.targetSignature,status:'CONTROL_NOT_TARGET',reason:'HARNESS_SELF_CHECK_DOES_NOT_REQUIRE_TARGET_PRECONDITION_WITNESS'});
+        continue;
+      }
       const target=targetByQ.get(property.targetQualifiedName);
       const defaultActor=target?.recipeRuntime?.primaryActor??actors[0];
       const initial=await readTargetPropertyV2({provider,ethers,property,from:defaultActor});
@@ -1101,7 +1106,11 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
     const engine=(parsed.properties??[]).find(x=>String(x.name??'').includes(property.wrapperName));
     const witness=witnessById.get(property.propertyId),witnessed=witness&&witness.status!=='UNEXERCISED'&&Array.isArray(witness.observedTransitionDeltas)&&witness.observedTransitionDeltas.length>0;
     let result='ENGINE_FAILURE';
-    if(engine?.status==='failed')result='DEVIATION_OBSERVED';
+    if(property.category==='HARNESS_SELF_CHECK'){
+      if(engine?.status==='failed')result='CONTROL_FALSE_OBSERVED';
+      else if(engine?.status==='passed')result='CONTROL_TRUE_OBSERVED';
+      else result='ENGINE_FAILURE';
+    }else if(engine?.status==='failed')result='DEVIATION_OBSERVED';
     else if(!witnessed)result='UNEXERCISED';
     else if(engine?.status==='passed')result='CHECKED_NO_DEVIATION_OBSERVED';
     else if(parsed.status==='no_tests')result='ENGINE_FAILURE';
