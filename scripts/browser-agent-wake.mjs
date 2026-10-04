@@ -763,13 +763,21 @@ async function runWithPage(providerName, connect) {
     }
 
     let thinkingEffortResult = null;
-    if (thinkingEffort) {
+    if (thinkingEffort && mode !== 'resume_existing') {
       await ensureComposer(page);
       thinkingEffortResult = await executeBrowserOperation({
         page,
         name: 'chatgpt.ensure_thinking_effort',
         args: { level: thinkingEffort },
       });
+    } else if (thinkingEffort && mode === 'resume_existing') {
+      thinkingEffortResult = {
+        level: thinkingEffort,
+        changed: false,
+        verified: false,
+        preservedExistingChatConfiguration: true
+      };
+      console.log('[github-playwright] thinking-effort=preserve-existing-chat-configuration');
     }
 
     const delivery = await postWithVisibleVerification(page, wakeMessage);
