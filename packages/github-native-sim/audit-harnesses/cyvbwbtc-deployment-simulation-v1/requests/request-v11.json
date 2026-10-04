@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "curveyield-cyvbwbtc-ipor-native-live-fork-request-v11",
+  "smartContractsRepository": "CurveYield2/Smart-Contracts",
+  "smartContractsCommit": "ef8c02efab79c718cd401be6ca5d05dac0b3cff9",
+  "chainId": 747474,
+  "forkRpc": "https://katana.drpc.org/",
+  "runner": "packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/run-v11.mjs",
+  "productionBroadcast": false,
+  "accountingMarketIds": {
+    "erc20AndFx": 7,
+    "erc4626": 100001,
+    "universalSwapperV2": 1202
+  },
+  "marketIdPolicy": "Use the best-fitting existing official IPOR market ID. Use ERC20_VAULT_BALANCE only when no better official IPOR market exists."
+}
