@@ -149,7 +149,7 @@ async function snapshot(page) {
     /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText) ||
     /Just a moment|Cloudflare/i.test(title);
   const chatViewable =
-    /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+/.test(currentUrl) &&
+    durableChatUrl(currentUrl) &&
     !!composer &&
     !conversationUnavailable &&
     !loginPrompt &&
