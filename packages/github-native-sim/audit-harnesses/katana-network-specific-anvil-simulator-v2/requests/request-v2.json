@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "katana-network-specific-anvil-simulator-request-v2",
+  "purpose": "Discover the current 0x4c03 fxUSD PoolManager vbWBTC pool and verify exact router/pool topology before fork-only route configuration",
+  "router": "0x01F9894f92ea9224fECc8C35482E20a05De13582",
+  "routerOwnerSafe": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+  "oldFxPool": "0xE32B9b4C8f776687Ec54B4b6B62DbD9ce5fd4b99",
+  "newFxUsd": "0x4c03ff0f44A55e7098a09016E02a01d3cdC2FDF9",
+  "targetSushiPool": "0x2d43e7931329dbb709f33d7049c937c6794bae10",
+  "requirements": {
+    "configureBothDirections": true,
+    "globalAdminFeeBps": 0,
+    "perRouteFeeBps": 0,
+    "productionWritesAllowed": false
+  }
+}
