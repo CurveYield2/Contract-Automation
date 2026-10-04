@@ -22,6 +22,12 @@ import {
 import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts} from './lib/lite-master-review-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
+function registeredReviewerChatUrls(file){
+  if(!file)return [];
+  const registration=readJson(path.resolve(file));
+  const candidates=[registration?.activeChat?.url,registration?.chatUrl,...(registration?.reviewerChats??[]).map(x=>x?.url)];
+  return [...new Set(candidates.filter(x=>typeof x==='string'&&x))];
+}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
 function phaseNum(n){return String(n).padStart(2,'0');}
 function feedbackText(sequence,defs){return ['Phase '+sequence+' semantic validation failed.','Repair only the exact substantive items below and invoke controller validation again.','',...defs.map(x=>'- '+x),'','Do not advance, retire, update receipts, or perform controller bookkeeping.'].join('\n');}
@@ -515,7 +521,7 @@ if(reviewKind==='master'){
   if(!pending) throw new Error('campaign has no pending master review');
   const lastReceipt=readJson(requiredFile(root,pending.lastSealedReceiptPath??directory.lastSealedReceiptPath,'last sealed receipt'));
   const masterAuthorityRoot=authorityRootFromReceipt(lastReceipt);
-  const result=processMasterReviewSubmission({root,campaignPath,directory,authorityRoot:masterAuthorityRoot,segmentId:a['segment-id']??null,now});
+  const result=processMasterReviewSubmission({root,campaignPath,directory,authorityRoot:masterAuthorityRoot,segmentId:a['segment-id']??null,now,normalReviewerChatUrls:registeredReviewerChatUrls(a['reviewer-registration-path'])});
   if(result.status==='MASTER_REVIEW_HELD'){
     const feedback='MASTER_REVIEW_HELD: '+result.failures.join('; ')+'. No campaign state or reviewed artifact was changed.';
     process.stdout.write(JSON.stringify({status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview?.chatUrl??null,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
