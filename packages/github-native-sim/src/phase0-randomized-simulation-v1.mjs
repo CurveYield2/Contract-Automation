@@ -8,6 +8,8 @@ import {startRpcIdentityProxy} from '../../runner/src/rpc-identity-proxy-v1.mjs'
 import {stageExactArchiveSource,runProcess} from './execution.mjs';
 import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
+import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
+import {parseMedusaOutput} from './analysis.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
 export const PHASE0_MEDUSA_MIN_CALLS_V1=100001;
@@ -490,9 +492,37 @@ function errorInfo(e,iface){
   if(typeof data==='string'){try{const p=iface.parseError(data);decoded=p?{name:p.name,signature:p.signature,args:normalize(p.args)}:null;}catch{}}
   return{name:e?.name??'Error',code:e?.code??null,shortMessage:e?.shortMessage??null,reason:e?.reason??null,message:String(e?.message??e).slice(0,1800),data:typeof data==='string'?data.slice(0,4096):null,decodedCustomError:decoded};
 }
-function targetObjects(ethers,artifacts,deployed){
+function sourceDeclaredStandardsV2(sourceIntelligence,qualifiedName){
+  const contracts=sourceIntelligence?.contracts??[],edges=sourceIntelligence?.inheritanceGraph??[];
+  const byId=new Map(contracts.map(c=>[c.contractId,c]));
+  const root=contracts.find(c=>c.qualifiedName===qualifiedName);
+  if(!root)return[];
+  const seen=new Set([root.contractId]),queue=[root.contractId],names=[];
+  while(queue.length){
+    const id=queue.shift(),c=byId.get(id);
+    if(c?.qualifiedName)names.push(String(c.qualifiedName).split(':').at(-1));
+    for(const edge of edges.filter(e=>e.derivedContractId===id)){
+      if(!seen.has(edge.baseContractId)){seen.add(edge.baseContractId);queue.push(edge.baseContractId);}
+    }
+  }
+  const normalized=new Set(names.map(x=>x.toUpperCase().replace(/[^A-Z0-9]/g,'')));
+  const out=[];
+  if(normalized.has('IERC20')||normalized.has('ERC20'))out.push('ERC20');
+  if(normalized.has('IERC4626')||normalized.has('ERC4626'))out.push('ERC4626');
+  return out;
+}
+function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
   const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
-  return deployed.filter(d=>d.qualifiedName&&byQ.has(d.qualifiedName)).map(d=>{const artifact=byQ.get(d.qualifiedName);return{...d,artifact,functions:mutableFunctions(ethers,artifact),plan:probePlan(ethers,artifact)};}).filter(t=>t.functions.length);
+  return deployed.filter(d=>d.qualifiedName&&byQ.has(d.qualifiedName)).map(d=>{
+    const artifact=byQ.get(d.qualifiedName);
+    const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,d.qualifiedName);
+    const recipe=qualifyRecipeV2({qualifiedName:d.qualifiedName,abi:artifact.abi,declaredStandards});
+    const functions=mutableFunctions(ethers,artifact).map(x=>{
+      const semantic=classifySemanticFamilyV2({signature:x.signature,stateMutability:x.fragment.stateMutability,recipe:recipe.status==='QUALIFIED'?recipe:null});
+      return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
+    });
+    return{...d,artifact,functions,plan:probePlan(ethers,artifact),declaredStandards,recipe};
+  }).filter(t=>t.functions.length);
 }
 function pickFn(target,rng,actionClass){
   const accounting=target.functions.filter(x=>x.accounting),other=target.functions.filter(x=>!x.accounting);
@@ -722,7 +752,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const sourcePlan=nativeScriptComplete
       ? {status:'SKIPPED_PACKAGE_DEPLOYMENT_SCRIPT_COMPLETE',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0}
       : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
-    const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows],targets=targetObjects(ethers,artifacts,deployed);
+    const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows],targets=targetObjects(ethers,artifacts,deployed,sourceIntelligence);
     const deploymentCombined={detectedScripts:detected,attempts:[...deployment.attempts,...sourcePlan.attempts],limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
     // Persist deployment diagnostics before any expensive randomized stage.
     deploymentEvidence={...deploymentCombined,packageDependencyInstall,policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS'};
