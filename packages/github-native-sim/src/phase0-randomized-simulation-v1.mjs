@@ -627,7 +627,7 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
     };
     const terminalRows=[];
     const telemetryStartedAt=Date.now();
-    console.log(`[phase0-telemetry] ${runId} started; targetCalls=${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; lifecycle=v2`);
+    console.log(`[phase0-telemetry] ${runId} started; targetCalls=${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; lifecycle=v2; heartbeat every 300s`);
     const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),300000);
     telemetryHeartbeat.unref?.();
     try{
@@ -937,7 +937,7 @@ async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoo
   await fs.writeFile(path.join(dir,'PROPERTY_WITNESSES_v2.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-property-witnesses-v2',properties:witnessRows},null,2)+'\n');
 
   const medusaStartedAt=Date.now();
-  console.log(`[phase0-medusa] started; mode=${mode}; timeout=1800s; configuredCallLimit=${PHASE0_MEDUSA_CALL_LIMIT_V1}`);
+  console.log(`[phase0-medusa] started; mode=${mode}; timeout=1800s; configuredCallLimit=${PHASE0_MEDUSA_CALL_LIMIT_V1}; progress heartbeat every 300s`);
   const heartbeat=setInterval(()=>console.log(`[phase0-medusa] heartbeat: mode=${mode}; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; configuredCallLimit=${PHASE0_MEDUSA_CALL_LIMIT_V1}`),300000);
   heartbeat.unref?.();
   let r;
