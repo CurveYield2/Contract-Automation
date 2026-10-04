@@ -224,6 +224,200 @@ async function x11Key(args, label = 'x11-key') {
   });
 }
 
+async function runCapture(command, args = [], options = {}) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      env: { ...process.env, ...(options.env || {}) },
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', chunk => { stdout += chunk.toString(); });
+    child.stderr?.on('data', chunk => { stderr += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', code => code === 0
+      ? resolve({ stdout: stdout.trim(), stderr: stderr.trim() })
+      : reject(new Error(command + ' failed (' + code + '): ' + stderr.trim())));
+  });
+}
+
+async function x11Capture(args, label = 'x11-command') {
+  try {
+    return await runCapture('xdotool', args, { env: { DISPLAY: process.env.DISPLAY || ':99' } });
+  } catch (error) {
+    throw new Error(label + ' failed: ' + error.message);
+  }
+}
+
+async function humanX11TypeText(page, text) {
+  const value = String(text);
+  for (const char of value) {
+    if (char === '\n') {
+      await x11Key(['key', '--clearmodifiers', 'shift+Return'], 'x11-line-break');
+    } else {
+      await x11Key(['type', '--clearmodifiers', '--delay', '0', char], 'x11-type-character');
+    }
+    await humanTypingPause(page, char);
+  }
+}
+
+async function waitForCdp(port, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch('http://127.0.0.1:' + port + '/json/version');
+      if (response.ok) return await response.json();
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  throw new Error('Normal Chrome CDP endpoint did not become ready');
+}
+
+async function saveNormalChromeEvidence(page, label, extra = {}) {
+  const dir = '/tmp/browser-wake-evidence-v1';
+  await fs.mkdir(dir, { recursive: true });
+  const safe = String(label).replace(/[^A-Za-z0-9._-]+/g, '-');
+  await page.screenshot({ path: path.join(dir, safe + '.png'), fullPage: true }).catch(() => {});
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  await fs.writeFile(path.join(dir, safe + '.json'), JSON.stringify({
+    label,
+    capturedAt: new Date().toISOString(),
+    url: page.url(),
+    title: await page.title().catch(() => ''),
+    bodyTail: bodyText.slice(-6000),
+    ...extra
+  }, null, 2) + '\n', 'utf8');
+}
+
+async function runNormalChromeExistingWake(chromium) {
+  if (!env.CHATGPT_STORAGE_STATE_B64) throw new Error('CHATGPT_STORAGE_STATE_B64 is required');
+  let storage;
+  try {
+    storage = JSON.parse(Buffer.from(env.CHATGPT_STORAGE_STATE_B64, 'base64').toString('utf8'));
+    if (!validateStorageState(storage)) throw new Error('invalid storage state');
+  } catch {
+    throw new Error('CHATGPT_STORAGE_STATE_B64 is invalid');
+  }
+
+  const requestedRoute = chatRouteInfo(requestedUrl);
+  if (!requestedRoute.isChat || requestedRoute.isLocal) {
+    throw new Error('normal Chrome wake requires a durable root or Project-scoped ChatGPT conversation URL');
+  }
+
+  const profileDir = '/tmp/curveyield-normal-chrome-profile-v1';
+  await fs.rm(profileDir, { recursive: true, force: true });
+  await fs.mkdir(profileDir, { recursive: true });
+  await fs.writeFile(path.join(profileDir, 'First Run'), '', 'utf8');
+
+  const chromeLookup = await runCapture('bash', ['-lc', 'command -v google-chrome || command -v google-chrome-stable']);
+  const chromePath = chromeLookup.stdout.split(/\r?\n/).filter(Boolean)[0];
+  if (!chromePath) throw new Error('System Google Chrome executable was not found');
+
+  const port = 9222;
+  console.log('[normal-chrome-v1] launching system Chrome directly; no Playwright launch, no headless flag, no enable-automation flag');
+  const chromeProcess = spawn(chromePath, [
+    '--user-data-dir=' + profileDir,
+    '--remote-debugging-port=' + port,
+    'about:blank'
+  ], {
+    env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
+    stdio: ['ignore', 'ignore', 'pipe']
+  });
+  let chromeStderr = '';
+  chromeProcess.stderr?.on('data', chunk => { chromeStderr += chunk.toString(); });
+
+  let browser;
+  try {
+    await waitForCdp(port, 30000);
+    browser = await chromium.connectOverCDP('http://127.0.0.1:' + port);
+    const contexts = browser.contexts();
+    if (contexts.length !== 1) throw new Error('Expected one normal Chrome browser context');
+    const context = contexts[0];
+    await context.addCookies(storage.cookies || []);
+    const pages = context.pages();
+    const page = pages[0] || await context.newPage();
+
+    await x11Key(['key', '--clearmodifiers', 'alt+F10'], 'x11-maximize-window');
+    await page.waitForTimeout(randomDelayMs(700, 1200));
+
+    await x11Key(['key', '--clearmodifiers', 'ctrl+l'], 'x11-address-bar');
+    await page.waitForTimeout(randomDelayMs(180, 320));
+    await humanX11TypeText(page, requestedUrl);
+    await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-navigate');
+    await page.waitForTimeout(18000);
+
+    const webdriverBefore = await page.evaluate(() => navigator.webdriver).catch(() => 'unavailable');
+    console.log('[normal-chrome-v1] navigator.webdriver=' + JSON.stringify(webdriverBefore));
+    await saveNormalChromeEvidence(page, '10-normal-chrome-loaded-v1', {
+      cookieCountApplied: (storage.cookies || []).length,
+      storageOriginCountNotInjected: (storage.origins || []).length,
+      navigatorWebdriver: webdriverBefore
+    });
+
+    const geometry = await x11Capture(['getdisplaygeometry'], 'x11-display-geometry');
+    const [widthText, heightText] = geometry.stdout.trim().split(/\s+/);
+    const width = Number.parseInt(widthText, 10);
+    const height = Number.parseInt(heightText, 10);
+    if (!Number.isFinite(width) || !Number.isFinite(height)) throw new Error('Could not determine X11 display geometry');
+
+    const composerX = Math.round(width * 0.63);
+    const composerY = Math.round(height - 72);
+    await x11Key(['mousemove', '--sync', String(composerX), String(composerY)], 'x11-composer-move');
+    await page.waitForTimeout(randomDelayMs(180, 360));
+    await x11Key(['click', '1'], 'x11-composer-click');
+    await page.waitForTimeout(randomDelayMs(250, 450));
+
+    console.log('[normal-chrome-v1] wake-entry=OS-X11-skilled-typist');
+    await humanX11TypeText(page, wakeMessage);
+    await saveNormalChromeEvidence(page, '11-normal-chrome-before-send-v1', {
+      composerClick: { x: composerX, y: composerY }
+    });
+
+    await page.waitForTimeout(randomDelayMs(350, 700));
+    console.log('[normal-chrome-v1] send=OS-X11-Return');
+    await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-send-return');
+    await page.waitForTimeout(15000);
+    await saveNormalChromeEvidence(page, '12-normal-chrome-after-send-v1');
+
+    await x11Key(['key', '--clearmodifiers', 'ctrl+r'], 'x11-human-reload');
+    await page.waitForTimeout(18000);
+    const bodyAfterReload = await page.locator('body').innerText().catch(() => '');
+    const normalizedBody = normalizeVisibleText(bodyAfterReload);
+    const marker = normalizeVisibleText(wakeMessage).slice(0, 120);
+    const persisted = marker.length > 0 && normalizedBody.includes(marker);
+    const cloudflareChallenge = /cloudflare_challenge|Verify you are human|Checking your browser|Just a moment/i.test(bodyAfterReload);
+    await saveNormalChromeEvidence(page, '13-normal-chrome-after-reload-v1', {
+      persisted,
+      cloudflareChallenge,
+      marker
+    });
+
+    const result = {
+      ok: persisted && !cloudflareChallenge,
+      provider: 'normal-system-chrome-x11',
+      action,
+      wakeId,
+      posted: persisted,
+      persisted,
+      cloudflareChallenge,
+      navigatorWebdriver: webdriverBefore,
+      chatUrl: requestedUrl,
+      verification: 'human-reload-visible-text'
+    };
+    await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n', 'utf8');
+    if (!result.ok) {
+      throw new Error('Normal Chrome wake did not persist cleanly after human reload: ' + JSON.stringify({ persisted, cloudflareChallenge }));
+    }
+    return result;
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+    if (!chromeProcess.killed) chromeProcess.kill('SIGTERM');
+    await new Promise(resolve => setTimeout(resolve, 800));
+    if (!chromeProcess.killed) chromeProcess.kill('SIGKILL');
+    if (chromeStderr.trim()) console.log('[normal-chrome-v1] chrome-stderr-tail=' + JSON.stringify(chromeStderr.slice(-1200)));
+  }
+}
+
 async function humanPointerHover(page, locator) {
   await locator.scrollIntoViewIfNeeded().catch(() => {});
   await humanActionPause(page);
@@ -1360,6 +1554,23 @@ async function localProvider(chromium) {
 }
 
 const { chromium } = await loadModules();
+
+if (action === 'wake' && mode === 'resume_existing') {
+  try {
+    const result = await runNormalChromeExistingWake(chromium);
+    console.log(JSON.stringify(result));
+    process.exit(0);
+  } catch (error) {
+    await fs.writeFile(statePath, JSON.stringify({
+      ok: false,
+      wakeId,
+      failures: [{ provider: 'normal-system-chrome-x11', error: error.message }]
+    }, null, 2) + '\n');
+    console.error('[normal-system-chrome-x11] ' + error.message);
+    process.exit(1);
+  }
+}
+
 const providers = [
   ['github-playwright', () => localProvider(chromium)],
 ];
