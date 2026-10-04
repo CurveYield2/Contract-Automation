@@ -17,51 +17,6 @@ const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
-
-async function publishOperatorStatus(status, extra = {}) {
-  const token = env.GITHUB_TOKEN || '';
-  const repository = env.GITHUB_REPOSITORY || '';
-  const statusPath = env.OPERATOR_STATUS_PATH || '';
-  if (!token || !repository || !statusPath) return;
-
-  const api = 'https://api.github.com/repos/' + repository + '/contents/' + statusPath;
-  const headers = {
-    'Authorization': 'Bearer ' + token,
-    'Accept': 'application/vnd.github+json',
-    'X-GitHub-Api-Version': '2022-11-28',
-    'Content-Type': 'application/json'
-  };
-
-  let fileSha = '';
-  try {
-    const response = await fetch(api + '?ref=main', { headers });
-    if (response.ok) fileSha = (await response.json()).sha || '';
-  } catch {}
-
-  const payload = {
-    version: 10,
-    run_id: String(env.GITHUB_RUN_ID || ''),
-    run_url: env.GITHUB_SERVER_URL && repository && env.GITHUB_RUN_ID
-      ? env.GITHUB_SERVER_URL + '/' + repository + '/actions/runs/' + env.GITHUB_RUN_ID
-      : '',
-    browser_view_url: env.BROWSER_VIEW_URL || '',
-    status,
-    updated_at: new Date().toISOString(),
-    ...extra
-  };
-
-  const body = {
-    message: 'chore(browser): update v10 operator status',
-    content: Buffer.from(JSON.stringify(payload, null, 2) + '\n', 'utf8').toString('base64'),
-    branch: 'main'
-  };
-  if (fileSha) body.sha = fileSha;
-
-  try {
-    await fetch(api, { method: 'PUT', headers, body: JSON.stringify(body) });
-  } catch {}
-}
-
 function bool(v) { return String(v || '').toLowerCase() === 'true'; }
 
 async function importBrowserRuntimeModule(specifier) {
@@ -250,23 +205,6 @@ async function humanPointerClick(page, locator) {
   await page.waitForTimeout(randomDelayMs(300, 700));
   await page.mouse.up();
   await humanActionPause(page);
-}
-
-async function shortHumanPointerClick(page, locator) {
-  await locator.scrollIntoViewIfNeeded().catch(() => {});
-  await humanActionPause(page);
-  await locator.hover().catch(() => {});
-  await humanActionPause(page);
-  const box = await locator.boundingBox();
-  if (!box) throw new Error('Visible control has no clickable bounding box');
-  const x = box.x + box.width / 2;
-  const y = box.y + box.height / 2;
-  await page.mouse.move(x, y, { steps: 12 });
-  await page.waitForTimeout(randomDelayMs(100, 300));
-  await page.mouse.down();
-  await page.waitForTimeout(randomDelayMs(80, 160));
-  await page.mouse.up();
-  await page.waitForTimeout(randomDelayMs(300, 700));
 }
 
 async function humanTypeInto(page, locator, text) {
@@ -582,16 +520,6 @@ async function findSendControlNearComposer(page, composer) {
   ]);
 }
 
-async function captureProjectDebugScreenshot(page, label) {
-  if (!env.PROJECT_DEBUG_DIR) return;
-  await fs.mkdir(env.PROJECT_DEBUG_DIR, { recursive: true }).catch(() => {});
-  const safe = String(label).replace(/[^a-z0-9_-]+/gi, '-');
-  await page.screenshot({
-    path: env.PROJECT_DEBUG_DIR + '/' + safe + '.png',
-    fullPage: false
-  }).catch(() => {});
-}
-
 async function createProjectExactHumanFlow(page, name) {
   if (!name) throw new Error('PROJECT_NAME is required for project_wake');
 
@@ -621,11 +549,8 @@ async function createProjectExactHumanFlow(page, name) {
   }
   if (!controls.create) throw new Error('Create Project button was not found on the visible Create-project surface');
   if (!controls.editor) throw new Error('Project-name editor was not found on the visible Create-project surface');
-  await captureProjectDebugScreenshot(page, '01-create-project-modal-open');
 
   await humanTypeInto(page, controls.editor, name);
-  console.log('[github-playwright-v10] project-name-entered=' + JSON.stringify({ projectName: name }));
-  await captureProjectDebugScreenshot(page, '02-project-name-entered');
 
   // The visible Create project button is initially disabled. Give the UI a
   // short human-scale moment to enable it after typing, then click only the
@@ -635,43 +560,20 @@ async function createProjectExactHumanFlow(page, name) {
   if (!enabledCreate) {
     throw new Error('Create project control did not become visibly enabled after typing the Project name');
   }
-  console.log('[github-playwright-v10] create-project-control-enabled=' + JSON.stringify({ projectName: name }));
 
   const beforeCreateUrl = page.url();
   await humanPointerClick(page, enabledCreate);
-  await captureProjectDebugScreenshot(page, '03-after-create-project-click');
 
-  // Preserve the proven create flow, but distinguish "slow navigation" from
-  // "the visible Create project click was ignored". If the modal is still
-  // visibly open with an enabled Create project button, retry that same control
-  // once with a shorter human-style click rather than aborting immediately.
-  let projectUrl = beforeCreateUrl;
-  let retriedCreateClick = false;
-  const projectCreateDeadline = Date.now() + 30000;
-
-  while (Date.now() < projectCreateDeadline) {
-    await page.waitForTimeout(randomDelayMs(900, 1500));
-    projectUrl = page.url();
-    if (projectUrl !== beforeCreateUrl) break;
-
-    const stillEnabledCreate = await findEnabledProjectCreateButton(page, 600);
-    if (stillEnabledCreate && !retriedCreateClick) {
-      retriedCreateClick = true;
-      console.log('[github-playwright-v10] create-project-click-retry=short-human-pointer');
-      await shortHumanPointerClick(page, stillEnabledCreate);
-      await captureProjectDebugScreenshot(page, '04-after-create-project-retry');
-      continue;
-    }
-  }
-
+  // Successful Project creation automatically navigates the browser to the new
+  // Project URL. A short human-scale wait is sufficient; capture that URL directly.
+  await page.waitForTimeout(randomDelayMs(3000, 5000));
+  let projectUrl = page.url();
   if (projectUrl === beforeCreateUrl) {
-    const createStillVisible = Boolean(await findVisibleProjectCreateButton(page));
-    throw new Error(
-      'Create project did not navigate to a new Project URL within 30 seconds; createControlStillVisible=' +
-      String(createStillVisible) +
-      '; retriedCreateClick=' +
-      String(retriedCreateClick)
-    );
+    await page.waitForTimeout(randomDelayMs(2000, 3500));
+    projectUrl = page.url();
+  }
+  if (projectUrl === beforeCreateUrl) {
+    throw new Error('Create project did not navigate to a new Project URL after a short visible wait');
   }
 
   const composer = await ensureComposer(page);
@@ -750,24 +652,11 @@ async function waitForVisibleBrowserReady(page) {
     }));
 
     if (visible.humanChallenge) {
-      await publishOperatorStatus('INTERVENTION_REQUIRED', {
-        stage: 'browser_ready',
-        message: 'Human verification is visible. Open browser_view_url, complete it manually, then wait for automation to resume.'
-      });
-      console.log('[github-playwright-v10] INTERVENTION_REQUIRED=' + JSON.stringify({
-        stage: 'browser_ready',
-        browserViewUrl: env.BROWSER_VIEW_URL || ''
-      }));
-      if (Date.now() >= deadline) {
-        throw new Error('Human verification was not cleared within the configured manual-verification window');
-      }
-      await page.waitForTimeout(5000);
-      continue;
+      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected; aborting immediately');
+      error.code = 'BROWSER_CHALLENGE';
+      throw error;
     }
-    if (composer && !visible.loginPrompt && !visible.conversationUnavailable) {
-      await publishOperatorStatus('AUTOMATION_RESUMED', { stage: 'browser_ready' });
-      return true;
-    }
+    if (composer && !visible.loginPrompt && !visible.conversationUnavailable) return true;
     if (Date.now() >= deadline) {
       throw new Error('ChatGPT visible browser state did not become ready within the configured 5-minute wait');
     }
@@ -782,26 +671,17 @@ async function waitForVisibleBrowserReady(page) {
 function chatRouteInfo(value) {
   try {
     const url = new URL(value);
-    if (url.origin !== 'https://chatgpt.com') {
-      return { isChat: false, isLocal: false, id: '', projectScoped: false };
-    }
-
-    const rootMatch = url.pathname.match(/^\/c\/([^/]+)\/?$/);
-    const projectMatch = url.pathname.match(/^\/g\/([^/]+)\/c\/([^/]+)\/?$/);
-    const id = rootMatch
-      ? decodeURIComponent(rootMatch[1])
-      : projectMatch
-        ? decodeURIComponent(projectMatch[2])
-        : '';
-
+    if (url.origin !== 'https://chatgpt.com') return { isChat: false, isLocal: false, id: '' };
+    const match = url.pathname.match(/^\/c\/([^/]+)\/?$/);
+    if (!match) return { isChat: false, isLocal: false, id: '' };
+    const id = decodeURIComponent(match[1]);
     return {
       isChat: Boolean(id),
       isLocal: id.startsWith('local-chatgpt:'),
-      id,
-      projectScoped: Boolean(projectMatch)
+      id
     };
   } catch {
-    return { isChat: false, isLocal: false, id: '', projectScoped: false };
+    return { isChat: false, isLocal: false, id: '' };
   }
 }
 
@@ -863,7 +743,7 @@ async function waitForFreshChatRoute(page, timeoutMs = 90000) {
     if (info.isChat) return { url: current, ...info };
     await page.waitForTimeout(500);
   }
-  throw new Error('Fresh chat did not visibly navigate to a recognized ChatGPT conversation route');
+  throw new Error('Fresh chat did not visibly navigate to a chatgpt.com/c/... route');
 }
 
 async function waitForDurableChatRoute(page, timeoutMs = 300000) {
@@ -873,16 +753,9 @@ async function waitForDurableChatRoute(page, timeoutMs = 300000) {
     const bodyText = await page.locator('body').innerText().catch(() => '');
     const visible = visibleBrowserStateText(bodyText, title);
     if (visible.humanChallenge) {
-      await publishOperatorStatus('INTERVENTION_REQUIRED', {
-        stage: 'durable_chat_url',
-        message: 'Human verification is visible while the new chat URL is becoming durable. Open browser_view_url and complete it manually.'
-      });
-      console.log('[github-playwright-v10] INTERVENTION_REQUIRED=' + JSON.stringify({
-        stage: 'durable_chat_url',
-        browserViewUrl: env.BROWSER_VIEW_URL || ''
-      }));
-      await page.waitForTimeout(5000);
-      continue;
+      const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected while waiting for durable chat URL; aborting immediately');
+      error.code = 'BROWSER_CHALLENGE';
+      throw error;
     }
 
     const current = page.url();
@@ -983,42 +856,54 @@ async function recoverCreatedChatByVisibleSearch(page, message) {
 async function postWithVisibleVerification(page, message, composerOverride = null) {
   const submitted = await post(page, message, composerOverride);
 
-  let route = { url: page.url(), ...chatRouteInfo(page.url()) };
+  let initialRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
   if (mode === 'create_fresh') {
-    route = await waitForFreshChatRoute(page, 90000);
-  } else if (!route.isChat) {
-    throw new Error('Existing-chat send is not on a visible ChatGPT conversation route');
+    initialRoute = await waitForFreshChatRoute(page, 90000);
+  } else if (!initialRoute.isChat) {
+    throw new Error('Existing-chat send is not on a visible chatgpt.com/c/... route');
   }
 
-  const visibleWake = await visibleWakePresent(page, message, 90000);
-  console.log('[github-playwright-v10] visible-wake-before-url-save=' + JSON.stringify({
-    ...visibleWake,
-    chatUrl: route.url,
-    localRoute: route.isLocal,
-    projectScoped: route.projectScoped
+  const beforeReload = await visibleWakePresent(page, message, 90000);
+  console.log('[github-playwright-v10] visible-wake-before-reload=' + JSON.stringify({
+    ...beforeReload,
+    chatUrl: initialRoute.url,
+    localRoute: initialRoute.isLocal
   }));
-  if (!visibleWake.visible) {
-    throw new Error('Sent wake is not visibly present in the rendered conversation before URL save');
+  if (!beforeReload.visible) {
+    throw new Error('Sent wake is not visibly present in the rendered conversation before reload');
   }
 
-  if (route.isLocal) {
-    route = await waitForDurableChatRoute(page, 300000);
+  // Never reload an optimistic local-chatgpt route. Wait for the normal UI
+  // to transition to a durable server-backed /c/<id> route first.
+  if (initialRoute.isLocal) {
+    initialRoute = await waitForDurableChatRoute(page, 300000);
   }
 
-  console.log('[github-playwright-v10] durable-chat-url-saved=' + JSON.stringify({
-    chatUrl: route.url,
-    projectScoped: route.projectScoped
+  await humanReload(page);
+  await waitForVisibleBrowserReady(page);
+
+  const reloadedRoute = { url: page.url(), ...chatRouteInfo(page.url()) };
+  if (!reloadedRoute.isChat || reloadedRoute.isLocal) {
+    throw new Error('Human-style reload did not return to a durable chatgpt.com/c/... conversation');
+  }
+
+  const afterReload = await visibleWakePresent(page, message, 90000);
+  console.log('[github-playwright-v10] visible-wake-after-reload=' + JSON.stringify({
+    ...afterReload,
+    chatUrl: reloadedRoute.url,
+    localRoute: reloadedRoute.isLocal
   }));
-  await publishOperatorStatus('CHAT_URL_SAVED', { chatUrl: route.url, projectScoped: route.projectScoped });
+  if (!afterReload.visible) {
+    throw new Error('Wake is not visibly present after human-style reload of the conversation');
+  }
 
   return {
     ...submitted,
     persisted: true,
-    userCount: visibleWake.userCount,
-    verificationMethod: visibleWake.method,
-    chatUrl: route.url,
-    localRoute: route.isLocal,
-    projectScoped: route.projectScoped
+    userCount: afterReload.userCount,
+    verificationMethod: afterReload.method,
+    chatUrl: reloadedRoute.url,
+    localRoute: reloadedRoute.isLocal
   };
 }
 
@@ -1046,7 +931,6 @@ async function runWithPage(providerName, connect) {
     if (action === 'project_wake') {
       if (mode !== 'create_fresh') throw new Error('project_wake requires create_fresh mode');
       project = await createProjectExactHumanFlow(page, projectName);
-      await publishOperatorStatus('PROJECT_URL_SAVED', { projectUrl: project.url });
     }
 
     const before = await snapshot(page);
