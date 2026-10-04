@@ -51,7 +51,7 @@
 
 ## ACTIVE BLOCKER
 
-**Center-page chat-title recovery is merged, but the latest merged live run did not reach the Project page: opening the persisted Project URL redirected back to the ChatGPT homepage.**
+**Direct saved-Project navigation repair is in progress on `repair/project-url-direct-retry-v1`: the exact persisted Project URL now retries in-place after a transient homepage bounce, with no sidebar fallback. Live merged proof remains required.**
 
 Latest merged production commit:
 - `ff468b253f70098d1a9bae572840ba58e24909b9` — `Recover Project chat from visible center title and capture URL v1`
@@ -86,7 +86,7 @@ Locked invariants:
 
 ## NEXT ACTION
 
-Start from current `main`. Diagnose only the direct persisted-Project navigation regression from run `37164591468`. Do not touch sidebar discovery. Once the Project opens, use the already-merged center-page title path to capture the durable chat URL and prove direct-chat reuse on the next run.
+Validate the direct retry patch, merge it, trigger the canonical recovery request on `main`, and prove the saved Project opens. Then use the already-merged center-page title path to capture the durable chat URL and immediately run a second recovery proving artifact-restored direct-chat reuse.
 
 ## PARKED / OUT OF SCOPE
 
