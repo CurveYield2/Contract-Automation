@@ -1288,9 +1288,383 @@ async function postWithVisibleVerification(page, message, composerOverride = nul
   };
 }
 
+
+const visualScreenPath = '/tmp/browser-agent-v10-visual-screen.png';
+
+function visualSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function publishOperatorStatus(status, extra = {}) {
+  const token = env.GITHUB_TOKEN || '';
+  const repository = env.GITHUB_REPOSITORY || '';
+  const statusPath = env.OPERATOR_STATUS_PATH || '';
+  if (!token || !repository || !statusPath) return;
+
+  const api = 'https://api.github.com/repos/' + repository + '/contents/' + statusPath;
+  const headers = {
+    'Authorization': 'Bearer ' + token,
+    'Accept': 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'Content-Type': 'application/json'
+  };
+
+  let fileSha = '';
+  try {
+    const getResponse = await fetch(api + '?ref=main', { headers });
+    if (getResponse.ok) {
+      const existing = await getResponse.json();
+      fileSha = existing.sha || '';
+    }
+  } catch {}
+
+  const payload = {
+    version: 10,
+    run_id: String(env.GITHUB_RUN_ID || ''),
+    run_url: env.GITHUB_SERVER_URL && repository && env.GITHUB_RUN_ID
+      ? env.GITHUB_SERVER_URL + '/' + repository + '/actions/runs/' + env.GITHUB_RUN_ID
+      : '',
+    browser_view_url: env.BROWSER_VIEW_URL || '',
+    status,
+    updated_at: new Date().toISOString(),
+    ...extra
+  };
+
+  const body = {
+    message: 'chore(browser): update v10 operator status',
+    content: Buffer.from(JSON.stringify(payload, null, 2) + '\n', 'utf8').toString('base64'),
+    branch: 'main'
+  };
+  if (fileSha) body.sha = fileSha;
+
+  try {
+    await fetch(api, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(body)
+    });
+  } catch {}
+}
+
+async function visualChromeWindowId() {
+  const { stdout } = await execFile('xdotool', ['search', '--onlyvisible', '--class', 'google-chrome']);
+  const ids = String(stdout || '').trim().split(/\s+/).filter(Boolean);
+  if (!ids.length) throw new Error('Visible Chrome window not found');
+  return ids[ids.length - 1];
+}
+
+async function visualFocus(windowId) {
+  await execFile('xdotool', ['windowfocus', '--sync', windowId]);
+  await visualSleep(randomDelayMs(300, 1500));
+}
+
+async function visualKey(windowId, keyName) {
+  await visualFocus(windowId);
+  await execFile('xdotool', ['key', '--window', windowId, '--clearmodifiers', keyName]);
+  await visualSleep(randomDelayMs(300, 1500));
+}
+
+async function visualType(windowId, text) {
+  await visualFocus(windowId);
+  for (const char of String(text)) {
+    await execFile('xdotool', ['type', '--window', windowId, '--clearmodifiers', char]);
+    await visualSleep(randomDelayMs(200, 400));
+  }
+  await visualSleep(randomDelayMs(300, 1500));
+}
+
+async function visualMove(windowId, x, y) {
+  await visualFocus(windowId);
+  await execFile('xdotool', [
+    'mousemove',
+    '--window', windowId,
+    String(Math.round(x)),
+    String(Math.round(y))
+  ]);
+  await visualSleep(randomDelayMs(300, 1500));
+}
+
+async function visualClick(windowId, x, y) {
+  await visualMove(windowId, x, y);
+  await execFile('xdotool', ['mousedown', '--window', windowId, '1']);
+  await visualSleep(randomDelayMs(180, 420));
+  await execFile('xdotool', ['mouseup', '--window', windowId, '1']);
+  await visualSleep(randomDelayMs(300, 1500));
+}
+
+async function visualNavigate(windowId, url) {
+  await visualKey(windowId, 'ctrl+l');
+  await visualType(windowId, url);
+  await visualKey(windowId, 'Return');
+  await visualSleep(randomDelayMs(4500, 6500));
+}
+
+async function visualAddressBarUrl(windowId) {
+  await visualKey(windowId, 'ctrl+l');
+  await visualKey(windowId, 'ctrl+c');
+  const { stdout } = await execFile('xclip', ['-selection', 'clipboard', '-o']);
+  await visualKey(windowId, 'Escape');
+  return String(stdout || '').trim();
+}
+
+async function visualWords() {
+  await execFile('scrot', ['-o', visualScreenPath]);
+  const { stdout } = await execFile('tesseract', [visualScreenPath, 'stdout', 'tsv']);
+
+  const words = [];
+  for (const line of String(stdout || '').split('\n').slice(1)) {
+    const parts = line.split('\t');
+    if (parts.length < 12) continue;
+    const text = String(parts[11] || '').trim();
+    const confidence = Number(parts[10]);
+    if (!text || !Number.isFinite(confidence) || confidence < 15) continue;
+    words.push({
+      text,
+      lower: text.toLowerCase(),
+      left: Number(parts[6]),
+      top: Number(parts[7]),
+      width: Number(parts[8]),
+      height: Number(parts[9]),
+      block: String(parts[2]),
+      paragraph: String(parts[3]),
+      line: String(parts[4])
+    });
+  }
+  return words;
+}
+
+function visualJoinedText(words) {
+  return words.map((word) => word.text).join(' ').toLowerCase();
+}
+
+function visualWordBox(words, pattern) {
+  for (const word of words) {
+    pattern.lastIndex = 0;
+    if (pattern.test(word.text)) {
+      return {
+        ...word,
+        cx: word.left + word.width / 2,
+        cy: word.top + word.height / 2
+      };
+    }
+  }
+  return null;
+}
+
+function visualPhraseBox(words, phrase) {
+  const wanted = String(phrase).toLowerCase().split(/\s+/).filter(Boolean);
+  const groups = new Map();
+
+  for (const word of words) {
+    const key = [word.block, word.paragraph, word.line].join(':');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(word);
+  }
+
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.left - b.left);
+    const normalized = group.map((word) => word.lower.replace(/[^a-z0-9_+-]/g, ''));
+
+    for (let i = 0; i <= normalized.length - wanted.length; i += 1) {
+      let matches = true;
+      for (let j = 0; j < wanted.length; j += 1) {
+        const token = wanted[j].replace(/[^a-z0-9_+-]/g, '');
+        if (!normalized[i + j].includes(token)) {
+          matches = false;
+          break;
+        }
+      }
+      if (!matches) continue;
+
+      const segment = group.slice(i, i + wanted.length);
+      const left = Math.min(...segment.map((word) => word.left));
+      const top = Math.min(...segment.map((word) => word.top));
+      const right = Math.max(...segment.map((word) => word.left + word.width));
+      const bottom = Math.max(...segment.map((word) => word.top + word.height));
+      return {
+        left,
+        top,
+        width: right - left,
+        height: bottom - top,
+        cx: (left + right) / 2,
+        cy: (top + bottom) / 2
+      };
+    }
+  }
+  return null;
+}
+
+function visualChallengeVisible(text) {
+  return /just a moment|verify you are human|verifying you are human|checking your browser|security verification|enable javascript and cookies|ray id/.test(text);
+}
+
+function visualNormalChatVisible(text) {
+  return /projects|new chat|chatgpt|ask anything|message chatgpt/.test(text);
+}
+
+async function waitForVisualChat(stage) {
+  const minutes = Number.parseInt(env.MANUAL_CHALLENGE_WAIT_MINUTES || '5', 10);
+  const timeoutMs = Math.max(1, Number.isFinite(minutes) ? minutes : 5) * 60000;
+  const deadline = Date.now() + timeoutMs;
+  let interventionPublished = false;
+
+  while (Date.now() < deadline) {
+    const words = await visualWords();
+    const text = visualJoinedText(words);
+
+    if (visualChallengeVisible(text)) {
+      if (!interventionPublished) {
+        interventionPublished = true;
+        await publishOperatorStatus('INTERVENTION_REQUIRED', {
+          stage,
+          message: 'Human verification is visible. Open browser_view_url and complete the verification manually.'
+        });
+        console.log('[github-playwright-v10] INTERVENTION_REQUIRED=' + JSON.stringify({
+          stage,
+          browserViewUrl: env.BROWSER_VIEW_URL || ''
+        }));
+      }
+      await visualSleep(5000);
+      continue;
+    }
+
+    if (visualNormalChatVisible(text)) {
+      if (interventionPublished) {
+        await publishOperatorStatus('AUTOMATION_RESUMED', { stage });
+      }
+      return words;
+    }
+
+    await visualSleep(3000);
+  }
+
+  throw new Error('Rendered ChatGPT UI did not become available within the manual-verification window');
+}
+
+async function visualFindProjects(windowId) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const words = await visualWords();
+    const projects = visualWordBox(words, /^Projects$/i);
+    if (projects) return projects;
+
+    if (attempt === 0) {
+      await visualClick(windowId, 30, 52);
+      await visualSleep(2500);
+    } else {
+      await visualSleep(1800);
+    }
+  }
+  throw new Error('Rendered Projects label was not found');
+}
+
+async function visualCreateFreshProject(windowId) {
+  const projects = await visualFindProjects(windowId);
+  await visualMove(windowId, projects.cx, projects.cy);
+  await visualSleep(randomDelayMs(700, 1300));
+
+  const plusX = Math.max(240, Math.min(305, projects.left + projects.width + 170));
+  await visualClick(windowId, plusX, projects.cy);
+  await visualSleep(randomDelayMs(2200, 3500));
+
+  let words = await visualWords();
+  let createButton = visualPhraseBox(words, 'Create project');
+  if (!createButton) {
+    throw new Error('Rendered Create project dialog was not found');
+  }
+
+  const nameLabel = visualPhraseBox(words, 'Project name') || visualWordBox(words, /^Name$/i);
+  const nameFieldY = nameLabel ? nameLabel.cy + 42 : Math.max(360, createButton.cy - 120);
+  await visualClick(windowId, 960, Math.max(330, Math.min(620, nameFieldY)));
+  await visualType(windowId, projectName);
+
+  await visualSleep(randomDelayMs(1200, 2300));
+  words = await visualWords();
+  createButton = visualPhraseBox(words, 'Create project');
+  if (!createButton) {
+    throw new Error('Rendered Create project button was not found after typing the name');
+  }
+
+  await visualClick(windowId, createButton.cx, createButton.cy);
+  await visualSleep(randomDelayMs(5000, 7500));
+  await waitForVisualChat('after_project_create');
+
+  const projectUrl = await visualAddressBarUrl(windowId);
+  if (!/^https:\/\/chatgpt\.com\/g\/g-p-[^/]+/.test(projectUrl)) {
+    throw new Error('Fresh Project did not expose a Project URL in Chrome address bar');
+  }
+
+  await publishOperatorStatus('PROJECT_CREATED', { projectUrl });
+  return projectUrl;
+}
+
+async function visualSendFreshProjectWake(windowId, projectUrl) {
+  const words = await visualWords();
+  const composerCue = visualPhraseBox(words, 'New chat in') || visualPhraseBox(words, 'New chat');
+
+  if (composerCue) {
+    await visualClick(windowId, composerCue.cx, composerCue.cy);
+  } else {
+    await visualClick(windowId, 960, 235);
+  }
+
+  await visualType(windowId, wakeMessage);
+  await visualKey(windowId, 'Return');
+  await visualSleep(randomDelayMs(8500, 12000));
+  await waitForVisualChat('after_wake_send');
+
+  let chatUrl = '';
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    chatUrl = await visualAddressBarUrl(windowId);
+    if (/^https:\/\/chatgpt\.com\/(?:c\/|g\/g-p-[^/]+\/c\/)/.test(chatUrl)) break;
+    await visualSleep(4000);
+  }
+
+  if (!/^https:\/\/chatgpt\.com\/(?:c\/|g\/g-p-[^/]+\/c\/)/.test(chatUrl)) {
+    throw new Error('Fresh Project chat did not expose a durable chat URL in Chrome address bar');
+  }
+
+  await publishOperatorStatus('WAKE_SENT', { projectUrl, chatUrl });
+  return chatUrl;
+}
+
+async function runVisualOnlyProjectWake(providerName) {
+  await publishOperatorStatus('AUTOMATION_RUNNING', {
+    message: 'Visual-only Project wake automation is active.'
+  });
+
+  const windowId = await visualChromeWindowId();
+  await visualNavigate(windowId, 'https://chatgpt.com/');
+  await waitForVisualChat('initial_load');
+
+  const projectUrl = await visualCreateFreshProject(windowId);
+  const chatUrl = await visualSendFreshProjectWake(windowId, projectUrl);
+
+  const result = {
+    ok: true,
+    provider: providerName,
+    action,
+    wakeId,
+    posted: true,
+    projectName,
+    projectUrl,
+    chatUrl,
+    verification: 'rendered-screen-ocr-only',
+    inputMethod: 'os-mouse-keyboard-only',
+    cloudflareHandling: 'manual-verification-only'
+  };
+
+  await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n');
+  await publishOperatorStatus('COMPLETE', { projectUrl, chatUrl });
+  return result;
+}
+
 async function runWithPage(providerName, connect) {
   const { browser, context, page, close } = await connect();
   try {
+    if (action === 'project_wake' && mode === 'create_fresh' && bool(env.VISUAL_ONLY_PROJECT_WAKE)) {
+      return await runVisualOnlyProjectWake(providerName);
+    }
+
     const recoveryRoute = action === 'recover' ? chatRouteInfo(requestedUrl) : { isChat: false, isLocal: false };
     let deferredHumanUrl = '';
     if (action === 'recover' && recoveryRoute.isChat && !recoveryRoute.isLocal) {
