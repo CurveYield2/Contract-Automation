@@ -157,13 +157,18 @@ async function snapshot(page) {
   const title = await page.title().catch(() => '');
   const conversationUnavailable =
     /Unable to load conversation|Conversation not found|Chat not found|This conversation is unavailable/i.test(bodyText);
-  const loginPrompt = /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText);
+  const accountLoadFailure =
+    /We couldn.?t load your account|Unable to load your account/i.test(bodyText);
+  const loginPrompt =
+    /\bLog in\b|\bSign up\b|Continue with Google|Welcome back/i.test(bodyText) ||
+    accountLoadFailure;
   const humanChallenge =
     /Verify you are human|Checking your browser|Just a moment|Cloudflare|security challenge/i.test(bodyText) ||
     /Just a moment|Cloudflare/i.test(title);
+  const generating = !!stop || /Stop generating/i.test(bodyText);
   const chatViewable =
     durableChatUrl(currentUrl) &&
-    !!composer &&
+    (!!composer || generating) &&
     !conversationUnavailable &&
     !loginPrompt &&
     !humanChallenge;
@@ -178,9 +183,10 @@ async function snapshot(page) {
     pageTitle: title,
     mainDiagnostics,
     loadingText: /loading|opening chat|reconnecting|synchroniz/i.test(bodyText),
-    generating: !!stop || /Stop generating/i.test(bodyText),
+    generating,
     composerVisible: !!composer,
     conversationUnavailable,
+    accountLoadFailure,
     loginPrompt,
     humanChallenge,
     chatViewable,
