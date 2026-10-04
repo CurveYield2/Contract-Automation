@@ -481,8 +481,8 @@ test('reviewer wake uses only visible human pointer, keyboard, and clipboard-pas
   assert.match(sendBlock, /messagePurpose === 'initial_wake'/);
   assert.match(sendBlock, /startSystemClipboard\(message\)/);
   assert.match(sendBlock, /finishSystemClipboard\(clipboardOwner\)/);
-  assert.match(sendBlock, /spawn\('xdotool', \['key', '--clearmodifiers', 'ctrl\+v'\]/);
-  assert.match(sendBlock, /composer-fill-strategy=human-clipboard-paste/);
+  assert.match(sendBlock, /spawn\('xdotool', \['type', '--clearmodifiers', '--delay', '8', humanText\]/);
+  assert.match(sendBlock, /composer-fill-strategy=human-x11-type/);
   assert.match(sendBlock, /for \(const char of String\(message\)\)/);
   assert.match(sendBlock, /humanTypingPause\(page\)/);
   assert.match(sendBlock, /humanPointerClick\(page, send/);
