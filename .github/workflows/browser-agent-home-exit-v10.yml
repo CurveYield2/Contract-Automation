@@ -62,8 +62,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: original-phase0-home-exit-browser-v10
-  cancel-in-progress: true
+  # One saved ChatGPT browser state is shared by every browser workflow.
+  # Queue ownership transfers; never cancel or overlap another browser owner.
+  group: chatgpt-shared-browser-session-v1
+  cancel-in-progress: false
 
 jobs:
   browser:
