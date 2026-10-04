@@ -14,6 +14,8 @@ import {
   prepareQualifiedRuntimeV2,
   runMedusa,
   runTelemetry,
+  detectDeploymentScripts,
+  executeDeploymentScripts,
   PHASE0_MEDUSA_MIN_CALLS_V1,
   PHASE0_TELEMETRY_CALLS_PER_RUN_V1,
   PHASE0_TELEMETRY_RUNS_V1
@@ -123,6 +125,57 @@ const proxy=await startCountingProxy(anvil.url);
 const provider=new ethers.JsonRpcProvider(proxy.url,1,{staticNetwork:true,cacheTimeout:-1});
 try{
   const actors=await provider.send('eth_accounts',[]);
+
+  // A06-A08: one successful mechanically adapted Node deployment script, one
+  // filesystem-escape attempt, and one unsupported sibling. A sibling success
+  // must never erase another script's typed gap.
+  const deploymentFixtureRoot=path.join(outRoot,'deployment-script-qualification');
+  await fs.mkdir(deploymentFixtureRoot,{recursive:true});
+  await fs.writeFile(path.join(deploymentFixtureRoot,'package.json'),JSON.stringify({
+    type:'module',
+    scripts:{
+      'deploy:success':'node success.mjs',
+      'deploy:sandbox':'node sandbox.mjs',
+      'deploy:unsupported':'python unsupported.py'
+    }
+  },null,2)+'\n');
+  await fs.writeFile(path.join(deploymentFixtureRoot,'success.mjs'),`
+const NETWORK_NAME='fixture';
+const resolveNetwork=()=>({chainId:999});
+const network=resolveNetwork(NETWORK_NAME);
+if(!process.env.RPC_URL) throw new Error('MISSING_RPC');
+console.log(JSON.stringify({chainId:network.chainId,rpc:Boolean(process.env.RPC_URL),github:process.env.GITHUB_TOKEN||'NO_GITHUB'}));
+`);
+  await fs.writeFile(path.join(deploymentFixtureRoot,'sandbox.mjs'),`
+import fs from 'node:fs';
+if(!process.env.RPC_URL) throw new Error('MISSING_RPC');
+console.log(fs.readFileSync('/etc/passwd','utf8'));
+`);
+  await fs.writeFile(path.join(deploymentFixtureRoot,'unsupported.py'),'print("unsupported")\n');
+  const priorGithubToken=process.env.GITHUB_TOKEN;
+  process.env.GITHUB_TOKEN='PHASE0_A08_SECRET_SENTINEL_SHOULD_NEVER_REACH_CHILD';
+  const deploymentFixtureDetected=await detectDeploymentScripts(deploymentFixtureRoot);
+  const deploymentFixtureResult=await executeDeploymentScripts({
+    projectRoot:deploymentFixtureRoot,
+    anvilUrl:proxy.url,
+    account0:actors[0],
+    localSigner:{address:actors[0],privateKey:'0x'+'11'.repeat(32)},
+    detected:deploymentFixtureDetected
+  });
+  if(priorGithubToken===undefined)delete process.env.GITHUB_TOKEN;else process.env.GITHUB_TOKEN=priorGithubToken;
+  const successfulAdapted=deploymentFixtureResult.attempts.find(x=>x.script==='deploy:success');
+  const sandboxAttempt=deploymentFixtureResult.attempts.find(x=>x.script==='deploy:sandbox');
+  const unsupportedDisposition=deploymentFixtureResult.scriptDispositions.find(x=>x.script==='deploy:unsupported');
+  assertThat(successfulAdapted?.status==='PASS','A06/A07 adapted deployment script did not execute successfully');
+  assertThat(successfulAdapted.originalSha256&&successfulAdapted.adaptedSha256&&successfulAdapted.originalSha256!==successfulAdapted.adaptedSha256,'A07 original/adapted deployment digests are not distinct');
+  assertThat(successfulAdapted.adaptation==='LOCAL_CHAIN_ID_OVERRIDE','A07 local chain substitution is not explicit');
+  assertThat(successfulAdapted.sandbox?.productionHandoffEligible===false,'A07 adapted local script incorrectly appears production-handoff eligible');
+  assertThat(!String(successfulAdapted.stdout).includes('PHASE0_A08_SECRET_SENTINEL'),'A08 parent GitHub secret reached retained child output');
+  assertThat(sandboxAttempt?.status==='FAILED','A08 filesystem escape fixture was not blocked');
+  assertThat(/ACCESS_DENIED|permission|FileSystemRead/i.test(String(sandboxAttempt.stderr)),'A08 filesystem escape failure is not attributable to the permission boundary');
+  assertThat(!String(sandboxAttempt.stdout).includes('root:x:'),'A08 outside filesystem contents leaked to retained output');
+  assertThat(unsupportedDisposition?.disposition==='UNSUPPORTED_WITH_TYPED_GAP','A06 unsupported sibling script lost its explicit disposition');
+  assertThat(deploymentFixtureResult.scriptDispositions.some(x=>x.script==='deploy:success'&&x.disposition==='EXECUTED_PASS'),'A06 successful sibling disposition missing');
   const token=await deploy(artifacts,provider,'QualifiedToken',[actors[0]]);
   const vault=await deploy(artifacts,provider,'QualifiedVault');
   const lender=await deploy(artifacts,provider,'FlashLender');
@@ -233,6 +286,17 @@ try{
     fixture:{sourcePath:path.relative(root,fixturePath).replaceAll('\\','/'),compiler:solc.version(),contractCount:artifacts.length,deployedContracts:deployed},
     recipes:targets.map(t=>({qualifiedName:t.qualifiedName,logicalQualifiedName:t.logicalQualifiedName??t.qualifiedName,address:t.address,contextType:t.contextType,recipeId:t.recipe?.recipeId??null,recipeStatus:t.recipe?.status??null})),
     runtimePreparation:prep,
+    deploymentScriptQualification:{
+      status:'PASS',
+      scriptDispositions:deploymentFixtureResult.scriptDispositions,
+      attempts:deploymentFixtureResult.attempts.map(x=>({
+        framework:x.framework,script:x.script,path:x.path,adaptedPath:x.adaptedPath,
+        originalSha256:x.originalSha256,adaptedSha256:x.adaptedSha256,adaptedContentChanged:x.adaptedContentChanged,
+        adaptation:x.adaptation,executionOverrides:x.executionOverrides,sandbox:x.sandbox,status:x.status,
+        exitCode:x.exitCode,stdout:x.stdout,stderr:x.stderr
+      })),
+      limitations:deploymentFixtureResult.limitations
+    },
     delegateContexts:contexts.contextEvidence,
     medusa,
     controls:{status:control.status,engineProperties:control.engineProperties,propertyRegistry:control.propertyRegistry},
