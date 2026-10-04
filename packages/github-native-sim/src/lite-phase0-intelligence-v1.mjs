@@ -639,7 +639,7 @@ async function main(){
 
   const pseudo={
     requestId:request.requestId,requestDigest:request.requestDigest??sha256(Buffer.from(JSON.stringify(request))),
-    campaignId:request.campaignId,assignmentId:'phase0-intelligence',phaseId:'phase-0',profileId:'github-native-compile-v2',
+    campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,assignmentId:'phase0-intelligence',phaseId:'phase-0',profileId:'github-native-compile-v2',
     source:{repository:request.source.repository,commit:request.source.commit,projectPath:detected.relativePath,archivePath:request.source.archivePath,archiveSha256:request.source.archiveSha256},
     configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],analysis:{slither:{version:'0.11.6'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
   };
@@ -658,11 +658,11 @@ async function main(){
 
   const buildIdentity={
     schemaVersion:'curveyield-lite-phase0-build-source-identity-v1',
-    requestId:request.requestId,campaignId:request.campaignId,
+    requestId:request.requestId,campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,
     source:{...request.source,checkoutCommit:checkout.commit,archiveSha256Observed:observed},
     discovery:{projectPath:detected.relativePath,topCandidates:detected.candidates,archiveEntryCount:extraction.entryCount,archiveExtractedBytes:extraction.extractedBytes},
     configurationDetection:effectiveCfg,
-    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??1,embeddedBuildContract:build.embeddedBuildContract??null,sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
+    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??0,compilationUnits:executionBuildArtifacts.buildIdentity.compilationUnits,buildConfigurationDigestSha256:executionBuildArtifacts.buildConfigurationDigestSha256,embeddedBuildContract:build.embeddedBuildContract??null,sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
     status:'PASS'
   };
 
