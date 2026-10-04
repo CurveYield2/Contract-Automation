@@ -357,16 +357,32 @@ function validateRepairCompletion({root,campaignPath,form,pending,cfg}){
   const allowed=new Set(expectedFiles);
   failures.push(...currentArtifactFailures(root,campaignPath,(form.reviewedArtifacts??[]).filter(x=>x.kind!=='WORK_FORM'||!allowed.has(x.path))));
   const candidateRows=expectedPreRefreshRows({root,campaignPath,form,baseline});
+  return {failures,candidateRows};
+}
+function validateRefreshedRepairVerification({root,campaignPath,form,pending,segment}){
+  const failures=[];
+  if(digestJson(form.review?.repairSpec)!==pending.repairSpecSha256)failures.push('repairSpec changed after controller refresh');
+  if(digestJson(form.childRepair)!==pending.childRepairSha256)failures.push('childRepair evidence changed after controller refresh');
+  const post=form.postRepair;
+  if(!post||post.schemaVersion!=='curveyield-lite-master-repair-refresh-v1')failures.push('controller postRepair record is missing');
+  else{
+    if(post.scopeId!==pending.repairScopeId||post.repairSpecSha256!==pending.repairSpecSha256)failures.push('postRepair scope binding mismatch');
+    if(post.manifestSha256!==pending.postRepairManifestSha256||digestJson(post.artifacts)!==pending.postRepairManifestSha256)failures.push('postRepair manifest binding mismatch');
+    try{
+      const currentRows=collectSegmentArtifacts({root,campaignPath,segment});
+      if(!exactJson(currentRows,post.artifacts))failures.push('refreshed segment artifacts no longer match controller postRepair manifest');
+    }catch(error){failures.push(String(error.message||error));}
+  }
   const verification=form.masterVerification;
-  if(verification?.outcome!=='ACCEPT')failures.push('masterVerification.outcome must be ACCEPT after child repair');
-  const expectedDigests=candidateRows.map(x=>({path:x.path,sha256:x.sha256}));
-  if(!exactJson(verification?.verifiedArtifactDigests,expectedDigests))failures.push('masterVerification.verifiedArtifactDigests must exactly match repaired forms and unchanged sealed artifacts');
+  if(verification?.outcome!=='ACCEPT')failures.push('masterVerification.outcome must be ACCEPT after controller refresh');
+  const expectedDigests=(post?.artifacts??[]).map(x=>({path:x.path,sha256:x.sha256}));
+  if(!exactJson(verification?.verifiedArtifactDigests,expectedDigests))failures.push('masterVerification.verifiedArtifactDigests must exactly match controller-refreshed segment artifacts');
   const deficiencyIds=(form.review?.deficiencies??[]).map(x=>x?.id).filter(Boolean).sort();
   const dispositions=(verification?.deficiencyDispositions??[]);
   const disposedIds=dispositions.map(x=>x?.deficiencyId).filter(Boolean).sort();
   if(!exactJson(disposedIds,deficiencyIds)||dispositions.some(x=>x?.disposition!=='RESOLVED'))failures.push('masterVerification must mark every bounded deficiency RESOLVED exactly once');
   if(typeof verification?.verifiedAt!=='string'||!verification.verifiedAt)failures.push('masterVerification.verifiedAt is required');
-  return {failures,candidateRows};
+  return failures;
 }
 
 export function processMasterReviewSubmission({root,campaignPath,directory,authorityRoot,segmentId,now}){
@@ -387,7 +403,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
     failures.push(...completed.failures);
     if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
     return {
-      status:'MASTER_REPAIR_ACCEPTED',
+      status:'MASTER_REPAIR_READY_FOR_REFRESH',
       failures:[],
       form,
       pending,
@@ -397,6 +413,11 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
       affectedPhases:[...new Set((pending.repairBaseline??[]).map(x=>x.phase))].sort((a,b)=>a-b),
       successorPlan:pending.successorPlan
     };
+  }
+  if(pending.status==='WAITING_FOR_MASTER_REVIEW'&&pending.postRepairManifestSha256){
+    failures.push(...validateRefreshedRepairVerification({root,campaignPath,form,pending,segment}));
+    if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
+    return {status:'MASTER_REPAIR_ACCEPTED',failures:[],form,pending,segment,successorPlan:pending.successorPlan};
   }
   const currentRows=collectSegmentArtifacts({root,campaignPath,segment});
   failures.push(...currentArtifactFailures(root,campaignPath,form.reviewedArtifacts));
