@@ -261,13 +261,10 @@ jobs:
           fi
           message_purpose="$(jq -r '.messagePurpose // "standard"' /tmp/browser-context.json)"
 
-          # The full tailored packet is first-message-only. Every later automation
-          # message to an existing reviewer chat is exactly GET BACK TO WORK except
-          # the one explicit repair-context message for a replacement chat.
-          if [ "$WAKE_MODE" = "create_fresh" ]; then
-            printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
-            test -s /tmp/wake-message.txt
-          elif [ "$message_purpose" = "initial_wake" ] && [ "${INITIAL_WAKE_DEDUPED:-false}" != "true" ]; then
+          # Current audit browser automation is resume-existing only.
+          # The tailored initial wake is used once; all later watchdog messages are
+          # exactly GET BACK TO WORK.
+          if [ "$message_purpose" = "initial_wake" ] && [ "${INITIAL_WAKE_DEDUPED:-false}" != "true" ]; then
             printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
             test -s /tmp/wake-message.txt
           elif [ "$message_purpose" = "repair_notice" ]; then
