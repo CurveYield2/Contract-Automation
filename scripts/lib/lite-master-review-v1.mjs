@@ -77,11 +77,16 @@ function pushUniqueArtifact(rows,seen,row){
   if(seen.has(key))return;
   seen.add(key);rows.push(row);
 }
-export function collectSegmentArtifacts({root,campaignPath,segment}){
+export function collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority}){
+  if(!directory||!expectedAuthority)throw new Error('segment collection requires exact campaign and authority bindings');
   const artifacts=[];const seen=new Set();
   for(const phase of segment.phases){
     const receiptInfo=latestReceipt(root,campaignPath,phase);
     const receipt=receiptInfo.receipt;
+    if(receipt.campaign?.campaignId!==directory.campaignId||receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId)throw new Error('sealed receipt campaign binding mismatch for Phase '+phase);
+    if(receipt.source?.sha256!==directory.sourceSha256)throw new Error('sealed receipt source binding mismatch for Phase '+phase);
+    if(Number(receipt.phase?.sequence)!==phase||Number(receipt.phase?.revision)!==receiptInfo.revision)throw new Error('sealed receipt phase/revision binding mismatch for Phase '+phase);
+    if(receipt.authority?.homepagePath!==expectedAuthority.homepagePath||receipt.authority?.liteSkillSha256!==expectedAuthority.liteSkillSha256)throw new Error('sealed receipt authority binding mismatch for Phase '+phase);
     const receiptKind=receipt.phase.status==='SKIPPED'?'SKIP_MARKER':'SEALED_RECEIPT';
     if(phase===7){
       const canonical=canonicalRel(campaignPath,phase);
@@ -137,7 +142,7 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
   if(directory.pendingMasterReview)throw new Error('campaign already has pendingMasterReview');
   const segment=segmentForBoundary(boundaryPhase);
   if(!segment)throw new Error('unsupported master review boundary '+boundaryPhase);
-  const reviewedArtifacts=collectSegmentArtifacts({root,campaignPath,segment});
+  const reviewedArtifacts=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:predecessor.authority});
   const bindings=bindingRecord({root,campaignPath,directory,predecessor,authorityRoot,reviewedArtifacts});
   const workFormRel=path.posix.join(campaignPath,'work/master-review',segment.segmentId,'MASTER_REVIEW_WORK_FORM_v1.json');
   const workForm={
@@ -218,6 +223,7 @@ function validateLockedForm(form,pending,directory,cfg){
   if(!exactJson(form.segmentPhases,pending.segmentPhases))failures.push('master work form segmentPhases mismatch');
   if(form.masterIdentity?.chatUrl!==cfg.chatUrl||form.masterIdentity?.reasoning!=='MAXIMUM')failures.push('master identity/configuration mismatch');
   if(form.bindings?.segmentManifestSha256!==pending.manifestSha256)failures.push('master manifest digest mismatch');
+  if(form.bindings?.source?.sha256!==directory.sourceSha256)failures.push('master source binding does not match current campaign directory');
   if(digestJson(form.bindings)!==pending.bindingsSha256)failures.push('master source/build/authority bindings were modified');
   if(digestJson(form.reviewedArtifacts)!==pending.manifestSha256)failures.push('master reviewedArtifacts were modified');
   return failures;
@@ -232,7 +238,7 @@ function currentArtifactFailures(root,campaignPath,rows){
   }
   return failures;
 }
-function currentBindingFailures(root,campaignPath,form){
+function currentBindingFailures(root,campaignPath,form,directory){
   const failures=[];
   const bindings=form.bindings??{};
   const build=bindings.build;
@@ -253,6 +259,7 @@ function currentBindingFailures(root,campaignPath,form){
   }
   const source=bindings.source;
   if(!source||!SHA256.test(String(source.sha256??'')))failures.push('source binding is incomplete');
+  else if(source.sha256!==directory.sourceSha256)failures.push('source binding does not match current campaign directory');
   else if(typeof source.path==='string'&&source.path&&!/^https?:\/\//.test(source.path)){
     const candidates=[source.path,path.posix.join(campaignPath,source.path)];
     const rel=candidates.find(x=>existing(root,x));
@@ -384,7 +391,7 @@ function validateRepairCompletion({root,campaignPath,form,pending,cfg}){
   const candidateRows=expectedPreRefreshRows({root,campaignPath,form,baseline});
   return {failures,candidateRows};
 }
-function validateRefreshedRepairVerification({root,campaignPath,form,pending,segment}){
+function validateRefreshedRepairVerification({root,campaignPath,form,pending,segment,directory}){
   const failures=[];
   if(digestJson(form.review?.repairSpec)!==pending.repairSpecSha256)failures.push('repairSpec changed after controller refresh');
   if(digestJson(form.review?.deficiencies)!==pending.originalDeficienciesSha256)failures.push('review deficiencies changed after controller refresh');
@@ -395,7 +402,7 @@ function validateRefreshedRepairVerification({root,campaignPath,form,pending,seg
     if(post.scopeId!==pending.repairScopeId||post.repairSpecSha256!==pending.repairSpecSha256)failures.push('postRepair scope binding mismatch');
     if(post.manifestSha256!==pending.postRepairManifestSha256||digestJson(post.artifacts)!==pending.postRepairManifestSha256)failures.push('postRepair manifest binding mismatch');
     try{
-      const currentRows=collectSegmentArtifacts({root,campaignPath,segment});
+      const currentRows=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:{homepagePath:form.bindings.authority.homepagePath,liteSkillSha256:form.bindings.authority.sha256}});
       if(!exactJson(currentRows,post.artifacts))failures.push('refreshed segment artifacts no longer match controller postRepair manifest');
     }catch(error){failures.push(String(error.message||error));}
   }
@@ -422,7 +429,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   const form=readJson(requiredFile(root,pending.workFormPath,'master review work form'));
   const failures=[
     ...validateLockedForm(form,pending,directory,cfg),
-    ...currentBindingFailures(root,campaignPath,form)
+    ...currentBindingFailures(root,campaignPath,form,directory)
   ];
   const outcome=String(form.review?.outcome??'');
   if(pending.status==='MASTER_REVIEW_REWORK_REQUIRED'){
@@ -442,11 +449,11 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
     };
   }
   if(pending.status==='WAITING_FOR_MASTER_REVIEW'&&pending.postRepairManifestSha256){
-    failures.push(...validateRefreshedRepairVerification({root,campaignPath,form,pending,segment}));
+    failures.push(...validateRefreshedRepairVerification({root,campaignPath,form,pending,segment,directory}));
     if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
     return {status:'MASTER_REPAIR_ACCEPTED',failures:[],form,pending,segment,successorPlan:pending.successorPlan};
   }
-  const currentRows=collectSegmentArtifacts({root,campaignPath,segment});
+  const currentRows=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:{homepagePath:form.bindings.authority.homepagePath,liteSkillSha256:form.bindings.authority.sha256}});
   failures.push(...currentArtifactFailures(root,campaignPath,form.reviewedArtifacts));
   if(digestJson(currentRows)!==pending.manifestSha256)failures.push('current segment manifest no longer matches the staged master-review manifest');
   if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
