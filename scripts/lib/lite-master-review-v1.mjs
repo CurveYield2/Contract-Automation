@@ -360,7 +360,9 @@ function expectedPreRefreshRows({root,campaignPath,form,baseline}){
 function masterTransportProofFailures({root,campaignPath,form,pending,cfg}){
   const failures=[];
   const pointer=pending.masterTransportProof;
-  const expectedPath=path.posix.join(campaignPath,'work/master-review',pending.segmentId,'MASTER_REVIEW_TRANSPORT_PROOF_v1.json');
+  const repaired=Boolean(pending.postRepairManifestSha256);
+  const proofName=repaired?'MASTER_REVIEW_TRANSPORT_PROOF_REPAIR_VERIFICATION_v1.json':'MASTER_REVIEW_TRANSPORT_PROOF_INITIAL_v1.json';
+  const expectedPath=path.posix.join(campaignPath,'work/master-review',pending.segmentId,proofName);
   if(!pointer||pointer.schemaVersion!=='curveyield-lite-master-review-transport-proof-v1')return ['controller-bound master transport proof is absent'];
   if(pointer.recordPath!==expectedPath||!SHA256.test(String(pointer.sha256??''))||pointer.verifiedBy!=='BROWSER_AGENT_WAKE_CONTROLLER'||!substantiveText(pointer.verifiedAt))failures.push('controller-bound master transport proof pointer is invalid');
   let proof=null;
@@ -370,7 +372,6 @@ function masterTransportProofFailures({root,campaignPath,form,pending,cfg}){
     proof=readJson(file);
   }catch(error){failures.push(String(error.message||error));}
   if(proof){
-    const repaired=Boolean(pending.postRepairManifestSha256);
     const expected={
       schemaVersion:'curveyield-lite-master-review-transport-proof-v1',
       campaignId:form.campaignId,
