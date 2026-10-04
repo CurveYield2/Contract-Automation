@@ -361,6 +361,8 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
 
   const ready=runMaster(f);
   assert.equal(ready.status,'MASTER_REPAIR_READY_FOR_VERIFICATION');
+  assert.equal(ready.freshSuccessorRequired,false);
+  assert.equal(ready.nextAssignment,null);
   const verificationPending=readJson(path.join(f.root,f.dirRel));
   assert.equal(verificationPending.currentAssignment,null);
   assert.equal(verificationPending.campaignStatus,'WAITING_FOR_MASTER_REVIEW');
