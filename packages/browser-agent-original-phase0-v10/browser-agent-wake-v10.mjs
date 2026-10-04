@@ -558,28 +558,66 @@ async function openSavedProjectUrl(page, name, projectUrl) {
     throw new Error('Persisted Project URL is not a valid ChatGPT Project URL');
   }
 
-  // This is navigation to a previously persisted Project identity, not a
-  // ChatGPT data read/write shortcut. All Project interaction after load stays
-  // on the visible human UI.
-  await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForTimeout(randomDelayMs(3000, 5000));
+  // Direct navigation is the canonical recovery path for an already-known
+  // Project. A live run proved ChatGPT can transiently bounce this exact saved
+  // URL to the homepage even with a healthy authenticated session. Retry only
+  // the same exact saved URL; never fall back to sidebar rediscovery here.
+  const maxAttempts = 4;
+  const observations = [];
 
-  const currentProjectUrl = page.url();
-  const currentProjectIdentity = savedProjectIdentity(currentProjectUrl);
-  if (!currentProjectIdentity || currentProjectIdentity !== expectedProjectIdentity) {
-    throw new Error(
-      'Persisted Project URL did not open the expected ChatGPT Project page' +
-      ' (observedUrl=' + currentProjectUrl + ')'
-    );
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+
+    const settleDeadline = Date.now() + 20000;
+    while (Date.now() < settleDeadline) {
+      const currentProjectUrl = page.url();
+      const currentProjectIdentity = savedProjectIdentity(currentProjectUrl);
+      const title = await page.title().catch(() => '');
+      const bodyText = await page.locator('body').innerText().catch(() => '');
+      const visible = visibleBrowserStateText(bodyText, title);
+
+      if (visible.humanChallenge) {
+        const error = new Error('BROWSER_CHALLENGE: visible ChatGPT/Cloudflare verification detected while opening saved Project URL; aborting immediately');
+        error.code = 'BROWSER_CHALLENGE';
+        throw error;
+      }
+
+      if (currentProjectIdentity === expectedProjectIdentity) {
+        const composer = await findProjectLandingComposer(page, name);
+        if (composer) {
+          console.log('[github-playwright-v10] project-reused-saved-url=' + JSON.stringify({
+            projectName: name,
+            url: currentProjectUrl,
+            projectIdentity: currentProjectIdentity,
+            attempt
+          }));
+          return { projectName: name, url: currentProjectUrl, composer, recoveredExisting: true, reusedSavedUrl: true };
+        }
+      }
+
+      await page.waitForTimeout(1000);
+    }
+
+    const observedUrl = page.url();
+    observations.push({ attempt, observedUrl });
+    console.log('[github-playwright-v10] project-saved-url-retry=' + JSON.stringify({
+      attempt,
+      maxAttempts,
+      expectedProjectIdentity,
+      observedUrl
+    }));
+
+    if (attempt < maxAttempts) {
+      // Give the already-authenticated visible ChatGPT shell a human-scale
+      // settle interval before retrying the exact persisted Project URL.
+      await page.waitForTimeout(randomDelayMs(2500, 4500));
+    }
   }
 
-  const composer = await ensureComposer(page);
-  console.log('[github-playwright-v10] project-reused-saved-url=' + JSON.stringify({
-    projectName: name,
-    url: currentProjectUrl,
-    projectIdentity: currentProjectIdentity
-  }));
-  return { projectName: name, url: currentProjectUrl, composer, recoveredExisting: true, reusedSavedUrl: true };
+  throw new Error(
+    'Persisted Project URL did not open the expected ChatGPT Project page after direct retries' +
+    ' (observations=' + JSON.stringify(observations) + ')'
+  );
 }
 
 async function findVisibleExactProjectEntry(page, projectsTitle, name) {
