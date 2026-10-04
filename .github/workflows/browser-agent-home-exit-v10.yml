@@ -208,13 +208,17 @@ jobs:
       - name: Set up isolated Playwright runtime
         uses: ./packages/browser-agent-original-phase0-v10/runtime-v10
 
-      - name: Install private VNC helper
-        if: steps.request.outputs.interactive_view == 'true'
+      - name: Install visible browser input helpers
         shell: bash
+        env:
+          INTERACTIVE_VIEW: ${{ steps.request.outputs.interactive_view }}
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y x11vnc
+          sudo apt-get install -y xdotool
+          if [ "$INTERACTIVE_VIEW" = "true" ]; then
+            sudo apt-get install -y x11vnc
+          fi
 
       - name: Record runner egress before home exit node
         shell: bash
