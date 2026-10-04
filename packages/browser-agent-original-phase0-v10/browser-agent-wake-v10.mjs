@@ -190,6 +190,17 @@ async function humanTypingPause(page) {
   await page.waitForTimeout(randomDelayMs(200, 400));
 }
 
+async function humanPointerHover(page, locator) {
+  await locator.scrollIntoViewIfNeeded().catch(() => {});
+  await humanActionPause(page);
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('Visible hover target has no bounding box');
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(x, y, { steps: 12 });
+  await humanActionPause(page);
+}
+
 async function humanPointerClick(page, locator) {
   await locator.scrollIntoViewIfNeeded().catch(() => {});
   await humanActionPause(page);
@@ -532,12 +543,15 @@ async function createProjectExactHumanFlow(page, name) {
     throw new Error('Visible Projects section title was not found');
   }
 
-  await projects.hover();
-  await humanActionPause(page);
+  console.log('[github-playwright-v10] project-flow=projects-visible');
+  await humanPointerHover(page, projects);
+  console.log('[github-playwright-v10] project-flow=projects-human-hover-complete');
 
   const plus = await findProjectsPlusAfterHover(page, projects);
-  if (!plus) throw new Error('Plus control did not appear to the right of Projects after hover');
+  if (!plus) throw new Error('Plus control did not appear to the right of Projects after human pointer hover');
+  console.log('[github-playwright-v10] project-flow=projects-plus-visible');
   await humanPointerClick(page, plus);
+  console.log('[github-playwright-v10] project-flow=projects-plus-clicked');
 
   // The Create project modal takes a moment to render in the normal UI.
   await page.waitForTimeout(randomDelayMs(2500, 4500));
@@ -550,7 +564,9 @@ async function createProjectExactHumanFlow(page, name) {
   if (!controls.create) throw new Error('Create Project button was not found on the visible Create-project surface');
   if (!controls.editor) throw new Error('Project-name editor was not found on the visible Create-project surface');
 
+  console.log('[github-playwright-v10] project-flow=create-surface-visible');
   await humanTypeInto(page, controls.editor, name);
+  console.log('[github-playwright-v10] project-flow=project-name-human-typed');
 
   // The visible Create project button is initially disabled. Give the UI a
   // short human-scale moment to enable it after typing, then click only the
@@ -562,28 +578,20 @@ async function createProjectExactHumanFlow(page, name) {
   }
 
   const beforeCreateUrl = page.url();
+  console.log('[github-playwright-v10] project-flow=create-button-enabled');
   await humanPointerClick(page, enabledCreate);
+  console.log('[github-playwright-v10] project-flow=create-button-clicked');
 
-  // Project creation can visibly complete before the SPA route is reflected by
-  // page.url(). Keep watching the browser route for the real Project URL instead
-  // of treating a short delay as a failed Create click.
-  const projectUrlDeadline = Date.now() + 30000;
+  // Successful Project creation automatically navigates the browser to the new
+  // Project URL. A short human-scale wait is sufficient; capture that URL directly.
+  await page.waitForTimeout(randomDelayMs(3000, 5000));
   let projectUrl = page.url();
-  while (Date.now() < projectUrlDeadline) {
-    if (
-      projectUrl !== beforeCreateUrl &&
-      /^https:\/\/chatgpt\.com\/g\/g-p-[^/]+\/project(?:[?#].*)?$/.test(projectUrl)
-    ) {
-      break;
-    }
-    await page.waitForTimeout(500);
+  if (projectUrl === beforeCreateUrl) {
+    await page.waitForTimeout(randomDelayMs(2000, 3500));
     projectUrl = page.url();
   }
-  if (
-    projectUrl === beforeCreateUrl ||
-    !/^https:\/\/chatgpt\.com\/g\/g-p-[^/]+\/project(?:[?#].*)?$/.test(projectUrl)
-  ) {
-    throw new Error('Created Project did not expose its Project URL within 30 seconds after the visible Create click');
+  if (projectUrl === beforeCreateUrl) {
+    throw new Error('Create project did not navigate to a new Project URL after a short visible wait');
   }
 
   const composer = await ensureComposer(page);
