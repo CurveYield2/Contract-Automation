@@ -756,15 +756,15 @@ async function createProjectExactHumanFlow(page, name) {
   await humanPointerClick(page, enabledCreate);
 
   // Successful Project creation automatically navigates the browser to the new
-  // Project URL. A short human-scale wait is sufficient; capture that URL directly.
-  await page.waitForTimeout(randomDelayMs(3000, 5000));
-  let projectUrl = page.url();
-  if (projectUrl === beforeCreateUrl) {
-    await page.waitForTimeout(randomDelayMs(2000, 3500));
+  // Project URL. Preserve the proven flow, but allow normal ChatGPT UI latency.
+  let projectUrl = beforeCreateUrl;
+  const projectNavigationDeadline = Date.now() + 30000;
+  while (Date.now() < projectNavigationDeadline && projectUrl === beforeCreateUrl) {
+    await page.waitForTimeout(randomDelayMs(1200, 2200));
     projectUrl = page.url();
   }
   if (projectUrl === beforeCreateUrl) {
-    throw new Error('Create project did not navigate to a new Project URL after a short visible wait');
+    throw new Error('Create project did not navigate to a new Project URL within 30 seconds');
   }
 
   const composer = await ensureComposer(page);
@@ -867,7 +867,7 @@ async function waitForVisibleBrowserReady(page) {
     }
 
     if (bool(env.INTERACTIVE_VIEW_ENABLED)) {
-      console.log('[github-playwright-v10] Visible browser is not ready; waiting only for ordinary UI/login readiness. Cloudflare challenge would abort immediately.');
+      console.log('[github-playwright-v10] Visible browser is not ready; waiting only for ordinary UI/login readiness. Cloudflare challenge will pause for manual verification.');
     }
     await page.waitForTimeout(5000);
   }
