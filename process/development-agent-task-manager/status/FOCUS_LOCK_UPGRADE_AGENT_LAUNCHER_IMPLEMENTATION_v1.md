@@ -51,13 +51,9 @@
 
 ## ACTIVE BLOCKER
 
-**The real Chrome omnibox path is now proven: run `37165935536` used `visible-x11-keyboard` and navigated away from the homepage, but the destination immediately met the strong-cue challenge detector and failed closed. No bypass is permitted. Commit `3a3499cd1b438352667cbd55c90eea75b2b31a1c` adds non-content diagnostics that log only the observed URL/title plus named strong challenge cues before abort, so the next live run can distinguish an actual verification interstitial from any remaining classification edge case.**
+**Run `37166240111` conclusively proved the exact saved Project route is being entered through the visible X11 Chrome omnibox, but Cloudflare is currently presenting a real verification interstitial: observed URL remained the exact Project URL, title was `Just a moment...`, and evidence was `just-a-moment-title`. The worker immediately aborted as required. This gate must not be bypassed. Browser qualification for the current implementation passes in V7 run `37166251924`; remaining Lite failure is the unrelated pre-existing audit-harness literal-\\n syntax corruption.**
 
-Current browser repair state:
-- `b1b3a01d192f4e2c72811b565131cbc930ab32db` — visible X11 Chrome omnibox control.
-- `c7a1e5702b698d3da444e8e1dfa2d54df8897f51` — workflow installs `xdotool`.
-- `3a3499cd1b438352667cbd55c90eea75b2b31a1c` — strong-cue diagnostic before fail-closed abort.
-- Regression drift repairs continue in parallel and do not relax any browser invariant.
+Current browser implementation is code-complete for the known navigation defect. The only live-proof blocker is the external verification interstitial on the Project deep link.
 
 ## REMAINING DELTA
 
@@ -73,7 +69,7 @@ Current browser repair state:
 
 ## NEXT ACTION
 
-Inspect the live diagnostic run from commit `3a3499cd1b438352667cbd55c90eea75b2b31a1c`. If it proves a genuine verification interstitial, keep aborting and retry only on a fresh runner after cooldown; do not bypass it. If classification is wrong, repair only that classifier. Once the saved Project opens, click the visible center chat title, capture the durable Project-scoped chat URL/artifact, then prove artifact-restored direct saved-chat recovery before audit integration.
+After cooldown, retry the exact current merged recovery on a fresh runner with no code relaxation. If Cloudflare again presents `Just a moment...`, abort and retry only after another cooldown; do not bypass verification. When one clean run reaches the Project, finish center-title recovery, durable chat URL/artifact capture, then immediately prove artifact-restored direct-chat recovery. After those live proofs, transplant only this browser implementation into the existing audit wake/watch path and resume DEX v16 Phase 1.
 
 ## PARKED / OUT OF SCOPE
 
