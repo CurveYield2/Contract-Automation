@@ -271,6 +271,7 @@ jobs:
           fi
 
       - name: Route browser phase through home exit node
+        timeout-minutes: 2
         shell: bash
         env:
           HOME_EXIT_NODE: ${{ steps.request.outputs.home_exit_node }}
