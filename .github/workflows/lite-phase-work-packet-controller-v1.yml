@@ -310,12 +310,12 @@ jobs:
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-complete"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id=phase-10             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=false             -f worker_role=reviewer             -f gate_mode=LITE
 
       - name: Wake persistent Maximum master reviewer
-        if: steps.request.outputs.hold_delivery != 'true' && (steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID') && steps.controller.outputs.master_chat_url != ''
+        if: steps.request.outputs.hold_delivery != 'true' && (steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'MASTER_REPAIR_READY_FOR_VERIFICATION' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID') && steps.controller.outputs.master_chat_url != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          context="$(jq -cn --arg segment "${{ steps.controller.outputs.segment_id }}" '{messagePurpose:"initial_wake",requestedModel:"MASTER",segmentId:$segment,persistentMaster:true}' | base64 -w0)"
+          context="$(jq -cn --arg segment "${{ steps.controller.outputs.segment_id }}" --arg status "${{ steps.controller.outputs.status }}" '{messagePurpose:(if $status=="MASTER_REPAIR_READY_FOR_VERIFICATION" then "repair_verification" else "initial_wake" end),requestedModel:"MASTER",segmentId:$segment,persistentMaster:true}' | base64 -w0)"
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.segment_id }}-master" \
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" -f phase_id=master-review \
