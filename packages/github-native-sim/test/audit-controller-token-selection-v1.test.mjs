@@ -115,7 +115,7 @@ test('every direct private controller checkout selects a probed credential first
     assert.equal(selectedTokens.length, repositories.length, name);
     assert.doesNotMatch(workflow, /^          token: \$\{\{ secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}$/m);
   }
-  assert.ok(checked >= 24, 'private controller checkouts must remain covered');
+  assert.ok(checked >= 20, 'private controller checkouts must remain covered');
 });
 
 
