@@ -594,6 +594,27 @@ async function postWithVisibleVerification(page, message) {
     await waitForDurableChatUrl(page, 300000);
   }
 
+  if (mode === 'resume_existing' && messagePurpose === 'initial_wake') {
+    const passiveState = await snapshot(page).catch(() => null);
+    const delivery = {
+      writeRequestObserved: false,
+      writeAccepted: true,
+      responseBodyMarkerObserved: false,
+      domPersisted: true,
+      verification: 'visible-browser-only',
+      verificationMethod: beforeReload.method,
+      postSendChallenge: passiveState?.humanChallenge === true,
+      postSendHealth: null,
+      response: null,
+      responseCandidates: [],
+      submittedRequest,
+      persisted: true,
+      userCount: beforeReload.userCount
+    };
+    console.log('[github-playwright] delivery-state=existing-chat-visible-no-reload ' + JSON.stringify(delivery));
+    return delivery;
+  }
+
   await humanReload(page);
   await waitForVisibleBrowserReady(page, 'post-send persistence reload');
 
