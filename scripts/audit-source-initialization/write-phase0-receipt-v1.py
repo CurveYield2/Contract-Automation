@@ -60,6 +60,8 @@ directory={
   "schemaVersion":"curveyield-audit-campaign-directory-entry-v1",
   "campaignId":e["CAMPAIGN_ID"],"campaignGenerationId":e["GENERATION_ID"],"campaignName":e["CAMPAIGN_NAME"],
   "workspacePath":workspace,"mode":"LITE","sourceSha256":e["SOURCE_SHA"],
+  "masterReview":{"chatUrl":e["MASTER_CHAT_URL"],"reasoning":"MAXIMUM","repairModel":"SOL","repairReasoning":"HIGH"},
+  "pendingMasterReview":None,
   "currentReceiptPath":receipt_path,"currentPhaseSequence":0,"currentReviewer":"phase0-automation",
   "status":"ACTIVE","updatedAt":e["CREATED_AT"]
 }
