@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {applyPhaseBoundaryPrefill} from './lite-phase-prefill-v1.mjs';
 
 export const EXPLICIT_NEGATIVES=new Set(['NONE_IDENTIFIED','NOT_APPLICABLE','NOT_TRIGGERED','NO_CANDIDATE','NO_REMEDIATION','INSUFFICIENT_EVIDENCE','UNRESOLVED','NO_ADDITIONAL_OBLIGATION','NO_CONTRADICTION']);
@@ -9,7 +10,35 @@ export function writeJson(file,value){fs.mkdirSync(path.dirname(file),{recursive
 export function writeText(file,value){fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);}
 export function safeRel(rel,label='path'){if(typeof rel!=='string'||!rel||rel.startsWith('/')||rel.split('/').includes('..')) throw new Error('unsafe '+label+': '+rel);return rel;}
 export function repoFile(root,rel){return path.join(root,...safeRel(rel).split('/'));}
-export function requiredFile(root,rel,label='file'){const f=repoFile(root,rel);if(!fs.existsSync(f)||!fs.statSync(f).isFile()) throw new Error('missing '+label+': '+rel);return f;}
+const LEGACY_V103_LOGICAL='Audit Skill - Current Authority/Audit_Litemode_v10.3';
+const LEGACY_V103_FROZEN='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3';
+const LEGACY_V103_SKILL_SHA256='bdb90107ea50580e67be91440ce47087de570c4f54b8474c5a3eb852af95ea27';
+function sha256File(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
+function frozenV103File(root,rel){
+  if(rel!==LEGACY_V103_LOGICAL&&!rel.startsWith(LEGACY_V103_LOGICAL+'/'))return null;
+  const suffix=rel.slice(LEGACY_V103_LOGICAL.length).replace(/^\//,'');
+  const frozenRoot=repoFile(root,LEGACY_V103_FROZEN);
+  const skill=path.join(frozenRoot,'SKILL.md');
+  if(!fs.existsSync(skill)||sha256File(skill)!==LEGACY_V103_SKILL_SHA256)throw new Error('frozen v10.3 authority root hash mismatch');
+  const manifestFile=path.join(frozenRoot,'MANIFEST.json');
+  if(!fs.existsSync(manifestFile))throw new Error('frozen v10.3 authority manifest missing');
+  const manifest=readJson(manifestFile);
+  if(manifest.release!=='Audit_Litemode_v10.3'||manifest.entrypoint!=='SKILL.md')throw new Error('frozen v10.3 authority manifest identity mismatch');
+  const target=suffix?path.join(frozenRoot,...suffix.split('/')):frozenRoot;
+  if(suffix&&suffix!=='MANIFEST.json'){
+    const entry=(manifest.files??[]).find(x=>x?.path===suffix);
+    if(!entry)throw new Error('frozen v10.3 manifest does not admit '+suffix);
+    if(!fs.existsSync(target)||fs.statSync(target).size!==entry.bytes||sha256File(target)!==entry.sha256)throw new Error('frozen v10.3 authority file digest mismatch: '+suffix);
+  }
+  return target;
+}
+export function requiredFile(root,rel,label='file'){
+  const f=repoFile(root,rel);
+  if(fs.existsSync(f)&&fs.statSync(f).isFile())return f;
+  const frozen=frozenV103File(root,rel);
+  if(frozen&&fs.existsSync(frozen)&&fs.statSync(frozen).isFile())return frozen;
+  throw new Error('missing '+label+': '+rel);
+}
 export function authorityRootFromReceipt(receipt){const home=receipt?.authority?.homepagePath;if(typeof home!=='string'||!home.endsWith('/SKILL.md')) throw new Error('receipt authority.homepagePath missing');return path.posix.dirname(home);}
 export function phaseSchemaRepoPath(authorityRoot,sequence){return path.posix.join(authorityRoot,'phases/phase-'+sequence,'PHASE_'+String(sequence).padStart(2,'0')+'_SCHEMA_v1.json');}
 export function loadPhaseSchema(root,authorityRoot,sequence){const rel=phaseSchemaRepoPath(authorityRoot,sequence);const schema=readJson(requiredFile(root,rel,'phase schema'));if(schema.schemaVersion!=='curveyield-lite-phase-work-schema-v1'||schema.phase!==sequence) throw new Error('phase schema identity mismatch: '+rel);return {schema,rel};}
