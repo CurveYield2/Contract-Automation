@@ -479,7 +479,8 @@ test('reviewer wake uses only visible human pointer, keyboard, and clipboard-pas
 
   assert.match(sendBlock, /humanPointerClick\(page, composer/);
   assert.match(sendBlock, /messagePurpose === 'initial_wake'/);
-  assert.match(sendBlock, /setSystemClipboard\(message\)/);
+  assert.match(sendBlock, /startSystemClipboard\(message\)/);
+  assert.match(sendBlock, /finishSystemClipboard\(clipboardOwner\)/);
   assert.match(sendBlock, /composer\.press\('Control\+V'\)/);
   assert.match(sendBlock, /composer-fill-strategy=human-clipboard-paste/);
   assert.match(sendBlock, /for \(const char of String\(message\)\)/);
