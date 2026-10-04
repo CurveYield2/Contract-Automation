@@ -29,6 +29,7 @@ test('Audit Source Initialization accepts source ZIP, four reviewer chats, and o
   assert.match(workflow, /agent_chat_4_url:/);
   assert.match(workflow, /master_chat_url:/);
   assert.match(workflow, /validate_chat_url/);
+  assert.match(workflow, /master_chat_url must be distinct from every normal reviewer chat URL/);
   assert.match(run, /agentChats/);
   assert.match(run, /"reviewer-1":\$chat1/);
   assert.match(run, /"reviewer-4":\$chat4/);
