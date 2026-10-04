@@ -191,9 +191,26 @@ jobs:
           set -euo pipefail
           node packages/browser-agent-manual-only-v11/browser-agent-manual-v11.mjs >/tmp/browser-manual-v11.log 2>&1 &
           echo $! >/tmp/browser-manual-v11.pid
-          sleep 3
-          kill -0 "$(cat /tmp/browser-manual-v11.pid)"
-          test -s "$MANUAL_RESULT_PATH"
+
+          ready=false
+          for i in {1..20}; do
+            if ! kill -0 "$(cat /tmp/browser-manual-v11.pid)" 2>/dev/null; then
+              echo "::error::Manual browser launcher exited before becoming ready."
+              cat /tmp/browser-manual-v11.log || true
+              exit 1
+            fi
+            if [ -s "$MANUAL_RESULT_PATH" ]; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" != "true" ]; then
+            echo "::error::Manual browser did not publish its ready file within 20 seconds."
+            cat /tmp/browser-manual-v11.log || true
+            exit 1
+          fi
           echo "Manual-only blank Chrome process is alive."
 
       - name: Publish ready manual VNC session address
