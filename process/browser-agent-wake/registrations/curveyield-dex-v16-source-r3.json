@@ -2,7 +2,7 @@
   "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
   "campaignId": "curveyield-dex-v16-source-r3",
   "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da50-e3a0-83e8-88ea-843db6f426f0",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da6a-3e4c-83e8-9154-73b4c7388f85",
   "browserRoutine": "",
   "agentChats": {
     "reviewer-1": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da50-e3a0-83e8-88ea-843db6f426f0",
@@ -15,17 +15,17 @@
     "url": ""
   },
   "activeChat": {
-    "name": "reviewer-1",
-    "url": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da50-e3a0-83e8-88ea-843db6f426f0"
+    "name": "reviewer-2",
+    "url": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da6a-3e4c-83e8-9154-73b4c7388f85"
   },
-  "wakeMessage": "GET BACK TO WORK",
+  "wakeMessage": "",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "ordinary-pointer-keyboard-only",
   "activeAssignment": {
-    "phaseId": "phase-1",
-    "milestoneId": "PHASE_1_WORK_PACKET",
+    "phaseId": "phase-2",
+    "milestoneId": "PHASE_2_WORK_PACKET",
     "workerRole": "reviewer",
-    "reviewer": "reviewer-1",
+    "reviewer": "reviewer-2",
     "thinkingEffort": "high"
   },
   "watchdog": {
@@ -36,8 +36,8 @@
       "repository": "CurveYield2/Audit-Controller",
       "ref": "main",
       "statePath": "Audit Campaign Directory/campaigns/curveyield-dex-v16-source.json",
-      "expectedPhaseId": "phase-1",
-      "expectedMilestoneId": "PHASE_1_WORK_PACKET",
+      "expectedPhaseId": "phase-2",
+      "expectedMilestoneId": "PHASE_2_WORK_PACKET",
       "activePointerPath": "",
       "stopStates": [
         "STOPPED_BY_HUMAN"
@@ -53,7 +53,7 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-04T09:36:15Z",
+  "updatedAt": "2026-10-04T12:14:26Z",
   "wakeDelivery": {
     "milestoneId": "PHASE_1_WORK_PACKET",
     "chatUrl": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da50-e3a0-83e8-88ea-843db6f426f0",
