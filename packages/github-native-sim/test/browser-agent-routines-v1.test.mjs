@@ -130,10 +130,10 @@ test('audit wakes enforce verified High reasoning effort and keep follow-up mess
   assert.match(runtime, /CHATGPT_THINKING_EFFORT/);
   assert.match(runtime, /chatgpt\.ensure_thinking_effort/);
   assert.match(wake, /default: high/);
-  assert.match(wake, /if \[ "\$WAKE_MODE" = "create_fresh" \]/);
+  assert.match(wake, /message_purpose.*initial_wake/);
   assert.match(wake, /printf '%s\\n' 'GET BACK TO WORK' > \/tmp\/wake-message\.txt/);
   assert.match(wake, /printf '%s\\n' 'GET BACK TO WORK' > \/tmp\/watchdog-message\.txt/);
-  assert.match(wake, /activeAssignment=\{phaseId:\$phaseId,milestoneId:\$milestoneId,workerRole:\$workerRole,thinkingEffort:\$thinkingEffort\}/);
+  assert.match(wake, /activeAssignment=\{phaseId:\$phaseId,milestoneId:\$milestoneId,workerRole:\$workerRole,reviewer:\$reviewer,thinkingEffort:\$thinkingEffort\}/);
 });
 
 test('technical execution callbacks never create a reviewer and only poke the existing chat', () => {
@@ -232,15 +232,14 @@ test('Project-create wakes fail closed before posting unless Share-link capture 
   assert.doesNotMatch(source, /PROJECT_CREATE_CHALLENGED_FALLBACK/);
 });
 
-test('Phase1 workflow persists the captured private Project URL even if a later wake step fails', () => {
+test('existing-chat audit wake has no Phase1 Project URL capture or requirement', () => {
   const workflow = read('.github/workflows/browser-agent-wake.yml');
-  const runtime = read('scripts/browser-agent-wake.mjs');
-  assert.match(workflow, /Persist captured Phase-1 Project URL/);
-  assert.match(workflow, /PROJECT_SHARE_URL_REQUIRED/);
-  assert.match(workflow, /bind Phase1 Project URL/);
-  assert.match(workflow, /chatgptProject=.*name:\$name,url:\$url/);
-  assert.match(runtime, /projectName: projectName \|\| null/);
-  assert.match(runtime, /projectUrl: projectUrl \|\| null/);
+  assert.doesNotMatch(workflow, /Persist captured Phase-1 Project URL/);
+  assert.doesNotMatch(workflow, /PROJECT_SHARE_URL_REQUIRED/);
+  assert.doesNotMatch(workflow, /bind Phase1 Project URL/);
+  assert.doesNotMatch(workflow, /Persist fresh-chat URL into campaign registration/);
+  assert.match(workflow, /Persist existing-chat reviewer wake into campaign registration/);
+  assert.match(workflow, /inputs\.mode == 'resume_existing'/);
 });
 
 test('fresh Project chat creation refuses to reuse an already-open conversation composer', () => {
@@ -277,7 +276,7 @@ test('wake runtime executes browser routines around the first message and return
   assert.match(source, /chatRenamed:/);
 });
 
-test('wake workflow carries packed routine/project/chat and repair policy through fresh-runner redispatch', () => {
+test('wake workflow carries existing-chat and repair policy through bounded fresh-runner redispatch', () => {
   const workflow = read('.github/workflows/browser-agent-wake.yml');
   assert.match(workflow, /browser_context_b64:/);
   assert.doesNotMatch(workflow, /\n      browser_routine_id:/);
@@ -285,14 +284,13 @@ test('wake workflow carries packed routine/project/chat and repair policy throug
   assert.doesNotMatch(workflow, /\n      chat_name:/);
   assert.match(workflow, /BROWSER_CONTEXT_B64:\s*\$\{\{ inputs\.browser_context_b64 \}\}/);
   assert.match(workflow, /base64 -d > \/tmp\/browser-context\.json/);
-  assert.match(workflow, /BROWSER_ROUTINE_ID=\$\(jq -r '\.routineId \/\/ empty'/);
-  assert.match(workflow, /CHATGPT_PROJECT_NAME=\$\(jq -r '\.projectName \/\/ empty'/);
-  assert.match(workflow, /CHATGPT_PROJECT_URL=\$\(jq -r '\.projectUrl \/\/ empty'/);
   assert.match(workflow, /CHATGPT_CHAT_NAME=\$\(jq -r '\.chatName \/\/ empty'/);
   assert.match(workflow, /REPAIR_ENABLED=\$\(jq -r '\.repair\.enabled \/\/ false'/);
   assert.match(workflow, /RETRY_INPUTS_JSON:\s*\$\{\{ toJSON\(inputs\) \}\}/);
-  assert.match(workflow, /chatgptProject=.*projectName/);
-  assert.match(workflow, /activeChat=.*chatName/);
+  assert.match(workflow, /Persist existing-chat reviewer wake into campaign registration/);
+  assert.match(workflow, /activeChat=\{name:\$reviewer,url:\$url\}/);
+  assert.doesNotMatch(workflow, /Persist captured Phase-1 Project URL/);
+  assert.doesNotMatch(workflow, /Persist fresh-chat URL into campaign registration/);
 });
 
 test('Lite browser orchestration routes each assignment reviewer to its supplied existing chat', () => {
@@ -477,32 +475,21 @@ test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualifi
 });
 
 
-test('Project creation and reviewer wake use only ordinary pointer and keyboard submission primitives', () => {
-  const operations = read('scripts/browser-operations-v1.mjs');
+test('reviewer wake uses only visible human pointer, keyboard, and clipboard-paste submission primitives', () => {
   const wake = read('scripts/browser-agent-wake.mjs');
-
-  const projectStart = operations.indexOf('async function createProject(page, projectName)');
-  const projectEnd = operations.indexOf('function validProjectUrl', projectStart);
-  const projectBlock = operations.slice(projectStart, projectEnd);
-  assert.match(projectBlock, /humanPointerClick\(page, trigger/);
-  assert.match(projectBlock, /humanTypeInto\(page, input/);
-  assert.match(projectBlock, /humanPointerClick\(page, submit/);
-  assert.doesNotMatch(projectBlock, /\.fill\(/);
-  assert.doesNotMatch(projectBlock, /\.press\('Enter'\)/);
-  assert.doesNotMatch(projectBlock, /force:\s*true/);
-  assert.doesNotMatch(projectBlock, /evaluate\([^\n]*\.click/);
-  assert.doesNotMatch(projectBlock, /requestSubmit|form\.submit/);
-
   const fillStart = wake.indexOf('async function fillComposer(page, message)');
   const fillEnd = wake.indexOf('async function persistedWakeVisible', fillStart);
   const sendBlock = wake.slice(fillStart, fillEnd);
+
+  assert.match(sendBlock, /humanPointerClick\(page, composer/);
+  assert.match(sendBlock, /messagePurpose === 'initial_wake'/);
+  assert.match(sendBlock, /setSystemClipboard\(message\)/);
+  assert.match(sendBlock, /composer\.press\('Control\+V'\)/);
+  assert.match(sendBlock, /composer-fill-strategy=human-clipboard-paste/);
   assert.match(sendBlock, /for \(const char of String\(message\)\)/);
   assert.match(sendBlock, /humanTypingPause\(page\)/);
-  assert.match(sendBlock, /normalizeVisibleText/);
-  assert.match(sendBlock, /visibleMessageMarker/);
-  assert.match(sendBlock, /normalized wake marker after keyboard entry/);
   assert.match(sendBlock, /humanPointerClick\(page, send/);
-  assert.doesNotMatch(sendBlock, /clipboard-read|clipboard-write|navigator\.clipboard/);
+  assert.doesNotMatch(sendBlock, /navigator\.clipboard|clipboard-read|clipboard-write/);
   assert.doesNotMatch(sendBlock, /\.fill\(/);
   assert.doesNotMatch(sendBlock, /force:\s*true/);
   assert.doesNotMatch(sendBlock, /requestSubmit|form\.submit/);
