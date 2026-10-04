@@ -532,6 +532,59 @@ export function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
     return{...d,artifact,functions,plan:probePlan(ethers,artifact),declaredStandards,recipe};
   }).filter(t=>t.functions.length);
 }
+export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={}}){
+  const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
+  const deployedByAddress=new Map(deployed.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
+  const out=[...targets],contextEvidence=[];
+  for(const proxyDeployment of deployed){
+    const proxyArtifact=proxyDeployment?.qualifiedName?byQ.get(proxyDeployment.qualifiedName):null;
+    if(!proxyArtifact)continue;
+    let iface;
+    try{iface=new ethers.Interface(normalizedAbi(proxyArtifact.abi));}catch{continue;}
+    let getter=null;
+    for(const candidate of ['implementation()','getImplementation()']){
+      try{if(iface.getFunction(candidate)){getter=candidate;break;}}catch{}
+    }
+    if(!getter)continue;
+    let implementationAddress;
+    try{
+      const c=new ethers.Contract(proxyDeployment.address,normalizedAbi(proxyArtifact.abi),provider);
+      implementationAddress=await c.getFunction(getter).staticCall();
+    }catch(error){
+      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,status:'CONTEXT_REQUIRED',reason:'IMPLEMENTATION_READ_FAILED',message:String(error?.shortMessage??error?.message??error).slice(0,1200)});
+      continue;
+    }
+    const implDeployment=deployedByAddress.get(String(implementationAddress).toLowerCase());
+    const implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
+    if(!implDeployment||!implArtifact){
+      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,status:'FIXTURE_GAP',implementationAddress:String(implementationAddress),reason:'IMPLEMENTATION_NOT_IN_DEPLOYED_ADMITTED_INVENTORY'});
+      continue;
+    }
+    const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,implDeployment.qualifiedName);
+    const recipe=qualifyRecipeV2({qualifiedName:implDeployment.qualifiedName,abi:implArtifact.abi,declaredStandards});
+    const functions=mutableFunctions(ethers,implArtifact).map(x=>{
+      const semantic=classifySemanticFamilyV2({signature:x.signature,stateMutability:x.fragment.stateMutability,recipe:recipe.status==='QUALIFIED'?recipe:null});
+      return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
+    });
+    if(!functions.length)continue;
+    const variant={
+      ...proxyDeployment,
+      qualifiedName:proxyDeployment.qualifiedName,
+      logicalQualifiedName:implDeployment.qualifiedName,
+      artifact:implArtifact,
+      functions,
+      plan:probePlan(ethers,implArtifact),
+      declaredStandards,recipe,
+      contextType:'DELEGATE_PROXY',
+      contextDisposition:'READY',
+      contextEvidence:{facadeAddress:proxyDeployment.address,implementationAddress:String(implementationAddress),implementationGetter:getter}
+    };
+    out.push(variant);
+    contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,logicalQualifiedName:implDeployment.qualifiedName,status:'READY',facadeAddress:proxyDeployment.address,implementationAddress:String(implementationAddress),implementationGetter:getter});
+  }
+  for(const target of out)if(!target.contextType){target.contextType='DIRECT';target.contextDisposition='READY';}
+  return{targets:out,contextEvidence};
+}
 export async function prepareQualifiedRuntimeV2({provider,ethers,targets,actors}){
   const setupReceipts=[];
   const erc20Abi=['function balanceOf(address) view returns (uint256)','function allowance(address,address) view returns (uint256)','function approve(address,uint256) returns (bool)'];
@@ -716,7 +769,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
           let sender=qualifiedAction?.sender??actors[ri(rng,actors.length)];
           const rec={
             schemaVersion:'curveyield-phase0-raw-simulation-call-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
-            runId,callIndex:stats.calls+1,target:{qualifiedName:target.qualifiedName,address:target.address,recipeId:target.recipe?.recipeId??null},
+            runId,callIndex:stats.calls+1,target:{qualifiedName:target.qualifiedName,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,address:target.address,recipeId:target.recipe?.recipeId??null,contextType:target.contextType??'DIRECT',contextDisposition:target.contextDisposition??'READY'},
             sender,functionSignature:selected.signature,declaredMutability:f.stateMutability,
             semanticFamily:selected.semanticFamily??'UNKNOWN',semanticBasis:selected.semanticBasis??'NO_QUALIFIED_SEMANTIC_RECIPE',
             actionClass:selected.semanticFamily==='ECONOMIC'?'ECONOMIC_STATE_CHANGE':'OTHER_STATE_CHANGE',
@@ -1153,7 +1206,10 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
     const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows];
     let targets=targetObjects(ethers,artifacts,deployed,sourceIntelligence);
+    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence});
+    targets=delegateContexts.targets;
     const runtimePreparation=await prepareQualifiedRuntimeV2({provider,ethers,targets,actors});
+    runtimePreparation.contextEvidence=delegateContexts.contextEvidence;
     targets=runtimePreparation.targets;
     const deploymentCombined={detectedScripts:detected,attempts:[...deployment.attempts,...sourcePlan.attempts],runtimePreparation,limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
     // Persist deployment diagnostics before any expensive randomized stage.
