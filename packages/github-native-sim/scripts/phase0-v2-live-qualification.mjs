@@ -208,6 +208,20 @@ try{
   assertThat(rows.some(r=>r.executionOutcome==='MINED_SUCCESS'&&r.stages?.RECEIPT?.status==='MINED'),'A26 mined success missing');
   assertThat(rows.every(r=>r.stages?.ARG_GEN&&r.executionOutcome),'A26 raw lifecycle fields missing');
   assertThat(rows.some(r=>(r.observations?.deltas??[]).some(d=>d.feeAdjusted===true&&d.transactionFeeWei!=null)),'A27 fee-adjusted native observation missing');
+  assertThat(rows.some(r=>(r.observations?.before??[]).some(o=>String(o.quantityId??'').startsWith('related:')&&['TOKEN_BALANCE','ALLOWANCE','TOTAL_SUPPLY'].includes(o.family))),'A27 related token/share observations missing');
+  assertThat(telemetry.every(t=>t.resetEvidence?.revertAccepted===true&&t.resetEvidence?.sentinelMatch===true),'A11/A24 reset evidence incomplete');
+  assertThat(telemetry.some(t=>t.feedbackStatus==='ACTIVE'&&t.feedbackUpdates>0&&t.feedbackSelections>0),'A20 transition feedback did not affect later action selection');
+  assertThat(telemetry.some(t=>(t.contextAdaptations??[]).some(a=>a.kind==='BOUNDED_WRONG_CONTEXT_GAP'||a.kind==='REROUTE_TO_QUALIFIED_CONTEXT')),'A23 bounded context adaptation not observed');
+
+  const replayBaseline=await provider.send('evm_snapshot',[]);
+  const replay=await runTelemetry({
+    provider,ethers,targets:mainTargets,actors,outRoot,baselineSnapshot:replayBaseline,
+    telemetryRuns:2,callsPerRun:96,seedSalt:'a11-deterministic-replay-v2',runPrefix:'a11-replay',repeatSameSeedAcrossRuns:true
+  });
+  assertThat(replay.length===2,'A11 replay did not produce two reconstructed runs');
+  assertThat(replay[1].resetEvidence?.revertAccepted===true&&replay[1].resetEvidence?.sentinelMatch===true,'A11 reconstructed replay baseline was not verified');
+  assertThat(replay[0].actionSequenceDigestSha256===replay[1].actionSequenceDigestSha256,'A11 replay action sequence digest mismatch');
+  assertThat(replay[0].outcomeSequenceDigestSha256===replay[1].outcomeSequenceDigestSha256,'A11 replay declared outcome digest mismatch');
 
   performance.push(controlPerf,medusaPerf,telemetryPerf);
   for(const p of performance){
@@ -224,6 +238,7 @@ try{
     controls:{status:control.status,engineProperties:control.engineProperties,propertyRegistry:control.propertyRegistry},
     telemetry,
     acceptanceWitnesses:{directDelegate,proxyDelegate,callback,callbackDirect,tuple},
+    replayControl:{status:'PASS',runs:replay.map(x=>({runId:x.runId,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256}))},
     performance,
     retainedOutputRoot:path.relative(root,outRoot).replaceAll('\\','/')
   };
