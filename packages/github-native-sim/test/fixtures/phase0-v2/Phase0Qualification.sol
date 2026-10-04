@@ -201,6 +201,7 @@ contract DelegateImplementation {
 }
 
 contract DelegateProxy {
+    uint256 private delegateStorageSlot;
     address public implementation;
 
     constructor(address impl) {
