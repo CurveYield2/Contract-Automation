@@ -3,6 +3,6 @@
   "campaignId": "curveyield-dex-v16-source-r3",
   "phaseSequence": 1,
   "auditControllerRef": "main",
-  "attempt": 2,
-  "triggerRecovery": "attempt 1 push produced no Actions run; same canonical request retried after verifying workflow/path and current main"
+  "attempt": 3,
+  "triggerRecovery": "attempts 1-2 exposed unconditional Phase-5 execution import; repaired by commit 292acde8d72bc711633e8951eb951c95a1115e65"
 }
