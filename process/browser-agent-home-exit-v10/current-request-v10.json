@@ -1,12 +1,12 @@
 {
   "schemaVersion": "curveyield-browser-home-exit-request-v10",
-  "action": "wake",
+  "action": "observe",
   "mode": "resume_existing",
   "chat_url": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da50-e3a0-83e8-88ea-843db6f426f0",
-  "wake_message": "LITE audit: CurveYield DEX v16 Source r3\nReviewer: reviewer-1\nCurrent phase: phase-1\nCampaign: https://github.com/CurveYield2/Audit-Controller/tree/main/campaigns/CurveYield%20DEX%20v16%20Source%20r3\nCurrent Audit Skill Authority: https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority\n\nThe Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority.\n\nStart phase-1 now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.",
+  "wake_message": "",
   "home_exit_node": "100.112.238.56",
   "interactive_view": true,
   "manual_challenge_wait_minutes": 5,
-  "requested_at": "2026-10-04T11:31:00Z",
+  "requested_at": "2026-10-04T11:42:00Z",
   "project_name": ""
 }
