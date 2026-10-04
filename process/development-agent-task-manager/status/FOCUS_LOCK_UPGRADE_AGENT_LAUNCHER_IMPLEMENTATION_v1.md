@@ -12,7 +12,7 @@
 ## CURRENT STATE
 
 - Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `f7e167fdcd2ff32938f7a620511caf416b82bb64`.
+- Base: current `main` at `b1dd3ec138883a9585203f15715b6df47540a07c`.
 - PR #508 through PR #514 are merged; their required validation lanes passed before merge.
 - Recovery-only run `37158898640` proves:
   - fresh immutable browser state loads normally without a Cloudflare challenge;
@@ -51,17 +51,20 @@
 
 ## ACTIVE BLOCKER
 
-**The recovery architecture is using discovery when it should be using a saved chat URL.**
+**Durable chat URL capture is now implemented and merged. Live recovery successfully opened the saved Project URL directly, with zero sidebar rediscovery, but the existing chat title lookup was too narrowly scoped to a `main/[role=main]` container.**
 
-The browser worker already emits `chatUrl` in successful results, and earlier live runs proved it can observe Project-scoped chat routes. The defect is that the standalone v10 workflow does not durably preserve that chat URL for the next run. This caused later recovery attempts to rediscover the Project/chat through UI paths that should never have been necessary.
+Merged live run `37164061408` proved:
+- exact saved Project URL opened successfully;
+- no sidebar Project search/scroll occurred;
+- Project identity matched;
+- failure was only `Visible Project chat title was not found in the Project chat list`;
+- therefore the remaining step is to find the already-visible center-page chat title without assuming a specific semantic container.
 
-Locked invariant:
-- as soon as a durable ChatGPT chat URL exists, capture it immediately;
-- persist it outside ephemeral run state;
-- on later recovery, open that saved `chatUrl` directly;
-- if a saved `projectUrl` is also available, persist it alongside the chat URL;
-- do not search the sidebar or scroll to rediscover an already-known Project/chat;
-- Project-page chat-title selection is fallback only when no durable chat URL has ever been captured.
+Locked UI fact from operator:
+- on the Project page the existing chat is in the top-center visible area;
+- no scrolling is needed;
+- click the visible chat title itself (or its visible subtitle area) to enter it;
+- once the durable chat route appears, checkpoint/upload `chatUrl` immediately.
 
 
 ## REMAINING DELTA
@@ -78,7 +81,7 @@ Locked invariant:
 
 ## NEXT ACTION
 
-Implement durable chat URL checkpoint + artifact restore + direct-chat recovery. Do not spend further time on sidebar Project discovery for an already-created chat.
+Broaden only the Project-page chat-title lookup to physically visible center-page text, with zero scrolling, click it humanly, and capture the durable chat URL immediately when the route appears.
 
 ## PARKED / OUT OF SCOPE
 
