@@ -471,21 +471,55 @@ function probePlan(ethers,abi){
 }
 async function safeStatic(contract,f,args){try{return{ok:true,value:normalize(await contract.getFunction(f.format('sighash')).staticCall(...args))};}catch(e){return{ok:false,error:String(e?.shortMessage??e?.message??e).slice(0,800)};}}
 async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
-  const out={native:{},views:{},systemNative:{}};
+  const out={native:{},views:{},systemNative:{},related:{}};
   const c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),provider);
+  const relatedAddresses=[...new Set([target.recipeRuntime?.assetAddress,target.recipeRuntime?.tokenAddress].filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x))))];
+  const erc20ViewAbi=[
+    'function balanceOf(address) view returns (uint256)',
+    'function allowance(address,address) view returns (uint256)',
+    'function totalSupply() view returns (uint256)'
+  ];
   // These reads share one stable pre/post state; batching preserves all observations without serial RPC latency.
   await Promise.all([
     (async()=>{out.native.sender=(await provider.getBalance(sender)).toString();})(),
     (async()=>{out.native.target=(await provider.getBalance(target.address)).toString();})(),
     ...systemTargets.map(async t=>{out.systemNative[t.address]=(await provider.getBalance(t.address)).toString();}),
     ...plan.zero.map(async f=>{out.views[f.format('sighash')]=await safeStatic(c,f,[]);}),
-    ...plan.address.flatMap(f=>{const s=f.format('sighash');return[
-      (async()=>{out.views[`${s}::sender`]=await safeStatic(c,f,[sender]);})(),
-      (async()=>{out.views[`${s}::target`]=await safeStatic(c,f,[target.address]);})()
+    ...plan.address.flatMap(f=>{const sig=f.format('sighash');return[
+      (async()=>{out.views[`${sig}::sender`]=await safeStatic(c,f,[sender]);})(),
+      (async()=>{out.views[`${sig}::target`]=await safeStatic(c,f,[target.address]);})()
     ];}),
-    ...(plan.addressPair??[]).map(async f=>{const s=f.format('sighash');out.views[`${s}::sender::target`]=await safeStatic(c,f,[sender,target.address]);})
+    ...(plan.addressPair??[]).map(async f=>{const sig=f.format('sighash');out.views[`${sig}::sender::target`]=await safeStatic(c,f,[sender,target.address]);}),
+    ...relatedAddresses.map(async address=>{
+      const token=new ethers.Contract(address,erc20ViewAbi,provider),key=address.toLowerCase();
+      const read=async(fn,args=[])=>{try{return{ok:true,value:normalize(await token.getFunction(fn).staticCall(...args))};}catch(error){return{ok:false,error:String(error?.shortMessage??error?.message??error).slice(0,800)};}};
+      out.related[key]={
+        address,
+        balanceSender:await read('balanceOf(address)',[sender]),
+        balanceTarget:await read('balanceOf(address)',[target.address]),
+        allowanceSenderTarget:await read('allowance(address,address)',[sender,target.address]),
+        totalSupply:await read('totalSupply()',[])
+      };
+    })
   ]);
   return out;
+}
+async function baselineSentinelV2({provider,ethers,targets,actors}){
+  const blockNumber=Number(await provider.getBlockNumber());
+  const block=await provider.getBlock(blockNumber);
+  const actor=actors[0];
+  const states=[];
+  for(const target of targets){
+    states.push({
+      logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,
+      address:target.address,
+      contextType:target.contextType??'DIRECT',
+      codeSha256:sha256(Buffer.from(String(await provider.getCode(target.address)).replace(/^0x/,''),'hex')),
+      observations:await snapshot({provider,ethers,target,sender:actor,plan:target.plan,systemTargets:targets})
+    });
+  }
+  const body={blockNumber,blockHash:block?.hash??null,states:normalize(states)};
+  return{...body,digestSha256:sha256(Buffer.from(JSON.stringify(body)))};
 }
 function flattenNumbers(v,p='',o={}){
   if(typeof v==='string'&&/^-?\d+$/.test(v)){o[p]=BigInt(v);return o;}
@@ -661,10 +695,19 @@ function qualifiedActionV2({target,selected,actors,rng}){
   }
   return null;
 }
-function pickFn(target,rng,actionClass){
-  const accounting=target.functions.filter(x=>x.accounting),other=target.functions.filter(x=>!x.accounting);
+function pickFn(target,rng,actionClass,feedback=new Map(),blocked=new Set()){
+  const keyFor=x=>`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${x.signature}`;
+  const available=list=>list.filter(x=>!blocked.has(keyFor(x)));
+  const accounting=available(target.functions.filter(x=>x.accounting)),other=available(target.functions.filter(x=>!x.accounting));
+  const originalAccounting=target.functions.filter(x=>x.accounting),originalOther=target.functions.filter(x=>!x.accounting);
   const pool=actionClass==='ACCOUNTING_STATE_CHANGE'?accounting:other;
-  const fallback=pool.length?pool:(accounting.length?accounting:other);return fallback[ri(rng,fallback.length)];
+  const fallback=pool.length?pool:(accounting.length?accounting:other);
+  const effective=fallback.length?fallback:(actionClass==='ACCOUNTING_STATE_CHANGE'?originalAccounting:originalOther).filter(Boolean);
+  if(!effective.length)return null;
+  const weights=effective.map(x=>1+Math.min(8,Number(feedback.get(keyFor(x))??0)));
+  const total=weights.reduce((a,b)=>a+b,0);let cursor=rng()*total;
+  for(let i=0;i<effective.length;i++){cursor-=weights[i];if(cursor<=0)return{selected:effective[i],feedbackWeight:weights[i],selectionKey:keyFor(effective[i])};}
+  return{selected:effective.at(-1),feedbackWeight:weights.at(-1),selectionKey:keyFor(effective.at(-1))};
 }
 export function buildBurstSchedule(targets,calls,rng){
   const out=[];
@@ -697,6 +740,16 @@ function observationRowsV2(snapshotValue,recipe,phase){
   const push=(quantityId,family,value,status='OK',error=null)=>rows.push({phase,quantityId,family,unit:'integer',status,value:status==='OK'?String(value):null,error});
   for(const [who,value] of Object.entries(snapshotValue?.native??{}))push(`native:${who}`,'NATIVE_BALANCE',value);
   for(const [address,value] of Object.entries(snapshotValue?.systemNative??{}))push(`system-native:${address.toLowerCase()}`,'NATIVE_BALANCE',value);
+  for(const [address,related] of Object.entries(snapshotValue?.related??{})){
+    for(const [name,result] of Object.entries(related??{})){
+      if(name==='address')continue;
+      const family=name.startsWith('balance')?'TOKEN_BALANCE':name.startsWith('allowance')?'ALLOWANCE':name==='totalSupply'?'TOTAL_SUPPLY':'RELATED_TOKEN_VIEW';
+      const quantityId=`related:${address}:${name}`;
+      if(result?.ok!==true)rows.push({phase,quantityId,family,unit:'integer',status:'FAILED',value:null,error:result?.error??'OBSERVATION_FAILED'});
+      else if(typeof result.value==='string'&&/^-?\d+$/.test(result.value))push(quantityId,family,result.value);
+      else rows.push({phase,quantityId,family,unit:'opaque',status:'OK',value:normalize(result.value),error:null});
+    }
+  }
   for(const [key,result] of Object.entries(snapshotValue?.views??{})){
     let family='ABI_VIEW';
     if(recipeId&&key.startsWith('balanceOf(address)'))family=recipeId==='erc4626-standard-v1'?'SHARE_BALANCE':'TOKEN_BALANCE';
