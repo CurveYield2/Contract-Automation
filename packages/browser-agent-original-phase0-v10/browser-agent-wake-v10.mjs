@@ -314,6 +314,28 @@ async function humanTypeInto(page, locator, text) {
   await humanActionPause(page);
 }
 
+async function humanAddressNavigate(page, targetUrl) {
+  const parsed = new URL(targetUrl);
+  if (parsed.origin !== 'https://chatgpt.com') {
+    throw new Error('Human address navigation only accepts chatgpt.com URLs');
+  }
+
+  // Use the visible browser's normal address-bar keyboard path. Do not use a
+  // page-context redirect, backend call, or synthetic DOM navigation.
+  await humanActionPause(page);
+  await page.keyboard.press('Control+L');
+  await humanActionPause(page);
+  for (const char of String(targetUrl)) {
+    await page.keyboard.type(char);
+    await humanTypingPause(page);
+  }
+  await humanActionPause(page);
+  await page.keyboard.press('Enter');
+  await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
+  await page.waitForTimeout(randomDelayMs(3000, 5000));
+  console.log('[github-playwright-v10] human-address-navigation=' + JSON.stringify({ targetUrl }));
+}
+
 async function findVisibleSidebarSurface(page) {
   const candidates = page.locator('nav, aside, [data-testid*="sidebar" i], [class*="sidebar" i]');
   const count = Math.min(await candidates.count().catch(() => 0), 40);
@@ -558,15 +580,14 @@ async function openSavedProjectUrl(page, name, projectUrl) {
     throw new Error('Persisted Project URL is not a valid ChatGPT Project URL');
   }
 
-  // Direct navigation is the canonical recovery path for an already-known
-  // Project. A live run proved ChatGPT can transiently bounce this exact saved
-  // URL to the homepage even with a healthy authenticated session. Retry only
-  // the same exact saved URL; never fall back to sidebar rediscovery here.
-  const maxAttempts = 4;
+  // Direct recovery stays on the exact saved Project URL, but navigation itself
+  // must look like normal human browser use. A prior merged run showed that
+  // repeated programmatic jumps can provoke a visible Cloudflare challenge.
+  const maxAttempts = 3;
   const observations = [];
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    await page.goto(projectUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await humanAddressNavigate(page, projectUrl);
 
     const settleDeadline = Date.now() + 20000;
     while (Date.now() < settleDeadline) {
@@ -608,14 +629,15 @@ async function openSavedProjectUrl(page, name, projectUrl) {
     }));
 
     if (attempt < maxAttempts) {
-      // Give the already-authenticated visible ChatGPT shell a human-scale
-      // settle interval before retrying the exact persisted Project URL.
-      await page.waitForTimeout(randomDelayMs(2500, 4500));
+      // Let the visible signed-in homepage fully settle before a person tries
+      // the same address again. Challenge detection remains fail-closed.
+      await waitForVisibleBrowserReady(page);
+      await page.waitForTimeout(randomDelayMs(12000, 20000));
     }
   }
 
   throw new Error(
-    'Persisted Project URL did not open the expected ChatGPT Project page after direct retries' +
+    'Persisted Project URL did not open the expected ChatGPT Project page after human direct retries' +
     ' (observations=' + JSON.stringify(observations) + ')'
   );
 }
@@ -1221,20 +1243,22 @@ async function runWithPage(providerName, connect) {
   const { browser, context, page, close } = await connect();
   try {
     const recoveryRoute = action === 'recover' ? chatRouteInfo(requestedUrl) : { isChat: false, isLocal: false };
+    let deferredHumanUrl = '';
     if (action === 'recover' && recoveryRoute.isChat && !recoveryRoute.isLocal) {
-      await page.goto(requestedUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      deferredHumanUrl = requestedUrl;
     } else if (mode === 'resume_existing') {
       const requestedRoute = chatRouteInfo(requestedUrl);
       if (!requestedRoute.isChat || requestedRoute.isLocal) {
         throw new Error('resume_existing requires a durable root or Project-scoped ChatGPT conversation URL');
       }
-      await page.goto(requestedUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    } else if (mode === 'create_fresh') {
-      await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-    } else {
+      deferredHumanUrl = requestedUrl;
+    } else if (mode !== 'create_fresh') {
       throw new Error('Unsupported WAKE_MODE');
     }
 
+    // Bootstrap only the ordinary signed-in ChatGPT home shell programmatically.
+    // Saved Project/chat routes are entered later through the visible address bar.
+    await page.goto('https://chatgpt.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(1500);
     if (bool(env.REFRESH_BEFORE_WAKE)) {
       await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -1242,6 +1266,11 @@ async function runWithPage(providerName, connect) {
     }
 
     await waitForVisibleBrowserReady(page);
+
+    if (deferredHumanUrl) {
+      await humanAddressNavigate(page, deferredHumanUrl);
+      await waitForVisibleBrowserReady(page);
+    }
 
     let project = null;
     if (action === 'project_wake') {
