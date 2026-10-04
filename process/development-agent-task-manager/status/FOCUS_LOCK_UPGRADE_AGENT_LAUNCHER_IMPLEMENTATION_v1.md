@@ -51,11 +51,12 @@
 
 ## ACTIVE BLOCKER
 
-**Live run 37165081531 proved the one-shot Project retry could provoke a visible Cloudflare challenge on the second programmatic URL jump. The merged worker now uses normal human address-bar navigation (Ctrl+L -> per-character URL typing -> Enter) for saved Project/chat routes, retains immediate fail-closed challenge abort, and retries only the exact saved Project URL with no sidebar fallback. Live proof is running.**
+**Live run `37165281363` reached a healthy signed-in ChatGPT homepage, used the merged human address-bar path for the exact saved Project URL, then immediately encountered a visible Cloudflare verification page. The worker correctly aborted; no bypass was attempted. This is now a transient browser/rate-state gate on the deep-link attempt, not a Project selector/sidebar bug. The exact same fail-closed human-only recovery is being retried on a fresh runner before any further code change.**
 
 Latest browser repair commits on `main`:
 - `2cc4fc94f88e4eb632756ebfded49fd3f9ee3a02` — human address-bar navigation for saved routes.
 - `d89655da3e97b87fea9ff1a2a5be7cb65b75bfa0` — regression coverage for the human address path.
+- `07b65acb533f02c6dd92efc79d4326e6478e83d7` — lock updated for live human-navigation proof.
 
 ## REMAINING DELTA
 
@@ -71,7 +72,7 @@ Latest browser repair commits on `main`:
 
 ## NEXT ACTION
 
-Verify the currently triggered merged browser run. If it reaches the known Project, click the already-visible center chat title, capture the Project-scoped durable chat URL, and verify the state artifact. Then trigger a second recovery with blank request chat_url and prove artifact-restored direct saved-chat recovery through the human address-bar path. After that, transplant only this proven browser routine into the audit wake/watch pathway and resume the latest DEX v16 Phase 1 campaign.
+Retry the exact merged human-only recovery on a fresh runner. If the visible challenge recurs, abort again and diagnose the fresh-run/browser-state pattern without bypassing verification. If the Project opens, click the already-visible center chat title, capture the Project-scoped durable chat URL, verify the state artifact, then immediately run a second blank-chat_url recovery proving artifact-restored direct saved-chat reuse.
 
 ## PARKED / OUT OF SCOPE
 
