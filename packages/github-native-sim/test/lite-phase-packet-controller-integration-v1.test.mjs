@@ -232,6 +232,7 @@ test('v11-configured Phase 1 seals but cannot create Phase 2 until exact master 
   assert.equal(waiting.currentAssignment,null);
   assert.equal(waiting.pendingMasterReview.segmentId,'reviewer-1-phase-01');
   assert.deepEqual(waiting.pendingMasterReview.segmentPhases,[1]);
+  assert.match(waiting.pendingMasterReview.bindingsSha256,/^[0-9a-f]{64}$/);
   const masterPath=path.join(f.root,waiting.pendingMasterReview.workFormPath);
   const master=readJson(masterPath);
   assert.deepEqual([...new Set(master.reviewedArtifacts.map(x=>x.phase))],[1]);
@@ -294,6 +295,11 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
   const blocked=readJson(path.join(f.root,f.dirRel));
   assert.equal(blocked.currentAssignment,null);
   assert.equal(blocked.campaignStatus,'MASTER_REVIEW_REWORK_REQUIRED');
+  assert.match(blocked.pendingMasterReview.repairSpecSha256,/^[0-9a-f]{64}$/);
+  const repeated=runMaster(f);
+  assert.equal(repeated.status,'MASTER_REVIEW_INVALID');
+  assert.match(repeated.feedbackText,/MASTER_REPAIR_TRANSPORT_BLOCKED/);
+  assert.equal(readJson(path.join(f.root,f.dirRel)).currentAssignment,null);
 });
 
 test('typed held revision2-to-revision3 admission regenerates controller products and resolves EIM-013',()=>{
