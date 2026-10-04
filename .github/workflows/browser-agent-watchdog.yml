@@ -1061,138 +1061,63 @@ jobs:
               continue
             fi
 
-            export WAKE_MODE='resume_existing'
-            export CHAT_URL="$chat_url"
-            export WAKE_ACTION='observe'
-            export WAKE_RESULT_PATH="/tmp/$safe_id-observe.json"
+            # Audit browser invariant: the watchdog never reads ChatGPT DOM/page
+            # state. Controller/campaign state above determines whether the phase is
+            # still active. The browser is touched only when the elapsed-time gate
+            # calls for a human-style Phase-1 X11 poke.
+            reference_at="$(jq -r '.lastPokedAt // .armedAt // empty' /tmp/watchdog-state.json)"
+            poke_interval_minutes="$(jq -r '.pokeIntervalMinutes // 20' /tmp/watchdog-state.json)"
+            [[ "$poke_interval_minutes" =~ ^[0-9]+$ ]] || poke_interval_minutes=20
+            now_epoch="$(date -u +%s)"
+            reference_epoch="$(date -u -d "$reference_at" +%s 2>/dev/null || echo 0)"
+            if [ "$reference_epoch" -le 0 ]; then
+              reference_epoch="$now_epoch"
+            fi
+            elapsed_minutes="$(( (now_epoch - reference_epoch) / 60 ))"
 
-            if ! node scripts/browser-agent-wake.mjs; then
-              echo "::warning::Observation failed for $WAKE_ID; the next scheduled sweep will retry."
-              jq '.lastDecision="OBSERVATION_FAILED" | .lastObservationFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+            if [ "$elapsed_minutes" -lt "$poke_interval_minutes" ]; then
+              echo "Watchdog $WAKE_ID: controller still active; no ChatGPT read. Next X11 poke eligible after ${poke_interval_minutes} minutes (elapsed=${elapsed_minutes})."
+              jq --argjson elapsed "$elapsed_minutes" --argjson interval "$poke_interval_minutes" \
+                '.lastDecision="WAITING_NO_CHATGPT_READ"
+                 | .lastNoReadSweepAt=(now|todate)
+                 | .elapsedSinceLastPokeMinutes=$elapsed
+                 | .pokeIntervalMinutes=$interval' \
+                /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
               mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
               persist_state || true
               continue
             fi
 
-            generating="$(jq -r '.generating // false' "$WAKE_RESULT_PATH")"
-            current_count="$(jq -r '.assistantCount // 0' "$WAKE_RESULT_PATH")"
-            current_hash="$(jq -r '.lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
-            previous_count="$(jq -r '.observation.assistantCount // 0' /tmp/watchdog-state.json)"
-            previous_hash="$(jq -r '.observation.lastAssistantHash // empty' /tmp/watchdog-state.json)"
-            chat_viewable="$(jq -r '.chatViewable // false' "$WAKE_RESULT_PATH")"
-            conversation_unavailable="$(jq -r '.conversationUnavailable // false' "$WAKE_RESULT_PATH")"
-            human_challenge="$(jq -r '.humanChallenge // false' "$WAKE_RESULT_PATH")"
-            login_prompt="$(jq -r '.loginPrompt // false' "$WAKE_RESULT_PATH")"
-
-            if [ "$human_challenge" = true ]; then
-              echo "::warning::Watchdog runner hit a browser challenge; treating as infrastructure noise, not reviewer failure."
-              jq '.lastDecision="BROWSER_CHALLENGE_RETRY_LATER" | .lastObservationFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
-              mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
-              persist_state || true
-              continue
-            fi
-
-            if [ "$login_prompt" = true ]; then
-              echo "::warning::ChatGPT authentication is required; not replacing the reviewer because this is a shared session problem."
-              jq '.lastDecision="AUTH_REQUIRED" | .lastObservationFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
-              mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
-              persist_state || true
-              continue
-            fi
-
-            if [ "$conversation_unavailable" = true ]; then
-              if dispatch_reviewer_repair "CONVERSATION_UNAVAILABLE"; then
-                retire_state "REVIEWER_REPAIR_DISPATCHED_CONVERSATION_UNAVAILABLE"
+            prior_idle_pokes="$(jq -r '.repair.consecutiveIdlePokes // 0' /tmp/watchdog-state.json)"
+            idle_threshold="$(jq -r '.repair.idlePokeThreshold // 3' /tmp/watchdog-state.json)"
+            if [ "$prior_idle_pokes" -ge "$idle_threshold" ]; then
+              if dispatch_reviewer_repair "NO_CONTROLLER_ADVANCE_AFTER_${prior_idle_pokes}_PHASE1_X11_POKES"; then
+                retire_state "REVIEWER_REPAIR_DISPATCHED_AFTER_${prior_idle_pokes}_NO_READ_POKES"
                 exit 0
               fi
             fi
 
-            if [ "$chat_viewable" != true ]; then
-              unviewable_count="$(jq -r '(.repair.consecutiveUnviewable // 0) + 1' /tmp/watchdog-state.json)"
-              unviewable_threshold="$(jq -r '.repair.unviewableThreshold // 2' /tmp/watchdog-state.json)"
-              jq --argjson count "$unviewable_count" '.repair.consecutiveUnviewable=$count | .lastDecision="CHAT_UNVIEWABLE"' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
-              mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
-              persist_state || true
-              if [ "$unviewable_count" -ge "$unviewable_threshold" ]; then
-                if dispatch_reviewer_repair "CHAT_UNVIEWABLE_${unviewable_count}_OBSERVATIONS"; then
-                  retire_state "REVIEWER_REPAIR_DISPATCHED_CHAT_UNVIEWABLE"
-                  exit 0
-                fi
-              fi
-              continue
-            fi
+            echo "Watchdog $WAKE_ID: elapsed-time gate reached; sending configured GET BACK TO WORK using the proven Phase-1 fixed X11 path."
+            export WAKE_MODE='resume_existing'
+            export CHAT_URL="$chat_url"
+            export WAKE_ACTION='wake'
+            export WAKE_MESSAGE="$(jq -r '.idleMessage' /tmp/watchdog-state.json)"
+            export WAKE_RESULT_PATH="/tmp/$safe_id-poke.json"
 
-            jq '.repair.consecutiveUnviewable=0' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
-            mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
-
-            productive=false
-            reason=''
-            if [ "$generating" = true ]; then
-              productive=true
-              reason='GENERATING'
-            elif [ "$current_count" -gt "$previous_count" ]; then
-              productive=true
-              reason='ADVANCED_MESSAGE_COUNT'
-            elif [ -n "$current_hash" ] && [ "$current_hash" != "$previous_hash" ]; then
-              productive=true
-              reason='ADVANCED_CONTENT'
-            fi
-
-            if [ "$productive" = true ]; then
-              echo "Watchdog $WAKE_ID: PRODUCTIVE ($reason); no interruption."
-              jq --argjson count "$current_count" --arg hash "$current_hash" --arg reason "$reason" \
-                '.observation.assistantCount=$count | .observation.lastAssistantHash=$hash | .observation.observedAt=(now|todate) | .lastProductiveAt=(now|todate) | .lastDecision=("PRODUCTIVE_"+$reason) | .repair.consecutiveIdlePokes=0' \
+            if node scripts/browser-agent-wake.mjs; then
+              jq --argjson interval "$poke_interval_minutes" \
+                '.lastPokedAt=(now|todate)
+                 | .pokeCount=((.pokeCount // 0)+1)
+                 | .repair.consecutiveIdlePokes=((.repair.consecutiveIdlePokes // 0)+1)
+                 | .lastDecision="TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ"
+                 | .pokeIntervalMinutes=$interval' \
                 /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
             else
-              prior_idle_pokes="$(jq -r '.repair.consecutiveIdlePokes // 0' /tmp/watchdog-state.json)"
-              idle_threshold="$(jq -r '.repair.idlePokeThreshold // 3' /tmp/watchdog-state.json)"
-              if [ "$prior_idle_pokes" -ge "$idle_threshold" ]; then
-                if dispatch_reviewer_repair "IDLE_AFTER_${prior_idle_pokes}_WATCHDOG_POKES"; then
-                  retire_state "REVIEWER_REPAIR_DISPATCHED_PERSISTENT_IDLE"
-                  exit 0
-                fi
-              fi
-              echo "Watchdog $WAKE_ID: IDLE; sending configured GET BACK TO WORK message."
-              export WAKE_ACTION='wake'
-              export WAKE_MESSAGE="$(jq -r '.idleMessage' /tmp/watchdog-state.json)"
-              export WAKE_RESULT_PATH="/tmp/$safe_id-poke.json"
-              if node scripts/browser-agent-wake.mjs; then
-                next_count="$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")"
-                next_hash="$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")"
-                jq --argjson count "$next_count" --arg hash "$next_hash" \
-                  '.observation.assistantCount=$count | .observation.lastAssistantHash=$hash | .observation.observedAt=(now|todate) | .lastPokedAt=(now|todate) | .pokeCount=((.pokeCount // 0)+1) | .repair.consecutiveIdlePokes=((.repair.consecutiveIdlePokes // 0)+1) | .lastDecision="IDLE_POKED"' \
-                  /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
-              else
-                # A failed poke after a successful idle observation must not freeze
-                # the reviewer forever one count below the replacement threshold.
-                # Browser/auth challenges remain infrastructure noise; other failed
-                # delivery attempts consume an idle-poke attempt and can trigger
-                # resume-first reviewer repair.
-                poke_infra_only=false
-                if [ -s "$WAKE_RESULT_PATH" ]; then
-                  poke_infra_only="$(jq -r '
-                    ([.failures[]?.code] | length) > 0
-                    and ([.failures[]?.code] | any(. == "BROWSER_CHALLENGE" or . == "AUTH_REQUIRED"))
-                  ' "$WAKE_RESULT_PATH" 2>/dev/null || echo false)"
-                fi
-                if [ "$poke_infra_only" = true ]; then
-                  jq '.lastDecision="IDLE_POKE_INFRA_RETRY_LATER" | .lastPokeFailureAt=(now|todate)' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
-                else
-                  failed_idle_pokes=$((prior_idle_pokes + 1))
-                  jq --argjson count "$failed_idle_pokes" \
-                    '.repair.consecutiveIdlePokes=$count | .pokeFailureCount=((.pokeFailureCount // 0)+1) | .lastDecision="IDLE_POKE_FAILED_COUNTED" | .lastPokeFailureAt=(now|todate)' \
-                    /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
-                  mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
-                  persist_state || true
-                  if [ "$failed_idle_pokes" -ge "$idle_threshold" ]; then
-                    if dispatch_reviewer_repair "IDLE_AFTER_${failed_idle_pokes}_WATCHDOG_ATTEMPTS_LAST_POKE_FAILED"; then
-                      retire_state "REVIEWER_REPAIR_DISPATCHED_PERSISTENT_IDLE"
-                      exit 0
-                    fi
-                  fi
-                  jq '.lastDecision="IDLE_POKE_FAILED_COUNTED"' /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
-                fi
-              fi
+              echo "::warning::Watchdog X11 poke transport failed; treating as infrastructure noise and not as reviewer failure."
+              jq '.lastDecision="PHASE1_X11_POKE_TRANSPORT_FAILED_RETRY_LATER"
+                   | .lastPokeFailureAt=(now|todate)
+                   | .pokeFailureCount=((.pokeFailureCount // 0)+1)' \
+                /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
             fi
 
             mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
