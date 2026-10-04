@@ -18,12 +18,6 @@ on:
         default: high
         type: choice
         options: [high, maximum]
-      requested_model:
-        description: Exact model capability requested for fail-closed reviewer transport
-        required: false
-        default: PRESERVE
-        type: choice
-        options: [PRESERVE, MASTER, SOL]
       mode:
         required: true
         default: resume_existing
@@ -122,7 +116,6 @@ jobs:
       CAMPAIGN_ID: ${{ inputs.campaign_id }}
       PHASE_ID: ${{ inputs.phase_id }}
       CHATGPT_THINKING_EFFORT: ${{ inputs.thinking_effort }}
-      CHATGPT_REQUESTED_MODEL: ${{ inputs.requested_model }}
       WORKER_ROLE: ${{ inputs.worker_role }}
       WAKE_MODE: ${{ inputs.mode }}
       CHAT_URL: ${{ inputs.chat_url }}
@@ -301,6 +294,7 @@ jobs:
             and ((.projectUrl // "")|type=="string")
             and ((.chatName // "")|type=="string")
             and ((.repair // {})|type=="object")
+            and ((.requestedModel // "PRESERVE")=="PRESERVE" or (.requestedModel // "PRESERVE")=="MASTER" or (.requestedModel // "PRESERVE")=="SOL")
             and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="repair_notice" or (.messagePurpose // "standard")=="initial_wake")
             and (((.routineId // "") | test("[\\r\\n]")) | not)
             and (((.projectName // "") | test("[\\r\\n]")) | not)
@@ -315,6 +309,7 @@ jobs:
             echo "CHATGPT_PROJECT_NAME=$(jq -r '.projectName // empty' /tmp/browser-context.json)"
             echo "CHATGPT_PROJECT_URL=$(jq -r '.projectUrl // empty' /tmp/browser-context.json)"
             echo "CHATGPT_CHAT_NAME=$(jq -r '.chatName // empty' /tmp/browser-context.json)"
+            echo "CHATGPT_REQUESTED_MODEL=$(jq -r '.requestedModel // "PRESERVE"' /tmp/browser-context.json)"
             echo "REPAIR_ENABLED=$(jq -r '.repair.enabled // false' /tmp/browser-context.json)"
             echo "REPAIR_IDLE_POKE_THRESHOLD=$(jq -r '.repair.idlePokeThreshold // 3' /tmp/browser-context.json)"
             echo "REPAIR_UNVIEWABLE_THRESHOLD=$(jq -r '.repair.unviewableThreshold // 2' /tmp/browser-context.json)"
