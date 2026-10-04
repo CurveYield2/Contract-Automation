@@ -37,8 +37,11 @@ function assignCanonicalIds(canonical,graph,phase){
       if(!family||!Array.isArray(value)) continue;
       for(let i=0;i<value.length;i++){
         const item=value[i];if(!item||typeof item!=='object'||Array.isArray(item)) continue;
+        const sourceRecordPath='actions.'+stepKey+'.outputs.'+fieldName+'['+i+']';
+        const prior=(graph.nodes??[]).find(n=>n.originPhase===phase&&n.sourceRecordPath===sourceRecordPath&&n.nodeType===family);
+        if(!item.canonicalId&&prior)item.canonicalId=prior.nodeId;
         if(!item.canonicalId) item.canonicalId=nextId(graph,family);
-        if(!(graph.nodes??[]).some(n=>n.nodeId===item.canonicalId)) graph.nodes.push({nodeId:item.canonicalId,nodeType:family,originPhase:phase,sourceRecordPath:'actions.'+stepKey+'.outputs.'+fieldName+'['+i+']'});
+        if(!(graph.nodes??[]).some(n=>n.nodeId===item.canonicalId)) graph.nodes.push({nodeId:item.canonicalId,nodeType:family,originPhase:phase,sourceRecordPath});
       }
     }
   }
@@ -59,7 +62,7 @@ function receiptObligationSummary({ledger,canonical,form,sequence,now}){
   const due=dueIds.map(id=>byId.get(String(id))??{obligationId:id,status:'UNRESOLVED_LEDGER_REFERENCE'});
   return {due,created,closed,carriedForward};
 }
-function syncControls({root,campaignPath,schema,canonical,canonicalRel,now}){
+function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,replacePhase=false}){
   const controlDir=path.posix.join(campaignPath,'controller');
   const graphRel=path.posix.join(controlDir,'SECURITY_TRACEABILITY_GRAPH_v1.json');
   const ledgerRel=path.posix.join(controlDir,'CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json');
@@ -69,6 +72,11 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now}){
   const invalid=readJson(requiredFile(root,invalidRel,'invalidation matrix'));
   assignCanonicalIds(canonical,graph,schema.phase);
   graph.controllerImports??=[]; ledger.controllerImports??=[]; invalid.controllerImports??=[];
+  if(replacePhase){
+    graph.controllerImports=graph.controllerImports.filter(x=>x?.phase!==schema.phase);
+    ledger.controllerImports=ledger.controllerImports.filter(x=>x?.phase!==schema.phase);
+    invalid.controllerImports=invalid.controllerImports.filter(x=>x?.phase!==schema.phase);
+  }
   const graphRecords=importedRecords(canonical,schema.bookkeepingMappings?.graphRecordPaths);
   const obligationRecords=importedRecords(canonical,schema.bookkeepingMappings?.obligationRecordPaths);
   const invalidationRecords=importedRecords(canonical,schema.bookkeepingMappings?.invalidationRecordPaths);
@@ -695,7 +703,7 @@ if(schema.finalReport){
 if(deficiencies.length) throw new Error('controller-generated report validation failed: '+deficiencies.join('; '));
 
 packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS'};
-const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now});
+const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now,replacePhase:Boolean(masterRepairRefreshSha)});
 if(sealedRework){
   const invalid=readJson(requiredFile(root,controls.invalidRel,'evidence invalidation matrix'));
   const events=invalid.events??(invalid.events=[]);
