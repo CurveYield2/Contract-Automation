@@ -478,25 +478,37 @@ test('browser routine/orchestration/repair changes stay in CONTROL_LIGHT qualifi
 });
 
 
-test('reviewer wake uses only visible human pointer and keyboard submission primitives', () => {
+test('reviewer wake uses only visible human pointer and X11 keyboard submission primitives', () => {
   const wake = read('scripts/browser-agent-wake.mjs');
   const fillStart = wake.indexOf('async function fillComposer(page, message)');
   const fillEnd = wake.indexOf('async function persistedWakeVisible', fillStart);
   const sendBlock = wake.slice(fillStart, fillEnd);
 
+  assert.match(wake, /import \{ spawn \} from 'node:child_process'/);
+  assert.match(wake, /async function x11Key\(/);
   assert.match(sendBlock, /humanPointerClick\(page, composer/);
   assert.match(sendBlock, /messagePurpose === 'initial_wake'/);
-  assert.match(sendBlock, /spawn\('xdotool', \['type', '--clearmodifiers', '--delay', '8', humanText\]/);
-  assert.match(sendBlock, /composer-fill-strategy=human-x11-type/);
-  assert.match(sendBlock, /for \(const char of String\(message\)\)/);
-  assert.match(sendBlock, /humanTypingPause\(page\)/);
+  assert.match(sendBlock, /x11Key\(\['type', '--clearmodifiers', '--delay', '0', char\]/);
+  assert.match(sendBlock, /composer-fill-strategy=human-x11-skilled-typist-per-character/);
+  assert.match(sendBlock, /for \(let i = 0; i < text\.length; i \+= 1\)/);
+  assert.match(sendBlock, /humanTypingPause\(page, char\)/);
   assert.match(sendBlock, /humanPointerClick\(page, send/);
+  assert.doesNotMatch(sendBlock, /pressSequentially|keyboard\.type|insertText/);
   assert.doesNotMatch(sendBlock, /navigator\.clipboard|clipboard-read|clipboard-write/);
   assert.doesNotMatch(sendBlock, /\.fill\(/);
   assert.doesNotMatch(sendBlock, /force:\s*true/);
   assert.doesNotMatch(sendBlock, /requestSubmit|form\.submit/);
   assert.doesNotMatch(sendBlock, /evaluate\([^\n]*\.click/);
   assert.doesNotMatch(sendBlock, /page\.on\(['"](?:request|response)['"]/);
+});
+
+test('reviewer wake launches ordinary visible Chrome without custom browser fingerprint overrides', () => {
+  const wake = read('scripts/browser-agent-wake.mjs');
+  const start = wake.indexOf('async function localProvider(chromium)');
+  const block = wake.slice(start);
+  assert.match(block, /headless: false/);
+  assert.match(block, /channel: 'chrome'/);
+  assert.doesNotMatch(block, /--disable-quic|--window-size|viewport:|screen:|deviceScaleFactor|userAgent:/);
 });
 
 test('project creation hovers Projects and distinguishes the plus control from the overflow menu', () => {
