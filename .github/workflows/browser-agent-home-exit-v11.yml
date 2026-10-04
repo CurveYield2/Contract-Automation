@@ -37,7 +37,7 @@ on:
       - 'packages/browser-agent-manual-only-v11/browser-agent-manual-v11.mjs'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: manual-only-home-exit-browser-v11
@@ -152,6 +152,20 @@ jobs:
           echo $! >/tmp/x11vnc-v11.pid
           echo "TAILSCALE_VNC=$ts_ip:5900"
           echo "Connect your VNC viewer from the Windows PC to $ts_ip:5900."
+
+      - name: Publish manual VNC session address
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          path="process/browser-agent-home-exit-v11/current-session-v11.json"
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          payload="$(jq -n             --arg schemaVersion "curveyield-browser-home-exit-session-v11"             --arg runId "$GITHUB_RUN_ID"             --arg runUrl "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"             --arg vnc "$TAILSCALE_RUNNER_IP:5900"             --arg publishedAt "$now"             --arg projectName "${{ steps.request.outputs.project_name }}"             --arg chatName "${{ steps.request.outputs.chat_name }}"             '{schemaVersion:$schemaVersion,run_id:$runId,run_url:$runUrl,vnc:$vnc,published_at:$publishedAt,project_name:$projectName,chat_name:$chatName,status:"manual_session_ready"}')"
+          sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/$path?ref=main" --jq '.sha')"
+          content="$(printf '%s\n' "$payload" | base64 -w0)"
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$path"             -f message="chore(browser): publish active manual VNC session v11"             -f content="$content"             -f sha="$sha"             -f branch="main" >/dev/null
+          echo "Published current manual VNC session address."
 
       - name: Route browser phase through home exit node
         shell: bash
