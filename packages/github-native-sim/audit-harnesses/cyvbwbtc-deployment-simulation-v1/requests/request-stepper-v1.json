@@ -1,0 +1,9 @@
+{
+  "schemaVersion":"curveyield-cyvbwbtc-live-fork-stepper-request-v1",
+  "smartContractsRepository":"CurveYield2/Smart-Contracts",
+  "smartContractsCommit":"7978ea62c58f8efa49c91f37931cab267379e0ee",
+  "chainId":747474,
+  "forkRpc":"https://katana.drpc.org/",
+  "runner":"packages/github-native-sim/audit-harnesses/cyvbwbtc-deployment-simulation-v1/run-stepper-v1.mjs",
+  "productionBroadcast":false
+}
