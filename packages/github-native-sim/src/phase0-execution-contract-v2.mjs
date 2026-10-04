@@ -225,11 +225,11 @@ export function assessMedusaV2({mode='DISCOVERY_ONLY',observedCalls=0,engineProp
   if(mode==='CHECKED_DISCOVERY'){
     if(discovered.length===0)checkStatus='NO_PROPERTY_ASSURANCE';
     else if(target.length===0||checked.length<target.length)checkStatus='PARTIAL';
-    else checkStatus=deviations?'CHECKED_WITH_DEVIATION':'CHECKED';
+    else checkStatus=deviations?'CHECK_DEVIATIONS_OBSERVED':'CHECKED';
   }else if(mode==='DISCOVERY_WITH_ORACLE_GAPS')checkStatus='ORACLE_GAP';
   return{
     capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,mode,
-    executionStatus:Number(observedCalls)>0?'EXECUTED':'NOT_EXECUTED',
+    executionStatus:Number(observedCalls)>0?'COMPLETED':'INCOMPLETE',
     coverageStatus:Number(observedCalls)>=100001?'DISCOVERY_VOLUME_MET':'DISCOVERY_VOLUME_INCOMPLETE',
     checkStatus,reachabilityStatus:checked.length?'REACHABLE':'UNKNOWN',
     observationStatus:target.some(x=>x.result==='OBSERVATION_GAP')?'PARTIAL':(target.length?'AVAILABLE':'UNAVAILABLE'),
@@ -262,7 +262,7 @@ export function migrateLegacyCapabilityV2(summary={}){
     capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
     legacyDisposition:'LEGACY_LIMITED',
     sourceSchemaVersion:summary.schemaVersion??null,
-    executionStatus:summary.medusa?.observedCalls>0?'EXECUTED':'UNKNOWN',
+    executionStatus:summary.medusa?.observedCalls>0?'COMPLETED':'INCOMPLETE',
     coverageStatus:Number(summary.medusa?.observedCalls??0)>=100001?'DISCOVERY_VOLUME_RECORDED':'UNKNOWN',
     checkStatus:'NO_PROPERTY_ASSURANCE',
     reachabilityStatus:'UNKNOWN',
