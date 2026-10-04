@@ -1063,7 +1063,7 @@ async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
   }finally{await provider.destroy();}
   return out;
 }
-export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,runId=runId}){
+export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,runId='medusa-anvil-fork-001'}){
   const dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
   const router=renderMedusaRouterV2(ethers,targets);
   if(!router.rows.length){
@@ -1100,7 +1100,7 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
   }
   await fs.writeFile(path.join(dir,'MEDUSA_CORPUS_INDEX_v1.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-corpus-index-v2',files:corpusIndex},null,2)+'\n');
 
-  const observedCalls=maxMedusaCalls(raw),rawRef='runs/medusa-anvil-fork-001/MEDUSA_RAW_OUTPUT_v1.log';
+  const observedCalls=maxMedusaCalls(raw),rawRef=`runs/${runId}/MEDUSA_RAW_OUTPUT_v1.log`;
   const witnessById=new Map(witnessRows.map(x=>[x.propertyId,x]));
   const properties=router.properties.map(property=>{
     const engine=(parsed.properties??[]).find(x=>String(x.name??'').includes(property.wrapperName));
@@ -1116,7 +1116,7 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
     else if(parsed.status==='no_tests')result='ENGINE_FAILURE';
     return{
       ...property,discoveredByEngine:Boolean(engine),engineName:engine?.name??null,
-      preconditionWitnessRefs:witnessed?[`runs/medusa-anvil-fork-001/PROPERTY_WITNESSES_v2.json#${property.propertyId}`]:[],
+      preconditionWitnessRefs:witnessed?[`runs/${runId}/PROPERTY_WITNESSES_v2.json#${property.propertyId}`]:[],
       executionEvidenceRefs:engine?[rawRef]:[],result,
       counterexample:engine?.counterexample??null
     };
@@ -1137,9 +1137,9 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
     omittedFunctions:router.omitted,propertyRegistry:properties,engineProperties:parsed.properties??[],engineParseStatus:parsed.status,
     executionStatus:assurance.executionStatus,coverageStatus:assurance.coverageStatus,checkStatus:assurance.checkStatus,
     reachabilityStatus:assurance.reachabilityStatus,observationStatus:assurance.observationStatus,
-    exitCode:r.exitCode,rawOutputRef:rawRef,corpusIndexRef:'runs/medusa-anvil-fork-001/MEDUSA_CORPUS_INDEX_v1.json',
-    retainedCorpusFileCount:corpusIndex.length,configRef:'runs/medusa-anvil-fork-001/MEDUSA_CONFIG_v1.json',
-    routerRef:'runs/medusa-anvil-fork-001/MEDUSA_ROUTER_v1.sol',propertyWitnessRef:'runs/medusa-anvil-fork-001/PROPERTY_WITNESSES_v2.json',
+    exitCode:r.exitCode,rawOutputRef:rawRef,corpusIndexRef:`runs/${runId}/MEDUSA_CORPUS_INDEX_v1.json`,
+    retainedCorpusFileCount:corpusIndex.length,configRef:`runs/${runId}/MEDUSA_CONFIG_v1.json`,
+    routerRef:`runs/${runId}/MEDUSA_ROUTER_v1.sol`,propertyWitnessRef:`runs/${runId}/PROPERTY_WITNESSES_v2.json`,
     limitations:checked?router.omitted:[...router.omitted,{type:'ORACLE_GAP',reason:'NO_EXPLICIT_PACKET_DECLARED_PROPERTY_FUNCTIONS_WERE_QUALIFIED'}],
     status
   };
