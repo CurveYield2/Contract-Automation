@@ -17,12 +17,18 @@ on:
         required: false
         default: high
         type: choice
-        options: [high]
+        options: [high, maximum]
+      requested_model:
+        description: Exact model capability requested for fail-closed reviewer transport
+        required: false
+        default: PRESERVE
+        type: choice
+        options: [PRESERVE, MASTER, SOL]
       mode:
         required: true
         default: resume_existing
         type: choice
-        options: [resume_existing]
+        options: [resume_existing, create_fresh]
       chat_url:
         required: false
         type: string
@@ -37,7 +43,7 @@ on:
         required: false
         default: reviewer
         type: choice
-        options: [reviewer, interphase_mechanical]
+        options: [reviewer, interphase_mechanical, master_reviewer, repair_child]
       watchdog_message_b64:
         required: false
         type: string
@@ -116,6 +122,7 @@ jobs:
       CAMPAIGN_ID: ${{ inputs.campaign_id }}
       PHASE_ID: ${{ inputs.phase_id }}
       CHATGPT_THINKING_EFFORT: ${{ inputs.thinking_effort }}
+      CHATGPT_REQUESTED_MODEL: ${{ inputs.requested_model }}
       WORKER_ROLE: ${{ inputs.worker_role }}
       WAKE_MODE: ${{ inputs.mode }}
       CHAT_URL: ${{ inputs.chat_url }}
