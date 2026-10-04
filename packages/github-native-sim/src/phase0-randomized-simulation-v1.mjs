@@ -69,6 +69,15 @@ function scrubbedEnv(extra={}){
   for(const k of ['PATH','HOME','USER','SHELL','TMPDIR','LANG','LC_ALL','NODE_OPTIONS','npm_config_cache'])if(process.env[k]!==undefined)out[k]=process.env[k];
   return{...out,CI:'true',NODE_ENV:'test',...extra};
 }
+function redactExecutionSecretsV2(value,secrets=[]){
+  let text=String(value??'');
+  for(const secret of secrets.filter(x=>typeof x==='string'&&x.length>=8))text=text.split(secret).join('[REDACTED_PHASE0_SECRET]');
+  text=text.replace(/gh[pousr]_[A-Za-z0-9_]{20,}/g,'[REDACTED_GITHUB_TOKEN]');
+  return text;
+}
+function deploymentScriptKeyV2(item){
+  return [item.framework??'GENERIC_NODE',item.path??item.entry??item.script??item.name??'UNKNOWN'].join(':');
+}
 async function rpc(url,method,params=[]){
   const res=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
   const body=await res.json();
@@ -166,7 +175,7 @@ async function installPackageRuntimeDependenciesV1(projectRoot){
   }
   return{status:'PASS',manager:'npm',lockfile:'package-lock.json',ignoreScripts:true,exitCode:r.exitCode};
 }
-async function detectDeploymentScripts(projectRoot){
+export async function detectDeploymentScripts(projectRoot){
   const files=await walk(projectRoot),texts=new Map();
   for(const rel of files.filter(f=>f.endsWith('.sol'))){try{texts.set(rel,await fs.readFile(path.join(projectRoot,...rel.split('/')),'utf8'));}catch{}}
   const foundry=(await fs.stat(path.join(projectRoot,'foundry.toml')).catch(()=>null))?detectFoundryScripts(files,texts):[];
@@ -245,7 +254,7 @@ async function runDeploymentScriptV1(options){
     return result;
   }finally{clearInterval(heartbeat);}
 }
-async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSigner,detected}){
+export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSigner,detected}){
   const attempts=[],limitations=[];
   let help='';
   if(detected.foundry.length){const h=await runProcess({command:'forge',args:['script','--help'],cwd:projectRoot,env:scrubbedEnv()});help=`${h.stdout}\n${h.stderr}`;}
@@ -278,7 +287,9 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSign
       continue;
     }
     const sourcePath=path.join(projectRoot,...item.entry.split('/'));
-    let source=await fs.readFile(sourcePath,'utf8');
+    const originalBytes=await fs.readFile(sourcePath);
+    const originalSha256=sha256(originalBytes);
+    let source=originalBytes.toString('utf8');
     const adaptedRel=path.posix.join(path.posix.dirname(item.entry),'.phase0-anvil-'+path.posix.basename(item.entry));
     const adaptedPath=path.join(projectRoot,...adaptedRel.split('/'));
     let adaptation='NONE';
@@ -299,6 +310,7 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSign
       continue;
     }
     await fs.writeFile(adaptedPath,source);
+    const adaptedBytes=Buffer.from(source),adaptedSha256=sha256(adaptedBytes);
     const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     const executionOverrides=canonicalEthereumExecutionOverrides(source);
     const env=scrubbedEnv({
@@ -309,18 +321,43 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSign
       BASE_DEPLOYER_PRIVATE_KEY:localSigner.privateKey,
       ...executionOverrides.env
     });
-    const args=['900s','node',adaptedRel];
+    const nodePermissionArgs=['--permission',`--allow-fs-read=${projectRoot}`,`--allow-fs-write=${projectRoot}`];
+    const args=['900s',process.execPath,...nodePermissionArgs,adaptedRel];
     if(item.argsText)args.push(...item.argsText.split(/\s+/).filter(Boolean));
     const r=await runDeploymentScriptV1({command:'timeout',args,cwd:projectRoot,env});
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
+    const retainedStdout=redactExecutionSecretsV2(String(r.stdout??''),[localSigner.privateKey,...Object.values(env)]);
+    const retainedStderr=redactExecutionSecretsV2(String(r.stderr??''),[localSigner.privateKey,...Object.values(env)]);
     attempts.push({
       framework:'GENERIC_NODE',script:item.name,path:item.entry,adaptedPath:adaptedRel,
-      adaptation,executionOverrides:executionOverrides.adaptations,localChainId:1,localSigner:localSigner.address,command:['node',adaptedRel,...args.slice(3)].join(' '),
+      originalSha256,adaptedSha256,adaptedContentChanged:originalSha256!==adaptedSha256,
+      adaptation,executionOverrides:executionOverrides.adaptations,localChainId:1,localSigner:localSigner.address,
+      sandbox:{filesystem:'NODE_PERMISSION_PROJECT_ROOT_READ_WRITE_ONLY',childProcess:'DENIED_BY_DEFAULT',worker:'DENIED_BY_DEFAULT',network:'ENVIRONMENT_SECRET_ISOLATION_ONLY',productionHandoffEligible:false},
+      command:[process.execPath,...nodePermissionArgs,adaptedRel,...args.slice(5)].join(' '),
       exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],
-      stdout:String(r.stdout??'').slice(-24000),stderr:String(r.stderr??'').slice(-24000)
+      stdout:retainedStdout.slice(-24000),stderr:retainedStderr.slice(-24000)
     });
   }
-  return{attempts,limitations,status:attempts.some(x=>x.status==='PASS')?'PASS':(attempts.length?'COMPLETE_WITH_FAILURES':'NO_SAFE_SCRIPT_ADAPTER')};
+  const detectedRows=[
+    ...(detected.foundry??[]),
+    ...(detected.hardhat??[]),
+    ...(detected.unsafeHardhat??[]),
+    ...(detected.genericPackageScripts??[]).map(x=>({...x,framework:'GENERIC_NODE',script:x.name}))
+  ];
+  const scriptDispositions=detectedRows.map(item=>{
+    const key=deploymentScriptKeyV2(item);
+    const attempt=attempts.find(x=>deploymentScriptKeyV2(x)===key);
+    const gap=limitations.find(x=>deploymentScriptKeyV2(x)===key);
+    return{
+      scriptKey:key,framework:item.framework,path:item.path??item.entry??null,script:item.script??item.name??null,
+      disposition:attempt?(attempt.status==='PASS'?'EXECUTED_PASS':'EXECUTED_FAILED'):(gap?'UNSUPPORTED_WITH_TYPED_GAP':'UNRESOLVED_DISPOSITION'),
+      attemptStatus:attempt?.status??null,gapType:gap?.type??null,gapReason:gap?.reason??null
+    };
+  });
+  if(scriptDispositions.some(x=>x.disposition==='UNRESOLVED_DISPOSITION')){
+    limitations.push({type:'DEPLOYMENT_SCRIPT_DISPOSITION_INCOMPLETE',scripts:scriptDispositions.filter(x=>x.disposition==='UNRESOLVED_DISPOSITION').map(x=>x.scriptKey)});
+  }
+  return{attempts,limitations,scriptDispositions,status:attempts.some(x=>x.status==='PASS')?'PASS':(attempts.length?'COMPLETE_WITH_FAILURES':'NO_SAFE_SCRIPT_ADAPTER')};
 }
 async function reportedPackageDeployments({projectRoot,attempts,artifacts}){
   const rows=[],limitations=[],seen=new Set();
@@ -1406,7 +1443,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const runtimePreparation=await prepareQualifiedRuntimeV2({provider,ethers,targets,actors});
     runtimePreparation.contextEvidence=delegateContexts.contextEvidence;
     targets=runtimePreparation.targets;
-    const deploymentCombined={detectedScripts:detected,attempts:[...deployment.attempts,...sourcePlan.attempts],runtimePreparation,limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
+    const deploymentCombined={detectedScripts:detected,scriptDispositions:deployment.scriptDispositions??[],attempts:[...deployment.attempts,...sourcePlan.attempts],runtimePreparation,limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
     // Persist deployment diagnostics before any expensive randomized stage.
     deploymentEvidence={...deploymentCombined,packageDependencyInstall,policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS'};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deploymentEvidence,null,2)+'\n');
@@ -1448,7 +1485,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     if(telemetryExecutionFailure)simulationLimitations.push(telemetryExecutionFailure);
     if(medusa.status!=='PASS'&&medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS')simulationLimitations.push({type:'MEDUSA_BASELINE_'+String(medusa.status),runId:medusa.runId});const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode:'ALL_PHASE0_STAGES',status:medusa.status==='PASS'&&telemetry.length===PHASE0_TELEMETRY_RUNS_V1&&telemetry.every(x=>x.status==='PASS')?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:telemetry.length===PHASE0_TELEMETRY_RUNS_V1?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,lifecycleFamilies:x.lifecycleFamilies,observationReads:x.observationReads,observationFailures:x.observationFailures,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
-    const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',packageDependencyInstall,fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
+    const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',packageDependencyInstall,fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,scriptDispositions:deploymentCombined.scriptDispositions,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deployEvidence,null,2)+'\n');await provider.destroy();
     return{summary,runIndex,deployEvidence};
   }catch(error){
