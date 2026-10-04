@@ -520,12 +520,22 @@ if(reviewKind==='master'){
     process.stdout.write(JSON.stringify({status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview.chatUrl,repairModel:'SOL',repairReasoning:'HIGH',repairSpec:result.repairSpec,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
     process.exit(0);
   }
-  let refresh=null;
-  if(result.status==='MASTER_REPAIR_ACCEPTED'){
-    refresh=applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,authorityRoot:masterAuthorityRoot,result,now});
+  if(result.status==='MASTER_REPAIR_READY_FOR_REFRESH'){
+    const refresh=applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,authorityRoot:masterAuthorityRoot,result,now});
+    pending.status='WAITING_FOR_MASTER_REVIEW';
+    pending.childRepairSha256=createHash('sha256').update(JSON.stringify(result.form.childRepair)).digest('hex');
     pending.lastSealedReceiptPath=refresh.lastSealedReceiptPath;
     pending.postRepairManifestSha256=refresh.postRepairManifestSha256;
+    pending.updatedAt=now;
+    directory.currentAssignment=null;
+    directory.campaignStatus='WAITING_FOR_MASTER_REVIEW';
+    directory.updatedAt=now;
+    writeJson(directoryFile,directory);
+    const feedback='MASTER_REPAIR_READY_FOR_VERIFICATION: controller refreshed Phases '+refresh.refreshedPhases.join(', ')+'. The same persistent Maximum master must verify the exact postRepair manifest before ACCEPT.';
+    process.stdout.write(JSON.stringify({status:'MASTER_REPAIR_READY_FOR_VERIFICATION',campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview.chatUrl,masterReasoning:'MAXIMUM',workFormPath:pending.workFormPath,postRepairManifestSha256:pending.postRepairManifestSha256,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\\n');
+    process.exit(0);
   }
+  const refresh=null;
   const plan=result.successorPlan??{};
   let nextAssignment=null;
   if(plan.nextPhaseSequence===null||plan.nextPhaseSequence===undefined){
@@ -539,7 +549,7 @@ if(reviewKind==='master'){
   }
   const acceptedSegment=pending.segmentId;
   directory.lastSealedReceiptPath=pending.lastSealedReceiptPath;
-  directory.lastAcceptedMasterReview={segmentId:acceptedSegment,workFormPath:pending.workFormPath,manifestSha256:pending.manifestSha256,postRepairManifestSha256:refresh?.postRepairManifestSha256??null,acceptedAt:now,masterChatUrl:directory.masterReview.chatUrl};
+  directory.lastAcceptedMasterReview={segmentId:acceptedSegment,workFormPath:pending.workFormPath,manifestSha256:pending.manifestSha256,postRepairManifestSha256:pending.postRepairManifestSha256??null,acceptedAt:now,masterChatUrl:directory.masterReview.chatUrl};
   directory.pendingMasterReview=null;directory.updatedAt=now;writeJson(directoryFile,directory);
   const feedback='MASTER_REVIEW_ACCEPTED: '+acceptedSegment+' accepted.'+(nextAssignment?' Successor Phase '+nextAssignment.phaseSequence+' may now be launched.':' Campaign is now COMPLETE.');
   process.stdout.write(JSON.stringify({status:'PASS',masterReviewAccepted:true,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:acceptedSegment,freshSuccessorRequired:Boolean(nextAssignment),sameReviewerAdvanced:false,nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
