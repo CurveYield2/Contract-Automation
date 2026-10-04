@@ -1541,19 +1541,68 @@ async function waitForVisualChat(stage) {
   throw new Error('Rendered ChatGPT UI did not become available within the manual-verification window');
 }
 
-async function visualFindProjects(windowId) {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const words = await visualWords();
-    const projects = visualWordBox(words, /^Projects$/i);
-    if (projects) return projects;
-
-    if (attempt === 0) {
-      await visualClick(windowId, 30, 52);
-      await visualSleep(2500);
-    } else {
-      await visualSleep(1800);
+function visualProjectsBox(words) {
+  for (const word of words) {
+    if (word.left > 420 || word.top < 80) continue;
+    if (/^Projects?$/i.test(word.text) || /^Projec[tf]s?$/i.test(word.text)) {
+      return {
+        ...word,
+        cx: word.left + word.width / 2,
+        cy: word.top + word.height / 2
+      };
     }
   }
+  return null;
+}
+
+async function visualWheel(windowId, x, y, direction) {
+  await visualMove(windowId, x, y);
+  const button = direction < 0 ? '4' : '5';
+  await execFile('xdotool', ['click', '--window', windowId, button]);
+  await visualSleep(randomDelayMs(500, 1100));
+}
+
+async function visualFindProjects(windowId) {
+  let words = await visualWords();
+  let projects = visualProjectsBox(words);
+  if (projects) return projects;
+
+  // Browser chrome occupies the top strip of the screenshot. The ChatGPT
+  // sidebar toggle sits below it at the far-left edge of the rendered page.
+  await visualClick(windowId, 28, 108);
+  await visualSleep(2500);
+
+  words = await visualWords();
+  projects = visualProjectsBox(words);
+  if (projects) return projects;
+
+  // Keep the pointer inside the rendered sidebar and scan it visually with
+  // ordinary wheel steps. This reads only successive screenshots.
+  for (let i = 0; i < 5; i += 1) {
+    await visualWheel(windowId, 170, 430, -1);
+    words = await visualWords();
+    projects = visualProjectsBox(words);
+    if (projects) return projects;
+  }
+
+  for (let i = 0; i < 12; i += 1) {
+    await visualWheel(windowId, 170, 430, 1);
+    words = await visualWords();
+    projects = visualProjectsBox(words);
+    if (projects) return projects;
+  }
+
+  const leftColumnText = words
+    .filter((word) => word.left < 420 && word.top >= 80)
+    .map((word) => word.text)
+    .slice(0, 80)
+    .join(' ');
+
+  await publishOperatorStatus('FAILED_VISUAL_NAVIGATION', {
+    stage: 'find_projects',
+    visibleLeftColumnText: leftColumnText
+  });
+  console.log('[github-playwright-v10] visual-left-column=' + JSON.stringify(leftColumnText));
   throw new Error('Rendered Projects label was not found');
 }
 
@@ -1822,6 +1871,11 @@ for (const [name, connect] of providers) {
     console.log(JSON.stringify(result));
     process.exit(0);
   } catch (error) {
+    if (bool(env.VISUAL_ONLY_PROJECT_WAKE) && action === 'project_wake') {
+      await publishOperatorStatus('FAILED', {
+        error: error.message
+      }).catch(() => {});
+    }
     failures.push({ provider: name, error: error.message });
     console.error('[' + name + '] ' + error.message);
   }
