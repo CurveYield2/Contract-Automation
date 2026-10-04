@@ -51,26 +51,11 @@
 
 ## ACTIVE BLOCKER
 
-**Direct saved-Project navigation repair is in progress on `repair/project-url-direct-retry-v1`: the exact persisted Project URL now retries in-place after a transient homepage bounce, with no sidebar fallback. Live merged proof remains required.**
+**Live run 37165081531 proved the one-shot Project retry could provoke a visible Cloudflare challenge on the second programmatic URL jump. The merged worker now uses normal human address-bar navigation (Ctrl+L -> per-character URL typing -> Enter) for saved Project/chat routes, retains immediate fail-closed challenge abort, and retries only the exact saved Project URL with no sidebar fallback. Live proof is running.**
 
-Latest merged production commit:
-- `ff468b253f70098d1a9bae572840ba58e24909b9` — `Recover Project chat from visible center title and capture URL v1`
-
-Latest live browser run:
-- `37164591468` — failed.
-- Home-exit routing, immutable bootstrap state, visible Chrome, and ordinary ChatGPT readiness all passed.
-- Recovery request contained the known Project and central chat title.
-- Terminal browser error:
-  `Persisted Project URL did not open the expected ChatGPT Project page (observedUrl=https://chatgpt.com/)`
-- The durable-state upload step completed successfully, but no artifact was produced because no durable chat URL had been reached/captured in this run.
-
-Locked invariants:
-- Do not search for this existing Project/chat through the sidebar.
-- Do not scroll to find the Project chat; the target chat is in the top-center Project page.
-- If a durable `chatUrl` exists, direct-chat recovery is always preferred.
-- As soon as a non-local durable chat route appears, checkpoint `chatUrl` immediately and upload it even if later verification fails.
-- Project-page title recovery is only the bootstrap fallback until a durable chat URL has been captured.
-
+Latest browser repair commits on `main`:
+- `2cc4fc94f88e4eb632756ebfded49fd3f9ee3a02` — human address-bar navigation for saved routes.
+- `d89655da3e97b87fea9ff1a2a5be7cb65b75bfa0` — regression coverage for the human address path.
 
 ## REMAINING DELTA
 
@@ -86,7 +71,7 @@ Locked invariants:
 
 ## NEXT ACTION
 
-Validate the direct retry patch, merge it, trigger the canonical recovery request on `main`, and prove the saved Project opens. Then use the already-merged center-page title path to capture the durable chat URL and immediately run a second recovery proving artifact-restored direct-chat reuse.
+Verify the currently triggered merged browser run. If it reaches the known Project, click the already-visible center chat title, capture the Project-scoped durable chat URL, and verify the state artifact. Then trigger a second recovery with blank request chat_url and prove artifact-restored direct saved-chat recovery through the human address-bar path. After that, transplant only this proven browser routine into the audit wake/watch pathway and resume the latest DEX v16 Phase 1 campaign.
 
 ## PARKED / OUT OF SCOPE
 
