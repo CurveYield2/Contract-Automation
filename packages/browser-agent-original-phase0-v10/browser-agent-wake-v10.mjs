@@ -251,13 +251,29 @@ async function x11Capture(args, label = 'x11-command') {
 
 async function humanX11TypeText(page, text) {
   const value = String(text);
-  for (const char of value) {
-    if (char === '\n') {
+  const tokens = value.match(/\n|[^\s]+[ \t]*/g) || [];
+  for (const token of tokens) {
+    if (token === '\n') {
       await x11Key(['key', '--clearmodifiers', 'shift+Return'], 'x11-line-break');
-    } else {
-      await x11Key(['type', '--clearmodifiers', '--delay', '0', char], 'x11-type-character');
+      await page.waitForTimeout(randomDelayMs(120, 220));
+      continue;
     }
-    await humanTypingPause(page, char);
+
+    // Skilled-typist cadence without one subprocess per character.
+    // xdotool itself emits the visible physical key sequence at ~90-125 WPM,
+    // while short randomized between-word pauses preserve human pacing.
+    const keyDelayMs = randomDelayMs(95, 125);
+    await x11Key(
+      ['type', '--clearmodifiers', '--delay', String(keyDelayMs), token],
+      'x11-type-token'
+    );
+
+    const trimmed = token.trimEnd();
+    if (/[.!?,;:]$/.test(trimmed)) {
+      await page.waitForTimeout(randomDelayMs(100, 210));
+    } else {
+      await page.waitForTimeout(randomDelayMs(30, 90));
+    }
   }
 }
 
