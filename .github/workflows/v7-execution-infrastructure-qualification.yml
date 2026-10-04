@@ -117,7 +117,7 @@ concurrency:
 jobs:
   qualify-v7-execution-infrastructure:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 90
     steps:
       - name: Checkout exact candidate runner
         uses: actions/checkout@v4
@@ -251,6 +251,13 @@ jobs:
       - name: Verify canonical runner manifest
         if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: npm run v7:manifest -- --check
+
+      - name: Phase-0 v2 live behavioral and performance qualification
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node packages/github-native-sim/scripts/phase0-v2-live-qualification.mjs .audit-evidence/v7-infrastructure-qualification/phase0-v2 | tee .audit-evidence/v7-infrastructure-qualification/phase0-v2-console.json
 
       - name: V7 request and execution contract qualification
         if: env.V7_QUALIFICATION_LANE == 'FULL'
