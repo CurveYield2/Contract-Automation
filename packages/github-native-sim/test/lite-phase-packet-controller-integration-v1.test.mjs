@@ -6,6 +6,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {refreshControllerPrefillDigest} from '../../../scripts/lib/lite-phase-prefill-v1.mjs';
+import {requiredFile,repoFile} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 
 const mkdir=p=>fs.mkdirSync(p,{recursive:true});
 const writeJson=(p,v)=>{mkdir(path.dirname(p));fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n');};
@@ -353,4 +354,14 @@ test('typed held revision2-to-revision3 admission regenerates controller product
   const invalid=readJson(path.join(f.root,f.campaign,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json'));
   assert.equal(invalid.events[0].status,'RESOLVED_BY_PHASE_1_REVISION_3');
   assert.equal(readJson(path.join(f.root,f.dirRel)).currentAssignment.phaseSequence,2);
+});
+
+
+test('legacy v10.3 fallback is read-only and rejects an unpinned frozen package',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'lite-frozen-authority-'));
+  const frozen='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3';
+  write(path.join(root,frozen,'SKILL.md'),'tampered');
+  writeJson(path.join(root,frozen,'MANIFEST.json'),{release:'Audit_Litemode_v10.3',entrypoint:'SKILL.md',files:[]});
+  assert.throws(()=>requiredFile(root,'Audit Skill - Current Authority/Audit_Litemode_v10.3/SKILL.md'),/root hash mismatch/);
+  assert.equal(repoFile(root,'Audit Skill - Current Authority/Audit_Litemode_v10.3/SKILL.md'),path.join(root,'Audit Skill - Current Authority/Audit_Litemode_v10.3/SKILL.md'));
 });
