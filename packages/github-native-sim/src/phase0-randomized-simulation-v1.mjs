@@ -735,18 +735,18 @@ function preflightKindV2(error){
   const text=String(error?.shortMessage??error?.message??error??'');
   return error?.code==='CALL_EXCEPTION'||/revert|execution reverted|panic/i.test(text)?'PROTOCOL_REJECTION':'INFRASTRUCTURE';
 }
-export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot}){
+export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry'}){
   const summaries=[];
   let snapshotId=baselineSnapshot;
-  for(let run=1;run<=PHASE0_TELEMETRY_RUNS_V1;run++){
+  for(let run=1;run<=telemetryRuns;run++){
     if(run>1){await provider.send('evm_revert',[snapshotId]);snapshotId=await provider.send('evm_snapshot',[]);}
-    const runId=`abi-telemetry-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
-    const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(`${runId}-phase0-v2`);
-    const schedule=buildBurstSchedule(targets,PHASE0_TELEMETRY_CALLS_PER_RUN_V1,rng);
+    const runId=`${runPrefix}-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
+    const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(`${runId}-${seedSalt}`);
+    const schedule=buildBurstSchedule(targets,callsPerRun,rng);
     const accountingFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.semanticFamily==='ECONOMIC').length,0);
     const otherFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.semanticFamily!=='ECONOMIC').length,0);
     const stats={
-      calls:0,plannedActions:PHASE0_TELEMETRY_CALLS_PER_RUN_V1,terminalActions:0,submittedActions:0,
+      calls:0,plannedActions:callsPerRun,terminalActions:0,submittedActions:0,
       accountingActions:0,otherActions:0,accountingFunctionCount,otherFunctionCount,
       weightingLimitation:accountingFunctionCount===0?'NO_QUALIFIED_ECONOMIC_STATE_CHANGE_FUNCTIONS':null,
       successes:0,reverts:0,errors:0,minedSuccess:0,minedRevert:0,simulatedRejection:0,
@@ -757,8 +757,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
     };
     const terminalRows=[];
     const telemetryStartedAt=Date.now();
-    console.log(`[phase0-telemetry] ${runId} started; targetCalls=${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; lifecycle=v2; heartbeat every 300s`);
-    const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),300000);
+    console.log(`[phase0-telemetry] ${runId} started; targetCalls=${callsPerRun}; lifecycle=v2; heartbeat every 300s`);
+    const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${callsPerRun}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),300000);
     telemetryHeartbeat.unref?.();
     try{
       for(const burst of schedule){
@@ -873,11 +873,11 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       schemaVersion:'curveyield-phase0-abi-telemetry-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
       runId,purpose:'AUTOMATED_LIFECYCLE_TELEMETRY_WITH_TYPED_OUTCOMES_AND_ACCOUNTING_OBSERVATIONS',...stats,
       accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,
-      interleavedCrossContractBursts:true,executionStatus:'EXECUTED',coverageStatus:stats.calls===PHASE0_TELEMETRY_CALLS_PER_RUN_V1?'COMPLETE':'INCOMPLETE',
+      interleavedCrossContractBursts:true,executionStatus:'EXECUTED',coverageStatus:stats.calls===callsPerRun?'COMPLETE':'INCOMPLETE',
       checkStatus:'NOT_APPLICABLE',reachabilityStatus,observationStatus,reconciliation,
       rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,
       legacyCompatibility:{legacyRevertCounterWasPreflightDominated:true,currentRevertsAreMinedRevertsOnly:true},
-      status:stats.calls===PHASE0_TELEMETRY_CALLS_PER_RUN_V1&&stats.terminalActions===stats.plannedActions&&reconciliation.status==='PASS'?'PASS':'INCOMPLETE'
+      status:stats.calls===callsPerRun&&stats.terminalActions===stats.plannedActions&&reconciliation.status==='PASS'?'PASS':'INCOMPLETE'
     };
     await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');summaries.push(summary);
   }
