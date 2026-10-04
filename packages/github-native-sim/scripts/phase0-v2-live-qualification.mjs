@@ -87,13 +87,14 @@ async function deploy(artifacts,provider,contractName,args=[]){
   return{contract:c,address:await c.getAddress(),artifact:a};
 }
 function siFixture(){
-  const names=['ERC20','QualifiedToken','ERC4626','QualifiedVault','IERC3156FlashLender','FlashLender','FlashBorrower','DelegateImplementation','DelegateProxy','TupleArrayRouter','LookalikeToken','PropertyControls'];
+  const names=['ERC20','QualifiedToken','ERC4626','QualifiedVault','IERC3156FlashLender','FlashLender','FlashBorrower','DelegateImplementation','DelegateProxy','TupleArrayRouter','LookalikeToken','PropertyControls','NeverReachProperty','BrokenObservationToken'];
   const contracts=names.map((name,i)=>({contractId:`C${i+1}`,qualifiedName:`${sourceName}:${name}`}));
   const id=n=>contracts.find(x=>x.qualifiedName.endsWith(':'+n)).contractId;
   const inheritanceGraph=[
     {derivedContractId:id('QualifiedToken'),baseContractId:id('ERC20')},
     {derivedContractId:id('QualifiedVault'),baseContractId:id('ERC4626')},
-    {derivedContractId:id('FlashLender'),baseContractId:id('IERC3156FlashLender')}
+    {derivedContractId:id('FlashLender'),baseContractId:id('IERC3156FlashLender')},
+    {derivedContractId:id('BrokenObservationToken'),baseContractId:id('ERC20')}
   ];
   return{contracts,inheritanceGraph};
 }
@@ -185,7 +186,9 @@ console.log(fs.readFileSync('/etc/passwd','utf8'));
   const router=await deploy(artifacts,provider,'TupleArrayRouter');
   const lookalike=await deploy(artifacts,provider,'LookalikeToken');
   const controls=await deploy(artifacts,provider,'PropertyControls');
-  const deployed=[token,vault,lender,borrower,impl,facade,router,lookalike,controls].map(x=>({address:x.address,qualifiedName:`${sourceName}:${x.artifact.contractName}`,contractName:x.artifact.contractName,sourceName}));
+  const neverReach=await deploy(artifacts,provider,'NeverReachProperty');
+  const brokenObservation=await deploy(artifacts,provider,'BrokenObservationToken',[actors[0]]);
+  const deployed=[token,vault,lender,borrower,impl,facade,router,lookalike,controls,neverReach,brokenObservation].map(x=>({address:x.address,qualifiedName:`${sourceName}:${x.artifact.contractName}`,contractName:x.artifact.contractName,sourceName}));
 
   let targets=targetObjects(ethers,artifacts,deployed,siFixture());
   const contexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence:siFixture()});
@@ -211,7 +214,16 @@ console.log(fs.readFileSync('/etc/passwd','utf8'));
   assertThat(controlStatuses.includes('passed')&&controlStatuses.includes('failed'),'A15 Medusa control pair did not produce native pass and fail outcomes');
   assertThat((control.propertyRegistry??[]).every(x=>x.category==='HARNESS_SELF_CHECK'),'A15 control properties leaked into target assurance');
 
-  const mainTargets=targets.filter(t=>(t.logicalQualifiedName??t.qualifiedName)!==`${sourceName}:PropertyControls`);
+  const neverReachTarget=byLogical('NeverReachProperty')[0];
+  const unexercised=await runMedusa({projectRoot:root,anvilUrl:proxy.url,blockNumber:Number(await provider.getBlockNumber()),ethers,targets:[neverReachTarget],outRoot,callLimit:2500,minimumRequiredCalls:500,runId:'medusa-unexercised-control-v2'});
+  assertThat(unexercised.propertyRegistry?.some(x=>x.result==='UNEXERCISED'),'A16 never-reached precondition was not labeled UNEXERCISED');
+
+  const brokenObservationTarget=byLogical('BrokenObservationToken')[0];
+  const observationGap=await runMedusa({projectRoot:root,anvilUrl:proxy.url,blockNumber:Number(await provider.getBlockNumber()),ethers,targets:[brokenObservationTarget],outRoot,callLimit:2500,minimumRequiredCalls:500,runId:'medusa-observation-gap-control-v2'});
+  assertThat(observationGap.propertyRegistry?.some(x=>x.result==='OBSERVATION_GAP'),'A16 missing required balance observation was not labeled OBSERVATION_GAP');
+
+  const excludedFromMain=new Set(['PropertyControls','NeverReachProperty','BrokenObservationToken'].map(name=>`${sourceName}:${name}`));
+  const mainTargets=targets.filter(t=>!excludedFromMain.has(t.logicalQualifiedName??t.qualifiedName));
   const performance=[];
   let baseline=await provider.send('evm_snapshot',[]);
   for(const seed of ['perf-seed-a','perf-seed-b','perf-seed-c']){
@@ -300,6 +312,10 @@ console.log(fs.readFileSync('/etc/passwd','utf8'));
     delegateContexts:contexts.contextEvidence,
     medusa,
     controls:{status:control.status,engineProperties:control.engineProperties,propertyRegistry:control.propertyRegistry},
+    antiVacuityControls:{
+      unexercised:{status:unexercised.status,checkStatus:unexercised.checkStatus,propertyRegistry:unexercised.propertyRegistry},
+      observationGap:{status:observationGap.status,checkStatus:observationGap.checkStatus,propertyRegistry:observationGap.propertyRegistry}
+    },
     telemetry,
     acceptanceWitnesses:{directDelegate,proxyDelegate,callback,callbackDirect,tuple},
     replayControl:{status:'PASS',runs:replay.map(x=>({runId:x.runId,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256}))},
