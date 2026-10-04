@@ -335,31 +335,18 @@ async function wakeMarkerVisible(page, marker) {
   const users = page.locator('[data-message-author-role="user"]');
   const userCount = await users.count().catch(() => 0);
   for (let i = Math.max(0, userCount - 8); i < userCount; i += 1) {
-    const text = normalizeVisibleText(await users.nth(i).innerText().catch(() => ''));
+    const user = users.nth(i);
+    if (!await user.isVisible().catch(() => false)) continue;
+    const text = normalizeVisibleText(await user.innerText().catch(() => ''));
     if (normalizedMarker && text.includes(normalizedMarker)) {
       return { visible: true, userCount, method: 'user-role' };
     }
   }
 
-  const composer = await firstVisible(page, [
-    '#prompt-textarea',
-    'textarea[placeholder*="Message"]',
-    '[contenteditable="true"][data-lexical-editor="true"]',
-    '[contenteditable="true"]'
-  ]);
-  const composerText = composer
-    ? normalizeVisibleText(await composer.inputValue().catch(async () => await composer.innerText().catch(() => '')))
-    : '';
-  const bodyText = normalizeVisibleText(await page.locator('body').innerText().catch(() => ''));
-  const bodyHasMarker = normalizedMarker && bodyText.includes(normalizedMarker);
-  const composerHasMarker = normalizedMarker && composerText.includes(normalizedMarker);
-
   return {
-    visible: Boolean(bodyHasMarker && !composerHasMarker),
+    visible: false,
     userCount,
-    method: bodyHasMarker && !composerHasMarker ? 'rendered-page-text' : 'not-visible',
-    bodyHasMarker: Boolean(bodyHasMarker),
-    composerHasMarker: Boolean(composerHasMarker)
+    method: 'not-visible'
   };
 }
 
@@ -596,14 +583,28 @@ async function postWithVisibleVerification(page, message) {
 
   if (mode === 'resume_existing' && messagePurpose === 'initial_wake') {
     const passiveState = await snapshot(page).catch(() => null);
+    if (passiveState?.humanChallenge) {
+      throw new BrowserAgentError(
+        'POST_SEND_CHALLENGE',
+        'A visible human challenge appeared after wake submission; delivery is not accepted',
+        true
+      );
+    }
+    if (beforeReload.method !== 'user-role' || beforeReload.userCount < 1) {
+      throw new BrowserAgentError(
+        'USER_MESSAGE_NOT_RENDERED',
+        'Wake marker was not verified inside an actual rendered user message',
+        true
+      );
+    }
     const delivery = {
       writeRequestObserved: false,
       writeAccepted: true,
       responseBodyMarkerObserved: false,
       domPersisted: true,
-      verification: 'visible-browser-only',
+      verification: 'visible-user-message',
       verificationMethod: beforeReload.method,
-      postSendChallenge: passiveState?.humanChallenge === true,
+      postSendChallenge: false,
       postSendHealth: null,
       response: null,
       responseCandidates: [],
@@ -611,7 +612,7 @@ async function postWithVisibleVerification(page, message) {
       persisted: true,
       userCount: beforeReload.userCount
     };
-    console.log('[github-playwright] delivery-state=existing-chat-visible-no-reload ' + JSON.stringify(delivery));
+    console.log('[github-playwright] delivery-state=existing-chat-user-message-verified ' + JSON.stringify(delivery));
     return delivery;
   }
 
