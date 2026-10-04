@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 import { validateStorageState } from './browser-session-state-v1.mjs';
 
 const env = process.env;
@@ -186,8 +187,31 @@ async function humanActionPause(page) {
   await page.waitForTimeout(randomDelayMs(300, 1500));
 }
 
-async function humanTypingPause(page) {
-  await page.waitForTimeout(randomDelayMs(200, 400));
+async function humanTypingPause(page, char = '') {
+  let min = 90;
+  let max = 130;
+  if (/\s/.test(char)) {
+    min = 55;
+    max = 95;
+  }
+  if (/[.!?,;:]/.test(char)) {
+    min = 145;
+    max = 230;
+  }
+  await page.waitForTimeout(randomDelayMs(min, max));
+}
+
+async function x11Key(args, label = 'x11-key') {
+  await new Promise((resolve, reject) => {
+    const child = spawn('xdotool', args, {
+      env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
+      stdio: ['ignore', 'ignore', 'pipe']
+    });
+    let stderr = '';
+    child.stderr?.on('data', chunk => { stderr += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', code => code === 0 ? resolve() : reject(new Error(label + ' failed: ' + stderr.trim())));
+  });
 }
 
 async function humanPointerHover(page, locator) {
@@ -239,14 +263,16 @@ async function humanTypeInto(page, locator, text) {
     return await locator.innerText().catch(() => '');
   });
   if (current) {
-    await locator.press('Control+A').catch(async () => locator.press('Meta+A').catch(() => {}));
-    await humanActionPause(page);
-    await locator.press('Backspace');
-    await humanActionPause(page);
+    await x11Key(['key', '--clearmodifiers', 'ctrl+a'], 'x11-select-all');
+    await page.waitForTimeout(randomDelayMs(90, 160));
+    await x11Key(['key', '--clearmodifiers', 'BackSpace'], 'x11-backspace');
+    await page.waitForTimeout(randomDelayMs(120, 220));
   }
-  for (const char of String(text)) {
-    await locator.pressSequentially(char);
-    await humanTypingPause(page);
+  const value = String(text);
+  console.log('[github-playwright-v10] text-entry-strategy=human-x11-skilled-typist-per-character length=' + value.length);
+  for (const char of value) {
+    await x11Key(['type', '--clearmodifiers', '--delay', '0', char], 'x11-type-character');
+    await humanTypingPause(page, char);
   }
   await humanActionPause(page);
 }
@@ -1246,11 +1272,10 @@ async function localProvider(chromium) {
   }
   console.log('[github-playwright-v10] Using immutable bootstrap-secret session state; run state will be discarded.');
   const launchOptions = {
-    headless: env.BROWSER_HEADLESS !== 'false',
-    channel: 'chrome',
-    args: ['--disable-quic']
+    headless: false,
+    channel: 'chrome'
   };
-  console.log('[github-playwright-v10] Chrome uses runner system routing; QUIC disabled so ChatGPT web traffic stays on TCP.');
+  console.log('[github-playwright-v10] Launching ordinary visible Chrome with default browser networking and display behavior.');
   const browser = await chromium.launch(launchOptions);
   const context = await browser.newContext({ storageState: storage });
   const page = await context.newPage();
