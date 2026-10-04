@@ -1,12 +1,12 @@
 {
   "schemaVersion": "curveyield-browser-home-exit-request-v10",
-  "action": "project_wake",
-  "mode": "create_fresh",
-  "chat_url": "",
-  "wake_message": "[HOME_EXIT_PROJECT_WAKE_VERIFY1] Assistant: when you personally receive this as a new user message inside this new Project, reply exactly HOME_EXIT_PROJECT_WAKE_PERSONALLY_SEEN_VERIFY1",
+  "action": "wake",
+  "mode": "resume_existing",
+  "chat_url": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da50-e3a0-83e8-88ea-843db6f426f0",
+  "wake_message": "DEX v16 Phase-1 wake request v1",
   "home_exit_node": "100.112.238.56",
   "interactive_view": true,
   "manual_challenge_wait_minutes": 5,
-  "requested_at": "2026-10-03T21:04:00-07:00",
-  "project_name": "DEX v16 Audit"
+  "requested_at": "2026-10-04",
+  "project_name": ""
 }
