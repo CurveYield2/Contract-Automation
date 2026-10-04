@@ -148,10 +148,20 @@ async function listBuildInfo(projectRoot, fsApi = fs) {
   for (const absolute of await buildInfoFiles(projectRoot, fsApi)) {
     let optimizerRuns = null;
     let solcVersion = null;
+    let compilerInputSha256 = null;
+    let compilerOutputSha256 = null;
+    let sourceNames = [];
+    let artifactQualifiedNames = [];
     try {
       const parsed = JSON.parse(await fsApi.readFile(absolute, 'utf8'));
       optimizerRuns = parsed?.input?.settings?.optimizer?.runs ?? null;
       solcVersion = parsed?.solcVersion ?? parsed?.solcLongVersion ?? null;
+      compilerInputSha256 = parsed?.input ? createHash('sha256').update(JSON.stringify(parsed.input)).digest('hex') : null;
+      compilerOutputSha256 = parsed?.output ? createHash('sha256').update(JSON.stringify(parsed.output)).digest('hex') : null;
+      sourceNames = Object.keys(parsed?.input?.sources ?? {}).sort();
+      artifactQualifiedNames = Object.entries(parsed?.output?.contracts ?? {}).flatMap(([sourceName,contracts]) =>
+        Object.keys(contracts ?? {}).map(contractName=>`${sourceName}:${contractName}`)
+      ).sort();
     } catch {
       // Raw build-info bytes remain evidence even if metadata parsing is unavailable.
     }
@@ -159,7 +169,11 @@ async function listBuildInfo(projectRoot, fsApi = fs) {
       path: path.relative(projectRoot, absolute).split(path.sep).join('/'),
       sha256: await sha256File(absolute, fsApi),
       optimizerRuns,
-      solcVersion
+      solcVersion,
+      compilerInputSha256,
+      compilerOutputSha256,
+      sourceNames,
+      artifactQualifiedNames
     });
   }
   return output;
@@ -295,6 +309,18 @@ export async function compileRepoNativeHardhat({
     },
     buildInfo,
     buildInfoCount: buildInfo.length,
+    compilationUnits:buildInfo.map((info,index)=>({
+      unitId:`hardhat-build-info-${index+1}`,
+      profile:'hardhat-native',
+      compilerVersion:info.solcVersion,
+      compilerPackage:'hardhat-build-info',
+      settings:{optimizer:{runs:info.optimizerRuns}},
+      compilerInputSha256:info.compilerInputSha256,
+      compilerOutputSha256:info.compilerOutputSha256,
+      sourceContents:Object.fromEntries((info.sourceNames??[]).map(name=>[name,null])),
+      sourceAsts:{},
+      artifacts:artifacts.filter(a=>(info.artifactQualifiedNames??[]).includes(`${a.sourceName}:${a.contractName}`))
+    })),
     artifacts,
     sourceAsts,
     sourceInventory: sources,
