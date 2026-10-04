@@ -144,20 +144,20 @@ jobs:
             echo "supplied_directory_path=$supplied_directory_path"
           } >> "$GITHUB_OUTPUT"
       - name: Set up Node.js for Phase-5 boundary execution
-        if: steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5'
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05')
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install trusted runner dependencies for Phase-5 boundary execution
-        if: steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5'
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05')
         shell: bash
         run: |
           set -euo pipefail
           npm ci --force
 
       - name: Install retained audit toolchain for Phase-5 boundary execution
-        if: steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5'
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05')
         uses: ./.github/actions/setup-v7-toolchain
 
       - name: Select Audit-Controller credential
