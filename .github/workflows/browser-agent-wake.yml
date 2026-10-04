@@ -304,7 +304,7 @@ jobs:
             echo "REPAIR_UNVIEWABLE_THRESHOLD=$(jq -r '.repair.unviewableThreshold // 2' /tmp/browser-context.json)"
           } >> "$GITHUB_ENV"
 
-      - name: Deliver wake through home-exit Playwright
+      - name: Deliver wake through normal Chrome Phase-1 X11 path
         id: deliver
         shell: bash
         run: |
@@ -440,7 +440,7 @@ jobs:
             --argjson assistantCount "${ASSISTANT_COUNT:-0}" \
             '{
               schemaVersion:$schemaVersion,wakeId:$wakeId,campaignId:$campaignId,phaseId:$phaseId,workerRole:$workerRole,
-              status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,
+              status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,pokeIntervalMinutes:20,
               idleMessage:$idleMessage,
               observation:{assistantCount:$assistantCount,lastAssistantHash:$lastHash,observedAt:$armedAt},
               gate:{
