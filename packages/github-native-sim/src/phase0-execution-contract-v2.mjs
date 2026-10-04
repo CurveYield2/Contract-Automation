@@ -239,22 +239,55 @@ export function assessMedusaV2({mode='DISCOVERY_ONLY',observedCalls=0,engineProp
 
 export function validateTelemetryCountersV2(summary={},rows=[]){
   const counts=Object.fromEntries(TERMINAL_OUTCOMES_V2.map(x=>[x,0]));
+  const indexes=new Set(),byContract={},byFunction={};
+  let observationReads=0,observationFailures=0,accountingActions=0,otherActions=0,positiveTransitions=0,positiveEconomicTransitions=0;
   for(const row of rows){
     if(!TERMINAL_OUTCOMES_V2.includes(row.executionOutcome))throw new Error('unknown telemetry terminal outcome '+String(row.executionOutcome));
+    if(!Number.isInteger(row.callIndex)||row.callIndex<1||row.callIndex>rows.length)throw new Error('telemetry row has invalid or missing callIndex');
+    if(indexes.has(row.callIndex))throw new Error('duplicate telemetry callIndex '+row.callIndex);
+    indexes.add(row.callIndex);
+    if(summary.runId&&row.runId!==summary.runId)throw new Error('telemetry row runId mismatch');
     counts[row.executionOutcome]++;
+    if(row.semanticFamily==='ECONOMIC')accountingActions++;else otherActions++;
+    if(row.positiveTransition===true){positiveTransitions++;if(row.semanticFamily==='ECONOMIC')positiveEconomicTransitions++;}
+    const observations=[...(row.observations?.before??[]),...(row.observations?.after??[])];
+    observationReads+=observations.length;observationFailures+=observations.filter(x=>x?.status!=='OK').length;
+    const contractKey=row.target?.qualifiedName??'UNKNOWN';
+    byContract[contractKey]=(byContract[contractKey]??0)+1;
+    const fnKey=`${contractKey}::${row.functionSignature??'UNKNOWN'}`;
+    byFunction[fnKey]=(byFunction[fnKey]??0)+1;
   }
+  for(let i=1;i<=rows.length;i++)if(!indexes.has(i))throw new Error('missing telemetry callIndex '+i);
+  const infrastructureErrors=counts.SIMULATION_INFRASTRUCTURE_ERROR+counts.SUBMISSION_INFRASTRUCTURE_ERROR+counts.SUBMITTED_OUTCOME_UNKNOWN+counts.NOT_EXECUTED_ENCODING_OR_PLANNING;
   const expected={
     plannedActions:rows.length,
     terminalActions:rows.length,
+    calls:rows.length,
     submittedActions:counts.MINED_SUCCESS+counts.MINED_REVERT+counts.SUBMITTED_OUTCOME_UNKNOWN,
     minedSuccess:counts.MINED_SUCCESS,
+    successes:counts.MINED_SUCCESS,
     minedRevert:counts.MINED_REVERT,
+    reverts:counts.MINED_REVERT,
     simulatedRejection:counts.SIMULATED_REJECTION,
+    simulationInfrastructureError:counts.SIMULATION_INFRASTRUCTURE_ERROR,
+    submissionInfrastructureError:counts.SUBMISSION_INFRASTRUCTURE_ERROR,
+    submittedOutcomeUnknown:counts.SUBMITTED_OUTCOME_UNKNOWN,
     notExecutedEncodingOrPlanning:counts.NOT_EXECUTED_ENCODING_OR_PLANNING,
-    positiveEconomicTransitions:rows.filter(x=>x.semanticFamily==='ECONOMIC'&&x.positiveTransition===true).length
+    errors:infrastructureErrors,
+    accountingActions,
+    otherActions,
+    positiveTransitions,
+    positiveEconomicTransitions,
+    observationReads,
+    observationFailures
   };
-  for(const [key,value] of Object.entries(expected))if(Number(summary[key])!==value)throw new Error(`telemetry counter mismatch ${key}: expected ${value} observed ${summary[key]}`);
-  return{status:'PASS',counts};
+  for(const [key,value] of Object.entries(expected)){
+    if(summary[key]!==undefined&&Number(summary[key])!==value)throw new Error(`telemetry counter mismatch ${key}: expected ${value} observed ${summary[key]}`);
+  }
+  const sameMap=(a,b)=>JSON.stringify(Object.fromEntries(Object.entries(a??{}).sort()))===JSON.stringify(Object.fromEntries(Object.entries(b??{}).sort()));
+  if(summary.byContract&&!sameMap(summary.byContract,byContract))throw new Error('telemetry byContract reconciliation mismatch');
+  if(summary.byFunction&&!sameMap(summary.byFunction,byFunction))throw new Error('telemetry byFunction reconciliation mismatch');
+  return{status:'PASS',counts,expected,byContract,byFunction};
 }
 
 export function migrateLegacyCapabilityV2(summary={}){
