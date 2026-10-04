@@ -11,28 +11,25 @@
 
 ## CURRENT STATE
 
-- Repository: `CurveYield2/Contract-Automation`
-- Base: current `main` at `ff468b253f70098d1a9bae572840ba58e24909b9`.
-- PR #508 through PR #514 are merged; their required validation lanes passed before merge.
-- Recovery-only run `37158898640` proves:
-  - fresh immutable browser state loads normally without a Cloudflare challenge;
-  - no wake resend occurs in recovery mode;
-  - sidebar Search can be opened and a query can be entered, but no matching global search result was found;
-  - global/sidebar Search is unnecessary for Project recovery.
-- Operator-confirmed Project UI model:
-  - open the exact Project URL directly;
-  - the Project page has its own top input/composer;
-  - the Project's chats are visibly listed underneath that top area;
-  - a sidebar may exist, but recovery does not need it.
-- Operator supplied the exact Project URL to use: `https://chatgpt.com/g/g-p-6ac173c6f6648191969a8988d6b2d51a/project`.
-- Durable Project URL for this test is now operator-confirmed as `https://chatgpt.com/g/g-p-6ac173c6f6648191969a8988d6b2d51a/project`.
-- Project chats use a Project-scoped durable route of the form `https://chatgpt.com/g/g-p-.../c/<id>`.
-- The operator supplied a screenshot of the successful Project landing page. Its reliable human-visible cue is the central composer labeled `New chat in <ProjectName>`, which differs from the homepage composer.
-- Retry must first recover/open an already-created Project with the same exact name if one exists, to avoid duplicate Projects.
-- New operator fact: after successful Project creation, the browser automatically navigates to that Project's URL. Treat that browser URL transition as the earliest durable Project-creation signal and capture the resulting Project URL immediately.
-- The same Project-wake request remains the canonical comparable test:
-  - Project: `HOME_EXIT_PROJECT_WAKE_VERIFY1`
-  - wake: `[HOME_EXIT_PROJECT_WAKE_VERIFY1] Assistant: when you personally receive this as a new user message inside this new Project, reply exactly HOME_EXIT_PROJECT_WAKE_PERSONALLY_SEEN_VERIFY1`
+- Active browser lane is now **Manual-Only Home-Exit Browser v11**.
+- Canonical workflow: `.github/workflows/browser-agent-home-exit-v11.yml`.
+- Canonical browser script: `packages/browser-agent-manual-only-v11/browser-agent-manual-v11.mjs`.
+- Canonical request: `process/browser-agent-home-exit-v11/current-request-v11.json`.
+- v10 executable workflow is intentionally disabled and rejects execution because it used automated ChatGPT DOM/page reads.
+- v11 launches authenticated headed Chrome on `about:blank`, exposes it over private Tailscale VNC, and then performs **zero ChatGPT automation**:
+  - no ChatGPT DOM reads;
+  - no title/url reads;
+  - no locators;
+  - no automated ChatGPT navigation;
+  - no automated ChatGPT clicking;
+  - no automated ChatGPT typing;
+  - no automated Cloudflare interaction.
+- All ChatGPT actions are performed by the human operator through VNC.
+- Fresh live request:
+  - Project: `HOME_EXIT_PROJECT_WAKE_VERIFY2`
+  - Chat: `VERIFY PROJECT WAKE SIGNAL 2`
+  - Wake: `[HOME_EXIT_PROJECT_WAKE_VERIFY2] Assistant: when you personally receive this as a new user message inside this new Project, reply exactly HOME_EXIT_PROJECT_WAKE_PERSONALLY_SEEN_VERIFY2`
+- Live v11 run: `37167404285`.
 
 ## SATISFIED
 
@@ -51,25 +48,24 @@
 
 ## ACTIVE BLOCKER
 
-**Run `37166240111` conclusively proved the exact saved Project route is being entered through the visible X11 Chrome omnibox, but Cloudflare is currently presenting a real verification interstitial: observed URL remained the exact Project URL, title was `Just a moment...`, and evidence was `just-a-moment-title`. The worker immediately aborted as required. This gate must not be bypassed. Browser qualification for the current implementation passes in V7 run `37166251924`; remaining Lite failure is the unrelated pre-existing audit-harness literal-\\n syntax corruption.**
+**Automated Project/chat recovery is intentionally removed from the active lane. The remaining browser step is human operation through the private VNC session: navigate to ChatGPT manually, complete any Cloudflare verification manually, create a brand-new Project and a brand-new chat, and send the supplied wake manually.**
 
-Current browser implementation is code-complete for the known navigation defect. The only live-proof blocker is the external verification interstitial on the Project deep link.
+There is no remaining machine-side Project-URL recovery attempt in v11. The old v10 workflow is disabled.
 
 ## REMAINING DELTA
 
-1. Diagnose why the known persisted Project URL redirected to `https://chatgpt.com/` in merged live run `37164591468`; do not reintroduce sidebar Project discovery.
-2. Preserve the merged center-page chat-title logic and zero-scroll invariant.
-3. Re-run recovery until the known Project URL opens successfully, then click the visible `VERIFY PROJECT WAKE SIGNAL` title in the top-center Project content.
-4. The moment the Project-scoped durable chat route appears, verify `durable-chat-state-captured` is logged and the Actions artifact `browser-agent-home-exit-v10-chat-state-v1` is actually created.
-5. On the following run, prove the artifact restores `chatUrl` and recovery opens that chat URL directly, bypassing Project discovery entirely.
-6. Once direct chat URL reuse is live-proven, replace only the broken browser wake/watch implementation in the audit process pathway with this proven routine.
-7. Locate the most recent CurveYield DEX v16 audit campaign in `CurveYield2/Audit-Controller`, recover its exact current state, and initialize Phase 1 without restarting completed/sealed work.
-8. Monitor and repair each audit wake/watch/phase-transition glitch using DIAGNOSE -> REPAIR -> RETRY -> VERIFY -> CONTINUE until the audit is complete.
-
+1. Human operator connects to the active v11 runner VNC address.
+2. In the visible Chrome window, manually navigate to ChatGPT.
+3. If Cloudflare appears, manually complete the verification and wait for the normal page.
+4. Manually create Project `HOME_EXIT_PROJECT_WAKE_VERIFY2`.
+5. Manually create chat `VERIFY PROJECT WAKE SIGNAL 2` inside that Project.
+6. Manually send the exact VERIFY2 wake.
+7. Human confirms the wake arrived in the new Project chat.
+8. Only after that proof, decide how the audit wake/watch path should operate under the new zero-ChatGPT-machine-read rule. Automatic browser wake/watch cannot be transplanted unchanged because that would violate the new rule.
 
 ## NEXT ACTION
 
-After cooldown, retry the exact current merged recovery on a fresh runner with no code relaxation. If Cloudflare again presents `Just a moment...`, abort and retry only after another cooldown; do not bypass verification. When one clean run reaches the Project, finish center-title recovery, durable chat URL/artifact capture, then immediately prove artifact-restored direct-chat recovery. After those live proofs, transplant only this browser implementation into the existing audit wake/watch path and resume DEX v16 Phase 1.
+Use the currently running v11 private VNC session to perform the fresh Project/chat creation and wake manually. Do not re-enable v10 or any ChatGPT DOM/page-read automation.
 
 ## PARKED / OUT OF SCOPE
 
