@@ -203,9 +203,25 @@ jobs:
               ref=match[1];
             }else ref='main';
           }
+          let reworkPath='';
+          if(process.env.EVENT_NAME==='pull_request'){
+            const body=String(event.pull_request?.body??'');
+            const declared=body.split(/\r?\n/).map(line=>line.trim()).filter(line=>/^rework_request_path\s*=/.test(line));
+            if(declared.length>1)throw new Error('PR body must contain at most one rework_request_path declaration');
+            if(declared.length===1){
+              const match=declared[0].match(/^rework_request_path=(campaigns\/[^\/\r\n]+\/controller\/[A-Za-z0-9._-]+\.json)$/);
+              if(!match||match[1].includes('..'))throw new Error('rework_request_path PR trailer must be one safe private campaign controller JSON path');
+              const sameRepo=event.pull_request?.head?.repo?.full_name===event.repository?.full_name;
+              const authorized=['CurveYield-Developer-DK','JamesNexus'].includes(event.pull_request?.user?.login);
+              if(!sameRepo||!authorized)throw new Error('held rework qualification requires an authorized same-repository PR');
+              reworkPath=match[1];
+            }
+          }
           if(!ref)ref='main';
           if(ref!=='main'&&!/^[0-9a-fA-F]{40}$/.test(ref))throw new Error('controller_ref must be main or an exact 40-hex commit');
+          if(reworkPath&&ref==='main')throw new Error('held rework qualification requires an exact controller_ref commit');
           fs.appendFileSync(process.env.GITHUB_ENV,'CONTROLLER_REF_TO_TEST='+ref+'\n');
+          fs.appendFileSync(process.env.GITHUB_ENV,'REWORK_REQUEST_PATH_TO_TEST='+reworkPath+'\n');
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,'paired_controller_ref='+ref+'\n');
           NODE
 
@@ -292,6 +308,96 @@ jobs:
             ]
           }
           JSON
+
+      - name: Qualify authorized held sealed rework in detached private clone
+        if: github.event_name == 'pull_request' && env.REWORK_REQUEST_PATH_TO_TEST != ''
+        env:
+          REWORK_REQUEST_PATH_TO_TEST: ${{ env.REWORK_REQUEST_PATH_TO_TEST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {createHash} from 'node:crypto';
+          import {execFileSync} from 'node:child_process';
+
+          const controllerRoot='.controller-under-test';
+          const requestPath=process.env.REWORK_REQUEST_PATH_TO_TEST;
+          const hashFile=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+          const readJson=file=>JSON.parse(fs.readFileSync(file,'utf8'));
+          const allFiles=dir=>{
+            if(!fs.existsSync(dir))return [];
+            return fs.readdirSync(dir,{withFileTypes:true}).flatMap(ent=>{
+              const file=path.join(dir,ent.name);
+              return ent.isDirectory()?allFiles(file):ent.isFile()?[file]:[];
+            }).sort();
+          };
+          const hashTree=dir=>createHash('sha256').update(JSON.stringify(allFiles(dir).map(file=>[path.relative(dir,file).split(path.sep).join('/'),hashFile(file)]))).digest('hex');
+          const fail=message=>{throw new Error('held rework qualification failed: '+message);};
+          const requestFile=path.join(controllerRoot,...requestPath.split('/'));
+          if(!fs.existsSync(requestFile))fail('request pointer is absent');
+          const request=readJson(requestFile);
+          if(request.schemaVersion!=='curveyield-lite-sealed-phase-rework-request-v1'||request.holdSuccessorDelivery!==true)fail('typed request/hold mismatch');
+          const directoryRoot=path.join(controllerRoot,'Audit Campaign Directory','campaigns');
+          const matches=allFiles(directoryRoot).filter(file=>file.endsWith('.json')).filter(file=>{
+            try{return readJson(file).campaignId===request.campaignId;}catch{return false;}
+          });
+          if(matches.length!==1)fail('campaign directory identity is not unique');
+          const directoryFile=matches[0];
+          const directoryRel=path.relative(controllerRoot,directoryFile).split(path.sep).join('/');
+          const beforeDirectory=readJson(directoryFile);
+          if(beforeDirectory.campaignGenerationId!==request.campaignGenerationId&&request.campaignGenerationId!==undefined)fail('campaign generation mismatch');
+          const campaignPath=beforeDirectory.workspacePath;
+          if(requestPath!==campaignPath+'/controller/PHASE_01_REWORK_REQUEST_v1.json')fail('request is not the admitted Phase-1 controller pointer');
+          const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
+          const sourceDigestBefore=hashTree(path.join(campaignRoot,'source'));
+          const sourceShaBefore=beforeDirectory.sourceSha256;
+          const receiptDir=path.join(campaignRoot,'receipts');
+          const priorReceiptFile=path.join(controllerRoot,...request.priorReceipt.path.split('/'));
+          const priorReceiptDigestBefore=hashFile(priorReceiptFile);
+          const oldReceiptDigests=new Map(allFiles(receiptDir).map(file=>[file,hashFile(file)]));
+          let raw;
+          try{
+            raw=execFileSync(process.execPath,[
+              'scripts/lite-phase-packet-controller-v1.mjs',
+              '--controller-root',controllerRoot,
+              '--campaign-id',request.campaignId,
+              '--campaign-path',campaignPath,
+              '--campaign-directory-path',directoryRel,
+              '--review-kind','sealed-rework',
+              '--phase-sequence','1',
+              '--rework-request-path',requestPath
+            ],{encoding:'utf8',stdio:['ignore','pipe','pipe']});
+          }catch{fail('candidate controller invocation did not complete');}
+          let result;
+          try{result=JSON.parse(raw.trim());}catch{fail('candidate controller returned non-JSON status');}
+          if(result.status!=='PASS'||result.sealedRework!==true)fail('candidate controller did not admit held sealed rework');
+          const afterDirectory=readJson(directoryFile);
+          if(afterDirectory.sourceSha256!==sourceShaBefore||hashTree(path.join(campaignRoot,'source'))!==sourceDigestBefore)fail('source changed');
+          if(hashFile(priorReceiptFile)!==priorReceiptDigestBefore)fail('prior receipt changed');
+          for(const [file,digest] of oldReceiptDigests)if(hashFile(file)!==digest)fail('accepted receipt history changed');
+          const newReceipt=path.join(receiptDir,'PHASE_01_RECEIPT_v3.json');
+          const report=path.join(controllerRoot,...request.generatedFinalReportPath.split('/'));
+          const packet=path.join(controllerRoot,...request.generatedPacketPath.split('/'));
+          for(const [label,file] of [['receipt',newReceipt],['report',report],['packet',packet]])if(!fs.existsSync(file)||!hashFile(file).match(/^[0-9a-f]{64}$/))fail(label+' product is missing');
+          const invalidation=readJson(path.join(campaignRoot,'controller','EVIDENCE_INVALIDATION_MATRIX_v1.json'));
+          const events=invalidation.events??invalidation.invalidationEvents??[];
+          const event=events.find(row=>(row.eventId??row.id)===request.evidenceInvalidation.eventId);
+          if(event?.status!==request.evidenceInvalidation.resolveTo)fail('EIM-013 event was not resolved');
+          const hold=readJson(path.join(campaignRoot,'controller','SUCCESSOR_DELIVERY_HOLD_v1.json'));
+          if(hold.status!=='ACTIVE'||hold.campaignId!==request.campaignId||hold.releaseRequiresExplicitHumanAuthorization!==true)fail('persistent delivery hold is not active');
+          if(afterDirectory.currentAssignment?.phaseSequence!==2)fail('controller did not prepare the bounded dependent successor assignment');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,[
+            'held_rework_qualification=PASS',
+            'held_rework_source_sha256='+sourceShaBefore,
+            'held_rework_prior_receipt_sha256='+priorReceiptDigestBefore,
+            'held_rework_revision3_receipt_sha256='+hashFile(newReceipt),
+            'held_rework_report_sha256='+hashFile(report),
+            'held_rework_packet_sha256='+hashFile(packet),
+            'held_rework_delivery=HELD'
+          ].join('\n')+'\n');
+          NODE
 
       - name: Validate controller-only runner baseline
         if: env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
