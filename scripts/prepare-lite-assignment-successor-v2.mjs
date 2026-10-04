@@ -31,10 +31,12 @@ const legacyLogical='Audit Skill - Current Authority/Audit_Litemode_v10.3/SKILL.
 if(logicalAuthorityHome===legacyLogical&&!fs.existsSync(repoFile(root,legacyLogical)))linkedAuthorityHome='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3/SKILL.md';
 if(predecessor.authority?.homepagePath)requiredFile(root,logicalAuthorityHome,'bound successor authority homepage');
 const campaignUrl=controllerTreeUrl(directory.workspacePath);
+const validationRequestSchema='curveyield-lite-phase-boundary-request-v1';
 const requestPath='process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json';
 const artifactLines=[
   'Bound authority homepage: '+controllerBlobUrl(linkedAuthorityHome),
-  'Logical phase schema identity: '+controllerBlobUrl(assignment.workSchemaPath),
+  'Bound authority package: '+controllerTreeUrl(path.posix.dirname(linkedAuthorityHome)),
+  'Phase schema: '+controllerBlobUrl(assignment.workSchemaPath),
   'Phase work form: '+controllerBlobUrl(assignment.workFormPath),
   'Controller-owned final report target: '+controllerBlobUrl(assignment.finalReportPath),
   'Controller work packet: '+controllerBlobUrl(assignment.packetPath),
@@ -51,7 +53,7 @@ const lines=[
   'The exact bound authority homepage above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority.',
   '',
   'Start '+assignment.phaseId+' now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.',
-  'Submit validation through '+requestPath+'. Finalized controller validation: https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase-work-packet-controller-v1.yml.',
+  'Submit validation through '+requestPath+' ('+validationRequestSchema+'). Finalized controller validation: https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase-work-packet-controller-v1.yml.',
   'Only CONTROLLER_PHASE_PASS permits advancement. If validation reports deficiencies, repair exactly the reported substantive deficiency and resubmit validation; do not seal, advance, or perform controller bookkeeping yourself.'
 ];
 const wakeMessage=lines.join('\n');
