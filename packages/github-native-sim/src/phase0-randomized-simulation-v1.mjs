@@ -788,13 +788,22 @@ function preflightKindV2(error){
   const text=String(error?.shortMessage??error?.message??error??'');
   return error?.code==='CALL_EXCEPTION'||/revert|execution reverted|panic/i.test(text)?'PROTOCOL_REJECTION':'INFRASTRUCTURE';
 }
-export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry'}){
+export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
   const summaries=[];
   let snapshotId=baselineSnapshot;
+  const canonicalBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
   for(let run=1;run<=telemetryRuns;run++){
-    if(run>1){await provider.send('evm_revert',[snapshotId]);snapshotId=await provider.send('evm_snapshot',[]);}
+    let resetEvidence={required:run>1,revertAccepted:run===1,sentinelMatch:run===1,expectedDigestSha256:canonicalBaseline.digestSha256,observedDigestSha256:canonicalBaseline.digestSha256};
+    if(run>1){
+      const reverted=await provider.send('evm_revert',[snapshotId]);
+      if(reverted!==true){const error=new Error('Phase-0 telemetry baseline snapshot revert failed or expired');error.code='PHASE0_BASELINE_REVERT_FAILED';throw error;}
+      const observedBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
+      resetEvidence={required:true,revertAccepted:true,sentinelMatch:observedBaseline.digestSha256===canonicalBaseline.digestSha256,expectedDigestSha256:canonicalBaseline.digestSha256,observedDigestSha256:observedBaseline.digestSha256};
+      if(!resetEvidence.sentinelMatch){const error=new Error('Phase-0 telemetry baseline sentinel changed after evm_revert');error.code='PHASE0_BASELINE_SENTINEL_MISMATCH';error.expected=canonicalBaseline.digestSha256;error.observed=observedBaseline.digestSha256;throw error;}
+      snapshotId=await provider.send('evm_snapshot',[]);
+    }
     const runId=`${runPrefix}-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
-    const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(`${runId}-${seedSalt}`);
+    const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(repeatSameSeedAcrossRuns?seedSalt:`${runId}-${seedSalt}`);
     const schedule=buildBurstSchedule(targets,callsPerRun,rng);
     const accountingFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.semanticFamily==='ECONOMIC').length,0);
     const otherFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.semanticFamily!=='ECONOMIC').length,0);
@@ -806,18 +815,33 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       simulationInfrastructureError:0,submissionInfrastructureError:0,submittedOutcomeUnknown:0,
       notExecutedEncodingOrPlanning:0,positiveTransitions:0,positiveEconomicTransitions:0,
       observationFailures:0,observationReads:0,byContract:{},byFunction:{},
+      feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
-    const terminalRows=[];
+    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),contextFailureCounts=new Map();
     const telemetryStartedAt=Date.now();
     console.log(`[phase0-telemetry] ${runId} started; targetCalls=${callsPerRun}; lifecycle=v2; heartbeat every 300s`);
     const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${callsPerRun}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),300000);
     telemetryHeartbeat.unref?.();
     try{
       for(const burst of schedule){
-        const target=targets[burst.targetIndex];
+        let target=targets[burst.targetIndex];
         for(let k=0;k<burst.count;k++){
-          const selected=pickFn(target,rng,burst.actionClass),f=selected.fragment,iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
+          let picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions);
+          if(!picked){
+            const alternate=targets.find(candidate=>
+              (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
+              (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
+              pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions)
+            );
+            if(alternate){
+              stats.contextAdaptations.push({kind:'REROUTE_TO_QUALIFIED_CONTEXT',fromContext:target.contextType??'DIRECT',toContext:alternate.contextType??'DIRECT',logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,atCallIndex:stats.calls+1});
+              target=alternate;
+              picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions);
+            }
+          }
+          if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
+          const selected=picked.selected,f=selected.fragment,iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
           const qualifiedAction=qualifiedActionV2({target,selected,actors,rng});
           let sender=qualifiedAction?.sender??actors[ri(rng,actors.length)];
           const rec={
@@ -829,8 +853,10 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             stages:{ARG_GEN:null,PREFLIGHT:null,SUBMISSION:null,RECEIPT:null,OBSERVATION:null},
             decodedInputs:null,abiGenerated:true,rawRandomBytes:false,executionOutcome:null,
             observations:{before:[],after:[],deltas:[]},effectClassification:'NOT_EXECUTED',positiveTransition:false,
-            transaction:null,error:null
+            transaction:null,error:null,
+            selectionFeedback:{selectionKey:picked.selectionKey,weight:picked.feedbackWeight,adaptedContext:stats.contextAdaptations.at(-1)?.atCallIndex===stats.calls+1}
           };
+          if(picked.feedbackWeight>1)stats.feedbackSelections++;
           stats.calls++; if(selected.semanticFamily==='ECONOMIC')stats.accountingActions++;else stats.otherActions++;
           stats.byContract[target.qualifiedName]=(stats.byContract[target.qualifiedName]??0)+1;
           const fk=`${target.qualifiedName}::${selected.signature}`;stats.byFunction[fk]=(stats.byFunction[fk]??0)+1;
@@ -910,7 +936,28 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
           else if(rec.executionOutcome==='SUBMISSION_INFRASTRUCTURE_ERROR')stats.submissionInfrastructureError++;
           else if(rec.executionOutcome==='SUBMITTED_OUTCOME_UNKNOWN')stats.submittedOutcomeUnknown++;
           else if(rec.executionOutcome==='NOT_EXECUTED_ENCODING_OR_PLANNING')stats.notExecutedEncodingOrPlanning++;
-          if(rec.positiveTransition){stats.positiveTransitions++;if(rec.semanticFamily==='ECONOMIC')stats.positiveEconomicTransitions++;}
+          if(rec.positiveTransition){
+            stats.positiveTransitions++;
+            if(rec.semanticFamily==='ECONOMIC')stats.positiveEconomicTransitions++;
+            feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
+            stats.feedbackUpdates++;
+          }
+          if(rec.executionOutcome==='SIMULATED_REJECTION'){
+            const hasAlternateContext=targets.some(candidate=>
+              (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
+              (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
+              candidate.functions.some(fn=>fn.signature===selected.signature)
+            );
+            if(hasAlternateContext){
+              const failures=Number(contextFailureCounts.get(picked.selectionKey)??0)+1;
+              contextFailureCounts.set(picked.selectionKey,failures);
+              if(failures>=3&&!blockedContextFunctions.has(picked.selectionKey)){
+                blockedContextFunctions.add(picked.selectionKey);
+                const adaptation={kind:'BOUNDED_WRONG_CONTEXT_GAP',selectionKey:picked.selectionKey,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,signature:selected.signature,contextType:target.contextType??'DIRECT',failureCount:failures,atCallIndex:stats.calls};
+                stats.contextAdaptations.push(adaptation);rec.contextAdaptation=adaptation;
+              }
+            }
+          }else contextFailureCounts.delete(picked.selectionKey);
           const observations=[...rec.observations.before,...rec.observations.after];stats.observationReads+=observations.length;stats.observationFailures+=observations.filter(x=>x.status!=='OK').length;
           if(['SIMULATION_INFRASTRUCTURE_ERROR','SUBMISSION_INFRASTRUCTURE_ERROR','SUBMITTED_OUTCOME_UNKNOWN','NOT_EXECUTED_ENCODING_OR_PLANNING'].includes(rec.executionOutcome))stats.errors++;
           terminalRows.push(rec);
@@ -922,12 +969,16 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
     const observationStatus=stats.observationReads===0?'UNAVAILABLE':(stats.observationFailures===0?'COMPLETE':'PARTIAL');
     const reachabilityStatus=stats.positiveTransitions>0?'REACHABLE':'REACHABILITY_GAP';
     console.log(`[phase0-telemetry] ${runId} completed; calls=${stats.calls}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; positiveTransitions=${stats.positiveTransitions}`);
+    const actionSequenceDigestSha256=sha256(Buffer.from(JSON.stringify(terminalRows.map(row=>({target:row.target,sender:row.sender,functionSignature:row.functionSignature,decodedInputs:row.decodedInputs,actionClass:row.actionClass})))));
+    const outcomeSequenceDigestSha256=sha256(Buffer.from(JSON.stringify(terminalRows.map(row=>({callIndex:row.callIndex,executionOutcome:row.executionOutcome,positiveTransition:row.positiveTransition,effectClassification:row.effectClassification})))));
     const bytes=await fs.readFile(file),summary={
       schemaVersion:'curveyield-phase0-abi-telemetry-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
       runId,purpose:'AUTOMATED_LIFECYCLE_TELEMETRY_WITH_TYPED_OUTCOMES_AND_ACCOUNTING_OBSERVATIONS',...stats,
       accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,
       interleavedCrossContractBursts:true,executionStatus:'COMPLETED',coverageStatus:stats.calls===callsPerRun?'COMPLETE':'INCOMPLETE',
-      checkStatus:'NOT_APPLICABLE',reachabilityStatus,observationStatus,reconciliation,
+      checkStatus:'NOT_APPLICABLE',reachabilityStatus,observationStatus,reconciliation,resetEvidence,
+      feedbackStatus:stats.feedbackUpdates>0&&stats.feedbackSelections>0?'ACTIVE':'NO_FEEDBACK_WITNESS',
+      actionSequenceDigestSha256,outcomeSequenceDigestSha256,
       rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,
       legacyCompatibility:{legacyRevertCounterWasPreflightDominated:true,currentRevertsAreMinedRevertsOnly:true},
       status:stats.calls===callsPerRun&&stats.terminalActions===stats.plannedActions&&reconciliation.status==='PASS'?'PASS':'INCOMPLETE'
