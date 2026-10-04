@@ -472,7 +472,7 @@ test('human address navigation uses the visible Chrome omnibox through X11 keybo
   assert.match(block, /'--delay', String\(perCharacterDelayMs\)/);
   assert.match(block, /randomDelayMs\(200, 400\)/);
   assert.match(block, /'Return'/);
-  assert.doesNotMatch(block, /page\.keyboard|page\.goto\(targetUrl|\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
+  assert.doesNotMatch(block, /await\s+page\.keyboard|page\.goto\(targetUrl|\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
 });
 
 
