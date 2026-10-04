@@ -4,11 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { validateStorageState } from './browser-session-state-v1.mjs';
-
-const execFileAsync = promisify(execFile);
 
 const env = process.env;
 const action = env.WAKE_ACTION || 'wake';
@@ -220,46 +216,6 @@ async function humanShortPointerClick(page, locator) {
   await humanActionPause(page);
 }
 
-async function x11HumanPointerClick(page, locator) {
-  await locator.scrollIntoViewIfNeeded().catch(() => {});
-  await humanActionPause(page);
-  const box = await locator.boundingBox();
-  if (!box) throw new Error('Visible X11 click target has no bounding box');
-
-  const metrics = await page.evaluate(() => ({
-    screenX: window.screenX,
-    screenY: window.screenY,
-    outerWidth: window.outerWidth,
-    outerHeight: window.outerHeight,
-    innerWidth: window.innerWidth,
-    innerHeight: window.innerHeight,
-    devicePixelRatio: window.devicePixelRatio || 1
-  }));
-
-  const sideInset = Math.max(0, (metrics.outerWidth - metrics.innerWidth) / 2);
-  const topInset = Math.max(0, metrics.outerHeight - metrics.innerHeight - sideInset);
-  const dpr = metrics.devicePixelRatio || 1;
-  const screenX = Math.round((metrics.screenX + sideInset + box.x + box.width / 2) * dpr);
-  const screenY = Math.round((metrics.screenY + topInset + box.y + box.height / 2) * dpr);
-
-  console.log('[github-playwright-v10] project-flow=x11-create-click-coordinates=' + JSON.stringify({
-    screenX,
-    screenY,
-    box,
-    metrics,
-    sideInset,
-    topInset
-  }));
-
-  const x11Env = { ...process.env, DISPLAY: process.env.DISPLAY || ':99' };
-  await execFileAsync('xdotool', ['mousemove', '--sync', String(screenX), String(screenY)], { env: x11Env });
-  await page.waitForTimeout(randomDelayMs(300, 700));
-  await execFileAsync('xdotool', ['mousedown', '1'], { env: x11Env });
-  await page.waitForTimeout(randomDelayMs(70, 150));
-  await execFileAsync('xdotool', ['mouseup', '1'], { env: x11Env });
-  await humanActionPause(page);
-}
-
 async function humanPointerClick(page, locator) {
   await locator.scrollIntoViewIfNeeded().catch(() => {});
   await humanActionPause(page);
@@ -445,41 +401,76 @@ async function findEnabledProjectCreateButton(page, timeoutMs = 8000) {
 }
 
 async function findProjectNameEditorFromVisibleCreateSurface(page) {
-  const create = await findVisibleProjectCreateButton(page);
-  if (!create) return { create: null, editor: null };
+  // Start from the visible Project-name editor, then find the Create-project
+  // control inside that editor's own rendered ancestor surface. This prevents
+  // duplicate/stale Create controls elsewhere on the page from being paired
+  // with the active modal.
+  const labelledEditors = page.getByLabel(/^Project name$/i);
+  const labelledCount = Math.min(await labelledEditors.count().catch(() => 0), 8);
+  for (let i = 0; i < labelledCount; i += 1) {
+    const editor = labelledEditors.nth(i);
+    if (!await editor.isVisible().catch(() => false)) continue;
 
-  const labelled = page.getByLabel(/^Project name$/i).first();
-  if (await labelled.isVisible().catch(() => false)) {
-    return { create, editor: labelled };
-  }
+    let region = editor;
+    for (let depth = 0; depth < 7; depth += 1) {
+      region = region.locator('xpath=..');
 
-  // Anchor the editor to the visible Create-project surface itself. This avoids
-  // accidentally selecting the dimmed homepage composer behind the modal and
-  // does not assume the editor is an <input> or that the surface has role=dialog.
-  let region = create;
-  for (let depth = 0; depth < 6; depth += 1) {
-    region = region.locator('xpath=..');
+      const buttons = region.getByRole('button', { name: /^Create project$/i });
+      const buttonCount = Math.min(await buttons.count().catch(() => 0), 8);
+      for (let j = 0; j < buttonCount; j += 1) {
+        const button = buttons.nth(j);
+        if (await button.isVisible().catch(() => false)) {
+          return { create: button, editor };
+        }
+      }
 
-    const textboxes = region.getByRole('textbox');
-    const textboxCount = Math.min(await textboxes.count().catch(() => 0), 8);
-    for (let i = 0; i < textboxCount; i += 1) {
-      const candidate = textboxes.nth(i);
-      if (await candidate.isVisible().catch(() => false)) {
-        return { create, editor: candidate };
+      const labels = region.getByText(/^Create project$/i, { exact: true });
+      const labelCount = Math.min(await labels.count().catch(() => 0), 8);
+      for (let j = 0; j < labelCount; j += 1) {
+        const label = labels.nth(j);
+        if (!await label.isVisible().catch(() => false)) continue;
+        const button = label.locator('xpath=ancestor-or-self::button[1]');
+        if (await button.isVisible().catch(() => false)) {
+          return { create: button, editor };
+        }
       }
     }
+  }
 
-    const editable = region.locator('input, textarea, [contenteditable="true"]');
-    const editableCount = Math.min(await editable.count().catch(() => 0), 8);
-    for (let i = 0; i < editableCount; i += 1) {
-      const candidate = editable.nth(i);
-      if (await candidate.isVisible().catch(() => false)) {
-        return { create, editor: candidate };
+  // Fallback for UI variants where the Project-name editor is not labelled:
+  // start from each visible Create-project control and only accept an editor
+  // found inside that same local ancestor surface.
+  const createCandidates = page.getByRole('button', { name: /^Create project$/i });
+  const createCount = Math.min(await createCandidates.count().catch(() => 0), 8);
+  for (let i = 0; i < createCount; i += 1) {
+    const create = createCandidates.nth(i);
+    if (!await create.isVisible().catch(() => false)) continue;
+
+    let region = create;
+    for (let depth = 0; depth < 6; depth += 1) {
+      region = region.locator('xpath=..');
+
+      const textboxes = region.getByRole('textbox');
+      const textboxCount = Math.min(await textboxes.count().catch(() => 0), 8);
+      for (let j = 0; j < textboxCount; j += 1) {
+        const editor = textboxes.nth(j);
+        if (await editor.isVisible().catch(() => false)) {
+          return { create, editor };
+        }
+      }
+
+      const editables = region.locator('input, textarea, [contenteditable="true"]');
+      const editableCount = Math.min(await editables.count().catch(() => 0), 8);
+      for (let j = 0; j < editableCount; j += 1) {
+        const editor = editables.nth(j);
+        if (await editor.isVisible().catch(() => false)) {
+          return { create, editor };
+        }
       }
     }
   }
 
-  return { create, editor: null };
+  return { create: null, editor: null };
 }
 
 function escapeRegExp(text) {
@@ -666,8 +657,8 @@ async function createProjectExactHumanFlow(page, name) {
 
   const beforeCreateUrl = page.url();
   console.log('[github-playwright-v10] project-flow=create-button-same-surface-enabled');
-  await x11HumanPointerClick(page, surfaceCreate);
-  console.log('[github-playwright-v10] project-flow=create-button-same-surface-x11-clicked');
+  await humanPointerClick(page, surfaceCreate);
+  console.log('[github-playwright-v10] project-flow=create-button-editor-surface-clicked');
 
   await page.waitForTimeout(1000);
   const postClickCreate = page.getByRole('button', { name: /^Create project$/i }).first();
