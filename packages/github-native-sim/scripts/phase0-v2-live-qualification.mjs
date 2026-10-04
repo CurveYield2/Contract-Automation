@@ -230,7 +230,7 @@ try{
   await fs.writeFile(path.join(outRoot,'PHASE0_V2_LIVE_QUALIFICATION_v1.json'),JSON.stringify(result,null,2)+'\n');
   process.stdout.write(JSON.stringify({status:'PASS',outRoot,resultRef:path.join(outRoot,'PHASE0_V2_LIVE_QUALIFICATION_v1.json'),medusaCalls:medusa.observedCalls,telemetryAttempts:telemetry.reduce((n,x)=>n+x.calls,0),positiveTransitions:telemetry.reduce((n,x)=>n+x.positiveTransitions,0),positiveEconomicTransitions:telemetry.reduce((n,x)=>n+x.positiveEconomicTransitions,0)},null,2)+'\n');
 } finally {
-  await provider.destroy().catch(()=>{});
+  try { provider.destroy(); } catch {}
   await proxy.close().catch(()=>{});
   await anvil.close().catch(()=>{});
 }
