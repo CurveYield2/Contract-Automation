@@ -189,38 +189,58 @@ registration_api="repos/$GITHUB_REPOSITORY/contents/$registration_path"
 existing_registration_payload="$(gh api "$registration_api?ref=main" 2>/dev/null || true)"
 existing_registration_sha="$(printf '%s' "$existing_registration_payload" | jq -r '.sha // empty' 2>/dev/null || true)"
 
-jq -n \
-  --arg campaignId "$campaign_id" \
-  --arg campaignName "$campaign_name" \
-  --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
-  --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" \
-  '{
-    schemaVersion:"curveyield-browser-agent-wake-registration-v1",
-    campaignId:$campaignId,
-    mode:"resume_existing",
-    chatUrl:"",
-    browserRoutine:"",
-    agentChats:{
-      "reviewer-1":$chat1,
-      "reviewer-2":$chat2,
-      "reviewer-3":$chat3,
-      "reviewer-4":$chat4
-    },
-    chatgptProject:{name:"",url:""},
-    activeChat:{name:"",url:""},
-    wakeMessage:"",
-    thinkingEffort:"high",
-    browserInteractionPolicy:"ordinary-pointer-keyboard-only",
-    activeAssignment:{},
-    watchdog:{enabled:true,idleMessage:"GET BACK TO WORK"},
-    repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},
-    updatedAt:(now|todate)
-  }' > /tmp/audit-browser-registration.json
+if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  printf '%s' "$existing_registration_payload" | jq -r '.content' | tr -d '\n' | base64 -d > /tmp/existing-audit-browser-registration.json
+  jq \
+    --arg campaignId "$campaign_id" \
+    --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" \
+    '.schemaVersion="curveyield-browser-agent-wake-registration-v1"
+     | .campaignId=$campaignId
+     | .agentChats={
+         "reviewer-1":$chat1,
+         "reviewer-2":$chat2,
+         "reviewer-3":$chat3,
+         "reviewer-4":$chat4
+       }
+     | .browserInteractionPolicy=(.browserInteractionPolicy // "ordinary-pointer-keyboard-only")
+     | .repair=((.repair // {}) + {enabled:true,idlePokeThreshold:(.repair.idlePokeThreshold // 3),unviewableThreshold:(.repair.unviewableThreshold // 2)})
+     | .watchdog=((.watchdog // {}) + {enabled:true,idleMessage:"GET BACK TO WORK"})
+     | .updatedAt=(now|todate)' \
+    /tmp/existing-audit-browser-registration.json > /tmp/audit-browser-registration.json
+else
+  jq -n \
+    --arg campaignId "$campaign_id" \
+    --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" \
+    '{
+      schemaVersion:"curveyield-browser-agent-wake-registration-v1",
+      campaignId:$campaignId,
+      mode:"resume_existing",
+      chatUrl:"",
+      browserRoutine:"",
+      agentChats:{
+        "reviewer-1":$chat1,
+        "reviewer-2":$chat2,
+        "reviewer-3":$chat3,
+        "reviewer-4":$chat4
+      },
+      chatgptProject:{name:"",url:""},
+      activeChat:{name:"",url:""},
+      wakeMessage:"",
+      thinkingEffort:"high",
+      browserInteractionPolicy:"ordinary-pointer-keyboard-only",
+      activeAssignment:{},
+      watchdog:{enabled:true,idleMessage:"GET BACK TO WORK"},
+      repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},
+      updatedAt:(now|todate)
+    }' > /tmp/audit-browser-registration.json
+fi
 
 registration_body="$(base64 -w0 /tmp/audit-browser-registration.json)"
 if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
   gh api --method PUT "$registration_api" \
-    -f message="chore(audit): bind four reviewer chats for $campaign_id" \
+    -f message="chore(audit): refresh four reviewer chats for $campaign_id" \
     -f content="$registration_body" -f sha="$existing_registration_sha" -f branch=main >/dev/null
 else
   gh api --method PUT "$registration_api" \
