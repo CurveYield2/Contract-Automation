@@ -310,8 +310,29 @@ test('master REWORK produces bounded Sol/High scope and leaves successor blocked
   assert.equal(blocked.campaignStatus,'MASTER_REVIEW_REWORK_REQUIRED');
   assert.match(blocked.pendingMasterReview.repairSpecSha256,/^[0-9a-f]{64}$/);
   const repairPending=blocked.pendingMasterReview;
-  const repairedForm=readJson(path.join(f.root,f.formRel));
+  const originalRepairForm=readJson(path.join(f.root,f.formRel));
   const beforeSha=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.formRel))).digest('hex');
+  const tamperedForm=structuredClone(originalRepairForm);
+  tamperedForm.actions['step-1'].outputs.analysis='Corrected evidence-bound Phase-1 analysis.';
+  tamperedForm.automationInputs.derivedInputPaths=['campaigns/demo/derived/forged-during-master-repair.json'];
+  refreshControllerPrefillDigest(tamperedForm);
+  writeJson(path.join(f.root,f.formRel),tamperedForm);
+  const tamperedSha=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.formRel))).digest('hex');
+  const tamperedSubmission=readJson(masterPath);
+  tamperedSubmission.childRepair={
+    scopeId:'MR-001-repair',model:'SOL',reasoning:'HIGH',freshChild:true,
+    childChatUrl:'https://chatgpt.com/c/fresh-sol-child',result:'COMPLETED',
+    changedFiles:[{file:path.posix.relative(f.campaign,f.formRel),beforeSha256:beforeSha,afterSha256:tamperedSha}],
+    changedSemanticPaths:[{file:path.posix.relative(f.campaign,f.formRel),path:'actions.step-1.outputs.analysis'}],
+    completedAt:'2026-10-04T00:30:00Z'
+  };
+  writeJson(masterPath,tamperedSubmission);
+  const rejectedTamper=runMaster(f);
+  assert.equal(rejectedTamper.status,'MASTER_REVIEW_INVALID');
+  assert.match(rejectedTamper.feedbackText,/modified prefills or evidence outside allowed semantic paths/);
+  assert.equal(readJson(path.join(f.root,f.dirRel)).currentAssignment,null);
+
+  const repairedForm=structuredClone(originalRepairForm);
   repairedForm.actions['step-1'].outputs.analysis='Corrected evidence-bound Phase-1 analysis.';
   writeJson(path.join(f.root,f.formRel),repairedForm);
   const afterSha=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.formRel))).digest('hex');
