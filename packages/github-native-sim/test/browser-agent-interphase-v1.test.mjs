@@ -13,12 +13,16 @@ const watchdogPath = path.join(repoRoot, '.github/workflows/browser-agent-watchd
 test('interphase mechanical work reuses the existing wake/watchdog workflows', () => {
   const workflows = fs.readdirSync(path.join(repoRoot, '.github/workflows'));
   assert.equal(workflows.some((name) => /interphase/i.test(name)), false, 'must not create a parallel interphase workflow');
+
   const wake = fs.readFileSync(wakePath, 'utf8');
   const watchdog = fs.readFileSync(watchdogPath, 'utf8');
   assert.match(wake, /options: \[resume_existing\]/);
-  assert.match(watchdog, /MECHANICAL_WORK_PACKET_v2\.json/);
-  assert.match(watchdog, /MECHANICAL_WORK_COMPLETION_v2\.json/);
+  assert.match(watchdog, /verify_lite_interphase_completion\(\)/);
   assert.match(watchdog, /Legacy create-fresh Lite successor launcher is retired/);
+  assert.doesNotMatch(watchdog.slice(
+    watchdog.indexOf('launch_lite_successor() {'),
+    watchdog.indexOf('\n          if ! fetch_state; then', watchdog.indexOf('launch_lite_successor() {'))
+  ), /gh workflow run browser-agent-wake\.yml/);
 });
 
 test('interphase mechanical wakes never replace the campaign reviewer chat registration', () => {
