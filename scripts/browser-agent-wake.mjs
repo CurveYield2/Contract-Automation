@@ -363,21 +363,31 @@ async function wakeMarkerVisible(page, marker) {
   };
 }
 
-async function setSystemClipboard(text) {
-  return await new Promise((resolve, reject) => {
-    const child = spawn('xclip', ['-selection', 'clipboard', '-in'], {
-      env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
-      stdio: ['pipe', 'ignore', 'pipe']
-    });
-    let stderr = '';
-    child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`xclip exited with code ${code}: ${stderr.trim()}`));
-    });
-    child.stdin.end(String(text));
+async function startSystemClipboard(text) {
+  const child = spawn('xclip', ['-selection', 'clipboard', '-in', '-loops', '1'], {
+    env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
+    stdio: ['pipe', 'ignore', 'pipe']
   });
+  let stderr = '';
+  child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
+  let spawnError = null;
+  child.on('error', (error) => { spawnError = error; });
+  child.stdin.end(String(text));
+  await new Promise((resolve) => setTimeout(resolve, 180));
+  if (spawnError) throw spawnError;
+  if (child.exitCode !== null && child.exitCode !== 0) {
+    throw new Error(`xclip exited before paste with code ${child.exitCode}: ${stderr.trim()}`);
+  }
+  return child;
+}
+
+async function finishSystemClipboard(child) {
+  if (!child || child.exitCode !== null) return;
+  await Promise.race([
+    new Promise((resolve) => child.once('close', resolve)),
+    new Promise((resolve) => setTimeout(resolve, 1200))
+  ]);
+  if (child.exitCode === null) child.kill('SIGTERM');
 }
 
 async function readComposerText(composer) {
@@ -421,9 +431,10 @@ async function fillComposer(page, message) {
   const useHumanPaste = messagePurpose === 'initial_wake' && String(message).length > 500;
   if (useHumanPaste) {
     for (let attempt = 1; attempt <= 2; attempt += 1) {
-      await setSystemClipboard(message);
+      const clipboardOwner = await startSystemClipboard(message);
       await page.waitForTimeout(200 + Math.floor(Math.random() * 301));
       await composer.press('Control+V');
+      await finishSystemClipboard(clipboardOwner);
       await page.waitForTimeout(500 + Math.floor(Math.random() * 401));
       const verification = await verifyComposerMessage(composer, message, 'composer-human-paste-verification');
       if (verification.prefixMatches && verification.lengthLooksPlausible) {
