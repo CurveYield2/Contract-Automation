@@ -582,6 +582,16 @@ async function findSendControlNearComposer(page, composer) {
   ]);
 }
 
+async function captureProjectDebugScreenshot(page, label) {
+  if (!env.PROJECT_DEBUG_DIR) return;
+  await fs.mkdir(env.PROJECT_DEBUG_DIR, { recursive: true }).catch(() => {});
+  const safe = String(label).replace(/[^a-z0-9_-]+/gi, '-');
+  await page.screenshot({
+    path: env.PROJECT_DEBUG_DIR + '/' + safe + '.png',
+    fullPage: false
+  }).catch(() => {});
+}
+
 async function createProjectExactHumanFlow(page, name) {
   if (!name) throw new Error('PROJECT_NAME is required for project_wake');
 
@@ -611,9 +621,11 @@ async function createProjectExactHumanFlow(page, name) {
   }
   if (!controls.create) throw new Error('Create Project button was not found on the visible Create-project surface');
   if (!controls.editor) throw new Error('Project-name editor was not found on the visible Create-project surface');
+  await captureProjectDebugScreenshot(page, '01-create-project-modal-open');
 
   await humanTypeInto(page, controls.editor, name);
   console.log('[github-playwright-v10] project-name-entered=' + JSON.stringify({ projectName: name }));
+  await captureProjectDebugScreenshot(page, '02-project-name-entered');
 
   // The visible Create project button is initially disabled. Give the UI a
   // short human-scale moment to enable it after typing, then click only the
@@ -627,6 +639,7 @@ async function createProjectExactHumanFlow(page, name) {
 
   const beforeCreateUrl = page.url();
   await humanPointerClick(page, enabledCreate);
+  await captureProjectDebugScreenshot(page, '03-after-create-project-click');
 
   // Preserve the proven create flow, but distinguish "slow navigation" from
   // "the visible Create project click was ignored". If the modal is still
@@ -646,6 +659,7 @@ async function createProjectExactHumanFlow(page, name) {
       retriedCreateClick = true;
       console.log('[github-playwright-v10] create-project-click-retry=short-human-pointer');
       await shortHumanPointerClick(page, stillEnabledCreate);
+      await captureProjectDebugScreenshot(page, '04-after-create-project-retry');
       continue;
     }
   }
