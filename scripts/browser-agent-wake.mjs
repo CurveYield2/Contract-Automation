@@ -177,7 +177,14 @@ async function snapshot(page) {
     !conversationUnavailable &&
     !loginPrompt &&
     !humanChallenge;
-  const mainDiagnostics = await page.locator('main, [role="main"]').first().evaluate(el => ({
+  const mainSurface = page.locator('main, [role="main"]').first();
+  const mainText = await mainSurface.innerText().catch(() => '');
+  if (!last && mainText) {
+    // Role attributes are no longer stable across ChatGPT UI revisions.
+    // Use the rendered conversation surface as the activity fingerprint fallback.
+    last = normalizeVisibleText(mainText);
+  }
+  const mainDiagnostics = await mainSurface.evaluate(el => ({
     tag: el.tagName,
     controls: [...el.querySelectorAll('button,[role="button"],[role="status"],h1,h2')].slice(0,25).map(node => ({
       tag: node.tagName, role: node.getAttribute('role'), label: node.getAttribute('aria-label'),
