@@ -150,7 +150,7 @@ jobs:
             exit 1
           }
 
-          interaction_policy="$(jq -r '.browserInteractionPolicy // "ordinary-pointer-keyboard-only"' /tmp/existing-registration.json)"
+          interaction_policy="$(jq -r '.browserInteractionPolicy // "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1"' /tmp/existing-registration.json)"
           jq \
             --arg chat "$chat_url" \
             --arg reviewer "$reviewer" \
