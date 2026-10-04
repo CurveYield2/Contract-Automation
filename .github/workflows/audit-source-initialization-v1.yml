@@ -51,13 +51,13 @@ jobs:
       - name: Resolve source and reviewer chat request
         id: request
         env:
-          EVENT_NAME: ${ github.event_name }}
-          DISPATCH_URL: ${ inputs.source_url }}
-          DISPATCH_CHAT_1_URL: ${ inputs.agent_chat_1_url }}
-          DISPATCH_CHAT_2_URL: ${ inputs.agent_chat_2_url }}
-          DISPATCH_CHAT_3_URL: ${ inputs.agent_chat_3_url }}
-          DISPATCH_CHAT_4_URL: ${ inputs.agent_chat_4_url }}
-          GH_TOKEN: ${ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_URL: ${{ inputs.source_url }}
+          DISPATCH_CHAT_1_URL: ${{ inputs.agent_chat_1_url }}
+          DISPATCH_CHAT_2_URL: ${{ inputs.agent_chat_2_url }}
+          DISPATCH_CHAT_3_URL: ${{ inputs.agent_chat_3_url }}
+          DISPATCH_CHAT_4_URL: ${{ inputs.agent_chat_4_url }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -127,22 +127,22 @@ jobs:
 
       - name: Select working Audit-Controller credential
         env:
-          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          PREFLIGHTSIM_FALLBACK_TOKEN: ${ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
         shell: bash
         run: bash scripts/select-audit-controller-token.sh
 
       - name: Initialize audit source and Lite campaign
         env:
-          GH_TOKEN: ${ github.token }}
-          CONTRACT_AUTOMATION_TOKEN: ${ github.token }}
-          AUDIT_CONTROLLER_TOKEN: ${ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          SOURCE_URL: ${ steps.request.outputs.source_url }}
-          AGENT_CHAT_1_URL: ${ steps.request.outputs.agent_chat_1_url }}
-          AGENT_CHAT_2_URL: ${ steps.request.outputs.agent_chat_2_url }}
-          AGENT_CHAT_3_URL: ${ steps.request.outputs.agent_chat_3_url }}
-          AGENT_CHAT_4_URL: ${ steps.request.outputs.agent_chat_4_url }}
-          REQUEST_ID: ${ steps.request.outputs.request_id }}
+          GH_TOKEN: ${{ github.token }}
+          CONTRACT_AUTOMATION_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          SOURCE_URL: ${{ steps.request.outputs.source_url }}
+          AGENT_CHAT_1_URL: ${{ steps.request.outputs.agent_chat_1_url }}
+          AGENT_CHAT_2_URL: ${{ steps.request.outputs.agent_chat_2_url }}
+          AGENT_CHAT_3_URL: ${{ steps.request.outputs.agent_chat_3_url }}
+          AGENT_CHAT_4_URL: ${{ steps.request.outputs.agent_chat_4_url }}
+          REQUEST_ID: ${{ steps.request.outputs.request_id }}
         shell: bash
         run: bash scripts/audit-source-initialization/run-v1.sh
