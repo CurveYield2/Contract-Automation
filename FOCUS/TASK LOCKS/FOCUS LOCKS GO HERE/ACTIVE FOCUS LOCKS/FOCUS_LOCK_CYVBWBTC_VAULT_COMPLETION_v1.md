@@ -14,12 +14,12 @@ Complete the remaining cyvbWBTC vault work without repeating closed work:
 ## CURRENT MAIN
 
 - Smart-Contracts main last checked: `a76c822571b8e61f40c906561106cc344276015d`
-- Contract-Automation main last checked: `599bd028cbfa1b597c2e1ef8bad790e05744469f`
+- Contract-Automation main last checked: `a71a7343a2f3b2adf2a6060eaab0cad4f70a455f`
 
 ## AUTHORITY
 
-- Focus/task-lock protocol: `process/development-agent-task-manager/TASK_LOCK_PROTOCOL_v1.md`
-- Focus-lock precedent: `process/development-agent-task-manager/status/FOCUS_LOCK_UPGRADE_AGENT_LAUNCHER_IMPLEMENTATION_v1.md`
+- Focus/task-lock protocol: `FOCUS/TASK LOCKS/TASK_LOCK_PROTOCOL_v1.md`
+- Focus-lock precedent: `FOCUS/TASK LOCKS/FOCUS LOCKS GO HERE/RETIRED FOCUS LOCKS/FOCUS_LOCK_UPGRADE_AGENT_LAUNCHER_IMPLEMENTATION_v1.md`
 - Explicit human instructions in the active cyvbWBTC task are controlling for the remaining implementation details.
 - Live repository state outranks stale handoffs or predecessor summaries.
 
