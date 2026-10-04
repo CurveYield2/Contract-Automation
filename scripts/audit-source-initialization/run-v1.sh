@@ -205,7 +205,7 @@ if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
        }
      | .browserInteractionPolicy=(.browserInteractionPolicy // "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1")
      | .repair=((.repair // {}) + {enabled:true,idlePokeThreshold:(.repair.idlePokeThreshold // 3),unviewableThreshold:(.repair.unviewableThreshold // 2)})
-     | .watchdog=((.watchdog // {}) + {enabled:true,idleMessage:"GET BACK TO WORK"})
+     | .watchdog=((.watchdog // {}) + {enabled:true,idleMessage:"GET BACK TO WORK",pokeIntervalMinutes:20})
      | .updatedAt=(now|todate)' \
     /tmp/existing-audit-browser-registration.json > /tmp/audit-browser-registration.json
 else
@@ -231,7 +231,7 @@ else
       thinkingEffort:"high",
       browserInteractionPolicy:"phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
       activeAssignment:{},
-      watchdog:{enabled:true,idleMessage:"GET BACK TO WORK"},
+      watchdog:{enabled:true,idleMessage:"GET BACK TO WORK",pokeIntervalMinutes:20},
       repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},
       updatedAt:(now|todate)
     }' > /tmp/audit-browser-registration.json
