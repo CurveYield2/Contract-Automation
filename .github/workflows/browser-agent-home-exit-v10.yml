@@ -264,6 +264,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Upload wake send evidence v1
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-wake-evidence-v1
+          path: /tmp/browser-wake-evidence-v1/
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Disable home exit node
         if: always()
         shell: bash
