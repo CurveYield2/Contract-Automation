@@ -984,6 +984,92 @@ function recoverySearchMarker(message) {
   return bracket ? bracket[0] : text.slice(0, 120);
 }
 
+async function findVisibleCenterProjectChatTitle(page, title) {
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error('Viewport unavailable while locating Project chat title');
+
+  const titlePattern = new RegExp('^' + escapeRegExp(title) + '$', 'i');
+  const matches = page.getByText(titlePattern, { exact: true });
+  const count = Math.min(await matches.count().catch(() => 0), 20);
+  const candidates = [];
+
+  for (let i = 0; i < count; i += 1) {
+    const candidate = matches.nth(i);
+    if (!await candidate.isVisible().catch(() => false)) continue;
+    const box = await candidate.boundingBox().catch(() => null);
+    if (!box) continue;
+
+    const centerX = box.x + box.width / 2;
+    const centerY = box.y + box.height / 2;
+    const physicallyOnscreen =
+      centerX >= 0 &&
+      centerY >= 0 &&
+      centerX <= viewport.width &&
+      centerY <= viewport.height;
+    const inProjectCenter =
+      centerX >= viewport.width * 0.22 &&
+      centerX <= viewport.width * 0.92 &&
+      centerY <= viewport.height * 0.68;
+
+    if (physicallyOnscreen && inProjectCenter) {
+      candidates.push({ candidate, box, centerY });
+    }
+  }
+
+  candidates.sort((a, b) => a.centerY - b.centerY);
+  const chosen = candidates[0];
+  if (!chosen) return null;
+
+  console.log('[github-playwright-v10] project-chat-title-target=' + JSON.stringify({
+    strategy: 'visible-center-page-title',
+    box: {
+      x: Math.round(chosen.box.x),
+      y: Math.round(chosen.box.y),
+      width: Math.round(chosen.box.width),
+      height: Math.round(chosen.box.height)
+    }
+  }));
+  return chosen.candidate;
+}
+
+async function clickVisibleCenterProjectChatTitle(page, locator, beforeUrl) {
+  const box = await locator.boundingBox().catch(() => null);
+  if (!box) throw new Error('Visible Project chat title has no clickable bounding box');
+
+  const point = (fraction) => ({
+    x: box.x + Math.max(8, Math.min(box.width - 8, box.width * fraction)),
+    y: box.y + box.height / 2
+  });
+
+  let p = point(0.35);
+  await page.mouse.move(p.x, p.y, { steps: 12 });
+  await page.mouse.down();
+  await page.waitForTimeout(randomDelayMs(70, 140));
+  await page.mouse.up();
+  await page.waitForTimeout(randomDelayMs(100, 300));
+  if (page.url() !== beforeUrl) return page.url();
+
+  p = point(0.5);
+  await page.mouse.move(p.x, p.y, { steps: 10 });
+  await page.mouse.down({ clickCount: 1 });
+  await page.waitForTimeout(randomDelayMs(70, 130));
+  await page.mouse.up({ clickCount: 1 });
+  await page.waitForTimeout(randomDelayMs(100, 220));
+  await page.mouse.down({ clickCount: 2 });
+  await page.waitForTimeout(randomDelayMs(70, 130));
+  await page.mouse.up({ clickCount: 2 });
+  await page.waitForTimeout(randomDelayMs(100, 300));
+  if (page.url() !== beforeUrl) return page.url();
+
+  p = point(0.68);
+  await page.mouse.move(p.x, p.y, { steps: 12 });
+  await page.mouse.down();
+  await page.waitForTimeout(randomDelayMs(550, 900));
+  await page.mouse.up();
+  await page.waitForTimeout(randomDelayMs(1200, 2200));
+  return page.url();
+}
+
 async function recoverCreatedChatFromProjectPage(page, message) {
   if (!message) throw new Error('recover action requires the original wake message');
   if (!recoveryChatTitle) throw new Error('recover action requires the visible Project chat title');
@@ -996,27 +1082,19 @@ async function recoverCreatedChatFromProjectPage(page, message) {
 
   await page.waitForTimeout(randomDelayMs(1200, 2200));
 
-  const projectMain = page.locator('main, [role="main"]').first();
-  if (!await projectMain.isVisible().catch(() => false)) {
-    throw new Error('Visible Project main surface was not found after opening the persisted Project URL');
+  // Project chats are visible in the top-center Project page. Do not use the
+  // sidebar and do not scroll: target only an exact title that is already
+  // physically on-screen in the center content region.
+  const visibleTitle = await findVisibleCenterProjectChatTitle(page, recoveryChatTitle);
+  if (!visibleTitle) {
+    throw new Error('Visible center-page Project chat title was not found');
   }
 
-  const titlePattern = new RegExp('^' + escapeRegExp(recoveryChatTitle) + '$', 'i');
-  const visibleTitle = projectMain.getByText(titlePattern, { exact: true }).first();
-  if (!await visibleTitle.isVisible().catch(() => false)) {
-    throw new Error('Visible Project chat title was not found in the Project chat list');
+  const beforeChatUrl = page.url();
+  const afterTitleClickUrl = await clickVisibleCenterProjectChatTitle(page, visibleTitle, beforeChatUrl);
+  if (afterTitleClickUrl === beforeChatUrl) {
+    throw new Error('Visible center-page Project chat title did not open after human click sequence');
   }
-
-  let chatControl = visibleTitle;
-  const link = visibleTitle.locator('xpath=ancestor-or-self::a[1]');
-  if (await link.isVisible().catch(() => false)) {
-    chatControl = link;
-  } else {
-    const button = visibleTitle.locator('xpath=ancestor-or-self::button[1]');
-    if (await button.isVisible().catch(() => false)) chatControl = button;
-  }
-
-  await humanPointerClick(page, chatControl);
 
   const route = await waitForDurableChatRoute(page, 300000);
   if (!route.projectScoped) {
