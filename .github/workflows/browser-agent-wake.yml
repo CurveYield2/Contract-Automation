@@ -156,8 +156,30 @@ jobs:
           safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
           api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
           encoded="$(gh api "$api?ref=main" --jq '.content' 2>/dev/null || true)"
-          if [ -n "$encoded" ]; then
-            printf '%s' "$encoded" | base64 -d > /tmp/existing-registration.json
+          [ -n "$encoded" ] || {
+            echo "::error::Reviewer wake requires a current campaign browser registration."
+            exit 1
+          }
+          printf '%s' "$encoded" | base64 -d > /tmp/existing-registration.json
+
+          interaction_policy="$(jq -r '.browserInteractionPolicy // empty' /tmp/existing-registration.json)"
+          [ "$interaction_policy" = "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1" ] || {
+            echo "::error::Reviewer wake registration does not carry the required Phase-1 fixed X11 interaction policy."
+            exit 1
+          }
+
+          [ "$REQUESTED_MODE" = "resume_existing" ] || {
+            echo "::error::Reviewer wake must use resume_existing."
+            exit 1
+          }
+
+          if [ -n "$REQUESTED_CHAT_URL" ]; then
+            jq -e --arg chat "$REQUESTED_CHAT_URL" '[.agentChats[]?] | index($chat) != null' /tmp/existing-registration.json >/dev/null || {
+              echo "::error::Requested reviewer chat is not one of the pre-created registered reviewer chats."
+              exit 1
+            }
+          fi
+
             existing_milestone="$(jq -r '.activeAssignment.milestoneId // empty' /tmp/existing-registration.json)"
             existing_chat="$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/existing-registration.json)"
             delivered_milestone="$(jq -r '.wakeDelivery.milestoneId // empty' /tmp/existing-registration.json)"
@@ -169,7 +191,6 @@ jobs:
               echo "Initial existing-chat wake already delivered for $CAMPAIGN_ID / $REQUESTED_MILESTONE; this run will use the watchdog poke message."
               echo "INITIAL_WAKE_DEDUPED=true" >> "$GITHUB_ENV"
             fi
-          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
