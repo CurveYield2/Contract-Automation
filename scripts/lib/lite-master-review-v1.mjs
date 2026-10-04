@@ -61,24 +61,49 @@ export function masterReviewRequired(directory,authorityRoot){
   return Boolean(directory?.masterReview&&validateMasterReviewConfiguration(directory));
 }
 
+function referencedArtifact({root,campaignPath,phase,kind,reference}){
+  const raw=reference?.path;
+  if(typeof raw!=='string'||!raw)return null;
+  const rel=existing(root,raw)?raw:path.posix.join(campaignPath,raw);
+  const row=artifact(root,campaignPath,phase,kind,rel);
+  if(SHA256.test(String(reference.sha256??''))&&reference.sha256!==row.sha256)throw new Error('sealed receipt reference digest mismatch: '+raw);
+  return row;
+}
+function pushUniqueArtifact(rows,seen,row){
+  if(!row)return;
+  const key=row.phase+'|'+row.path;
+  if(seen.has(key))return;
+  seen.add(key);rows.push(row);
+}
 export function collectSegmentArtifacts({root,campaignPath,segment}){
-  const artifacts=[];
+  const artifacts=[];const seen=new Set();
   for(const phase of segment.phases){
     const receiptInfo=latestReceipt(root,campaignPath,phase);
-    const receiptKind=receiptInfo.receipt.phase.status==='SKIPPED'?'SKIP_MARKER':'SEALED_RECEIPT';
+    const receipt=receiptInfo.receipt;
+    const receiptKind=receipt.phase.status==='SKIPPED'?'SKIP_MARKER':'SEALED_RECEIPT';
     if(phase===7){
       const canonical=canonicalRel(campaignPath,phase);
       const canonicalData=readJson(requiredFile(root,canonical,'Phase-7 marker canonical data'));
-      artifacts.push(artifact(root,campaignPath,phase,'MACHINE_MARKER',canonical));
-      if(canonicalData.workFormPath)artifacts.push(artifact(root,campaignPath,phase,'WORK_FORM',canonicalData.workFormPath));
+      pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,'MACHINE_MARKER',canonical));
+      if(canonicalData.workFormPath)pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,'WORK_FORM',canonicalData.workFormPath));
     }else if(receiptKind!=='SKIP_MARKER'){
       const canonical=canonicalRel(campaignPath,phase);
       const canonicalData=readJson(requiredFile(root,canonical,'Phase '+phase+' canonical data'));
-      artifacts.push(artifact(root,campaignPath,phase,'CANONICAL_DATA',canonical));
-      artifacts.push(artifact(root,campaignPath,phase,'WORK_FORM',canonicalData.workFormPath));
-      if(canonicalData.finalReportPath)artifacts.push(artifact(root,campaignPath,phase,'PHASE_REPORT',canonicalData.finalReportPath));
+      pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,'CANONICAL_DATA',canonical));
+      pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,'WORK_FORM',canonicalData.workFormPath));
+      if(canonicalData.finalReportPath)pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,'PHASE_REPORT',canonicalData.finalReportPath));
     }
-    artifacts.push(artifact(root,campaignPath,phase,receiptKind,receiptInfo.rel,{receiptRevision:receiptInfo.revision}));
+    for(const [family,refs] of [['INPUT',receipt.inputs],['EVIDENCE',receipt.evidence],['OUTPUT',receipt.outputs]]){
+      for(const ref of refs??[]){
+        const role=String(ref?.role??family).replace(/[^A-Za-z0-9_-]+/g,'_').toUpperCase();
+        pushUniqueArtifact(artifacts,seen,referencedArtifact({root,campaignPath,phase,kind:family+'_'+role,reference:ref}));
+      }
+    }
+    for(const [name,value] of Object.entries(receipt.globalControls??{})){
+      if(typeof value!=='string'||!value)continue;
+      pushUniqueArtifact(artifacts,seen,referencedArtifact({root,campaignPath,phase,kind:'GLOBAL_CONTROL_'+name.replace(/[^A-Za-z0-9_-]+/g,'_').toUpperCase(),reference:{path:value}}));
+    }
+    pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,receiptKind,receiptInfo.rel,{receiptRevision:receiptInfo.revision}));
   }
   return artifacts;
 }
