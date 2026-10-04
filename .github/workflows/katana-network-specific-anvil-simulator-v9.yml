@@ -1,0 +1,122 @@
+name: Katana Network Specific Anvil Simulator v9
+
+on:
+  push:
+    paths:
+      - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v9/requests/*.json'
+      - '.github/workflows/katana-network-specific-anvil-simulator-v9.yml'
+      - 'packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v9/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  resolve-katana-vbwbtc-market:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Contract-Automation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Resolve registered Katana vbWBTC f(x) market
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUTDIR=packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v9/results
+          mkdir -p "$OUTDIR"
+          RESULT="$OUTDIR/KATANA_VBWBTC_FX_MARKET_RESULT_v9.md"
+          RPC=https://katana.drpc.org/
+          EXPLORER=https://explorer.katanarpc.com/api
+          MANAGER=0x27b3eE81DF2Dd7356D5ac282e2416991A616f96a
+          FXUSD=0x4c03ff0f44A55e7098a09016E02a01d3cdC2FDF9
+          VBWBTC=0x0913DA6Da4b42f538B445599b46Bb4622342Cf52
+          TOPIC="$(cast keccak 'RegisterPool(address)')"
+
+          RAW="$RUNNER_TEMP/register-pool-logs-v9.json"
+          curl -fsSL --retry 3 --get "$EXPLORER" \
+            --data-urlencode module=logs \
+            --data-urlencode action=getLogs \
+            --data-urlencode fromBlock=0 \
+            --data-urlencode toBlock=latest \
+            --data-urlencode address="$MANAGER" \
+            --data-urlencode topic0="$TOPIC" > "$RAW"
+
+          echo 'Blockscout response:'
+          cat "$RAW"
+
+          STATUS="$(jq -r '.status // empty' "$RAW")"
+          MESSAGE="$(jq -r '.message // empty' "$RAW")"
+          if [ "$STATUS" != '1' ]; then
+            echo "Blockscout getLogs failed: status=$STATUS message=$MESSAGE" >&2
+            exit 1
+          fi
+
+          CANDIDATES="$RUNNER_TEMP/registered-pools-v9.txt"
+          jq -r '.result[]?.topics[1] // empty' "$RAW" \
+            | sed -E 's/^0x0{24}/0x/' \
+            | awk 'NF' \
+            | sort -fu > "$CANDIDATES"
+
+          DETAILS="$RUNNER_TEMP/pool-details-v9.txt"
+          : > "$DETAILS"
+          MATCHING=""
+          while read -r P; do
+            [ -n "$P" ] || continue
+            PCOLL="$(cast call "$P" 'collateralToken()(address)' --rpc-url "$RPC" 2>/dev/null || true)"
+            PFXUSD="$(cast call "$P" 'fxUSD()(address)' --rpc-url "$RPC" 2>/dev/null || true)"
+            PMGR="$(cast call "$P" 'poolManager()(address)' --rpc-url "$RPC" 2>/dev/null || true)"
+            PORACLE="$(cast call "$P" 'priceOracle()(address)' --rpc-url "$RPC" 2>/dev/null || true)"
+            PCONFIG="$(cast call "$P" 'configuration()(address)' --rpc-url "$RPC" 2>/dev/null || true)"
+            PRANGE="$(cast call "$P" 'getDebtRatioRange()(uint256,uint256)' --rpc-url "$RPC" 2>/dev/null | tr '\n' ',' || true)"
+            LINE="market=$P collateral=$PCOLL fxUSD=$PFXUSD manager=$PMGR oracle=$PORACLE config=$PCONFIG debtRange=$PRANGE"
+            echo "$LINE" | tee -a "$DETAILS"
+            if [ "$(echo "$PCOLL" | tr '[:upper:]' '[:lower:]')" = "$(echo "$VBWBTC" | tr '[:upper:]' '[:lower:]')" ] &&
+               [ "$(echo "$PFXUSD" | tr '[:upper:]' '[:lower:]')" = "$(echo "$FXUSD" | tr '[:upper:]' '[:lower:]')" ] &&
+               [ "$(echo "$PMGR" | tr '[:upper:]' '[:lower:]')" = "$(echo "$MANAGER" | tr '[:upper:]' '[:lower:]')" ]; then
+              MATCHING="$MATCHING $P"
+            fi
+          done < "$CANDIDATES"
+
+          {
+            echo '# Katana vbWBTC f(x) Market Result v9'
+            echo
+            echo "- PoolManager: $MANAGER"
+            echo "- fxUSD: $FXUSD"
+            echo "- vbWBTC: $VBWBTC"
+            echo "- RegisterPool_topic: $TOPIC"
+            echo "- registered_pools: $(tr '\n' ' ' < "$CANDIDATES")"
+            echo "- matching_vbWBTC_market: $MATCHING"
+            echo
+            echo '## Registered pool details'
+            echo '~~~text'
+            cat "$DETAILS"
+            echo '~~~'
+          } > "$RESULT"
+
+          COUNT="$(printf '%s\n' "$MATCHING" | grep -oE '0x[0-9a-fA-F]{40}' | wc -l | tr -d ' ')"
+          test "$COUNT" = '1'
+
+      - name: Persist Katana vbWBTC market result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESULT=packages/github-native-sim/audit-harnesses/katana-network-specific-anvil-simulator-v9/results/KATANA_VBWBTC_FX_MARKET_RESULT_v9.md
+          test -f "$RESULT" || exit 0
+          git config user.name 'CurveYield2 CI'
+          git config user.email 'actions@users.noreply.github.com'
+          git add "$RESULT"
+          if ! git diff --cached --quiet; then
+            git commit -m 'sim: record Katana vbWBTC f(x) market v9 [skip ci]'
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
