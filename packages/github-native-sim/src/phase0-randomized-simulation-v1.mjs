@@ -746,90 +746,256 @@ async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnap
   }
   return summaries;
 }
-function solidityType(param){
-  const type=String(param.type??'');
-  if(!SAFE_ABI_TYPE_RE.test(type)||param.baseType==='tuple')return null;
-  const dynamic=type==='string'||type==='bytes'||type.includes('[');
-  return dynamic?`${type} calldata`:type;
+function medusaParamSupportedV2(param,depth=0){
+  if(depth>8)return false;
+  if(param?.baseType==='array'){
+    if(Number.isInteger(param.arrayLength)&&param.arrayLength>96)return false;
+    return medusaParamSupportedV2(param.arrayChildren,depth+1);
+  }
+  if(param?.baseType==='tuple')return (param.components??[]).every(x=>medusaParamSupportedV2(x,depth+1));
+  return /^(?:u?int(?:8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?|address|bool|string|bytes(?:[1-9]|[12][0-9]|3[0-2])?)$/.test(String(param?.type??''));
+}
+function medusaSolidityBaseTypeV2(param,state){
+  if(param?.baseType==='array'){
+    const child=medusaSolidityBaseTypeV2(param.arrayChildren,state);
+    const suffix=Number.isInteger(param.arrayLength)&&param.arrayLength>=0?`[${param.arrayLength}]`:'[]';
+    return child+suffix;
+  }
+  if(param?.baseType==='tuple'){
+    const name=`Phase0TupleV2_${state.nextStruct++}`;
+    const fields=(param.components??[]).map((child,i)=>`    ${medusaSolidityBaseTypeV2(child,state)} f${i};`);
+    state.structs.push(`  struct ${name} {\n${fields.join('\n')}\n  }`);
+    return name;
+  }
+  return String(param?.type??'');
+}
+function medusaSolidityParamTypeV2(param,state){
+  const base=medusaSolidityBaseTypeV2(param,state);
+  const reference=param?.baseType==='array'||param?.baseType==='tuple'||param?.type==='string'||param?.type==='bytes';
+  return reference?`${base} calldata`:base;
+}
+function medusaCanonicalInputTypeV2(param){
+  try{return param.format('sighash');}catch{return String(param?.type??'');}
 }
 export function medusaWrappers(ethers,targets){
   const accounting=[],other=[],omitted=[];
   for(const t of targets){
     for(const x of t.functions){
-      const types=x.fragment.inputs.map(solidityType);if(types.some(v=>!v)){omitted.push({qualifiedName:t.qualifiedName,signature:x.signature,reason:'UNSUPPORTED_ROUTER_PARAMETER_TYPE'});continue;}
-      const row={target:t,selected:x,types};(x.accounting?accounting:other).push(row);
+      if(!(x.fragment.inputs??[]).every(p=>medusaParamSupportedV2(p))){
+        omitted.push({qualifiedName:t.qualifiedName,signature:x.signature,reason:'ABI_RESOURCE_LIMIT_OR_UNSUPPORTED_ROUTER_PARAMETER_TYPE'});
+        continue;
+      }
+      const row={target:t,selected:x,canonicalInputTypes:x.fragment.inputs.map(medusaCanonicalInputTypeV2)};
+      (x.semanticFamily==='ECONOMIC'||x.accounting?accounting:other).push(row);
     }
   }
   const rows=[];let id=0;
-  const accCopies=accounting.length?4:0;
+  const accCopies=accounting.length?Math.max(4,Math.ceil((4*other.length)/accounting.length)):0;
   for(const x of accounting)for(let n=0;n<accCopies;n++)rows.push({...x,wrapperName:`p0_acc_${id++}_${n}`});
-  let selectedOther=other;
-  if(accounting.length&&other.length>accounting.length){
-    const step=other.length/accounting.length;
-    selectedOther=Array.from({length:accounting.length},(_,i)=>other[Math.floor(i*step)]);
-    for(const x of other)if(!selectedOther.includes(x))omitted.push({qualifiedName:x.target.qualifiedName,signature:x.selected.signature,reason:'NON_ACCOUNTING_WRAPPER_DOWNSAMPLED_FOR_80_PERCENT_WEIGHT'});
-  }
-  for(const x of selectedOther)rows.push({...x,wrapperName:`p0_other_${id++}`});
-  if(!accounting.length) omitted.push({qualifiedName:'ALL_TARGETS',signature:'N/A',reason:'NO_ACCOUNTING_STATE_CHANGE_FUNCTIONS_DETECTED_FOR_MEDUSA_WEIGHTING'});
-  return{rows,omitted,accCopies,accountingWrapperShare:rows.length?rows.filter(x=>x.selected.accounting).length/rows.length:0};
+  for(const x of other)rows.push({...x,wrapperName:`p0_other_${id++}`});
+  if(!accounting.length)omitted.push({qualifiedName:'ALL_TARGETS',signature:'N/A',reason:'NO_QUALIFIED_ECONOMIC_STATE_CHANGE_FUNCTIONS_FOR_MEDUSA_WEIGHTING'});
+  return{
+    rows,omitted,accCopies,
+    accountingWrapperShare:rows.length?rows.filter(x=>x.selected.semanticFamily==='ECONOMIC'||x.selected.accounting).length/rows.length:0,
+    weightingStrategy:'ROUTER_SURFACE_WEIGHT_PLUS_CORPUS_FEEDBACK_ELIGIBLE',
+    allSupportedFunctionsRepresented:other.every(x=>rows.some(r=>r.selected.signature===x.selected.signature&&r.target.qualifiedName===x.target.qualifiedName))
+  };
 }
-function renderMedusaRouter(ethers,targets){
-  const plan=medusaWrappers(ethers,targets),body=[];
-  for(const x of plan.rows){
-    const names=x.types.map((t,i)=>`${t} a${i}`),args=x.types.map((_,i)=>`a${i}`),selector=ethers.id(x.selected.signature).slice(0,10),payable=x.selected.fragment.stateMutability==='payable'?' payable':'';
-    const value=x.selected.fragment.stateMutability==='payable'?'msg.value':'0';
-    const encodedArgs=args.length?`,`+args.join(','):'';
-    const targetAddress=ethers.getAddress(x.target.address);
-    body.push(`  function ${x.wrapperName}(${names.join(', ')}) external${payable} { (bool ok, bytes memory data)=address(${targetAddress}).call{value:${value}}(abi.encodeWithSelector(bytes4(${selector})${encodedArgs})); emit Phase0Call(address(${targetAddress}),bytes4(${selector}),ok,data); }`);
+function explicitTargetPropertiesV2(ethers,targets){
+  const rows=[];
+  for(const target of targets){
+    const iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
+    for(const f of iface.fragments.filter(x=>x.type==='function'&&/^property_/.test(x.name)&&['view','pure'].includes(x.stateMutability)&&x.inputs.length===0&&x.outputs.length===1&&x.outputs[0].type==='bool')){
+      rows.push({
+        propertyId:`target-property-${rows.length+1}`,
+        category:'TARGET_BEHAVIOR',
+        targetQualifiedName:target.qualifiedName,
+        targetAddress:target.address,
+        targetSignature:f.format('sighash'),
+        wrapperName:`property_p0_target_${rows.length}`,
+        applicabilityBasis:'PACKET_DECLARED_PROPERTY_FUNCTION',
+        preconditionMode:'REQUIRES_RELEVANT_SUCCESSFUL_STATE_TRANSITION_WITNESS'
+      });
+    }
   }
-  return{...plan,source:`// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.20;\ncontract Phase0MedusaRouterV1 {\n  event Phase0Call(address indexed target, bytes4 indexed selector, bool success, bytes data);\n${body.join('\n')}\n}\n`};
+  return rows;
+}
+export function renderMedusaRouterV2(ethers,targets){
+  const plan=medusaWrappers(ethers,targets),state={nextStruct:0,structs:[]},body=[];
+  for(const x of plan.rows){
+    const paramTypes=x.selected.fragment.inputs.map(p=>medusaSolidityParamTypeV2(p,state));
+    const names=paramTypes.map((t,i)=>`${t} a${i}`),args=paramTypes.map((_,i)=>`a${i}`);
+    const selector=ethers.id(x.selected.signature).slice(0,10),payable=x.selected.fragment.stateMutability==='payable'?' payable':'';
+    const value=x.selected.fragment.stateMutability==='payable'?'msg.value':'0';
+    const encodedArgs=args.length?','+args.join(','):'';
+    const targetAddress=ethers.getAddress(x.target.address);
+    x.wrapperSignature=`Phase0MedusaRouterV1.${x.wrapperName}(${x.canonicalInputTypes.join(',')})`;
+    body.push(`  function ${x.wrapperName}(${names.join(', ')}) external${payable} { CHEATS.prank(msg.sender); (bool ok, bytes memory data)=address(${targetAddress}).call{value:${value}}(abi.encodeWithSelector(bytes4(${selector})${encodedArgs})); if(ok){successfulTargetCalls++;} emit Phase0Call(address(${targetAddress}),bytes4(${selector}),msg.sender,ok,data); }`);
+  }
+  const properties=explicitTargetPropertiesV2(ethers,targets);
+  for(const property of properties){
+    const selector=ethers.id(property.targetSignature).slice(0,10);
+    body.push(`  function ${property.wrapperName}() external returns(bool) { CHEATS.prank(msg.sender); (bool ok, bytes memory data)=address(${ethers.getAddress(property.targetAddress)}).call(abi.encodeWithSelector(bytes4(${selector}))); return ok && data.length>=32 && abi.decode(data,(bool)); }`);
+  }
+  const source=`// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.20;
+interface Phase0MedusaCheatCodesV2 { function prank(address) external; }
+contract Phase0MedusaRouterV1 {
+  Phase0MedusaCheatCodesV2 internal constant CHEATS=Phase0MedusaCheatCodesV2(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+  uint256 public successfulTargetCalls;
+  event Phase0Call(address indexed target, bytes4 indexed selector, address indexed fuzzSender, bool success, bytes data);
+${state.structs.join('\n')}
+${body.join('\n')}
+}
+`;
+  return{...plan,properties,structs:state.structs,source};
 }
 function maxMedusaCalls(text){let max=0;for(const m of String(text).matchAll(/calls:\s*([0-9][0-9,]*)/gi))max=Math.max(max,Number(m[1].replaceAll(',','')));return max;}
+export function buildMedusaConfigV2({anvilUrl,blockNumber,routerRows,checked,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1}){
+  return{
+    fuzzing:{
+      workers:10,workerResetLimit:50,timeout:0,testLimit:callLimit,shrinkLimit:5000,callSequenceLength:100,
+      coverageEnabled:true,corpusDirectory:'.curveyield-phase0-medusa-corpus-v2',coverageFormats:['lcov'],revertReporterEnabled:true,
+      targetContracts:['Phase0MedusaRouterV1'],predeployedContracts:{},targetContractsBalances:[],constructorArgs:{},
+      senderAddresses:['0x0000000000000000000000000000000000010000','0x0000000000000000000000000000000000020000','0x0000000000000000000000000000000000030000','0x0000000000000000000000000000000000040000'],
+      testing:{
+        stopOnFailedTest:false,stopOnNoTests:checked===true,testAllContracts:false,testViewMethods:false,
+        assertionTesting:{enabled:checked===true},
+        propertyTesting:{enabled:checked===true,testPrefixes:['property_']},
+        optimizationTesting:{enabled:false,testPrefixes:['optimize_']},
+        targetFunctionSignatures:routerRows.map(x=>x.wrapperSignature??`Phase0MedusaRouterV1.${x.wrapperName}(${(x.canonicalInputTypes??[]).join(',')})`),
+        excludeFunctionSignatures:[]
+      },
+      chainConfig:{cheatCodes:{cheatCodesEnabled:true,enableFFI:false},forkConfig:{forkModeEnabled:true,rpcUrl:anvilUrl,rpcBlock:blockNumber,poolSize:24}}
+    },
+    compilation:{platform:'crytic-compile',platformConfig:{target:'.',args:['--foundry-compile-all']}},
+    slither:{useSlither:false},logging:{level:'info',logDirectory:'',noColor:true}
+  };
+}
+async function readTargetPropertyV2({provider,ethers,property,from}){
+  try{
+    const iface=new ethers.Interface([`function ${property.targetSignature} view returns (bool)`]);
+    const data=iface.encodeFunctionData(property.targetSignature,[]);
+    const raw=await provider.call({to:property.targetAddress,from,data});
+    return{status:'OK',value:Boolean(iface.decodeFunctionResult(property.targetSignature,raw)[0])};
+  }catch(error){return{status:'FAILED',value:null,error:String(error?.shortMessage??error?.message??error).slice(0,1200)};}
+}
+async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
+  if(!properties.length)return[];
+  const provider=new ethers.JsonRpcProvider(anvilUrl,1,{staticNetwork:true,cacheTimeout:-1});
+  const actors=await provider.send('eth_accounts',[]);
+  const targetByQ=new Map(targets.map(t=>[t.qualifiedName,t])),out=[];
+  try{
+    for(const property of properties){
+      const target=targetByQ.get(property.targetQualifiedName),actor=actors[0],initial=await readTargetPropertyV2({provider,ethers,property,from:actor});
+      let witness=null;
+      for(const selected of target?.functions??[]){
+        const attemptSnapshot=await provider.send('evm_snapshot',[]);
+        try{
+          const rng=seeded(`property-witness-v2:${property.propertyId}:${selected.signature}`);
+          const args=selected.fragment.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));
+          const iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
+          const data=iface.encodeFunctionData(selected.signature,args),value=selected.fragment.stateMutability==='payable'?1n:0n;
+          const before=await snapshot({provider,ethers,target,sender:actor,plan:target.plan,systemTargets:targets});
+          const estimate=await provider.estimateGas({from:actor,to:target.address,data,value});
+          const signer=await provider.getSigner(actor),tx=await signer.sendTransaction({to:target.address,data,value,gasLimit:estimate+(estimate/2n)+100000n});
+          const receipt=await tx.wait();
+          const after=await snapshot({provider,ethers,target,sender:actor,plan:target.plan,systemTargets:targets});
+          const beforeRows=observationRowsV2(before,target.recipe,'BEFORE'),afterRows=observationRowsV2(after,target.recipe,'AFTER');
+          const deltaRows=observationDeltasV2(beforeRows,afterRows,{receipt,sender:actor});
+          const nonGasDelta=deltaRows.filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
+          const afterProperty=await readTargetPropertyV2({provider,ethers,property,from:actor});
+          if(Number(receipt?.status)===1&&nonGasDelta.length){
+            witness={propertyId:property.propertyId,targetSignature:property.targetSignature,actionSignature:selected.signature,actor,receipt:{status:receipt.status,gasUsed:receipt.gasUsed?.toString()??null},initialProperty:initial,afterProperty,observedTransitionDeltas:nonGasDelta};
+          }
+        }catch{}
+        await provider.send('evm_revert',[attemptSnapshot]).catch(()=>{});
+        if(witness)break;
+      }
+      out.push(witness??{propertyId:property.propertyId,targetSignature:property.targetSignature,status:'UNEXERCISED',initialProperty:initial,reason:'NO_RELEVANT_SUCCESSFUL_OBSERVED_STATE_TRANSITION_WITNESS'});
+    }
+  }finally{await provider.destroy();}
+  return out;
+}
 async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot}){
   const dir=path.join(outRoot,'runs','medusa-anvil-fork-001');await fs.mkdir(dir,{recursive:true});
-  const router=renderMedusaRouter(ethers,targets);
-  if(!router.rows.length){const s={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_ROUTABLE_ABI_FUNCTIONS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,observedCalls:0,limitations:router.omitted};await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(s,null,2)+'\n');return s;}
-  // Compile only the ABI router: production targets are already exactly compiled and deployed on Anvil.
-  const medusaProject=path.join(dir,'router-project');
-  await fs.mkdir(path.join(medusaProject,'src'),{recursive:true});
+  const router=renderMedusaRouterV2(ethers,targets);
+  if(!router.rows.length){
+    const s={schemaVersion:'curveyield-phase0-medusa-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,runId:'medusa-anvil-fork-001',mode:'DISCOVERY_WITH_ORACLE_GAPS',executionStatus:'NOT_EXECUTED',coverageStatus:'NO_ROUTABLE_FUNCTIONS',checkStatus:'ORACLE_GAP',reachabilityStatus:'UNKNOWN',observationStatus:'UNAVAILABLE',status:'BLOCKED_NO_ROUTABLE_ABI_FUNCTIONS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,observedCalls:0,limitations:router.omitted};
+    await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(s,null,2)+'\n');return s;
+  }
+  const checked=router.properties.length>0,mode=checked?'CHECKED_DISCOVERY':'DISCOVERY_WITH_ORACLE_GAPS';
+  const medusaProject=path.join(dir,'router-project');await fs.mkdir(path.join(medusaProject,'src'),{recursive:true});
   const harnessAbs=path.join(medusaProject,'src','Phase0MedusaRouterV1.sol');
   await fs.writeFile(harnessAbs,router.source);
   await fs.writeFile(path.join(medusaProject,'foundry.toml'),'[profile.default]\nsrc = "src"\nout = "out"\nlibs = []\nsolc_version = "0.8.28"\nevm_version = "cancun"\noptimizer = true\noptimizer_runs = 200\n');
-
-  const corpusRel='.curveyield-phase0-medusa-corpus-v1';
-  const cfg={fuzzing:{workers:10,workerResetLimit:50,timeout:0,testLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,shrinkLimit:5000,callSequenceLength:100,coverageEnabled:true,corpusDirectory:corpusRel,coverageFormats:['lcov'],revertReporterEnabled:true,targetContracts:['Phase0MedusaRouterV1'],predeployedContracts:{},targetContractsBalances:[],constructorArgs:{},senderAddresses:['0x0000000000000000000000000000000000010000','0x0000000000000000000000000000000000020000','0x0000000000000000000000000000000000030000','0x0000000000000000000000000000000000040000'],testing:{stopOnFailedTest:false,stopOnNoTests:false,testAllContracts:false,testViewMethods:false,assertionTesting:{enabled:false},propertyTesting:{enabled:false,testPrefixes:['property_']},optimizationTesting:{enabled:false,testPrefixes:['optimize_']},targetFunctionSignatures:router.rows.map(x=>`Phase0MedusaRouterV1.${x.wrapperName}(${x.selected.fragment.inputs.map(p=>p.type).join(',')})`),excludeFunctionSignatures:[]},chainConfig:{cheatCodes:{cheatCodesEnabled:true,enableFFI:false},forkConfig:{forkModeEnabled:true,rpcUrl:anvilUrl,rpcBlock:blockNumber,poolSize:24}}},compilation:{platform:'crytic-compile',platformConfig:{target:'.',args:['--foundry-compile-all']}},slither:{useSlither:false},logging:{level:'info',logDirectory:'',noColor:true}};
+  const cfg=buildMedusaConfigV2({anvilUrl,blockNumber,routerRows:router.rows,checked,callLimit:PHASE0_MEDUSA_CALL_LIMIT_V1});
   const cfgPath=path.join(medusaProject,'medusa.json');await fs.writeFile(cfgPath,JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_CONFIG_v1.json'),JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_ROUTER_v1.sol'),router.source);
+  const witnessRows=await collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties:router.properties});
+  await fs.writeFile(path.join(dir,'PROPERTY_WITNESSES_v2.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-property-witnesses-v2',properties:witnessRows},null,2)+'\n');
+
   const medusaStartedAt=Date.now();
-  console.log('[phase0-medusa] started; timeout=1800s; progress heartbeat every 300s');
-  const heartbeat=setInterval(()=>{
-    const elapsedSeconds=Math.floor((Date.now()-medusaStartedAt)/1000);
-    console.log(`[phase0-medusa] heartbeat: fuzz process still running; elapsed=${elapsedSeconds}s; configuredCallLimit=${PHASE0_MEDUSA_CALL_LIMIT_V1}`);
-  },300000);
+  console.log(`[phase0-medusa] started; mode=${mode}; timeout=1800s; configuredCallLimit=${PHASE0_MEDUSA_CALL_LIMIT_V1}`);
+  const heartbeat=setInterval(()=>console.log(`[phase0-medusa] heartbeat: mode=${mode}; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; configuredCallLimit=${PHASE0_MEDUSA_CALL_LIMIT_V1}`),300000);
   heartbeat.unref?.();
   let r;
-  try{
-    r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv()});
-  }finally{
-    clearInterval(heartbeat);
-  }
-  console.log(`[phase0-medusa] exited; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; exitCode=${r?.exitCode??-1}`);
+  try{r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv()});}
+  finally{clearInterval(heartbeat);}
   const raw=`${r.stdout??''}\n${r.stderr??''}`;await fs.writeFile(path.join(dir,'MEDUSA_RAW_OUTPUT_v1.log'),raw);
-  const corpusSource=path.join(medusaProject,corpusRel),corpusDest=path.join(dir,'corpus');
-  const corpusIndex=[];
+  let parsed;
+  try{parsed=parseMedusaOutput(r.stdout??raw);}catch(error){parsed={status:'parse_failure',properties:[],falsifiedProperties:0,parseError:String(error?.message??error)};}
+
+  const corpusSource=path.join(medusaProject,'.curveyield-phase0-medusa-corpus-v2'),corpusDest=path.join(dir,'corpus'),corpusIndex=[];
   if(fss.existsSync(corpusSource)){
-    await fs.rm(corpusDest,{recursive:true,force:true});
-    await fs.cp(corpusSource,corpusDest,{recursive:true});
-    for(const rel of await walk(corpusDest)){
-      const abs=path.join(corpusDest,...rel.split('/')),bytes=await fs.readFile(abs);
-      corpusIndex.push({path:'corpus/'+rel,sha256:sha256(bytes),bytes:bytes.length});
-    }
+    await fs.rm(corpusDest,{recursive:true,force:true});await fs.cp(corpusSource,corpusDest,{recursive:true});
+    for(const rel of await walk(corpusDest)){const abs=path.join(corpusDest,...rel.split('/')),bytes=await fs.readFile(abs);corpusIndex.push({path:'corpus/'+rel,sha256:sha256(bytes),bytes:bytes.length});}
   }
-  await fs.writeFile(path.join(dir,'MEDUSA_CORPUS_INDEX_v1.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-corpus-index-v1',files:corpusIndex},null,2)+'\n');
-  const observedCalls=maxMedusaCalls(raw),summary={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',purpose:'BROAD_PHASE0_STATEFUL_RANDOMIZED_DISCOVERY_FROM_ANVIL_STATE',fork:{engine:'anvil',rpcUrlExposed:false,rpcBlock:blockNumber,chain:'ethereum',chainId:1},configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls,callSequenceLength:100,workers:10,abiRouterGenerated:true,rawRandomBytes:false,targetContracts:targets.map(t=>({qualifiedName:t.qualifiedName,address:t.address})),routerWrapperCount:router.rows.length,accountingWrapperShare:router.accountingWrapperShare,omittedFunctions:router.omitted,exitCode:r.exitCode,rawOutputRef:'runs/medusa-anvil-fork-001/MEDUSA_RAW_OUTPUT_v1.log',corpusIndexRef:'runs/medusa-anvil-fork-001/MEDUSA_CORPUS_INDEX_v1.json',retainedCorpusFileCount:corpusIndex.length,configRef:'runs/medusa-anvil-fork-001/MEDUSA_CONFIG_v1.json',routerRef:'runs/medusa-anvil-fork-001/MEDUSA_ROUTER_v1.sol',status:r.exitCode===0&&observedCalls>=PHASE0_MEDUSA_MIN_CALLS_V1?'PASS':(r.exitCode===0?'INCOMPLETE_CALL_REQUIREMENT':'FAILED')};
+  await fs.writeFile(path.join(dir,'MEDUSA_CORPUS_INDEX_v1.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-corpus-index-v2',files:corpusIndex},null,2)+'\n');
+
+  const observedCalls=maxMedusaCalls(raw),rawRef='runs/medusa-anvil-fork-001/MEDUSA_RAW_OUTPUT_v1.log';
+  const witnessById=new Map(witnessRows.map(x=>[x.propertyId,x]));
+  const properties=router.properties.map(property=>{
+    const engine=(parsed.properties??[]).find(x=>String(x.name??'').includes(property.wrapperName));
+    const witness=witnessById.get(property.propertyId),witnessed=witness&&witness.status!=='UNEXERCISED'&&Array.isArray(witness.observedTransitionDeltas)&&witness.observedTransitionDeltas.length>0;
+    let result='ENGINE_FAILURE';
+    if(engine?.status==='failed')result='DEVIATION_OBSERVED';
+    else if(!witnessed)result='UNEXERCISED';
+    else if(engine?.status==='passed')result='CHECKED_NO_DEVIATION_OBSERVED';
+    else if(parsed.status==='no_tests')result='ENGINE_FAILURE';
+    return{
+      ...property,discoveredByEngine:Boolean(engine),engineName:engine?.name??null,
+      preconditionWitnessRefs:witnessed?[`runs/medusa-anvil-fork-001/PROPERTY_WITNESSES_v2.json#${property.propertyId}`]:[],
+      executionEvidenceRefs:engine?[rawRef]:[],result,
+      counterexample:engine?.counterexample??null
+    };
+  });
+  const assurance=assessMedusaV2({mode,observedCalls,engineProperties:parsed.properties??[],properties});
+  const callVolumeMet=observedCalls>=PHASE0_MEDUSA_MIN_CALLS_V1;
+  let status;
+  if(checked)status=r.exitCode===0&&callVolumeMet&&assurance.checkStatus==='CHECKED'?'PASS':'COMPLETE_WITH_FAILURES';
+  else status=r.exitCode===0&&callVolumeMet?'COMPLETE_WITH_ORACLE_GAPS':'INCOMPLETE_CALL_REQUIREMENT';
+  const summary={
+    schemaVersion:'curveyield-phase0-medusa-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,runId:'medusa-anvil-fork-001',
+    mode,purpose:'BROAD_PHASE0_STATEFUL_RANDOMIZED_DISCOVERY_WITH_CHECKED_PACKET_PROPERTIES_WHEN_AVAILABLE',
+    fork:{engine:'anvil',rpcUrlExposed:false,rpcBlock:blockNumber,chain:'ethereum',chainId:1},
+    configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls,
+    callSequenceLength:100,workers:10,callerSemantics:'FUZZ_SENDER_PRESERVED_WITH_MEDUSA_PRANK_CHEATCODE',
+    abiRouterGenerated:true,rawRandomBytes:false,targetContracts:targets.map(t=>({qualifiedName:t.qualifiedName,address:t.address,recipeId:t.recipe?.recipeId??null})),
+    routerWrapperCount:router.rows.length,accountingWrapperShare:router.accountingWrapperShare,weightingStrategy:router.weightingStrategy,
+    omittedFunctions:router.omitted,propertyRegistry:properties,engineProperties:parsed.properties??[],engineParseStatus:parsed.status,
+    executionStatus:assurance.executionStatus,coverageStatus:assurance.coverageStatus,checkStatus:assurance.checkStatus,
+    reachabilityStatus:assurance.reachabilityStatus,observationStatus:assurance.observationStatus,
+    exitCode:r.exitCode,rawOutputRef:rawRef,corpusIndexRef:'runs/medusa-anvil-fork-001/MEDUSA_CORPUS_INDEX_v1.json',
+    retainedCorpusFileCount:corpusIndex.length,configRef:'runs/medusa-anvil-fork-001/MEDUSA_CONFIG_v1.json',
+    routerRef:'runs/medusa-anvil-fork-001/MEDUSA_ROUTER_v1.sol',propertyWitnessRef:'runs/medusa-anvil-fork-001/PROPERTY_WITNESSES_v2.json',
+    limitations:checked?router.omitted:[...router.omitted,{type:'ORACLE_GAP',reason:'NO_EXPLICIT_PACKET_DECLARED_PROPERTY_FUNCTIONS_WERE_QUALIFIED'}],
+    status
+  };
   await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
-  await fs.rm(harnessAbs,{force:true});await fs.rm(cfgPath,{force:true});return summary;
+  await fs.rm(harnessAbs,{force:true});await fs.rm(cfgPath,{force:true});
+  return summary;
 }
 function baselineTargetRows({medusa,telemetry}){
   const refs=[medusa?.rawOutputRef,medusa?.corpusIndexRef,...telemetry.map(x=>x.rawTranscriptRef)].filter(Boolean);
