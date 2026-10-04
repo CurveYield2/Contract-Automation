@@ -276,32 +276,40 @@ async function humanScrollSidebarForProjects(page) {
 
 async function ensureSidebarOpenForProject(page) {
   const projects = page.getByText('Projects', { exact: true }).first();
-  if (await projects.isVisible().catch(() => false)) return projects;
+  if (await projects.isVisible().catch(() => false)) {
+    console.log('[github-playwright-v10] project-flow=projects-already-visible');
+    return projects;
+  }
+
+  // First treat the sidebar as already open and human-scroll it. The normal UI
+  // can have Projects below the fold even when no sidebar-open action is needed.
+  const existingSidebarProjects = await humanScrollSidebarForProjects(page);
+  if (existingSidebarProjects) {
+    console.log('[github-playwright-v10] project-flow=projects-found-by-sidebar-scroll');
+    return existingSidebarProjects;
+  }
 
   const open = await firstVisible(page, [
     'button[data-testid="open-sidebar-button"]',
-    'button[data-testid="sidebar-toggle-button"]',
     'button[aria-label="Open sidebar"]',
-    'button[aria-label="Toggle sidebar"]',
     'button[aria-label*="Open sidebar" i]',
-    'button[aria-label*="Show sidebar" i]',
-    'button[aria-label*="sidebar" i]',
-    '[role="button"][aria-label*="sidebar" i]',
-    '[data-testid*="sidebar"][role="button"]',
-    'button[title*="sidebar" i]'
+    'button[aria-label*="Show sidebar" i]'
   ]);
 
-  // If the explicit open control is absent, do not assume failure: the sidebar
-  // may already be open with Projects simply below the fold.
-  if (open) {
-    await humanPointerClick(page, open);
-    await humanActionPause(page);
+  if (!open) {
+    throw new Error('Projects section was not visible and no physical Open-sidebar control was found');
   }
+
+  console.log('[github-playwright-v10] project-flow=open-sidebar-control-visible');
+  await humanPointerClick(page, open);
+  console.log('[github-playwright-v10] project-flow=open-sidebar-clicked');
+  await humanActionPause(page);
 
   const found = await humanScrollSidebarForProjects(page);
   if (!found) {
-    throw new Error('Projects section could not be found after opening/scrolling the visible sidebar');
+    throw new Error('Projects section could not be found after opening and human-scrolling the visible sidebar');
   }
+  console.log('[github-playwright-v10] project-flow=projects-found-after-opening-sidebar');
   return found;
 }
 
