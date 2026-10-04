@@ -285,3 +285,93 @@ export function childRepairWakeMessage({campaignId,pending,repairSpec}){
     'Master work form: '+pending.workFormPath+'.'
   ].join(' ');
 }
+
+function assertDigest(root,record,label){
+  if(!record||typeof record.path!=='string'||!SHA256.test(String(record.sha256??'')))throw new Error(label+' path/sha256 are required');
+  const file=requiredFile(root,record.path,label);
+  if(digestFile(file)!==record.sha256)throw new Error(label+' digest mismatch');
+  return file;
+}
+function deleteObjectPath(object,dot){
+  const parts=String(dot).split('.');
+  let current=object;
+  for(let i=0;i<parts.length-1;i++){
+    if(!current||typeof current!=='object'||!(parts[i] in current))return;
+    current=current[parts[i]];
+  }
+  if(current&&typeof current==='object')delete current[parts.at(-1)];
+}
+function validateAllowedSemanticPaths(root,authorityRoot,phase,paths){
+  const schema=loadPhaseSchema(root,authorityRoot,phase).schema;
+  const failures=[];
+  for(const semanticPath of paths??[]){
+    const match=String(semanticPath).match(/^actions\.([A-Za-z0-9._-]+)\.outputs\.([A-Za-z0-9._-]+)$/);
+    if(!match){failures.push('not a reviewer-owned action output: '+semanticPath);continue;}
+    const field=(schema.actions?.[match[1]]?.fields??[]).find(x=>x.name===match[2]);
+    if(!field)failures.push('not declared by bound phase schema: '+semanticPath);
+  }
+  return failures;
+}
+export function admitSealedPhaseRework({root,campaignPath,directory,requestPath,now}){
+  const request=readJson(requiredFile(root,requestPath,'sealed-phase rework request'));
+  if(request.schemaVersion!=='curveyield-lite-sealed-phase-rework-request-v1')throw new Error('sealed rework request schemaVersion mismatch');
+  if(request.campaignId!==directory.campaignId||request.phaseSequence!==1)throw new Error('sealed rework request campaign/phase mismatch');
+  if(request.fromRevision!==2||request.toRevision!==3)throw new Error('sealed rework request must be the authorized revision2-to-revision3 repair');
+  if(request.holdSuccessorDelivery!==true)throw new Error('sealed rework request must hold successor delivery');
+  if(request.sourceSha256!==directory.sourceSha256)throw new Error('sealed rework source binding mismatch');
+  const expectedRoot='Audit Skill - Current Authority/Audit_Litemode_v10.3';
+  if(request.authority?.logicalRoot!==expectedRoot)throw new Error('sealed rework must remain bound to logical v10.3 authority');
+  if(request.authority?.expectedRootSha256!=='bdb90107ea50580e67be91440ce47087de570c4f54b8474c5a3eb852af95ea27')throw new Error('sealed rework authority root digest mismatch');
+  if(request.authority?.expectedManifestSha256!=='846be5f90d6e00757b817b1218dfabeb2aa4dff6c92b8e9ff47335d2db83703a')throw new Error('sealed rework authority manifest digest mismatch');
+  requiredFile(root,path.posix.join(expectedRoot,'SKILL.md'),'bound v10.3 authority root');
+  requiredFile(root,path.posix.join(expectedRoot,'MANIFEST.json'),'bound v10.3 authority manifest');
+  const priorReceiptFile=assertDigest(root,request.priorReceipt,'prior Phase-1 receipt');
+  const priorReceipt=readJson(priorReceiptFile);
+  if(priorReceipt.phase?.sequence!==1||priorReceipt.phase?.revision!==2||priorReceipt.phase?.status!=='SEALED')throw new Error('prior receipt is not sealed Phase-1 revision2');
+  if(priorReceipt.source?.sha256!==directory.sourceSha256&&priorReceipt.sourceSha256!==directory.sourceSha256)throw new Error('prior receipt source mismatch');
+  if(path.posix.dirname(priorReceipt.authority?.homepagePath??'')!==expectedRoot)throw new Error('prior receipt authority mismatch');
+  const priorFormFile=assertDigest(root,request.priorWorkForm,'prior Phase-1 work form');
+  const repairedFormFile=assertDigest(root,request.repairedWorkForm,'repaired Phase-1 work form');
+  assertDigest(root,request.qualityReview,'Phase-1 quality review');
+  if(!request.humanAuthorization?.scopeId||!request.humanAuthorization?.authorizedAt)throw new Error('explicit human rework authorization metadata is required');
+  assertDigest(root,{path:request.humanAuthorization.recordPath,sha256:request.humanAuthorization.recordSha256},'human rework authorization record');
+  const allowed=request.allowedSemanticPaths;
+  if(!Array.isArray(allowed)||allowed.length===0)throw new Error('allowedSemanticPaths must be non-empty');
+  const allowedFailures=validateAllowedSemanticPaths(root,expectedRoot,1,allowed);
+  if(allowedFailures.length)throw new Error('invalid sealed rework scope: '+allowedFailures.join('; '));
+  const priorForm=readJson(priorFormFile);
+  const repairedForm=readJson(repairedFormFile);
+  const priorProtected=structuredClone(priorForm);
+  const repairedProtected=structuredClone(repairedForm);
+  for(const semanticPath of allowed){deleteObjectPath(priorProtected,semanticPath);deleteObjectPath(repairedProtected,semanticPath);}
+  if(!exactJson(priorProtected,repairedProtected))throw new Error('repaired work form changed data outside allowedSemanticPaths');
+  const refresh=request.dependentRefresh??{};
+  for(const key of ['regenerateCanonical','regenerateReport','regenerateDerived','resealReceipt','prepareSuccessorAssignment'])if(refresh[key]!==true)throw new Error('dependentRefresh.'+key+' must be true');
+  if(request.evidenceInvalidation?.eventId!=='EIM-013'||request.evidenceInvalidation?.resolveTo!=='RESOLVED_BY_PHASE_1_REVISION_3')throw new Error('sealed rework must resolve EIM-013 with the authorized disposition');
+  const invalidRel=path.posix.join(campaignPath,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json');
+  const invalid=readJson(requiredFile(root,invalidRel,'evidence invalidation matrix'));
+  const events=invalid.events??invalid.invalidationEvents??[];
+  const event=events.find(x=>x?.eventId==='EIM-013'||x?.id==='EIM-013');
+  if(!event)throw new Error('EIM-013 does not exist');
+  if(request.evidenceInvalidation.requiredPriorStatus&&String(event.status)!==String(request.evidenceInvalidation.requiredPriorStatus))throw new Error('EIM-013 prior status mismatch');
+  const predecessorInput=(priorReceipt.inputs??[]).find(x=>x?.role==='PREDECESSOR_RECEIPT')?.path;
+  if(!predecessorInput)throw new Error('prior Phase-1 receipt lacks predecessor receipt input');
+  const loaded=loadPhaseSchema(root,expectedRoot,1);
+  if(repairedForm.schemaVersion!=='curveyield-lite-phase-work-form-v1'||repairedForm.phase!==1)throw new Error('repaired work form identity mismatch');
+  const prefillDigest=repairedForm.automationInputs?.controllerPrefillDigestSha256;
+  if(!SHA256.test(String(prefillDigest??'')))throw new Error('repaired work form lacks controller prefill digest');
+  return {
+    request,
+    authorityRoot:expectedRoot,
+    invalidationRel:invalidRel,
+    assignment:{
+      phaseSequence:1,phaseId:'phase-1',phaseRevision:3,reviewer:'reviewer-1',status:'ACTIVE',
+      workSchemaPath:loaded.rel,workFormPath:request.repairedWorkForm.path,
+      finalReportPath:path.posix.join(campaignPath,loaded.schema.finalReport.campaignPath),
+      packetPath:path.posix.join(campaignPath,loaded.schema.submission.packetPath),
+      predecessorReceiptPath:predecessorInput,derivedInputPaths:priorReceipt.inputs?.filter(x=>x?.role==='DERIVED_INPUT').map(x=>x.path)??[],
+      controllerPrefillDigestSha256:prefillDigest,
+      sealedRework:{scopeId:request.humanAuthorization.scopeId,requestPath,admittedAt:now}
+    }
+  };
+}
