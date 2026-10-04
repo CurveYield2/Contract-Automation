@@ -440,3 +440,20 @@ test('workflow uploads durable chat state even after later browser failure and r
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /CHAT_STATE_PATH: \/tmp\/browser-agent-home-exit-v10-chat-state-v1\.json/);
 });
+
+
+test('saved Project direct recovery retries only the exact URL after transient homepage bounce', () => {
+  const start = source.indexOf('async function openSavedProjectUrl');
+  const end = source.indexOf('\nasync function findVisibleExactProjectEntry', start);
+  const block = source.slice(start, end);
+
+  assert.match(block, /const maxAttempts = 4/);
+  assert.match(block, /for \(let attempt = 1; attempt <= maxAttempts; attempt \+= 1\)/);
+  assert.match(block, /await page\.goto\(projectUrl, \{ waitUntil: 'domcontentloaded', timeout: 60000 \}\)/);
+  assert.match(block, /const settleDeadline = Date\.now\(\) \+ 20000/);
+  assert.match(block, /findProjectLandingComposer\(page, name\)/);
+  assert.match(block, /project-saved-url-retry=/);
+  assert.match(block, /randomDelayMs\(2500, 4500\)/);
+  assert.match(block, /after direct retries/);
+  assert.doesNotMatch(block, /recoverExistingProjectExactHumanFlow|ensureSidebarOpenForProject|mouse\.wheel/);
+});
