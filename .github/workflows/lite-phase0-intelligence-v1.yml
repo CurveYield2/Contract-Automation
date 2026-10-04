@@ -84,10 +84,11 @@ jobs:
           gh api "repos/CurveYield2/Audit-Controller/contents/$receipt_path?ref=$AUDIT_CONTROLLER_REF" --jq '.content' | base64 -d > /tmp/phase0-receipt.json
           test "$(jq -r '.campaign.campaignId' /tmp/phase0-receipt.json)" = "$CAMPAIGN_ID"
           test "$(jq -r '.phase.sequence' /tmp/phase0-receipt.json)" = "0"
-          jq -n             --arg requestId "phase0-$CAMPAIGN_ID-$GITHUB_RUN_ID"             --arg campaignId "$CAMPAIGN_ID"             --arg sourceCommit "$(jq -r '.source.archiveCommit' /tmp/phase0-receipt.json)"             --arg archivePath "$(jq -r '.source.archivePath' /tmp/phase0-receipt.json)"             --arg archiveSha "$(jq -r '.source.sha256' /tmp/phase0-receipt.json)"             --arg destRef "$AUDIT_CONTROLLER_REF"             --arg campaignPath "$CAMPAIGN_PATH"             '{
+          jq -n             --arg requestId "phase0-$CAMPAIGN_ID-$GITHUB_RUN_ID"             --arg campaignId "$CAMPAIGN_ID"             --arg campaignGenerationId "$(jq -r '.campaign.campaignGenerationId' /tmp/phase0-receipt.json)"             --arg sourceCommit "$(jq -r '.source.archiveCommit' /tmp/phase0-receipt.json)"             --arg archivePath "$(jq -r '.source.archivePath' /tmp/phase0-receipt.json)"             --arg archiveSha "$(jq -r '.source.sha256' /tmp/phase0-receipt.json)"             --arg destRef "$AUDIT_CONTROLLER_REF"             --arg campaignPath "$CAMPAIGN_PATH"             '{
               schemaVersion:"curveyield-lite-phase0-intelligence-request-v1",
               requestId:$requestId,
               campaignId:$campaignId,
+              campaignGenerationId:$campaignGenerationId,
               source:{repository:"CurveYield2/Audit-Controller",commit:$sourceCommit,archivePath:$archivePath,archiveSha256:$archiveSha},
               destination:{repository:"CurveYield2/Audit-Controller",ref:$destRef,campaignPath:$campaignPath}
             }' > .phase0-request.json
