@@ -419,8 +419,13 @@ test('typed held revision2-to-revision3 admission regenerates controller product
   const priorReceiptRel=f.campaign+'/receipts/PHASE_01_RECEIPT_v2.json';
   writeJson(path.join(f.root,priorReceiptRel),{
     phase:{sequence:1,revision:2,status:'SEALED'},source:{sha256:'a'.repeat(64)},authority:phase0.authority,
-    inputs:[{role:'PREDECESSOR_RECEIPT',path:f.campaign+'/receipts/PHASE_00_RECEIPT_v1.json'}]
+    inputs:[{role:'PREDECESSOR_RECEIPT',path:f.campaign+'/receipts/PHASE_00_RECEIPT_v1.json'}],
+    evidence:[{role:'PHASE_WORK_FORM',path:path.posix.relative(f.campaign,priorFormRel),sha256:createHash('sha256').update(fs.readFileSync(path.join(f.root,priorFormRel))).digest('hex')}],
+    outputs:[{role:'PHASE_WORK_FORM',path:path.posix.relative(f.campaign,priorFormRel),sha256:createHash('sha256').update(fs.readFileSync(path.join(f.root,priorFormRel))).digest('hex')}]
   });
+  const reworkDirectory=readJson(path.join(f.root,f.dirRel));
+  reworkDirectory.lastSealedReceiptPath=priorReceiptRel;
+  writeJson(path.join(f.root,f.dirRel),reworkDirectory);
   const qualityRel=f.campaign+'/work/phase-01/review/PHASE_01_QUALITY_REVIEW_v2.md';
   const authRel=f.campaign+'/controller/HUMAN_REWORK_AUTHORIZATION_v1.json';
   write(path.join(f.root,qualityRel),'# Quality review\nBounded correction approved.\n');
