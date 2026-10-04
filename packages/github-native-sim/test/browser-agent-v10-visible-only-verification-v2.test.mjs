@@ -310,7 +310,7 @@ test('v10 saved Project reuse accepts canonical Project root while rejecting cha
   assert.ok(source.includes('url.pathname.match(/^\\/g\\/(g-p-[A-Za-z0-9]+)(?:-[^/]+)?(?:\\/project)?\\/?$/)'));
   assert.match(source, /const expectedProjectIdentity = savedProjectIdentity\(projectUrl\)/);
   assert.match(source, /const currentProjectIdentity = savedProjectIdentity\(currentProjectUrl\)/);
-  assert.match(source, /currentProjectIdentity !== expectedProjectIdentity/);
+  assert.match(source, /currentProjectIdentity === expectedProjectIdentity/);
   assert.match(source, /observedUrl=/);
 });
 
