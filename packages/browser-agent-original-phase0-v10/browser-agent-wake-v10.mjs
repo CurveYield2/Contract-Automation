@@ -16,6 +16,7 @@ const projectName = env.PROJECT_NAME || '';
 const requestedProjectUrl = env.PROJECT_URL || '';
 const recoveryChatTitle = env.RECOVERY_CHAT_TITLE || '';
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
+const chatStatePath = env.CHAT_STATE_PATH || '/tmp/browser-agent-home-exit-v10-chat-state-v1.json';
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
 }
@@ -841,6 +842,51 @@ function chatRouteInfo(value) {
   }
 }
 
+async function persistDurableChatState(chatUrl, projectUrl = '') {
+  const route = chatRouteInfo(chatUrl);
+  if (!route.isChat || route.isLocal) return false;
+
+  const state = {
+    version: 1,
+    capturedAt: new Date().toISOString(),
+    wakeId,
+    action,
+    projectName,
+    projectUrl: projectUrl || requestedProjectUrl || '',
+    chatUrl,
+    chatTitle: recoveryChatTitle || ''
+  };
+  await fs.writeFile(chatStatePath, JSON.stringify(state, null, 2) + '\n');
+  console.log('[github-playwright-v10] durable-chat-state-captured=' + JSON.stringify({
+    chatUrl,
+    projectUrl: state.projectUrl,
+    projectName: state.projectName
+  }));
+  return true;
+}
+
+async function recoverCreatedChatDirect(page, message) {
+  const route = chatRouteInfo(page.url());
+  if (!route.isChat || route.isLocal) {
+    throw new Error('Direct recovery is not on a durable ChatGPT conversation route');
+  }
+
+  const wake = await visibleWakePresent(page, message, 30000);
+  if (!wake.visible) {
+    throw new Error('Directly recovered chat did not visibly contain the exact original wake message');
+  }
+
+  await persistDurableChatState(route.url || page.url(), requestedProjectUrl);
+  return {
+    recovered: true,
+    projectUrl: requestedProjectUrl || '',
+    chatUrl: page.url(),
+    chatTitle: recoveryChatTitle || '',
+    verificationMethod: wake.method,
+    userCount: wake.userCount
+  };
+}
+
 async function visibleWakePresent(page, message, timeoutMs = 90000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
@@ -941,15 +987,12 @@ function recoverySearchMarker(message) {
 async function recoverCreatedChatFromProjectPage(page, message) {
   if (!message) throw new Error('recover action requires the original wake message');
   if (!recoveryChatTitle) throw new Error('recover action requires the visible Project chat title');
+  if (!requestedProjectUrl) {
+    throw new Error('Project-page recovery requires a saved Project URL; sidebar rediscovery is disabled');
+  }
 
-  // Prefer an already-persisted Project URL when supplied. If this one-time
-  // recovery request does not have one, open the exact visible Project entry
-  // by name with the normal human pointer flow and capture the navigated URL.
-  // Once inside the Project, recovery never uses global Search.
-  const project = requestedProjectUrl
-    ? await openSavedProjectUrl(page, projectName, requestedProjectUrl)
-    : await recoverExistingProjectExactHumanFlow(page, projectName);
-  if (!project) throw new Error('Existing Project could not be opened for recovery');
+  const project = await openSavedProjectUrl(page, projectName, requestedProjectUrl);
+  if (!project) throw new Error('Saved Project URL could not be opened for recovery');
 
   await page.waitForTimeout(randomDelayMs(1200, 2200));
 
@@ -979,6 +1022,7 @@ async function recoverCreatedChatFromProjectPage(page, message) {
   if (!route.projectScoped) {
     throw new Error('Recovered Project chat did not open a Project-scoped durable conversation route');
   }
+  await persistDurableChatState(route.url, project.url);
 
   const wake = await visibleWakePresent(page, message, 30000);
   if (!wake.visible) {
@@ -1026,6 +1070,7 @@ async function postWithVisibleVerification(page, message, composerOverride = nul
   if (initialRoute.isLocal) {
     initialRoute = await waitForDurableChatRoute(page, 300000);
   }
+  await persistDurableChatState(initialRoute.url, requestedProjectUrl);
 
   await humanReload(page);
   await waitForVisibleBrowserReady(page);
@@ -1035,6 +1080,7 @@ async function postWithVisibleVerification(page, message, composerOverride = nul
     throw new Error('Human-style reload did not return to a durable ChatGPT conversation');
   }
 
+  await persistDurableChatState(reloadedRoute.url, requestedProjectUrl);
   const afterReload = await visibleWakePresent(page, message, 90000);
   console.log('[github-playwright-v10] visible-wake-after-reload=' + JSON.stringify({
     ...afterReload,
@@ -1058,7 +1104,10 @@ async function postWithVisibleVerification(page, message, composerOverride = nul
 async function runWithPage(providerName, connect) {
   const { browser, context, page, close } = await connect();
   try {
-    if (mode === 'resume_existing') {
+    const recoveryRoute = action === 'recover' ? chatRouteInfo(requestedUrl) : { isChat: false, isLocal: false };
+    if (action === 'recover' && recoveryRoute.isChat && !recoveryRoute.isLocal) {
+      await page.goto(requestedUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    } else if (mode === 'resume_existing') {
       const requestedRoute = chatRouteInfo(requestedUrl);
       if (!requestedRoute.isChat || requestedRoute.isLocal) {
         throw new Error('resume_existing requires a durable root or Project-scoped ChatGPT conversation URL');
@@ -1094,7 +1143,10 @@ async function runWithPage(providerName, connect) {
     }
 
     if (action === 'recover') {
-      const recovered = await recoverCreatedChatFromProjectPage(page, wakeMessage);
+      const directRoute = chatRouteInfo(requestedUrl);
+      const recovered = directRoute.isChat && !directRoute.isLocal
+        ? await recoverCreatedChatDirect(page, wakeMessage)
+        : await recoverCreatedChatFromProjectPage(page, wakeMessage);
       const after = await snapshot(page);
       const sessionStatePersisted = false;
       const result = {

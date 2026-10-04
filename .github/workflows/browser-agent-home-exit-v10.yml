@@ -71,6 +71,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: original-phase0-home-exit-browser-v10
@@ -85,6 +86,7 @@ jobs:
       DISPLAY: ":99"
       BROWSER_HEADLESS: "false"
       WAKE_RESULT_PATH: /tmp/browser-agent-home-exit-v10-result.json
+      CHAT_STATE_PATH: /tmp/browser-agent-home-exit-v10-chat-state-v1.json
 
     steps:
       - name: Checkout trusted browser package
@@ -94,6 +96,38 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+
+      - name: Restore latest durable chat state
+        id: prior_chat_state
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          state="/tmp/browser-agent-home-exit-v10-prior-chat-state-v1.json"
+          echo "state_path=" >> "$GITHUB_OUTPUT"
+
+          artifact_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=browser-agent-home-exit-v10-chat-state-v1&per_page=100"             --jq '[.artifacts[] | select(.expired==false)] | sort_by(.created_at) | reverse | .[0].id // empty' 2>/dev/null || true)"
+          if [ -z "$artifact_id" ]; then
+            echo "No prior durable chat-state artifact found."
+            exit 0
+          fi
+
+          rm -rf /tmp/browser-chat-state-restore /tmp/browser-chat-state.zip
+          mkdir -p /tmp/browser-chat-state-restore
+          curl -fsSL             -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip"             -o /tmp/browser-chat-state.zip
+          unzip -q /tmp/browser-chat-state.zip -d /tmp/browser-chat-state-restore
+
+          restored="$(find /tmp/browser-chat-state-restore -type f -name 'browser-agent-home-exit-v10-chat-state-v1.json' -print -quit)"
+          if [ -z "$restored" ] || [ ! -s "$restored" ]; then
+            echo "Prior artifact did not contain durable chat state."
+            exit 0
+          fi
+
+          cp "$restored" "$state"
+          jq -e '.version==1 and (.chatUrl|type=="string")' "$state" >/dev/null
+          echo "state_path=$state" >> "$GITHUB_OUTPUT"
+          echo "Restored prior durable browser chat state."
 
       - name: Resolve browser request
         id: request
@@ -110,33 +144,61 @@ jobs:
           INPUT_HOME_EXIT_NODE: ${{ inputs.home_exit_node }}
           INPUT_INTERACTIVE_VIEW: ${{ inputs.interactive_view }}
           INPUT_MANUAL_WAIT: ${{ inputs.manual_challenge_wait_minutes }}
+          PRIOR_CHAT_STATE_PATH: ${{ steps.prior_chat_state.outputs.state_path }}
         run: |
           set -euo pipefail
+
           if [ "$EVENT_NAME" = "push" ]; then
             request="process/browser-agent-home-exit-v10/current-request-v10.json"
             test -s "$request"
-            echo "action=$(jq -r '.action // "observe"' "$request")" >> "$GITHUB_OUTPUT"
-            echo "mode=$(jq -r '.mode // "create_fresh"' "$request")" >> "$GITHUB_OUTPUT"
-            echo "chat_url=$(jq -r '.chat_url // ""' "$request")" >> "$GITHUB_OUTPUT"
-            echo "wake_message=$(jq -r '.wake_message // ""' "$request")" >> "$GITHUB_OUTPUT"
-            echo "project_name=$(jq -r '.project_name // ""' "$request")" >> "$GITHUB_OUTPUT"
-            echo "project_url=$(jq -r '.project_url // ""' "$request")" >> "$GITHUB_OUTPUT"
-            echo "recovery_chat_title=$(jq -r '.recovery_chat_title // ""' "$request")" >> "$GITHUB_OUTPUT"
-            echo "home_exit_node=$(jq -r '.home_exit_node' "$request")" >> "$GITHUB_OUTPUT"
-            echo "interactive_view=$(jq -r '.interactive_view // true' "$request")" >> "$GITHUB_OUTPUT"
-            echo "manual_wait=$(jq -r '.manual_challenge_wait_minutes // 5' "$request")" >> "$GITHUB_OUTPUT"
+            action="$(jq -r '.action // "observe"' "$request")"
+            mode="$(jq -r '.mode // "create_fresh"' "$request")"
+            chat_url="$(jq -r '.chat_url // ""' "$request")"
+            wake_message="$(jq -r '.wake_message // ""' "$request")"
+            project_name="$(jq -r '.project_name // ""' "$request")"
+            project_url="$(jq -r '.project_url // ""' "$request")"
+            recovery_chat_title="$(jq -r '.recovery_chat_title // ""' "$request")"
+            home_exit_node="$(jq -r '.home_exit_node' "$request")"
+            interactive_view="$(jq -r '.interactive_view // true' "$request")"
+            manual_wait="$(jq -r '.manual_challenge_wait_minutes // 5' "$request")"
           else
-            echo "action=$INPUT_ACTION" >> "$GITHUB_OUTPUT"
-            echo "mode=$INPUT_MODE" >> "$GITHUB_OUTPUT"
-            echo "chat_url=$INPUT_CHAT_URL" >> "$GITHUB_OUTPUT"
-            echo "wake_message=$INPUT_WAKE_MESSAGE" >> "$GITHUB_OUTPUT"
-            echo "project_name=$INPUT_PROJECT_NAME" >> "$GITHUB_OUTPUT"
-            echo "project_url=$INPUT_PROJECT_URL" >> "$GITHUB_OUTPUT"
-            echo "recovery_chat_title=$INPUT_RECOVERY_CHAT_TITLE" >> "$GITHUB_OUTPUT"
-            echo "home_exit_node=$INPUT_HOME_EXIT_NODE" >> "$GITHUB_OUTPUT"
-            echo "interactive_view=$INPUT_INTERACTIVE_VIEW" >> "$GITHUB_OUTPUT"
-            echo "manual_wait=$INPUT_MANUAL_WAIT" >> "$GITHUB_OUTPUT"
+            action="$INPUT_ACTION"
+            mode="$INPUT_MODE"
+            chat_url="$INPUT_CHAT_URL"
+            wake_message="$INPUT_WAKE_MESSAGE"
+            project_name="$INPUT_PROJECT_NAME"
+            project_url="$INPUT_PROJECT_URL"
+            recovery_chat_title="$INPUT_RECOVERY_CHAT_TITLE"
+            home_exit_node="$INPUT_HOME_EXIT_NODE"
+            interactive_view="$INPUT_INTERACTIVE_VIEW"
+            manual_wait="$INPUT_MANUAL_WAIT"
           fi
+
+          if [ "$action" = "recover" ] && [ -n "$PRIOR_CHAT_STATE_PATH" ] && [ -s "$PRIOR_CHAT_STATE_PATH" ]; then
+            prior_project_name="$(jq -r '.projectName // ""' "$PRIOR_CHAT_STATE_PATH")"
+            if [ -z "$project_name" ] || [ -z "$prior_project_name" ] || [ "$prior_project_name" = "$project_name" ]; then
+              if [ -z "$chat_url" ]; then
+                chat_url="$(jq -r '.chatUrl // ""' "$PRIOR_CHAT_STATE_PATH")"
+              fi
+              if [ -z "$project_url" ]; then
+                project_url="$(jq -r '.projectUrl // ""' "$PRIOR_CHAT_STATE_PATH")"
+              fi
+              echo "Recovered durable chat/project URL from prior browser state artifact."
+            fi
+          fi
+
+          {
+            echo "action=$action"
+            echo "mode=$mode"
+            echo "chat_url=$chat_url"
+            echo "wake_message=$wake_message"
+            echo "project_name=$project_name"
+            echo "project_url=$project_url"
+            echo "recovery_chat_title=$recovery_chat_title"
+            echo "home_exit_node=$home_exit_node"
+            echo "interactive_view=$interactive_view"
+            echo "manual_wait=$manual_wait"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -258,6 +320,15 @@ jobs:
           else
             jq -e '.ok==true and .provider=="github-playwright" and (.posted==true or .skipped=="PRODUCTIVE_GENERATING")' "$WAKE_RESULT_PATH" >/dev/null
           fi
+
+      - name: Capture durable browser chat state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-agent-home-exit-v10-chat-state-v1
+          path: /tmp/browser-agent-home-exit-v10-chat-state-v1.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Disable home exit node
         if: always()

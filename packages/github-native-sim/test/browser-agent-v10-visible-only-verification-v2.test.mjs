@@ -103,10 +103,11 @@ test('send path uses visible pointer and keyboard primitives only', () => {
 });
 
 
-test('recover action reopens the already-posted Project chat through visible UI without resending', () => {
+test('recover action prefers saved durable chat URL and uses saved Project URL only as fallback', () => {
+  assert.match(source, /async function recoverCreatedChatDirect/);
   assert.match(source, /async function recoverCreatedChatFromProjectPage/);
-  assert.match(source, /requestedProjectUrl\s*\?\s*await openSavedProjectUrl\(page, projectName, requestedProjectUrl\)/);
-  assert.match(source, /:\s*await recoverExistingProjectExactHumanFlow\(page, projectName\)/);
+  assert.match(source, /Project-page recovery requires a saved Project URL; sidebar rediscovery is disabled/);
+  assert.match(source, /const project = await openSavedProjectUrl\(page, projectName, requestedProjectUrl\)/);
   assert.match(source, /projectMain\.getByText\(titlePattern, \{ exact: true \}\)/);
   assert.match(source, /humanPointerClick\(page, chatControl\)/);
   assert.match(source, /await waitForDurableChatRoute\(page, 300000\)/);
@@ -311,21 +312,21 @@ test('v10 saved Project reuse accepts canonical Project root while rejecting cha
   assert.match(source, /observedUrl=/);
 });
 
-test('recover opens the Project first, then uses only the visible Project chat list', () => {
+test('Project fallback recovery requires saved Project URL and uses only the central visible Project chat list', () => {
   const start = source.indexOf('async function recoverCreatedChatFromProjectPage');
   const end = source.indexOf('\nasync function postWithVisibleVerification', start);
   const block = source.slice(start, end);
 
+  const requireSaved = block.indexOf('Project-page recovery requires a saved Project URL; sidebar rediscovery is disabled');
   const openSaved = block.indexOf('openSavedProjectUrl(page, projectName, requestedProjectUrl)');
-  const openByName = block.indexOf('recoverExistingProjectExactHumanFlow(page, projectName)');
   const projectMain = block.indexOf("page.locator('main, [role=\"main\"]').first()");
   const title = block.indexOf('projectMain.getByText(titlePattern, { exact: true })');
   const click = block.indexOf('humanPointerClick(page, chatControl)');
-  assert.ok(openSaved >= 0 && openByName > openSaved && projectMain > openByName && title > projectMain && click > title);
+  assert.ok(requireSaved >= 0 && openSaved > requireSaved && projectMain > openSaved && title > projectMain && click > title);
   assert.match(block, /recoveryChatTitle/);
   assert.match(block, /ancestor-or-self::a\[1\]/);
   assert.match(block, /ancestor-or-self::button\[1\]/);
-  assert.doesNotMatch(block, /Search chats|Control\+K|humanTypeInto\(page, searchInput/);
+  assert.doesNotMatch(block, /recoverExistingProjectExactHumanFlow|Search chats|Control\+K|humanTypeInto\(page, searchInput/);
 });
 
 test('visible Project-name recovery clicks the exact rendered Project title text directly', () => {
@@ -374,4 +375,49 @@ test('existing Project recovery uses short-click then double-click then long-cli
   assert.match(recover, /runProjectTitleClickSequence\(page, existing, beforeUrl\)/);
   assert.match(recover, /Existing exact-name Project title did not navigate after short-click, double-click, and long-click sequence/);
   assert.doesNotMatch(recover, /humanPointerClick\(page, existing\)/);
+});
+
+test('v10 checkpoints every durable chat URL before later verification can fail', () => {
+  assert.match(source, /const chatStatePath = env\.CHAT_STATE_PATH/);
+  assert.match(source, /async function persistDurableChatState/);
+  assert.match(source, /durable-chat-state-captured=/);
+  assert.match(source, /await fs\.writeFile\(chatStatePath/);
+
+  const postStart = source.indexOf('async function postWithVisibleVerification');
+  const postEnd = source.indexOf('\nasync function runWithPage', postStart);
+  const postBlock = source.slice(postStart, postEnd);
+  const durableWait = postBlock.indexOf('initialRoute = await waitForDurableChatRoute');
+  const checkpoint = postBlock.indexOf('persistDurableChatState(initialRoute.url');
+  const reload = postBlock.indexOf('await humanReload(page)');
+  assert.ok(checkpoint >= 0 && reload > checkpoint);
+  if (durableWait >= 0) assert.ok(checkpoint > durableWait);
+});
+
+test('recover opens a saved durable chat URL directly and never rediscovers its Project through sidebar UI', () => {
+  assert.match(source, /async function recoverCreatedChatDirect/);
+  assert.match(source, /action === 'recover' && recoveryRoute\.isChat && !recoveryRoute\.isLocal/);
+
+  const runStart = source.indexOf('async function runWithPage');
+  const runEnd = source.indexOf('\nasync function localProvider', runStart);
+  const runBlock = source.slice(runStart, runEnd);
+  assert.match(runBlock, /await page\.goto\(requestedUrl/);
+  assert.match(runBlock, /await recoverCreatedChatDirect\(page, wakeMessage\)/);
+
+  const projectRecoverStart = source.indexOf('async function recoverCreatedChatFromProjectPage');
+  const projectRecoverEnd = source.indexOf('\nasync function postWithVisibleVerification', projectRecoverStart);
+  const projectRecoverBlock = source.slice(projectRecoverStart, projectRecoverEnd);
+  assert.match(projectRecoverBlock, /Project-page recovery requires a saved Project URL; sidebar rediscovery is disabled/);
+  assert.doesNotMatch(projectRecoverBlock, /recoverExistingProjectExactHumanFlow/);
+});
+
+test('workflow uploads durable chat state even after later browser failure and restores it on the next recovery', () => {
+  assert.match(workflow, /actions: read/);
+  assert.match(workflow, /Restore latest durable chat state/);
+  assert.match(workflow, /browser-agent-home-exit-v10-chat-state-v1/);
+  assert.match(workflow, /actions\/artifacts\?name=browser-agent-home-exit-v10-chat-state-v1/);
+  assert.match(workflow, /Recovered durable chat\/project URL from prior browser state artifact/);
+  assert.match(workflow, /Capture durable browser chat state/);
+  assert.match(workflow, /if: always\(\)/);
+  assert.match(workflow, /actions\/upload-artifact@v4/);
+  assert.match(workflow, /CHAT_STATE_PATH: \/tmp\/browser-agent-home-exit-v10-chat-state-v1\.json/);
 });
