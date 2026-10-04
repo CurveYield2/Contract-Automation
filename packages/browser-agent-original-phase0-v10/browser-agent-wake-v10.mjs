@@ -623,7 +623,6 @@ async function createProjectExactHumanFlow(page, name) {
 
   const composer = await ensureComposer(page);
   console.log('[github-playwright-v10] project-created-visible=' + JSON.stringify({ projectName: name, url: projectUrl }));
-  await publishOperatorStatus('PROJECT_URL_SAVED', { projectUrl });
   return { projectName: name, url: projectUrl, composer };
 }
 
@@ -994,6 +993,7 @@ async function runWithPage(providerName, connect) {
     if (action === 'project_wake') {
       if (mode !== 'create_fresh') throw new Error('project_wake requires create_fresh mode');
       project = await createProjectExactHumanFlow(page, projectName);
+      await publishOperatorStatus('PROJECT_URL_SAVED', { projectUrl: project.url });
     }
 
     const before = await snapshot(page);
