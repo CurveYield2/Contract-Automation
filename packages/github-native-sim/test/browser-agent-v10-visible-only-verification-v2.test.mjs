@@ -459,16 +459,20 @@ test('saved Project direct recovery retries only the exact URL after transient h
 });
 
 
-test('human address navigation uses the visible address bar and per-character keyboard input', () => {
+test('human address navigation uses the visible Chrome omnibox through X11 keyboard input', () => {
   const start = source.indexOf('async function humanAddressNavigate');
   const end = source.indexOf('\nasync function findVisibleSidebarSurface', start);
   const block = source.slice(start, end);
-  assert.match(block, /page\.keyboard\.press\('Control\+L'\)/);
-  assert.match(block, /for \(const char of String\(targetUrl\)\)/);
-  assert.match(block, /page\.keyboard\.type\(char\)/);
-  assert.match(block, /humanTypingPause\(page\)/);
-  assert.match(block, /page\.keyboard\.press\('Enter'\)/);
-  assert.doesNotMatch(block, /page\.goto\(targetUrl|\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
+  assert.match(source, /execFile as execFileCallback/);
+  assert.match(source, /promisify\(execFileCallback\)/);
+  assert.match(block, /visibleChromeWindowId\(\)/);
+  assert.match(block, /humanOsKey\(page, windowId, 'ctrl\+l'\)/);
+  assert.match(block, /'xdotool'/);
+  assert.match(block, /'type'/);
+  assert.match(block, /'--delay', String\(perCharacterDelayMs\)/);
+  assert.match(block, /randomDelayMs\(200, 400\)/);
+  assert.match(block, /'Return'/);
+  assert.doesNotMatch(block, /page\.keyboard|page\.goto\(targetUrl|\.fill\s*\(|\.evaluate\s*\(|force:\s*true/);
 });
 
 
