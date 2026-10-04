@@ -336,6 +336,11 @@ function latestPhaseReceiptInfo(root,campaignPath,sequence){
   if(!rows.length)throw new Error('master repair refresh cannot find sealed Phase '+sequence+' receipt');
   return rows[0];
 }
+function revisionedArtifactPath(rel,revision){
+  if(!rel)return null;
+  if(/_v[0-9]+(?=\.[^.]+$)/.test(rel))return rel.replace(/_v[0-9]+(?=\.[^.]+$)/,'_v'+revision);
+  return rel.replace(/(?=\.[^.]+$)/,'_v'+revision);
+}
 function reviewerForPhase(sequence){
   if(sequence===1)return 'reviewer-1';
   if(sequence>=2&&sequence<=5)return 'reviewer-2';
@@ -429,8 +434,8 @@ function applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,auth
         status:'ACTIVE',
         workSchemaPath:loaded.rel,
         workFormPath:formRel,
-        finalReportPath:schema.finalReport?path.posix.join(campaignPath,schema.finalReport.campaignPath):null,
-        packetPath:path.posix.join(campaignPath,schema.submission.packetPath),
+        finalReportPath:schema.finalReport?revisionedArtifactPath(path.posix.join(campaignPath,schema.finalReport.campaignPath),revision):null,
+        packetPath:revisionedArtifactPath(path.posix.join(campaignPath,schema.submission.packetPath),revision),
         predecessorReceiptPath,
         derivedInputPaths:[...derivedInputPaths],
         controllerPrefillDigestSha256:prefillDigest,
