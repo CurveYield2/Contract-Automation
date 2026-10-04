@@ -240,6 +240,15 @@ jobs:
             jq -e '.ok==true and .provider=="github-playwright" and (.posted==true or .skipped=="PRODUCTIVE_GENERATING")' "$WAKE_RESULT_PATH" >/dev/null
           fi
 
+      - name: Upload Project create evidence v1
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-project-create-evidence-v1
+          path: /tmp/browser-project-create-evidence-v1/
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Disable home exit node
         if: always()
         shell: bash
