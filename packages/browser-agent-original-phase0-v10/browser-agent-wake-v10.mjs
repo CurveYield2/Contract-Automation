@@ -883,9 +883,30 @@ async function post(page, message, composerOverride = null) {
     throw new Error('Human-typed wake was not fully and visibly present in the composer before Send');
   }
 
-  console.log('[github-playwright-v10] send-strategy=human-pointer-click');
-  await humanPointerClick(page, send, { hoverMs: 220, downMs: 75, settleMs: 500 });
-  return { strategy: 'human-pointer-click' };
+  console.log('[github-playwright-v10] send-strategy=human-short-pointer-click');
+  await humanShortPointerClick(page, send);
+  await page.waitForTimeout(randomDelayMs(1400, 2200));
+
+  const quickVisible = await visibleWakePresent(page, message, 2500);
+  if (!quickVisible.visible) {
+    const composerAfterFirstClick = await composer.inputValue().catch(async () => {
+      return await composer.innerText().catch(() => '');
+    });
+    const normalizedAfterFirstClick = normalizeVisibleText(composerAfterFirstClick);
+    const stillInComposer =
+      normalizedAfterFirstClick.includes(marker) &&
+      normalizedAfterFirstClick.length >= minimumExpectedLength;
+
+    if (stillInComposer) {
+      const retrySend = await findSendControlNearComposer(page, composer);
+      if (!retrySend) throw new Error('Wake remained in composer after first Send click and no visible Send control was available for retry');
+      console.log('[github-playwright-v10] send-retry=human-short-pointer-click reason=message-still-in-composer');
+      await humanShortPointerClick(page, retrySend);
+      await page.waitForTimeout(randomDelayMs(900, 1500));
+    }
+  }
+
+  return { strategy: 'human-short-pointer-click' };
 }
 
 function visibleBrowserStateText(bodyText = '', title = '') {
@@ -1017,8 +1038,8 @@ async function waitForDurableChatRoute(page, timeoutMs = 300000) {
 }
 
 async function humanReload(page) {
-  console.log('[github-playwright-v10] verification-reload=human-keyboard-control-r');
-  await page.keyboard.press('Control+R');
+  console.log('[github-playwright-v10] verification-reload=human-x11-control-r');
+  await x11Key(['key', '--clearmodifiers', 'ctrl+r'], 'x11-reload');
   await page.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(() => {});
   await page.waitForTimeout(1500);
 }
