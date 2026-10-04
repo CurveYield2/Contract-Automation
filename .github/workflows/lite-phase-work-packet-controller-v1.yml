@@ -300,7 +300,7 @@ jobs:
           gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f campaign_name="${{ steps.controller.outputs.campaign_name }}"             -f campaign_path="${{ steps.routing.outputs.campaign_path }}"             -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
 
       - name: Authorize final reviewer retirement
-        if: steps.request.outputs.hold_delivery != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.next_phase == '' && steps.chat.outputs.chat_url != '' && steps.controller.outputs.master_accepted == 'true'
+        if: steps.request.outputs.hold_delivery != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.next_phase == '' && steps.chat.outputs.chat_url != '' && (steps.request.outputs.review_kind == 'phase' || steps.controller.outputs.master_accepted == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
