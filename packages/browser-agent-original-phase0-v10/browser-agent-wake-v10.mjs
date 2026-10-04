@@ -657,8 +657,36 @@ async function createProjectExactHumanFlow(page, name) {
 
   const beforeCreateUrl = page.url();
   console.log('[github-playwright-v10] project-flow=create-button-same-surface-enabled');
-  await humanPointerClick(page, surfaceCreate);
-  console.log('[github-playwright-v10] project-flow=create-button-editor-surface-clicked');
+  const finalCreateBox = await surfaceCreate.boundingBox();
+  if (!finalCreateBox) throw new Error('Final Create-project control has no clickable bounding box');
+  const finalCreateX = finalCreateBox.x + finalCreateBox.width / 2;
+  const finalCreateY = finalCreateBox.y + finalCreateBox.height / 2;
+  const finalHit = await page.evaluate(({ x, y }) => {
+    const element = document.elementFromPoint(x, y);
+    const button = element?.closest?.('button');
+    if (!element) return null;
+    const style = getComputedStyle(element);
+    return {
+      tag: element.tagName,
+      text: (element.textContent || '').trim().slice(0, 200),
+      role: element.getAttribute('role') || '',
+      ariaLabel: element.getAttribute('aria-label') || '',
+      pointerEvents: style.pointerEvents,
+      closestButtonText: (button?.textContent || '').trim().slice(0, 200),
+      closestButtonDisabled: button ? Boolean(button.disabled) : null,
+      closestButtonAriaDisabled: button?.getAttribute('aria-disabled') || ''
+    };
+  }, { x: finalCreateX, y: finalCreateY });
+  console.log('[github-playwright-v10] project-flow=create-button-hit-target=' + JSON.stringify({
+    x: finalCreateX,
+    y: finalCreateY,
+    hit: finalHit
+  }));
+  await page.mouse.move(finalCreateX, finalCreateY, { steps: 12 });
+  await humanActionPause(page);
+  await page.mouse.click(finalCreateX, finalCreateY, { delay: randomDelayMs(70, 150) });
+  await humanActionPause(page);
+  console.log('[github-playwright-v10] project-flow=create-button-rendered-mouse-clicked');
 
   await page.waitForTimeout(1000);
   const postClickCreate = page.getByRole('button', { name: /^Create project$/i }).first();
