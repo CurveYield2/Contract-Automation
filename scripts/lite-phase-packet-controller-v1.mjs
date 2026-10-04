@@ -556,6 +556,19 @@ if(reviewKind==='master'){
 let sealedRework=null;
 if(reviewKind==='sealed-rework'){
   sealedRework=admitSealedPhaseRework({root,campaignPath,directory,requestPath:a['rework-request-path'],now});
+  const deliveryHoldRel=path.posix.join(campaignPath,'controller/SUCCESSOR_DELIVERY_HOLD_v1.json');
+  writeJson(repoFile(root,deliveryHoldRel),{
+    schemaVersion:'curveyield-lite-successor-delivery-hold-v1',
+    campaignId:directory.campaignId,
+    campaignGenerationId:directory.campaignGenerationId,
+    sourceSha256:directory.sourceSha256,
+    scopeId:sealedRework.request.humanAuthorization.scopeId,
+    requestPath:a['rework-request-path'],
+    status:'ACTIVE',
+    reason:'HUMAN_AUTHORIZED_SEALED_REWORK_BRANCH_QUALIFICATION',
+    createdAt:now,
+    releaseRequiresExplicitHumanAuthorization:true
+  });
   directory.currentAssignment=sealedRework.assignment;directory.campaignStatus='ACTIVE';directory.updatedAt=now;
 }
 const assignment=directory.currentAssignment;
