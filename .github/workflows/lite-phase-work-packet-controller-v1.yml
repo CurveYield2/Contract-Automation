@@ -233,16 +233,6 @@ jobs:
         run: |
           gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f campaign_name="${{ steps.controller.outputs.campaign_name }}"             -f campaign_path="${{ steps.routing.outputs.campaign_path }}"             -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
 
-      - name: Authorize retiring reviewer after fresh successor dispatch
-        if: steps.controller.outputs.status == 'PASS' && steps.controller.outputs.fresh == 'true' && steps.chat.outputs.chat_url != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          msg="CONTROLLER_PHASE_PASS. Phase ${{ steps.request.outputs.phase_sequence }} is sealed and the fresh successor orchestration has been dispatched successfully. Your phase responsibility is complete; retire."
-          b64="$(printf '%s' "$msg" | base64 -w0)"
-          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-phase-${{ steps.request.outputs.phase_sequence }}-retire"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.request.outputs.phase_sequence }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=false             -f worker_role=reviewer             -f gate_mode=LITE
-
       - name: Authorize final reviewer retirement
         if: steps.controller.outputs.status == 'PASS' && steps.controller.outputs.next_phase == '' && steps.chat.outputs.chat_url != ''
         env:
