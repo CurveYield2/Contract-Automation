@@ -253,6 +253,7 @@ test('v11-configured Phase 1 seals but cannot create Phase 2 until master ACCEPT
   const phaseResult=run(f);
   assert.equal(phaseResult.status,'WAITING_FOR_MASTER_REVIEW');
   assert.match(phaseResult.feedbackText,/reviewKind":"master"/);
+  assert.match(phaseResult.feedbackText,/Audit_Litemode_v10\.2\/master-review\/START_HERE\.md/);
   const waiting=readJson(path.join(f.root,f.dirRel));
   assert.equal(waiting.campaignStatus,'WAITING_FOR_MASTER_REVIEW');
   assert.equal(waiting.currentAssignment,null);
