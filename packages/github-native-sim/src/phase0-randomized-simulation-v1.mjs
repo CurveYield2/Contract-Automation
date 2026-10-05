@@ -143,6 +143,31 @@ async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
     throw error;
   }
 }
+// Medusa fuzzes a network-free copy of the post-deployment fork: the full Anvil state (deployed contracts plus every
+// mainnet account/slot already fetched during deployment) is loaded into a plain local node, so deep coverage-seeking
+// calls never wait on the upstream archive RPC. Unfetched mainnet state reads as empty on this copy.
+export async function startStateSnapshotAnvilV1({sourceUrl,projectRoot,evmVersion='cancun',port=8546}){
+  const state=await rpc(sourceUrl,'anvil_dumpState',[]);
+  const head=await rpc(sourceUrl,'eth_getBlockByNumber',['latest',false]);
+  const url=`http://127.0.0.1:${port}`;
+  const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
+  const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--number',String(Number(BigInt(head.number))),'--timestamp',String(Number(BigInt(head.timestamp))),'--auto-impersonate','--silent'];
+  const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
+  let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
+  const close=async()=>{if(child.exitCode===null){child.kill('SIGTERM');await Promise.race([new Promise(r=>child.once('exit',r)),sleep(2000)]);if(child.exitCode===null)child.kill('SIGKILL');}};
+  try{
+    const started=Date.now();
+    while(true){
+      if(child.exitCode!==null)throw new Error(`Snapshot Anvil exited before readiness: ${stderr}`);
+      try{if(await rpc(url,'eth_chainId',[]))break;}catch{}
+      if(Date.now()-started>30000)throw new Error('Snapshot Anvil RPC readiness timeout');
+      await sleep(100);
+    }
+    await rpc(url,'anvil_loadState',[state]);
+    const blockNumber=Number(BigInt(await rpc(url,'eth_blockNumber',[])));
+    return{url,blockNumber,stateBytes:Math.floor(String(state).length/2),sourceBlock:Number(BigInt(head.number)),close};
+  }catch(error){await close();throw error;}
+}
 function detectFoundryScripts(files,texts){
   const out=[];
   for(const rel of files.filter(f=>/(^|\/)scripts?\/.*\.s\.sol$/i.test(f)&&DEPLOY_SCRIPT_RE.test(f))){
@@ -1597,7 +1622,16 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     let medusaExecutionFailure=null;
     if(targets.length){
       try{
-        medusa=await runMedusa({projectRoot:staged.projectRoot,anvilUrl:anvil.url,blockNumber:baselineBlock,ethers,targets,outRoot:outputRoot,...(smoke?{callLimit:medusaSmokeCalls,minimumRequiredCalls:medusaSmokeCalls}:{})});
+        let medusaNode=null,stateSource={mode:'LIVE_FORK_ANVIL'};
+        try{
+          medusaNode=await startStateSnapshotAnvilV1({sourceUrl:anvil.url,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
+          stateSource={mode:'NETWORK_FREE_POST_DEPLOYMENT_STATE_SNAPSHOT',sourceBlock:medusaNode.sourceBlock,snapshotBlock:medusaNode.blockNumber,stateBytes:medusaNode.stateBytes};
+        }catch(error){stateSource={mode:'LIVE_FORK_ANVIL',snapshotFailure:String(error?.message??error).slice(0,1200)};}
+        console.log(`[phase0-medusa] state source: ${JSON.stringify(stateSource)}`);
+        try{
+          medusa=await runMedusa({projectRoot:staged.projectRoot,anvilUrl:medusaNode?.url??anvil.url,blockNumber:medusaNode?.blockNumber??baselineBlock,ethers,targets,outRoot:outputRoot,...(smoke?{callLimit:medusaSmokeCalls,minimumRequiredCalls:medusaSmokeCalls}:{})});
+          medusa.stateSource=stateSource;
+        }finally{if(medusaNode)await medusaNode.close();}
       }catch(error){
         medusaExecutionFailure={type:'MEDUSA_EXECUTION_FAILURE',code:error?.code??null,message:String(error?.message??error).slice(0,3000)};
         medusa={schemaVersion:'curveyield-phase0-medusa-run-v2',runId:'medusa-anvil-fork-001',status:'FAILED_EXECUTION',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0,limitations:[medusaExecutionFailure]};
