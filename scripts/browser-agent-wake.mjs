@@ -21,6 +21,7 @@ let projectName = env.CHATGPT_PROJECT_NAME || '';
 let projectUrl = env.CHATGPT_PROJECT_URL || '';
 let requestedChatName = env.CHATGPT_CHAT_NAME || '';
 const thinkingEffort = (env.CHATGPT_THINKING_EFFORT || '').trim();
+const requestedModel = (env.CHATGPT_REQUESTED_MODEL || 'PRESERVE').trim().toUpperCase();
 const statePath = env.WAKE_RESULT_PATH || '/tmp/browser-agent-wake-result.json';
 function sha(text='') {
   return crypto.createHash('sha256').update(text).digest('hex');
@@ -1188,6 +1189,22 @@ async function localProvider(chromium) {
 }
 
 await hydrateBrowserContextFromRegistration();
+
+if(!['PRESERVE','MASTER','SOL'].includes(requestedModel)){
+  throw new Error('Unsupported CHATGPT_REQUESTED_MODEL');
+}
+if(thinkingEffort.toLowerCase()==='maximum'||requestedModel==='SOL'){
+  const code=thinkingEffort.toLowerCase()==='maximum'?'MAXIMUM_UI_VERIFICATION_UNAVAILABLE':'SOL_UI_VERIFICATION_UNAVAILABLE';
+  const failedResult={
+    ok:false,wakeId,
+    failures:[{provider:'audit-browser-policy',code,retryable:false,error:
+      'The current mandatory X11-only no-page-read transport cannot yet select and verify this model/reasoning capability. Delivery is blocked rather than silently downgraded.'
+    }]
+  };
+  await fs.writeFile(statePath,JSON.stringify(failedResult,null,2)+'\n','utf8');
+  console.error('[audit-browser-policy] '+code);
+  process.exit(1);
+}
 
 if (mode !== 'resume_existing') {
   const failedResult = {

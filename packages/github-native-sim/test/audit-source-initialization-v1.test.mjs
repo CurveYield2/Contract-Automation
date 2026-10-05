@@ -12,13 +12,14 @@ const extract = fs.readFileSync(path.join(root, 'scripts/audit-source-initializa
 const receipt = fs.readFileSync(path.join(root, 'scripts/audit-source-initialization/write-phase0-receipt-v1.py'), 'utf8');
 const request = JSON.parse(fs.readFileSync(path.join(root, 'process/audit-source-initialization/REQUEST_TEMPLATE_v1.json'), 'utf8'));
 
-test('Audit Source Initialization accepts source ZIP plus four pre-created reviewer chats', () => {
+test('Audit Source Initialization accepts source ZIP, four reviewer chats, and one persistent master chat', () => {
   assert.deepEqual(Object.keys(request), [
     'source_url',
     'agent_chat_1_url',
     'agent_chat_2_url',
     'agent_chat_3_url',
     'agent_chat_4_url',
+    'master_chat_url',
   ]);
   for (const key of Object.keys(request)) assert.equal(typeof request[key], 'string');
   assert.match(workflow, /source_url:/);
@@ -26,10 +27,13 @@ test('Audit Source Initialization accepts source ZIP plus four pre-created revie
   assert.match(workflow, /agent_chat_2_url:/);
   assert.match(workflow, /agent_chat_3_url:/);
   assert.match(workflow, /agent_chat_4_url:/);
+  assert.match(workflow, /master_chat_url:/);
   assert.match(workflow, /validate_chat_url/);
+  assert.match(workflow, /master_chat_url must be distinct from every normal reviewer chat URL/);
   assert.match(run, /agentChats/);
   assert.match(run, /"reviewer-1":\$chat1/);
   assert.match(run, /"reviewer-4":\$chat4/);
+  assert.match(run, /masterReviewer:\{chatUrl:\$master,reasoning:"MAXIMUM",repairModel:"SOL",repairReasoning:"HIGH"\}/);
   assert.match(run, /mode:"resume_existing"/);
   assert.match(run, /phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1/);
   assert.match(run, /pokeIntervalMinutes:20/);

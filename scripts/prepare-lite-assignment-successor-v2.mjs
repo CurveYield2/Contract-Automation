@@ -24,18 +24,44 @@ if(!['SEALED','SKIPPED'].includes(predecessor.phase?.status)) throw new Error('p
 const controllerRef=a['audit-controller-ref'];
 const encodeRepoPath=p=>String(p).split('/').map(encodeURIComponent).join('/');
 const controllerTreeUrl=p=>'https://github.com/CurveYield2/Audit-Controller/tree/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
-const authorityUrl=controllerTreeUrl('Audit Skill - Current Authority');
+const controllerBlobUrl=p=>'https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
+const logicalAuthorityHome=predecessor.authority?.homepagePath??assignment.workSchemaPath.replace(/\/phases\/phase-[^/]+\/[^/]+$/,'/SKILL.md');
+const legacyLogicalRoot='Audit Skill - Current Authority/Audit_Litemode_v10.3';
+const frozenAuthorityRoot='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3';
+const authorityLinkPath=p=>{
+  if(typeof p!=='string')return p;
+  if((p===legacyLogicalRoot||p.startsWith(legacyLogicalRoot+'/'))&&!fs.existsSync(repoFile(root,p)))return frozenAuthorityRoot+p.slice(legacyLogicalRoot.length);
+  return p;
+};
+const linkedAuthorityHome=authorityLinkPath(logicalAuthorityHome);
+if(predecessor.authority?.homepagePath)requiredFile(root,logicalAuthorityHome,'bound successor authority homepage');
 const campaignUrl=controllerTreeUrl(directory.workspacePath);
+const validationRequestSchema='curveyield-lite-phase-boundary-request-v1';
+const requestPath='process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json';
+const artifactLines=[
+  'Bound authority homepage: '+controllerBlobUrl(linkedAuthorityHome),
+  'Bound authority package: '+controllerTreeUrl(path.posix.dirname(linkedAuthorityHome)),
+  'Phase schema: '+controllerBlobUrl(authorityLinkPath(assignment.workSchemaPath)),
+  'Assigned work form: '+controllerBlobUrl(assignment.workFormPath),
+  'Controller-owned final report: '+controllerBlobUrl(assignment.finalReportPath),
+  'Controller-owned Phase Work Packet: '+controllerBlobUrl(assignment.packetPath),
+  'Sealed predecessor receipt: '+controllerBlobUrl(assignment.predecessorReceiptPath),
+  ...(assignment.derivedInputPaths??[]).map((x,index)=>'Phase input '+(index+1)+': '+controllerBlobUrl(x))
+];
 const lines=[
   'LITE audit: '+directory.campaignName,
   'Reviewer: '+assignment.reviewer,
   'Current phase: '+assignment.phaseId,
   'Campaign: '+campaignUrl,
-  'Current Audit Skill Authority: '+authorityUrl,
+  ...artifactLines,
   '',
-  'The Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority.',
+  'The exact bound authority homepage above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority.',
   '',
-  'Start '+assignment.phaseId+' now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.'
+  'Start '+assignment.phaseId+' now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.',
+  'Submit validation through '+requestPath+' ('+validationRequestSchema+'). Finalized controller validation: https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase-work-packet-controller-v1.yml.',
+  ...(directory.masterReview
+    ? ['CONTROLLER_PHASE_PASS seals valid work. At a normal-reviewer segment boundary, only MASTER_REVIEW_ACCEPTED permits successor launch or campaign completion. If validation reports deficiencies, repair exactly the reported substantive deficiency and resubmit validation; do not seal, advance, or perform controller bookkeeping yourself.']
+    : ['Only CONTROLLER_PHASE_PASS permits advancement. If validation reports deficiencies, repair exactly the reported substantive deficiency and resubmit validation; do not seal, advance, or perform controller bookkeeping yourself.'])
 ];
 const wakeMessage=lines.join('\n');
 process.stdout.write(JSON.stringify({status:'PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,directoryPath:a['campaign-directory-path'],incomingPhaseId:assignment.phaseId,incomingPhaseSequence:assignment.phaseSequence,incomingReviewer:assignment.reviewer,wakeMessage,wakeMessageB64:Buffer.from(wakeMessage).toString('base64')})+'\n');
