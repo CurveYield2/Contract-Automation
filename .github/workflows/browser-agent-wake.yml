@@ -279,7 +279,7 @@ jobs:
           if [ "$message_purpose" = "initial_wake" ] && [ "${INITIAL_WAKE_DEDUPED:-false}" != "true" ]; then
             printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
             test -s /tmp/wake-message.txt
-          elif [ "$message_purpose" = "repair_notice" ]; then
+          elif [ "$message_purpose" = "repair_notice" ] || [ "$message_purpose" = "repair_verification" ]; then
             printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
             test -s /tmp/wake-message.txt
           else
@@ -295,7 +295,7 @@ jobs:
             and ((.chatName // "")|type=="string")
             and ((.repair // {})|type=="object")
             and ((.requestedModel // "PRESERVE")=="PRESERVE" or (.requestedModel // "PRESERVE")=="MASTER" or (.requestedModel // "PRESERVE")=="SOL")
-            and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="repair_notice" or (.messagePurpose // "standard")=="initial_wake")
+            and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="repair_notice" or (.messagePurpose // "standard")=="repair_verification" or (.messagePurpose // "standard")=="initial_wake")
             and (((.routineId // "") | test("[\\r\\n]")) | not)
             and (((.projectName // "") | test("[\\r\\n]")) | not)
             and (((.projectUrl // "") | test("[\\r\\n]")) | not)
