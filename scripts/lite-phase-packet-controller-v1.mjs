@@ -19,7 +19,7 @@ import {
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
-import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts} from './lib/lite-master-review-v1.mjs';
+import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,snapshotPhaseReceiptArtifacts} from './lib/lite-master-review-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function registeredReviewerChatUrls(file){
@@ -862,9 +862,10 @@ if(sealedRework){
   if(event)event.resolutionReceiptPath=receiptRel;
   writeJson(repoFile(root,controls.invalidRel),invalid);
 }
-writeJson(repoFile(root,receiptRel),receipt);
 packet.status='ACCEPTED';packet.controllerValidation.receiptPath=receiptRel;packet.controllerValidation.canonicalDataPath=canonicalRel;packet.controllerValidation.derivedOutputPaths=derivedRels;packet.controllerValidation.boundaryMachineArtifactPaths=boundaryArtifactRels;
 writeJson(packetFile,packet);
+if(gatedMasterReview||masterRepairRefreshSha)snapshotPhaseReceiptArtifacts({root,campaignPath,receipt,bindSnapshots:true});
+writeJson(repoFile(root,receiptRel),receipt);
 
 let sealedReceiptRel=receiptRel;
 if(sequence===6){
@@ -882,7 +883,7 @@ if(sequence===6){
   const markerEvidence=[receiptRef(root,campaignPath,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,campaignPath,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,campaignPath,x,'DERIVED_DOWNSTREAM_DATA'))];
   const markerHandoff=gatedMasterReview?{required:true,boundary:'MASTER_REVIEW_SEGMENT_06_07',incomingReviewer:'master-reviewer',assignedWork:'Review reviewer-3L segment Phases 6-7',nextPhaseSequence:8,sameReviewer:false,status:'MASTER_REVIEW_PENDING'}:{required:true,boundary:'P67_TO_P8',incomingReviewer:'reviewer-4',assignedWork:'Combined Lite Phases 8-10',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'};
   const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',revision:markerRevision,authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],evidence:markerEvidence,outputs:markerEvidence,globalControls:receipt.globalControls,validation:{status:'PASS',validatedAt:now,failures:[]},handoff:markerHandoff,now});
-  marker.sealedAt=now;if(masterRepairRefreshSha)marker.masterRepair={schemaVersion:'curveyield-lite-master-repair-receipt-v1',scopeId:directory.pendingMasterReview.repairScopeId,repairSpecSha256:masterRepairRefreshSha,priorRevision:markerRevision-1,controllerDependentRefresh:true};writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=true;nextSequence=8;nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:8,immediate:[...derivedRels,...derived7,...boundaryArtifactRels]});
+  marker.sealedAt=now;if(masterRepairRefreshSha)marker.masterRepair={schemaVersion:'curveyield-lite-master-repair-receipt-v1',scopeId:directory.pendingMasterReview.repairScopeId,repairSpecSha256:masterRepairRefreshSha,priorRevision:markerRevision-1,controllerDependentRefresh:true};if(gatedMasterReview||masterRepairRefreshSha)snapshotPhaseReceiptArtifacts({root,campaignPath,receipt:marker,bindSnapshots:true});writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=true;nextSequence=8;nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:8,immediate:[...derivedRels,...derived7,...boundaryArtifactRels]});
 }
 if(sequence===8&&nextSequence===10){
   const skippedRevision=masterRepairRefreshSha?phaseRevision:1;

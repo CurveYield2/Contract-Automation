@@ -42,6 +42,70 @@ function canonicalRel(campaignPath,phase){return path.posix.join(campaignPath,'d
 function segmentForBoundary(boundaryPhase){return MASTER_REVIEW_SEGMENTS_V1.find(x=>x.boundaryPhase===Number(boundaryPhase))??null;}
 function segmentForId(segmentId){return MASTER_REVIEW_SEGMENTS_V1.find(x=>x.segmentId===segmentId)??null;}
 
+
+function immutableCopy(root,sourceRel,snapshotRel){
+  const source=requiredFile(root,sourceRel,'sealed revision artifact');
+  const bytes=fs.readFileSync(source);
+  const target=repoFile(root,snapshotRel);
+  if(fs.existsSync(target)){
+    if(!fs.readFileSync(target).equals(bytes))throw new Error('immutable sealed revision snapshot conflict: '+snapshotRel);
+  }else{
+    fs.mkdirSync(path.dirname(target),{recursive:true});
+    fs.writeFileSync(target,bytes,{flag:'wx'});
+  }
+  return {path:snapshotRel,sha256:digestBytes(bytes)};
+}
+function campaignArtifactPath(campaignPath,raw){
+  if(typeof raw!=='string'||!raw)throw new Error('sealed receipt reference path is required');
+  const rel=raw.startsWith(campaignPath+'/')?raw:path.posix.join(campaignPath,raw);
+  const local=path.posix.relative(campaignPath,rel);
+  if(!local||local.startsWith('../')||path.posix.isAbsolute(local))throw new Error('sealed revision artifact must be inside the campaign: '+raw);
+  return rel;
+}
+export function phaseRevisionSnapshotPath(campaignPath,phase,revision,rel){
+  if(!Number.isInteger(Number(phase))||!Number.isInteger(Number(revision))||Number(revision)<1)throw new Error('sealed revision snapshot requires exact phase/revision');
+  const original=campaignArtifactPath(campaignPath,rel);
+  return path.posix.join(campaignPath,'evidence/sealed-revisions','phase-'+phaseNumber(phase),'revision-'+revision,relativeToCampaign(campaignPath,original));
+}
+export function resolveSealedArtifactReference({root,campaignPath,receipt,reference}){
+  const original=campaignArtifactPath(campaignPath,reference?.path);
+  const sha=reference?.sha256;
+  if(sha!==undefined&&sha!==null&&sha!==''&&!SHA256.test(String(sha)))throw new Error('sealed receipt reference has invalid sha256: '+reference.path);
+  const snapshot=original.includes('/evidence/sealed-revisions/')||relativeToCampaign(campaignPath,original).startsWith('receipts/')
+    ? original:phaseRevisionSnapshotPath(campaignPath,Number(receipt?.phase?.sequence),Number(receipt?.phase?.revision),original);
+  for(const rel of [...new Set([snapshot,original])]){
+    const file=existing(root,rel);
+    if(file&&(!SHA256.test(String(sha??''))||digestFile(file)===sha))return {path:rel,sha256:digestFile(file)};
+  }
+  throw new Error('sealed receipt reference digest mismatch or artifact missing: '+reference.path);
+}
+export function snapshotPhaseReceiptArtifacts({root,campaignPath,receipt,bindSnapshots=false}){
+  for(const family of ['inputs','evidence','outputs']){
+    receipt[family]=(receipt[family]??[]).map(ref=>{
+      const original=campaignArtifactPath(campaignPath,ref?.path);
+      if(relativeToCampaign(campaignPath,original).startsWith('receipts/'))return ref;
+      const resolved=resolveSealedArtifactReference({root,campaignPath,receipt,reference:ref});
+      const snapshot=original.includes('/evidence/sealed-revisions/')?original:phaseRevisionSnapshotPath(campaignPath,Number(receipt.phase.sequence),Number(receipt.phase.revision),original);
+      const row=immutableCopy(root,resolved.path,snapshot);
+      return bindSnapshots?{...ref,path:relativeToCampaign(campaignPath,row.path),sha256:row.sha256}:ref;
+    });
+  }
+  return receipt;
+}
+function preserveSegmentRevisionArtifacts({root,campaignPath,segment}){
+  for(const phase of segment.phases){
+    const {receipt}=latestReceipt(root,campaignPath,phase);
+    snapshotPhaseReceiptArtifacts({root,campaignPath,receipt});
+    if(receipt.phase.status!=='SKIPPED'){
+      const canonical=canonicalRel(campaignPath,phase);
+      const data=readJson(requiredFile(root,canonical,'sealed canonical data'));
+      for(const rel of [canonical,data.workFormPath,data.finalReportPath].filter(Boolean)){
+        immutableCopy(root,rel,phaseRevisionSnapshotPath(campaignPath,phase,Number(receipt.phase.revision),rel));
+      }
+    }
+  }
+}
+
 export function validateMasterReviewConfiguration(directory,{required=false}={}){
   const cfg=directory?.masterReview;
   if(!cfg){
@@ -61,12 +125,12 @@ export function masterReviewRequired(directory,authorityRoot){
   return Boolean(directory?.masterReview&&validateMasterReviewConfiguration(directory));
 }
 
-function referencedArtifact({root,campaignPath,phase,kind,reference,requireDigest=true}){
+function referencedArtifact({root,campaignPath,phase,kind,reference,receipt=null,requireDigest=true}){
   const raw=reference?.path;
   if(typeof raw!=='string'||!raw)throw new Error('sealed receipt reference path is required for Phase '+phase+' '+kind);
   const suppliedDigest=reference.sha256;
   if(requireDigest&&suppliedDigest!==undefined&&suppliedDigest!==null&&suppliedDigest!==''&&!SHA256.test(String(suppliedDigest)))throw new Error('sealed receipt reference has invalid sha256: '+raw);
-  const rel=existing(root,raw)?raw:path.posix.join(campaignPath,raw);
+  const rel=receipt?resolveSealedArtifactReference({root,campaignPath,receipt,reference}).path:(existing(root,raw)?raw:path.posix.join(campaignPath,raw));
   const row=artifact(root,campaignPath,phase,kind,rel);
   if(requireDigest&&SHA256.test(String(suppliedDigest??''))&&suppliedDigest!==row.sha256)throw new Error('sealed receipt reference digest mismatch: '+raw);
   return row;
@@ -108,7 +172,7 @@ export function collectSegmentArtifacts({root,campaignPath,segment,directory,exp
     for(const [family,refs] of [['INPUT',receipt.inputs],['EVIDENCE',receipt.evidence],['OUTPUT',receipt.outputs]]){
       for(const ref of refs??[]){
         const role=String(ref?.role??family).replace(/[^A-Za-z0-9_-]+/g,'_').toUpperCase();
-        pushUniqueArtifact(artifacts,seen,referencedArtifact({root,campaignPath,phase,kind:family+'_'+role,reference:ref}));
+        pushUniqueArtifact(artifacts,seen,referencedArtifact({root,campaignPath,phase,kind:family+'_'+role,reference:ref,receipt}));
       }
     }
     for(const [name,value] of Object.entries(receipt.globalControls??{})){
@@ -148,6 +212,7 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
   const segment=segmentForBoundary(boundaryPhase);
   if(!segment)throw new Error('unsupported master review boundary '+boundaryPhase);
   const reviewedArtifacts=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:predecessor.authority});
+  preserveSegmentRevisionArtifacts({root,campaignPath,segment});
   const bindings=bindingRecord({root,campaignPath,directory,predecessor,authorityRoot,reviewedArtifacts});
   const workFormRel=path.posix.join(campaignPath,'work/master-review',segment.segmentId,'MASTER_REVIEW_WORK_FORM_v1.json');
   const workForm={
@@ -444,6 +509,7 @@ function validateRepairCompletion({root,campaignPath,form,pending,cfg,normalRevi
     if(child.model!=='SOL'||child.reasoning!=='HIGH')failures.push('childRepair must identify exact SOL / HIGH capability');
     if(child.freshChild!==true)failures.push('childRepair.freshChild must be true');
     if(!CHAT_URL.test(String(child.childChatUrl??''))||child.childChatUrl===cfg.chatUrl||normalReviewerChatUrls.includes(child.childChatUrl))failures.push('childRepair requires a durable fresh-child ChatGPT URL distinct from the master and registered normal reviewers');
+    if((pending.repairHistory??[]).some(x=>x.childChatUrl===child.childChatUrl))failures.push('childRepair must use a new child chat for each repair attempt');
     if(child.result!=='COMPLETED')failures.push('childRepair.result must be COMPLETED');
     if(typeof child.completedAt!=='string'||!child.completedAt)failures.push('childRepair.completedAt is required');
   }
@@ -483,15 +549,54 @@ function validateRefreshedRepairVerification({root,campaignPath,form,pending,seg
     }catch(error){failures.push(String(error.message||error));}
   }
   const verification=form.masterVerification;
-  if(verification?.outcome!=='ACCEPT')failures.push('masterVerification.outcome must be ACCEPT after controller refresh');
+  const rework=verification?.outcome==='REWORK';
+  if(!['ACCEPT','REWORK'].includes(verification?.outcome))failures.push('masterVerification.outcome must be ACCEPT or REWORK after controller refresh');
+  if(!substantiveText(verification?.notes))failures.push('masterVerification.notes must be substantive after controller refresh');
   const expectedDigests=(post?.artifacts??[]).map(x=>({path:x.path,sha256:x.sha256}));
   if(!exactJson(verification?.verifiedArtifactDigests,expectedDigests))failures.push('masterVerification.verifiedArtifactDigests must exactly match controller-refreshed segment artifacts');
   const deficiencyIds=(form.review?.deficiencies??[]).map(x=>x?.id).filter(Boolean).sort();
   const dispositions=(verification?.deficiencyDispositions??[]);
   const disposedIds=dispositions.map(x=>x?.deficiencyId).filter(Boolean).sort();
-  if(!exactJson(disposedIds,deficiencyIds)||dispositions.some(x=>x?.disposition!=='RESOLVED'))failures.push('masterVerification must mark every bounded deficiency RESOLVED exactly once');
+  if(!exactJson(disposedIds,deficiencyIds)||dispositions.some(x=>!(rework?['RESOLVED','UNRESOLVED']:['RESOLVED']).includes(x?.disposition)))failures.push('masterVerification must dispose every original bounded deficiency exactly once');
+  if(rework&&!dispositions.some(x=>x?.disposition==='UNRESOLVED'))failures.push('REWORK requires an unresolved original deficiency');
+  if(rework&&Number(pending.reviewAttempt)>=2)failures.push('finite master repair limit reached: at most two repair cycles');
   if(typeof verification?.verifiedAt!=='string'||!verification.verifiedAt)failures.push('masterVerification.verifiedAt is required');
   return failures;
+}
+
+
+function admitNextRepairCycle({root,campaignPath,form,pending,directory,now}){
+  const attempt=Number(pending.reviewAttempt);
+  const attemptDir=path.posix.join(campaignPath,'work/master-review',pending.segmentId,'attempts','attempt-'+attempt);
+  const archivedForm=path.posix.join(attemptDir,'MASTER_REVIEW_WORK_FORM_v1.json');
+  immutableCopy(root,pending.workFormPath,archivedForm);
+  const proofs=[];
+  for(const name of ['MASTER_REVIEW_TRANSPORT_PROOF_INITIAL_v1.json','MASTER_REVIEW_TRANSPORT_PROOF_REPAIR_VERIFICATION_v1.json','MASTER_REPAIR_TRANSPORT_PROOF_v1.json']){
+    const rel=path.posix.join(campaignPath,'work/master-review',pending.segmentId,name);
+    if(existing(root,rel))proofs.push(immutableCopy(root,rel,path.posix.join(attemptDir,name)));
+  }
+  pending.repairHistory??=[];
+  pending.repairHistory.push({reviewAttempt:attempt,workFormPath:archivedForm,workFormSha256:digestFile(repoFile(root,archivedForm)),proofs,
+    childChatUrl:form.childRepair.childChatUrl,repairScopeId:pending.repairScopeId,repairSpecSha256:pending.repairSpecSha256,
+    originalDeficienciesSha256:pending.originalDeficienciesSha256,postRepairManifestSha256:pending.postRepairManifestSha256});
+  form.reviewAttempt=attempt+1;
+  form.reviewedArtifacts=structuredClone(form.postRepair.artifacts);
+  form.bindings.segmentManifestSha256=form.postRepair.manifestSha256;
+  delete form.bindings.repairChildSha256;
+  pending.manifestSha256=form.bindings.segmentManifestSha256;
+  pending.bindingsSha256=digestJson(form.bindings);
+  pending.reviewAttempt=form.reviewAttempt;
+  pending.reviewedRevision=Math.max(...form.reviewedArtifacts.map(x=>x.receiptRevision??0),1);
+  pending.repairBaseline=createRepairBaseline({root,campaignPath,form});
+  delete pending.masterTransportProof;delete pending.repairTransportProof;delete pending.postRepairManifestSha256;
+  delete form.postRepair;
+  form.childRepair=null;
+  form.masterVerification={outcome:'<REQUIRED_ACCEPT_OR_REWORK>',verifiedArtifactDigests:[],deficiencyDispositions:[],notes:'<REQUIRED>',verifiedAt:null};
+  pending.status='MASTER_REVIEW_REWORK_REQUIRED';
+  pending.updatedAt=now;form.updatedAt=now;
+  directory.currentAssignment=null;directory.campaignStatus='MASTER_REVIEW_REWORK_REQUIRED';directory.updatedAt=now;
+  writeJson(repoFile(root,pending.workFormPath),form);
+  return {status:'MASTER_REVIEW_REWORK_REQUIRED',failures:[],form,pending,repairSpec:form.review.repairSpec};
 }
 
 export function processMasterReviewSubmission({root,campaignPath,directory,authorityRoot,segmentId,now,normalReviewerChatUrls=[]}){
@@ -534,6 +639,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   if(pending.status==='WAITING_FOR_MASTER_REVIEW'&&pending.postRepairManifestSha256){
     failures.push(...validateRefreshedRepairVerification({root,campaignPath,form,pending,segment,directory}));
     if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
+    if(form.masterVerification.outcome==='REWORK')return admitNextRepairCycle({root,campaignPath,form,pending,directory,now});
     return {status:'MASTER_REPAIR_ACCEPTED',failures:[],form,pending,segment,successorPlan:pending.successorPlan};
   }
   const currentRows=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:{homepagePath:form.bindings.authority.homepagePath,liteSkillSha256:form.bindings.authority.sha256}});
