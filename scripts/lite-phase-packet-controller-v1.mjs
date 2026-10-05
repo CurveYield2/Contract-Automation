@@ -899,7 +899,7 @@ const masterBoundary=sequence===1?1:sequence===5?5:sequence===6?7:sequence===10?
 if(gatedMasterReview&&masterBoundary!==null){
   const staged=stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase:masterBoundary,lastSealedReceiptPath:sealedReceiptRel,nextSequence,nextDerivedInputPaths:nextDerivedInputs,successorPrefillContext,now});
   writeJson(directoryFile,directory);
-  const feedback=masterWakeMessage({campaignId:directory.campaignId,pending:staged.pending,auditControllerRef:a['audit-controller-ref']??'main'});
+  const feedback=masterWakeMessage({campaignId:directory.campaignId,pending:staged.pending,auditControllerRef:a['audit-controller-ref']??'main',authorityRoot});
   process.stdout.write(JSON.stringify({status:'WAITING_FOR_MASTER_REVIEW',controllerPassToken:'CONTROLLER_PHASE_PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,segmentId:staged.segment.segmentId,masterReviewRequired:true,masterChatUrl:directory.masterReview.chatUrl,masterReasoning:'MAXIMUM',recordPath:staged.pending.recordPath,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
   process.exit(0);
 }

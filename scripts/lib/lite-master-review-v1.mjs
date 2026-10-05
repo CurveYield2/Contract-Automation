@@ -355,7 +355,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   };
 }
 
-export function masterWakeMessage({campaignId,pending,auditControllerRef='main'}){
+export function masterWakeMessage({campaignId,pending,auditControllerRef='main',authorityRoot=null}){
   const phases=pending.segmentPhases.length===1?'Phase '+pending.segmentPhases[0]:'Phases '+pending.segmentPhases[0]+'-'+pending.segmentPhases.at(-1);
   return [
     'MASTER_REVIEW_REQUIRED.',
@@ -365,7 +365,7 @@ export function masterWakeMessage({campaignId,pending,auditControllerRef='main'}
     '3. If anything needs correcting, edit only the reviewer-written fields (actions.<step>.outputs.<field>) of this segment\'s work forms, in their normal locations. Do not edit reports, canonical data, receipts or controller files; the controller regenerates them and archives the originals under '+SUPERSEDED_DIRECTORY_V1+'/.',
     '4. Do not start new executions or simulations.',
     '5. Submit one request file to process/agent-upload/lite-phase-boundary/ in Contract-Automation: {"schemaVersion":"curveyield-lite-phase-boundary-request-v1","campaignId":"'+campaignId+'","reviewKind":"master","segmentId":"'+pending.segmentId+'","masterOutcome":"AMENDED" or "ACCEPT_WITHOUT_MODIFICATIONS","summary":"<one paragraph>","auditControllerRef":"'+auditControllerRef+'","attempt":1}.',
-    'Follow the master-reviewer instructions in the Audit Skill for details.'
+    'Step-by-step instructions: '+(authorityRoot?authorityRoot+'/':'')+'master-review/START_HERE.md in Audit-Controller.'
   ].join(' ');
 }
 
