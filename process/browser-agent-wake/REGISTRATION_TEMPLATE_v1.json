@@ -8,7 +8,14 @@
     "reviewer-1": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_1_CHAT_ID",
     "reviewer-2": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_2_CHAT_ID",
     "reviewer-3L": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_3L_CHAT_ID",
-    "reviewer-4": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_4_CHAT_ID"
+    "reviewer-4": "https://chatgpt.com/c/REPLACE_WITH_REVIEWER_4_CHAT_ID",
+    "master-reviewer": "https://chatgpt.com/c/REPLACE_WITH_MASTER_REVIEWER_CHAT_ID"
+  },
+  "masterReviewer": {
+    "chatUrl": "https://chatgpt.com/c/REPLACE_WITH_MASTER_REVIEWER_CHAT_ID",
+    "reasoning": "MAXIMUM",
+    "repairModel": "SOL",
+    "repairReasoning": "HIGH"
   },
   "chatgptProject": {
     "name": "",
