@@ -69,13 +69,22 @@ export function buildExecutionArtifactBundleV2({request,build}={}){
       throw new Error(`execution artifact export cannot promote compiler unit ${unit.unitId??'UNKNOWN'} to exactness with null input/output identity`);
     }
   }
-  const unitByArtifact=new Map();
+  // A shared source (e.g. a dependency interface) is legitimately compiled in
+  // several units; the artifact's own exact unit tag decides which one it is.
+  const unitsByArtifact=new Map();
   for(const unit of compilationUnits)for(const qualifiedName of unit.artifactQualifiedNames??[]){
-    if(unitByArtifact.has(qualifiedName))throw new Error(`compiler artifact appears in multiple exact units: ${qualifiedName}`);
-    unitByArtifact.set(qualifiedName,unit);
+    if(!unitsByArtifact.has(qualifiedName))unitsByArtifact.set(qualifiedName,[]);
+    unitsByArtifact.get(qualifiedName).push(unit);
   }
   const artifacts=(build.artifacts??[]).map(raw=>{
-    const qualifiedName=`${raw.sourceName}:${raw.contractName}`,unit=unitByArtifact.get(qualifiedName);
+    const qualifiedName=`${raw.sourceName}:${raw.contractName}`,candidates=unitsByArtifact.get(qualifiedName)??[];
+    let unit=null;
+    if(raw.compilationUnitId){
+      unit=candidates.find(u=>u.unitId===raw.compilationUnitId)??null;
+      if(candidates.length&&!unit)throw new Error(`compiler artifact ${qualifiedName} names unit ${raw.compilationUnitId}, which does not contain it`);
+    }else if(candidates.length>1){
+      throw new Error(`compiler artifact appears in multiple exact units without an exact unit tag: ${qualifiedName}`);
+    }else unit=candidates[0]??null;
     return normalizedArtifact({
       ...raw,
       compilationUnitId:raw.compilationUnitId??unit?.unitId??null,

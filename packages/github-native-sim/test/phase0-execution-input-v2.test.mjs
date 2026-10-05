@@ -118,3 +118,22 @@ test('A03 generation, profile/build digest, and null compiler input identity eac
   const nullInput=structuredClone(bundle);nullInput.buildIdentity.compilationUnits[0].compilerInputSha256=null;
   assert.throws(()=>validateExecutionInputJoinV2({...base,artifactBundle:nullInput}),/null compiler input\/output identity/i);
 });
+
+test('A01 shared dependency compiled in several units resolves by its exact unit tag and fails closed when untagged or mis-tagged',()=>{
+  const shared={sourceName:'lib/IShared.sol',contractName:'IShared'};
+  const unit=(unitId,input)=>({...structuredClone(build.compilationUnits[0]),unitId,compilerInputSha256:input.repeat(64),
+    sourceContents:{'src/X.sol':'contract X {}','lib/IShared.sol':'interface IShared {}'},artifacts:[{sourceName:'src/X.sol',contractName:'X'},shared]});
+  const multi=structuredClone(build);
+  multi.compilationUnits=[unit('hardhat-build-info-1','3'),unit('hardhat-build-info-2','4')];
+  multi.artifacts=[
+    {...structuredClone(build.artifacts[0]),compilationUnitId:'hardhat-build-info-2'},
+    {...structuredClone(build.artifacts[0]),...shared,abi:[],bytecode:'0x',deployedBytecode:'0x',methodIdentifiers:{},compilationUnitId:'hardhat-build-info-1'}
+  ];
+  const bundle=buildExecutionArtifactBundleV2({request,build:multi});
+  assert.deepEqual(bundle.artifacts.map(a=>[a.qualifiedName,a.compilationUnitId]),[['lib/IShared.sol:IShared','hardhat-build-info-1'],['src/X.sol:X','hardhat-build-info-2']]);
+
+  const untagged=structuredClone(multi);delete untagged.artifacts[1].compilationUnitId;
+  assert.throws(()=>buildExecutionArtifactBundleV2({request,build:untagged}),/multiple exact units without an exact unit tag: lib\/IShared\.sol:IShared/);
+  const mistagged=structuredClone(multi);mistagged.artifacts[1].compilationUnitId='hardhat-build-info-9';
+  assert.throws(()=>buildExecutionArtifactBundleV2({request,build:mistagged}),/names unit hardhat-build-info-9, which does not contain it/);
+});

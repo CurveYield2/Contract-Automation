@@ -181,13 +181,17 @@ async function listBuildInfo(projectRoot, fsApi = fs) {
 
 export async function collectNativeContractArtifacts(projectRoot, fsApi = fs) {
   const byQualifiedName = new Map();
-  for (const absolute of await buildInfoFiles(projectRoot, fsApi)) {
+  const files = await buildInfoFiles(projectRoot, fsApi);
+  for (const [fileIndex, absolute] of files.entries()) {
     let parsed;
     try {
       parsed = JSON.parse(await fsApi.readFile(absolute, 'utf8'));
     } catch {
       continue;
     }
+    // Same file order and numbering as listBuildInfo/compilationUnits, so a
+    // contract compiled in several build-info units keeps its exact unit.
+    const compilationUnitId = `hardhat-build-info-${fileIndex + 1}`;
     for (const [sourceName, contracts] of Object.entries(parsed?.output?.contracts ?? {})) {
       for (const [contractName, raw] of Object.entries(contracts ?? {})) {
         const key = `${sourceName}:${contractName}`;
@@ -207,6 +211,7 @@ export async function collectNativeContractArtifacts(projectRoot, fsApi = fs) {
           bytecodeSourceMap: raw?.evm?.bytecode?.sourceMap ?? '',
           deployedBytecodeSourceMap: raw?.evm?.deployedBytecode?.sourceMap ?? '',
           gasEstimates: raw?.evm?.gasEstimates ?? null,
+          compilationUnitId,
         };
         const existing = byQualifiedName.get(key);
         if (!existing || (existing.gasEstimates === null && candidate.gasEstimates !== null)) byQualifiedName.set(key, candidate);
