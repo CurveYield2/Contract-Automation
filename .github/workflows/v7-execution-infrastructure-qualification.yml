@@ -113,7 +113,10 @@ permissions:
   contents: write
 
 concurrency:
-  group: v7-qualification-${{ github.event_name == 'workflow_call' && github.run_id || github.event.pull_request.number || github.ref }}
+  # In a reusable-workflow call github.event_name is the caller's event, so
+  # detect a call by the caller's workflow name. Each Phase-0 call gets its own
+  # group; otherwise a push to main would cancel a running campaign's Phase 0.
+  group: v7-qualification-${{ github.workflow != 'V7 Execution Infrastructure Qualification' && format('call-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
