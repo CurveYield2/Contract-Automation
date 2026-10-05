@@ -199,7 +199,7 @@ test('watchdog observation classifies home-exit challenge and auth walls as infr
   assert.match(source, /failures\.find\(\(entry\) => entry\.code === 'AUTH_REQUIRED'\)/);
 });
 
-test('audit registration template requires four pre-created reviewer chats and no Project routine', () => {
+test('audit registration template requires four pre-created reviewer chats plus the master reviewer chat and no Project routine', () => {
   const registration = JSON.parse(read('process/browser-agent-wake/REGISTRATION_TEMPLATE_v1.json'));
   assert.equal(registration.browserInteractionPolicy, 'phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1');
   assert.equal(registration.mode, 'resume_existing');
@@ -207,8 +207,9 @@ test('audit registration template requires four pre-created reviewer chats and n
   assert.equal(registration.chatgptProject.name, '');
   assert.equal(registration.chatgptProject.url, '');
   assert.equal(registration.watchdog.pokeIntervalMinutes, 20);
-  assert.deepEqual(Object.keys(registration.agentChats), ['reviewer-1','reviewer-2','reviewer-3L','reviewer-4']);
+  assert.deepEqual(Object.keys(registration.agentChats), ['reviewer-1','reviewer-2','reviewer-3L','reviewer-4','master-reviewer']);
   for (const url of Object.values(registration.agentChats)) assert.match(url, /^https:\/\/chatgpt\.com\/c\//);
+  assert.equal(registration.masterReviewer.chatUrl, registration.agentChats['master-reviewer']);
 });
 
 test('Project-create wakes fail closed before posting unless Share-link capture returns a valid Project URL', () => {
