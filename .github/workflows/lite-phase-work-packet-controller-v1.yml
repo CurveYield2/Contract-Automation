@@ -31,6 +31,11 @@ on:
         required: false
         default: ''
         type: string
+      master_outcome:
+        description: Master review outcome (AMENDED or ACCEPT_WITHOUT_MODIFICATIONS)
+        required: false
+        default: ''
+        type: string
       rework_request_path:
         description: Private Audit-Controller path to typed sealed-phase rework admission
         required: false
@@ -76,6 +81,7 @@ jobs:
           DISPATCH_REVIEW_KIND: ${{ inputs.review_kind }}
           DISPATCH_PHASE_SEQUENCE: ${{ inputs.phase_sequence }}
           DISPATCH_SEGMENT_ID: ${{ inputs.segment_id }}
+          DISPATCH_MASTER_OUTCOME: ${{ inputs.master_outcome }}
           DISPATCH_REWORK_REQUEST_PATH: ${{ inputs.rework_request_path }}
           DISPATCH_HOLD_DELIVERY: ${{ inputs.hold_successor_delivery }}
           DISPATCH_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
@@ -87,6 +93,8 @@ jobs:
             review_kind="${DISPATCH_REVIEW_KIND:-phase}"
             phase_sequence="$DISPATCH_PHASE_SEQUENCE"
             segment_id="$DISPATCH_SEGMENT_ID"
+            master_outcome="$DISPATCH_MASTER_OUTCOME"
+            master_summary_b64=""
             rework_request_path="$DISPATCH_REWORK_REQUEST_PATH"
             hold_delivery="${DISPATCH_HOLD_DELIVERY:-false}"
             controller_ref="${DISPATCH_CONTROLLER_REF:-main}"
@@ -105,7 +113,7 @@ jobs:
               .schemaVersion=="curveyield-lite-phase-boundary-request-v1" and
               ((.campaignId|type)=="string") and (.campaignId|length)>0 and
               (((.reviewKind // "phase")=="phase" and ((.phaseSequence|type)=="number") and ((.phaseSequence|floor)==.phaseSequence) and .phaseSequence>=1 and .phaseSequence<=10) or
-               ((.reviewKind // "phase")=="master" and ((.segmentId|type)=="string") and (.segmentId|length)>0) or
+               ((.reviewKind // "phase")=="master" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and (.masterOutcome=="AMENDED" or .masterOutcome=="ACCEPT_WITHOUT_MODIFICATIONS") and ((.summary // "")|type)=="string") or
                ((.reviewKind // "phase")=="sealed-rework" and ((.phaseSequence|type)=="number") and .phaseSequence==1 and ((.reworkRequestPath|type)=="string") and (.reworkRequestPath|length)>0 and .holdSuccessorDelivery==true)) and
               ((.auditControllerRef|type)=="string") and (.auditControllerRef|length)>0 and
               ((.attempt|type)=="number") and ((.attempt|floor)==.attempt) and .attempt>=1
@@ -114,6 +122,8 @@ jobs:
             review_kind="$(jq -r '.reviewKind // "phase"' /tmp/lite-phase-boundary-request.json)"
             phase_sequence="$(jq -r '.phaseSequence // empty' /tmp/lite-phase-boundary-request.json)"
             segment_id="$(jq -r '.segmentId // empty' /tmp/lite-phase-boundary-request.json)"
+            master_outcome="$(jq -r '.masterOutcome // empty' /tmp/lite-phase-boundary-request.json)"
+            master_summary_b64="$(jq -j '.summary // ""' /tmp/lite-phase-boundary-request.json | base64 -w0)"
             rework_request_path="$(jq -r '.reworkRequestPath // empty' /tmp/lite-phase-boundary-request.json)"
             hold_delivery="$(jq -r '.holdSuccessorDelivery // false' /tmp/lite-phase-boundary-request.json)"
             controller_ref="$(jq -r '.auditControllerRef' /tmp/lite-phase-boundary-request.json)"
@@ -123,7 +133,10 @@ jobs:
           [[ "$campaign_id" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || { echo "::error::Invalid campaign_id"; exit 1; }
           case "$review_kind" in phase|master|sealed-rework) ;; *) echo "::error::Invalid review_kind"; exit 1;; esac
           if [ "$review_kind" = phase ]; then [[ "$phase_sequence" =~ ^([1-9]|10)$ ]] || { echo "::error::Invalid phase_sequence"; exit 1; }; fi
-          if [ "$review_kind" = master ]; then [[ "$segment_id" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Invalid segment_id"; exit 1; }; fi
+          if [ "$review_kind" = master ]; then
+            [[ "$segment_id" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Invalid segment_id"; exit 1; }
+            case "$master_outcome" in AMENDED|ACCEPT_WITHOUT_MODIFICATIONS) ;; *) echo "::error::master_outcome must be AMENDED or ACCEPT_WITHOUT_MODIFICATIONS"; exit 1;; esac
+          fi
           if [ "$review_kind" = sealed-rework ]; then
             [ "$phase_sequence" = 1 ] || { echo "::error::sealed-rework is restricted to Phase 1"; exit 1; }
             [[ "$rework_request_path" == campaigns/* ]] || { echo "::error::rework_request_path must be private campaign-relative state"; exit 1; }
@@ -137,6 +150,8 @@ jobs:
             echo "review_kind=$review_kind"
             echo "phase_sequence=$phase_sequence"
             echo "segment_id=$segment_id"
+            echo "master_outcome=$master_outcome"
+            echo "master_summary_b64=$master_summary_b64"
             echo "rework_request_path=$rework_request_path"
             echo "hold_delivery=$hold_delivery"
             echo "audit_controller_ref=$controller_ref"
@@ -221,34 +236,17 @@ jobs:
             echo "effective_hold=$effective_hold"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Resolve registered reviewer identity exclusions
-        id: reviewer_identity
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          safe_campaign="$(printf '%s' "${{ steps.request.outputs.campaign_id }}" | tr -c 'A-Za-z0-9._-' '_')"
-          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
-          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content' 2>/dev/null || true)"
-          if [ -n "$encoded" ]; then
-            printf '%s' "$encoded" | base64 -d > /tmp/lite-reviewer-registration.json
-            echo "path=/tmp/lite-reviewer-registration.json" >> "$GITHUB_OUTPUT"
-          else
-            echo "path=" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Generate packet/report, validate semantic work, then bookkeep after PASS
         id: controller
         shell: bash
         run: |
           set -euo pipefail
-          args=(--controller-root .audit-controller --campaign-id "${{ steps.request.outputs.campaign_id }}" --campaign-path "${{ steps.routing.outputs.campaign_path }}" --campaign-directory-path "${{ steps.routing.outputs.campaign_directory_path }}" --review-kind "${{ steps.request.outputs.review_kind }}")
-          if [ -n "${{ steps.reviewer_identity.outputs.path }}" ]; then
-            args+=(--reviewer-registration-path "${{ steps.reviewer_identity.outputs.path }}")
-          fi
+          args=(--controller-root .audit-controller --campaign-id "${{ steps.request.outputs.campaign_id }}" --campaign-path "${{ steps.routing.outputs.campaign_path }}" --campaign-directory-path "${{ steps.routing.outputs.campaign_directory_path }}" --review-kind "${{ steps.request.outputs.review_kind }}" --audit-controller-ref "${{ steps.request.outputs.audit_controller_ref }}")
           if [ "${{ steps.request.outputs.review_kind }}" = master ]; then
-            args+=(--segment-id "${{ steps.request.outputs.segment_id }}")
+            args+=(--segment-id "${{ steps.request.outputs.segment_id }}" --master-outcome "${{ steps.request.outputs.master_outcome }}")
+            if [ -n "${{ steps.request.outputs.master_summary_b64 }}" ]; then
+              args+=(--master-summary-b64 "${{ steps.request.outputs.master_summary_b64 }}")
+            fi
           else
             args+=(--phase-sequence "${{ steps.request.outputs.phase_sequence }}")
           fi
@@ -340,13 +338,13 @@ jobs:
           b64="$(printf '%s' "$msg" | base64 -w0)"
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-complete"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id=phase-10             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=false             -f worker_role=reviewer             -f gate_mode=LITE
 
-      - name: Wake persistent Maximum master reviewer
-        if: steps.routing.outputs.effective_hold != 'true' && (steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'MASTER_REPAIR_READY_FOR_VERIFICATION' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID') && steps.controller.outputs.master_chat_url != ''
+      - name: Wake persistent master reviewer
+        if: steps.routing.outputs.effective_hold != 'true' && (steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID') && steps.controller.outputs.master_chat_url != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          context="$(jq -cn --arg segment "${{ steps.controller.outputs.segment_id }}" --arg status "${{ steps.controller.outputs.status }}" '{messagePurpose:(if $status=="MASTER_REPAIR_READY_FOR_VERIFICATION" then "repair_verification" else "initial_wake" end),requestedModel:"MASTER",segmentId:$segment,persistentMaster:true}' | base64 -w0)"
+          context="$(jq -cn --arg segment "${{ steps.controller.outputs.segment_id }}" --arg status "${{ steps.controller.outputs.status }}" '{messagePurpose:(if $status=="MASTER_REVIEW_INVALID" then "repair_notice" else "initial_wake" end),requestedModel:"MASTER",segmentId:$segment,persistentMaster:true}' | base64 -w0)"
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.segment_id }}-master" \
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" -f phase_id=master-review \
@@ -358,14 +356,6 @@ jobs:
             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
             -f gate_expected_phase_id=master-review -f gate_expected_milestone_id="${{ steps.controller.outputs.segment_id }}" \
             -f browser_context_b64="$context"
-
-      - name: Block unverified fresh Sol repair-child transport
-        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'MASTER_REVIEW_REWORK_REQUIRED'
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "::error::SOL_UI_VERIFICATION_UNAVAILABLE: fresh Sol/High selection cannot yet be performed and visibly verified by the mandatory X11-only transport. No child wake was dispatched."
-          exit 1
 
       - name: Summary
         run: |

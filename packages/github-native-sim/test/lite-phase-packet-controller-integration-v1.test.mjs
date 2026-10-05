@@ -217,47 +217,15 @@ test('accepted due-obligation disposition updates ledger and sealed receipt cons
 });
 
 
-function runMaster(f,segmentId='reviewer-1-phase-01'){
-  const out=execFileSync(process.execPath,['scripts/lite-phase-packet-controller-v1.mjs','--controller-root',f.root,'--campaign-id','demo-r1','--campaign-path',f.campaign,'--campaign-directory-path',f.dirRel,'--review-kind','master','--segment-id',segmentId],{encoding:'utf8'});
+function runMaster(f,outcome,segmentId='reviewer-1-phase-01'){
+  const args=['scripts/lite-phase-packet-controller-v1.mjs','--controller-root',f.root,'--campaign-id','demo-r1','--campaign-path',f.campaign,'--campaign-directory-path',f.dirRel,'--review-kind','master','--segment-id',segmentId];
+  if(outcome)args.push('--master-outcome',outcome,'--master-summary-b64',Buffer.from('Master reviewed the whole segment.').toString('base64'));
+  const out=execFileSync(process.execPath,args,{encoding:'utf8'});
   return JSON.parse(out.trim());
 }
 
 function fileSha(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
-function installMasterTransportProof(f,messagePurpose){
-  const directory=readJson(path.join(f.root,f.dirRel));
-  const pending=directory.pendingMasterReview;
-  const proofName=messagePurpose==='REPAIR_VERIFICATION'?'MASTER_REVIEW_TRANSPORT_PROOF_REPAIR_VERIFICATION_v1.json':'MASTER_REVIEW_TRANSPORT_PROOF_INITIAL_v1.json';
-  const recordRel=path.posix.join(f.campaign,'work/master-review',pending.segmentId,proofName);
-  const verifiedAt='2026-10-04T00:10:00Z';
-  writeJson(path.join(f.root,recordRel),{
-    schemaVersion:'curveyield-lite-master-review-transport-proof-v1',
-    campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
-    segmentId:pending.segmentId,reviewAttempt:pending.reviewAttempt,masterChatUrl:directory.masterReview.chatUrl,
-    observedModel:'MASTER',observedReasoning:'MAXIMUM',controlVerification:'VISIBLE_UI_VERIFIED',deliveryStatus:'VERIFIED',
-    messagePurpose,reviewManifestSha256:messagePurpose==='REPAIR_VERIFICATION'?pending.postRepairManifestSha256:pending.manifestSha256,
-    verifiedBy:'BROWSER_AGENT_WAKE_CONTROLLER',verifiedAt
-  });
-  pending.masterTransportProof={schemaVersion:'curveyield-lite-master-review-transport-proof-v1',recordPath:recordRel,sha256:fileSha(path.join(f.root,recordRel)),verifiedBy:'BROWSER_AGENT_WAKE_CONTROLLER',verifiedAt};
-  writeJson(path.join(f.root,f.dirRel),directory);
-}
-function installRepairTransportProof(f,childChatUrl='https://chatgpt.com/c/fresh-sol-child'){
-  const directory=readJson(path.join(f.root,f.dirRel));
-  const pending=directory.pendingMasterReview;
-  const recordRel=path.posix.join(f.campaign,'work/master-review',pending.segmentId,'MASTER_REPAIR_TRANSPORT_PROOF_v1.json');
-  const verifiedAt='2026-10-04T00:40:00Z';
-  writeJson(path.join(f.root,recordRel),{
-    schemaVersion:'curveyield-lite-master-repair-transport-proof-v1',
-    campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,
-    segmentId:pending.segmentId,reviewAttempt:pending.reviewAttempt,masterChatUrl:directory.masterReview.chatUrl,
-    repairScopeId:pending.repairScopeId,repairSpecSha256:pending.repairSpecSha256,childChatUrl,
-    observedModel:'SOL',observedReasoning:'HIGH',controlVerification:'VISIBLE_UI_VERIFIED',freshChild:true,deliveryStatus:'VERIFIED',
-    verifiedBy:'BROWSER_AGENT_WAKE_CONTROLLER',verifiedAt
-  });
-  pending.repairTransportProof={schemaVersion:'curveyield-lite-master-repair-transport-proof-v1',recordPath:recordRel,sha256:fileSha(path.join(f.root,recordRel)),verifiedBy:'BROWSER_AGENT_WAKE_CONTROLLER',verifiedAt};
-  writeJson(path.join(f.root,f.dirRel),directory);
-}
-
-test('v11-configured Phase 1 seals but cannot create Phase 2 until exact master ACCEPT',()=>{
+function masterFixture(analysis){
   const f=fixture();
   const directory=readJson(path.join(f.root,f.dirRel));
   directory.masterReview={chatUrl:'https://chatgpt.com/c/master-review-chat',reasoning:'MAXIMUM',repairModel:'SOL',repairReasoning:'HIGH'};
@@ -268,62 +236,73 @@ test('v11-configured Phase 1 seals but cannot create Phase 2 until exact master 
   writeJson(path.join(f.root,directory.lastSealedReceiptPath),predecessor);
   writeJson(path.join(f.root,f.campaign,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),{source:{archiveSha256:'a'.repeat(64)}});
   const form=readJson(path.join(f.root,f.formRel));
-  form.actions['step-1'].outputs.analysis='Master-gated Phase-1 analysis.';
+  form.actions['step-1'].outputs.analysis=analysis;
   writeJson(path.join(f.root,f.formRel),form);
+  return f;
+}
+// The trusted workflow commits sealed state to Audit-Controller; the controller
+// recovers amended originals from that git history.
+function commitControllerState(f){
+  const git=(...args)=>execFileSync('git',['-c','user.name=fixture','-c','user.email=fixture@example.invalid',...args],{cwd:f.root,stdio:'pipe'});
+  if(!fs.existsSync(path.join(f.root,'.git')))git('init','-q');
+  git('add','-A');git('commit','-q','-m','sealed state');
+}
 
+test('v11-configured Phase 1 seals but cannot create Phase 2 until master ACCEPT_WITHOUT_MODIFICATIONS',()=>{
+  const f=masterFixture('Master-gated Phase-1 analysis.');
   const phaseResult=run(f);
   assert.equal(phaseResult.status,'WAITING_FOR_MASTER_REVIEW');
+  assert.match(phaseResult.feedbackText,/reviewKind":"master"/);
   const waiting=readJson(path.join(f.root,f.dirRel));
   assert.equal(waiting.campaignStatus,'WAITING_FOR_MASTER_REVIEW');
   assert.equal(waiting.currentAssignment,null);
   assert.equal(waiting.pendingMasterReview.segmentId,'reviewer-1-phase-01');
   assert.deepEqual(waiting.pendingMasterReview.segmentPhases,[1]);
   assert.match(waiting.pendingMasterReview.bindingsSha256,/^[0-9a-f]{64}$/);
-  const masterPath=path.join(f.root,waiting.pendingMasterReview.workFormPath);
-  const master=readJson(masterPath);
-  assert.deepEqual([...new Set(master.reviewedArtifacts.map(x=>x.phase))],[1]);
-  assert.ok(master.reviewedArtifacts.some(x=>x.kind==='WORK_FORM'));
-  assert.ok(master.reviewedArtifacts.some(x=>x.kind==='CANONICAL_DATA'));
-  assert.ok(master.reviewedArtifacts.some(x=>x.kind==='PHASE_REPORT'));
-  assert.ok(master.reviewedArtifacts.some(x=>x.kind==='SEALED_RECEIPT'));
-  assert.ok(master.reviewedArtifacts.some(x=>x.kind==='GLOBAL_CONTROL_SOURCEINTELLIGENCEBUNDLE'));
-  assert.ok(master.reviewedArtifacts.some(x=>x.kind==='INPUT_CONTROLLER_GENERATED_PHASE_WORK_PACKET'));
-  master.review={outcome:'ACCEPT',summary:'<REQUIRED>',deficiencies:[],repairSpec:null};
-  master.masterVerification={
-    outcome:'ACCEPT',
-    verifiedArtifactDigests:master.reviewedArtifacts.map(x=>({path:x.path,sha256:x.sha256})),
-    deficiencyDispositions:[],
-    notes:'Verified exact segment manifest.',
-    verifiedAt:'2026-10-04T00:00:00Z'
-  };
-  writeJson(masterPath,master);
-  const unverifiedMaster=runMaster(f);
-  assert.equal(unverifiedMaster.status,'MASTER_REVIEW_TRANSPORT_BLOCKED');
-  installMasterTransportProof(f,'INITIAL_REVIEW');
-  const placeholderRejected=runMaster(f);
-  assert.equal(placeholderRejected.status,'MASTER_REVIEW_INVALID');
-  assert.match(placeholderRejected.feedbackText,/substantive review.summary/);
-  master.review.summary='Entire reviewer-1 segment accepted.';
-  writeJson(masterPath,master);
+  assert.equal(waiting.pendingMasterReview.sealedWorkForms.length,1);
+  assert.match(waiting.pendingMasterReview.sealedWorkForms[0].gitBlobSha1,/^[0-9a-f]{40}$/);
+  const recordPath=path.join(f.root,waiting.pendingMasterReview.recordPath);
+  const record=readJson(recordPath);
+  assert.deepEqual([...new Set(record.reviewedArtifacts.map(x=>x.phase))],[1]);
+  for(const kind of ['WORK_FORM','CANONICAL_DATA','PHASE_REPORT','SEALED_RECEIPT','GLOBAL_CONTROL_SOURCEINTELLIGENCEBUNDLE','INPUT_CONTROLLER_GENERATED_PHASE_WORK_PACKET'])assert.ok(record.reviewedArtifacts.some(x=>x.kind===kind),kind);
+
+  const noOutcome=runMaster(f,null);
+  assert.equal(noOutcome.status,'MASTER_REVIEW_INVALID');
+  assert.match(noOutcome.feedbackText,/masterOutcome must be AMENDED or ACCEPT_WITHOUT_MODIFICATIONS/);
+
+  const sealedForm=fs.readFileSync(path.join(f.root,f.formRel));
+  const edited=readJson(path.join(f.root,f.formRel));
+  edited.actions['step-1'].outputs.analysis='Silently changed analysis.';
+  writeJson(path.join(f.root,f.formRel),edited);
+  const acceptWithEdits=runMaster(f,'ACCEPT_WITHOUT_MODIFICATIONS');
+  assert.equal(acceptWithEdits.status,'MASTER_REVIEW_INVALID');
+  assert.match(acceptWithEdits.feedbackText,/submit AMENDED instead/);
+  fs.writeFileSync(path.join(f.root,f.formRel),sealedForm);
+  const amendWithoutEdits=runMaster(f,'AMENDED');
+  assert.equal(amendWithoutEdits.status,'MASTER_REVIEW_INVALID');
+  assert.match(amendWithoutEdits.feedbackText,/submit ACCEPT_WITHOUT_MODIFICATIONS instead/);
+
   const stoppedDirectory=readJson(path.join(f.root,f.dirRel));
   stoppedDirectory.campaignStatus='STOPPED_BY_HUMAN';
   writeJson(path.join(f.root,f.dirRel),stoppedDirectory);
   const stoppedDirectoryBytes=fs.readFileSync(path.join(f.root,f.dirRel),'utf8');
-  const stoppedFormBytes=fs.readFileSync(masterPath,'utf8');
-  const held=runMaster(f);
+  const held=runMaster(f,'ACCEPT_WITHOUT_MODIFICATIONS');
   assert.equal(held.status,'MASTER_REVIEW_HELD');
   assert.equal(fs.readFileSync(path.join(f.root,f.dirRel),'utf8'),stoppedDirectoryBytes);
-  assert.equal(fs.readFileSync(masterPath,'utf8'),stoppedFormBytes);
   stoppedDirectory.campaignStatus='WAITING_FOR_MASTER_REVIEW';
   writeJson(path.join(f.root,f.dirRel),stoppedDirectory);
 
-  const accepted=runMaster(f);
+  const accepted=runMaster(f,'ACCEPT_WITHOUT_MODIFICATIONS');
   assert.equal(accepted.status,'PASS');
   assert.equal(accepted.masterReviewAccepted,true);
+  assert.equal(accepted.freshSuccessorRequired,true);
   const advanced=readJson(path.join(f.root,f.dirRel));
   assert.equal(Object.hasOwn(advanced,'pendingMasterReview'),false);
   assert.equal(advanced.currentAssignment.phaseSequence,2);
   assert.equal(advanced.campaignStatus,'WAITING_FOR_SUCCESSOR_AGENT');
+  assert.equal(advanced.lastAcceptedMasterReview.outcome,'ACCEPT_WITHOUT_MODIFICATIONS');
+  assert.equal(readJson(recordPath).decision.outcome,'ACCEPT_WITHOUT_MODIFICATIONS');
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'superseded')),false);
 });
 
 test('segment collection binds legacy missing digests but rejects a supplied malformed receipt digest',()=>{
@@ -358,146 +337,83 @@ test('segment collection binds legacy missing digests but rejects a supplied mal
   assert.throws(collect,/required Phase 1 report path is missing/);
 });
 
-test('master REWORK produces bounded Sol/High scope and leaves successor blocked',()=>{
-  const f=fixture();
-  const directory=readJson(path.join(f.root,f.dirRel));
-  directory.masterReview={chatUrl:'https://chatgpt.com/c/master-review-chat',reasoning:'MAXIMUM',repairModel:'SOL',repairReasoning:'HIGH'};
-  writeJson(path.join(f.root,f.dirRel),directory);
-  const predecessor=readJson(path.join(f.root,directory.lastSealedReceiptPath));
-  predecessor.authority.liteSkillSha256=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.authority,'SKILL.md'))).digest('hex');
-  writeJson(path.join(f.root,directory.lastSealedReceiptPath),predecessor);
-  writeJson(path.join(f.root,f.campaign,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),{});
-  const form=readJson(path.join(f.root,f.formRel));
-  form.actions['step-1'].outputs.analysis='Reviewable but deficient Phase-1 analysis.';
-  writeJson(path.join(f.root,f.formRel),form);
+test('master AMENDED edits are resealed in place and the sealed originals move to superseded/',()=>{
+  const f=masterFixture('Reviewable but incomplete Phase-1 analysis.');
   run(f);
+  commitControllerState(f);
   const waiting=readJson(path.join(f.root,f.dirRel));
-  const masterPath=path.join(f.root,waiting.pendingMasterReview.workFormPath);
-  const master=readJson(masterPath);
-  master.review={
-    outcome:'REWORK',
-    summary:'One bounded defect.',
-    deficiencies:[{id:'MR-001',phase:1,file:path.posix.relative(f.campaign,f.formRel),ownedPaths:['actions.step-1.outputs.analysis'],evidenceRefs:[path.posix.relative(f.campaign,f.formRel)],rationale:'Clarify the evidence-bound Phase-1 analysis.'}],
-    repairSpec:{
-      scopeId:'MR-001-repair',
-      allowedFiles:[path.posix.relative(f.campaign,f.formRel)],
-      allowedSemanticPaths:[{file:path.posix.relative(f.campaign,f.formRel),path:'actions.step-1.outputs.analysis'}],
-      requiredDependentRefreshes:['REGENERATE_CANONICAL','REGENERATE_REPORT','REGENERATE_DERIVED','RESEAL_RECEIPT'],
-      acceptanceConditions:['The repaired analysis cites exact staged evidence and resolves MR-001.'],
-      prohibitedActions:['SEAL','ADVANCE','MUTATE_ACCEPTED_PREFILL','MUTATE_UNRELATED_EVIDENCE']
-    }
-  };
-  writeJson(masterPath,master);
-  const unverifiedMaster=runMaster(f);
-  assert.equal(unverifiedMaster.status,'MASTER_REVIEW_TRANSPORT_BLOCKED');
-  installMasterTransportProof(f,'INITIAL_REVIEW');
-  const result=runMaster(f);
-  assert.equal(result.status,'MASTER_REVIEW_REWORK_REQUIRED');
-  assert.equal(result.repairModel,'SOL');
-  assert.equal(result.repairReasoning,'HIGH');
-  const blocked=readJson(path.join(f.root,f.dirRel));
-  assert.equal(blocked.currentAssignment,null);
-  assert.equal(blocked.campaignStatus,'MASTER_REVIEW_REWORK_REQUIRED');
-  assert.match(blocked.pendingMasterReview.repairSpecSha256,/^[0-9a-f]{64}$/);
-  const repairPending=blocked.pendingMasterReview;
-  assert.match(repairPending.originalDeficienciesSha256,/^[0-9a-f]{64}$/);
-  const originalRepairForm=readJson(path.join(f.root,f.formRel));
-  const beforeSha=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.formRel))).digest('hex');
-  const tamperedForm=structuredClone(originalRepairForm);
-  tamperedForm.actions['step-1'].outputs.analysis='Corrected evidence-bound Phase-1 analysis.';
-  tamperedForm.automationInputs.derivedInputPaths=['campaigns/demo/derived/forged-during-master-repair.json'];
-  refreshControllerPrefillDigest(tamperedForm);
-  writeJson(path.join(f.root,f.formRel),tamperedForm);
-  const tamperedSha=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.formRel))).digest('hex');
-  const tamperedSubmission=readJson(masterPath);
-  tamperedSubmission.childRepair={
-    scopeId:'MR-001-repair',model:'SOL',reasoning:'HIGH',freshChild:true,
-    childChatUrl:'https://chatgpt.com/c/fresh-sol-child',result:'COMPLETED',
-    changedFiles:[{file:path.posix.relative(f.campaign,f.formRel),beforeSha256:beforeSha,afterSha256:tamperedSha}],
-    changedSemanticPaths:[{file:path.posix.relative(f.campaign,f.formRel),path:'actions.step-1.outputs.analysis'}],
-    completedAt:'2026-10-04T00:30:00Z'
-  };
-  writeJson(masterPath,tamperedSubmission);
-  const unverifiedChild=runMaster(f);
-  assert.equal(unverifiedChild.status,'MASTER_REPAIR_TRANSPORT_BLOCKED');
-  installRepairTransportProof(f);
-  const admittedMaster=readJson(masterPath);
-  const changedDeficiencies=structuredClone(admittedMaster);
-  changedDeficiencies.review.deficiencies[0].id='MR-CHANGED';
-  writeJson(masterPath,changedDeficiencies);
-  const rejectedDeficiencyMutation=runMaster(f);
-  assert.equal(rejectedDeficiencyMutation.status,'MASTER_REVIEW_INVALID');
-  assert.match(rejectedDeficiencyMutation.feedbackText,/review deficiencies changed/);
-  writeJson(masterPath,admittedMaster);
-  const rejectedTamper=runMaster(f);
-  assert.equal(rejectedTamper.status,'MASTER_REVIEW_INVALID');
-  assert.match(rejectedTamper.feedbackText,/modified prefills or evidence outside allowed semantic paths/);
-  assert.equal(readJson(path.join(f.root,f.dirRel)).currentAssignment,null);
-
-  const repairedForm=structuredClone(originalRepairForm);
-  repairedForm.actions['step-1'].outputs.analysis='Corrected evidence-bound Phase-1 analysis.';
-  writeJson(path.join(f.root,f.formRel),repairedForm);
-  const afterSha=createHash('sha256').update(fs.readFileSync(path.join(f.root,f.formRel))).digest('hex');
-  const childSubmission=readJson(masterPath);
-  childSubmission.childRepair={
-    scopeId:'MR-001-repair',
-    model:'SOL',
-    reasoning:'HIGH',
-    freshChild:true,
-    childChatUrl:'https://chatgpt.com/c/fresh-sol-child',
-    result:'COMPLETED',
-    changedFiles:[{file:path.posix.relative(f.campaign,f.formRel),beforeSha256:beforeSha,afterSha256:afterSha}],
-    changedSemanticPaths:[{file:path.posix.relative(f.campaign,f.formRel),path:'actions.step-1.outputs.analysis'}],
-    completedAt:'2026-10-04T01:00:00Z'
-  };
-  writeJson(masterPath,childSubmission);
+  const sealed=waiting.pendingMasterReview.sealedWorkForms[0];
+  const sealedFormBytes=fs.readFileSync(path.join(f.root,f.formRel));
+  const sealedReportBytes=fs.readFileSync(path.join(f.root,f.reportRel));
   const canonicalPath=path.join(f.root,f.campaign,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json');
-  const acceptedCanonical=fs.readFileSync(canonicalPath,'utf8');
-  const forgedCanonical=JSON.parse(acceptedCanonical);
+  const sealedCanonicalBytes=fs.readFileSync(canonicalPath);
+
+  const tampered=readJson(path.join(f.root,f.formRel));
+  tampered.actions['step-1'].outputs.analysis='Corrected evidence-bound Phase-1 analysis.';
+  tampered.automationInputs.derivedInputPaths=['campaigns/demo/derived/forged-during-master-review.json'];
+  writeJson(path.join(f.root,f.formRel),tampered);
+  const rejectedTamper=runMaster(f,'AMENDED');
+  assert.equal(rejectedTamper.status,'MASTER_REVIEW_INVALID');
+  assert.match(rejectedTamper.feedbackText,/changed controller-owned data outside reviewer-written fields/);
+
+  const amended=JSON.parse(sealedFormBytes.toString('utf8'));
+  amended.actions['step-1'].outputs.analysis='Corrected evidence-bound Phase-1 analysis.';
+  writeJson(path.join(f.root,f.formRel),amended);
+  const forgedCanonical=JSON.parse(sealedCanonicalBytes.toString('utf8'));
   forgedCanonical.actions['step-1'].outputs.analysis='Unreviewed manual derived-product edit.';
   writeJson(canonicalPath,forgedCanonical);
-  const rejectedProductEdit=runMaster(f);
+  const rejectedProductEdit=runMaster(f,'AMENDED');
   assert.equal(rejectedProductEdit.status,'MASTER_REVIEW_INVALID');
   assert.match(rejectedProductEdit.feedbackText,/reviewed artifact digest changed/);
-  fs.writeFileSync(canonicalPath,acceptedCanonical);
+  fs.writeFileSync(canonicalPath,sealedCanonicalBytes);
+  assert.equal(readJson(path.join(f.root,f.dirRel)).currentAssignment,null);
 
-  const ready=runMaster(f);
-  assert.equal(ready.status,'MASTER_REPAIR_READY_FOR_VERIFICATION');
-  assert.equal(ready.freshSuccessorRequired,false);
-  assert.equal(ready.nextAssignment,null);
-  const verificationPending=readJson(path.join(f.root,f.dirRel));
-  assert.equal(verificationPending.currentAssignment,null);
-  assert.equal(verificationPending.campaignStatus,'WAITING_FOR_MASTER_REVIEW');
-  assert.match(verificationPending.pendingMasterReview.postRepairManifestSha256,/^[0-9a-f]{64}$/);
-  assert.equal(verificationPending.lastSealedReceiptPath,verificationPending.pendingMasterReview.lastSealedReceiptPath);
-  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v1.json')),true);
-  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v2.json')),true);
-  assert.equal(fs.existsSync(path.join(f.root,f.reportRel)),true);
-  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'work/phase-01/PHASE_01_FINAL_REPORT_v2.md')),true);
-  assert.equal(fs.existsSync(path.join(f.root,f.packetRel)),true);
-  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'submissions/PHASE_01_WORK_PACKET_v2.json')),true);
-
-  const verifiedForm=readJson(masterPath);
-  assert.equal(verifiedForm.postRepair.scopeId,'MR-001-repair');
-  assert.deepEqual(verifiedForm.postRepair.refreshedPhases,[1]);
-  verifiedForm.masterVerification={
-    outcome:'ACCEPT',
-    verifiedArtifactDigests:verifiedForm.postRepair.artifacts.map(x=>({path:x.path,sha256:x.sha256})),
-    deficiencyDispositions:[{deficiencyId:'MR-001',disposition:'RESOLVED'}],
-    notes:'Same persistent master verified controller-refreshed artifacts.',
-    verifiedAt:'2026-10-04T02:00:00Z'
-  };
-  writeJson(masterPath,verifiedForm);
-  const unverifiedFinalMaster=runMaster(f);
-  assert.equal(unverifiedFinalMaster.status,'MASTER_REVIEW_TRANSPORT_BLOCKED');
-  installMasterTransportProof(f,'REPAIR_VERIFICATION');
-  const accepted=runMaster(f);
-  assert.equal(accepted.status,'PASS');
+  const accepted=runMaster(f,'AMENDED');
+  assert.equal(accepted.status,'PASS',accepted.feedbackText);
   assert.equal(accepted.masterReviewAccepted,true);
+  assert.equal(accepted.masterOutcome,'AMENDED');
+  assert.equal(accepted.freshSuccessorRequired,true);
+  assert.equal(accepted.nextAssignment.phaseSequence,2);
+
+  // Original seal and receipt remain; the amended phase is resealed as revision 2.
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v1.json')),true);
+  const receipt2=readJson(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v2.json'));
+  assert.equal(receipt2.masterAmendment.segmentId,'reviewer-1-phase-01');
+  assert.equal(receipt2.masterAmendment.amendmentRecordPath,waiting.pendingMasterReview.recordPath);
+  assert.equal(receipt2.masterAmendment.priorRevision,1);
+
+  // Revised products occupy the standard locations.
+  assert.equal(readJson(path.join(f.root,f.formRel)).actions['step-1'].outputs.analysis,'Corrected evidence-bound Phase-1 analysis.');
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'work/phase-01/PHASE_01_FINAL_REPORT_v2.md')),true);
+  assert.equal(fs.existsSync(path.join(f.root,f.campaign,'submissions/PHASE_01_WORK_PACKET_v2.json')),true);
+  assert.equal(readJson(canonicalPath).actions['step-1'].outputs.analysis,'Corrected evidence-bound Phase-1 analysis.');
+
+  // Outdated reviewer products are preserved byte-for-byte in one superseded/ folder.
+  const sup=rel=>path.join(f.root,f.campaign,'superseded',path.posix.relative(f.campaign,rel));
+  assert.deepEqual(fs.readFileSync(sup(f.formRel)),sealedFormBytes);
+  assert.equal(fileSha(sup(f.formRel)),sealed.sha256);
+  assert.deepEqual(fs.readFileSync(sup(f.reportRel)),sealedReportBytes);
+  assert.deepEqual(fs.readFileSync(sup(path.posix.join(f.campaign,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json'))),sealedCanonicalBytes);
+  assert.equal(fs.existsSync(sup(f.packetRel)),true);
+  assert.equal(fs.existsSync(path.join(f.root,f.reportRel)),false);
+  assert.equal(fs.existsSync(path.join(f.root,f.packetRel)),false);
+
+  const record=readJson(path.join(f.root,waiting.pendingMasterReview.recordPath));
+  assert.equal(record.decision.outcome,'AMENDED');
+  assert.deepEqual(record.decision.refreshedPhases,[1]);
+  assert.deepEqual(record.decision.amendedForms.map(x=>[x.path,x.changedFields]),[[path.posix.relative(f.campaign,f.formRel),['actions.step-1.outputs.analysis']]]);
+  const formEntry=record.decision.superseded.find(x=>x.originalPath===path.posix.relative(f.campaign,f.formRel));
+  assert.equal(formEntry.supersededPath,'superseded/'+formEntry.originalPath);
+  assert.equal(formEntry.sha256,sealed.sha256);
+  assert.equal(formEntry.replacedBySha256,fileSha(path.join(f.root,f.formRel)));
+  assert.equal(record.decision.superseded.find(x=>x.kind==='PHASE_REPORT').replacedBySha256,null);
+
   const advanced=readJson(path.join(f.root,f.dirRel));
   assert.equal(Object.hasOwn(advanced,'pendingMasterReview'),false);
   assert.equal(advanced.currentAssignment.phaseSequence,2);
-  assert.equal(advanced.lastAcceptedMasterReview.postRepairManifestSha256,verifiedForm.postRepair.manifestSha256);
+  assert.equal(advanced.campaignStatus,'WAITING_FOR_SUCCESSOR_AGENT');
+  assert.equal(advanced.lastSealedReceiptPath,f.campaign+'/receipts/PHASE_01_RECEIPT_v2.json');
+  assert.equal(advanced.lastAcceptedMasterReview.outcome,'AMENDED');
 });
 
 test('typed held revision2-to-revision3 admission regenerates controller products and resolves EIM-013',()=>{
