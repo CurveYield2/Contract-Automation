@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import fss from 'node:fs';
 import path from 'node:path';
+import {pathToFileURL} from 'node:url';
 import os from 'node:os';
 import http from 'node:http';
 import {spawn} from 'node:child_process';
@@ -145,7 +146,14 @@ const NETWORK_NAME='fixture';
 const resolveNetwork=()=>({chainId:999});
 const network=resolveNetwork(NETWORK_NAME);
 if(!process.env.RPC_URL) throw new Error('MISSING_RPC');
-console.log(JSON.stringify({chainId:network.chainId,rpc:Boolean(process.env.RPC_URL),github:process.env.GITHUB_TOKEN||'NO_GITHUB'}));
+console.log(JSON.stringify({
+  chainId:network.chainId,
+  rpc:Boolean(process.env.RPC_URL),
+  github:process.env.GITHUB_TOKEN||'NO_GITHUB',
+  controller:process.env.AUDIT_CONTROLLER_GITHUB_TOKEN||'NO_CONTROLLER',
+  upstream:process.env.UPSTREAM_RPC_URL||'NO_UPSTREAM',
+  simArchive:process.env.SIM_ARCHIVE_PRIMARY_ETHEREUM_01||'NO_SIM_ARCHIVE'
+}));
 `);
   await fs.writeFile(path.join(deploymentFixtureRoot,'sandbox.mjs'),`
 import fs from 'node:fs';
@@ -153,8 +161,14 @@ if(!process.env.RPC_URL) throw new Error('MISSING_RPC');
 console.log(fs.readFileSync('/etc/passwd','utf8'));
 `);
   await fs.writeFile(path.join(deploymentFixtureRoot,'unsupported.py'),'print("unsupported")\n');
-  const priorGithubToken=process.env.GITHUB_TOKEN;
-  process.env.GITHUB_TOKEN='PHASE0_A08_SECRET_SENTINEL_SHOULD_NEVER_REACH_CHILD';
+  const secretSentinels={
+    GITHUB_TOKEN:'PHASE0_A08_GITHUB_SECRET_SENTINEL_NEVER_CHILD',
+    AUDIT_CONTROLLER_GITHUB_TOKEN:'PHASE0_A08_CONTROLLER_SECRET_SENTINEL_NEVER_CHILD',
+    UPSTREAM_RPC_URL:'PHASE0_A08_UPSTREAM_RPC_SECRET_SENTINEL_NEVER_CHILD',
+    SIM_ARCHIVE_PRIMARY_ETHEREUM_01:'PHASE0_A08_SIM_ARCHIVE_SECRET_SENTINEL_NEVER_CHILD'
+  };
+  const priorSecrets=Object.fromEntries(Object.keys(secretSentinels).map(k=>[k,process.env[k]]));
+  for(const [k,v] of Object.entries(secretSentinels))process.env[k]=v;
   const deploymentFixtureDetected=await detectDeploymentScripts(deploymentFixtureRoot);
   const deploymentFixtureResult=await executeDeploymentScripts({
     projectRoot:deploymentFixtureRoot,
@@ -163,7 +177,7 @@ console.log(fs.readFileSync('/etc/passwd','utf8'));
     localSigner:{address:actors[0],privateKey:'0x'+'11'.repeat(32)},
     detected:deploymentFixtureDetected
   });
-  if(priorGithubToken===undefined)delete process.env.GITHUB_TOKEN;else process.env.GITHUB_TOKEN=priorGithubToken;
+  for(const [k,v] of Object.entries(priorSecrets)){if(v===undefined)delete process.env[k];else process.env[k]=v;}
   const successfulAdapted=deploymentFixtureResult.attempts.find(x=>x.script==='deploy:success');
   const sandboxAttempt=deploymentFixtureResult.attempts.find(x=>x.script==='deploy:sandbox');
   const unsupportedDisposition=deploymentFixtureResult.scriptDispositions.find(x=>x.script==='deploy:unsupported');
@@ -171,7 +185,11 @@ console.log(fs.readFileSync('/etc/passwd','utf8'));
   assertThat(successfulAdapted.originalSha256&&successfulAdapted.adaptedSha256&&successfulAdapted.originalSha256!==successfulAdapted.adaptedSha256,'A07 original/adapted deployment digests are not distinct');
   assertThat(successfulAdapted.adaptation==='LOCAL_CHAIN_ID_OVERRIDE','A07 local chain substitution is not explicit');
   assertThat(successfulAdapted.sandbox?.productionHandoffEligible===false,'A07 adapted local script incorrectly appears production-handoff eligible');
-  assertThat(!String(successfulAdapted.stdout).includes('PHASE0_A08_SECRET_SENTINEL'),'A08 parent GitHub secret reached retained child output');
+  for(const sentinel of Object.values(secretSentinels))assertThat(!String(successfulAdapted.stdout).includes(sentinel),'A08 forbidden parent secret reached retained child output');
+  assertThat(/"github":"NO_GITHUB"/.test(String(successfulAdapted.stdout)),'A08 GitHub token was visible to child');
+  assertThat(/"controller":"NO_CONTROLLER"/.test(String(successfulAdapted.stdout)),'A08 controller token was visible to child');
+  assertThat(/"upstream":"NO_UPSTREAM"/.test(String(successfulAdapted.stdout)),'A08 upstream RPC secret was visible to child');
+  assertThat(/"simArchive":"NO_SIM_ARCHIVE"/.test(String(successfulAdapted.stdout)),'A08 archive RPC secret was visible to child');
   assertThat(sandboxAttempt?.status==='FAILED','A08 filesystem escape fixture was not blocked');
   assertThat(/ACCESS_DENIED|permission|FileSystemRead/i.test(String(sandboxAttempt.stderr)),'A08 filesystem escape failure is not attributable to the permission boundary');
   assertThat(!String(sandboxAttempt.stdout).includes('root:x:'),'A08 outside filesystem contents leaked to retained output');
@@ -240,13 +258,33 @@ console.log(fs.readFileSync('/etc/passwd','utf8'));
 
   const excludedFromMain=new Set(['PropertyControls','LowLevelControls','NeverReachProperty','BrokenObservationToken'].map(name=>`${sourceName}:${name}`));
   const mainTargets=targets.filter(t=>!excludedFromMain.has(t.logicalQualifiedName??t.qualifiedName));
-  const performance=[];
+  const performance=[],performanceBaselineV1=[];
+  const baselineModulePath=process.env.PHASE0_V1_BASELINE_MODULE;
+  assertThat(baselineModulePath&&fss.existsSync(baselineModulePath),'Performance baseline module is missing');
+  const baselineModule=await import(pathToFileURL(baselineModulePath).href+'?phase0v1='+Date.now());
+  assertThat(typeof baselineModule.runTelemetry==='function','Performance baseline runTelemetry export is missing');
+  const perfSeeds=['perf-seed-a','perf-seed-b','perf-seed-c'];
   let baseline=await provider.send('evm_snapshot',[]);
-  for(const seed of ['perf-seed-a','perf-seed-b','perf-seed-c']){
+  for(const seed of perfSeeds){
     proxy.reset();start=Date.now();cpu=process.resourceUsage();mem=process.memoryUsage();
-    const short=await runTelemetry({provider,ethers,targets:mainTargets,actors,outRoot,baselineSnapshot:baseline,telemetryRuns:1,callsPerRun:180,seedSalt:seed,runPrefix:`perf-${seed}`});
-    performance.push(perfSnapshot(seed,start,proxy,cpu,mem,{attempts:short[0].calls,positiveTransitions:short[0].positiveTransitions,positiveEconomicTransitions:short[0].positiveEconomicTransitions,artifactBytes:short[0].rawTranscriptBytes}));
-    await provider.send('evm_revert',[baseline]);baseline=await provider.send('evm_snapshot',[]);
+    const baselineOut=path.join(outRoot,'performance-baseline-v1',seed);
+    const legacy=await baselineModule.runTelemetry({provider,ethers,targets:mainTargets,actors,outRoot:baselineOut,baselineSnapshot:baseline,telemetryRuns:1,callsPerRun:180,seedSalt:seed});
+    const legacyFile=path.join(baselineOut,...legacy[0].rawTranscriptRef.split('/'));
+    const legacyRows=(await fs.readFile(legacyFile,'utf8')).trim().split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line));
+    const usefulTransitions=legacyRows.filter(row=>{
+      if(Number(row.transaction?.status)!==1)return false;
+      return Object.entries(row.accountingDeltas??{}).some(([key,value])=>key!=='native.sender'&&String(value)!=='0');
+    }).length;
+    const entry=perfSnapshot('baseline-v1-'+seed,start,proxy,cpu,mem,{seed,attempts:legacy[0].calls,usefulTransitions,reportedSuccesses:legacy[0].successes,reportedReverts:legacy[0].reverts,reportedErrors:legacy[0].errors,artifactBytes:legacy[0].rawTranscriptBytes});
+    entry.usefulTransitionsPerMinute=entry.wallMs>0?usefulTransitions/(entry.wallMs/60000):null;
+    performanceBaselineV1.push(entry);
+    const reverted=await provider.send('evm_revert',[baseline]);assertThat(reverted===true,'Performance baseline reset failed');baseline=await provider.send('evm_snapshot',[]);
+  }
+  for(const seed of perfSeeds){
+    proxy.reset();start=Date.now();cpu=process.resourceUsage();mem=process.memoryUsage();
+    const short=await runTelemetry({provider,ethers,targets:mainTargets,actors,outRoot,baselineSnapshot:baseline,telemetryRuns:1,callsPerRun:180,seedSalt:seed,runPrefix:`perf-${seed}`,repeatSameSeedAcrossRuns:true});
+    performance.push(perfSnapshot(seed,start,proxy,cpu,mem,{seed,attempts:short[0].calls,positiveTransitions:short[0].positiveTransitions,positiveEconomicTransitions:short[0].positiveEconomicTransitions,artifactBytes:short[0].rawTranscriptBytes}));
+    const reverted=await provider.send('evm_revert',[baseline]);assertThat(reverted===true,'Performance upgraded reset failed');baseline=await provider.send('evm_snapshot',[]);
   }
 
   proxy.reset();start=Date.now();cpu=process.resourceUsage();mem=process.memoryUsage();
@@ -337,7 +375,17 @@ console.log(fs.readFileSync('/etc/passwd','utf8'));
     telemetry,
     acceptanceWitnesses:{directDelegate,proxyDelegate,callback,callbackDirect,tuple},
     replayControl:{status:'PASS',runs:replay.map(x=>({runId:x.runId,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256}))},
+    performanceBaselineV1,
     performance,
+    performanceComparison:{
+      fixtureIdentity:'SAME_COMPILED_QUALIFICATION_FIXTURE',
+      forkReconstruction:'SAME_ANVIL_INSTANCE_AND_RECONSTRUCTED_BASELINE',
+      seeds:perfSeeds,
+      baselineImplementation:'PINNED_V1_ENGINE_94207081_WITH_QUALIFICATION_ONLY_CALLCOUNT_SEED_PARAMETERS',
+      upgradedImplementation:'CURRENT_BRANCH_ENGINE',
+      serializedDecisionIdentity:'PARTIALLY_PAIRED_SAME_SEED_INPUT_BUT_ENGINE_SCHEDULER_AND_CONTEXT_LOGIC_DIFFER_BY_DESIGN',
+      unpairedConditions:['V2_CONTEXT_CALIBRATION','V2_TRANSITION_FEEDBACK','V2_TYPED_OBSERVATIONS','V2_RECURSIVE_ABI_GENERATION']
+    },
     retainedOutputRoot:path.relative(root,outRoot).replaceAll('\\','/')
   };
   await fs.writeFile(path.join(outRoot,'PHASE0_V2_LIVE_QUALIFICATION_v1.json'),JSON.stringify(result,null,2)+'\n');

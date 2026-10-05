@@ -254,6 +254,24 @@ jobs:
         if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: npm run v7:manifest -- --check
 
+      - name: Checkout pinned Phase-0 v1 performance baseline
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        uses: actions/checkout@v4
+        with:
+          ref: 94207081af8c4a292750a0bfdc20176b5ead6ad7
+          path: .phase0-v1-baseline
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Prepare pinned Phase-0 v1 short-run baseline
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        shell: bash
+        run: |
+          set -euo pipefail
+          baseline_module="$GITHUB_WORKSPACE/.phase0-v1-baseline/packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs"
+          node packages/github-native-sim/scripts/prepare-phase0-v1-performance-baseline.mjs "$baseline_module"
+          echo "PHASE0_V1_BASELINE_MODULE=$baseline_module" >> "$GITHUB_ENV"
+
       - name: Phase-0 v2 live behavioral and performance qualification
         if: env.V7_QUALIFICATION_LANE == 'FULL'
         shell: bash
@@ -267,6 +285,59 @@ jobs:
         run: |
           set -euo pipefail
           node packages/github-native-sim/scripts/phase0-v2-heldout-qualification.mjs .audit-evidence/v7-infrastructure-qualification/phase0-v2-heldout | tee .audit-evidence/v7-infrastructure-qualification/phase0-v2-heldout-console.json
+
+      - name: Phase-0 v2 A33 failure-boundary qualification
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node packages/github-native-sim/scripts/phase0-v2-a33-failure-boundary.mjs .audit-evidence/v7-infrastructure-qualification/phase0-v2-a33 | tee .audit-evidence/v7-infrastructure-qualification/phase0-v2-a33-console.json
+
+      - name: Select working Audit-Controller credential
+        if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Checkout pinned Audit-Controller DEX regression evidence
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          rm -rf .phase0-dex-controller
+          gh auth setup-git
+          gh repo clone CurveYield2/Audit-Controller .phase0-dex-controller -- --filter=blob:none --no-checkout
+          git -C .phase0-dex-controller fetch --depth=1 origin 78943917711d0c56ebedd2ddc4ec267d1b1efc89
+          git -C .phase0-dex-controller checkout --detach FETCH_HEAD
+          test "$(git -C .phase0-dex-controller rev-parse HEAD)" = '78943917711d0c56ebedd2ddc4ec267d1b1efc89'
+
+      - name: Phase-0 v2 unchanged DEX generic regression
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node packages/github-native-sim/scripts/phase0-v2-dex-generic-regression.mjs .phase0-dex-controller .audit-evidence/v7-infrastructure-qualification/phase0-v2-dex | tee .audit-evidence/v7-infrastructure-qualification/phase0-v2-dex-console.json
+
+      - name: Phase-0 v2 focused unit acceptance
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test packages/github-native-sim/test/phase0-*.test.mjs
+
+      - name: Phase-0 v2 final A01-A34 and performance report
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node packages/github-native-sim/scripts/phase0-v2-final-qualification-report.mjs .audit-evidence/v7-infrastructure-qualification | tee .audit-evidence/v7-infrastructure-qualification/phase0-v2-final-report-console.json
+          cat .audit-evidence/v7-infrastructure-qualification/PHASE0_V2_ACCEPTANCE_MATRIX_v1.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: V7 request and execution contract qualification
         if: env.V7_QUALIFICATION_LANE == 'FULL'
@@ -293,15 +364,6 @@ jobs:
         if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: npm run lint
 
-
-      - name: Select working Audit-Controller credential
-        if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
-        env:
-          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
-        shell: bash
-        run: bash scripts/select-audit-controller-token.sh
 
       - name: Checkout exact private Audit-Controller candidate
         if: inputs.controller_ref != '' || github.event_name == 'pull_request' || github.event_name == 'push'
