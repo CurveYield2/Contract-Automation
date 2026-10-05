@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
+  "campaignId": "curveyield-dex-v16-source-r4",
+  "mode": "resume_existing",
+  "chatUrl": "",
+  "browserRoutine": "",
+  "agentChats": {
+    "reviewer-1": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac4013d-6ba4-83e8-b704-8cff2a4df8c8",
+    "reviewer-2": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da6a-3e4c-83e8-9154-73b4c7388f85",
+    "reviewer-3L": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da70-dbfc-83e8-89f8-532603efc0af",
+    "reviewer-4": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da76-f048-83e8-9cdc-26399ce8b161",
+    "master-reviewer": "https://chatgpt.com/c/6ac4023b-1b50-83e8-9402-58e52b710e77"
+  },
+  "masterReviewer": {
+    "chatUrl": "https://chatgpt.com/c/6ac4023b-1b50-83e8-9402-58e52b710e77",
+    "reasoning": "MAXIMUM",
+    "repairModel": "SOL",
+    "repairReasoning": "HIGH"
+  },
+  "chatgptProject": {
+    "name": "",
+    "url": ""
+  },
+  "activeChat": {
+    "name": "",
+    "url": ""
+  },
+  "wakeMessage": "",
+  "thinkingEffort": "high",
+  "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
+  "activeAssignment": {},
+  "watchdog": {
+    "enabled": true,
+    "idleMessage": "GET BACK TO WORK",
+    "pokeIntervalMinutes": 20
+  },
+  "repair": {
+    "enabled": true,
+    "idlePokeThreshold": 3,
+    "unviewableThreshold": 2
+  },
+  "updatedAt": "2026-10-05T21:28:28Z"
+}
