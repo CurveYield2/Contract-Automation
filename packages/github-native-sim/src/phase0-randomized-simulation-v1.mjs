@@ -1243,6 +1243,37 @@ ${body.join('\n')}
 `;
   return{...plan,properties,structs:state.structs,source};
 }
+export const PHASE0_MEDUSA_MAX_REPETITION_RATE_V1=0.5;
+export function medusaCoverageTimelineV2(text){
+  const samples=[];
+  for(const m of String(text).matchAll(/fuzz: elapsed:\s*(?:(\d+)h)?(?:(\d+)m)?(\d+)s, calls:\s*([0-9,]+).*?branches:\s*([0-9,]+), corpus:\s*([0-9,]+)/g)){
+    samples.push({elapsedSeconds:Number(m[1]??0)*3600+Number(m[2]??0)*60+Number(m[3]),calls:Number(m[4].replaceAll(',','')),branches:Number(m[5].replaceAll(',','')),corpus:Number(m[6].replaceAll(',',''))});
+  }
+  return samples;
+}
+// Repetition rate: share of calls executed after coverage last grew (0 = still discovering, 1 = pure cycling).
+export function medusaVarietyV2({timeline=[],dispatch={}}={}){
+  const last=timeline.at(-1)??{calls:0,branches:0,corpus:0};
+  const firstAtMax=timeline.find(x=>x.branches===last.branches)??last;
+  const half=timeline.find(x=>x.calls>=last.calls/2)??last;
+  const repetitionRate=last.calls>0?(last.calls-firstAtMax.calls)/last.calls:1;
+  const represented=Number(dispatch.representedLogicalFunctionCount??0),pairs=Number(dispatch.uniqueCallChainPairs??0);
+  const failures=[];
+  if(repetitionRate>PHASE0_MEDUSA_MAX_REPETITION_RATE_V1)failures.push('COVERAGE_PLATEAUED_CALLS_ARE_REPEATING');
+  if(pairs<represented)failures.push('TOO_FEW_UNIQUE_CALL_CHAIN_PAIRS');
+  return{
+    finalBranches:last.branches,finalCorpusSequences:last.corpus,callsAtLastCoverageGain:firstAtMax.calls,
+    repetitionRate,maximumRepetitionRate:PHASE0_MEDUSA_MAX_REPETITION_RATE_V1,
+    branchesGainedInSecondHalf:last.branches-half.branches,
+    uniqueCallChainPairs:pairs,uniqueCrossContractCallChainPairs:Number(dispatch.uniqueCrossContractCallChainPairs??0),
+    uniqueCallChainTriples:Number(dispatch.uniqueCallChainTriples??0),
+    observedLogicalFunctionCount:Number(dispatch.observedLogicalFunctionCount??0),
+    logicalFunctionsDispatchedMoreThanOnce:Number(dispatch.logicalFunctionsDispatchedMoreThanOnce??0),
+    representedLogicalFunctionCount:represented,
+    timeline:timeline.filter((_,i)=>i%10===0||i===timeline.length-1),
+    status:failures.length?'FAIL':'PASS',failures
+  };
+}
 function maxMedusaCalls(text){let max=0;for(const m of String(text).matchAll(/calls:\s*([0-9][0-9,]*)/gi))max=Math.max(max,Number(m[1].replaceAll(',','')));return max;}
 function collectMethodSignaturesV2(value,out=[]){
   if(Array.isArray(value)){for(const x of value)collectMethodSignaturesV2(x,out);return out;}
@@ -1257,18 +1288,26 @@ async function medusaCorpusDispatchMetricsV2({corpusDest,routerRows}){
     logicalKey:`${row.target?.logicalQualifiedName??row.target?.qualifiedName}::${row.selected?.signature}`
   }]));
   let dispatches=0,economicDispatches=0,parsedFiles=0,parseFailures=0;
-  const wrapperCounts={},logicalCounts={};
+  const wrapperCounts={},logicalCounts={},pairs=new Set(),crossContractPairs=new Set(),triples=new Set();
   if(!fss.existsSync(corpusDest))return{status:'UNAVAILABLE_NO_RETAINED_CORPUS',dispatches:0,economicDispatches:0,economicShare:null,parsedFiles:0,parseFailures:0,wrapperCounts,logicalCounts};
   for(const rel of await walk(corpusDest)){
     if(!rel.endsWith('.json'))continue;
     try{
       const parsed=JSON.parse(await fs.readFile(path.join(corpusDest,...rel.split('/')),'utf8'));parsedFiles++;
+      const chain=[];
       for(const signature of collectMethodSignaturesV2(parsed)){
         const name=String(signature).split('(')[0],meta=byWrapper.get(name);
         if(!meta)continue;
         dispatches++;if(meta.economic)economicDispatches++;
         wrapperCounts[name]=(wrapperCounts[name]??0)+1;
         logicalCounts[meta.logicalKey]=(logicalCounts[meta.logicalKey]??0)+1;
+        chain.push(meta.logicalKey);
+      }
+      // Ordered call-chain variety inside each retained (coverage-increasing) sequence.
+      for(let i=1;i<chain.length;i++){
+        pairs.add(chain[i-1]+' -> '+chain[i]);
+        if(chain[i-1].split('::')[0]!==chain[i].split('::')[0])crossContractPairs.add(chain[i-1]+' -> '+chain[i]);
+        if(i>=2)triples.add(chain[i-2]+' -> '+chain[i-1]+' -> '+chain[i]);
       }
     }catch{parseFailures++;}
   }
@@ -1277,6 +1316,8 @@ async function medusaCorpusDispatchMetricsV2({corpusDest,routerRows}){
     dispatches,economicDispatches,economicShare:dispatches?economicDispatches/dispatches:null,
     parsedFiles,parseFailures,wrapperCounts,logicalCounts,
     observedLogicalFunctionCount:Object.keys(logicalCounts).length,
+    logicalFunctionsDispatchedMoreThanOnce:Object.values(logicalCounts).filter(n=>n>1).length,
+    uniqueCallChainPairs:pairs.size,uniqueCrossContractCallChainPairs:crossContractPairs.size,uniqueCallChainTriples:triples.size,
     representedLogicalFunctionCount:new Set([...byWrapper.values()].map(x=>x.logicalKey)).size
   };
 }
@@ -1449,6 +1490,7 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
     abiRouterGenerated:true,rawRandomBytes:false,targetContracts:targets.map(t=>({qualifiedName:t.qualifiedName,address:t.address,recipeId:t.recipe?.recipeId??null})),
     routerWrapperCount:router.rows.length,accountingWrapperShare:router.accountingWrapperShare,weightingStrategy:router.weightingStrategy,
     achievedDispatchWeight:corpusDispatchMetrics,
+    variety:medusaVarietyV2({timeline:medusaCoverageTimelineV2(raw),dispatch:corpusDispatchMetrics}),
     achievedWeightBasis:corpusDispatchMetrics.status==='MEASURED_FROM_RETAINED_CORPUS'?'ACTUAL_RETAINED_MEDUSA_CORPUS_DISPATCHES':'UNAVAILABLE_WITH_TYPED_REASON',
     omittedFunctions:router.omitted,propertyRegistry:properties,engineProperties:parsed.properties??[],engineParseStatus:parsed.status,
     executionStatus:assurance.executionStatus,coverageStatus:assurance.coverageStatus,checkStatus:assurance.checkStatus,

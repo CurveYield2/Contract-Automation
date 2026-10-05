@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Interface, AbiCoder, getBytes, id, getAddress } from 'ethers';
 import { createRequire } from 'node:module';
-import { renderMedusaRouterV2, buildMedusaConfigV2 } from '../src/phase0-randomized-simulation-v1.mjs';
+import { renderMedusaRouterV2, buildMedusaConfigV2, medusaCoverageTimelineV2, medusaVarietyV2 } from '../src/phase0-randomized-simulation-v1.mjs';
 
 const artifact={
   sourceName:'Fixture.sol',contractName:'Fixture',
@@ -85,4 +85,21 @@ test('Medusa router forwards wrapper calldata byte-for-byte as the target call a
   const forwarded=getBytes(wrapperArgs).slice(32);
   assert.deepEqual(forwarded,getBytes(coder.encode(fragment.inputs,args)));
   assert.equal(row.wrapperSignature,`Phase0MedusaRouterV1.${row.wrapperName}((${fragment.inputs.map(p=>p.format('sighash')).join(',')}))`);
+});
+
+test('Medusa variety gate fails a run whose coverage plateaued and passes one still discovering',()=>{
+  const line=(t,c,b,k)=>`fuzz: elapsed: ${t}, calls: ${c} (1/sec), seq/s: 0, branches: ${b}, corpus: ${k}, failures: 0/0, gas/s: 1`;
+  const cycling=[line('3s',2817,4549,248),line('12s',45966,4666,259),line('1m30s',138521,4666,259)].join('\n');
+  const discovering=[line('3s',160,4496,154),line('2m00s',654,7615,535),line('5m00s',1018,9034,728)].join('\n');
+  const timeline=medusaCoverageTimelineV2(cycling);
+  assert.equal(timeline.at(-1).elapsedSeconds,90);
+  const plateau=medusaVarietyV2({timeline,dispatch:{representedLogicalFunctionCount:10,uniqueCallChainPairs:50}});
+  assert.equal(plateau.status,'FAIL');
+  assert.ok(plateau.repetitionRate>0.6);
+  assert.deepEqual(plateau.failures,['COVERAGE_PLATEAUED_CALLS_ARE_REPEATING']);
+  const fresh=medusaVarietyV2({timeline:medusaCoverageTimelineV2(discovering),dispatch:{representedLogicalFunctionCount:10,uniqueCallChainPairs:50}});
+  assert.equal(fresh.status,'PASS');
+  assert.equal(fresh.repetitionRate,0);
+  const narrow=medusaVarietyV2({timeline:medusaCoverageTimelineV2(discovering),dispatch:{representedLogicalFunctionCount:10,uniqueCallChainPairs:3}});
+  assert.deepEqual(narrow.failures,['TOO_FEW_UNIQUE_CALL_CHAIN_PAIRS']);
 });
