@@ -584,3 +584,123 @@ test('legacy v10.3 fallback is read-only and rejects an unpinned frozen package'
   assert.throws(()=>requiredFile(root,'Audit Skill - Current Authority/Audit_Litemode_v10.3/SKILL.md'),/root hash mismatch/);
   assert.equal(repoFile(root,'Audit Skill - Current Authority/Audit_Litemode_v10.3/SKILL.md'),path.join(root,'Audit Skill - Current Authority/Audit_Litemode_v10.3/SKILL.md'));
 });
+
+
+function boundedRepairFixture(){
+  const f=fixture();
+  const directory=readJson(path.join(f.root,f.dirRel));
+  directory.masterReview={chatUrl:'https://chatgpt.com/c/master-review-chat',reasoning:'MAXIMUM',repairModel:'SOL',repairReasoning:'HIGH'};
+  writeJson(path.join(f.root,f.dirRel),directory);
+  const predecessor=readJson(path.join(f.root,directory.lastSealedReceiptPath));
+  predecessor.authority.liteSkillSha256=fileSha(path.join(f.root,f.authority,'SKILL.md'));
+  writeJson(path.join(f.root,directory.lastSealedReceiptPath),predecessor);
+  writeJson(path.join(f.root,f.campaign,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),{});
+  const form=readJson(path.join(f.root,f.formRel));
+  form.actions['step-1'].outputs.analysis='Original evidence-bound semantic analysis.';
+  writeJson(path.join(f.root,f.formRel),form);
+  run(f);
+  const pending=readJson(path.join(f.root,f.dirRel)).pendingMasterReview;
+  f.masterPath=path.join(f.root,pending.workFormPath);
+  f.relativeForm=path.posix.relative(f.campaign,f.formRel);
+  const master=readJson(f.masterPath);
+  master.review={
+    outcome:'REWORK',summary:'One bounded semantic deficiency needs repair.',
+    deficiencies:[{id:'MR-001',phase:1,file:f.relativeForm,ownedPaths:['actions.step-1.outputs.analysis'],evidenceRefs:[f.relativeForm],rationale:'Resolve the remaining evidence attribution deficiency.'}],
+    repairSpec:{scopeId:'MR-001-repair',allowedFiles:[f.relativeForm],allowedSemanticPaths:[{file:f.relativeForm,path:'actions.step-1.outputs.analysis'}],
+      requiredDependentRefreshes:['REGENERATE_CANONICAL','REGENERATE_REPORT','REGENERATE_DERIVED','RESEAL_RECEIPT'],
+      acceptanceConditions:['All MR-001 evidence attribution deficiencies are resolved.'],
+      prohibitedActions:['SEAL','ADVANCE','MUTATE_ACCEPTED_PREFILL','MUTATE_UNRELATED_EVIDENCE']}
+  };
+  writeJson(f.masterPath,master);
+  installMasterTransportProof(f,'INITIAL_REVIEW');
+  assert.equal(runMaster(f).status,'MASTER_REVIEW_REWORK_REQUIRED');
+  return f;
+}
+function submitBoundedChild(f,attempt){
+  const beforeSha=fileSha(path.join(f.root,f.formRel));
+  const form=readJson(path.join(f.root,f.formRel));
+  form.actions['step-1'].outputs.analysis='Repaired evidence-bound semantic analysis, attempt '+attempt+'.';
+  writeJson(path.join(f.root,f.formRel),form);
+  const master=readJson(f.masterPath);
+  master.childRepair={scopeId:'MR-001-repair',model:'SOL',reasoning:'HIGH',freshChild:true,
+    childChatUrl:'https://chatgpt.com/c/fresh-sol-child-'+attempt,result:'COMPLETED',
+    changedFiles:[{file:f.relativeForm,beforeSha256:beforeSha,afterSha256:fileSha(path.join(f.root,f.formRel))}],
+    changedSemanticPaths:[{file:f.relativeForm,path:'actions.step-1.outputs.analysis'}],completedAt:'2026-10-05T00:00:00Z'};
+  writeJson(f.masterPath,master);
+  installRepairTransportProof(f,master.childRepair.childChatUrl);
+  return runMaster(f);
+}
+function submitRepairVerification(f,outcome){
+  const master=readJson(f.masterPath);
+  master.masterVerification={outcome,verifiedArtifactDigests:master.postRepair.artifacts.map(x=>({path:x.path,sha256:x.sha256})),
+    deficiencyDispositions:[{deficiencyId:'MR-001',disposition:outcome==='ACCEPT'?'RESOLVED':'UNRESOLVED'}],
+    notes:'Persistent master verified regenerated evidence and original deficiency.',
+    verifiedAt:'2026-10-05T01:00:00Z'};
+  writeJson(f.masterPath,master);
+  installMasterTransportProof(f,'REPAIR_VERIFICATION');
+  return runMaster(f);
+}
+test('regenerated-product master review admits one further bounded REWORK with fresh proof and child',()=>{
+  const f=boundedRepairFixture();
+  const original=readJson(f.masterPath).review;
+  assert.equal(submitBoundedChild(f,1).status,'MASTER_REPAIR_READY_FOR_VERIFICATION');
+  const previous=readJson(path.join(f.root,f.dirRel)).pendingMasterReview;
+  const attemptBytes=fs.readFileSync(f.masterPath,'utf8');
+  const rework=submitRepairVerification(f,'REWORK');
+  assert.equal(rework.status,'MASTER_REVIEW_REWORK_REQUIRED');
+  const directory=readJson(path.join(f.root,f.dirRel));
+  const pending=directory.pendingMasterReview;
+  assert.equal(directory.currentAssignment,null);
+  assert.equal(pending.reviewAttempt,2);
+  assert.equal(pending.originalDeficienciesSha256,previous.originalDeficienciesSha256);
+  assert.equal(pending.repairSpecSha256,previous.repairSpecSha256);
+  assert.equal(pending.repairScopeId,previous.repairScopeId);
+  assert.equal(pending.masterTransportProof,undefined);
+  assert.equal(pending.repairTransportProof,undefined);
+  assert.equal(pending.postRepairManifestSha256,undefined);
+  assert.deepEqual(readJson(f.masterPath).review,original);
+  assert.equal(pending.repairHistory.length,1);
+  const archived=readJson(path.join(f.root,pending.repairHistory[0].workFormPath));
+  assert.equal(archived.masterVerification.outcome,'REWORK');
+  assert.equal(archived.postRepair.manifestSha256,previous.postRepairManifestSha256);
+  assert.equal(archived.childRepair.childChatUrl,'https://chatgpt.com/c/fresh-sol-child-1');
+  assert.notEqual(fs.readFileSync(f.masterPath,'utf8'),attemptBytes);
+  assert.equal(runMaster(f).status,'MASTER_REPAIR_TRANSPORT_BLOCKED');
+  assert.equal(submitBoundedChild(f,2).status,'MASTER_REPAIR_READY_FOR_VERIFICATION');
+  const beforeThird=fs.readFileSync(path.join(f.root,f.dirRel),'utf8');
+  assert.equal(submitRepairVerification(f,'REWORK').status,'MASTER_REVIEW_INVALID');
+  assert.equal(fs.readFileSync(path.join(f.root,f.dirRel),'utf8'),beforeThird);
+  assert.equal(submitRepairVerification(f,'ACCEPT').status,'PASS');
+  assert.equal(readJson(path.join(f.root,f.dirRel)).currentAssignment.phaseSequence,2);
+});
+test('generic repair preserves prior revision bytes and binds refreshed form, packet and canonical snapshots',()=>{
+  const f=boundedRepairFixture();
+  const receipt1Rel=f.campaign+'/receipts/PHASE_01_RECEIPT_v1.json';
+  const receipt1Bytes=fs.readFileSync(path.join(f.root,receipt1Rel),'utf8');
+  const receipt1=JSON.parse(receipt1Bytes);
+  const productRoles=['PHASE_WORK_FORM','PHASE_FINAL_REPORT','PHASE_CANONICAL_DATA'];
+  for(const role of productRoles){
+    const ref=receipt1.evidence.find(x=>x.role===role);
+    assert.match(ref.path,/evidence\/sealed-revisions\/phase-01\/revision-1\//);
+    assert.equal(fileSha(path.join(f.root,f.campaign,ref.path)),ref.sha256);
+  }
+  assert.equal(submitBoundedChild(f,1).status,'MASTER_REPAIR_READY_FOR_VERIFICATION');
+  assert.equal(fs.readFileSync(path.join(f.root,receipt1Rel),'utf8'),receipt1Bytes);
+  for(const ref of receipt1.evidence)assert.equal(fileSha(path.join(f.root,f.campaign,ref.path)),ref.sha256);
+  const receipt2=readJson(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v2.json'));
+  for(const role of productRoles){
+    const ref=receipt2.evidence.find(x=>x.role===role);
+    assert.match(ref.path,/evidence\/sealed-revisions\/phase-01\/revision-2\//);
+    assert.equal(fileSha(path.join(f.root,f.campaign,ref.path)),ref.sha256);
+  }
+  const packet=receipt2.inputs.find(x=>x.role==='CONTROLLER_GENERATED_PHASE_WORK_PACKET');
+  assert.match(packet.path,/evidence\/sealed-revisions\/phase-01\/revision-2\//);
+  assert.equal(readJson(path.join(f.root,f.campaign,packet.path)).status,'ACCEPTED');
+});
+test('boundary workflow serializes the shared controller resource across push and dispatch requests',()=>{
+  const workflow=fs.readFileSync('.github/workflows/lite-phase-work-packet-controller-v1.yml','utf8');
+  const concurrency=workflow.match(/concurrency:\n([\s\S]*?)\njobs:/)[1];
+  assert.match(concurrency,/group: lite-phase-boundary-shared-controller/);
+  assert.match(concurrency,/cancel-in-progress: false/);
+  assert.doesNotMatch(concurrency,/github\.(?:sha|run_id)|inputs\.phase_sequence/);
+});
