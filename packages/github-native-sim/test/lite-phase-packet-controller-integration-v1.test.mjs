@@ -604,7 +604,7 @@ test('legacy v10.3 fallback is read-only and rejects an unpinned frozen package'
 });
 
 
-function boundedRepairFixture(){
+function boundedRepairFixture({reducer=false}={}){
   const f=fixture();
   const directory=readJson(path.join(f.root,f.dirRel));
   directory.masterReview={chatUrl:'https://chatgpt.com/c/master-review-chat',reasoning:'MAXIMUM',repairModel:'SOL',repairReasoning:'HIGH'};
@@ -615,6 +615,21 @@ function boundedRepairFixture(){
   writeJson(path.join(f.root,f.campaign,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),{});
   const form=readJson(path.join(f.root,f.formRel));
   form.actions['step-1'].outputs.analysis='Original evidence-bound semantic analysis.';
+  f.repairPath='actions.step-1.outputs.analysis';
+  if(reducer){
+    f.repairPath='actions.step-1.outputs.obligationDispositions';
+    const schemaPath=path.join(f.root,f.authority,'phases/phase-1/PHASE_01_SCHEMA_v1.json');
+    const schema=readJson(schemaPath);
+    schema.actions['step-1'].fields.push({name:'obligationDispositions',type:'REQUIRED_RECORD_LIST',itemRequiredFields:['obligationId','requiredAction','completionCondition','disposition','rationale','evidenceRefs','carryForwardPhaseOrNone']});
+    schema.bookkeepingMappings.obligationRecordPaths=[f.repairPath];writeJson(schemaPath,schema);
+    const obligation={obligationId:'OBL-BASE-001',originPhase:'0',requiredPhase:'1',requiredReviewer:'reviewer-1',requiredAction:'Interpret admitted evidence',completionCondition:'Provide an evidence-bound disposition',status:'OPEN',createdAt:'2026-10-04T00:00:00Z',updatedAt:'2026-10-04T00:00:00Z'};
+    writeJson(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),{obligations:[obligation]});
+    form.actions['step-1'].outputs.obligationDispositions=[{obligationId:obligation.obligationId,requiredAction:obligation.requiredAction,completionCondition:obligation.completionCondition,disposition:'SATISFIED',rationale:'Original reviewer considered the existing evidence sufficient.',evidenceRefs:[f.formRel],carryForwardPhaseOrNone:'NONE_IDENTIFIED',automationOwnedFields:['obligationId','requiredAction','completionCondition']}];
+    form.automationInputs.expectedDueObligationIds=[obligation.obligationId];
+    form.automationInputs.controllerOwnedAutomationInputs.push('expectedDueObligationIds');
+    const prefills=refreshControllerPrefillDigest(form);
+    const d=readJson(path.join(f.root,f.dirRel));d.currentAssignment.controllerPrefillDigestSha256=prefills;writeJson(path.join(f.root,f.dirRel),d);
+  }
   writeJson(path.join(f.root,f.formRel),form);
   run(f);
   const pending=readJson(path.join(f.root,f.dirRel)).pendingMasterReview;
@@ -623,8 +638,8 @@ function boundedRepairFixture(){
   const master=readJson(f.masterPath);
   master.review={
     outcome:'REWORK',summary:'One bounded semantic deficiency needs repair.',
-    deficiencies:[{id:'MR-001',phase:1,file:f.relativeForm,ownedPaths:['actions.step-1.outputs.analysis'],evidenceRefs:[f.relativeForm],rationale:'Resolve the remaining evidence attribution deficiency.'}],
-    repairSpec:{scopeId:'MR-001-repair',allowedFiles:[f.relativeForm],allowedSemanticPaths:[{file:f.relativeForm,path:'actions.step-1.outputs.analysis'}],
+    deficiencies:[{id:'MR-001',phase:1,file:f.relativeForm,ownedPaths:[f.repairPath],evidenceRefs:[f.relativeForm],rationale:'Resolve the remaining evidence attribution deficiency.'}],
+    repairSpec:{scopeId:'MR-001-repair',allowedFiles:[f.relativeForm],allowedSemanticPaths:[{file:f.relativeForm,path:f.repairPath}],
       requiredDependentRefreshes:['REGENERATE_CANONICAL','REGENERATE_REPORT','REGENERATE_DERIVED','RESEAL_RECEIPT'],
       acceptanceConditions:['All MR-001 evidence attribution deficiencies are resolved.'],
       prohibitedActions:['SEAL','ADVANCE','MUTATE_ACCEPTED_PREFILL','MUTATE_UNRELATED_EVIDENCE']}
@@ -637,13 +652,17 @@ function boundedRepairFixture(){
 function submitBoundedChild(f,attempt){
   const beforeSha=fileSha(path.join(f.root,f.formRel));
   const form=readJson(path.join(f.root,f.formRel));
-  form.actions['step-1'].outputs.analysis='Repaired evidence-bound semantic analysis, attempt '+attempt+'.';
+  if(f.repairPath==='actions.step-1.outputs.obligationDispositions'){
+    const row=form.actions['step-1'].outputs.obligationDispositions[0];
+    row.disposition='CARRY_FORWARD';row.carryForwardPhaseOrNone='6';
+    row.rationale='Remaining evidence needs explicit Phase-6 verification, attempt '+attempt+'.';
+  }else form.actions['step-1'].outputs.analysis='Repaired evidence-bound semantic analysis, attempt '+attempt+'.';
   writeJson(path.join(f.root,f.formRel),form);
   const master=readJson(f.masterPath);
   master.childRepair={scopeId:'MR-001-repair',model:'SOL',reasoning:'HIGH',freshChild:true,
     childChatUrl:'https://chatgpt.com/c/fresh-sol-child-'+attempt,result:'COMPLETED',
     changedFiles:[{file:f.relativeForm,beforeSha256:beforeSha,afterSha256:fileSha(path.join(f.root,f.formRel))}],
-    changedSemanticPaths:[{file:f.relativeForm,path:'actions.step-1.outputs.analysis'}],completedAt:'2026-10-05T00:00:00Z'};
+    changedSemanticPaths:[{file:f.relativeForm,path:f.repairPath}],completedAt:'2026-10-05T00:00:00Z'};
   writeJson(f.masterPath,master);
   installRepairTransportProof(f,master.childRepair.childChatUrl);
   return runMaster(f);
@@ -761,4 +780,25 @@ test('obligation and invalidation semantic repair paths remain blocked without d
     assert.equal(fs.readFileSync(path.join(f.root,f.dirRel),'utf8'),before);
     assert.equal(fs.readFileSync(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),'utf8'),ledgerBefore);
   }
+});
+
+test('future checkpoint-backed semantic replay restores the earliest ledger before applying repaired dispositions',()=>{
+  const f=boundedRepairFixture({reducer:true});
+  const receipt1Rel=f.campaign+'/receipts/PHASE_01_RECEIPT_v1.json';
+  const oldReceipt=fs.readFileSync(path.join(f.root,receipt1Rel),'utf8');
+  const checkpoint=JSON.parse(oldReceipt).controllerReplayCheckpoint;
+  assert.match(checkpoint.before.sha256,/^[0-9a-f]{64}$/);
+  assert.match(checkpoint.after.sha256,/^[0-9a-f]{64}$/);
+  const originalPost=readJson(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'));
+  assert.equal(originalPost.obligations[0].status,'SATISFIED');
+  assert.equal(submitBoundedChild(f,1).status,'MASTER_REPAIR_READY_FOR_VERIFICATION');
+  const refreshed=readJson(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'));
+  assert.equal(refreshed.obligations[0].status,'OPEN');
+  assert.equal(refreshed.obligations[0].requiredPhase,'6');
+  assert.deepEqual(refreshed.obligations[0].closureEvidenceRefs,[]);
+  assert.equal(refreshed.obligations[0].createdAt,originalPost.obligations[0].createdAt);
+  assert.equal(fs.readFileSync(path.join(f.root,receipt1Rel),'utf8'),oldReceipt);
+  const receipt2=readJson(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v2.json'));
+  assert.match(receipt2.controllerReplayCheckpoint.after.sha256,/^[0-9a-f]{64}$/);
+  assert.equal(submitRepairVerification(f,'ACCEPT').status,'PASS');
 });

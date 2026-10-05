@@ -19,7 +19,7 @@ import {
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
-import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,snapshotPhaseReceiptArtifacts} from './lib/lite-master-review-v1.mjs';
+import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,snapshotPhaseReceiptArtifacts,resolveSealedArtifactReference} from './lib/lite-master-review-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function registeredReviewerChatUrls(file){
@@ -120,10 +120,23 @@ function isFreshBoundary(next){return next===2||next===6||next===8;}
 function maybeFile(root,rel){const f=repoFile(root,rel);return fs.existsSync(f)&&fs.statSync(f).isFile()?f:null;}
 function maybeJson(root,rel){const f=maybeFile(root,rel);if(!f)return null;try{return readJson(f);}catch{return null;}}
 function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNum(phase)+'_CANONICAL_DATA_v1.json');}
-function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRelFor(campaignPath,phase));}
+
+function currentPhaseProductRel(root,campaignPath,phase,role,fallback){
+  const receiptDir=repoFile(root,path.posix.join(campaignPath,'receipts'));
+  if(!fs.existsSync(receiptDir))return fallback;
+  let receiptInfo;
+  try{receiptInfo=latestPhaseReceiptInfo(root,campaignPath,phase);}catch{return fallback;}
+  const receipt=readJson(requiredFile(root,receiptInfo.rel,'current phase receipt'));
+  const baseName=path.posix.basename(fallback).replace(/_v[0-9]+(?=\.[^.]+$)/,'');
+  const ref=[...(receipt.evidence??[]),...(receipt.outputs??[])].find(x=>x?.role===role&&path.posix.basename(x.path??'').replace(/_v[0-9]+(?=\.[^.]+$)/,'')===baseName);
+  if(!ref)return fallback;
+  return resolveSealedArtifactReference({root,campaignPath,receipt,reference:ref}).path;
+}
+
+function canonicalFor(root,campaignPath,phase){return maybeJson(root,currentPhaseProductRel(root,campaignPath,phase,phase===7?'AUTOMATIC_PHASE7_CANONICAL_DATA':'PHASE_CANONICAL_DATA',canonicalRelFor(campaignPath,phase)));}
 function uniqueExisting(root,rels){return [...new Set(rels.filter(Boolean))].filter(rel=>Boolean(maybeFile(root,rel)));}
 function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
-  const derived=(phase,name)=>path.posix.join(campaignPath,`derived/phase-${phase}/${name}`);
+  const derived=(phase,name)=>currentPhaseProductRel(root,campaignPath,phase,'DERIVED_DOWNSTREAM_DATA',path.posix.join(campaignPath,`derived/phase-${phase}/${name}`));
   const buildIdentity=path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
   const deploy=path.posix.join(campaignPath,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
   const targets=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
@@ -708,7 +721,9 @@ if(deficiencies.length){
   process.exit(0);
 }
 
-const canonicalRel=path.posix.join(campaignPath,'derived/phase-'+sequence,'PHASE_'+phaseNum(sequence)+'_CANONICAL_DATA_v1.json');
+const phaseRevision=Number(assignment.phaseRevision??1);
+if(!Number.isInteger(phaseRevision)||phaseRevision<1) throw new Error('assignment.phaseRevision must be an integer >= 1 when present');
+const canonicalRel=revisionedArtifactPath(path.posix.join(campaignPath,'derived/phase-'+sequence,'PHASE_'+phaseNum(sequence)+'_CANONICAL_DATA_v1.json'),phaseRevision);
 const canonical={
   schemaVersion:'curveyield-lite-phase-canonical-data-v1',
   phase:sequence,
@@ -761,7 +776,7 @@ if(sealedRework){
   writeJson(repoFile(root,controls.invalidRel),invalid);
 }
 writeJson(repoFile(root,canonicalRel),canonical);
-const derivedRels=buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical,canonicalRel,now});
+const derivedRels=buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical,canonicalRel,now,revision:phaseRevision});
 const boundaryArtifactRels=[];
 let successorPrefillContext={};
 if(sequence===5){
@@ -816,8 +831,6 @@ if(sequence===9){
 
 const receiptLibUrl=pathToFileURL(repoFile(root,'packages/controller-core/src/lite-phase-receipt-v1.mjs')).href;
 const receiptLib=await import(receiptLibUrl);
-const phaseRevision=Number(assignment.phaseRevision??1);
-if(!Number.isInteger(phaseRevision)||phaseRevision<1) throw new Error('assignment.phaseRevision must be an integer >= 1 when present');
 const receiptRel=receiptLib.phaseReceiptPath(campaignPath,sequence,phaseRevision);
 const evidence=[receiptRef(root,campaignPath,assignment.workFormPath,'PHASE_WORK_FORM')];
 if(sealedRework){
@@ -874,10 +887,10 @@ if(sequence===6){
   form7.actions['step-1'].outputs={predecessorPhase6Receipt:receiptRel,phase6DerivedInput:derivedRels[0]??'NONE_IDENTIFIED',markerDisposition:'SEALED_AUTOMATIC_MARKER',successorPhase:'8',successorReviewer:'reviewer-4'};
   form7.automationInputs={predecessorReceiptPath:receiptRel,derivedInputPaths:derivedRels};
   writeJson(repoFile(root,form7Rel),form7);
-  const canonical7Rel=path.posix.join(campaignPath,'derived/phase-7/PHASE_07_CANONICAL_DATA_v1.json');
+  const canonical7Rel=revisionedArtifactPath(path.posix.join(campaignPath,'derived/phase-7/PHASE_07_CANONICAL_DATA_v1.json'),phaseRevision);
   const canonical7={schemaVersion:'curveyield-lite-phase-canonical-data-v1',phase:7,campaignId:directory.campaignId,workSchemaPath:loaded7.rel,workFormPath:form7Rel,finalReportPath:null,actions:form7.actions,generatedAt:now};
   writeJson(repoFile(root,canonical7Rel),canonical7);
-  const derived7=buildDerivedOutputs({root,campaignPath,schema:schema7,canonicalData:canonical7,canonicalRel:canonical7Rel,now});
+  const derived7=buildDerivedOutputs({root,campaignPath,schema:schema7,canonicalData:canonical7,canonicalRel:canonical7Rel,now,revision:phaseRevision});
   const markerRevision=masterRepairRefreshSha?phaseRevision:1;
   const markerRel=receiptLib.phaseReceiptPath(campaignPath,7,markerRevision);
   const markerEvidence=[receiptRef(root,campaignPath,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,campaignPath,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,campaignPath,x,'DERIVED_DOWNSTREAM_DATA'))];

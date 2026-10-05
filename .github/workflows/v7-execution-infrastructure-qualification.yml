@@ -357,6 +357,16 @@ jobs:
           const priorReceiptFile=path.join(controllerRoot,...request.priorReceipt.path.split('/'));
           const priorReceiptDigestBefore=hashFile(priorReceiptFile);
           const oldReceiptDigests=new Map(allFiles(receiptDir).map(file=>[file,hashFile(file)]));
+          const receiptRefFile=ref=>path.join(controllerRoot,...(ref.path.startsWith(campaignPath+'/')?ref.path:campaignPath+'/'+ref.path).split('/'));
+          const priorReceipt=readJson(priorReceiptFile);
+          const priorArtifactDigests=new Map();
+          for(const family of ['inputs','evidence','outputs'])for(const ref of priorReceipt[family]??[]){
+            if(!ref.sha256)continue;
+            if(!/^[0-9a-f]{64}$/.test(ref.sha256))fail('prior receipt has malformed artifact digest');
+            const file=receiptRefFile(ref);
+            if(!fs.existsSync(file)||hashFile(file)!==ref.sha256)fail('prior receipt artifact is unresolved before qualification');
+            priorArtifactDigests.set(file,ref.sha256);
+          }
           let raw;
           try{
             raw=execFileSync(process.execPath,[
@@ -377,6 +387,7 @@ jobs:
           if(afterDirectory.sourceSha256!==sourceShaBefore||hashTree(path.join(campaignRoot,'source'))!==sourceDigestBefore)fail('source changed');
           if(hashFile(priorReceiptFile)!==priorReceiptDigestBefore)fail('prior receipt changed');
           for(const [file,digest] of oldReceiptDigests)if(hashFile(file)!==digest)fail('accepted receipt history changed');
+          for(const [file,digest] of priorArtifactDigests)if(hashFile(file)!==digest)fail('prior sealed artifact changed');
           const newReceipt=path.join(receiptDir,'PHASE_01_RECEIPT_v3.json');
           const report=path.join(controllerRoot,...request.generatedFinalReportPath.split('/'));
           const packet=path.join(controllerRoot,...request.generatedPacketPath.split('/'));
@@ -392,6 +403,7 @@ jobs:
             'held_rework_qualification=PASS',
             'held_rework_source_sha256='+sourceShaBefore,
             'held_rework_prior_receipt_sha256='+priorReceiptDigestBefore,
+            'held_rework_prior_artifacts_preserved='+priorArtifactDigests.size,
             'held_rework_revision3_receipt_sha256='+hashFile(newReceipt),
             'held_rework_report_sha256='+hashFile(report),
             'held_rework_packet_sha256='+hashFile(packet),

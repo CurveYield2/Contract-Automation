@@ -39,6 +39,13 @@ function latestReceipt(root,campaignPath,phase){
   return {...found,receipt};
 }
 function canonicalRel(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNumber(phase)+'_CANONICAL_DATA_v1.json');}
+function currentCanonicalRel(root,campaignPath,phase,receipt){
+  const ref=[...(receipt.evidence??[]),...(receipt.outputs??[])].find(x=>x?.role===(phase===7?'AUTOMATIC_PHASE7_CANONICAL_DATA':'PHASE_CANONICAL_DATA'));
+  if(!ref)return canonicalRel(campaignPath,phase);
+  const resolved=resolveSealedArtifactReference({root,campaignPath,receipt,reference:ref}).path;
+  const snapshotPrefix=path.posix.join(campaignPath,'evidence/sealed-revisions','phase-'+phaseNumber(phase),'revision-'+receipt.phase.revision)+'/';
+  return resolved.startsWith(snapshotPrefix)?path.posix.join(campaignPath,resolved.slice(snapshotPrefix.length)):resolved;
+}
 function segmentForBoundary(boundaryPhase){return MASTER_REVIEW_SEGMENTS_V1.find(x=>x.boundaryPhase===Number(boundaryPhase))??null;}
 function segmentForId(segmentId){return MASTER_REVIEW_SEGMENTS_V1.find(x=>x.segmentId===segmentId)??null;}
 
@@ -97,7 +104,7 @@ function preserveSegmentRevisionArtifacts({root,campaignPath,segment}){
     const {receipt}=latestReceipt(root,campaignPath,phase);
     snapshotPhaseReceiptArtifacts({root,campaignPath,receipt});
     if(receipt.phase.status!=='SKIPPED'){
-      const canonical=canonicalRel(campaignPath,phase);
+      const canonical=currentCanonicalRel(root,campaignPath,phase,receipt);
       const data=readJson(requiredFile(root,canonical,'sealed canonical data'));
       for(const rel of [canonical,data.workFormPath,data.finalReportPath].filter(Boolean)){
         immutableCopy(root,rel,phaseRevisionSnapshotPath(campaignPath,phase,Number(receipt.phase.revision),rel));
@@ -116,6 +123,7 @@ export function validateMasterReviewConfiguration(directory,{required=false}={})
   if(cfg.reasoning!=='MAXIMUM')throw new Error('masterReview.reasoning must be MAXIMUM');
   if(cfg.repairModel!=='SOL')throw new Error('masterReview.repairModel must be SOL');
   if(cfg.repairReasoning!=='HIGH')throw new Error('masterReview.repairReasoning must be HIGH');
+  if(cfg.maxRepairCycles!==undefined&&(!Number.isInteger(cfg.maxRepairCycles)||cfg.maxRepairCycles<1||cfg.maxRepairCycles>10))throw new Error('masterReview.maxRepairCycles must be a finite integer from 1 to 10; default is 2');
   return cfg;
 }
 
@@ -155,12 +163,12 @@ export function collectSegmentArtifacts({root,campaignPath,segment,directory,exp
     if(!Array.isArray(receipt.inputs)||receipt.inputs.length===0)throw new Error('sealed receipt inputs are missing for Phase '+phase);
     if(receiptKind!=='SKIP_MARKER'&&(!Array.isArray(receipt.evidence)||receipt.evidence.length===0||!Array.isArray(receipt.outputs)||receipt.outputs.length===0))throw new Error('sealed receipt evidence/outputs are missing for Phase '+phase);
     if(phase===7){
-      const canonical=canonicalRel(campaignPath,phase);
+      const canonical=currentCanonicalRel(root,campaignPath,phase,receipt);
       const canonicalData=readJson(requiredFile(root,canonical,'Phase-7 marker canonical data'));
       pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,'MACHINE_MARKER',canonical));
       if(canonicalData.workFormPath)pushUniqueArtifact(artifacts,seen,artifact(root,campaignPath,phase,'WORK_FORM',canonicalData.workFormPath));
     }else if(receiptKind!=='SKIP_MARKER'){
-      const canonical=canonicalRel(campaignPath,phase);
+      const canonical=currentCanonicalRel(root,campaignPath,phase,receipt);
       const canonicalData=readJson(requiredFile(root,canonical,'Phase '+phase+' canonical data'));
       const authorityRoot=path.posix.dirname(expectedAuthority.homepagePath);
       const phaseSchema=loadPhaseSchema(root,authorityRoot,phase).schema;
@@ -559,7 +567,8 @@ function validateRefreshedRepairVerification({root,campaignPath,form,pending,seg
   const disposedIds=dispositions.map(x=>x?.deficiencyId).filter(Boolean).sort();
   if(!exactJson(disposedIds,deficiencyIds)||dispositions.some(x=>!(rework?['RESOLVED','UNRESOLVED']:['RESOLVED']).includes(x?.disposition)))failures.push('masterVerification must dispose every original bounded deficiency exactly once');
   if(rework&&!dispositions.some(x=>x?.disposition==='UNRESOLVED'))failures.push('REWORK requires an unresolved original deficiency');
-  if(rework&&Number(pending.reviewAttempt)>=2)failures.push('finite master repair limit reached: at most two repair cycles');
+  if(rework&&Number(pending.reviewAttempt)>=Number(directory.masterReview?.maxRepairCycles??2))failures.push('finite master repair limit reached');
+  for(const id of pending.resolvedDeficiencyIds??[])if(!dispositions.some(x=>x?.deficiencyId===id&&x?.disposition==='RESOLVED'))failures.push('previously resolved original deficiency cannot regress: '+id);
   if(typeof verification?.verifiedAt!=='string'||!verification.verifiedAt)failures.push('masterVerification.verifiedAt is required');
   return failures;
 }
@@ -576,9 +585,17 @@ function admitNextRepairCycle({root,campaignPath,form,pending,directory,now}){
     if(existing(root,rel))proofs.push(immutableCopy(root,rel,path.posix.join(attemptDir,name)));
   }
   pending.repairHistory??=[];
-  pending.repairHistory.push({reviewAttempt:attempt,workFormPath:archivedForm,workFormSha256:digestFile(repoFile(root,archivedForm)),proofs,
+  pending.repairHistory.push({reviewAttempt:attempt,deficiencyDispositions:structuredClone(form.masterVerification.deficiencyDispositions),workFormPath:archivedForm,workFormSha256:digestFile(repoFile(root,archivedForm)),proofs,
     childChatUrl:form.childRepair.childChatUrl,repairScopeId:pending.repairScopeId,repairSpecSha256:pending.repairSpecSha256,
     originalDeficienciesSha256:pending.originalDeficienciesSha256,postRepairManifestSha256:pending.postRepairManifestSha256});
+  const unresolved=new Set(form.masterVerification.deficiencyDispositions.filter(x=>x.disposition==='UNRESOLVED').map(x=>x.deficiencyId));
+  const unresolvedPaths=new Set(form.review.deficiencies.filter(x=>unresolved.has(x.id)).flatMap(x=>x.ownedPaths.map(p=>x.file+'|'+p)));
+  pending.resolvedDeficiencyIds=[...new Set([...(pending.resolvedDeficiencyIds??[]),...form.masterVerification.deficiencyDispositions.filter(x=>x.disposition==='RESOLVED').map(x=>x.deficiencyId)])];
+  pending.initialRepairSpecSha256??=pending.repairSpecSha256;
+  form.review.repairSpec.allowedSemanticPaths=form.review.repairSpec.allowedSemanticPaths.filter(x=>unresolvedPaths.has(x.file+'|'+x.path));
+  form.review.repairSpec.allowedFiles=[...new Set(form.review.repairSpec.allowedSemanticPaths.map(x=>x.file))];
+  if(!form.review.repairSpec.allowedFiles.length)throw new Error('REWORK has no remaining admitted original semantic paths');
+  pending.repairSpecSha256=digestJson(form.review.repairSpec);
   form.reviewAttempt=attempt+1;
   form.reviewedArtifacts=structuredClone(form.postRepair.artifacts);
   form.bindings.segmentManifestSha256=form.postRepair.manifestSha256;
