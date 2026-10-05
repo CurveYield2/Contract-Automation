@@ -471,13 +471,6 @@ jobs:
         if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: npm run v7:manifest -- --check
 
-      - name: Phase-0 v2 focused unit acceptance
-        if: env.V7_QUALIFICATION_LANE == 'FULL'
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --test packages/github-native-sim/test/phase0-*.test.mjs
-
       - name: V7 request and execution contract qualification
         if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: node --test packages/github-native-sim/test/*.test.mjs
