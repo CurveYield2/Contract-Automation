@@ -19,7 +19,7 @@ import {
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
-import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts} from './lib/lite-master-review-v1.mjs';
+import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,snapshotPhaseReceiptArtifacts,resolveSealedArtifactReference,captureControllerReplayState,restoreControllerReplayState} from './lib/lite-master-review-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function registeredReviewerChatUrls(file){
@@ -120,10 +120,23 @@ function isFreshBoundary(next){return next===2||next===6||next===8;}
 function maybeFile(root,rel){const f=repoFile(root,rel);return fs.existsSync(f)&&fs.statSync(f).isFile()?f:null;}
 function maybeJson(root,rel){const f=maybeFile(root,rel);if(!f)return null;try{return readJson(f);}catch{return null;}}
 function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNum(phase)+'_CANONICAL_DATA_v1.json');}
-function canonicalFor(root,campaignPath,phase){return maybeJson(root,canonicalRelFor(campaignPath,phase));}
+
+function currentPhaseProductRel(root,campaignPath,phase,role,fallback){
+  const receiptDir=repoFile(root,path.posix.join(campaignPath,'receipts'));
+  if(!fs.existsSync(receiptDir))return fallback;
+  let receiptInfo;
+  try{receiptInfo=latestPhaseReceiptInfo(root,campaignPath,phase);}catch{return fallback;}
+  const receipt=readJson(requiredFile(root,receiptInfo.rel,'current phase receipt'));
+  const baseName=path.posix.basename(fallback).replace(/_v[0-9]+(?=\.[^.]+$)/,'');
+  const ref=[...(receipt.evidence??[]),...(receipt.outputs??[])].find(x=>x?.role===role&&path.posix.basename(x.path??'').replace(/_v[0-9]+(?=\.[^.]+$)/,'')===baseName);
+  if(!ref)return fallback;
+  return resolveSealedArtifactReference({root,campaignPath,receipt,reference:ref}).path;
+}
+
+function canonicalFor(root,campaignPath,phase){return maybeJson(root,currentPhaseProductRel(root,campaignPath,phase,phase===7?'AUTOMATIC_PHASE7_CANONICAL_DATA':'PHASE_CANONICAL_DATA',canonicalRelFor(campaignPath,phase)));}
 function uniqueExisting(root,rels){return [...new Set(rels.filter(Boolean))].filter(rel=>Boolean(maybeFile(root,rel)));}
 function resolveInputsForTarget({root,campaignPath,target,immediate=[]}){
-  const derived=(phase,name)=>path.posix.join(campaignPath,`derived/phase-${phase}/${name}`);
+  const derived=(phase,name)=>currentPhaseProductRel(root,campaignPath,phase,'DERIVED_DOWNSTREAM_DATA',path.posix.join(campaignPath,`derived/phase-${phase}/${name}`));
   const buildIdentity=path.posix.join(campaignPath,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json');
   const deploy=path.posix.join(campaignPath,'work/phase-06/LITE_DEPLOY_CONFIG_MATRIX.md');
   const targets=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
@@ -404,6 +417,7 @@ function applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,auth
     fs.mkdirSync(path.dirname(repoFile(shadowRoot,receiptLibRel)),{recursive:true});
     fs.copyFileSync(requiredFile(root,receiptLibRel,'lite receipt library'),repoFile(shadowRoot,receiptLibRel));
 
+    if(result.replayPlan)restoreControllerReplayState({root:shadowRoot,campaignPath,pointer:result.replayPlan.before});
     let shadowDirectory=readJson(repoFile(shadowRoot,directoryRel));
     for(let index=0;index<refreshPhases.length;index++){
       const phase=refreshPhases[index];
@@ -708,7 +722,9 @@ if(deficiencies.length){
   process.exit(0);
 }
 
-const canonicalRel=path.posix.join(campaignPath,'derived/phase-'+sequence,'PHASE_'+phaseNum(sequence)+'_CANONICAL_DATA_v1.json');
+const phaseRevision=Number(assignment.phaseRevision??1);
+if(!Number.isInteger(phaseRevision)||phaseRevision<1) throw new Error('assignment.phaseRevision must be an integer >= 1 when present');
+const canonicalRel=revisionedArtifactPath(path.posix.join(campaignPath,'derived/phase-'+sequence,'PHASE_'+phaseNum(sequence)+'_CANONICAL_DATA_v1.json'),phaseRevision);
 const canonical={
   schemaVersion:'curveyield-lite-phase-canonical-data-v1',
   phase:sequence,
@@ -752,6 +768,7 @@ if(schema.finalReport){
 if(deficiencies.length) throw new Error('controller-generated report validation failed: '+deficiencies.join('; '));
 
 packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS'};
+const replayBefore=captureControllerReplayState({root,campaignPath,phase:sequence,revision:phaseRevision,stage:'before',now});
 const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now,replacePhase:Boolean(masterRepairRefreshSha)});
 if(sealedRework){
   const invalid=readJson(requiredFile(root,controls.invalidRel,'evidence invalidation matrix'));
@@ -761,7 +778,7 @@ if(sealedRework){
   writeJson(repoFile(root,controls.invalidRel),invalid);
 }
 writeJson(repoFile(root,canonicalRel),canonical);
-const derivedRels=buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical,canonicalRel,now});
+const derivedRels=buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical,canonicalRel,now,revision:phaseRevision});
 const boundaryArtifactRels=[];
 let successorPrefillContext={};
 if(sequence===5){
@@ -816,8 +833,6 @@ if(sequence===9){
 
 const receiptLibUrl=pathToFileURL(repoFile(root,'packages/controller-core/src/lite-phase-receipt-v1.mjs')).href;
 const receiptLib=await import(receiptLibUrl);
-const phaseRevision=Number(assignment.phaseRevision??1);
-if(!Number.isInteger(phaseRevision)||phaseRevision<1) throw new Error('assignment.phaseRevision must be an integer >= 1 when present');
 const receiptRel=receiptLib.phaseReceiptPath(campaignPath,sequence,phaseRevision);
 const evidence=[receiptRef(root,campaignPath,assignment.workFormPath,'PHASE_WORK_FORM')];
 if(sealedRework){
@@ -862,9 +877,10 @@ if(sealedRework){
   if(event)event.resolutionReceiptPath=receiptRel;
   writeJson(repoFile(root,controls.invalidRel),invalid);
 }
-writeJson(repoFile(root,receiptRel),receipt);
 packet.status='ACCEPTED';packet.controllerValidation.receiptPath=receiptRel;packet.controllerValidation.canonicalDataPath=canonicalRel;packet.controllerValidation.derivedOutputPaths=derivedRels;packet.controllerValidation.boundaryMachineArtifactPaths=boundaryArtifactRels;
 writeJson(packetFile,packet);
+if(gatedMasterReview||masterRepairRefreshSha)snapshotPhaseReceiptArtifacts({root,campaignPath,receipt,bindSnapshots:true});
+writeJson(repoFile(root,receiptRel),receipt);
 
 let sealedReceiptRel=receiptRel;
 if(sequence===6){
@@ -873,16 +889,16 @@ if(sequence===6){
   form7.actions['step-1'].outputs={predecessorPhase6Receipt:receiptRel,phase6DerivedInput:derivedRels[0]??'NONE_IDENTIFIED',markerDisposition:'SEALED_AUTOMATIC_MARKER',successorPhase:'8',successorReviewer:'reviewer-4'};
   form7.automationInputs={predecessorReceiptPath:receiptRel,derivedInputPaths:derivedRels};
   writeJson(repoFile(root,form7Rel),form7);
-  const canonical7Rel=path.posix.join(campaignPath,'derived/phase-7/PHASE_07_CANONICAL_DATA_v1.json');
+  const canonical7Rel=revisionedArtifactPath(path.posix.join(campaignPath,'derived/phase-7/PHASE_07_CANONICAL_DATA_v1.json'),phaseRevision);
   const canonical7={schemaVersion:'curveyield-lite-phase-canonical-data-v1',phase:7,campaignId:directory.campaignId,workSchemaPath:loaded7.rel,workFormPath:form7Rel,finalReportPath:null,actions:form7.actions,generatedAt:now};
   writeJson(repoFile(root,canonical7Rel),canonical7);
-  const derived7=buildDerivedOutputs({root,campaignPath,schema:schema7,canonicalData:canonical7,canonicalRel:canonical7Rel,now});
+  const derived7=buildDerivedOutputs({root,campaignPath,schema:schema7,canonicalData:canonical7,canonicalRel:canonical7Rel,now,revision:phaseRevision});
   const markerRevision=masterRepairRefreshSha?phaseRevision:1;
   const markerRel=receiptLib.phaseReceiptPath(campaignPath,7,markerRevision);
   const markerEvidence=[receiptRef(root,campaignPath,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,campaignPath,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,campaignPath,x,'DERIVED_DOWNSTREAM_DATA'))];
   const markerHandoff=gatedMasterReview?{required:true,boundary:'MASTER_REVIEW_SEGMENT_06_07',incomingReviewer:'master-reviewer',assignedWork:'Review reviewer-3L segment Phases 6-7',nextPhaseSequence:8,sameReviewer:false,status:'MASTER_REVIEW_PENDING'}:{required:true,boundary:'P67_TO_P8',incomingReviewer:'reviewer-4',assignedWork:'Combined Lite Phases 8-10',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'};
   const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',revision:markerRevision,authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],evidence:markerEvidence,outputs:markerEvidence,globalControls:receipt.globalControls,validation:{status:'PASS',validatedAt:now,failures:[]},handoff:markerHandoff,now});
-  marker.sealedAt=now;if(masterRepairRefreshSha)marker.masterRepair={schemaVersion:'curveyield-lite-master-repair-receipt-v1',scopeId:directory.pendingMasterReview.repairScopeId,repairSpecSha256:masterRepairRefreshSha,priorRevision:markerRevision-1,controllerDependentRefresh:true};writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=true;nextSequence=8;nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:8,immediate:[...derivedRels,...derived7,...boundaryArtifactRels]});
+  marker.sealedAt=now;if(masterRepairRefreshSha)marker.masterRepair={schemaVersion:'curveyield-lite-master-repair-receipt-v1',scopeId:directory.pendingMasterReview.repairScopeId,repairSpecSha256:masterRepairRefreshSha,priorRevision:markerRevision-1,controllerDependentRefresh:true};if(gatedMasterReview||masterRepairRefreshSha)snapshotPhaseReceiptArtifacts({root,campaignPath,receipt:marker,bindSnapshots:true});writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=true;nextSequence=8;nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:8,immediate:[...derivedRels,...derived7,...boundaryArtifactRels]});
 }
 if(sequence===8&&nextSequence===10){
   const skippedRevision=masterRepairRefreshSha?phaseRevision:1;
@@ -890,9 +906,18 @@ if(sequence===8&&nextSequence===10){
   const skipped=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:9,revision:skippedRevision,executorType:'GITHUB_ACTIONS',executorLineage:'phase9-skip-automation',authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SKIPPED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],outputs:[],automation:[{action:'SKIPPED_NO_REMEDIATION',status:'PASS',recordedAt:now}],globalControls:receipt.globalControls,validation:{status:'NOT_APPLICABLE',validatedAt:now,failures:[]},handoff:{required:false,boundary:null,incomingReviewer:'reviewer-4',assignedWork:'Phase 10',nextPhaseSequence:10,sameReviewer:true,status:'NOT_APPLICABLE'},now});
   skipped.sealedAt=now;if(masterRepairRefreshSha)skipped.masterRepair={schemaVersion:'curveyield-lite-master-repair-receipt-v1',scopeId:directory.pendingMasterReview.repairScopeId,repairSpecSha256:masterRepairRefreshSha,priorRevision:skippedRevision-1,controllerDependentRefresh:true};writeJson(repoFile(root,skippedRel),skipped);sealedReceiptRel=skippedRel;
 }
+function finalizeControllerReplayCheckpoint(){
+  const replayAfter=captureControllerReplayState({root,campaignPath,phase:sequence,revision:phaseRevision,stage:'after',now});
+  for(const rel of [...new Set([receiptRel,sealedReceiptRel])]){
+    const sealed=readJson(requiredFile(root,rel,'sealed replay-checkpoint receipt'));
+    sealed.controllerReplayCheckpoint={schemaVersion:'curveyield-lite-controller-replay-checkpoint-v1',ownerPhase:sequence,ownerRevision:phaseRevision,before:replayBefore,after:replayAfter};
+    writeJson(repoFile(root,rel),sealed);
+  }
+}
 directory.lastSealedReceiptPath=sealedReceiptRel;
 const masterBoundary=sequence===1?1:sequence===5?5:sequence===6?7:sequence===10?10:null;
 if(gatedMasterReview&&masterBoundary!==null){
+  finalizeControllerReplayCheckpoint();
   const staged=stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase:masterBoundary,lastSealedReceiptPath:sealedReceiptRel,nextSequence,nextDerivedInputPaths:nextDerivedInputs,successorPrefillContext,now});
   writeJson(directoryFile,directory);
   const feedback=masterWakeMessage({campaignId:directory.campaignId,pending:staged.pending});
@@ -906,6 +931,7 @@ else{
   nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
   directory.currentAssignment=nextAssignment;directory.campaignStatus=nextStatus==='WAITING_FOR_SUCCESSOR_AGENT'?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';directory.updatedAt=now;
 }
+finalizeControllerReplayCheckpoint();
 writeJson(directoryFile,directory);
 const feedback='CONTROLLER_PHASE_PASS: Phase '+sequence+' validated and sealed.'+(nextAssignment?' Next authorized assignment: Phase '+nextAssignment.phaseSequence+' / '+nextAssignment.reviewer+'.':' Campaign complete.');
 process.stdout.write(JSON.stringify({status:'PASS',controllerPassToken:'CONTROLLER_PHASE_PASS',sealedRework:Boolean(sealedRework),masterRepairRefresh:Boolean(masterRepairRefreshSha),campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:Boolean(nextAssignment&&nextAssignment.status==='WAITING_FOR_SUCCESSOR_AGENT'),sameReviewerAdvanced:Boolean(nextAssignment&&nextAssignment.status==='ACTIVE'),nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');

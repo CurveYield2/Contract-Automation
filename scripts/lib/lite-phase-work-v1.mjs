@@ -104,12 +104,15 @@ export function validateFinalReport(schema,text){
 }
 export function getByPath(obj,dot){let cur=obj;for(const part of String(dot).split('.')){if(cur==null) return undefined;cur=cur[part];}return cur;}
 export function setByPath(obj,dot,value){const parts=String(dot).split('.');let cur=obj;for(let i=0;i<parts.length-1;i++){cur[parts[i]]??={};cur=cur[parts[i]];}cur[parts.at(-1)]=value;}
-export function buildDerivedOutputs({root,campaignPath,schema,canonicalData,canonicalRel,now}){
+export function buildDerivedOutputs({root,campaignPath,schema,canonicalData,canonicalRel,now,revision=1}){
   const out=[];
   for(const spec of schema.derivedOutputs??[]){
     const data={};
     for(const selector of spec.selectors??[]) setByPath(data,selector,getByPath(canonicalData,selector));
-    const rel=fullCampaignPath(campaignPath,spec.path);
+    const outputPath=Number(revision)===1?spec.path:spec.path.replace(/_v[0-9]+(?=\.[^.]+$)/,'_v'+revision);
+    if(!Number.isInteger(Number(revision))||Number(revision)<1)throw new Error('derived output revision must be a positive integer');
+    if(Number(revision)>1&&outputPath===spec.path)throw new Error('derived output has no revision-addressed schema path: '+spec.path);
+    const rel=fullCampaignPath(campaignPath,outputPath);
     writeJson(repoFile(root,rel),{schemaVersion:'curveyield-lite-derived-phase-data-v1',phase:schema.phase,sourceCanonicalData:canonicalRel,generatedAt:now,data});
     out.push(rel);
   }

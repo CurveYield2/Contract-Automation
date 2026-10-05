@@ -51,7 +51,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: lite-phase-boundary-${{ inputs.campaign_id || github.sha }}-${{ inputs.phase_sequence || github.run_id }}
+  group: lite-phase-boundary-shared-controller
   cancel-in-progress: false
 
 jobs:
