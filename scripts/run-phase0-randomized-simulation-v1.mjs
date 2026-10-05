@@ -19,7 +19,8 @@ const result=a['completed-stages-manifest'] ? await importCompletedPhase0StagesV
   controllerRoot:path.resolve(a['controller-root']),
   campaignPath:a['campaign-path'],
   outputRoot:path.resolve(a.output),
-  forkUrl:a['fork-url']
+  forkUrl:a['fork-url'],
+  medusaSmokeCalls:a['medusa-smoke-calls']?Number(a['medusa-smoke-calls']):null
 });
 process.stdout.write(JSON.stringify({
   status:result.summary?.status??'UNKNOWN',

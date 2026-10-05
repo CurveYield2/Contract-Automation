@@ -47,15 +47,12 @@ This README inventories the core Contract Automation workflows currently organiz
    Re-runs corrected randomized simulation against an already sealed campaign without modifying the original sealed Phase-0 outputs. It produces supplemental evidence while explicitly verifying that the existing Phase-1 handoff remains unchanged.
 
 4. [**Lite Phase 0 Simulation Testing v1**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase0-simulation-testing-v1.yml) — `lite-phase0-simulation-testing-v1.yml`  
-   An isolated simulation-testing entry point for the Phase-0 simulation harness. It resolves the request and runs the dedicated `phase0-simulation-testing-v1` harness.
+   Manual smoke test of the production Phase-0 Medusa stage: deploys the campaign on the Anvil fork and runs Medusa with a small call budget (default 1,000), skipping telemetry and publishing nothing. Use it to prove Medusa fixes before a full Phase-0 run.
 
-5. [**Phase 0 Medusa Router Build Diagnostic v1**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/phase0-medusa-router-build-diagnostic-v1.yml) — `phase0-medusa-router-build-diagnostic-v1.yml`  
-   Diagnostic workflow specifically for the retained Medusa router. It fetches the isolated router and compiles it with full Forge diagnostics so router/build failures can be examined independently.
-
-6. [**V7 Agent Qualification Bridge**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/v7-agent-qualification-bridge.yml) — `v7-agent-qualification-bridge.yml`  
+5. [**V7 Agent Qualification Bridge**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/v7-agent-qualification-bridge.yml) — `v7-agent-qualification-bridge.yml`  
    Processes queued V7 qualification requests, dispatches the canonical qualification workflow, observes the result, records the qualification attempt, closes the trigger issue, and continues through queued requests.
 
-7. [**V7 Execution Infrastructure Qualification**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/v7-execution-infrastructure-qualification.yml) — `v7-execution-infrastructure-qualification.yml`  
+6. [**V7 Execution Infrastructure Qualification**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/v7-execution-infrastructure-qualification.yml) — `v7-execution-infrastructure-qualification.yml`  
    Comprehensive qualification gate for the V7 runner and its paired Audit-Controller code. It checks exact source identities, toolchains, runner manifests, Node tests, static checks, Anvil execution, controller behavior, and live mutable Phase-6/7 infrastructure before publishing qualification status.
 
 ---
