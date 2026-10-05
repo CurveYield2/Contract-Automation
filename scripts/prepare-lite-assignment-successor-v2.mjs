@@ -36,32 +36,17 @@ const authorityLinkPath=p=>{
 const linkedAuthorityHome=authorityLinkPath(logicalAuthorityHome);
 if(predecessor.authority?.homepagePath)requiredFile(root,logicalAuthorityHome,'bound successor authority homepage');
 const campaignUrl=controllerTreeUrl(directory.workspacePath);
-const validationRequestSchema='curveyield-lite-phase-boundary-request-v1';
-const requestPath='process/agent-upload/lite-phase-boundary/'+directory.campaignId+'-phase-'+assignment.phaseSequence+'.json';
-const artifactLines=[
-  'Bound authority homepage: '+controllerBlobUrl(linkedAuthorityHome),
-  'Bound authority package: '+controllerTreeUrl(path.posix.dirname(linkedAuthorityHome)),
-  'Phase schema: '+controllerBlobUrl(authorityLinkPath(assignment.workSchemaPath)),
-  'Assigned work form: '+controllerBlobUrl(assignment.workFormPath),
-  'Controller-owned final report: '+controllerBlobUrl(assignment.finalReportPath),
-  'Controller-owned Phase Work Packet: '+controllerBlobUrl(assignment.packetPath),
-  'Sealed predecessor receipt: '+controllerBlobUrl(assignment.predecessorReceiptPath),
-  ...(assignment.derivedInputPaths??[]).map((x,index)=>'Phase input '+(index+1)+': '+controllerBlobUrl(x))
-];
+const authorityUrl=controllerBlobUrl(linkedAuthorityHome);
 const lines=[
   'LITE audit: '+directory.campaignName,
   'Reviewer: '+assignment.reviewer,
   'Current phase: '+assignment.phaseId,
   'Campaign: '+campaignUrl,
-  ...artifactLines,
+  'Current Audit Skill Authority: '+authorityUrl,
   '',
-  'The exact bound authority homepage above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority.',
+  'The Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority.',
   '',
-  'Start '+assignment.phaseId+' now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.',
-  'Submit validation through '+requestPath+' ('+validationRequestSchema+'). Finalized controller validation: https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase-work-packet-controller-v1.yml.',
-  ...(directory.masterReview
-    ? ['CONTROLLER_PHASE_PASS seals valid work. At a normal-reviewer segment boundary, only MASTER_REVIEW_ACCEPTED permits successor launch or campaign completion. If validation reports deficiencies, repair exactly the reported substantive deficiency and resubmit validation; do not seal, advance, or perform controller bookkeeping yourself.']
-    : ['Only CONTROLLER_PHASE_PASS permits advancement. If validation reports deficiencies, repair exactly the reported substantive deficiency and resubmit validation; do not seal, advance, or perform controller bookkeeping yourself.'])
+  'Start '+assignment.phaseId+' now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.'
 ];
 const wakeMessage=lines.join('\n');
 process.stdout.write(JSON.stringify({status:'PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,directoryPath:a['campaign-directory-path'],incomingPhaseId:assignment.phaseId,incomingPhaseSequence:assignment.phaseSequence,incomingReviewer:assignment.reviewer,wakeMessage,wakeMessageB64:Buffer.from(wakeMessage).toString('base64')})+'\n');
