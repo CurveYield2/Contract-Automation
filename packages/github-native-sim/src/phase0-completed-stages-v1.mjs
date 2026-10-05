@@ -5,7 +5,7 @@ import {execFileSync} from 'node:child_process';
 import {migrateLegacyCapabilityV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 
 const POLICY='ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE';
-const WORKFLOWS=new Set(['.github/workflows/lite-phase0-simulation-testing-v1.yml','.github/workflows/lite-phase0-randomized-simulation-v1.yml']);
+const WORKFLOWS=new Set(['.github/workflows/lite-phase0-randomized-simulation-v1.yml']);
 function requireThat(value,message){if(!value)throw new Error('PHASE0_COMPLETED_STAGE_REJECTED: '+message);}
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 async function json(file){return JSON.parse(await fs.readFile(file,'utf8'));}

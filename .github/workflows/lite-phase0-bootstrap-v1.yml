@@ -74,7 +74,7 @@ jobs:
           git diff --name-only "$qualified" "$GITHUB_SHA" > /tmp/resume-runner-delta.txt
           python3 - <<'PY'
           import re
-          allowed=[r'process/V7_QUALIFICATION_(STATUS|LAST_RUN)\.json',r'process/agent-upload/lite-phase0-bootstrap-recovery/[^/]+\.json',r'packages/github-native-sim/audit-harnesses/phase0-simulation-testing-v1/HANDOFF_v[0-9]+\.md',r'PHASE0_MEDUSA_PROGRESS_UPDATE_v[0-9]+\.md']
+          allowed=[r'process/V7_QUALIFICATION_(STATUS|LAST_RUN)\.json',r'process/agent-upload/lite-phase0-bootstrap-recovery/[^/]+\.json',r'PHASE0_MEDUSA_PROGRESS_UPDATE_v[0-9]+\.md']
           changed=open('/tmp/resume-runner-delta.txt').read().splitlines()
           blocked=[p for p in changed if not any(re.fullmatch(x,p) for x in allowed)]
           if blocked: raise SystemExit('Unqualified executable delta: '+repr(blocked))

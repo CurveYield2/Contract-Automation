@@ -1462,7 +1462,9 @@ function baselineTargetRows({medusa,telemetry}){
     {candidateKey:'PHASE0-BASELINE-ABI-TELEMETRY',executionEvidenceRefs:refs,oracleOutcome:'INVESTIGATIVE_BASELINE_TELEMETRY_GENERATED',reproductionStatus:telemetry.every(x=>x.status==='PASS')?'PASS':'INCOMPLETE',requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',requestBindingEvidenceRef:'evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.json'}
   ];
 }
-export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl}){
+export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl,medusaSmokeCalls=null}){
+  // Smoke mode proves Medusa end to end on the real deployment with a small call budget; it never produces campaign evidence.
+  const smoke=Number.isInteger(medusaSmokeCalls)&&medusaSmokeCalls>0;
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
   const buildIdentity=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
   const executionBuildArtifacts=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'utf8'));
@@ -1545,7 +1547,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     let medusaExecutionFailure=null;
     if(targets.length){
       try{
-        medusa=await runMedusa({projectRoot:staged.projectRoot,anvilUrl:anvil.url,blockNumber:baselineBlock,ethers,targets,outRoot:outputRoot});
+        medusa=await runMedusa({projectRoot:staged.projectRoot,anvilUrl:anvil.url,blockNumber:baselineBlock,ethers,targets,outRoot:outputRoot,...(smoke?{callLimit:medusaSmokeCalls,minimumRequiredCalls:medusaSmokeCalls}:{})});
       }catch(error){
         medusaExecutionFailure={type:'MEDUSA_EXECUTION_FAILURE',code:error?.code??null,message:String(error?.message??error).slice(0,3000)};
         medusa={schemaVersion:'curveyield-phase0-medusa-run-v2',runId:'medusa-anvil-fork-001',status:'FAILED_EXECUTION',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0,limitations:[medusaExecutionFailure]};
@@ -1556,7 +1558,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     }
     let telemetry=[];
     let telemetryExecutionFailure=null;
-    if(targets.length){
+    if(targets.length&&!smoke){
       try{
         telemetry=await runTelemetry({provider,ethers,targets,actors,outRoot:outputRoot,baselineSnapshot});
       }catch(error){

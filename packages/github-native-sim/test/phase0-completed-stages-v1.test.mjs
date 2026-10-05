@@ -12,7 +12,7 @@ function fixture(){
   return {
     stage:'MEDUSA',
     source:{campaignId:'synthetic',sourceSha256:'a'.repeat(64),qualifiedNames:['example/Counter.sol:Counter']},
-    run:{id:12,status:'completed',conclusion:'success',head_sha:'b'.repeat(40),path:'.github/workflows/lite-phase0-simulation-testing-v1.yml'},
+    run:{id:12,status:'completed',conclusion:'success',head_sha:'b'.repeat(40),path:'.github/workflows/lite-phase0-randomized-simulation-v1.yml'},
     expected:{runId:12,headSha:'b'.repeat(40)},
     summary:{campaignId:'synthetic',status:'PASS',executionMode:'MEDUSA_ONLY',medusa:{status:'PASS',exitCode:0,observedCalls:100001,rawRandomBytes:false,accountingWrapperShare:0.8,targetContracts:[{qualifiedName:'example/Counter.sol:Counter',address:'0x'+'1'.repeat(40)}]},deployment:{status:'PASS',deployedContracts:[{qualifiedName:'example/Counter.sol:Counter',address:'0x'+'1'.repeat(40)}],coverage:{mutableTargets:1,sourcePlanUnresolved:0,sourceKnownMissingTargets:0}}},
     index:{sourceIdentity:{campaignId:'synthetic',sourceSha256:'a'.repeat(64)},executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE'},fork:{engine:'anvil',chainId:1,baselineBlock:5,baselineBlockHash:'0x'+'c'.repeat(64)},policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:0.8,crossContractBursts:true}}

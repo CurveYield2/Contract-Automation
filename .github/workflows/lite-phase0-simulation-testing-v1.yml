@@ -1,90 +1,94 @@
 name: Lite Phase 0 Simulation Testing v1
 
+# Proves the production Phase-0 Medusa stage end to end (real deployment on the Anvil fork, generated router,
+# Medusa engine) with a small call budget before spending a full campaign simulation. Never publishes evidence.
 on:
-  push:
-    paths:
-      - 'packages/github-native-sim/audit-harnesses/phase0-simulation-testing-v1/requests/*.json'
   workflow_dispatch:
     inputs:
       campaign_id:
-        description: Exact existing Audit-Controller campaign ID
         required: true
         type: string
       campaign_path:
-        description: Exact existing Audit-Controller campaign path
         required: true
         type: string
       audit_controller_ref:
-        description: Audit-Controller ref containing the campaign
         required: false
         default: main
+        type: string
+      medusa_calls:
+        required: false
+        default: '1000'
         type: string
 
 permissions:
   contents: read
-  actions: write
+
+concurrency:
+  group: lite-phase0-simulation-testing-${{ inputs.campaign_id }}
+  cancel-in-progress: true
 
 jobs:
   simulation-testing:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 30
     steps:
-      - name: Checkout Contract-Automation
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 1
 
-      - name: Resolve Simulation Testing request
-        id: request
-        shell: bash
-        env:
-          DISPATCH_CAMPAIGN_ID: ${{ inputs.campaign_id }}
-          DISPATCH_CAMPAIGN_PATH: ${{ inputs.campaign_path }}
-          DISPATCH_AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
-        run: |
-          set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            campaign_id="$DISPATCH_CAMPAIGN_ID"
-            campaign_path="$DISPATCH_CAMPAIGN_PATH"
-            audit_controller_ref="${DISPATCH_AUDIT_CONTROLLER_REF:-main}"
-            cancel_run_id=""
-          else
-            request="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep -E '^packages/github-native-sim/audit-harnesses/phase0-simulation-testing-v1/requests/.*[.]json$' | tail -n 1)"
-            test -n "$request" || { echo "::error::No Simulation Testing request file found in trigger commit"; exit 1; }
-            campaign_id="$(jq -r '.campaign_id' "$request")"
-            campaign_path="$(jq -r '.campaign_path' "$request")"
-            audit_controller_ref="$(jq -r '.audit_controller_ref // "main"' "$request")"
-            cancel_run_id="$(jq -r '.cancel_run_id // empty' "$request")"
-          fi
-          test -n "$campaign_id"
-          test -n "$campaign_path"
-          echo "campaign_id=$campaign_id" >> "$GITHUB_OUTPUT"
-          echo "campaign_path=$campaign_path" >> "$GITHUB_OUTPUT"
-          echo "audit_controller_ref=$audit_controller_ref" >> "$GITHUB_OUTPUT"
-          [[ "$cancel_run_id" =~ ^[0-9]*$ ]] || { echo "::error::Invalid cancellation run ID"; exit 1; }
-          echo "cancel_run_id=$cancel_run_id" >> "$GITHUB_OUTPUT"
-
-      - name: Cancel exact isolated simulation attempt
-        if: steps.request.outputs.cancel_run_id != ''
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CANCEL_RUN_ID: ${{ steps.request.outputs.cancel_run_id }}
-        run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANCEL_RUN_ID" > /tmp/cancel-target.json
-          jq -e '.path==".github/workflows/lite-phase0-simulation-testing-v1.yml" and .status!="completed"' /tmp/cancel-target.json >/dev/null
-          gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$CANCEL_RUN_ID/cancel"
-
-      - name: Run isolated Simulation Testing fork
-        if: steps.request.outputs.cancel_run_id == ''
-        uses: ./packages/github-native-sim/audit-harnesses/phase0-simulation-testing-v1
+      - uses: actions/setup-node@v4
         with:
-          campaign_id: ${{ steps.request.outputs.campaign_id }}
-          campaign_path: ${{ steps.request.outputs.campaign_path }}
-          audit_controller_ref: ${{ steps.request.outputs.audit_controller_ref }}
-          audit_controller_token: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          fallback_token: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
-          ethereum_fork_rpc_url: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          node-version: '22'
+
+      - run: npm ci --force
+
+      - uses: ./.github/actions/setup-v7-toolchain
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Checkout exact campaign
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
+          cd .audit-controller
+          git fetch origin "$AUDIT_CONTROLLER_REF"
+          git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
+
+      - name: Deploy on Anvil and run Medusa with a reduced call budget
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+          MEDUSA_CALLS: ${{ inputs.medusa_calls }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$MEDUSA_CALLS" =~ ^[1-9][0-9]{0,5}$ ]] || { echo "::error::medusa_calls must be a positive integer"; exit 1; }
+          node scripts/run-phase0-randomized-simulation-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" \
+            --output .phase0-medusa-smoke --fork-url "$ETHEREUM_FORK_RPC_URL" --medusa-smoke-calls "$MEDUSA_CALLS"
+
+      - name: Report and require Medusa smoke result
+        if: ${{ always() }}
+        env:
+          MEDUSA_CALLS: ${{ inputs.medusa_calls }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          summary=.phase0-medusa-smoke/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
+          test -f "$summary" || { echo "::error::No simulation summary was produced"; exit 1; }
+          jq '.deployment.coverage // {}' "$summary"
+          jq '.medusa | del(.targetContracts)' "$summary"
+          raw="$(find .phase0-medusa-smoke -name MEDUSA_RAW_OUTPUT_v1.log -print -quit)"
+          if [ -n "$raw" ]; then echo "---- Medusa raw output (tail) ----"; tail -n 120 "$raw" | sed -E 's#https?://[^ ]+#[URL]#g'; fi
+          jq -e --argjson n "$MEDUSA_CALLS" '(.medusa.status=="PASS" or .medusa.status=="COMPLETE_WITH_ORACLE_GAPS") and (.medusa.observedCalls|tonumber)>=$n' "$summary" >/dev/null

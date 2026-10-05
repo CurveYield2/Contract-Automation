@@ -70,7 +70,9 @@ test('A12/A18 recipe qualification requires evidence and rejects standard-lookin
 test('A22 semantic family separates mutability, authority/config and qualified economics',()=>{
   assert.equal(classifySemanticFamilyV2({signature:'transferOwnership(address)',stateMutability:'nonpayable'}).semanticFamily,'AUTHORITY_CONFIG');
   assert.equal(classifySemanticFamilyV2({signature:'multicall(bytes[])',stateMutability:'nonpayable'}).semanticFamily,'OTHER_MUTATION');
-  assert.equal(classifySemanticFamilyV2({signature:'deposit(uint256,address)',stateMutability:'nonpayable'}).semanticFamily,'UNKNOWN');
+  assert.equal(classifySemanticFamilyV2({signature:'deposit(uint256,address)',stateMutability:'nonpayable'}).semanticFamily,'ECONOMIC');
+  assert.equal(classifySemanticFamilyV2({signature:'swapSingleTokenExactIn(address,address,address,uint256,uint256,uint256,bool,bytes)',stateMutability:'payable'}).basis,'ACCOUNTING_MUTATION_NAME');
+  assert.equal(classifySemanticFamilyV2({signature:'poke(uint256)',stateMutability:'nonpayable'}).semanticFamily,'UNKNOWN');
   assert.equal(classifySemanticFamilyV2({signature:'deposit(uint256,address)',stateMutability:'nonpayable',recipe:{recipeId:'erc4626-standard-v1',functionFamilies:{'deposit(uint256,address)':'ECONOMIC'}}}).semanticFamily,'ECONOMIC');
   assert.equal(classifySemanticFamilyV2({signature:'balanceOf(address)',stateMutability:'view'}).semanticFamily,'VIEW');
 });
