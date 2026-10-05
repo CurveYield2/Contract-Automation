@@ -130,7 +130,7 @@ contract ContextLogic {
 }
 
 contract ContextShell {
-    address public implementation;
+    address public immutable implementation;
     constructor(address impl){ implementation=impl; }
     fallback() external payable {
         address impl=implementation;

@@ -767,14 +767,16 @@ function qualifiedActionV2({target,selected,actors,rng}){
   }
   return null;
 }
-function pickFn(target,rng,actionClass,feedback=new Map(),blocked=new Set()){
+export function pickFn(target,rng,actionClass,feedback=new Map(),blocked=new Set()){
   const keyFor=x=>`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${x.signature}`;
   const available=list=>list.filter(x=>!blocked.has(keyFor(x)));
   const accounting=available(target.functions.filter(x=>x.accounting)),other=available(target.functions.filter(x=>!x.accounting));
-  const originalAccounting=target.functions.filter(x=>x.accounting),originalOther=target.functions.filter(x=>!x.accounting);
-  const pool=actionClass==='ACCOUNTING_STATE_CHANGE'?accounting:other;
-  const fallback=pool.length?pool:(accounting.length?accounting:other);
-  const effective=fallback.length?fallback:(actionClass==='ACCOUNTING_STATE_CHANGE'?originalAccounting:originalOther).filter(Boolean);
+  const requested=actionClass==='ACCOUNTING_STATE_CHANGE'?accounting:other;
+  const alternate=actionClass==='ACCOUNTING_STATE_CHANGE'?other:accounting;
+  const effective=requested.length?requested:alternate;
+  // If every admitted function for this target is explicitly blocked, return null so
+  // the caller can reroute to another qualified execution context. Never silently
+  // resurrect a blocked function.
   if(!effective.length)return null;
   const weights=effective.map(x=>1+Math.min(8,Number(feedback.get(keyFor(x))??0)));
   const total=weights.reduce((a,b)=>a+b,0);let cursor=rng()*total;

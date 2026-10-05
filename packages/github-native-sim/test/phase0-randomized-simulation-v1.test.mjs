@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,canonicalEthereumExecutionOverrides,snapshot} from '../src/phase0-randomized-simulation-v1.mjs';
+import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,canonicalEthereumExecutionOverrides,snapshot,pickFn} from '../src/phase0-randomized-simulation-v1.mjs';
 import {extractSourceKnownDeployPlanV1,extractSourceKnownBindingsV1,extractSourceKnownCompileGroupsV1} from '../src/source-known-deployment-plan-v1.mjs';
 
 function rngSeq(values){let i=0;return()=>values[(i++)%values.length];}
@@ -321,4 +321,12 @@ test('native deployment budget includes production compilation and broadcasts wi
   assert.doesNotMatch(run,/240s/);
   assert.match(s,/native script still running; elapsed=/);
   assert.match(s,/clearInterval\(heartbeat\)/);
+});
+
+test('A23 blocked wrong-context selection yields null so caller can reroute instead of resurrecting blocked function',()=>{
+  const fn={signature:'setObserved(uint256)',accounting:false};
+  const target={address:'0x0000000000000000000000000000000000000001',qualifiedName:'Heldout.sol:Logic',logicalQualifiedName:'Heldout.sol:Logic',functions:[fn]};
+  const key='0x0000000000000000000000000000000000000001|Heldout.sol:Logic|setObserved(uint256)';
+  assert.equal(pickFn(target,()=>0.5,'OTHER_STATE_CHANGE',new Map(),new Set([key])),null);
+  assert.equal(pickFn(target,()=>0.5,'OTHER_STATE_CHANGE',new Map(),new Set()).selected.signature,'setObserved(uint256)');
 });
