@@ -85,14 +85,11 @@ test('controller architecture forbids active receipt bookkeeping before packet v
 test('assignment-v2 controller validation is reviewer-request driven and not circularly packet-triggered',()=>{
   const workflow=read('.github/workflows/lite-phase-work-packet-controller-v1.yml');
   const watchdog=read('.github/workflows/browser-agent-watchdog.yml');
-  const successor=read('scripts/prepare-lite-assignment-successor-v2.mjs');
   assert.match(workflow,/process\/agent-upload\/lite-phase-boundary\/\*\.json/);
   assert.match(workflow,/curveyield-lite-phase-boundary-request-v1/);
   assert.match(workflow,/Resolve canonical campaign routing/);
   assert.match(workflow,/--campaign-id/);
   assert.doesNotMatch(watchdog,/packet_status.*SUBMITTED[\s\S]{0,500}lite-phase-work-packet-controller-v1\.yml/);
-  assert.match(successor,/process\/agent-upload\/lite-phase-boundary\//);
-  assert.match(successor,/curveyield-lite-phase-boundary-request-v1/);
 });
 
 test('downstream routing preserves all declared Phase-7 and Phase-10 input views',()=>{
@@ -104,20 +101,13 @@ test('downstream routing preserves all declared Phase-7 and Phase-10 input views
   assert.match(controller,/target===10[^\n]*\[[^\]]*p8Final[^\]]*p9Final[^\]]*finalIndex/);
 });
 
-test('fresh assignment wake links phase artifacts and requires controller PASS before handoff',()=>{
+test('fresh assignment wake links campaign and authority and defers phase instructions to the authority',()=>{
   const script=read('scripts/prepare-lite-assignment-successor-v2.mjs');
   const orch=read('.github/workflows/lite-audit-browser-orchestrator-v1.yml');
   assert.match(script,/Current phase:/);
-  assert.match(script,/Phase schema:/);
-  assert.match(script,/Assigned work form:/);
-  assert.match(script,/Controller-owned final report:/);
-  assert.match(script,/Controller-owned Phase Work Packet:/);
-  assert.match(script,/Sealed predecessor receipt:/);
-  assert.match(script,/Phase input /);
-  assert.match(script,/Finalized controller validation:/);
+  assert.match(script,/Current Audit Skill Authority:/);
   assert.match(script,/ultimate authority/i);
-  assert.match(script,/CONTROLLER_PHASE_PASS/);
-  assert.match(script,/resubmit validation/);
+  assert.match(script,/Do not redo sealed earlier phases/);
   assert.match(orch,/prepare-lite-assignment-successor-v2\.mjs/);
 });
 
