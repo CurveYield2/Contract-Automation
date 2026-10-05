@@ -202,12 +202,17 @@ export function qualifyRecipeV2({qualifiedName=null,abi=[],declaredStandards=[],
   };
 }
 
+export const ACCOUNTING_MUTATION_NAME_RE_V2=/^(?:deposit|mint|stake|supply|lend|borrow|repay|withdraw|redeem|unstake|unsupply|transfer|transferFrom|burn|swap|addLiquidity|removeLiquidity|join|exit|claim|harvest|collect|distribute|accrue|settle|liquidate|donate|sync|skim|flashLoan|erc4626BufferWrapOrUnwrap)/i;
+
 export function classifySemanticFamilyV2({signature='',stateMutability=null,recipe=null}={}){
   const mutability=['view','pure'].includes(stateMutability)?'READ_ONLY':'STATE_CHANGING';
   if(mutability==='READ_ONLY')return{declaredMutability:mutability,semanticFamily:'VIEW',basis:'ABI_STATE_MUTABILITY'};
   if(recipe?.functionFamilies?.[signature])return{declaredMutability:mutability,semanticFamily:recipe.functionFamilies[signature],basis:'QUALIFIED_RECIPE'};
   if(AUTHORITY_CONFIG_SIGNATURES.has(signature)||/^set[A-Z_]/.test(signature)||/^configure[A-Z_(]/.test(signature))return{declaredMutability:mutability,semanticFamily:'AUTHORITY_CONFIG',basis:'EXACT_AUTHORITY_CONFIGURATION_SIGNATURE'};
   if(/^multicall\(/.test(signature))return{declaredMutability:mutability,semanticFamily:'OTHER_MUTATION',basis:'KNOWN_BATCH_DISPATCH_SURFACE'};
+  // Non-standard protocols (DEX vaults, routers, hooks) never match a token recipe; their deposit/swap/liquidity/fee
+  // surfaces are still accounting-changing and must keep the accounting weighting and before/after accounting reads.
+  if(ACCOUNTING_MUTATION_NAME_RE_V2.test(signature))return{declaredMutability:mutability,semanticFamily:'ECONOMIC',basis:'ACCOUNTING_MUTATION_NAME'};
   return{declaredMutability:mutability,semanticFamily:'UNKNOWN',basis:'NO_QUALIFIED_SEMANTIC_RECIPE'};
 }
 

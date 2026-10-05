@@ -107,6 +107,11 @@ jobs:
           jq '[.deployment.attempts[]? | select(.status != "PASS")] | .[:40]' "$summary" || true
           echo "---- Medusa ----"
           jq '.medusa // {}' "$summary" || true
+          medusa_raw="$(find .phase0-randomized-output -name MEDUSA_RAW_OUTPUT_v1.log -print -quit 2>/dev/null || true)"
+          if [ "$(jq -r '.medusa.status // empty' "$summary")" != PASS ] && [ -n "$medusa_raw" ]; then
+            echo "---- Medusa raw output (tail) ----"
+            tail -n 80 "$medusa_raw" | sed -E 's#https?://[^ ]+#[URL]#g' || true
+          fi
 
       - name: Retain raw randomized simulation output
         if: ${{ always() }}
