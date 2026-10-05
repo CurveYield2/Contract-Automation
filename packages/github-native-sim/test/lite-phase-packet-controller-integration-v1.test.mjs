@@ -604,7 +604,7 @@ test('legacy v10.3 fallback is read-only and rejects an unpinned frozen package'
 });
 
 
-function boundedRepairFixture({reducer=false}={}){
+function boundedRepairFixture({reducer=false,legacy=false,expectedAdmission='MASTER_REVIEW_REWORK_REQUIRED'}={}){
   const f=fixture();
   const directory=readJson(path.join(f.root,f.dirRel));
   directory.masterReview={chatUrl:'https://chatgpt.com/c/master-review-chat',reasoning:'MAXIMUM',repairModel:'SOL',repairReasoning:'HIGH'};
@@ -636,6 +636,13 @@ function boundedRepairFixture({reducer=false}={}){
   f.masterPath=path.join(f.root,pending.workFormPath);
   f.relativeForm=path.posix.relative(f.campaign,f.formRel);
   const master=readJson(f.masterPath);
+  if(legacy){
+    const receiptRel=f.campaign+'/receipts/PHASE_01_RECEIPT_v1.json';
+    const receipt=readJson(path.join(f.root,receiptRel));delete receipt.controllerReplayCheckpoint;writeJson(path.join(f.root,receiptRel),receipt);
+    for(const row of master.reviewedArtifacts)if(row.kind==='SEALED_RECEIPT')row.sha256=fileSha(path.join(f.root,receiptRel));
+    master.bindings.segmentManifestSha256=createHash('sha256').update(JSON.stringify(master.reviewedArtifacts)).digest('hex');
+    const d=readJson(path.join(f.root,f.dirRel));d.pendingMasterReview.manifestSha256=master.bindings.segmentManifestSha256;d.pendingMasterReview.bindingsSha256=createHash('sha256').update(JSON.stringify(master.bindings)).digest('hex');writeJson(path.join(f.root,f.dirRel),d);
+  }
   master.review={
     outcome:'REWORK',summary:'One bounded semantic deficiency needs repair.',
     deficiencies:[{id:'MR-001',phase:1,file:f.relativeForm,ownedPaths:[f.repairPath],evidenceRefs:[f.relativeForm],rationale:'Resolve the remaining evidence attribution deficiency.'}],
@@ -646,7 +653,8 @@ function boundedRepairFixture({reducer=false}={}){
   };
   writeJson(f.masterPath,master);
   installMasterTransportProof(f,'INITIAL_REVIEW');
-  assert.equal(runMaster(f).status,'MASTER_REVIEW_REWORK_REQUIRED');
+  f.admission=runMaster(f);
+  assert.equal(f.admission.status,expectedAdmission);
   return f;
 }
 function submitBoundedChild(f,attempt){
@@ -759,26 +767,27 @@ test('legacy receipt references resolve immutable snapshots after live replaceme
   assert.throws(()=>snapshotPhaseReceiptArtifacts({root:f.root,campaignPath:f.campaign,receipt:conflicting}),/immutable sealed revision snapshot conflict/);
   assert.throws(()=>resolveSealedArtifactReference({root:f.root,campaignPath:f.campaign,receipt,reference:{path:'../outside.json',sha256:'a'.repeat(64)}}),/inside the campaign/);
 });
-test('obligation and invalidation semantic repair paths remain blocked without deterministic historical replay',()=>{
-  for(const owner of ['obligationRecordPaths','invalidationRecordPaths']){
-    const f=boundedRepairFixture();
-    // Recreate the initial staged gate before admission using the accepted manifest.
-    const directory=readJson(path.join(f.root,f.dirRel));
-    directory.pendingMasterReview.status='WAITING_FOR_MASTER_REVIEW';
-    directory.campaignStatus='WAITING_FOR_MASTER_REVIEW';
-    writeJson(path.join(f.root,f.dirRel),directory);
-    const schemaPath=path.join(f.root,f.authority,'phases/phase-1/PHASE_01_SCHEMA_v1.json');
-    const schema=readJson(schemaPath);
-    schema.bookkeepingMappings[owner]=['actions.step-1.outputs.analysis'];
-    writeJson(schemaPath,schema);
-    installMasterTransportProof(f,'INITIAL_REVIEW');
-    const before=fs.readFileSync(path.join(f.root,f.dirRel),'utf8');
-    const ledgerBefore=fs.readFileSync(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),'utf8');
-    const rejected=runMaster(f);
-    assert.equal(rejected.status,'MASTER_REVIEW_INVALID');
-    assert.match(rejected.feedbackText,/unsupported historical obligation\/invalidation replay/);
-    assert.equal(fs.readFileSync(path.join(f.root,f.dirRel),'utf8'),before);
-    assert.equal(fs.readFileSync(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),'utf8'),ledgerBefore);
+
+test('legacy reducer repair requires complete checkpoints and leaves the gate and ledger unchanged',()=>{
+  const f=boundedRepairFixture({reducer:true,legacy:true,expectedAdmission:'MASTER_REVIEW_INVALID'});
+  assert.match(f.admission.feedbackText,/complete digest-bound before controller checkpoint is required/);
+  assert.equal(readJson(path.join(f.root,f.dirRel)).campaignStatus,'WAITING_FOR_MASTER_REVIEW');
+  assert.equal(readJson(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json')).obligations[0].status,'SATISFIED');
+});
+test('future reducer replay rejects out-of-band mutations for each of the four controller owners',()=>{
+  for(const name of ['SECURITY_TRACEABILITY_GRAPH_v1.json','CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json','EVIDENCE_INVALIDATION_MATRIX_v1.json','DOMAIN_APPLICABILITY_REGISTRY_v1.json']){
+    const f=boundedRepairFixture({reducer:true});
+    const file=path.join(f.root,f.campaign,'controller',name);
+    const control=fs.existsSync(file)?readJson(file):{};
+    control.untrackedMutation='OUT_OF_BAND';writeJson(file,control);
+    const before=fs.readFileSync(file,'utf8');
+    const oldReceipt=fs.readFileSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v1.json'),'utf8');
+    const result=submitBoundedChild(f,1);
+    assert.equal(result.status,'MASTER_REVIEW_INVALID');
+    assert.match(result.feedbackText,/out-of-band controller mutation blocks historical replay/);
+    assert.equal(fs.readFileSync(file,'utf8'),before);
+    assert.equal(fs.readFileSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v1.json'),'utf8'),oldReceipt);
+    assert.equal(readJson(path.join(f.root,f.dirRel)).currentAssignment,null);
   }
 });
 

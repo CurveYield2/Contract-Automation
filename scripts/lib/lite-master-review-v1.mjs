@@ -113,6 +113,85 @@ function preserveSegmentRevisionArtifacts({root,campaignPath,segment}){
   }
 }
 
+
+const REPLAY_CONTROL_FILES=Object.freeze([
+  'SECURITY_TRACEABILITY_GRAPH_v1.json','CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json',
+  'EVIDENCE_INVALIDATION_MATRIX_v1.json','DOMAIN_APPLICABILITY_REGISTRY_v1.json'
+]);
+export function captureControllerReplayState({root,campaignPath,phase,revision,stage,now}){
+  if(!['before','after'].includes(stage))throw new Error('unsupported controller replay checkpoint stage');
+  const base=path.posix.join(campaignPath,'evidence/controller-checkpoints','phase-'+phaseNumber(phase),'revision-'+revision,stage);
+  const artifacts=REPLAY_CONTROL_FILES.map(name=>{
+    const live=path.posix.join(campaignPath,'controller',name);
+    if(!existing(root,live))return {name,present:false,sha256:null,path:null};
+    const saved=immutableCopy(root,live,path.posix.join(base,name));
+    return {name,present:true,path:saved.path,sha256:saved.sha256};
+  });
+  const record={schemaVersion:'curveyield-lite-controller-replay-state-v1',campaignPath,phase,revision,stage,artifacts,capturedAt:now};
+  const recordPath=path.posix.join(base,'CONTROLLER_REPLAY_STATE_v1.json');
+  const bytes=Buffer.from(JSON.stringify(record,null,2)+'\n');
+  const file=repoFile(root,recordPath);
+  if(fs.existsSync(file)){
+    if(!fs.readFileSync(file).equals(bytes))throw new Error('immutable controller replay checkpoint conflict: '+recordPath);
+  }else{fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,bytes,{flag:'wx'});}
+  return {recordPath,sha256:digestBytes(bytes)};
+}
+function loadControllerReplayState({root,campaignPath,pointer,stage}){
+  if(!pointer||!SHA256.test(String(pointer.sha256??'')))throw new Error('complete digest-bound '+stage+' controller checkpoint is required');
+  const file=requiredFile(root,pointer.recordPath,'controller replay checkpoint');
+  if(digestFile(file)!==pointer.sha256)throw new Error('controller replay checkpoint digest mismatch');
+  const state=readJson(file);
+  if(state.schemaVersion!=='curveyield-lite-controller-replay-state-v1'||state.campaignPath!==campaignPath||state.stage!==stage)throw new Error('controller replay checkpoint identity mismatch');
+  if(!Array.isArray(state.artifacts)||!exactJson(state.artifacts.map(x=>x.name),REPLAY_CONTROL_FILES))throw new Error('controller replay checkpoint requires all four control owners');
+  const base=path.posix.join(campaignPath,'evidence/controller-checkpoints','phase-'+phaseNumber(state.phase),'revision-'+state.revision,stage);
+  if(pointer.recordPath!==path.posix.join(base,'CONTROLLER_REPLAY_STATE_v1.json'))throw new Error('controller replay checkpoint path mismatch');
+  for(const row of state.artifacts){
+    if(row.present===false){
+      if(row.path!==null||row.sha256!==null)throw new Error('absent controller checkpoint artifact is malformed');
+    }else if(row.present===true){
+      if(row.path!==path.posix.join(base,row.name)||!SHA256.test(String(row.sha256??''))||digestFile(requiredFile(root,row.path,'controller checkpoint artifact'))!==row.sha256)throw new Error('controller checkpoint artifact digest/path mismatch');
+    }else throw new Error('controller checkpoint artifact presence is missing');
+  }
+  return state;
+}
+export function restoreControllerReplayState({root,campaignPath,pointer}){
+  const state=loadControllerReplayState({root,campaignPath,pointer,stage:'before'});
+  for(const row of state.artifacts){
+    const live=repoFile(root,path.posix.join(campaignPath,'controller',row.name));
+    if(row.present){fs.mkdirSync(path.dirname(live),{recursive:true});fs.copyFileSync(repoFile(root,row.path),live);}
+    else fs.rmSync(live,{force:true});
+  }
+}
+function requiresHistoricalReplay({root,authorityRoot,form}){
+  const phaseByFile=new Map((form.reviewedArtifacts??[]).filter(x=>x.kind==='WORK_FORM').map(x=>[x.path,x.phase]));
+  return (form.review?.repairSpec?.allowedSemanticPaths??[]).some(entry=>{
+    const phase=phaseByFile.get(entry.file);
+    if(!phase)return false;
+    const schema=loadPhaseSchema(root,authorityRoot,phase).schema;
+    return [...(schema.bookkeepingMappings?.obligationRecordPaths??[]),...(schema.bookkeepingMappings?.invalidationRecordPaths??[])].includes(entry.path);
+  });
+}
+function controllerReplayPlan({root,campaignPath,directory,segment,form}){
+  const files=new Set(form.review.repairSpec.allowedFiles);
+  const phases=(form.reviewedArtifacts??[]).filter(x=>x.kind==='WORK_FORM'&&files.has(x.path)).map(x=>x.phase);
+  const earliest=Math.min(...phases);
+  const first=latestReceipt(root,campaignPath,earliest).receipt;
+  const before=first.controllerReplayCheckpoint?.before;
+  loadControllerReplayState({root,campaignPath,pointer:before,stage:'before'});
+  for(const phase of segment.phases.filter(x=>x>=earliest)){
+    const checkpoint=latestReceipt(root,campaignPath,phase).receipt.controllerReplayCheckpoint;
+    loadControllerReplayState({root,campaignPath,pointer:checkpoint?.before,stage:'before'});
+    loadControllerReplayState({root,campaignPath,pointer:checkpoint?.after,stage:'after'});
+  }
+  const last=readJson(requiredFile(root,directory.lastSealedReceiptPath,'latest sealed receipt'));
+  const after=loadControllerReplayState({root,campaignPath,pointer:last.controllerReplayCheckpoint?.after,stage:'after'});
+  for(const row of after.artifacts){
+    const live=existing(root,path.posix.join(campaignPath,'controller',row.name));
+    if(row.present!==Boolean(live)||(live&&digestFile(live)!==row.sha256))throw new Error('out-of-band controller mutation blocks historical replay: '+row.name);
+  }
+  return {earliestPhase:earliest,before,after:last.controllerReplayCheckpoint.after};
+}
+
 export function validateMasterReviewConfiguration(directory,{required=false}={}){
   const cfg=directory?.masterReview;
   if(!cfg){
@@ -123,7 +202,6 @@ export function validateMasterReviewConfiguration(directory,{required=false}={})
   if(cfg.reasoning!=='MAXIMUM')throw new Error('masterReview.reasoning must be MAXIMUM');
   if(cfg.repairModel!=='SOL')throw new Error('masterReview.repairModel must be SOL');
   if(cfg.repairReasoning!=='HIGH')throw new Error('masterReview.repairReasoning must be HIGH');
-  if(cfg.maxRepairCycles!==undefined&&(!Number.isInteger(cfg.maxRepairCycles)||cfg.maxRepairCycles<1||cfg.maxRepairCycles>10))throw new Error('masterReview.maxRepairCycles must be a finite integer from 1 to 10; default is 2');
   return cfg;
 }
 
@@ -347,7 +425,7 @@ function currentBindingFailures(root,campaignPath,form,directory){
   return failures;
 }
 function substantiveText(value){return typeof value==='string'&&value.trim().length>=8&&!/^<REQUIRED/.test(value.trim());}
-function validateRepairSpec({root,authorityRoot,segment,form}){
+function validateRepairSpec({root,campaignPath,directory,authorityRoot,segment,form}){
   const failures=[];
   const deficiencies=form.review?.deficiencies;
   const spec=form.review?.repairSpec;
@@ -388,13 +466,14 @@ function validateRepairSpec({root,authorityRoot,segment,form}){
     const field=(schema.actions?.[match[1]]?.fields??[]).find(x=>x.name===match[2]);
     if(!field)failures.push('repair semantic path is not schema-declared: '+entry.path);
     const controllerReducerPaths=[...(schema.bookkeepingMappings?.obligationRecordPaths??[]),...(schema.bookkeepingMappings?.invalidationRecordPaths??[])];
-    if(controllerReducerPaths.includes(entry.path))failures.push('repair semantic path requires unsupported historical obligation/invalidation replay: '+entry.path);
+    // Reducer-owned semantic paths require a complete pre/post checkpoint and exact current control state.
   }
   const prohibited=new Set(spec.prohibitedActions??[]);
   for(const action of ['SEAL','ADVANCE','MUTATE_ACCEPTED_PREFILL','MUTATE_UNRELATED_EVIDENCE'])if(!prohibited.has(action))failures.push('repairSpec.prohibitedActions must include '+action);
   if(!Array.isArray(spec.acceptanceConditions)||spec.acceptanceConditions.length===0||spec.acceptanceConditions.some(x=>!substantiveText(x)))failures.push('repairSpec.acceptanceConditions must be a non-empty substantive string array');
   const supportedRefreshes=['REGENERATE_CANONICAL','REGENERATE_REPORT','REGENERATE_DERIVED','RESEAL_RECEIPT'];
   if(!exactJson(spec.requiredDependentRefreshes,supportedRefreshes))failures.push('repairSpec.requiredDependentRefreshes must exactly match controller-supported deterministic refreshes');
+  if(!failures.length&&requiresHistoricalReplay({root,authorityRoot,form}))try{controllerReplayPlan({root,campaignPath,directory,segment,form});}catch(error){failures.push('unsupported historical obligation/invalidation replay: '+String(error.message||error));}
   return failures;
 }
 
@@ -567,7 +646,7 @@ function validateRefreshedRepairVerification({root,campaignPath,form,pending,seg
   const disposedIds=dispositions.map(x=>x?.deficiencyId).filter(Boolean).sort();
   if(!exactJson(disposedIds,deficiencyIds)||dispositions.some(x=>!(rework?['RESOLVED','UNRESOLVED']:['RESOLVED']).includes(x?.disposition)))failures.push('masterVerification must dispose every original bounded deficiency exactly once');
   if(rework&&!dispositions.some(x=>x?.disposition==='UNRESOLVED'))failures.push('REWORK requires an unresolved original deficiency');
-  if(rework&&Number(pending.reviewAttempt)>=Number(directory.masterReview?.maxRepairCycles??2))failures.push('finite master repair limit reached');
+  if(rework&&Number(pending.reviewAttempt)>=2)failures.push('finite master repair limit reached');
   for(const id of pending.resolvedDeficiencyIds??[])if(!dispositions.some(x=>x?.deficiencyId===id&&x?.disposition==='RESOLVED'))failures.push('previously resolved original deficiency cannot regress: '+id);
   if(typeof verification?.verifiedAt!=='string'||!verification.verifiedAt)failures.push('masterVerification.verifiedAt is required');
   return failures;
@@ -638,11 +717,14 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   if(pending.status==='MASTER_REVIEW_REWORK_REQUIRED'){
     const transportFailures=repairTransportProofFailures({root,campaignPath,form,pending,cfg});
     if(transportFailures.length)return {status:'MASTER_REPAIR_TRANSPORT_BLOCKED',failures:transportFailures,form,pending};
+    let replayPlan=null;
+    if(requiresHistoricalReplay({root,authorityRoot,form}))try{replayPlan=controllerReplayPlan({root,campaignPath,directory,segment,form});}catch(error){return {status:'MASTER_REVIEW_INVALID',failures:['historical controller replay blocked: '+String(error.message||error)],form,pending};}
     const completed=validateRepairCompletion({root,campaignPath,form,pending,cfg,normalReviewerChatUrls});
     failures.push(...completed.failures);
     if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
     return {
       status:'MASTER_REPAIR_READY_FOR_REFRESH',
+      replayPlan,
       failures:[],
       form,
       pending,
@@ -664,7 +746,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   if(digestJson(currentRows)!==pending.manifestSha256)failures.push('current segment manifest no longer matches the staged master-review manifest');
   if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
   if(outcome==='REWORK'){
-    failures.push(...validateRepairSpec({root,authorityRoot,segment,form}));
+    failures.push(...validateRepairSpec({root,campaignPath,directory,authorityRoot,segment,form}));
     if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
     pending.originalDeficienciesSha256=digestJson(form.review.deficiencies);
     delete pending.masterTransportProof;
@@ -726,7 +808,16 @@ function deleteObjectPath(object,dot){
     if(!current||typeof current!=='object'||!(parts[i] in current))return;
     current=current[parts[i]];
   }
-  if(current&&typeof current==='object')delete current[parts.at(-1)];
+  if(current&&typeof current==='object'){
+    const leaf=parts.at(-1);const value=current[leaf];
+    if(Array.isArray(value)&&value.some(row=>Array.isArray(row?.automationOwnedFields)&&row.automationOwnedFields.length)){
+      current[leaf]=value.map(row=>{
+        if(!row||typeof row!=='object')return null;
+        const keys=row.automationOwnedFields??[];
+        return Object.fromEntries([['automationOwnedFields',keys],...keys.map(key=>[key,row[key]])]);
+      });
+    }else delete current[leaf];
+  }
 }
 function validateAllowedSemanticPaths(root,authorityRoot,phase,paths){
   const schema=loadPhaseSchema(root,authorityRoot,phase).schema;

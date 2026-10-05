@@ -19,7 +19,7 @@ import {
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
-import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,snapshotPhaseReceiptArtifacts,resolveSealedArtifactReference} from './lib/lite-master-review-v1.mjs';
+import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,childRepairWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,snapshotPhaseReceiptArtifacts,resolveSealedArtifactReference,captureControllerReplayState,restoreControllerReplayState} from './lib/lite-master-review-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function registeredReviewerChatUrls(file){
@@ -417,6 +417,7 @@ function applyMasterRepairRefresh({root,campaignPath,directoryRel,directory,auth
     fs.mkdirSync(path.dirname(repoFile(shadowRoot,receiptLibRel)),{recursive:true});
     fs.copyFileSync(requiredFile(root,receiptLibRel,'lite receipt library'),repoFile(shadowRoot,receiptLibRel));
 
+    if(result.replayPlan)restoreControllerReplayState({root:shadowRoot,campaignPath,pointer:result.replayPlan.before});
     let shadowDirectory=readJson(repoFile(shadowRoot,directoryRel));
     for(let index=0;index<refreshPhases.length;index++){
       const phase=refreshPhases[index];
@@ -767,6 +768,7 @@ if(schema.finalReport){
 if(deficiencies.length) throw new Error('controller-generated report validation failed: '+deficiencies.join('; '));
 
 packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS'};
+const replayBefore=captureControllerReplayState({root,campaignPath,phase:sequence,revision:phaseRevision,stage:'before',now});
 const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now,replacePhase:Boolean(masterRepairRefreshSha)});
 if(sealedRework){
   const invalid=readJson(requiredFile(root,controls.invalidRel,'evidence invalidation matrix'));
@@ -904,9 +906,18 @@ if(sequence===8&&nextSequence===10){
   const skipped=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:9,revision:skippedRevision,executorType:'GITHUB_ACTIONS',executorLineage:'phase9-skip-automation',authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SKIPPED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],outputs:[],automation:[{action:'SKIPPED_NO_REMEDIATION',status:'PASS',recordedAt:now}],globalControls:receipt.globalControls,validation:{status:'NOT_APPLICABLE',validatedAt:now,failures:[]},handoff:{required:false,boundary:null,incomingReviewer:'reviewer-4',assignedWork:'Phase 10',nextPhaseSequence:10,sameReviewer:true,status:'NOT_APPLICABLE'},now});
   skipped.sealedAt=now;if(masterRepairRefreshSha)skipped.masterRepair={schemaVersion:'curveyield-lite-master-repair-receipt-v1',scopeId:directory.pendingMasterReview.repairScopeId,repairSpecSha256:masterRepairRefreshSha,priorRevision:skippedRevision-1,controllerDependentRefresh:true};writeJson(repoFile(root,skippedRel),skipped);sealedReceiptRel=skippedRel;
 }
+function finalizeControllerReplayCheckpoint(){
+  const replayAfter=captureControllerReplayState({root,campaignPath,phase:sequence,revision:phaseRevision,stage:'after',now});
+  for(const rel of [...new Set([receiptRel,sealedReceiptRel])]){
+    const sealed=readJson(requiredFile(root,rel,'sealed replay-checkpoint receipt'));
+    sealed.controllerReplayCheckpoint={schemaVersion:'curveyield-lite-controller-replay-checkpoint-v1',ownerPhase:sequence,ownerRevision:phaseRevision,before:replayBefore,after:replayAfter};
+    writeJson(repoFile(root,rel),sealed);
+  }
+}
 directory.lastSealedReceiptPath=sealedReceiptRel;
 const masterBoundary=sequence===1?1:sequence===5?5:sequence===6?7:sequence===10?10:null;
 if(gatedMasterReview&&masterBoundary!==null){
+  finalizeControllerReplayCheckpoint();
   const staged=stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase:masterBoundary,lastSealedReceiptPath:sealedReceiptRel,nextSequence,nextDerivedInputPaths:nextDerivedInputs,successorPrefillContext,now});
   writeJson(directoryFile,directory);
   const feedback=masterWakeMessage({campaignId:directory.campaignId,pending:staged.pending});
@@ -920,6 +931,7 @@ else{
   nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
   directory.currentAssignment=nextAssignment;directory.campaignStatus=nextStatus==='WAITING_FOR_SUCCESSOR_AGENT'?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';directory.updatedAt=now;
 }
+finalizeControllerReplayCheckpoint();
 writeJson(directoryFile,directory);
 const feedback='CONTROLLER_PHASE_PASS: Phase '+sequence+' validated and sealed.'+(nextAssignment?' Next authorized assignment: Phase '+nextAssignment.phaseSequence+' / '+nextAssignment.reviewer+'.':' Campaign complete.');
 process.stdout.write(JSON.stringify({status:'PASS',controllerPassToken:'CONTROLLER_PHASE_PASS',sealedRework:Boolean(sealedRework),masterRepairRefresh:Boolean(masterRepairRefreshSha),campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:Boolean(nextAssignment&&nextAssignment.status==='WAITING_FOR_SUCCESSOR_AGENT'),sameReviewerAdvanced:Boolean(nextAssignment&&nextAssignment.status==='ACTIVE'),nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
