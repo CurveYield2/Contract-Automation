@@ -117,10 +117,12 @@ test('Medusa state snapshot node carries deployed code, storage and block height
     const tx=await call(url,'eth_sendTransaction',[{from,data:'0x602a600055600a6011600039600a6000f360005460005260206000f3'}]);
     const {contractAddress}=await call(url,'eth_getTransactionReceipt',[tx]);
     await call(url,'anvil_mine',['0x5']);
+    for(let i=1;i<=500;i++)await call(url,'anvil_setStorageAt',[contractAddress,'0x'+i.toString(16),'0x'+'11'.repeat(32)]);
     const height=Number(await call(url,'eth_blockNumber'));
     node=await startStateSnapshotAnvilV1({sourceUrl:url,projectRoot:process.cwd(),port:18646});
     assert.equal(node.blockNumber,height);
     assert.equal(await call(node.url,'eth_getStorageAt',[contractAddress,'0x0','latest']),'0x'+'0'.repeat(62)+'2a');
+    assert.equal(await call(node.url,'eth_getStorageAt',[contractAddress,'0x1f4','latest']),'0x'+'11'.repeat(32));
   }finally{
     await node?.close();
     source.kill('SIGKILL');

@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import fss from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import zlib from 'node:zlib';
 import {spawn} from 'node:child_process';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {createHash} from 'node:crypto';
@@ -147,11 +149,17 @@ async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
 // mainnet account/slot already fetched during deployment) is loaded into a plain local node, so deep coverage-seeking
 // calls never wait on the upstream archive RPC. Unfetched mainnet state reads as empty on this copy.
 export async function startStateSnapshotAnvilV1({sourceUrl,projectRoot,evmVersion='cancun',port=8546}){
+  // anvil_dumpState returns gzip-compressed state JSON as hex; real fork states are too large for anvil_loadState
+  // over RPC, so the decoded JSON is handed to the new node's --load-state at startup.
   const state=await rpc(sourceUrl,'anvil_dumpState',[]);
   const head=await rpc(sourceUrl,'eth_getBlockByNumber',['latest',false]);
+  const raw=Buffer.from(String(state).replace(/^0x/,''),'hex');
+  let stateJson;try{stateJson=zlib.gunzipSync(raw);}catch{stateJson=raw;}
+  const statePath=path.join(os.tmpdir(),`phase0-medusa-state-${process.pid}-${port}.json`);
+  await fs.writeFile(statePath,stateJson);
   const url=`http://127.0.0.1:${port}`;
   const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
-  const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--number',String(Number(BigInt(head.number))),'--timestamp',String(Number(BigInt(head.timestamp))),'--auto-impersonate','--silent'];
+  const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--load-state',statePath,'--auto-impersonate','--silent'];
   const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
   let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
   const close=async()=>{if(child.exitCode===null){child.kill('SIGTERM');await Promise.race([new Promise(r=>child.once('exit',r)),sleep(2000)]);if(child.exitCode===null)child.kill('SIGKILL');}};
@@ -163,10 +171,11 @@ export async function startStateSnapshotAnvilV1({sourceUrl,projectRoot,evmVersio
       if(Date.now()-started>30000)throw new Error('Snapshot Anvil RPC readiness timeout');
       await sleep(100);
     }
-    await rpc(url,'anvil_loadState',[state]);
     const blockNumber=Number(BigInt(await rpc(url,'eth_blockNumber',[])));
-    return{url,blockNumber,stateBytes:Math.floor(String(state).length/2),sourceBlock:Number(BigInt(head.number)),close};
+    if(blockNumber!==Number(BigInt(head.number)))throw new Error(`Snapshot Anvil block ${blockNumber} does not match source block ${Number(BigInt(head.number))}`);
+    return{url,blockNumber,stateBytes:stateJson.length,sourceBlock:Number(BigInt(head.number)),close};
   }catch(error){await close();throw error;}
+  finally{await fs.rm(statePath,{force:true}).catch(()=>{});}
 }
 function detectFoundryScripts(files,texts){
   const out=[];
