@@ -321,6 +321,7 @@ jobs:
           import path from 'node:path';
           import {createHash} from 'node:crypto';
           import {execFileSync} from 'node:child_process';
+          import {resolveSealedArtifactReference} from './scripts/lib/lite-master-review-v1.mjs';
 
           const controllerRoot='.controller-under-test';
           const requestPath=process.env.REWORK_REQUEST_PATH_TO_TEST;
@@ -367,6 +368,13 @@ jobs:
             if(!fs.existsSync(file)||hashFile(file)!==ref.sha256)fail('prior receipt artifact is unresolved before qualification');
             priorArtifactDigests.set(file,ref.sha256);
           }
+          const historicalReceipt=readJson(path.join(receiptDir,'PHASE_01_RECEIPT_v1.json'));
+          const historicalArtifacts=[];
+          for(const family of ['inputs','evidence','outputs'])for(const ref of historicalReceipt[family]??[]){
+            if(!ref.sha256)continue;
+            const resolved=resolveSealedArtifactReference({root:controllerRoot,campaignPath,receipt:historicalReceipt,reference:ref});
+            historicalArtifacts.push({ref,path:resolved.path,sha256:resolved.sha256});
+          }
           let raw;
           try{
             raw=execFileSync(process.execPath,[
@@ -388,6 +396,10 @@ jobs:
           if(hashFile(priorReceiptFile)!==priorReceiptDigestBefore)fail('prior receipt changed');
           for(const [file,digest] of oldReceiptDigests)if(hashFile(file)!==digest)fail('accepted receipt history changed');
           for(const [file,digest] of priorArtifactDigests)if(hashFile(file)!==digest)fail('prior sealed artifact changed');
+          for(const row of historicalArtifacts){
+            const resolved=resolveSealedArtifactReference({root:controllerRoot,campaignPath,receipt:historicalReceipt,reference:row.ref});
+            if(resolved.path!==row.path||resolved.sha256!==row.sha256)fail('historical receipt snapshot resolution changed');
+          }
           const newReceipt=path.join(receiptDir,'PHASE_01_RECEIPT_v3.json');
           const report=path.join(controllerRoot,...request.generatedFinalReportPath.split('/'));
           const packet=path.join(controllerRoot,...request.generatedPacketPath.split('/'));
@@ -404,6 +416,7 @@ jobs:
             'held_rework_source_sha256='+sourceShaBefore,
             'held_rework_prior_receipt_sha256='+priorReceiptDigestBefore,
             'held_rework_prior_artifacts_preserved='+priorArtifactDigests.size,
+            'held_rework_historical_artifacts_resolved='+historicalArtifacts.length,
             'held_rework_revision3_receipt_sha256='+hashFile(newReceipt),
             'held_rework_report_sha256='+hashFile(report),
             'held_rework_packet_sha256='+hashFile(packet),
