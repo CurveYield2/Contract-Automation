@@ -75,6 +75,7 @@ if(runIndex.policy?.crossContractBursts!==true)throw new Error('Phase-0 ABI tele
 if(medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS'){
   if(Number(medusa.observedCalls??0)<100001)throw new Error('Phase-0 Medusa simulation did not exceed 100,000 randomized ABI calls');
   if(medusa.executionStatus!=='COMPLETED')throw new Error('Phase-0 Medusa did not record executable engine activity');
+  if(medusa.variety?.status!=='PASS')throw new Error('Phase-0 Medusa call variety requirement failed: '+JSON.stringify(medusa.variety?.failures??['VARIETY_METRICS_MISSING']));
   if(medusa.mode==='CHECKED_DISCOVERY'){
     if(!['CHECKED','CHECK_DEVIATIONS_OBSERVED'].includes(medusa.checkStatus))throw new Error('CHECKED_DISCOVERY Medusa evidence did not execute every applicable target-behavior property with non-vacuous witnesses');
     const properties=medusa.propertyRegistry??[];

@@ -137,6 +137,7 @@ jobs:
               (((.deployment.coverage.mutableTargets // 0)|tonumber)>0 and
                (.medusa.status=="PASS" or .medusa.status=="COMPLETE_WITH_ORACLE_GAPS") and
                (.medusa.observedCalls|tonumber)>=100001 and
+               .medusa.variety.status=="PASS" and
                (.telemetry|length)==4 and
                all(.telemetry[]; .status=="PASS" and (.calls|tonumber)==1200 and (.errors|tonumber)==0))
               or

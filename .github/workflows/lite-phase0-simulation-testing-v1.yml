@@ -88,7 +88,7 @@ jobs:
           summary=.phase0-medusa-smoke/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
           test -f "$summary" || { echo "::error::No simulation summary was produced"; exit 1; }
           jq '.deployment.coverage // {}' "$summary"
-          jq '.medusa | del(.targetContracts)' "$summary"
+          jq '.medusa | del(.targetContracts, .achievedDispatchWeight.wrapperCounts, .achievedDispatchWeight.logicalCounts)' "$summary"
           raw="$(find .phase0-medusa-smoke -name MEDUSA_RAW_OUTPUT_v1.log -print -quit)"
           if [ -n "$raw" ]; then echo "---- Medusa raw output (tail) ----"; tail -n 120 "$raw" | sed -E 's#https?://[^ ]+#[URL]#g'; fi
           jq -e --argjson n "$MEDUSA_CALLS" '(.medusa.status=="PASS" or .medusa.status=="COMPLETE_WITH_ORACLE_GAPS") and (.medusa.observedCalls|tonumber)>=$n' "$summary" >/dev/null
