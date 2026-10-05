@@ -109,7 +109,7 @@ async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
     try{if(observation?.chainId)upstreamChainId=Number(BigInt(observation.chainId));}catch{}
     const port=8545,url='http://127.0.0.1:8545';
     const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
-    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--auto-impersonate','--silent'];
+    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--auto-impersonate','--no-rate-limit','--silent'];
     const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
     let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
     const started=Date.now();
