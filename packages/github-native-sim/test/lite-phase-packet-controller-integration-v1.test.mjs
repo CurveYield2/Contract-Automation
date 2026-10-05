@@ -7,7 +7,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {refreshControllerPrefillDigest} from '../../../scripts/lib/lite-phase-prefill-v1.mjs';
 import {requiredFile,repoFile} from '../../../scripts/lib/lite-phase-work-v1.mjs';
-import {MASTER_REVIEW_SEGMENTS_V1,collectSegmentArtifacts} from '../../../scripts/lib/lite-master-review-v1.mjs';
+import {MASTER_REVIEW_SEGMENTS_V1,collectSegmentArtifacts,resolveSealedArtifactReference,snapshotPhaseReceiptArtifacts} from '../../../scripts/lib/lite-master-review-v1.mjs';
 
 const mkdir=p=>fs.mkdirSync(p,{recursive:true});
 const writeJson=(p,v)=>{mkdir(path.dirname(p));fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n');};
@@ -528,6 +528,14 @@ test('typed held revision2-to-revision3 admission regenerates controller product
   const phase0=readJson(path.join(f.root,f.campaign,'receipts/PHASE_00_RECEIPT_v1.json'));
   phase0.authority={...phase0.authority,homepagePath:authority+'/SKILL.md',liteSkillSha256:'bdb90107ea50580e67be91440ce47087de570c4f54b8474c5a3eb852af95ea27'};
   writeJson(path.join(f.root,f.campaign,'receipts/PHASE_00_RECEIPT_v1.json'),phase0);
+  const priorCanonicalRel=f.campaign+'/derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json';
+  const priorDerivedRel=f.campaign+'/derived/phase-1/PHASE2_INPUT_v1.json';
+  writeJson(path.join(f.root,priorCanonicalRel),{schemaVersion:'curveyield-lite-phase-canonical-data-v1',phase:1,workFormPath:priorFormRel,actions:priorForm.actions});
+  writeJson(path.join(f.root,priorDerivedRel),{schemaVersion:'curveyield-lite-derived-phase-data-v1',phase:1,sourceCanonicalData:priorCanonicalRel,data:{actions:priorForm.actions}});
+  const reworkSchemaPath=path.join(f.root,authority,'phases/phase-1/PHASE_01_SCHEMA_v1.json');
+  const reworkSchema=readJson(reworkSchemaPath);
+  reworkSchema.derivedOutputs=[{path:'derived/phase-1/PHASE2_INPUT_v1.json',selectors:['actions.step-1.outputs.analysis']}];
+  writeJson(reworkSchemaPath,reworkSchema);
   const priorReceiptRel=f.campaign+'/receipts/PHASE_01_RECEIPT_v2.json';
   writeJson(path.join(f.root,priorReceiptRel),{
     phase:{sequence:1,revision:2,status:'SEALED'},source:{sha256:'a'.repeat(64)},authority:phase0.authority,
@@ -535,6 +543,11 @@ test('typed held revision2-to-revision3 admission regenerates controller product
     evidence:[{role:'PHASE_WORK_FORM',path:path.posix.relative(f.campaign,priorFormRel),sha256:createHash('sha256').update(fs.readFileSync(path.join(f.root,priorFormRel))).digest('hex')}],
     outputs:[{role:'PHASE_WORK_FORM',path:path.posix.relative(f.campaign,priorFormRel),sha256:createHash('sha256').update(fs.readFileSync(path.join(f.root,priorFormRel))).digest('hex')}]
   });
+  const sealedPriorReceipt=readJson(path.join(f.root,priorReceiptRel));
+  const oldRefs=[priorCanonicalRel,priorDerivedRel].map((rel,i)=>({role:i?'DERIVED_DOWNSTREAM_DATA':'PHASE_CANONICAL_DATA',path:path.posix.relative(f.campaign,rel),sha256:fileSha(path.join(f.root,rel))}));
+  sealedPriorReceipt.evidence.push(...oldRefs);sealedPriorReceipt.outputs.push(...oldRefs);
+  writeJson(path.join(f.root,priorReceiptRel),sealedPriorReceipt);
+  const originalPriorReceiptBytes=fs.readFileSync(path.join(f.root,priorReceiptRel),'utf8');
   const reworkDirectory=readJson(path.join(f.root,f.dirRel));
   reworkDirectory.lastSealedReceiptPath=priorReceiptRel;
   writeJson(path.join(f.root,f.dirRel),reworkDirectory);
@@ -564,7 +577,7 @@ test('typed held revision2-to-revision3 admission regenerates controller product
   assert.equal(persistentHold.scopeId,'phase1-r2-r3');
   assert.equal(persistentHold.releaseRequiresExplicitHumanAuthorization,true);
   assert.equal(fs.existsSync(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v3.json')),true);
-  const canonical=readJson(path.join(f.root,f.campaign,'derived/phase-1/PHASE_01_CANONICAL_DATA_v1.json'));
+  const canonical=readJson(path.join(f.root,f.campaign,'derived/phase-1/PHASE_01_CANONICAL_DATA_v3.json'));
   assert.equal(canonical.actions['step-1'].outputs.analysis,'Corrected, source-bound interpretation.');
   const invalid=readJson(path.join(f.root,f.campaign,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json'));
   assert.equal(invalid.events[0].status,'RESOLVED_BY_PHASE_1_REVISION_2');
@@ -573,6 +586,11 @@ test('typed held revision2-to-revision3 admission regenerates controller product
   assert.equal(fs.existsSync(path.join(f.root,f.campaign,'work/phase-01/PHASE_01_FINAL_REPORT_v3.md')),true);
   assert.equal(fs.existsSync(path.join(f.root,f.campaign,'submissions/PHASE_01_WORK_PACKET_v3.json')),true);
   assert.equal(readJson(path.join(f.root,f.dirRel)).currentAssignment.phaseSequence,2);
+  assert.equal(fs.readFileSync(path.join(f.root,priorReceiptRel),'utf8'),originalPriorReceiptBytes);
+  for(const ref of sealedPriorReceipt.evidence)assert.equal(fileSha(path.join(f.root,f.campaign,ref.path)),ref.sha256);
+  const revision3=readJson(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v3.json'));
+  assert.ok(revision3.evidence.some(x=>x.role==='PHASE_CANONICAL_DATA'&&x.path.endsWith('PHASE_01_CANONICAL_DATA_v3.json')));
+  assert.ok(readJson(path.join(f.root,f.dirRel)).currentAssignment.derivedInputPaths.includes(f.campaign+'/derived/phase-1/PHASE2_INPUT_v3.json'));
 });
 
 
@@ -667,6 +685,7 @@ test('regenerated-product master review admits one further bounded REWORK with f
   assert.notEqual(fs.readFileSync(f.masterPath,'utf8'),attemptBytes);
   assert.equal(runMaster(f).status,'MASTER_REPAIR_TRANSPORT_BLOCKED');
   assert.equal(submitBoundedChild(f,2).status,'MASTER_REPAIR_READY_FOR_VERIFICATION');
+  installMasterTransportProof(f,'REPAIR_VERIFICATION');
   const beforeThird=fs.readFileSync(path.join(f.root,f.dirRel),'utf8');
   assert.equal(submitRepairVerification(f,'REWORK').status,'MASTER_REVIEW_INVALID');
   assert.equal(fs.readFileSync(path.join(f.root,f.dirRel),'utf8'),beforeThird);
@@ -703,4 +722,43 @@ test('boundary workflow serializes the shared controller resource across push an
   assert.match(concurrency,/group: lite-phase-boundary-shared-controller/);
   assert.match(concurrency,/cancel-in-progress: false/);
   assert.doesNotMatch(concurrency,/github\.(?:sha|run_id)|inputs\.phase_sequence/);
+});
+
+test('legacy receipt references resolve immutable snapshots after live replacement and reject snapshot conflicts',()=>{
+  const f=fixture();
+  const receipt={phase:{sequence:1,revision:1},inputs:[],evidence:[{role:'PHASE_WORK_FORM',path:path.posix.relative(f.campaign,f.formRel),sha256:fileSha(path.join(f.root,f.formRel))}],outputs:[]};
+  const original=structuredClone(receipt);
+  snapshotPhaseReceiptArtifacts({root:f.root,campaignPath:f.campaign,receipt});
+  assert.deepEqual(receipt,original);
+  const form=readJson(path.join(f.root,f.formRel));
+  form.actions['step-1'].outputs.analysis='Changed live analysis after original seal.';
+  writeJson(path.join(f.root,f.formRel),form);
+  const resolved=resolveSealedArtifactReference({root:f.root,campaignPath:f.campaign,receipt,reference:receipt.evidence[0]});
+  assert.match(resolved.path,/sealed-revisions/);
+  assert.equal(fileSha(path.join(f.root,resolved.path)),original.evidence[0].sha256);
+  const conflicting={...receipt,evidence:[{...receipt.evidence[0],sha256:fileSha(path.join(f.root,f.formRel))}]};
+  assert.throws(()=>snapshotPhaseReceiptArtifacts({root:f.root,campaignPath:f.campaign,receipt:conflicting}),/immutable sealed revision snapshot conflict/);
+  assert.throws(()=>resolveSealedArtifactReference({root:f.root,campaignPath:f.campaign,receipt,reference:{path:'../outside.json',sha256:'a'.repeat(64)}}),/inside the campaign/);
+});
+test('obligation and invalidation semantic repair paths remain blocked without deterministic historical replay',()=>{
+  for(const owner of ['obligationRecordPaths','invalidationRecordPaths']){
+    const f=boundedRepairFixture();
+    // Recreate the initial staged gate before admission using the accepted manifest.
+    const directory=readJson(path.join(f.root,f.dirRel));
+    directory.pendingMasterReview.status='WAITING_FOR_MASTER_REVIEW';
+    directory.campaignStatus='WAITING_FOR_MASTER_REVIEW';
+    writeJson(path.join(f.root,f.dirRel),directory);
+    const schemaPath=path.join(f.root,f.authority,'phases/phase-1/PHASE_01_SCHEMA_v1.json');
+    const schema=readJson(schemaPath);
+    schema.bookkeepingMappings[owner]=['actions.step-1.outputs.analysis'];
+    writeJson(schemaPath,schema);
+    installMasterTransportProof(f,'INITIAL_REVIEW');
+    const before=fs.readFileSync(path.join(f.root,f.dirRel),'utf8');
+    const ledgerBefore=fs.readFileSync(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),'utf8');
+    const rejected=runMaster(f);
+    assert.equal(rejected.status,'MASTER_REVIEW_INVALID');
+    assert.match(rejected.feedbackText,/unsupported historical obligation\/invalidation replay/);
+    assert.equal(fs.readFileSync(path.join(f.root,f.dirRel),'utf8'),before);
+    assert.equal(fs.readFileSync(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),'utf8'),ledgerBefore);
+  }
 });
