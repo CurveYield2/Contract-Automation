@@ -7,7 +7,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {refreshControllerPrefillDigest} from '../../../scripts/lib/lite-phase-prefill-v1.mjs';
 import {requiredFile,repoFile} from '../../../scripts/lib/lite-phase-work-v1.mjs';
-import {MASTER_REVIEW_SEGMENTS_V1,collectSegmentArtifacts,resolveSealedArtifactReference,snapshotPhaseReceiptArtifacts} from '../../../scripts/lib/lite-master-review-v1.mjs';
+import {MASTER_REVIEW_SEGMENTS_V1,collectSegmentArtifacts,resolveSealedArtifactReference,snapshotPhaseReceiptArtifacts,captureControllerReplayState} from '../../../scripts/lib/lite-master-review-v1.mjs';
 
 const mkdir=p=>fs.mkdirSync(p,{recursive:true});
 const writeJson=(p,v)=>{mkdir(path.dirname(p));fs.writeFileSync(p,JSON.stringify(v,null,2)+'\n');};
@@ -604,7 +604,7 @@ test('legacy v10.3 fallback is read-only and rejects an unpinned frozen package'
 });
 
 
-function boundedRepairFixture({reducer=false,legacy=false,expectedAdmission='MASTER_REVIEW_REWORK_REQUIRED'}={}){
+function boundedRepairFixture({reducer=false,creation=false,legacy=false,expectedAdmission='MASTER_REVIEW_REWORK_REQUIRED'}={}){
   const f=fixture();
   const directory=readJson(path.join(f.root,f.dirRel));
   directory.masterReview={chatUrl:'https://chatgpt.com/c/master-review-chat',reasoning:'MAXIMUM',repairModel:'SOL',repairReasoning:'HIGH'};
@@ -616,6 +616,16 @@ function boundedRepairFixture({reducer=false,legacy=false,expectedAdmission='MAS
   const form=readJson(path.join(f.root,f.formRel));
   form.actions['step-1'].outputs.analysis='Original evidence-bound semantic analysis.';
   f.repairPath='actions.step-1.outputs.analysis';
+  if(creation){
+    f.repairPath='actions.step-1.outputs.formalObligations';
+    const schemaPath=path.join(f.root,f.authority,'phases/phase-1/PHASE_01_SCHEMA_v1.json');
+    const schema=readJson(schemaPath);schema.actions['step-1'].fields.push({name:'formalObligations',type:'REQUIRED_RECORD_LIST',itemRequiredFields:['tempKey','requiredPhase','requiredAction','completionCondition']});
+    schema.bookkeepingMappings.obligationRecordPaths=[f.repairPath];writeJson(schemaPath,schema);
+    form.actions['step-1'].outputs.formalObligations=[{tempKey:'NEW-001',requiredPhase:'6',requiredAction:'Old incomplete semantic action',completionCondition:'Record the future exact evidence'}];
+    writeJson(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),{obligations:[{obligationId:'OBL-UNRELATED',originPhase:'0',requiredPhase:'8',status:'OPEN',requiredAction:'Preserve the upstream action',completionCondition:'Preserve the upstream evidence',createdAt:'2026-10-04T00:00:00Z',updatedAt:'2026-10-04T00:00:00Z'}]});
+    writeJson(path.join(f.root,f.campaign,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json'),{decisions:[],generatedObligations:[],unrelatedState:'RETAINED'});
+    writeJson(path.join(f.root,f.campaign,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json'),{events:[{eventId:'UPSTREAM-EVENT',status:'RETAINED'}]});
+  }
   if(reducer){
     f.repairPath='actions.step-1.outputs.obligationDispositions';
     const schemaPath=path.join(f.root,f.authority,'phases/phase-1/PHASE_01_SCHEMA_v1.json');
@@ -660,7 +670,9 @@ function boundedRepairFixture({reducer=false,legacy=false,expectedAdmission='MAS
 function submitBoundedChild(f,attempt){
   const beforeSha=fileSha(path.join(f.root,f.formRel));
   const form=readJson(path.join(f.root,f.formRel));
-  if(f.repairPath==='actions.step-1.outputs.obligationDispositions'){
+  if(f.repairPath==='actions.step-1.outputs.formalObligations'){
+    form.actions['step-1'].outputs.formalObligations[0].requiredAction='Corrected evidence-bound action, attempt '+attempt+'.';
+  }else if(f.repairPath==='actions.step-1.outputs.obligationDispositions'){
     const row=form.actions['step-1'].outputs.obligationDispositions[0];
     row.disposition='CARRY_FORWARD';row.carryForwardPhaseOrNone='6';
     row.rationale='Remaining evidence needs explicit Phase-6 verification, attempt '+attempt+'.';
@@ -810,4 +822,47 @@ test('future checkpoint-backed semantic replay restores the earliest ledger befo
   const receipt2=readJson(path.join(f.root,f.campaign,'receipts/PHASE_01_RECEIPT_v2.json'));
   assert.match(receipt2.controllerReplayCheckpoint.after.sha256,/^[0-9a-f]{64}$/);
   assert.equal(submitRepairVerification(f,'ACCEPT').status,'PASS');
+});
+
+test('checkpoint replay replaces a previously normalized formal obligation while preserving unaffected controls',()=>{
+  const f=boundedRepairFixture({creation:true});
+  const ledgerFile=path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json');
+  const before=readJson(ledgerFile);
+  const unrelated=structuredClone(before.obligations.find(x=>x.obligationId==='OBL-UNRELATED'));
+  const registryFile=path.join(f.root,f.campaign,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json');
+  const registryBytes=fs.readFileSync(registryFile,'utf8');
+  const events=readJson(path.join(f.root,f.campaign,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json')).events;
+  assert.equal(before.obligations.find(x=>x.obligationId==='OBL-P1-NEW-001').requiredAction,'Old incomplete semantic action');
+  assert.equal(submitBoundedChild(f,1).status,'MASTER_REPAIR_READY_FOR_VERIFICATION');
+  const after=readJson(ledgerFile);
+  assert.equal(after.obligations.filter(x=>x.obligationId==='OBL-P1-NEW-001').length,1);
+  assert.equal(after.obligations.find(x=>x.obligationId==='OBL-P1-NEW-001').requiredAction,'Corrected evidence-bound action, attempt 1.');
+  assert.deepEqual(after.obligations.find(x=>x.obligationId==='OBL-UNRELATED'),unrelated);
+  assert.equal(fs.readFileSync(registryFile,'utf8'),registryBytes);
+  assert.deepEqual(readJson(path.join(f.root,f.campaign,'controller/EVIDENCE_INVALIDATION_MATRIX_v1.json')).events,events);
+  assert.equal(submitRepairVerification(f,'ACCEPT').status,'PASS');
+});
+
+test('future replay rejects another valid same-campaign checkpoint with a different owning phase',()=>{
+  const f=boundedRepairFixture({reducer:true});
+  const receiptRel=f.campaign+'/receipts/PHASE_01_RECEIPT_v1.json';
+  const receipt=readJson(path.join(f.root,receiptRel));
+  const identity={campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,sourceSha256:receipt.source.sha256,authority:{homepagePath:receipt.authority.homepagePath,liteSkillSha256:receipt.authority.liteSkillSha256??null}};
+  // Both foreign states have correct artifact digests and equal the current controls.
+  const before=captureControllerReplayState({root:f.root,campaignPath:f.campaign,phase:2,revision:1,stage:'before',identity,now:'2026-10-05T02:00:00Z'});
+  const after=captureControllerReplayState({root:f.root,campaignPath:f.campaign,phase:2,revision:1,stage:'after',identity,now:'2026-10-05T02:00:00Z'});
+  receipt.controllerReplayCheckpoint.before=before;receipt.controllerReplayCheckpoint.after=after;
+  writeJson(path.join(f.root,receiptRel),receipt);
+  const master=readJson(f.masterPath);
+  for(const row of master.reviewedArtifacts)if(row.kind==='SEALED_RECEIPT')row.sha256=fileSha(path.join(f.root,receiptRel));
+  master.bindings.segmentManifestSha256=createHash('sha256').update(JSON.stringify(master.reviewedArtifacts)).digest('hex');
+  const directory=readJson(path.join(f.root,f.dirRel));
+  directory.pendingMasterReview.manifestSha256=master.bindings.segmentManifestSha256;
+  directory.pendingMasterReview.bindingsSha256=createHash('sha256').update(JSON.stringify(master.bindings)).digest('hex');
+  writeJson(f.masterPath,master);writeJson(path.join(f.root,f.dirRel),directory);
+  const ledgerBytes=fs.readFileSync(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),'utf8');
+  const result=submitBoundedChild(f,1);
+  assert.equal(result.status,'MASTER_REVIEW_INVALID');
+  assert.match(result.feedbackText,/controller replay checkpoint owner\/identity binding mismatch/);
+  assert.equal(fs.readFileSync(path.join(f.root,f.campaign,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json'),'utf8'),ledgerBytes);
 });
