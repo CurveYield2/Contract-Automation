@@ -1149,11 +1149,6 @@ function medusaSolidityBaseTypeV2(param,state){
   }
   return String(param?.type??'');
 }
-function medusaSolidityParamTypeV2(param,state){
-  const base=medusaSolidityBaseTypeV2(param,state);
-  const reference=param?.baseType==='array'||param?.baseType==='tuple'||param?.type==='string'||param?.type==='bytes';
-  return reference?`${base} calldata`:base;
-}
 function medusaCanonicalInputTypeV2(param){
   try{return param.format('sighash');}catch{return String(param?.type??'');}
 }
@@ -1205,17 +1200,30 @@ function explicitTargetPropertiesV2(ethers,targets){
   }
   return rows;
 }
+function medusaParamDynamicV2(param){
+  if(param?.baseType==='array')return !(Number.isInteger(param.arrayLength)&&param.arrayLength>=0)||medusaParamDynamicV2(param.arrayChildren);
+  if(param?.baseType==='tuple')return (param.components??[]).some(medusaParamDynamicV2);
+  return param?.type==='string'||param?.type==='bytes';
+}
 export function renderMedusaRouterV2(ethers,targets){
   const plan=medusaWrappers(ethers,targets),state={nextStruct:0,structs:[]},body=[];
   for(const x of plan.rows){
-    const paramTypes=x.selected.fragment.inputs.map(p=>medusaSolidityParamTypeV2(p,state));
-    const names=paramTypes.map((t,i)=>`${t} a${i}`),args=paramTypes.map((_,i)=>`a${i}`);
+    // Bundle all target arguments into ONE calldata struct: the wrapper then holds a single stack slot regardless of
+    // arity (legacy codegen "Stack too deep" otherwise), and the struct's ABI encoding equals the target's argument
+    // encoding, so the raw calldata is forwarded verbatim instead of being re-encoded from locals.
+    const inputs=x.selected.fragment.inputs??[];
     const selector=ethers.id(x.selected.signature).slice(0,10),payable=x.selected.fragment.stateMutability==='payable'?' payable':'';
     const value=x.selected.fragment.stateMutability==='payable'?'msg.value':'0';
-    const encodedArgs=args.length?','+args.join(','):'';
     const targetAddress=ethers.getAddress(x.target.address);
+    let params='',forwarded=`bytes.concat(bytes4(${selector}))`;
+    if(inputs.length){
+      const argsStruct=medusaSolidityBaseTypeV2({baseType:'tuple',components:inputs},state);
+      const offset=inputs.some(medusaParamDynamicV2)?36:4; // dynamic struct param = 32-byte head offset, then the tuple
+      params=`${argsStruct} calldata`;forwarded=`bytes.concat(bytes4(${selector}),msg.data[${offset}:])`;
+      x.canonicalInputTypes=[`(${x.canonicalInputTypes.join(',')})`];
+    }
     x.wrapperSignature=`Phase0MedusaRouterV1.${x.wrapperName}(${x.canonicalInputTypes.join(',')})`;
-    body.push(`  function ${x.wrapperName}(${names.join(', ')}) external${payable} { CHEATS.prank(msg.sender); (bool ok, bytes memory data)=address(${targetAddress}).call{value:${value}}(abi.encodeWithSelector(bytes4(${selector})${encodedArgs})); if(ok){successfulTargetCalls++;} emit Phase0Call(address(${targetAddress}),bytes4(${selector}),msg.sender,ok,data); }`);
+    body.push(`  function ${x.wrapperName}(${params}) external${payable} { CHEATS.prank(msg.sender); (bool ok, bytes memory data)=address(${targetAddress}).call{value:${value}}(${forwarded}); if(ok){successfulTargetCalls++;} emit Phase0Call(address(${targetAddress}),bytes4(${selector}),msg.sender,ok,data); }`);
   }
   const properties=explicitTargetPropertiesV2(ethers,targets);
   for(const property of properties){
