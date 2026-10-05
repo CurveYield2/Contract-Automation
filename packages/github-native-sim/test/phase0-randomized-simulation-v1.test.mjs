@@ -330,3 +330,19 @@ test('A23 blocked wrong-context selection yields null so caller can reroute inst
   assert.equal(pickFn(target,()=>0.5,'OTHER_STATE_CHANGE',new Map(),new Set([key])),null);
   assert.equal(pickFn(target,()=>0.5,'OTHER_STATE_CHANGE',new Map(),new Set()).selected.signature,'setObserved(uint256)');
 });
+
+test('A19/A23 telemetry schedule reserves at least one attempt for every admitted target/context class',()=>{
+  const targets=[
+    {functions:[{accounting:true},{accounting:false}]},
+    {functions:[{accounting:false}]},
+    {functions:[{accounting:true}]},
+    {functions:[{accounting:false}]}
+  ];
+  const schedule=buildBurstSchedule(targets,100,()=>0.5);
+  const accountingSeen=new Set(schedule.filter(x=>x.actionClass==='ACCOUNTING_STATE_CHANGE').map(x=>x.targetIndex));
+  const otherSeen=new Set(schedule.filter(x=>x.actionClass==='OTHER_STATE_CHANGE').map(x=>x.targetIndex));
+  assert.deepEqual([...accountingSeen].sort((a,b)=>a-b),[0,2]);
+  assert.deepEqual([...otherSeen].sort((a,b)=>a-b),[0,1,3]);
+  assert.equal(schedule.reduce((n,x)=>n+x.count,0),100);
+  assert.ok(schedule.filter(x=>x.calibration===true).length>=5);
+});

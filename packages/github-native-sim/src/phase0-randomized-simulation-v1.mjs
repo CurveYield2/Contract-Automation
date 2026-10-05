@@ -791,7 +791,22 @@ export function buildBurstSchedule(targets,calls,rng){
   let otherRemaining=otherTargets.length?(calls-accountingRemaining):0;
   if(accountingTargets.length&&!otherTargets.length){accountingRemaining=calls;otherRemaining=0;}
   if(!accountingTargets.length&&otherTargets.length){accountingRemaining=0;otherRemaining=calls;}
-  let previous=-1;
+  // Reserve one deterministic calibration attempt for every admitted target/context class
+  // before weighted bursts. This prevents a ready callback/facade/context from receiving zero
+  // telemetry attempts due only to stochastic target selection.
+  const calibration=[];
+  for(const x of accountingTargets){
+    if(accountingRemaining<=0)break;
+    calibration.push({targetIndex:x.i,count:1,actionClass:'ACCOUNTING_STATE_CHANGE',calibration:true});
+    accountingRemaining--;
+  }
+  for(const x of otherTargets){
+    if(otherRemaining<=0)break;
+    calibration.push({targetIndex:x.i,count:1,actionClass:'OTHER_STATE_CHANGE',calibration:true});
+    otherRemaining--;
+  }
+  out.push(...calibration);
+  let previous=calibration.length?calibration.at(-1).targetIndex:-1;
   while(accountingRemaining+otherRemaining>0){
     let actionClass;
     if(accountingRemaining===0) actionClass='OTHER_STATE_CHANGE';
