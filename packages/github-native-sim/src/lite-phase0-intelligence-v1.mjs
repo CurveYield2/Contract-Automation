@@ -8,6 +8,7 @@ import { buildProject } from '../../runner/src/build-dispatch.mjs';
 import { runSlitherAnalysis } from './analysis.mjs';
 import { generateBuildSbomV1 } from './sbom-v1.mjs';
 import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligence-technical-v1.mjs';
+import { buildExecutionArtifactBundleV2 } from './phase0-execution-input-v2.mjs';
 
 function parseArgs(argv){const o={};for(let i=0;i<argv.length;i++){const t=argv[i];if(!t.startsWith('--'))continue;const k=t.slice(2);const n=argv[i+1];if(n!==undefined&&!n.startsWith('--')){o[k]=n;i++;}else o[k]=true;}return o;}
 function sha256(bytes){return createHash('sha256').update(bytes).digest('hex');}
@@ -638,12 +639,13 @@ async function main(){
 
   const pseudo={
     requestId:request.requestId,requestDigest:request.requestDigest??sha256(Buffer.from(JSON.stringify(request))),
-    campaignId:request.campaignId,assignmentId:'phase0-intelligence',phaseId:'phase-0',profileId:'github-native-compile-v2',
+    campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,assignmentId:'phase0-intelligence',phaseId:'phase-0',profileId:'github-native-compile-v2',
     source:{repository:request.source.repository,commit:request.source.commit,projectPath:detected.relativePath,archivePath:request.source.archivePath,archiveSha256:request.source.archiveSha256},
     configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],analysis:{slither:{version:'0.11.6'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
   };
 
   const build=await buildProject({projectRoot:detected.absolute,request:pseudo});
+  const executionBuildArtifacts=buildExecutionArtifactBundleV2({request:pseudo,build});
   const effectiveCfg={...cfg,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
   const slither=await slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit});
   const sbom=await generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build});
@@ -656,16 +658,17 @@ async function main(){
 
   const buildIdentity={
     schemaVersion:'curveyield-lite-phase0-build-source-identity-v1',
-    requestId:request.requestId,campaignId:request.campaignId,
+    requestId:request.requestId,campaignId:request.campaignId,campaignGenerationId:request.campaignGenerationId,
     source:{...request.source,checkoutCommit:checkout.commit,archiveSha256Observed:observed},
     discovery:{projectPath:detected.relativePath,topCandidates:detected.candidates,archiveEntryCount:extraction.entryCount,archiveExtractedBytes:extraction.extractedBytes},
     configurationDetection:effectiveCfg,
-    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??1,embeddedBuildContract:build.embeddedBuildContract??null,sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
+    build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??0,compilationUnits:executionBuildArtifacts.buildIdentity.compilationUnits,buildConfigurationDigestSha256:executionBuildArtifacts.buildConfigurationDigestSha256,embeddedBuildContract:build.embeddedBuildContract??null,sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
     status:'PASS'
   };
 
   const files=[
     ['BUILD_AND_SOURCE_IDENTITY_v1.json',buildIdentity],
+    ['PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json',executionBuildArtifacts],
     ['SBOM_v1.json',sbom],
     ['SLITHER_v1.json',slither],
     ['SOURCE_INTELLIGENCE_AUTOMATED_v1.json',sourceIntelligence],

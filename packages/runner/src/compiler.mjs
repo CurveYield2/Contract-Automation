@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const OUTPUT_SELECTION = [
   'abi',
@@ -162,7 +163,9 @@ export async function compileProject({ sources, compilerVersion, settings, openZ
     return { error: `Import not found or not allowlisted: ${importPath}` };
   }
 
-  const output = JSON.parse(compiler.compile(JSON.stringify(input), { import: findImports }));
+  const inputText = JSON.stringify(input);
+  const outputText = compiler.compile(inputText, { import: findImports });
+  const output = JSON.parse(outputText);
   const diagnostics = (output.errors ?? []).map((item) => ({
     severity: item.severity,
     type: item.type,
@@ -183,5 +186,9 @@ export async function compileProject({ sources, compilerVersion, settings, openZ
       .map(([sourceName, value]) => [sourceName, value.ast])
       .sort(([left], [right]) => left.localeCompare(right))
   );
-  return { output, diagnostics, artifacts: contractArtifactMap(output), input, sourceAsts };
+  return {
+    output, diagnostics, artifacts: contractArtifactMap(output), input, sourceAsts,
+    compilerInputSha256:createHash('sha256').update(inputText).digest('hex'),
+    compilerOutputSha256:createHash('sha256').update(outputText).digest('hex')
+  };
 }

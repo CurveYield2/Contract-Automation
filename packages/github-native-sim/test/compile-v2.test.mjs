@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { detectNativeBuild, compileRepoNativeHardhat, materializeFrozenVendorRootAdapter } from '../../runner/src/native-build.mjs';
+import { detectNativeBuild, compileRepoNativeHardhat, materializeFrozenVendorRootAdapter, collectNativeContractArtifacts } from '../../runner/src/native-build.mjs';
 import { runGitHubNativeJob } from '../src/run-job-file.mjs';
 
 const commit = (c) => c.repeat(40);
@@ -189,4 +189,20 @@ test('compile-v2 build admission failure stops before Slither and preserves type
   assert.equal(result.analysis.slither, undefined);
   assert.equal(result.analysisComponentFailureCount, 0);
   assert.equal(result.continuityDisposition, 'COMPLETE_EVIDENCE');
+});
+
+test('Hardhat artifacts carry the exact build-info unit even when a shared contract is compiled in several units', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'hardhat-shared-unit-'));
+  const dir = path.join(root, 'artifacts', 'build-info');
+  await fs.mkdir(dir, { recursive: true });
+  const info = (contracts) => JSON.stringify({ solcVersion: '0.8.28', input: { sources: {} }, output: { contracts } });
+  const shared = { 'lib/IShared.sol': { IShared: { abi: [], evm: { bytecode: { object: '' }, deployedBytecode: { object: '' } } } } };
+  await fs.writeFile(path.join(dir, 'a.json'), info({ ...shared, 'src/A.sol': { A: { abi: [], evm: { bytecode: { object: '6000' }, deployedBytecode: { object: '6001' } } } } }));
+  await fs.writeFile(path.join(dir, 'b.json'), info({ ...shared, 'src/B.sol': { B: { abi: [], evm: { bytecode: { object: '6002' }, deployedBytecode: { object: '6003' } } } } }));
+  const artifacts = await collectNativeContractArtifacts(root);
+  assert.deepEqual(artifacts.map((a) => [`${a.sourceName}:${a.contractName}`, a.compilationUnitId]), [
+    ['lib/IShared.sol:IShared', 'hardhat-build-info-1'],
+    ['src/A.sol:A', 'hardhat-build-info-1'],
+    ['src/B.sol:B', 'hardhat-build-info-2']
+  ]);
 });

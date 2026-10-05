@@ -66,6 +66,7 @@ on:
       - 'protocol/schemas/curveyield-lite-interphase-*.schema.json'
       - '.github/actions/setup-v7-toolchain/**'
       - 'packages/github-native-sim/src/**'
+      - 'packages/github-native-sim/scripts/**'
       - 'packages/github-native-sim/test/**'
       - 'packages/runner/src/**'
       - 'packages/runner/test/**'
@@ -99,6 +100,7 @@ on:
       - 'protocol/schemas/curveyield-lite-interphase-*.schema.json'
       - '.github/actions/setup-v7-toolchain/**'
       - 'packages/github-native-sim/src/**'
+      - 'packages/github-native-sim/scripts/**'
       - 'packages/github-native-sim/test/**'
       - 'packages/runner/src/**'
       - 'packages/runner/test/**'
@@ -117,7 +119,7 @@ concurrency:
 jobs:
   qualify-v7-execution-infrastructure:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 90
     steps:
       - name: Checkout exact candidate runner
         uses: actions/checkout@v4

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1} from '../src/phase0-randomized-simulation-v1.mjs';
+import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,canonicalEthereumExecutionOverrides,snapshot,pickFn} from '../src/phase0-randomized-simulation-v1.mjs';
 import {extractSourceKnownDeployPlanV1,extractSourceKnownBindingsV1,extractSourceKnownCompileGroupsV1} from '../src/source-known-deployment-plan-v1.mjs';
 
 function rngSeq(values){let i=0;return()=>values[(i++)%values.length];}
@@ -50,7 +50,7 @@ test('Phase-0 burst schedule terminates and uses available mutable actions when 
   assert.ok(schedule.every(x=>x.actionClass==='OTHER_STATE_CHANGE'));
 });
 
-test('Medusa wrapper population gives accounting actions at least 80 percent target-function weight when both classes exist',()=>{
+test('Medusa wrapper population carries stochastic headroom above the 80 percent achieved-dispatch floor',()=>{
   const fakeEthers={};
   const targets=[
     {qualifiedName:'A',address:'0x0000000000000000000000000000000000000001',functions:[fn(true,'deposit()'),fn(false,'pause()')]},
@@ -59,7 +59,7 @@ test('Medusa wrapper population gives accounting actions at least 80 percent tar
   ];
   const plan=medusaWrappers(fakeEthers,targets);
   assert.ok(plan.rows.length>0);
-  assert.ok(plan.accountingWrapperShare>=0.8);
+  assert.ok(plan.accountingWrapperShare>=0.85);
 });
 
 
@@ -161,15 +161,16 @@ test('Phase-0 source-known compile groups preserve deployment entries separately
   assert.deepEqual(groups[1].contractNames,['Hook']);
 });
 
-test('Phase-0 randomized simulation compiles declared deployment-entry artifacts before starting Anvil',()=>{
+test('Phase-0 randomized simulation binds exported accepted build artifacts before starting Anvil without a second compile',()=>{
   const here=path.dirname(fileURLToPath(import.meta.url));
   const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  const compileAt=source.indexOf('compileSourceKnownDeploymentArtifactsV1');
+  const bindAt=source.indexOf('validateExecutionInputJoinV2');
   const anvilAt=source.indexOf('anvil=await startAnvil');
-  assert.ok(compileAt>=0);
-  assert.ok(anvilAt>compileAt);
-  assert.match(source,/sourceKnownCompiledTargets/);
-  assert.match(source,/sourceKnownMissingTargets/);
+  assert.ok(bindAt>=0);
+  assert.ok(anvilAt>bindAt);
+  assert.match(source,/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2\.json/);
+  assert.match(source,/EXACT_ACCEPTED_PHASE0_EXECUTION_BUILD_ARTIFACTS_V2/);
+  assert.doesNotMatch(source,/await buildProject\(/);
 });
 
 
@@ -196,7 +197,7 @@ test('Phase-0 telemetry emits five-minute progress heartbeats with live call cou
   const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
   assert.match(source,/\[phase0-telemetry\].*heartbeat every 300s/);
   assert.match(source,/\[phase0-telemetry\] heartbeat: run=/);
-  assert.match(source,/calls=\$\{stats\.calls\}\/\$\{PHASE0_TELEMETRY_CALLS_PER_RUN_V1\}/);
+  assert.match(source,/calls=\$\{stats\.calls\}\/\$\{callsPerRun\}/);
   assert.match(source,/clearInterval\(telemetryHeartbeat\)/);
 });
 
@@ -236,26 +237,22 @@ test('Phase-0 rebind workflow assesses completeness non-fatally and enforces onl
 });
 
 
-test('Phase-0 randomized simulation reuses exact embedded-profile build artifacts instead of recompiling with one flattened profile',()=>{
+test('Phase-0 randomized simulation reuses exact accepted multi-profile artifacts instead of flattening or rebuilding',()=>{
   const here=path.dirname(fileURLToPath(import.meta.url));
   const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  assert.match(source,/build\.system==='embedded-profile-native'/);
-  assert.match(source,/EXACT_EMBEDDED_PROFILE_BUILD_FROM_PHASE0_BUILD_DISPATCH/);
-  assert.match(source,/compilerProfiles:build\.compilerProfiles/);
-  assert.match(source,/artifacts:build\.artifacts/);
+  assert.match(source,/executionBuildArtifacts\.buildIdentity\?\.compilerProfiles/);
+  assert.match(source,/EXACT_ACCEPTED_PHASE0_EXECUTION_BUILD_ARTIFACTS_V2/);
+  assert.match(source,/artifacts:sharedExecutionInputs\.artifacts/);
+  assert.doesNotMatch(source,/await buildProject\(/);
 });
 
 test('gas overrides bind to consumed environment keys, including WEI suffix',()=>{
-  const here=path.dirname(fileURLToPath(import.meta.url));
-  const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  const body=source.slice(source.indexOf('function canonicalEthereumExecutionOverrides'),source.indexOf('async function executeDeploymentScripts'));
-  const overrides=new Function(body+';return canonicalEthereumExecutionOverrides;')();
-  const result=overrides('const MAX_FEE_PER_GAS=envBigInt("MAX_FEE_PER_GAS_WEI",1); const MAX_PRIORITY_FEE_PER_GAS=envBigInt("MAX_PRIORITY_FEE_PER_GAS_WEI",2);');
+  const result=canonicalEthereumExecutionOverrides('const MAX_FEE_PER_GAS=envBigInt("MAX_FEE_PER_GAS_WEI",1); const MAX_PRIORITY_FEE_PER_GAS=envBigInt("MAX_PRIORITY_FEE_PER_GAS_WEI",2);');
   assert.deepEqual(result.env,{MAX_FEE_PER_GAS_WEI:'1000000000000',MAX_PRIORITY_FEE_PER_GAS_WEI:'1000000000'});
   assert.deepEqual(result.adaptations.map(x=>x.env),Object.keys(result.env));
-  const legacy=overrides('const fee=process.env.MAX_FEE_PER_GAS; const tip=envBigInt("MAX_PRIORITY_FEE_PER_GAS",2);');
+  const legacy=canonicalEthereumExecutionOverrides('const fee=process.env.MAX_FEE_PER_GAS; const tip=envBigInt("MAX_PRIORITY_FEE_PER_GAS",2);');
   assert.deepEqual(legacy.env,{MAX_FEE_PER_GAS:'1000000000000',MAX_PRIORITY_FEE_PER_GAS:'1000000000'});
-  assert.deepEqual(overrides('const MAX_FEE_PER_GAS=1;').env,{});
+  assert.deepEqual(canonicalEthereumExecutionOverrides('const MAX_FEE_PER_GAS=1;').env,{});
 });
 
 test('summary telemetry projection preserves terminal status used by completeness gate',()=>{
@@ -300,11 +297,17 @@ test('Medusa compiles its standalone router without invoking production framewor
   assert.doesNotMatch(run,/cwd:projectRoot/);
 });
 test('batched accounting snapshots preserve all observations',async()=>{
-  const here=path.dirname(fileURLToPath(import.meta.url));
-  const s=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  const body=s.slice(s.indexOf('async function snapshot('),s.indexOf('function flattenNumbers'));
-  const snap=new Function('normalizedAbi','safeStatic',body+';return snapshot;')(x=>x,async(_c,f,args)=>f.format()+args.join(','));
-  const result=await snap({provider:{getBalance:async a=>BigInt(a)},ethers:{Contract:class{}},target:{address:'2',artifact:{abi:[]}},sender:'1',plan:{zero:[{format:()=> 'totalSupply()'}],address:[{format:()=> 'balanceOf(address)'}]},systemTargets:[{address:'2'},{address:'3'}]});
+  class FakeContract {
+    getFunction(signature){return{staticCall:async(...args)=>signature+args.join(',')};}
+  }
+  const result=await snapshot({
+    provider:{getBalance:async a=>BigInt(a)},
+    ethers:{Contract:FakeContract},
+    target:{address:'2',artifact:{abi:[]}},
+    sender:'1',
+    plan:{zero:[{format:()=> 'totalSupply()'}],address:[{format:()=> 'balanceOf(address)'}],addressPair:[]},
+    systemTargets:[{address:'2'},{address:'3'}]
+  });
   assert.deepEqual(result.native,{sender:'1',target:'2'});
   assert.deepEqual(result.systemNative,{'2':'2','3':'3'});
   assert.equal(Object.keys(result.views).length,3);
@@ -318,4 +321,28 @@ test('native deployment budget includes production compilation and broadcasts wi
   assert.doesNotMatch(run,/240s/);
   assert.match(s,/native script still running; elapsed=/);
   assert.match(s,/clearInterval\(heartbeat\)/);
+});
+
+test('A23 blocked wrong-context selection yields null so caller can reroute instead of resurrecting blocked function',()=>{
+  const fn={signature:'setObserved(uint256)',accounting:false};
+  const target={address:'0x0000000000000000000000000000000000000001',qualifiedName:'Heldout.sol:Logic',logicalQualifiedName:'Heldout.sol:Logic',functions:[fn]};
+  const key='0x0000000000000000000000000000000000000001|Heldout.sol:Logic|setObserved(uint256)';
+  assert.equal(pickFn(target,()=>0.5,'OTHER_STATE_CHANGE',new Map(),new Set([key])),null);
+  assert.equal(pickFn(target,()=>0.5,'OTHER_STATE_CHANGE',new Map(),new Set()).selected.signature,'setObserved(uint256)');
+});
+
+test('A19/A23 telemetry schedule reserves at least one attempt for every admitted target/context class',()=>{
+  const targets=[
+    {functions:[{accounting:true},{accounting:false}]},
+    {functions:[{accounting:false}]},
+    {functions:[{accounting:true}]},
+    {functions:[{accounting:false}]}
+  ];
+  const schedule=buildBurstSchedule(targets,100,()=>0.5);
+  const accountingSeen=new Set(schedule.filter(x=>x.actionClass==='ACCOUNTING_STATE_CHANGE').map(x=>x.targetIndex));
+  const otherSeen=new Set(schedule.filter(x=>x.actionClass==='OTHER_STATE_CHANGE').map(x=>x.targetIndex));
+  assert.deepEqual([...accountingSeen].sort((a,b)=>a-b),[0,2]);
+  assert.deepEqual([...otherSeen].sort((a,b)=>a-b),[0,1,3]);
+  assert.equal(schedule.reduce((n,x)=>n+x.count,0),100);
+  assert.ok(schedule.filter(x=>x.calibration===true).length>=5);
 });

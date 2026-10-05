@@ -4,10 +4,12 @@ import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {setTimeout as sleep} from 'node:timers/promises';
 import {createHash} from 'node:crypto';
-import {buildProject} from '../../runner/src/build-dispatch.mjs';
 import {startRpcIdentityProxy} from '../../runner/src/rpc-identity-proxy-v1.mjs';
 import {stageExactArchiveSource,runProcess} from './execution.mjs';
-import {compileSourceKnownDeploymentArtifactsV1,deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
+import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
+import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
+import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
+import {parseMedusaOutput} from './analysis.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
 export const PHASE0_MEDUSA_MIN_CALLS_V1=100001;
@@ -66,6 +68,19 @@ function scrubbedEnv(extra={}){
   const out={};
   for(const k of ['PATH','HOME','USER','SHELL','TMPDIR','LANG','LC_ALL','NODE_OPTIONS','npm_config_cache'])if(process.env[k]!==undefined)out[k]=process.env[k];
   return{...out,CI:'true',NODE_ENV:'test',...extra};
+}
+function redactExecutionSecretsV2(value,secrets=[]){
+  let text=String(value??'');
+  for(const secret of secrets.filter(x=>typeof x==='string'&&x.length>=8))text=text.split(secret).join('[REDACTED_PHASE0_SECRET]');
+  text=text.replace(/gh[pousr]_[A-Za-z0-9_]{20,}/g,'[REDACTED_GITHUB_TOKEN]');
+  return text;
+}
+function deploymentScriptKeyV2(item){
+  const framework=item.framework??'GENERIC_NODE';
+  const identity=framework==='GENERIC_NODE'
+    ? (item.script??item.name??item.path??item.entry??'UNKNOWN')
+    : (item.path??item.entry??item.script??item.name??'UNKNOWN');
+  return [framework,identity].join(':');
 }
 async function rpc(url,method,params=[]){
   const res=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
@@ -164,7 +179,7 @@ async function installPackageRuntimeDependenciesV1(projectRoot){
   }
   return{status:'PASS',manager:'npm',lockfile:'package-lock.json',ignoreScripts:true,exitCode:r.exitCode};
 }
-async function detectDeploymentScripts(projectRoot){
+export async function detectDeploymentScripts(projectRoot){
   const files=await walk(projectRoot),texts=new Map();
   for(const rel of files.filter(f=>f.endsWith('.sol'))){try{texts.set(rel,await fs.readFile(path.join(projectRoot,...rel.split('/')),'utf8'));}catch{}}
   const foundry=(await fs.stat(path.join(projectRoot,'foundry.toml')).catch(()=>null))?detectFoundryScripts(files,texts):[];
@@ -205,7 +220,7 @@ async function detectDeploymentScripts(projectRoot){
   }catch{}
   return{foundry,hardhat,unsafeHardhat,genericPackageScripts};
 }
-function canonicalEthereumExecutionOverrides(source){
+export function canonicalEthereumExecutionOverrides(source){
   const text=String(source??''),env={};
   const adaptations=[];
   const MAINNET_WETH='0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
@@ -243,7 +258,7 @@ async function runDeploymentScriptV1(options){
     return result;
   }finally{clearInterval(heartbeat);}
 }
-async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSigner,detected}){
+export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSigner,detected}){
   const attempts=[],limitations=[];
   let help='';
   if(detected.foundry.length){const h=await runProcess({command:'forge',args:['script','--help'],cwd:projectRoot,env:scrubbedEnv()});help=`${h.stdout}\n${h.stderr}`;}
@@ -276,7 +291,9 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSign
       continue;
     }
     const sourcePath=path.join(projectRoot,...item.entry.split('/'));
-    let source=await fs.readFile(sourcePath,'utf8');
+    const originalBytes=await fs.readFile(sourcePath);
+    const originalSha256=sha256(originalBytes);
+    let source=originalBytes.toString('utf8');
     const adaptedRel=path.posix.join(path.posix.dirname(item.entry),'.phase0-anvil-'+path.posix.basename(item.entry));
     const adaptedPath=path.join(projectRoot,...adaptedRel.split('/'));
     let adaptation='NONE';
@@ -297,6 +314,7 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSign
       continue;
     }
     await fs.writeFile(adaptedPath,source);
+    const adaptedBytes=Buffer.from(source),adaptedSha256=sha256(adaptedBytes);
     const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
     const executionOverrides=canonicalEthereumExecutionOverrides(source);
     const env=scrubbedEnv({
@@ -307,18 +325,43 @@ async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSign
       BASE_DEPLOYER_PRIVATE_KEY:localSigner.privateKey,
       ...executionOverrides.env
     });
-    const args=['900s','node',adaptedRel];
+    const nodePermissionArgs=['--permission',`--allow-fs-read=${projectRoot}`,`--allow-fs-write=${projectRoot}`];
+    const args=['900s',process.execPath,...nodePermissionArgs,adaptedRel];
     if(item.argsText)args.push(...item.argsText.split(/\s+/).filter(Boolean));
     const r=await runDeploymentScriptV1({command:'timeout',args,cwd:projectRoot,env});
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
+    const retainedStdout=redactExecutionSecretsV2(String(r.stdout??''),[localSigner.privateKey,...Object.values(env)]);
+    const retainedStderr=redactExecutionSecretsV2(String(r.stderr??''),[localSigner.privateKey,...Object.values(env)]);
     attempts.push({
       framework:'GENERIC_NODE',script:item.name,path:item.entry,adaptedPath:adaptedRel,
-      adaptation,executionOverrides:executionOverrides.adaptations,localChainId:1,localSigner:localSigner.address,command:['node',adaptedRel,...args.slice(3)].join(' '),
+      originalSha256,adaptedSha256,adaptedContentChanged:originalSha256!==adaptedSha256,
+      adaptation,executionOverrides:executionOverrides.adaptations,localChainId:1,localSigner:localSigner.address,
+      sandbox:{filesystem:'NODE_PERMISSION_PROJECT_ROOT_READ_WRITE_ONLY',childProcess:'DENIED_BY_DEFAULT',worker:'DENIED_BY_DEFAULT',network:'ENVIRONMENT_SECRET_ISOLATION_ONLY',productionHandoffEligible:false},
+      command:[process.execPath,...nodePermissionArgs,adaptedRel,...args.slice(6)].join(' '),
       exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],
-      stdout:String(r.stdout??'').slice(-24000),stderr:String(r.stderr??'').slice(-24000)
+      stdout:retainedStdout.slice(-24000),stderr:retainedStderr.slice(-24000)
     });
   }
-  return{attempts,limitations,status:attempts.some(x=>x.status==='PASS')?'PASS':(attempts.length?'COMPLETE_WITH_FAILURES':'NO_SAFE_SCRIPT_ADAPTER')};
+  const detectedRows=[
+    ...(detected.foundry??[]),
+    ...(detected.hardhat??[]),
+    ...(detected.unsafeHardhat??[]),
+    ...(detected.genericPackageScripts??[]).map(x=>({...x,framework:'GENERIC_NODE',script:x.name}))
+  ];
+  const scriptDispositions=detectedRows.map(item=>{
+    const key=deploymentScriptKeyV2(item);
+    const attempt=attempts.find(x=>deploymentScriptKeyV2(x)===key);
+    const gap=limitations.find(x=>deploymentScriptKeyV2(x)===key);
+    return{
+      scriptKey:key,framework:item.framework,path:item.path??item.entry??null,script:item.script??item.name??null,
+      disposition:attempt?(attempt.status==='PASS'?'EXECUTED_PASS':'EXECUTED_FAILED'):(gap?'UNSUPPORTED_WITH_TYPED_GAP':'UNRESOLVED_DISPOSITION'),
+      attemptStatus:attempt?.status??null,gapType:gap?.type??null,gapReason:gap?.reason??null
+    };
+  });
+  if(scriptDispositions.some(x=>x.disposition==='UNRESOLVED_DISPOSITION')){
+    limitations.push({type:'DEPLOYMENT_SCRIPT_DISPOSITION_INCOMPLETE',scripts:scriptDispositions.filter(x=>x.disposition==='UNRESOLVED_DISPOSITION').map(x=>x.scriptKey)});
+  }
+  return{attempts,limitations,scriptDispositions,status:attempts.some(x=>x.status==='PASS')?'PASS':(attempts.length?'COMPLETE_WITH_FAILURES':'NO_SAFE_SCRIPT_ADAPTER')};
 }
 async function reportedPackageDeployments({projectRoot,attempts,artifacts}){
   const rows=[],limitations=[],seen=new Set();
@@ -389,9 +432,9 @@ async function discoverDeployments({provider,artifacts,startBlock,endBlock}){
 }
 function canonicalAbiParam(param={}){
   const next={...param},originalType=String(param.type??''),internalType=String(param.internalType??'');
-  const arraySuffix=originalType.match(/(?:\\[[0-9]*\\])+$/)?.[0]??'';
+  const arraySuffix=originalType.match(/(?:\[[0-9]*\])+$/)?.[0]??'';
   const baseType=arraySuffix?originalType.slice(0,-arraySuffix.length):originalType;
-  const internalBase=internalType.replace(/(?:\\[[0-9]*\\])+$/,'');
+  const internalBase=internalType.replace(/(?:\[[0-9]*\])+$/,'');
   if(internalBase.startsWith('enum ')&&!/^u?int(?:[0-9]+)?$/.test(baseType)) next.type=`uint8${arraySuffix}`;
   else if((internalBase.startsWith('contract ')||internalBase.startsWith('interface '))&&baseType!=='address') next.type=`address${arraySuffix}`;
   else if(internalBase.startsWith('struct ')&&baseType!=='tuple') next.type=`tuple${arraySuffix}`;
@@ -442,41 +485,87 @@ function intValue(param,rng){
   const max=signed?(1n<<BigInt(bits-1))-1n:(1n<<BigInt(bits))-1n;if(v>max)v=max;if(signed&&rng()<0.15)v=-v;return v;
 }
 function randomValue(param,rng,ctx){
-  const type=String(param.type);
-  if(param.baseType==='array'){const len=param.arrayLength>=0?Math.min(param.arrayLength,4):ri(rng,4);return Array.from({length:len},()=>randomValue(param.arrayChildren,rng,ctx));}
-  if(param.baseType==='tuple')return (param.components??[]).map(p=>randomValue(p,rng,ctx));
-  if(/^u?int\d*$/.test(type))return intValue(param,rng);
-  if(type==='address'){const xs=[...ctx.actors,...ctx.targets];return rng()<0.03?'0x0000000000000000000000000000000000000000':xs[ri(rng,xs.length)];}
-  if(type==='bool')return rng()<0.5;
-  if(type==='string')return['','a','phase0','vault','randomized'][ri(rng,5)];
-  if(type==='bytes')return randHex(rng,ri(rng,33));
-  const m=type.match(/^bytes(\d+)$/);if(m)return randHex(rng,Number(m[1]));
-  throw new Error(`unsupported ABI input type ${type}`);
+  const generated=generateTypedValueV2(param,rng,{
+    addresses:[...(ctx.actors??[]),...(ctx.targets??[])],
+    limits:{maxDynamicArrayLength:3,maxDepth:8,maxTotalElements:96,maxDynamicBytes:32,maxStringBytes:64}
+  });
+  if(generated.limitation){
+    const error=new Error(generated.limitation.detail??generated.limitation.code??'ABI argument generation limitation');
+    error.code=generated.limitation.code??'ABI_ARGUMENT_GENERATION_LIMITATION';
+    error.limitation=generated.limitation;
+    throw error;
+  }
+  return generated.value;
 }
 function simpleView(f){return (f.outputs??[]).length>0&&(f.outputs??[]).every(x=>/^(?:u?int\d*|address|bool|bytes\d*|string)$/.test(x.type));}
 function probePlan(ethers,abi){
-  const iface=new ethers.Interface(normalizedAbi(abi)),zero=[],address=[];
-  for(const f of iface.fragments.filter(x=>x.type==='function'&&['view','pure'].includes(x.stateMutability)&&simpleView(x)&&ACCOUNTING_VIEW_RE.test(x.name))){
-    if(f.inputs.length===0&&zero.length<14)zero.push(f);else if(f.inputs.length===1&&f.inputs[0].type==='address'&&address.length<8)address.push(f);
+  const iface=new ethers.Interface(normalizedAbi(abi)),zero=[],address=[],addressPair=[];
+  for(const f of iface.fragments.filter(x=>x.type==='function'&&['view','pure'].includes(x.stateMutability)&&simpleView(x))){
+    const signature=f.format('sighash');
+    const admitted=ACCOUNTING_VIEW_RE.test(f.name)||['totalSupply()','totalAssets()','asset()','balanceOf(address)','allowance(address,address)'].includes(signature);
+    if(!admitted)continue;
+    if(f.inputs.length===0&&zero.length<18)zero.push(f);
+    else if(f.inputs.length===1&&f.inputs[0].type==='address'&&address.length<10)address.push(f);
+    else if(f.inputs.length===2&&f.inputs.every(x=>x.type==='address')&&addressPair.length<6)addressPair.push(f);
   }
-  return{zero,address};
+  return{zero,address,addressPair};
 }
 async function safeStatic(contract,f,args){try{return{ok:true,value:normalize(await contract.getFunction(f.format('sighash')).staticCall(...args))};}catch(e){return{ok:false,error:String(e?.shortMessage??e?.message??e).slice(0,800)};}}
-async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
-  const out={native:{},views:{},systemNative:{}};
+export async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
+  const out={native:{},views:{},systemNative:{},related:{}};
   const c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),provider);
+  const relatedAddresses=[...new Set([target.recipeRuntime?.assetAddress,target.recipeRuntime?.tokenAddress].filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x))))];
+  const erc20ViewAbi=[
+    'function balanceOf(address) view returns (uint256)',
+    'function allowance(address,address) view returns (uint256)',
+    'function totalSupply() view returns (uint256)'
+  ];
   // These reads share one stable pre/post state; batching preserves all observations without serial RPC latency.
   await Promise.all([
     (async()=>{out.native.sender=(await provider.getBalance(sender)).toString();})(),
     (async()=>{out.native.target=(await provider.getBalance(target.address)).toString();})(),
     ...systemTargets.map(async t=>{out.systemNative[t.address]=(await provider.getBalance(t.address)).toString();}),
     ...plan.zero.map(async f=>{out.views[f.format('sighash')]=await safeStatic(c,f,[]);}),
-    ...plan.address.flatMap(f=>{const s=f.format('sighash');return[
-      (async()=>{out.views[`${s}::sender`]=await safeStatic(c,f,[sender]);})(),
-      (async()=>{out.views[`${s}::target`]=await safeStatic(c,f,[target.address]);})()
-    ];})
+    ...plan.address.flatMap(f=>{const sig=f.format('sighash');return[
+      (async()=>{out.views[`${sig}::sender`]=await safeStatic(c,f,[sender]);})(),
+      (async()=>{out.views[`${sig}::target`]=await safeStatic(c,f,[target.address]);})()
+    ];}),
+    ...(plan.addressPair??[]).map(async f=>{const sig=f.format('sighash');out.views[`${sig}::sender::target`]=await safeStatic(c,f,[sender,target.address]);}),
+    ...relatedAddresses.map(async address=>{
+      const token=new ethers.Contract(address,erc20ViewAbi,provider),key=address.toLowerCase();
+      const read=async(fn,args=[])=>{try{return{ok:true,value:normalize(await token.getFunction(fn).staticCall(...args))};}catch(error){return{ok:false,error:String(error?.shortMessage??error?.message??error).slice(0,800)};}};
+      out.related[key]={
+        address,
+        balanceSender:await read('balanceOf(address)',[sender]),
+        balanceTarget:await read('balanceOf(address)',[target.address]),
+        allowanceSenderTarget:await read('allowance(address,address)',[sender,target.address]),
+        totalSupply:await read('totalSupply()',[])
+      };
+    })
   ]);
   return out;
+}
+export function verifyBaselineResetV2({reverted,expectedDigestSha256,observedDigestSha256}){
+  if(reverted!==true){const error=new Error('Phase-0 telemetry baseline snapshot revert failed or expired');error.code='PHASE0_BASELINE_REVERT_FAILED';throw error;}
+  if(!expectedDigestSha256||observedDigestSha256!==expectedDigestSha256){const error=new Error('Phase-0 telemetry baseline sentinel changed after evm_revert');error.code='PHASE0_BASELINE_SENTINEL_MISMATCH';error.expected=expectedDigestSha256??null;error.observed=observedDigestSha256??null;throw error;}
+  return{status:'PASS',revertAccepted:true,sentinelMatch:true,expectedDigestSha256,observedDigestSha256};
+}
+export async function baselineSentinelV2({provider,ethers,targets,actors}){
+  const blockNumber=Number(await provider.getBlockNumber());
+  const block=await provider.getBlock(blockNumber);
+  const actor=actors[0];
+  const states=[];
+  for(const target of targets){
+    states.push({
+      logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,
+      address:target.address,
+      contextType:target.contextType??'DIRECT',
+      codeSha256:sha256(Buffer.from(String(await provider.getCode(target.address)).replace(/^0x/,''),'hex')),
+      observations:await snapshot({provider,ethers,target,sender:actor,plan:target.plan,systemTargets:targets})
+    });
+  }
+  const body={blockNumber,blockHash:block?.hash??null,states:normalize(states)};
+  return{...body,digestSha256:sha256(Buffer.from(JSON.stringify(body)))};
 }
 function flattenNumbers(v,p='',o={}){
   if(typeof v==='string'&&/^-?\d+$/.test(v)){o[p]=BigInt(v);return o;}
@@ -490,14 +579,209 @@ function errorInfo(e,iface){
   if(typeof data==='string'){try{const p=iface.parseError(data);decoded=p?{name:p.name,signature:p.signature,args:normalize(p.args)}:null;}catch{}}
   return{name:e?.name??'Error',code:e?.code??null,shortMessage:e?.shortMessage??null,reason:e?.reason??null,message:String(e?.message??e).slice(0,1800),data:typeof data==='string'?data.slice(0,4096):null,decodedCustomError:decoded};
 }
-function targetObjects(ethers,artifacts,deployed){
-  const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
-  return deployed.filter(d=>d.qualifiedName&&byQ.has(d.qualifiedName)).map(d=>{const artifact=byQ.get(d.qualifiedName);return{...d,artifact,functions:mutableFunctions(ethers,artifact),plan:probePlan(ethers,artifact)};}).filter(t=>t.functions.length);
+function sourceDeclaredStandardsV2(sourceIntelligence,qualifiedName){
+  const contracts=sourceIntelligence?.contracts??[],edges=sourceIntelligence?.inheritanceGraph??[];
+  const byId=new Map(contracts.map(c=>[c.contractId,c]));
+  const root=contracts.find(c=>c.qualifiedName===qualifiedName);
+  if(!root)return[];
+  const seen=new Set([root.contractId]),queue=[root.contractId],names=[];
+  while(queue.length){
+    const id=queue.shift(),c=byId.get(id);
+    if(c?.qualifiedName)names.push(String(c.qualifiedName).split(':').at(-1));
+    for(const edge of edges.filter(e=>e.derivedContractId===id)){
+      if(!seen.has(edge.baseContractId)){seen.add(edge.baseContractId);queue.push(edge.baseContractId);}
+    }
+  }
+  const normalized=new Set(names.map(x=>x.toUpperCase().replace(/[^A-Z0-9]/g,'')));
+  const out=[];
+  if(normalized.has('IERC20')||normalized.has('ERC20'))out.push('ERC20');
+  if(normalized.has('IERC4626')||normalized.has('ERC4626'))out.push('ERC4626');
+  if(normalized.has('IERC3156FLASHLENDER')||normalized.has('ERC3156FLASHLENDER'))out.push('ERC3156FLASHLENDER');
+  return out;
 }
-function pickFn(target,rng,actionClass){
-  const accounting=target.functions.filter(x=>x.accounting),other=target.functions.filter(x=>!x.accounting);
-  const pool=actionClass==='ACCOUNTING_STATE_CHANGE'?accounting:other;
-  const fallback=pool.length?pool:(accounting.length?accounting:other);return fallback[ri(rng,fallback.length)];
+export function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
+  const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
+  return deployed.filter(d=>d.qualifiedName&&byQ.has(d.qualifiedName)).map(d=>{
+    const artifact=byQ.get(d.qualifiedName);
+    const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,d.qualifiedName);
+    const recipe=qualifyRecipeV2({qualifiedName:d.qualifiedName,abi:artifact.abi,declaredStandards});
+    const functions=mutableFunctions(ethers,artifact).map(x=>{
+      const semantic=classifySemanticFamilyV2({signature:x.signature,stateMutability:x.fragment.stateMutability,recipe:recipe.status==='QUALIFIED'?recipe:null});
+      return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
+    });
+    return{...d,artifact,functions,plan:probePlan(ethers,artifact),declaredStandards,recipe};
+  }).filter(t=>t.functions.length);
+}
+export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={}}){
+  const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
+  const deployedByAddress=new Map(deployed.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
+  const out=[...targets],contextEvidence=[];
+  for(const proxyDeployment of deployed){
+    const proxyArtifact=proxyDeployment?.qualifiedName?byQ.get(proxyDeployment.qualifiedName):null;
+    if(!proxyArtifact)continue;
+    let iface;
+    try{iface=new ethers.Interface(normalizedAbi(proxyArtifact.abi));}catch{continue;}
+    let getter=null;
+    for(const candidate of ['implementation()','getImplementation()']){
+      try{if(iface.getFunction(candidate)){getter=candidate;break;}}catch{}
+    }
+    if(!getter)continue;
+    let implementationAddress;
+    try{
+      const c=new ethers.Contract(proxyDeployment.address,normalizedAbi(proxyArtifact.abi),provider);
+      implementationAddress=await c.getFunction(getter).staticCall();
+    }catch(error){
+      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,status:'CONTEXT_REQUIRED',reason:'IMPLEMENTATION_READ_FAILED',message:String(error?.shortMessage??error?.message??error).slice(0,1200)});
+      continue;
+    }
+    const implDeployment=deployedByAddress.get(String(implementationAddress).toLowerCase());
+    const implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
+    if(!implDeployment||!implArtifact){
+      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,status:'FIXTURE_GAP',implementationAddress:String(implementationAddress),reason:'IMPLEMENTATION_NOT_IN_DEPLOYED_ADMITTED_INVENTORY'});
+      continue;
+    }
+    const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,implDeployment.qualifiedName);
+    const recipe=qualifyRecipeV2({qualifiedName:implDeployment.qualifiedName,abi:implArtifact.abi,declaredStandards});
+    const functions=mutableFunctions(ethers,implArtifact).map(x=>{
+      const semantic=classifySemanticFamilyV2({signature:x.signature,stateMutability:x.fragment.stateMutability,recipe:recipe.status==='QUALIFIED'?recipe:null});
+      return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
+    });
+    if(!functions.length)continue;
+    const variant={
+      ...proxyDeployment,
+      qualifiedName:proxyDeployment.qualifiedName,
+      logicalQualifiedName:implDeployment.qualifiedName,
+      artifact:implArtifact,
+      functions,
+      plan:probePlan(ethers,implArtifact),
+      declaredStandards,recipe,
+      contextType:'DELEGATE_PROXY',
+      contextDisposition:'READY',
+      contextEvidence:{facadeAddress:proxyDeployment.address,implementationAddress:String(implementationAddress),implementationGetter:getter}
+    };
+    out.push(variant);
+    contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,logicalQualifiedName:implDeployment.qualifiedName,status:'READY',facadeAddress:proxyDeployment.address,implementationAddress:String(implementationAddress),implementationGetter:getter});
+  }
+  for(const target of out)if(!target.contextType){target.contextType='DIRECT';target.contextDisposition='READY';}
+  return{targets:out,contextEvidence};
+}
+export async function prepareQualifiedRuntimeV2({provider,ethers,targets,actors}){
+  const setupReceipts=[];
+  const erc20Abi=['function balanceOf(address) view returns (uint256)','function allowance(address,address) view returns (uint256)','function approve(address,uint256) returns (bool)'];
+  const callbackSig='onFlashLoan(address,address,uint256,uint256,bytes)';
+  const callbackTargets=targets.filter(t=>normalizedAbi(t.artifact.abi).some(x=>x?.type==='function'&&`${x.name}(${(x.inputs??[]).map(i=>i.type).join(',')})`===callbackSig));
+  for(const target of targets){
+    const recipeId=target.recipe?.recipeId;
+    const c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),provider);
+    if(recipeId==='erc20-standard-v1'){
+      const balances=[];
+      for(const actor of actors){try{balances.push({actor,balance:BigInt(await c.balanceOf(actor))});}catch{}}
+      balances.sort((a,b)=>a.balance===b.balance?0:(a.balance>b.balance?-1:1));
+      const primary=balances.find(x=>x.balance>0n)?.actor??actors[0];
+      const spender=actors.find(x=>x.toLowerCase()!==primary.toLowerCase())??actors[0];
+      target.recipeRuntime={primaryActor:primary,spenderActor:spender,balances:balances.map(x=>({actor:x.actor,balance:x.balance.toString()})),setupReceipts:[]};
+      try{
+        const signer=await provider.getSigner(primary),token=c.connect(signer),tx=await token.approve(spender,ethers.MaxUint256),receipt=await tx.wait();
+        target.recipeRuntime.setupReceipts.push({kind:'ERC20_ALLOWANCE',hash:receipt.hash,status:receipt.status});
+        setupReceipts.push({target:target.qualifiedName,...target.recipeRuntime.setupReceipts.at(-1)});
+      }catch(error){target.recipeRuntime.setupGap={type:'ERC20_ALLOWANCE_SETUP_GAP',message:String(error?.shortMessage??error?.message??error).slice(0,1200)};}
+    }else if(recipeId==='erc4626-standard-v1'){
+      try{
+        const assetAddress=await c.asset(),asset=new ethers.Contract(assetAddress,erc20Abi,provider),balances=[];
+        for(const actor of actors){try{balances.push({actor,balance:BigInt(await asset.balanceOf(actor))});}catch{}}
+        balances.sort((a,b)=>a.balance===b.balance?0:(a.balance>b.balance?-1:1));
+        const primary=balances.find(x=>x.balance>1n)?.actor??actors[0];
+        target.recipeRuntime={assetAddress,primaryActor:primary,balances:balances.map(x=>({actor:x.actor,balance:x.balance.toString()})),setupReceipts:[]};
+        const signer=await provider.getSigner(primary),assetSigner=asset.connect(signer);
+        const allowance=BigInt(await asset.allowance(primary,target.address));
+        if(allowance<1000n){
+          const tx=await assetSigner.approve(target.address,ethers.MaxUint256),receipt=await tx.wait();
+          target.recipeRuntime.setupReceipts.push({kind:'ERC4626_ASSET_ALLOWANCE',hash:receipt.hash,status:receipt.status});
+          setupReceipts.push({target:target.qualifiedName,...target.recipeRuntime.setupReceipts.at(-1)});
+        }
+        try{
+          const shares=BigInt(await c.balanceOf(primary));
+          const assetBal=BigInt(await asset.balanceOf(primary));
+          if(shares===0n&&assetBal>10n){
+            const vault=c.connect(signer),tx=await vault.deposit(10n,primary),receipt=await tx.wait();
+            target.recipeRuntime.setupReceipts.push({kind:'ERC4626_SEED_DEPOSIT',hash:receipt.hash,status:receipt.status});
+            setupReceipts.push({target:target.qualifiedName,...target.recipeRuntime.setupReceipts.at(-1)});
+          }
+        }catch(error){target.recipeRuntime.seedGap={type:'ERC4626_SEED_GAP',message:String(error?.shortMessage??error?.message??error).slice(0,1200)};}
+      }catch(error){target.recipeRuntime={setupGap:{type:'ERC4626_RUNTIME_BINDING_GAP',message:String(error?.shortMessage??error?.message??error).slice(0,1200)}};}
+    }else if(recipeId==='erc3156-flash-lender-v1'){
+      let tokenAddress=null;
+      for(const getter of ['token','asset']){
+        try{tokenAddress=await c.getFunction(`${getter}()`).staticCall();if(tokenAddress)break;}catch{}
+      }
+      const borrower=callbackTargets.find(x=>x.address.toLowerCase()!==target.address.toLowerCase())?.address??null;
+      const primaryActor=actors[0];
+      target.recipeRuntime={tokenAddress,borrowerAddress:borrower,primaryActor,setupReceipts:[],lifecycleWitnesses:[]};
+      if(!tokenAddress||!borrower){
+        target.recipeRuntime.setupGap={type:'ERC3156_RUNTIME_BINDING_GAP',missing:[!tokenAddress?'TOKEN':null,!borrower?'BORROWER':null].filter(Boolean)};
+      }else{
+        try{
+          const before=await snapshot({provider,ethers,target,sender:primaryActor,plan:target.plan,systemTargets:targets});
+          const signer=await provider.getSigner(primaryActor);
+          const lender=c.connect(signer);
+          const tx=await lender.getFunction('flashLoan(address,address,uint256,bytes)').send(borrower,tokenAddress,1n,'0x');
+          const receipt=await tx.wait();
+          const after=await snapshot({provider,ethers,target,sender:primaryActor,plan:target.plan,systemTargets:targets});
+          const beforeRows=observationRowsV2(before,target.recipe,'BEFORE');
+          const afterRows=observationRowsV2(after,target.recipe,'AFTER');
+          const transitionDeltas=observationDeltasV2(beforeRows,afterRows,{receipt,sender:primaryActor})
+            .filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
+          const witness={
+            kind:'ERC3156_SEED_FLASH_LOAN',actionSignature:'flashLoan(address,address,uint256,bytes)',actor:primaryActor,
+            receipt:{hash:receipt.hash,status:receipt.status,gasUsed:receipt.gasUsed?.toString()??null},
+            observedTransitionDeltas:transitionDeltas
+          };
+          target.recipeRuntime.setupReceipts.push(witness.receipt);
+          target.recipeRuntime.lifecycleWitnesses.push(witness);
+          setupReceipts.push({target:target.qualifiedName,kind:witness.kind,...witness.receipt});
+        }catch(error){
+          target.recipeRuntime.setupGap={type:'ERC3156_SEED_FLOW_GAP',message:String(error?.shortMessage??error?.message??error).slice(0,1200)};
+        }
+      }
+    }
+  }
+  return{targets,setupReceipts};
+}
+function qualifiedActionV2({target,selected,actors,rng}){
+  const recipeId=target.recipe?.recipeId,runtime=target.recipeRuntime??{},sig=selected.signature;
+  if(recipeId==='erc20-standard-v1'&&runtime.primaryActor){
+    const primary=runtime.primaryActor,spender=runtime.spenderActor??actors[1]??actors[0],receiver=actors.find(x=>x.toLowerCase()!==primary.toLowerCase()&&x.toLowerCase()!==spender.toLowerCase())??spender;
+    if(sig==='transfer(address,uint256)')return{sender:primary,args:[receiver,1n],value:0n,basis:'ERC20_FUNDED_ACTOR_RECIPE'};
+    if(sig==='approve(address,uint256)')return{sender:primary,args:[spender,2n],value:0n,basis:'ERC20_ALLOWANCE_RECIPE'};
+    if(sig==='transferFrom(address,address,uint256)')return{sender:spender,args:[primary,receiver,1n],value:0n,basis:'ERC20_ALLOWANCE_RECIPE'};
+  }
+  if(recipeId==='erc4626-standard-v1'&&runtime.primaryActor){
+    const a=runtime.primaryActor;
+    if(sig==='deposit(uint256,address)')return{sender:a,args:[1n,a],value:0n,basis:'ERC4626_ASSET_ALLOWANCE_RECIPE'};
+    if(sig==='mint(uint256,address)')return{sender:a,args:[1n,a],value:0n,basis:'ERC4626_ASSET_ALLOWANCE_RECIPE'};
+    if(sig==='withdraw(uint256,address,address)')return{sender:a,args:[1n,a,a],value:0n,basis:'ERC4626_SEEDED_POSITION_RECIPE'};
+    if(sig==='redeem(uint256,address,address)')return{sender:a,args:[1n,a,a],value:0n,basis:'ERC4626_SEEDED_POSITION_RECIPE'};
+  }
+  if(recipeId==='erc3156-flash-lender-v1'&&runtime.tokenAddress&&runtime.borrowerAddress&&sig==='flashLoan(address,address,uint256,bytes)'){
+    return{sender:runtime.primaryActor??actors[0],args:[runtime.borrowerAddress,runtime.tokenAddress,1n,'0x'],value:0n,basis:'ERC3156_CALLBACK_FLOW_RECIPE'};
+  }
+  return null;
+}
+export function pickFn(target,rng,actionClass,feedback=new Map(),blocked=new Set()){
+  const keyFor=x=>`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${x.signature}`;
+  const available=list=>list.filter(x=>!blocked.has(keyFor(x)));
+  const accounting=available(target.functions.filter(x=>x.accounting)),other=available(target.functions.filter(x=>!x.accounting));
+  const requested=actionClass==='ACCOUNTING_STATE_CHANGE'?accounting:other;
+  const alternate=actionClass==='ACCOUNTING_STATE_CHANGE'?other:accounting;
+  const effective=requested.length?requested:alternate;
+  // If every admitted function for this target is explicitly blocked, return null so
+  // the caller can reroute to another qualified execution context. Never silently
+  // resurrect a blocked function.
+  if(!effective.length)return null;
+  const weights=effective.map(x=>1+Math.min(8,Number(feedback.get(keyFor(x))??0)));
+  const total=weights.reduce((a,b)=>a+b,0);let cursor=rng()*total;
+  for(let i=0;i<effective.length;i++){cursor-=weights[i];if(cursor<=0)return{selected:effective[i],feedbackWeight:weights[i],selectionKey:keyFor(effective[i])};}
+  return{selected:effective.at(-1),feedbackWeight:weights.at(-1),selectionKey:keyFor(effective.at(-1))};
 }
 export function buildBurstSchedule(targets,calls,rng){
   const out=[];
@@ -507,7 +791,22 @@ export function buildBurstSchedule(targets,calls,rng){
   let otherRemaining=otherTargets.length?(calls-accountingRemaining):0;
   if(accountingTargets.length&&!otherTargets.length){accountingRemaining=calls;otherRemaining=0;}
   if(!accountingTargets.length&&otherTargets.length){accountingRemaining=0;otherRemaining=calls;}
-  let previous=-1;
+  // Reserve one deterministic calibration attempt for every admitted target/context class
+  // before weighted bursts. This prevents a ready callback/facade/context from receiving zero
+  // telemetry attempts due only to stochastic target selection.
+  const calibration=[];
+  for(const x of accountingTargets){
+    if(accountingRemaining<=0)break;
+    calibration.push({targetIndex:x.i,count:1,actionClass:'ACCOUNTING_STATE_CHANGE',calibration:true});
+    accountingRemaining--;
+  }
+  for(const x of otherTargets){
+    if(otherRemaining<=0)break;
+    calibration.push({targetIndex:x.i,count:1,actionClass:'OTHER_STATE_CHANGE',calibration:true});
+    otherRemaining--;
+  }
+  out.push(...calibration);
+  let previous=calibration.length?calibration.at(-1).targetIndex:-1;
   while(accountingRemaining+otherRemaining>0){
     let actionClass;
     if(accountingRemaining===0) actionClass='OTHER_STATE_CHANGE';
@@ -524,137 +823,634 @@ export function buildBurstSchedule(targets,calls,rng){
   }
   return out;
 }
-async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot}){
+function observationRowsV2(snapshotValue,recipe,phase){
+  const rows=[];
+  const recipeId=recipe?.status==='QUALIFIED'?recipe.recipeId:null;
+  const push=(quantityId,family,value,status='OK',error=null)=>rows.push({phase,quantityId,family,unit:'integer',status,value:status==='OK'?String(value):null,error});
+  for(const [who,value] of Object.entries(snapshotValue?.native??{}))push(`native:${who}`,'NATIVE_BALANCE',value);
+  for(const [address,value] of Object.entries(snapshotValue?.systemNative??{}))push(`system-native:${address.toLowerCase()}`,'NATIVE_BALANCE',value);
+  for(const [address,related] of Object.entries(snapshotValue?.related??{})){
+    for(const [name,result] of Object.entries(related??{})){
+      if(name==='address')continue;
+      const family=name.startsWith('balance')?'TOKEN_BALANCE':name.startsWith('allowance')?'ALLOWANCE':name==='totalSupply'?'TOTAL_SUPPLY':'RELATED_TOKEN_VIEW';
+      const quantityId=`related:${address}:${name}`;
+      if(result?.ok!==true)rows.push({phase,quantityId,family,unit:'integer',status:'FAILED',value:null,error:result?.error??'OBSERVATION_FAILED'});
+      else if(typeof result.value==='string'&&/^-?\d+$/.test(result.value))push(quantityId,family,result.value);
+      else rows.push({phase,quantityId,family,unit:'opaque',status:'OK',value:normalize(result.value),error:null});
+    }
+  }
+  for(const [key,result] of Object.entries(snapshotValue?.views??{})){
+    let family='ABI_VIEW';
+    if(recipeId&&key.startsWith('balanceOf(address)'))family=recipeId==='erc4626-standard-v1'?'SHARE_BALANCE':'TOKEN_BALANCE';
+    else if(recipeId&&key.startsWith('allowance(address,address)'))family='ALLOWANCE';
+    else if(recipeId&&key.startsWith('totalSupply()'))family='TOTAL_SUPPLY';
+    else if(recipeId==='erc4626-standard-v1'&&key.startsWith('totalAssets()'))family='TOTAL_ASSETS';
+    if(result?.ok!==true){rows.push({phase,quantityId:`view:${key}`,family,unit:'integer',status:'FAILED',value:null,error:result?.error??'OBSERVATION_FAILED'});continue;}
+    const value=result.value;
+    if(typeof value==='string'&&/^-?\d+$/.test(value))push(`view:${key}`,family,value);
+    else rows.push({phase,quantityId:`view:${key}`,family,unit:'opaque',status:'OK',value:normalize(value),error:null});
+  }
+  return rows;
+}
+function observationDeltasV2(beforeRows,afterRows,{receipt,sender}={}){
+  const afterById=new Map(afterRows.map(x=>[x.quantityId,x])),rows=[];
+  const gasUsed=receipt?.gasUsed!=null?BigInt(receipt.gasUsed):null;
+  const gasPrice=receipt?.gasPrice!=null?BigInt(receipt.gasPrice):(receipt?.effectiveGasPrice!=null?BigInt(receipt.effectiveGasPrice):null);
+  const gasFee=gasUsed!=null&&gasPrice!=null?gasUsed*gasPrice:null;
+  for(const before of beforeRows){
+    const after=afterById.get(before.quantityId);
+    if(!after){rows.push({quantityId:before.quantityId,family:before.family,status:'UNKNOWN',reason:'POST_OBSERVATION_MISSING'});continue;}
+    if(before.unit!=='integer'||after.unit!=='integer'){rows.push({quantityId:before.quantityId,family:before.family,status:'UNKNOWN',reason:'NON_INTEGER_OR_INCOMPARABLE_QUANTITY'});continue;}
+    const delta=observationDeltaV2(before,after);
+    const row={quantityId:before.quantityId,family:before.family,...delta};
+    if(delta.status==='KNOWN'&&before.quantityId==='native:sender'&&gasFee!=null){
+      row.rawValue=delta.value;
+      row.transactionFeeWei=gasFee.toString();
+      row.value=(BigInt(delta.value)+gasFee).toString();
+      row.feeAdjusted=true;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+function lifecycleReachabilityV2(targets,rows){
+  const families=[];
+  for(const target of targets){
+    for(const fn of target.functions??[]){
+      const logical=target.logicalQualifiedName??target.qualifiedName;
+      const contextType=target.contextType??'DIRECT';
+      const hasAlternate=targets.some(other=>
+        (other.logicalQualifiedName??other.qualifiedName)===logical&&
+        (other.contextType??'DIRECT')!==contextType&&
+        (other.functions??[]).some(x=>x.signature===fn.signature)
+      );
+      const requiresPositive=fn.semanticFamily==='ECONOMIC'||contextType==='DELEGATE_PROXY';
+      const expectsRejection=contextType==='DIRECT'&&hasAlternate;
+      if(!requiresPositive&&!expectsRejection)continue;
+      const id=`${logical}|${contextType}|${target.recipe?.recipeId??'NO_RECIPE'}|${fn.signature}`;
+      const attempts=rows.filter(row=>
+        (row.target?.logicalQualifiedName??row.target?.qualifiedName)===logical&&
+        (row.target?.contextType??'DIRECT')===contextType&&
+        row.functionSignature===fn.signature
+      );
+      const positive=attempts.find(row=>row.executionOutcome==='MINED_SUCCESS'&&row.positiveTransition===true);
+      const negative=attempts.find(row=>row.executionOutcome==='SIMULATED_REJECTION'||row.executionOutcome==='MINED_REVERT');
+      let status='INFORMATIONAL';
+      if(requiresPositive)status=positive?'POSITIVE_WITNESS':'REACHABILITY_GAP';
+      else if(expectsRejection)status=negative?'EXPECTED_REJECTION_WITNESS':'EXPECTED_REJECTION_GAP';
+      families.push({
+        lifecycleFamilyId:id,logicalQualifiedName:logical,contextType,recipeId:target.recipe?.recipeId??null,
+        functionSignature:fn.signature,semanticFamily:fn.semanticFamily,requiresPositive,expectsRejection,
+        attemptCount:attempts.length,status,
+        positiveWitness:positive?{runId:positive.runId,callIndex:positive.callIndex,transactionHash:positive.transaction?.hash??null}:null,
+        negativeWitness:negative?{runId:negative.runId,callIndex:negative.callIndex,outcome:negative.executionOutcome,error:negative.error??null}:null,
+        gapReason:status.endsWith('GAP')?(attempts.length?'NO_REQUIRED_WITNESS_OBSERVED':'NO_ATTEMPT_REACHED_FAMILY'):null
+      });
+    }
+  }
+  return families;
+}
+function preflightKindV2(error){
+  const text=String(error?.shortMessage??error?.message??error??'');
+  return error?.code==='CALL_EXCEPTION'||/revert|execution reverted|panic/i.test(text)?'PROTOCOL_REJECTION':'INFRASTRUCTURE';
+}
+export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
   const summaries=[];
   let snapshotId=baselineSnapshot;
-  for(let run=1;run<=PHASE0_TELEMETRY_RUNS_V1;run++){
-    if(run>1){await provider.send('evm_revert',[snapshotId]);snapshotId=await provider.send('evm_snapshot',[]);}
-    const runId=`abi-telemetry-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
-    const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(`${runId}-phase0-v1`);
-    const schedule=buildBurstSchedule(targets,PHASE0_TELEMETRY_CALLS_PER_RUN_V1,rng);
-    const accountingFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.accounting).length,0);
-    const otherFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>!x.accounting).length,0);
-    const stats={calls:0,accountingActions:0,otherActions:0,accountingFunctionCount,otherFunctionCount,weightingLimitation:accountingFunctionCount===0?'NO_ACCOUNTING_STATE_CHANGE_FUNCTIONS_DETECTED':null,successes:0,reverts:0,errors:0,byContract:{},byFunction:{},burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))};
+  const canonicalBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
+  for(let run=1;run<=telemetryRuns;run++){
+    let resetEvidence={required:run>1,revertAccepted:run===1,sentinelMatch:run===1,expectedDigestSha256:canonicalBaseline.digestSha256,observedDigestSha256:canonicalBaseline.digestSha256};
+    if(run>1){
+      const reverted=await provider.send('evm_revert',[snapshotId]);
+      if(reverted!==true){const error=new Error('Phase-0 telemetry baseline snapshot revert failed or expired');error.code='PHASE0_BASELINE_REVERT_FAILED';throw error;}
+      const observedBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
+      resetEvidence={required:true,...verifyBaselineResetV2({reverted,expectedDigestSha256:canonicalBaseline.digestSha256,observedDigestSha256:observedBaseline.digestSha256})};
+      snapshotId=await provider.send('evm_snapshot',[]);
+    }
+    const runId=`${runPrefix}-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
+    const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(repeatSameSeedAcrossRuns?seedSalt:`${runId}-${seedSalt}`);
+    const schedule=buildBurstSchedule(targets,callsPerRun,rng);
+    const accountingFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.semanticFamily==='ECONOMIC').length,0);
+    const otherFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.semanticFamily!=='ECONOMIC').length,0);
+    const stats={
+      calls:0,plannedActions:callsPerRun,terminalActions:0,submittedActions:0,
+      accountingActions:0,otherActions:0,accountingFunctionCount,otherFunctionCount,
+      weightingLimitation:accountingFunctionCount===0?'NO_QUALIFIED_ECONOMIC_STATE_CHANGE_FUNCTIONS':null,
+      successes:0,reverts:0,errors:0,minedSuccess:0,minedRevert:0,simulatedRejection:0,
+      simulationInfrastructureError:0,submissionInfrastructureError:0,submittedOutcomeUnknown:0,
+      notExecutedEncodingOrPlanning:0,positiveTransitions:0,positiveEconomicTransitions:0,
+      observationFailures:0,observationReads:0,byContract:{},byFunction:{},
+      feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],
+      burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
+    };
+    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),contextFailureCounts=new Map();
     const telemetryStartedAt=Date.now();
-    console.log(`[phase0-telemetry] ${runId} started; targetCalls=${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; heartbeat every 300s`);
-    const telemetryHeartbeat=setInterval(()=>{
-      const elapsedSeconds=Math.floor((Date.now()-telemetryStartedAt)/1000);
-      console.log(`[phase0-telemetry] heartbeat: run=${runId}; elapsed=${elapsedSeconds}s; calls=${stats.calls}/${PHASE0_TELEMETRY_CALLS_PER_RUN_V1}; successes=${stats.successes}; reverts=${stats.reverts}; errors=${stats.errors}`);
-    },300000);
+    console.log(`[phase0-telemetry] ${runId} started; targetCalls=${callsPerRun}; lifecycle=v2; heartbeat every 300s`);
+    const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${callsPerRun}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),300000);
     telemetryHeartbeat.unref?.();
     try{
       for(const burst of schedule){
-        const target=targets[burst.targetIndex];
+        let target=targets[burst.targetIndex];
         for(let k=0;k<burst.count;k++){
-          const selected=pickFn(target,rng,burst.actionClass),f=selected.fragment,sender=actors[ri(rng,actors.length)],iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
-          let args=[],argError=null;try{args=f.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));}catch(e){argError=e;}
-          const before=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
-          const rec={schemaVersion:'curveyield-phase0-raw-simulation-call-v1',runId,callIndex:stats.calls+1,target:{qualifiedName:target.qualifiedName,address:target.address},sender,functionSignature:selected.signature,actionClass:selected.accounting?'ACCOUNTING_STATE_CHANGE':'OTHER_STATE_CHANGE',decodedInputs:argError?null:normalize(args),abiGenerated:true,rawRandomBytes:false,beforeAccounting:before,transaction:null,error:null,afterAccounting:null,accountingDeltas:{}};
-          stats.calls++;if(selected.accounting)stats.accountingActions++;else stats.otherActions++;
-          stats.byContract[target.qualifiedName]=(stats.byContract[target.qualifiedName]??0)+1;const fk=`${target.qualifiedName}::${selected.signature}`;stats.byFunction[fk]=(stats.byFunction[fk]??0)+1;
-          if(argError){rec.error={name:'ABI_ARGUMENT_GENERATION_LIMITATION',message:String(argError.message??argError)};stats.errors++;}
-          else{
-            try{
-              const signer=await provider.getSigner(sender),c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),signer),fn=c.getFunction(selected.signature),overrides=f.stateMutability==='payable'?{value:BigInt(ri(rng,1000000))}:{};
-              const tx=await fn.send(...args,overrides),receipt=await tx.wait();
-              rec.transaction={hash:receipt.hash,blockNumber:receipt.blockNumber,status:receipt.status,gasUsed:receipt.gasUsed?.toString()??null,value:overrides.value?.toString()??'0',logs:(receipt.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))};stats.successes++;
-            }catch(e){rec.error=errorInfo(e,iface);if(e?.code==='CALL_EXCEPTION'||/revert/i.test(String(e?.shortMessage??e?.message??'')))stats.reverts++;else stats.errors++;}
+          let picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions);
+          if(!picked){
+            const alternate=targets.find(candidate=>
+              (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
+              (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
+              pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions)
+            );
+            if(alternate){
+              stats.contextAdaptations.push({kind:'REROUTE_TO_QUALIFIED_CONTEXT',fromContext:target.contextType??'DIRECT',toContext:alternate.contextType??'DIRECT',logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,atCallIndex:stats.calls+1});
+              target=alternate;
+              picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions);
+            }
           }
-          const after=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});rec.afterAccounting=after;rec.accountingDeltas=deltas(before,after);
+          if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
+          const selected=picked.selected,f=selected.fragment,iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
+          const qualifiedAction=qualifiedActionV2({target,selected,actors,rng});
+          let sender=qualifiedAction?.sender??actors[ri(rng,actors.length)];
+          const rec={
+            schemaVersion:'curveyield-phase0-raw-simulation-call-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
+            runId,callIndex:stats.calls+1,target:{qualifiedName:target.qualifiedName,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,address:target.address,recipeId:target.recipe?.recipeId??null,contextType:target.contextType??'DIRECT',contextDisposition:target.contextDisposition??'READY'},
+            sender,functionSignature:selected.signature,declaredMutability:f.stateMutability,
+            semanticFamily:selected.semanticFamily??'UNKNOWN',semanticBasis:selected.semanticBasis??'NO_QUALIFIED_SEMANTIC_RECIPE',
+            actionClass:selected.semanticFamily==='ECONOMIC'?'ECONOMIC_STATE_CHANGE':'OTHER_STATE_CHANGE',
+            stages:{ARG_GEN:null,PREFLIGHT:null,SUBMISSION:null,RECEIPT:null,OBSERVATION:null},
+            decodedInputs:null,abiGenerated:true,rawRandomBytes:false,executionOutcome:null,
+            observations:{before:[],after:[],deltas:[]},effectClassification:'NOT_EXECUTED',positiveTransition:false,
+            transaction:null,error:null,
+            selectionFeedback:{selectionKey:picked.selectionKey,weight:picked.feedbackWeight,adaptedContext:stats.contextAdaptations.at(-1)?.atCallIndex===stats.calls+1}
+          };
+          if(picked.feedbackWeight>1)stats.feedbackSelections++;
+          stats.calls++; if(selected.semanticFamily==='ECONOMIC')stats.accountingActions++;else stats.otherActions++;
+          stats.byContract[target.qualifiedName]=(stats.byContract[target.qualifiedName]??0)+1;
+          const fk=`${target.qualifiedName}::${selected.signature}`;stats.byFunction[fk]=(stats.byFunction[fk]??0)+1;
+
+          let args=null,argError=null;
+          try{
+            args=qualifiedAction?.args??f.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));
+            rec.decodedInputs=normalize(args);
+            rec.stages.ARG_GEN={status:'PASS',basis:qualifiedAction?.basis??'BOUNDED_RECURSIVE_ABI_GENERATION'};
+            if(qualifiedAction)rec.recipeAction={basis:qualifiedAction.basis};
+          }
+          catch(error){argError=error;rec.stages.ARG_GEN={status:'FAILED',error:{code:error?.code??'ABI_ARGUMENT_GENERATION_LIMITATION',message:String(error?.message??error),limitation:error?.limitation??null}};}
+          if(argError){
+            rec.executionOutcome=classifyExecutionOutcomeV2({argumentGeneration:{success:false}});
+            rec.error=rec.stages.ARG_GEN.error;
+          }else{
+            const before=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
+            rec.observations.before=observationRowsV2(before,target.recipe,'BEFORE');
+            const data=iface.encodeFunctionData(selected.signature,args);
+            const value=qualifiedAction?.value??(f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n);
+            let estimate=null,preflightError=null;
+            let callProbe;
+            try{
+              const rawReturn=await provider.call({from:sender,to:target.address,data,value});
+              let decodedReturn=null;
+              try{decodedReturn=normalize(iface.decodeFunctionResult(selected.signature,rawReturn));}catch{}
+              callProbe={status:'RETURNED',rawReturn,decodedReturn};
+            }catch(error){
+              callProbe={status:'REVERTED',error:errorInfo(error,iface)};
+            }
+            try{
+              estimate=await provider.estimateGas({from:sender,to:target.address,data,value});
+              rec.stages.PREFLIGHT={status:'PASS',estimateGas:estimate.toString(),callProbe};
+            }catch(error){
+              preflightError=error;
+              const kind=preflightKindV2(error);
+              rec.stages.PREFLIGHT={status:'FAILED',kind,error:errorInfo(error,iface),callProbe};
+            }
+            let tx=null,receipt=null,submissionError=null;
+            if(!preflightError){
+              try{
+                const signer=await provider.getSigner(sender);
+                const gasLimit=estimate+(estimate/2n)+100000n;
+                tx=await signer.sendTransaction({to:target.address,data,value,gasLimit});
+                rec.stages.SUBMISSION={status:'SUBMITTED',transactionHash:tx.hash,gasLimit:gasLimit.toString()};
+                try{
+                  receipt=await tx.wait();
+                  rec.stages.RECEIPT={status:'MINED',transactionHash:tx.hash,blockNumber:receipt?.blockNumber??null,receiptStatus:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,gasPrice:(receipt?.gasPrice??receipt?.effectiveGasPrice)?.toString?.()??null};
+                }catch(error){
+                  receipt=error?.receipt??null;
+                  if(receipt)rec.stages.RECEIPT={status:'MINED',transactionHash:tx.hash,blockNumber:receipt.blockNumber??null,receiptStatus:receipt.status??0,gasUsed:receipt.gasUsed?.toString()??null,gasPrice:(receipt?.gasPrice??receipt?.effectiveGasPrice)?.toString?.()??null,error:errorInfo(error,iface)};
+                  else rec.stages.RECEIPT={status:'OUTCOME_UNKNOWN',transactionHash:tx.hash,error:errorInfo(error,iface)};
+                }
+              }catch(error){
+                submissionError=error;
+                rec.stages.SUBMISSION={status:'FAILED',error:errorInfo(error,iface)};
+              }
+            }
+            rec.executionOutcome=classifyExecutionOutcomeV2({
+              argumentGeneration:{success:true},
+              preflight:preflightError?{success:false,kind:preflightKindV2(preflightError)}:{success:true},
+              submission:preflightError?null:(submissionError?{success:false}:{success:!!tx}),
+              receipt
+            });
+            const after=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
+            rec.observations.after=observationRowsV2(after,target.recipe,'AFTER');
+            rec.observations.deltas=observationDeltasV2(rec.observations.before,rec.observations.after,{receipt,sender});
+            rec.stages.OBSERVATION={
+              status:rec.observations.after.some(x=>x.status!=='OK')?'PARTIAL':'COMPLETE',
+              reads:rec.observations.after.length,
+              failedReads:rec.observations.after.filter(x=>x.status!=='OK').length
+            };
+            const knownNonzero=rec.observations.deltas.filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
+            rec.positiveTransition=rec.executionOutcome==='MINED_SUCCESS'&&knownNonzero.length>0;
+            rec.effectClassification=rec.positiveTransition?'OBSERVED_STATE_TRANSITION':(rec.executionOutcome==='MINED_SUCCESS'?'MINED_NO_OBSERVED_STATE_TRANSITION':'NO_MINED_SUCCESS');
+            rec.transaction=tx?{hash:tx.hash,blockNumber:receipt?.blockNumber??null,status:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,value:value.toString(),logs:(receipt?.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))}:null;
+            if(preflightError)rec.error=errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
+          }
+
+          stats.terminalActions++;
+          if(['MINED_SUCCESS','MINED_REVERT','SUBMITTED_OUTCOME_UNKNOWN'].includes(rec.executionOutcome))stats.submittedActions++;
+          if(rec.executionOutcome==='MINED_SUCCESS'){stats.minedSuccess++;stats.successes++;}
+          else if(rec.executionOutcome==='MINED_REVERT'){stats.minedRevert++;stats.reverts++;}
+          else if(rec.executionOutcome==='SIMULATED_REJECTION')stats.simulatedRejection++;
+          else if(rec.executionOutcome==='SIMULATION_INFRASTRUCTURE_ERROR')stats.simulationInfrastructureError++;
+          else if(rec.executionOutcome==='SUBMISSION_INFRASTRUCTURE_ERROR')stats.submissionInfrastructureError++;
+          else if(rec.executionOutcome==='SUBMITTED_OUTCOME_UNKNOWN')stats.submittedOutcomeUnknown++;
+          else if(rec.executionOutcome==='NOT_EXECUTED_ENCODING_OR_PLANNING')stats.notExecutedEncodingOrPlanning++;
+          if(rec.positiveTransition){
+            stats.positiveTransitions++;
+            if(rec.semanticFamily==='ECONOMIC')stats.positiveEconomicTransitions++;
+            feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
+            stats.feedbackUpdates++;
+          }
+          if(rec.executionOutcome==='SIMULATED_REJECTION'){
+            const hasAlternateContext=targets.some(candidate=>
+              (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
+              (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
+              candidate.functions.some(fn=>fn.signature===selected.signature)
+            );
+            if(hasAlternateContext){
+              const failures=Number(contextFailureCounts.get(picked.selectionKey)??0)+1;
+              contextFailureCounts.set(picked.selectionKey,failures);
+              if(failures>=3&&!blockedContextFunctions.has(picked.selectionKey)){
+                blockedContextFunctions.add(picked.selectionKey);
+                const adaptation={kind:'BOUNDED_WRONG_CONTEXT_GAP',selectionKey:picked.selectionKey,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,signature:selected.signature,contextType:target.contextType??'DIRECT',failureCount:failures,atCallIndex:stats.calls};
+                stats.contextAdaptations.push(adaptation);rec.contextAdaptation=adaptation;
+              }
+            }
+          }else contextFailureCounts.delete(picked.selectionKey);
+          const observations=[...rec.observations.before,...rec.observations.after];stats.observationReads+=observations.length;stats.observationFailures+=observations.filter(x=>x.status!=='OK').length;
+          if(['SIMULATION_INFRASTRUCTURE_ERROR','SUBMISSION_INFRASTRUCTURE_ERROR','SUBMITTED_OUTCOME_UNKNOWN','NOT_EXECUTED_ENCODING_OR_PLANNING'].includes(rec.executionOutcome))stats.errors++;
+          terminalRows.push(rec);
           await h.write(JSON.stringify(rec)+'\n');
         }
       }
     }finally{clearInterval(telemetryHeartbeat);await h.close();}
-    console.log(`[phase0-telemetry] ${runId} completed; elapsed=${Math.floor((Date.now()-telemetryStartedAt)/1000)}s; calls=${stats.calls}; successes=${stats.successes}; reverts=${stats.reverts}; errors=${stats.errors}`);
-    const bytes=await fs.readFile(file),summary={schemaVersion:'curveyield-phase0-abi-telemetry-run-v1',runId,purpose:'INVESTIGATIVE_TELEMETRY_FOR_LATER_REVIEWERS_NOT_MANUAL_REVERIFICATION',...stats,accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,interleavedCrossContractBursts:true,rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,status:stats.calls===PHASE0_TELEMETRY_CALLS_PER_RUN_V1?'PASS':'INCOMPLETE'};
+    const reconciliation=validateTelemetryCountersV2(stats,terminalRows);
+    const lifecycleFamilies=lifecycleReachabilityV2(targets,terminalRows);
+    const positiveRequired=lifecycleFamilies.filter(x=>x.requiresPositive);
+    const observationStatus=stats.observationReads===0?'UNAVAILABLE':(stats.observationFailures===0?'COMPLETE':'PARTIAL');
+    const reachabilityStatus=positiveRequired.length===0?'NO_QUALIFIED_LIFECYCLES':(positiveRequired.every(x=>x.status==='POSITIVE_WITNESS')?'REACHABLE':positiveRequired.some(x=>x.status==='POSITIVE_WITNESS')?'PARTIAL':'REACHABILITY_GAP');
+    console.log(`[phase0-telemetry] ${runId} completed; calls=${stats.calls}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; positiveTransitions=${stats.positiveTransitions}`);
+    const actionSequenceDigestSha256=sha256(Buffer.from(JSON.stringify(terminalRows.map(row=>({target:row.target,sender:row.sender,functionSignature:row.functionSignature,decodedInputs:row.decodedInputs,actionClass:row.actionClass})))));
+    const outcomeSequenceDigestSha256=sha256(Buffer.from(JSON.stringify(terminalRows.map(row=>({callIndex:row.callIndex,executionOutcome:row.executionOutcome,positiveTransition:row.positiveTransition,effectClassification:row.effectClassification})))));
+    const bytes=await fs.readFile(file),summary={
+      schemaVersion:'curveyield-phase0-abi-telemetry-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
+      runId,purpose:'AUTOMATED_LIFECYCLE_TELEMETRY_WITH_TYPED_OUTCOMES_AND_ACCOUNTING_OBSERVATIONS',...stats,
+      accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,
+      interleavedCrossContractBursts:true,executionStatus:'COMPLETED',coverageStatus:stats.calls===callsPerRun?'COMPLETE':'INCOMPLETE',
+      checkStatus:'NOT_APPLICABLE',reachabilityStatus,observationStatus,reconciliation,lifecycleFamilies,resetEvidence,
+      feedbackStatus:stats.feedbackUpdates>0&&stats.feedbackSelections>0?'ACTIVE':'NO_FEEDBACK_WITNESS',
+      actionSequenceDigestSha256,outcomeSequenceDigestSha256,
+      rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,
+      legacyCompatibility:{legacyRevertCounterWasPreflightDominated:true,currentRevertsAreMinedRevertsOnly:true},
+      status:stats.calls===callsPerRun&&stats.terminalActions===stats.plannedActions&&reconciliation.status==='PASS'?'PASS':'INCOMPLETE'
+    };
     await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');summaries.push(summary);
   }
   return summaries;
 }
-function solidityType(param){
-  const type=String(param.type??'');
-  if(!SAFE_ABI_TYPE_RE.test(type)||param.baseType==='tuple')return null;
-  const dynamic=type==='string'||type==='bytes'||type.includes('[');
-  return dynamic?`${type} calldata`:type;
+function medusaParamSupportedV2(param,depth=0){
+  if(depth>8)return false;
+  if(param?.baseType==='array'){
+    if(Number.isInteger(param.arrayLength)&&param.arrayLength>96)return false;
+    return medusaParamSupportedV2(param.arrayChildren,depth+1);
+  }
+  if(param?.baseType==='tuple')return (param.components??[]).every(x=>medusaParamSupportedV2(x,depth+1));
+  return /^(?:u?int(?:8|16|24|32|40|48|56|64|72|80|88|96|104|112|120|128|136|144|152|160|168|176|184|192|200|208|216|224|232|240|248|256)?|address|bool|string|bytes(?:[1-9]|[12][0-9]|3[0-2])?)$/.test(String(param?.type??''));
+}
+function medusaSolidityBaseTypeV2(param,state){
+  if(param?.baseType==='array'){
+    const child=medusaSolidityBaseTypeV2(param.arrayChildren,state);
+    const suffix=Number.isInteger(param.arrayLength)&&param.arrayLength>=0?`[${param.arrayLength}]`:'[]';
+    return child+suffix;
+  }
+  if(param?.baseType==='tuple'){
+    const name=`Phase0TupleV2_${state.nextStruct++}`;
+    const fields=(param.components??[]).map((child,i)=>`    ${medusaSolidityBaseTypeV2(child,state)} f${i};`);
+    state.structs.push(`  struct ${name} {\n${fields.join('\n')}\n  }`);
+    return name;
+  }
+  return String(param?.type??'');
+}
+function medusaSolidityParamTypeV2(param,state){
+  const base=medusaSolidityBaseTypeV2(param,state);
+  const reference=param?.baseType==='array'||param?.baseType==='tuple'||param?.type==='string'||param?.type==='bytes';
+  return reference?`${base} calldata`:base;
+}
+function medusaCanonicalInputTypeV2(param){
+  try{return param.format('sighash');}catch{return String(param?.type??'');}
 }
 export function medusaWrappers(ethers,targets){
   const accounting=[],other=[],omitted=[];
   for(const t of targets){
     for(const x of t.functions){
-      const types=x.fragment.inputs.map(solidityType);if(types.some(v=>!v)){omitted.push({qualifiedName:t.qualifiedName,signature:x.signature,reason:'UNSUPPORTED_ROUTER_PARAMETER_TYPE'});continue;}
-      const row={target:t,selected:x,types};(x.accounting?accounting:other).push(row);
+      if(!(x.fragment.inputs??[]).every(p=>medusaParamSupportedV2(p))){
+        omitted.push({qualifiedName:t.qualifiedName,signature:x.signature,reason:'ABI_RESOURCE_LIMIT_OR_UNSUPPORTED_ROUTER_PARAMETER_TYPE'});
+        continue;
+      }
+      const row={target:t,selected:x,canonicalInputTypes:x.fragment.inputs.map(medusaCanonicalInputTypeV2)};
+      (x.semanticFamily==='ECONOMIC'||x.accounting?accounting:other).push(row);
     }
   }
   const rows=[];let id=0;
-  const accCopies=accounting.length?4:0;
+  // Wrapper population is only a selection mechanism; achieved share is still measured from retained corpus calls.
+  // Target 85% here to leave stochastic headroom above the 80% acceptance floor.
+  const desiredEconomicShare=0.85;
+  const odds=desiredEconomicShare/(1-desiredEconomicShare);
+  const accCopies=accounting.length?Math.max(6,Math.ceil((odds*other.length)/accounting.length)):0;
   for(const x of accounting)for(let n=0;n<accCopies;n++)rows.push({...x,wrapperName:`p0_acc_${id++}_${n}`});
-  let selectedOther=other;
-  if(accounting.length&&other.length>accounting.length){
-    const step=other.length/accounting.length;
-    selectedOther=Array.from({length:accounting.length},(_,i)=>other[Math.floor(i*step)]);
-    for(const x of other)if(!selectedOther.includes(x))omitted.push({qualifiedName:x.target.qualifiedName,signature:x.selected.signature,reason:'NON_ACCOUNTING_WRAPPER_DOWNSAMPLED_FOR_80_PERCENT_WEIGHT'});
-  }
-  for(const x of selectedOther)rows.push({...x,wrapperName:`p0_other_${id++}`});
-  if(!accounting.length) omitted.push({qualifiedName:'ALL_TARGETS',signature:'N/A',reason:'NO_ACCOUNTING_STATE_CHANGE_FUNCTIONS_DETECTED_FOR_MEDUSA_WEIGHTING'});
-  return{rows,omitted,accCopies,accountingWrapperShare:rows.length?rows.filter(x=>x.selected.accounting).length/rows.length:0};
+  for(const x of other)rows.push({...x,wrapperName:`p0_other_${id++}`});
+  if(!accounting.length)omitted.push({qualifiedName:'ALL_TARGETS',signature:'N/A',reason:'NO_QUALIFIED_ECONOMIC_STATE_CHANGE_FUNCTIONS_FOR_MEDUSA_WEIGHTING'});
+  return{
+    rows,omitted,accCopies,
+    accountingWrapperShare:rows.length?rows.filter(x=>x.selected.semanticFamily==='ECONOMIC'||x.selected.accounting).length/rows.length:0,
+    weightingStrategy:'ROUTER_SURFACE_WEIGHT_PLUS_CORPUS_FEEDBACK_ELIGIBLE',
+    allSupportedFunctionsRepresented:other.every(x=>rows.some(r=>r.selected.signature===x.selected.signature&&r.target.qualifiedName===x.target.qualifiedName))
+  };
 }
-function renderMedusaRouter(ethers,targets){
-  const plan=medusaWrappers(ethers,targets),body=[];
-  for(const x of plan.rows){
-    const names=x.types.map((t,i)=>`${t} a${i}`),args=x.types.map((_,i)=>`a${i}`),selector=ethers.id(x.selected.signature).slice(0,10),payable=x.selected.fragment.stateMutability==='payable'?' payable':'';
-    const value=x.selected.fragment.stateMutability==='payable'?'msg.value':'0';
-    const encodedArgs=args.length?`,`+args.join(','):'';
-    const targetAddress=ethers.getAddress(x.target.address);
-    body.push(`  function ${x.wrapperName}(${names.join(', ')}) external${payable} { (bool ok, bytes memory data)=address(${targetAddress}).call{value:${value}}(abi.encodeWithSelector(bytes4(${selector})${encodedArgs})); emit Phase0Call(address(${targetAddress}),bytes4(${selector}),ok,data); }`);
+function explicitTargetPropertiesV2(ethers,targets){
+  const rows=[];
+  for(const target of targets){
+    const iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
+    for(const f of iface.fragments.filter(x=>x.type==='function'&&/^property_/.test(x.name)&&['view','pure'].includes(x.stateMutability)&&x.inputs.length===0&&x.outputs.length===1&&x.outputs[0].type==='bool')){
+      const category=target.propertyCategory??'TARGET_BEHAVIOR';
+      rows.push({
+        propertyId:`${category==='HARNESS_SELF_CHECK'?'harness-control':'target-property'}-${rows.length+1}`,
+        category,
+        targetQualifiedName:target.qualifiedName,
+        targetAddress:target.address,
+        targetSignature:f.format('sighash'),
+        wrapperName:`property_p0_${category==='HARNESS_SELF_CHECK'?'control':'target'}_${rows.length}`,
+        applicabilityBasis:category==='HARNESS_SELF_CHECK'?'OWNED_QUALIFICATION_CONTROL':'PACKET_DECLARED_PROPERTY_FUNCTION',
+        preconditionMode:category==='HARNESS_SELF_CHECK'?'ENGINE_CAPABILITY_CONTROL':'REQUIRES_RELEVANT_SUCCESSFUL_STATE_TRANSITION_WITNESS'
+      });
+    }
   }
-  return{...plan,source:`// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.20;\ncontract Phase0MedusaRouterV1 {\n  event Phase0Call(address indexed target, bytes4 indexed selector, bool success, bytes data);\n${body.join('\n')}\n}\n`};
+  return rows;
+}
+export function renderMedusaRouterV2(ethers,targets){
+  const plan=medusaWrappers(ethers,targets),state={nextStruct:0,structs:[]},body=[];
+  for(const x of plan.rows){
+    const paramTypes=x.selected.fragment.inputs.map(p=>medusaSolidityParamTypeV2(p,state));
+    const names=paramTypes.map((t,i)=>`${t} a${i}`),args=paramTypes.map((_,i)=>`a${i}`);
+    const selector=ethers.id(x.selected.signature).slice(0,10),payable=x.selected.fragment.stateMutability==='payable'?' payable':'';
+    const value=x.selected.fragment.stateMutability==='payable'?'msg.value':'0';
+    const encodedArgs=args.length?','+args.join(','):'';
+    const targetAddress=ethers.getAddress(x.target.address);
+    x.wrapperSignature=`Phase0MedusaRouterV1.${x.wrapperName}(${x.canonicalInputTypes.join(',')})`;
+    body.push(`  function ${x.wrapperName}(${names.join(', ')}) external${payable} { CHEATS.prank(msg.sender); (bool ok, bytes memory data)=address(${targetAddress}).call{value:${value}}(abi.encodeWithSelector(bytes4(${selector})${encodedArgs})); if(ok){successfulTargetCalls++;} emit Phase0Call(address(${targetAddress}),bytes4(${selector}),msg.sender,ok,data); }`);
+  }
+  const properties=explicitTargetPropertiesV2(ethers,targets);
+  for(const property of properties){
+    const selector=ethers.id(property.targetSignature).slice(0,10);
+    body.push(`  function ${property.wrapperName}() external returns(bool) { CHEATS.prank(msg.sender); (bool ok, bytes memory data)=address(${ethers.getAddress(property.targetAddress)}).call(abi.encodeWithSelector(bytes4(${selector}))); return ok && data.length>=32 && abi.decode(data,(bool)); }`);
+  }
+  const source=`// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.20;
+interface Phase0MedusaCheatCodesV2 { function prank(address) external; }
+contract Phase0MedusaRouterV1 {
+  Phase0MedusaCheatCodesV2 internal constant CHEATS=Phase0MedusaCheatCodesV2(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
+  uint256 public successfulTargetCalls;
+  event Phase0Call(address indexed target, bytes4 indexed selector, address indexed fuzzSender, bool success, bytes data);
+${state.structs.join('\n')}
+${body.join('\n')}
+}
+`;
+  return{...plan,properties,structs:state.structs,source};
 }
 function maxMedusaCalls(text){let max=0;for(const m of String(text).matchAll(/calls:\s*([0-9][0-9,]*)/gi))max=Math.max(max,Number(m[1].replaceAll(',','')));return max;}
-async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot}){
-  const dir=path.join(outRoot,'runs','medusa-anvil-fork-001');await fs.mkdir(dir,{recursive:true});
-  const router=renderMedusaRouter(ethers,targets);
-  if(!router.rows.length){const s={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_ROUTABLE_ABI_FUNCTIONS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,observedCalls:0,limitations:router.omitted};await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(s,null,2)+'\n');return s;}
-  // Compile only the ABI router: production targets are already exactly compiled and deployed on Anvil.
-  const medusaProject=path.join(dir,'router-project');
-  await fs.mkdir(path.join(medusaProject,'src'),{recursive:true});
+function collectMethodSignaturesV2(value,out=[]){
+  if(Array.isArray(value)){for(const x of value)collectMethodSignaturesV2(x,out);return out;}
+  if(!value||typeof value!=='object')return out;
+  if(typeof value.methodSignature==='string')out.push(value.methodSignature);
+  for(const x of Object.values(value))collectMethodSignaturesV2(x,out);
+  return out;
+}
+async function medusaCorpusDispatchMetricsV2({corpusDest,routerRows}){
+  const byWrapper=new Map(routerRows.map(row=>[row.wrapperName,{
+    economic:row.selected?.semanticFamily==='ECONOMIC'||row.selected?.accounting===true,
+    logicalKey:`${row.target?.logicalQualifiedName??row.target?.qualifiedName}::${row.selected?.signature}`
+  }]));
+  let dispatches=0,economicDispatches=0,parsedFiles=0,parseFailures=0;
+  const wrapperCounts={},logicalCounts={};
+  if(!fss.existsSync(corpusDest))return{status:'UNAVAILABLE_NO_RETAINED_CORPUS',dispatches:0,economicDispatches:0,economicShare:null,parsedFiles:0,parseFailures:0,wrapperCounts,logicalCounts};
+  for(const rel of await walk(corpusDest)){
+    if(!rel.endsWith('.json'))continue;
+    try{
+      const parsed=JSON.parse(await fs.readFile(path.join(corpusDest,...rel.split('/')),'utf8'));parsedFiles++;
+      for(const signature of collectMethodSignaturesV2(parsed)){
+        const name=String(signature).split('(')[0],meta=byWrapper.get(name);
+        if(!meta)continue;
+        dispatches++;if(meta.economic)economicDispatches++;
+        wrapperCounts[name]=(wrapperCounts[name]??0)+1;
+        logicalCounts[meta.logicalKey]=(logicalCounts[meta.logicalKey]??0)+1;
+      }
+    }catch{parseFailures++;}
+  }
+  return{
+    status:dispatches>0?'MEASURED_FROM_RETAINED_CORPUS':'UNAVAILABLE_NO_ROUTER_DISPATCHES_IN_RETAINED_CORPUS',
+    dispatches,economicDispatches,economicShare:dispatches?economicDispatches/dispatches:null,
+    parsedFiles,parseFailures,wrapperCounts,logicalCounts,
+    observedLogicalFunctionCount:Object.keys(logicalCounts).length,
+    representedLogicalFunctionCount:new Set([...byWrapper.values()].map(x=>x.logicalKey)).size
+  };
+}
+export function buildMedusaConfigV2({anvilUrl,blockNumber,routerRows,checked,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1}){
+  return{
+    fuzzing:{
+      workers:10,workerResetLimit:50,timeout:0,testLimit:callLimit,shrinkLimit:5000,callSequenceLength:100,
+      coverageEnabled:true,corpusDirectory:'.curveyield-phase0-medusa-corpus-v2',coverageFormats:['lcov'],revertReporterEnabled:true,
+      targetContracts:['Phase0MedusaRouterV1'],predeployedContracts:{},targetContractsBalances:[],constructorArgs:{},
+      senderAddresses:['0x0000000000000000000000000000000000010000','0x0000000000000000000000000000000000020000','0x0000000000000000000000000000000000030000','0x0000000000000000000000000000000000040000'],
+      testing:{
+        stopOnFailedTest:false,stopOnNoTests:checked===true,testAllContracts:false,testViewMethods:false,
+        assertionTesting:{enabled:checked===true},
+        propertyTesting:{enabled:checked===true,testPrefixes:['property_']},
+        optimizationTesting:{enabled:false,testPrefixes:['optimize_']},
+        targetFunctionSignatures:routerRows.map(x=>x.wrapperSignature??`Phase0MedusaRouterV1.${x.wrapperName}(${(x.canonicalInputTypes??[]).join(',')})`),
+        excludeFunctionSignatures:[]
+      },
+      chainConfig:{cheatCodes:{cheatCodesEnabled:true,enableFFI:false},forkConfig:{forkModeEnabled:true,rpcUrl:anvilUrl,rpcBlock:blockNumber,poolSize:24}}
+    },
+    compilation:{platform:'crytic-compile',platformConfig:{target:'.',args:['--foundry-compile-all']}},
+    slither:{useSlither:false},logging:{level:'info',logDirectory:'',noColor:true}
+  };
+}
+async function readTargetPropertyV2({provider,ethers,property,from}){
+  try{
+    const iface=new ethers.Interface([`function ${property.targetSignature} view returns (bool)`]);
+    const data=iface.encodeFunctionData(property.targetSignature,[]);
+    const raw=await provider.call({to:property.targetAddress,from,data});
+    return{status:'OK',value:Boolean(iface.decodeFunctionResult(property.targetSignature,raw)[0])};
+  }catch(error){return{status:'FAILED',value:null,error:String(error?.shortMessage??error?.message??error).slice(0,1200)};}
+}
+async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
+  if(!properties.length)return[];
+  const provider=new ethers.JsonRpcProvider(anvilUrl,1,{staticNetwork:true,cacheTimeout:-1});
+  const actors=await provider.send('eth_accounts',[]);
+  const targetByQ=new Map(targets.map(t=>[t.qualifiedName,t])),out=[];
+  try{
+    for(const property of properties){
+      if(property.category==='HARNESS_SELF_CHECK'){
+        out.push({propertyId:property.propertyId,targetSignature:property.targetSignature,status:'CONTROL_NOT_TARGET',reason:'HARNESS_SELF_CHECK_DOES_NOT_REQUIRE_TARGET_PRECONDITION_WITNESS'});
+        continue;
+      }
+      const target=targetByQ.get(property.targetQualifiedName);
+      const defaultActor=target?.recipeRuntime?.primaryActor??actors[0];
+      const initial=await readTargetPropertyV2({provider,ethers,property,from:defaultActor});
+      let witness=null;
+      const runtimeWitness=(target?.recipeRuntime?.lifecycleWitnesses??[])
+        .find(x=>Array.isArray(x?.observedTransitionDeltas)&&x.observedTransitionDeltas.length>0);
+      if(runtimeWitness){
+        witness={
+          status:'WITNESSED',propertyId:property.propertyId,targetSignature:property.targetSignature,
+          actionSignature:runtimeWitness.actionSignature,actor:runtimeWitness.actor??defaultActor,
+          receipt:runtimeWitness.receipt??null,initialProperty:initial,
+          afterProperty:await readTargetPropertyV2({provider,ethers,property,from:runtimeWitness.actor??defaultActor}),
+          observedTransitionDeltas:runtimeWitness.observedTransitionDeltas,
+          witnessBasis:'RUNTIME_RECIPE_PRECONDITION'
+        };
+      }
+      for(const selected of witness?[]:(target?.functions??[])){
+        const attemptSnapshot=await provider.send('evm_snapshot',[]);
+        try{
+          const rng=seeded(`property-witness-v2:${property.propertyId}:${selected.signature}`);
+          const qualified=qualifiedActionV2({target,selected,actors,rng});
+          const actor=qualified?.sender??defaultActor;
+          const args=qualified?.args??selected.fragment.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));
+          const iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
+          const data=iface.encodeFunctionData(selected.signature,args),value=qualified?.value??(selected.fragment.stateMutability==='payable'?1n:0n);
+          const before=await snapshot({provider,ethers,target,sender:actor,plan:target.plan,systemTargets:targets});
+          const estimate=await provider.estimateGas({from:actor,to:target.address,data,value});
+          const signer=await provider.getSigner(actor),tx=await signer.sendTransaction({to:target.address,data,value,gasLimit:estimate+(estimate/2n)+100000n});
+          const receipt=await tx.wait();
+          const after=await snapshot({provider,ethers,target,sender:actor,plan:target.plan,systemTargets:targets});
+          const beforeRows=observationRowsV2(before,target.recipe,'BEFORE'),afterRows=observationRowsV2(after,target.recipe,'AFTER');
+          const deltaRows=observationDeltasV2(beforeRows,afterRows,{receipt,sender:actor});
+          const nonGasDelta=deltaRows.filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
+          const requiredFamilies=new Set(target?.recipe?.requiredObservationFamilies??[]);
+          const requiredObservationFailures=[...beforeRows,...afterRows].filter(x=>x.status!=='OK'&&requiredFamilies.has(x.family));
+          const afterProperty=await readTargetPropertyV2({provider,ethers,property,from:actor});
+          if(Number(receipt?.status)===1&&nonGasDelta.length&&requiredObservationFailures.length){
+            witness={
+              status:'OBSERVATION_GAP',propertyId:property.propertyId,targetSignature:property.targetSignature,
+              actionSignature:selected.signature,actor,receipt:{status:receipt.status,gasUsed:receipt.gasUsed?.toString()??null},
+              initialProperty:initial,afterProperty,observedTransitionDeltas:nonGasDelta,
+              missingRequiredObservations:requiredObservationFailures.map(x=>({quantityId:x.quantityId,family:x.family,error:x.error??null}))
+            };
+          }else if(Number(receipt?.status)===1&&nonGasDelta.length){
+            witness={status:'WITNESSED',propertyId:property.propertyId,targetSignature:property.targetSignature,actionSignature:selected.signature,actor,receipt:{status:receipt.status,gasUsed:receipt.gasUsed?.toString()??null},initialProperty:initial,afterProperty,observedTransitionDeltas:nonGasDelta};
+          }
+        }catch{}
+        await provider.send('evm_revert',[attemptSnapshot]).catch(()=>{});
+        if(witness)break;
+      }
+      out.push(witness??{propertyId:property.propertyId,targetSignature:property.targetSignature,status:'UNEXERCISED',initialProperty:initial,reason:'NO_RELEVANT_SUCCESSFUL_OBSERVED_STATE_TRANSITION_WITNESS'});
+    }
+  }finally{await provider.destroy();}
+  return out;
+}
+export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,runId='medusa-anvil-fork-001'}){
+  const dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
+  const router=renderMedusaRouterV2(ethers,targets);
+  if(!router.rows.length){
+    const s={schemaVersion:'curveyield-phase0-medusa-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,runId:runId,mode:'DISCOVERY_WITH_ORACLE_GAPS',executionStatus:'NOT_EXECUTED',coverageStatus:'NO_ROUTABLE_FUNCTIONS',checkStatus:'ORACLE_GAP',reachabilityStatus:'UNKNOWN',observationStatus:'UNAVAILABLE',status:'BLOCKED_NO_ROUTABLE_ABI_FUNCTIONS',configuredCallLimit:callLimit,observedCalls:0,limitations:router.omitted};
+    await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(s,null,2)+'\n');return s;
+  }
+  const checked=router.properties.length>0,mode=checked?'CHECKED_DISCOVERY':'DISCOVERY_WITH_ORACLE_GAPS';
+  const medusaProject=path.join(dir,'router-project');await fs.mkdir(path.join(medusaProject,'src'),{recursive:true});
   const harnessAbs=path.join(medusaProject,'src','Phase0MedusaRouterV1.sol');
   await fs.writeFile(harnessAbs,router.source);
   await fs.writeFile(path.join(medusaProject,'foundry.toml'),'[profile.default]\nsrc = "src"\nout = "out"\nlibs = []\nsolc_version = "0.8.28"\nevm_version = "cancun"\noptimizer = true\noptimizer_runs = 200\n');
-
-  const corpusRel='.curveyield-phase0-medusa-corpus-v1';
-  const cfg={fuzzing:{workers:10,workerResetLimit:50,timeout:0,testLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,shrinkLimit:5000,callSequenceLength:100,coverageEnabled:true,corpusDirectory:corpusRel,coverageFormats:['lcov'],revertReporterEnabled:true,targetContracts:['Phase0MedusaRouterV1'],predeployedContracts:{},targetContractsBalances:[],constructorArgs:{},senderAddresses:['0x0000000000000000000000000000000000010000','0x0000000000000000000000000000000000020000','0x0000000000000000000000000000000000030000','0x0000000000000000000000000000000000040000'],testing:{stopOnFailedTest:false,stopOnNoTests:false,testAllContracts:false,testViewMethods:false,assertionTesting:{enabled:false},propertyTesting:{enabled:false,testPrefixes:['property_']},optimizationTesting:{enabled:false,testPrefixes:['optimize_']},targetFunctionSignatures:router.rows.map(x=>`Phase0MedusaRouterV1.${x.wrapperName}(${x.selected.fragment.inputs.map(p=>p.type).join(',')})`),excludeFunctionSignatures:[]},chainConfig:{cheatCodes:{cheatCodesEnabled:true,enableFFI:false},forkConfig:{forkModeEnabled:true,rpcUrl:anvilUrl,rpcBlock:blockNumber,poolSize:24}}},compilation:{platform:'crytic-compile',platformConfig:{target:'.',args:['--foundry-compile-all']}},slither:{useSlither:false},logging:{level:'info',logDirectory:'',noColor:true}};
+  const cfg=buildMedusaConfigV2({anvilUrl,blockNumber,routerRows:router.rows,checked,callLimit});
   const cfgPath=path.join(medusaProject,'medusa.json');await fs.writeFile(cfgPath,JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_CONFIG_v1.json'),JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_ROUTER_v1.sol'),router.source);
+  const witnessRows=await collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties:router.properties});
+  await fs.writeFile(path.join(dir,'PROPERTY_WITNESSES_v2.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-property-witnesses-v2',properties:witnessRows},null,2)+'\n');
+
   const medusaStartedAt=Date.now();
-  console.log('[phase0-medusa] started; timeout=1800s; progress heartbeat every 300s');
-  const heartbeat=setInterval(()=>{
-    const elapsedSeconds=Math.floor((Date.now()-medusaStartedAt)/1000);
-    console.log(`[phase0-medusa] heartbeat: fuzz process still running; elapsed=${elapsedSeconds}s; configuredCallLimit=${PHASE0_MEDUSA_CALL_LIMIT_V1}`);
-  },300000);
+  console.log(`[phase0-medusa] started; mode=${mode}; timeout=1800s; configuredCallLimit=${callLimit}; progress heartbeat every 300s`);
+  const heartbeat=setInterval(()=>console.log(`[phase0-medusa] heartbeat: mode=${mode}; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; configuredCallLimit=${callLimit}`),300000);
   heartbeat.unref?.();
   let r;
-  try{
-    r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv()});
-  }finally{
-    clearInterval(heartbeat);
-  }
-  console.log(`[phase0-medusa] exited; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; exitCode=${r?.exitCode??-1}`);
+  try{r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv()});}
+  finally{clearInterval(heartbeat);}
   const raw=`${r.stdout??''}\n${r.stderr??''}`;await fs.writeFile(path.join(dir,'MEDUSA_RAW_OUTPUT_v1.log'),raw);
-  const corpusSource=path.join(medusaProject,corpusRel),corpusDest=path.join(dir,'corpus');
-  const corpusIndex=[];
+  let parsed;
+  try{parsed=parseMedusaOutput(r.stdout??raw);}catch(error){parsed={status:'parse_failure',properties:[],falsifiedProperties:0,parseError:String(error?.message??error)};}
+
+  const corpusSource=path.join(medusaProject,'.curveyield-phase0-medusa-corpus-v2'),corpusDest=path.join(dir,'corpus'),corpusIndex=[];
   if(fss.existsSync(corpusSource)){
-    await fs.rm(corpusDest,{recursive:true,force:true});
-    await fs.cp(corpusSource,corpusDest,{recursive:true});
-    for(const rel of await walk(corpusDest)){
-      const abs=path.join(corpusDest,...rel.split('/')),bytes=await fs.readFile(abs);
-      corpusIndex.push({path:'corpus/'+rel,sha256:sha256(bytes),bytes:bytes.length});
-    }
+    await fs.rm(corpusDest,{recursive:true,force:true});await fs.cp(corpusSource,corpusDest,{recursive:true});
+    for(const rel of await walk(corpusDest)){const abs=path.join(corpusDest,...rel.split('/')),bytes=await fs.readFile(abs);corpusIndex.push({path:'corpus/'+rel,sha256:sha256(bytes),bytes:bytes.length});}
   }
-  await fs.writeFile(path.join(dir,'MEDUSA_CORPUS_INDEX_v1.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-corpus-index-v1',files:corpusIndex},null,2)+'\n');
-  const observedCalls=maxMedusaCalls(raw),summary={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',purpose:'BROAD_PHASE0_STATEFUL_RANDOMIZED_DISCOVERY_FROM_ANVIL_STATE',fork:{engine:'anvil',rpcUrlExposed:false,rpcBlock:blockNumber,chain:'ethereum',chainId:1},configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls,callSequenceLength:100,workers:10,abiRouterGenerated:true,rawRandomBytes:false,targetContracts:targets.map(t=>({qualifiedName:t.qualifiedName,address:t.address})),routerWrapperCount:router.rows.length,accountingWrapperShare:router.accountingWrapperShare,omittedFunctions:router.omitted,exitCode:r.exitCode,rawOutputRef:'runs/medusa-anvil-fork-001/MEDUSA_RAW_OUTPUT_v1.log',corpusIndexRef:'runs/medusa-anvil-fork-001/MEDUSA_CORPUS_INDEX_v1.json',retainedCorpusFileCount:corpusIndex.length,configRef:'runs/medusa-anvil-fork-001/MEDUSA_CONFIG_v1.json',routerRef:'runs/medusa-anvil-fork-001/MEDUSA_ROUTER_v1.sol',status:r.exitCode===0&&observedCalls>=PHASE0_MEDUSA_MIN_CALLS_V1?'PASS':(r.exitCode===0?'INCOMPLETE_CALL_REQUIREMENT':'FAILED')};
+  const corpusDispatchMetrics=await medusaCorpusDispatchMetricsV2({corpusDest,routerRows:router.rows});
+  await fs.writeFile(path.join(dir,'MEDUSA_CORPUS_INDEX_v1.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-corpus-index-v2',files:corpusIndex,dispatchMetrics:corpusDispatchMetrics},null,2)+'\n');
+
+  const observedCalls=maxMedusaCalls(raw),rawRef=`runs/${runId}/MEDUSA_RAW_OUTPUT_v1.log`;
+  const witnessById=new Map(witnessRows.map(x=>[x.propertyId,x]));
+  const properties=router.properties.map(property=>{
+    const engine=(parsed.properties??[]).find(x=>String(x.name??'').includes(property.wrapperName));
+    const witness=witnessById.get(property.propertyId),witnessed=witness&&witness.status==='WITNESSED'&&Array.isArray(witness.observedTransitionDeltas)&&witness.observedTransitionDeltas.length>0;
+    let result='ENGINE_FAILURE';
+    if(property.category==='HARNESS_SELF_CHECK'){
+      if(engine?.status==='failed')result='CONTROL_FALSE_OBSERVED';
+      else if(engine?.status==='passed')result='CONTROL_TRUE_OBSERVED';
+      else result='ENGINE_FAILURE';
+    }else if(engine?.status==='failed')result='DEVIATION_OBSERVED';
+    else if(witness?.status==='OBSERVATION_GAP')result='OBSERVATION_GAP';
+    else if(!witnessed)result='UNEXERCISED';
+    else if(engine?.status==='passed')result='CHECKED_NO_DEVIATION_OBSERVED';
+    else if(parsed.status==='no_tests')result='ENGINE_FAILURE';
+    return{
+      ...property,discoveredByEngine:Boolean(engine),engineName:engine?.name??null,
+      preconditionWitnessRefs:witnessed?[`runs/${runId}/PROPERTY_WITNESSES_v2.json#${property.propertyId}`]:[],
+      executionEvidenceRefs:engine?[rawRef]:[],result,
+      counterexample:engine?.counterexample??null
+    };
+  });
+  const assurance=assessMedusaV2({mode,observedCalls,engineProperties:parsed.properties??[],properties});
+  const callVolumeMet=observedCalls>=minimumRequiredCalls;
+  let status;
+  if(checked)status=r.exitCode===0&&callVolumeMet&&assurance.checkStatus==='CHECKED'?'PASS':'COMPLETE_WITH_FAILURES';
+  else status=r.exitCode===0&&callVolumeMet?'COMPLETE_WITH_ORACLE_GAPS':'INCOMPLETE_CALL_REQUIREMENT';
+  const summary={
+    schemaVersion:'curveyield-phase0-medusa-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,runId:runId,
+    mode,purpose:'BROAD_PHASE0_STATEFUL_RANDOMIZED_DISCOVERY_WITH_CHECKED_PACKET_PROPERTIES_WHEN_AVAILABLE',
+    fork:{engine:'anvil',rpcUrlExposed:false,rpcBlock:blockNumber,chain:'ethereum',chainId:1},
+    configuredCallLimit:callLimit,minimumRequiredCalls:minimumRequiredCalls,observedCalls,
+    callSequenceLength:100,workers:10,callerSemantics:'FUZZ_SENDER_PRESERVED_WITH_MEDUSA_PRANK_CHEATCODE',
+    abiRouterGenerated:true,rawRandomBytes:false,targetContracts:targets.map(t=>({qualifiedName:t.qualifiedName,address:t.address,recipeId:t.recipe?.recipeId??null})),
+    routerWrapperCount:router.rows.length,accountingWrapperShare:router.accountingWrapperShare,weightingStrategy:router.weightingStrategy,
+    achievedDispatchWeight:corpusDispatchMetrics,
+    achievedWeightBasis:corpusDispatchMetrics.status==='MEASURED_FROM_RETAINED_CORPUS'?'ACTUAL_RETAINED_MEDUSA_CORPUS_DISPATCHES':'UNAVAILABLE_WITH_TYPED_REASON',
+    omittedFunctions:router.omitted,propertyRegistry:properties,engineProperties:parsed.properties??[],engineParseStatus:parsed.status,
+    executionStatus:assurance.executionStatus,coverageStatus:assurance.coverageStatus,checkStatus:assurance.checkStatus,
+    reachabilityStatus:assurance.reachabilityStatus,observationStatus:assurance.observationStatus,
+    exitCode:r.exitCode,rawOutputRef:rawRef,corpusIndexRef:`runs/${runId}/MEDUSA_CORPUS_INDEX_v1.json`,
+    retainedCorpusFileCount:corpusIndex.length,configRef:`runs/${runId}/MEDUSA_CONFIG_v1.json`,
+    routerRef:`runs/${runId}/MEDUSA_ROUTER_v1.sol`,propertyWitnessRef:`runs/${runId}/PROPERTY_WITNESSES_v2.json`,
+    limitations:checked?router.omitted:[...router.omitted,{type:'ORACLE_GAP',reason:'NO_EXPLICIT_PACKET_DECLARED_PROPERTY_FUNCTIONS_WERE_QUALIFIED'}],
+    status
+  };
   await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
-  await fs.rm(harnessAbs,{force:true});await fs.rm(cfgPath,{force:true});return summary;
+  await fs.rm(harnessAbs,{force:true});await fs.rm(cfgPath,{force:true});
+  return summary;
 }
 function baselineTargetRows({medusa,telemetry}){
   const refs=[medusa?.rawOutputRef,medusa?.corpusIndexRef,...telemetry.map(x=>x.rawTranscriptRef)].filter(Boolean);
@@ -664,35 +1460,48 @@ function baselineTargetRows({medusa,telemetry}){
   ];
 }
 export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl}){
-  const campaignRoot=path.join(controllerRoot,...campaignPath.split('/')),buildIdentity=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
+  const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
+  const buildIdentity=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
+  const executionBuildArtifacts=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'utf8'));
   const receipt=JSON.parse(await fs.readFile(path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json'),'utf8'));
   const readiness=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'utf8'));
+  const sourceIntelligence=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json'),'utf8'));
+  const slither=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/static-analysis/SLITHER_v1.json'),'utf8'));
+  const sharedExecutionInputs=validateExecutionInputJoinV2({receipt,buildIdentity,artifactBundle:executionBuildArtifacts,sourceIntelligence,slither,readiness});
   const targetChainIds=phase0DiscoveredTargetChainIdsV1(readiness);
   const archivePath=receipt.source.archivePath,archiveSha256=receipt.source.sha256,workspace=path.join(path.dirname(outputRoot),'.phase0-simulation-work');
   const staged=await stageExactArchiveSource({checkoutRoot:controllerRoot,workspaceRoot:workspace,archivePath,archiveSha256,projectPath:buildIdentity.discovery.projectPath});
-  const cfg=buildIdentity.configurationDetection,pseudo={requestId:`phase0-sim-${receipt.campaign.campaignId}`,requestDigest:sha256(JSON.stringify(buildIdentity)),campaignId:receipt.campaign.campaignId,assignmentId:'phase0-simulation',phaseId:'phase-0',profileId:'github-native-compile-v2',source:{repository:'CurveYield2/Audit-Controller',commit:receipt.source.archiveCommit,projectPath:buildIdentity.discovery.projectPath,archivePath,archiveSha256},configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}};
+  const cfg=buildIdentity.configurationDetection,pseudo={requestId:`phase0-sim-${receipt.campaign.campaignId}`,requestDigest:sha256(JSON.stringify(buildIdentity)),campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,assignmentId:'phase0-simulation',phaseId:'phase-0',profileId:'github-native-compile-v2',source:{repository:'CurveYield2/Audit-Controller',commit:receipt.source.archiveCommit,projectPath:buildIdentity.discovery.projectPath,archivePath,archiveSha256},configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}};
   const packageDependencyInstall=await installPackageRuntimeDependenciesV1(staged.projectRoot);
-  const build=await buildProject({projectRoot:staged.projectRoot,request:pseudo}),ethers=await import('ethers');
+  const build={
+    status:'completed',
+    system:executionBuildArtifacts.buildIdentity?.system??buildIdentity.build?.system??null,
+    compilerVersion:executionBuildArtifacts.buildIdentity?.compilerVersion??buildIdentity.build?.compilerVersion??null,
+    compilerVersions:executionBuildArtifacts.buildIdentity?.compilerVersions??buildIdentity.build?.compilerVersions??[],
+    compilerProfiles:executionBuildArtifacts.buildIdentity?.compilerProfiles??buildIdentity.build?.compilerProfiles??[],
+    deploymentOrder:executionBuildArtifacts.buildIdentity?.deploymentOrder??[],
+    compileGroups:executionBuildArtifacts.buildIdentity?.compileGroups??[],
+    embeddedBuildContract:executionBuildArtifacts.buildIdentity?.embeddedBuildContract??null,
+    artifacts:sharedExecutionInputs.artifacts
+  },ethers=await import('ethers');
   await fs.rm(outputRoot,{recursive:true,force:true});await fs.mkdir(path.join(outputRoot,'runs'),{recursive:true});
   let anvil;
   let deploymentEvidence=null;
   try{
     const detected=await detectDeploymentScripts(staged.projectRoot);
-    const sourceKnownCompilation=build.system==='embedded-profile-native'
-      ? {
-          status:'PASS',
-          planPath:build.embeddedBuildContract?.deploymentSetModule??'tooling/lib/deploymentSet.mjs',
-          groups:build.compileGroups??[],
-          artifacts:build.artifacts??[],
-          selectedTargets:(build.artifacts??[]).map((artifact,index)=>({groupIndex:null,contractName:artifact.contractName,sourceName:artifact.sourceName,qualifiedName:`${artifact.sourceName}:${artifact.contractName}`,profile:artifact.profile??null,compilationUnitId:artifact.compilationUnitId??null,index})),
-          missingTargets:[],
-          limitations:[],
-          compilerProfiles:build.compilerProfiles??[],
-          reuseBasis:'EXACT_EMBEDDED_PROFILE_BUILD_FROM_PHASE0_BUILD_DISPATCH'
-        }
-      : await compileSourceKnownDeploymentArtifactsV1({projectRoot:staged.projectRoot,detected,request:pseudo});
+    const sourceKnownCompilation={
+      status:'PASS',
+      planPath:build.embeddedBuildContract?.deploymentSetModule??null,
+      groups:build.compileGroups??[],
+      artifacts:build.artifacts??[],
+      selectedTargets:(build.artifacts??[]).map((artifact,index)=>({groupIndex:null,contractName:artifact.contractName,sourceName:artifact.sourceName,qualifiedName:`${artifact.sourceName}:${artifact.contractName}`,profile:artifact.profile??null,compilationUnitId:artifact.compilationUnitId??null,index})),
+      missingTargets:[],
+      limitations:[],
+      compilerProfiles:build.compilerProfiles??[],
+      reuseBasis:'EXACT_ACCEPTED_PHASE0_EXECUTION_BUILD_ARTIFACTS_V2'
+    };
     const artifactByQualified=new Map();
-    for(const artifact of [...(build.artifacts??[]),...(sourceKnownCompilation.artifacts??[])])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
+    for(const artifact of build.artifacts??[])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
     const artifacts=[...artifactByQualified.values()];
     anvil=await startAnvil({forkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
     const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true,cacheTimeout:-1}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
@@ -709,8 +1518,14 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const sourcePlan=nativeScriptComplete
       ? {status:'SKIPPED_PACKAGE_DEPLOYMENT_SCRIPT_COMPLETE',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0}
       : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
-    const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows],targets=targetObjects(ethers,artifacts,deployed);
-    const deploymentCombined={detectedScripts:detected,attempts:[...deployment.attempts,...sourcePlan.attempts],limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
+    const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows];
+    let targets=targetObjects(ethers,artifacts,deployed,sourceIntelligence);
+    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence});
+    targets=delegateContexts.targets;
+    const runtimePreparation=await prepareQualifiedRuntimeV2({provider,ethers,targets,actors});
+    runtimePreparation.contextEvidence=delegateContexts.contextEvidence;
+    targets=runtimePreparation.targets;
+    const deploymentCombined={detectedScripts:detected,scriptDispositions:deployment.scriptDispositions??[],attempts:[...deployment.attempts,...sourcePlan.attempts],runtimePreparation,limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
     // Persist deployment diagnostics before any expensive randomized stage.
     deploymentEvidence={...deploymentCombined,packageDependencyInstall,policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS'};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deploymentEvidence,null,2)+'\n');
@@ -730,16 +1545,11 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         medusa=await runMedusa({projectRoot:staged.projectRoot,anvilUrl:anvil.url,blockNumber:baselineBlock,ethers,targets,outRoot:outputRoot});
       }catch(error){
         medusaExecutionFailure={type:'MEDUSA_EXECUTION_FAILURE',code:error?.code??null,message:String(error?.message??error).slice(0,3000)};
-        medusa={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'FAILED_EXECUTION',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0,limitations:[medusaExecutionFailure]};
+        medusa={schemaVersion:'curveyield-phase0-medusa-run-v2',runId:'medusa-anvil-fork-001',status:'FAILED_EXECUTION',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0,limitations:[medusaExecutionFailure]};
         console.log(`[phase0-medusa] failed but workflow will continue to remaining executable stages: ${medusaExecutionFailure.message}`);
       }
     }else{
-      medusa={schemaVersion:'curveyield-phase0-medusa-run-v1',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_EXECUTABLE_TARGETS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0};
-    }
-    if(targets.length&&medusa.status!=='PASS'){
-      const error=new Error('Medusa did not complete; telemetry is blocked. Inspect retained Medusa raw output.');
-      error.code='PHASE0_MEDUSA_INCOMPLETE';error.medusa=medusa;
-      await provider.destroy();throw error;
+      medusa={schemaVersion:'curveyield-phase0-medusa-run-v2',runId:'medusa-anvil-fork-001',status:'BLOCKED_NO_EXECUTABLE_TARGETS',configuredCallLimit:PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls:PHASE0_MEDUSA_MIN_CALLS_V1,observedCalls:0};
     }
     let telemetry=[];
     let telemetryExecutionFailure=null;
@@ -755,9 +1565,9 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const simulationLimitations=[...deploymentCombined.limitations,...(telemetry.filter(x=>x.weightingLimitation).map(x=>({type:x.weightingLimitation,runId:x.runId})))];
     if(medusaExecutionFailure)simulationLimitations.push(medusaExecutionFailure);
     if(telemetryExecutionFailure)simulationLimitations.push(telemetryExecutionFailure);
-    if(medusa.status!=='PASS'&&medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS')simulationLimitations.push({type:'MEDUSA_BASELINE_'+String(medusa.status),runId:medusa.runId});const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v1',campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode:'ALL_PHASE0_STAGES',status:medusa.status==='PASS'&&telemetry.length===PHASE0_TELEMETRY_RUNS_V1&&telemetry.every(x=>x.status==='PASS')?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
+    if(medusa.status!=='PASS'&&medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS')simulationLimitations.push({type:'MEDUSA_BASELINE_'+String(medusa.status),runId:medusa.runId});const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode:'ALL_PHASE0_STAGES',status:medusa.status==='PASS'&&telemetry.length===PHASE0_TELEMETRY_RUNS_V1&&telemetry.every(x=>x.status==='PASS')?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:telemetry.length===PHASE0_TELEMETRY_RUNS_V1?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,lifecycleFamilies:x.lifecycleFamilies,observationReads:x.observationReads,observationFailures:x.observationFailures,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
-    const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',packageDependencyInstall,fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
+    const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',packageDependencyInstall,fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,scriptDispositions:deploymentCombined.scriptDispositions,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deployEvidence,null,2)+'\n');await provider.destroy();
     return{summary,runIndex,deployEvidence};
   }catch(error){

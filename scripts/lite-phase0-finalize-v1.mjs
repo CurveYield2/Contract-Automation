@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import {preparePhaseWork} from './lib/lite-phase-work-v1.mjs';
+import {CAPABILITY_CONTRACT_VERSION_V2,validateTelemetryCountersV2} from '../packages/github-native-sim/src/phase0-execution-contract-v2.mjs';
 
 function args(argv){const out={};for(let i=2;i<argv.length;i+=2){const k=argv[i],v=argv[i+1];if(!k?.startsWith('--')||v===undefined)throw new Error('arguments must be --key value');out[k.slice(2)]=v;}return out;}
 function sha(bytes){return createHash('sha256').update(bytes).digest('hex');}
@@ -29,6 +30,7 @@ if(qualification.qualifiedCommit!==a['contract-automation-sha']) throw new Error
 
 const evidence={
   build:required(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'build identity'),
+  executionBuildArtifacts:required(path.join(campaignRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'Phase-0 reusable execution build artifacts v2'),
   sbom:required(path.join(campaignRoot,'evidence/dependencies/SBOM_v1.json'),'SBOM'),
   slither:required(path.join(campaignRoot,'evidence/static-analysis/SLITHER_v1.json'),'Slither evidence'),
   sourceIntelligence:required(path.join(campaignRoot,'evidence/source-intelligence/SOURCE_INTELLIGENCE_v1.json'),'Source Intelligence'),
@@ -58,27 +60,68 @@ if(bundle.identity?.sourceDigestSha256!==sourceSha) throw new Error('Source Inte
 const simulation=read(evidence.randomizedSimulation);
 const runIndex=read(evidence.simulationRunIndex);
 const deployExecution=read(evidence.deployConfigExecution);
+const executionBuildArtifacts=read(evidence.executionBuildArtifacts);
 const medusa=simulation.medusa??{};
+if(executionBuildArtifacts.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2'||executionBuildArtifacts.source?.archiveSha256!==sourceSha||executionBuildArtifacts.reuseContract?.secondBuildRequired!==false)throw new Error('Phase-0 reusable execution build artifact contract is missing or not bound to the canonical source');
+if(simulation.capabilityContractVersion!==CAPABILITY_CONTRACT_VERSION_V2)throw new Error('Phase-0 execution evidence does not implement curveyield-phase0-execution-capability-v2');
+if(simulation.legacyDisposition==='LEGACY_LIMITED'||simulation.status==='LEGACY_LIMITED')throw new Error('LEGACY_LIMITED Phase-0 evidence is retained for history but cannot satisfy v2 finalization');
 if(Number(deployExecution.coverage?.sourcePlanUnresolved??0)!==0||Number(deployExecution.coverage?.sourceKnownMissingTargets??0)!==0||(medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS'&&deployExecution.status!=='PASS'))throw new Error('Phase-0 deployment is incomplete');
-if(medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS'&&((simulation.telemetry??[]).length!==4||(simulation.telemetry??[]).some(t=>t.status!=='PASS'||Number(t.calls)!==1200||Number(t.errors)!==0)))throw new Error('Phase-0 requires four complete 1200-call telemetry shards');
 if(runIndex.sourceIdentity?.sourceSha256!==sourceSha||runIndex.sourceIdentity?.campaignId!==receipt.campaign.campaignId)throw new Error('Phase-0 simulation source mismatch');
+if(runIndex.executionNormalization?.policy!=='ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE')throw new Error('Phase-0 simulation must normalize EVM packages onto the canonical Ethereum Anvil baseline');
+if(runIndex.policy?.realAbiCallsOnly!==true||runIndex.policy?.rawRandomBytes!==false)throw new Error('Phase-0 randomized simulation policy must require real ABI calls and forbid raw random calldata');
+if(Number(runIndex.policy?.accountingActionWeight??0)<0.8)throw new Error('Phase-0 randomized simulation accounting/state-change action weight must be at least 80%');
+if(runIndex.policy?.crossContractBursts!==true)throw new Error('Phase-0 ABI telemetry must use randomized cross-contract bursts');
+
 if(medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS'){
-  if(medusa.status!=='PASS') throw new Error('Phase-0 Medusa simulation did not PASS on the canonical Ethereum Anvil execution baseline: '+String(medusa.status??'MISSING'));
-  if(Number(medusa.observedCalls??0)<100001) throw new Error('Phase-0 Medusa simulation did not exceed 100,000 randomized ABI calls');
+  if(Number(medusa.observedCalls??0)<100001)throw new Error('Phase-0 Medusa simulation did not exceed 100,000 randomized ABI calls');
+  if(medusa.executionStatus!=='COMPLETED')throw new Error('Phase-0 Medusa did not record executable engine activity');
+  if(medusa.mode==='CHECKED_DISCOVERY'){
+    if(!['CHECKED','CHECK_DEVIATIONS_OBSERVED'].includes(medusa.checkStatus))throw new Error('CHECKED_DISCOVERY Medusa evidence did not execute every applicable target-behavior property with non-vacuous witnesses');
+    const properties=medusa.propertyRegistry??[];
+    if(!properties.length)throw new Error('CHECKED_DISCOVERY Medusa evidence has no property registry');
+    for(const property of properties){
+      if(property.category!=='TARGET_BEHAVIOR'||property.discoveredByEngine!==true)throw new Error('Medusa target-behavior property was not discovered by the engine');
+      if(!Array.isArray(property.preconditionWitnessRefs)||property.preconditionWitnessRefs.length===0)throw new Error('Medusa target-behavior property lacks a relevant successful transition witness');
+      if(!Array.isArray(property.executionEvidenceRefs)||property.executionEvidenceRefs.length===0)throw new Error('Medusa target-behavior property lacks engine execution evidence');
+      if(!['CHECKED_NO_DEVIATION_OBSERVED','DEVIATION_OBSERVED'].includes(property.result))throw new Error('Medusa target-behavior property did not produce a checked result');
+    }
+  }else if(medusa.mode==='DISCOVERY_WITH_ORACLE_GAPS'){
+    if(medusa.checkStatus!=='ORACLE_GAP')throw new Error('Medusa discovery-only evidence must state an explicit ORACLE_GAP');
+    if(!(medusa.limitations??[]).some(x=>x?.type==='ORACLE_GAP'||x?.reason==='NO_EXPLICIT_PACKET_DECLARED_PROPERTY_FUNCTIONS_WERE_QUALIFIED'))throw new Error('Medusa discovery-only evidence lacks its explicit semantic/oracle gap');
+  }else throw new Error('Phase-0 Medusa mode is unsupported: '+String(medusa.mode??'MISSING'));
 }
-if(runIndex.executionNormalization?.policy!=='ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE') throw new Error('Phase-0 simulation must normalize EVM packages onto the canonical Ethereum Anvil baseline');
-if(runIndex.policy?.realAbiCallsOnly!==true||runIndex.policy?.rawRandomBytes!==false) throw new Error('Phase-0 randomized simulation policy must require real ABI calls and forbid raw random calldata');
-if(Number(runIndex.policy?.accountingActionWeight??0)<0.8) throw new Error('Phase-0 randomized simulation accounting/state-change action weight must be at least 80%');
-if(runIndex.policy?.crossContractBursts!==true) throw new Error('Phase-0 ABI telemetry must use randomized cross-contract bursts');
-for(const t of simulation.telemetry??[]){
-  if(Number(t.accountingFunctionCount??0)>0 && Number(t.accountingActionShare??0)<0.79) throw new Error('Phase-0 ABI telemetry materially missed the 80% accounting/state-change action target in '+String(t.runId));
-  if(Number(t.accountingFunctionCount??0)===0 && t.weightingLimitation!=='NO_ACCOUNTING_STATE_CHANGE_FUNCTIONS_DETECTED') throw new Error('Phase-0 ABI telemetry without accounting functions must carry the typed weighting limitation');
+
+const telemetry=simulation.telemetry??[];
+if(medusa.status!=='BLOCKED_NO_EXECUTABLE_TARGETS'&&telemetry.length!==4)throw new Error('Phase-0 requires four complete telemetry shards');
+for(const t of telemetry){
+  if(t.status!=='PASS'||Number(t.calls)!==1200||Number(t.plannedActions)!==1200||Number(t.terminalActions)!==1200)throw new Error('Phase-0 telemetry shard is incomplete: '+String(t.runId));
+  if(t.executionStatus!=='COMPLETED'||!['COMPLETE','PARTIAL'].includes(t.observationStatus))throw new Error('Phase-0 telemetry shard lacks execution/observation evidence: '+String(t.runId));
+  if(Number(t.accountingFunctionCount??0)>0&&Number(t.accountingActionShare??0)<0.79)throw new Error('Phase-0 ABI telemetry materially missed the 80% qualified-economic action target in '+String(t.runId));
+  if(Number(t.accountingFunctionCount??0)===0&&t.weightingLimitation!=='NO_QUALIFIED_ECONOMIC_STATE_CHANGE_FUNCTIONS')throw new Error('Phase-0 telemetry without qualified economic functions must carry the typed weighting limitation');
+  if(Number(t.simulationInfrastructureError??0)!==0||Number(t.submissionInfrastructureError??0)!==0||Number(t.submittedOutcomeUnknown??0)!==0)throw new Error('Phase-0 telemetry contains unresolved infrastructure/submission outcomes in '+String(t.runId));
+  if(Number(t.accountingFunctionCount??0)>0&&Number(t.positiveEconomicTransitions??0)===0)throw new Error('Phase-0 telemetry failed to demonstrate a successful relevant economic transition in '+String(t.runId));
+  if(t.reconciliation?.status!=='PASS')throw new Error('Phase-0 telemetry summary reconciliation is not PASS in '+String(t.runId));
+  if(t.resetEvidence?.revertAccepted!==true||t.resetEvidence?.sentinelMatch!==true)throw new Error('Phase-0 telemetry baseline reset/sentinel evidence is not verified in '+String(t.runId));
+  if(Number(t.positiveTransitions??0)>0&&t.feedbackStatus!=='ACTIVE')throw new Error('Phase-0 telemetry observed useful transitions without demonstrating feedback-driven later selection in '+String(t.runId));
+  if(!/^[0-9a-f]{64}$/.test(String(t.actionSequenceDigestSha256??''))||!/^[0-9a-f]{64}$/.test(String(t.outcomeSequenceDigestSha256??'')))throw new Error('Phase-0 telemetry sequence digests are missing in '+String(t.runId));
 }
 for(const run of runIndex.runs??[]){
-  if(run.type!=='ABI_ACCOUNTING_TELEMETRY') continue;
+  if(run.type!=='ABI_ACCOUNTING_TELEMETRY')continue;
   const ref=run.rawTranscriptRef;
-  if(typeof ref!=='string'||!ref.startsWith('runs/')) throw new Error('Phase-0 ABI telemetry run is missing raw transcript reference: '+String(run.runId));
-  required(path.join(campaignRoot,'evidence/phase0/simulations',...ref.split('/')),'raw Phase-0 simulation transcript '+String(run.runId));
+  if(typeof ref!=='string'||!ref.startsWith('runs/'))throw new Error('Phase-0 ABI telemetry run is missing raw transcript reference: '+String(run.runId));
+  const transcriptPath=required(path.join(campaignRoot,'evidence/phase0/simulations',...ref.split('/')),'raw Phase-0 simulation transcript '+String(run.runId));
+  const transcriptBytes=fs.readFileSync(transcriptPath);
+  const rows=transcriptBytes.toString('utf8').trim().split(/\r?\n/).filter(Boolean).map(line=>JSON.parse(line));
+  const shard=telemetry.find(x=>x.runId===run.runId);
+  if(!shard)throw new Error('raw telemetry transcript has no matching summary shard: '+String(run.runId));
+  if(run.rawTranscriptRef!==shard.rawTranscriptRef)throw new Error('telemetry raw transcript reference mismatch: '+String(run.runId));
+  if(sha(transcriptBytes)!==shard.rawTranscriptSha256)throw new Error('telemetry raw transcript digest mismatch: '+String(run.runId));
+  if(rows.length!==Number(shard.calls))throw new Error('raw telemetry transcript count mismatch: '+String(run.runId));
+  validateTelemetryCountersV2(shard,rows);
+  for(const row of rows){
+    if(row.capabilityContractVersion!==CAPABILITY_CONTRACT_VERSION_V2||!row.stages?.ARG_GEN||!row.executionOutcome)throw new Error('raw telemetry row does not satisfy v2 lifecycle schema: '+String(run.runId));
+    if(!row.stages.OBSERVATION&&row.executionOutcome!=='NOT_EXECUTED_ENCODING_OR_PLANNING')throw new Error('executed telemetry row lacks observation stage: '+String(run.runId));
+  }
 }
 const phase5Input=read(evidence.phase5SimulationInput);
 const phase6Input=read(evidence.phase6SimulationInput);

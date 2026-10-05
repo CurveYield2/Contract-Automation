@@ -404,6 +404,18 @@ export async function compileRepoHermeticStandardJson({
     compilerDiagnostics: diagnostics,
     compilerInputSha256: sha256(JSON.stringify(input)),
     compilerOutputSha256: sha256(outputText),
+    compilationUnits:[{
+      unitId:'hermetic-standard-json-1',
+      profile:'hermetic',
+      compilerVersion:compiler.version,
+      compilerPackage:'solc',
+      settings:input.settings,
+      compilerInputSha256:sha256(JSON.stringify(input)),
+      compilerOutputSha256:sha256(outputText),
+      sourceContents:collected.sources,
+      sourceAsts,
+      artifacts
+    }],
     stagingManifest,
     stagingManifestSha256: sha256(stableJson(stagingManifest)),
     sourceInventory: collected.manifest.map((item) => item.sourceName),

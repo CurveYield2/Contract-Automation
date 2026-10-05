@@ -84,10 +84,11 @@ jobs:
           gh api "repos/CurveYield2/Audit-Controller/contents/$receipt_path?ref=$AUDIT_CONTROLLER_REF" --jq '.content' | base64 -d > /tmp/phase0-receipt.json
           test "$(jq -r '.campaign.campaignId' /tmp/phase0-receipt.json)" = "$CAMPAIGN_ID"
           test "$(jq -r '.phase.sequence' /tmp/phase0-receipt.json)" = "0"
-          jq -n             --arg requestId "phase0-$CAMPAIGN_ID-$GITHUB_RUN_ID"             --arg campaignId "$CAMPAIGN_ID"             --arg sourceCommit "$(jq -r '.source.archiveCommit' /tmp/phase0-receipt.json)"             --arg archivePath "$(jq -r '.source.archivePath' /tmp/phase0-receipt.json)"             --arg archiveSha "$(jq -r '.source.sha256' /tmp/phase0-receipt.json)"             --arg destRef "$AUDIT_CONTROLLER_REF"             --arg campaignPath "$CAMPAIGN_PATH"             '{
+          jq -n             --arg requestId "phase0-$CAMPAIGN_ID-$GITHUB_RUN_ID"             --arg campaignId "$CAMPAIGN_ID"             --arg campaignGenerationId "$(jq -r '.campaign.campaignGenerationId' /tmp/phase0-receipt.json)"             --arg sourceCommit "$(jq -r '.source.archiveCommit' /tmp/phase0-receipt.json)"             --arg archivePath "$(jq -r '.source.archivePath' /tmp/phase0-receipt.json)"             --arg archiveSha "$(jq -r '.source.sha256' /tmp/phase0-receipt.json)"             --arg destRef "$AUDIT_CONTROLLER_REF"             --arg campaignPath "$CAMPAIGN_PATH"             '{
               schemaVersion:"curveyield-lite-phase0-intelligence-request-v1",
               requestId:$requestId,
               campaignId:$campaignId,
+              campaignGenerationId:$campaignGenerationId,
               source:{repository:"CurveYield2/Audit-Controller",commit:$sourceCommit,archivePath:$archivePath,archiveSha256:$archiveSha},
               destination:{repository:"CurveYield2/Audit-Controller",ref:$destRef,campaignPath:$campaignPath}
             }' > .phase0-request.json
@@ -150,6 +151,7 @@ jobs:
           mkdir -p "$campaign_path/controller"
 
           cp ../.phase0-intelligence-output/BUILD_AND_SOURCE_IDENTITY_v1.json "$campaign_path/evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json"
+          cp ../.phase0-intelligence-output/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json "$campaign_path/evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json"
           cp ../.phase0-intelligence-output/SBOM_v1.json "$campaign_path/evidence/dependencies/SBOM_v1.json"
           cp ../.phase0-intelligence-output/SLITHER_v1.json "$campaign_path/evidence/static-analysis/SLITHER_v1.json"
           cp ../.phase0-intelligence-output/SOURCE_INTELLIGENCE_AUTOMATED_v1.json "$campaign_path/evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json"
@@ -194,6 +196,7 @@ jobs:
             echo "## Lite Phase 0 Intelligence"
             echo
             echo "- Build/source identity: generated"
+            echo "- Reusable execution build artifacts v2: generated from the accepted build; no downstream rebuild required"
             echo "- SBOM: generated"
             echo "- Slither: successful terminal evidence required"
             echo "- Automated Source Intelligence: generated"
