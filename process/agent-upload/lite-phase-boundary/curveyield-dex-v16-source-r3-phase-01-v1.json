@@ -1,8 +1,0 @@
-{
-  "schemaVersion": "curveyield-lite-phase-boundary-request-v1",
-  "campaignId": "curveyield-dex-v16-source-r3",
-  "phaseSequence": 1,
-  "auditControllerRef": "main",
-  "attempt": 4,
-  "triggerRecovery": "Phase 1 explicitly reopened as revision 2 under EIM-013 to repair dependency semantics, add raw-source evidence binding, and add crvYIELD supply/ownership coverage."
-}
