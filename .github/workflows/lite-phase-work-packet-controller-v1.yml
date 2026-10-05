@@ -338,24 +338,40 @@ jobs:
           b64="$(printf '%s' "$msg" | base64 -w0)"
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-complete"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id=phase-10             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=false             -f worker_role=reviewer             -f gate_mode=LITE
 
-      - name: Wake persistent master reviewer
+      - name: Wake master reviewer
         if: steps.routing.outputs.effective_hold != 'true' && (steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID') && steps.controller.outputs.master_chat_url != ''
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          context="$(jq -cn --arg segment "${{ steps.controller.outputs.segment_id }}" --arg status "${{ steps.controller.outputs.status }}" '{messagePurpose:(if $status=="MASTER_REVIEW_INVALID" then "repair_notice" else "initial_wake" end),requestedModel:"MASTER",segmentId:$segment,persistentMaster:true}' | base64 -w0)"
+          set -euo pipefail
+          # The master is woken and supervised exactly like a normal reviewer;
+          # an invalid submission re-delivers the controller feedback.
+          poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
+          purpose=initial_wake
+          [ "${{ steps.controller.outputs.status }}" != MASTER_REVIEW_INVALID ] || purpose=repair_notice
+          browser_context_b64="$(jq -cn --arg purpose "$purpose" \
+            '{routineId:"",projectName:"",projectUrl:"",chatName:"master-reviewer",repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:$purpose}' | base64 -w0)"
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.segment_id }}-master" \
-            -f campaign_id="${{ steps.request.outputs.campaign_id }}" -f phase_id=master-review \
-            -f thinking_effort=maximum -f mode=resume_existing \
+            -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.segment_id }}-master-reviewer" \
+            -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
+            -f phase_id=master-review \
+            -f mode=resume_existing \
             -f chat_url="${{ steps.controller.outputs.master_chat_url }}" \
             -f wake_message_b64="${{ steps.controller.outputs.feedback_b64 }}" \
-            -f watchdog_enabled=true -f worker_role=master_reviewer -f gate_mode=LITE \
-            -f gate_repository=CurveYield2/Audit-Controller -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
+            -f watchdog_enabled=true \
+            -f worker_role=reviewer \
+            -f watchdog_message_b64="$poke_b64" \
+            -f gate_mode=LITE \
+            -f gate_repository=CurveYield2/Audit-Controller \
+            -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
-            -f gate_expected_phase_id=master-review -f gate_expected_milestone_id="${{ steps.controller.outputs.segment_id }}" \
-            -f browser_context_b64="$context"
+            -f gate_expected_phase_id=master-review \
+            -f gate_expected_milestone_id="${{ steps.controller.outputs.segment_id }}" \
+            -f gate_active_pointer_path="" \
+            -f gate_stop_states_csv=STOPPED_BY_HUMAN \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN \
+            -f browser_context_b64="$browser_context_b64"
 
       - name: Summary
         run: |

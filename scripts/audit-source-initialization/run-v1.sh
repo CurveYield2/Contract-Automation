@@ -205,7 +205,8 @@ if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
          "reviewer-1":$chat1,
          "reviewer-2":$chat2,
          "reviewer-3L":$chat3,
-         "reviewer-4":$chat4
+         "reviewer-4":$chat4,
+         "master-reviewer":$master
        }
      | .masterReviewer={chatUrl:$master,reasoning:"MAXIMUM",repairModel:"SOL",repairReasoning:"HIGH"}
      | .browserInteractionPolicy=(.browserInteractionPolicy // "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1")
@@ -228,7 +229,8 @@ else
         "reviewer-1":$chat1,
         "reviewer-2":$chat2,
         "reviewer-3L":$chat3,
-        "reviewer-4":$chat4
+        "reviewer-4":$chat4,
+        "master-reviewer":$master
       },
       masterReviewer:{chatUrl:$master,reasoning:"MAXIMUM",repairModel:"SOL",repairReasoning:"HIGH"},
       chatgptProject:{name:"",url:""},
