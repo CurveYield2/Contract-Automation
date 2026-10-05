@@ -103,3 +103,26 @@ test('Medusa variety gate fails a run whose coverage plateaued and passes one st
   const narrow=medusaVarietyV2({timeline:medusaCoverageTimelineV2(discovering),dispatch:{representedLogicalFunctionCount:10,uniqueCallChainPairs:3}});
   assert.deepEqual(narrow.failures,['TOO_FEW_UNIQUE_CALL_CHAIN_PAIRS']);
 });
+
+test('Medusa state snapshot node carries deployed code, storage and block height without any upstream',async()=>{
+  const { spawn } = await import('node:child_process');
+  const { startStateSnapshotAnvilV1 } = await import('../src/phase0-randomized-simulation-v1.mjs');
+  const call=async(url,method,params=[])=>{const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});const b=await r.json();if(b.error)throw new Error(JSON.stringify(b.error));return b.result;};
+  const source=spawn(process.execPath,['node_modules/@foundry-rs/anvil/bin.mjs','--port','18645','--chain-id','1','--silent'],{stdio:'ignore'});
+  const url='http://127.0.0.1:18645';
+  let node;
+  try{
+    for(let i=0;i<300;i++){try{await call(url,'eth_chainId');break;}catch{await new Promise(r=>setTimeout(r,100));}}
+    const [from]=await call(url,'eth_accounts');
+    const tx=await call(url,'eth_sendTransaction',[{from,data:'0x602a600055600a6011600039600a6000f360005460005260206000f3'}]);
+    const {contractAddress}=await call(url,'eth_getTransactionReceipt',[tx]);
+    await call(url,'anvil_mine',['0x5']);
+    const height=Number(await call(url,'eth_blockNumber'));
+    node=await startStateSnapshotAnvilV1({sourceUrl:url,projectRoot:process.cwd(),port:18646});
+    assert.equal(node.blockNumber,height);
+    assert.equal(await call(node.url,'eth_getStorageAt',[contractAddress,'0x0','latest']),'0x'+'0'.repeat(62)+'2a');
+  }finally{
+    await node?.close();
+    source.kill('SIGKILL');
+  }
+});
