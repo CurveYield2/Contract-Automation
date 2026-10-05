@@ -127,7 +127,15 @@ jobs:
             fi
             encode_path() { printf '%s' "$1" | sed 's/ /%20/g'; }
             campaign_url="https://github.com/$gate_repo/tree/$gate_ref/$(encode_path "$workspace")"
-            authority_url="https://github.com/CurveYield2/Audit-Controller/tree/main/Audit%20Skill%20-%20Current%20Authority"
+            receipt_encoded="$(gh api "repos/$gate_repo/contents/$receipt_path?ref=$gate_ref" --jq '.content')"
+            printf '%s' "$receipt_encoded" | base64 -d > /tmp/predecessor-receipt.json
+            authority_home="$(jq -r '.authority.homepagePath // empty' /tmp/predecessor-receipt.json)"
+            test -n "$authority_home"
+            legacy_root='Audit Skill - Current Authority/Audit_Litemode_v10.3'
+            if [ "$authority_home" = "$legacy_root/SKILL.md" ]; then
+              authority_home='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3/SKILL.md'
+            fi
+            authority_url="https://github.com/$gate_repo/blob/$gate_ref/$(encode_path "$authority_home")"
             {
               printf '%s\n' \
                 "LITE audit: $campaign_name" \
@@ -139,6 +147,8 @@ jobs:
                 "The Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority." \
                 "" \
                 "Resume $phase_id from the latest durable state. Do not restart completed work or redo sealed earlier phases." \
+                "If controller validation reported deficiencies, repair exactly the reported substantive deficiency and resubmit controller validation; do not seal or advance." \
+                "$feedback" \
                 "" \
                 "Repair reason: $reason"
             } > /tmp/replacement-wake.txt

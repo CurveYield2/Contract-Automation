@@ -278,7 +278,7 @@ test('shared browser script uses generic Project semantics rather than audit rou
 
 test('task-lock policy is not injected into audit-specific browser workflows', () => {
   const protocol = fs.readFileSync(
-    path.join(root, 'process/development-agent-task-manager/TASK_LOCK_PROTOCOL_v1.md'),
+    path.join(root, 'FOCUS/TASK LOCKS/TASK_LOCK_PROTOCOL_v1.md'),
     'utf8'
   );
   assert.match(protocol, /does \*\*not\*\* govern audit execution agents or audit campaign orchestration/);

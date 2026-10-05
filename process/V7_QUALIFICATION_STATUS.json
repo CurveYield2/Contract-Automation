@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-v7-current-qualification-status-v1",
   "status": "PASS",
-  "qualifiedCommit": "e6011b4390a4e95bc63d3f9b67878326cda3f089",
-  "workflowRunId": "37178704985",
-  "qualifiedAt": "2026-10-04T05:03:26.323Z",
+  "qualifiedCommit": "22dbd6a13550da4e639055e64cdf924ca7957c40",
+  "workflowRunId": "37248975646",
+  "qualifiedAt": "2026-10-05T00:50:37.236Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
@@ -42,13 +42,13 @@
   },
   "controllerQualification": {
     "schemaVersion": "v26-controller-qualification-v1",
-    "controllerCommit": "e98d2b80aa169015d9a40d0aeb76657a772566fb",
-    "controllerRef": "main",
+    "controllerCommit": "84970e854df4ed09687902e25e7db6542a34322b",
+    "controllerRef": "84970e854df4ed09687902e25e7db6542a34322b",
     "status": "PASS",
-    "qualificationRunId": "37178704985",
-    "qualifiedAt": "2026-10-04T05:03:04Z",
-    "runnerQualifiedCommit": "e6011b4390a4e95bc63d3f9b67878326cda3f089",
-    "runnerQualificationRunId": "37178704985",
+    "qualificationRunId": "37249413658",
+    "qualifiedAt": "2026-10-05T00:56:24Z",
+    "runnerQualifiedCommit": "22dbd6a13550da4e639055e64cdf924ca7957c40",
+    "runnerQualificationRunId": "37248975646",
     "testedSchemas": [
       "audit-v7-sequential-review-state-v3",
       "v26-phase-contract-v1",
@@ -126,8 +126,8 @@
     },
     "runtime": {
       "identityNormalized": true,
-      "blockNumber": 26116771,
-      "blockHash": "0x7e7ee0e8e102ce2357debe32219490ee5e51b693282e71dfd0030ba96ee57374",
+      "blockNumber": 26122689,
+      "blockHash": "0x21abc7bdba8ece1d28f05f1ae8d16debd5e7548fde09dbab020125436e153a60",
       "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
       "rpcUrlExposed": false
     },
@@ -136,8 +136,8 @@
       "status": "PASS",
       "rpc": {
         "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
-        "blockNumber": 26116771,
-        "blockHash": "0x7e7ee0e8e102ce2357debe32219490ee5e51b693282e71dfd0030ba96ee57374",
+        "blockNumber": 26122689,
+        "blockHash": "0x21abc7bdba8ece1d28f05f1ae8d16debd5e7548fde09dbab020125436e153a60",
         "urlExposed": false
       },
       "checks": {

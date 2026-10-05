@@ -24,8 +24,19 @@ if(!['SEALED','SKIPPED'].includes(predecessor.phase?.status)) throw new Error('p
 const controllerRef=a['audit-controller-ref'];
 const encodeRepoPath=p=>String(p).split('/').map(encodeURIComponent).join('/');
 const controllerTreeUrl=p=>'https://github.com/CurveYield2/Audit-Controller/tree/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
-const authorityUrl=controllerTreeUrl('Audit Skill - Current Authority');
+const controllerBlobUrl=p=>'https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
+const logicalAuthorityHome=predecessor.authority?.homepagePath??assignment.workSchemaPath.replace(/\/phases\/phase-[^/]+\/[^/]+$/,'/SKILL.md');
+const legacyLogicalRoot='Audit Skill - Current Authority/Audit_Litemode_v10.3';
+const frozenAuthorityRoot='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3';
+const authorityLinkPath=p=>{
+  if(typeof p!=='string')return p;
+  if((p===legacyLogicalRoot||p.startsWith(legacyLogicalRoot+'/'))&&!fs.existsSync(repoFile(root,p)))return frozenAuthorityRoot+p.slice(legacyLogicalRoot.length);
+  return p;
+};
+const linkedAuthorityHome=authorityLinkPath(logicalAuthorityHome);
+if(predecessor.authority?.homepagePath)requiredFile(root,logicalAuthorityHome,'bound successor authority homepage');
 const campaignUrl=controllerTreeUrl(directory.workspacePath);
+const authorityUrl=controllerBlobUrl(linkedAuthorityHome);
 const lines=[
   'LITE audit: '+directory.campaignName,
   'Reviewer: '+assignment.reviewer,
