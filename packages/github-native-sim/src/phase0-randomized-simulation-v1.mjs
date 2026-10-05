@@ -69,7 +69,10 @@ function scrubbedEnv(extra={}){
   for(const k of ['PATH','HOME','USER','SHELL','TMPDIR','LANG','LC_ALL','NODE_OPTIONS','npm_config_cache'])if(process.env[k]!==undefined)out[k]=process.env[k];
   return{...out,CI:'true',NODE_ENV:'test',...extra};
 }
-function redactExecutionSecretsV2(value,secrets=[]){
+export function executionSecretValuesV2(env={},extra=[]){
+  return[...extra,...Object.entries(env).filter(([k])=>/PRIVATE_KEY|SECRET|TOKEN|MNEMONIC|PASSWORD|API_KEY/i.test(k)).map(([,v])=>v)];
+}
+export function redactExecutionSecretsV2(value,secrets=[]){
   let text=String(value??'');
   for(const secret of secrets.filter(x=>typeof x==='string'&&x.length>=8))text=text.split(secret).join('[REDACTED_PHASE0_SECRET]');
   text=text.replace(/gh[pousr]_[A-Za-z0-9_]{20,}/g,'[REDACTED_GITHUB_TOKEN]');
@@ -330,8 +333,8 @@ export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,lo
     if(item.argsText)args.push(...item.argsText.split(/\s+/).filter(Boolean));
     const r=await runDeploymentScriptV1({command:'timeout',args,cwd:projectRoot,env});
     const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
-    const retainedStdout=redactExecutionSecretsV2(String(r.stdout??''),[localSigner.privateKey,...Object.values(env)]);
-    const retainedStderr=redactExecutionSecretsV2(String(r.stderr??''),[localSigner.privateKey,...Object.values(env)]);
+    const retainedStdout=redactExecutionSecretsV2(String(r.stdout??''),executionSecretValuesV2(env,[localSigner.privateKey]));
+    const retainedStderr=redactExecutionSecretsV2(String(r.stderr??''),executionSecretValuesV2(env,[localSigner.privateKey]));
     attempts.push({
       framework:'GENERIC_NODE',script:item.name,path:item.entry,adaptedPath:adaptedRel,
       originalSha256,adaptedSha256,adaptedContentChanged:originalSha256!==adaptedSha256,

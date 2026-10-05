@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,canonicalEthereumExecutionOverrides,snapshot,pickFn} from '../src/phase0-randomized-simulation-v1.mjs';
+import {buildBurstSchedule,medusaWrappers,phase0DiscoveredTargetChainIdsV1,PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,canonicalEthereumExecutionOverrides,snapshot,pickFn,executionSecretValuesV2,redactExecutionSecretsV2} from '../src/phase0-randomized-simulation-v1.mjs';
 import {extractSourceKnownDeployPlanV1,extractSourceKnownBindingsV1,extractSourceKnownCompileGroupsV1} from '../src/source-known-deployment-plan-v1.mjs';
 
 function rngSeq(values){let i=0;return()=>values[(i++)%values.length];}
@@ -345,4 +345,12 @@ test('A19/A23 telemetry schedule reserves at least one attempt for every admitte
   assert.deepEqual([...otherSeen].sort((a,b)=>a-b),[0,1,3]);
   assert.equal(schedule.reduce((n,x)=>n+x.count,0),100);
   assert.ok(schedule.filter(x=>x.calibration===true).length>=5);
+});
+
+test('Phase-0 script output redaction keeps paths and only removes secret values',()=>{
+  const key='0x'+'ab'.repeat(32);
+  const env={HOME:'/home/runner',PATH:'/usr/bin:/bin',RPC_URL:'http://127.0.0.1:8545',PRIVATE_KEY:key,DEPLOYER_PRIVATE_KEY:key};
+  const out=redactExecutionSecretsV2(`Report: /home/runner/work/x/deployments/fresh.json\nkey=${key}`,executionSecretValuesV2(env,[key]));
+  assert.match(out,/Report: \/home\/runner\/work\/x\/deployments\/fresh\.json/);
+  assert.ok(!out.includes(key));
 });
