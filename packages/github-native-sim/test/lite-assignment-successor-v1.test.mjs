@@ -9,7 +9,7 @@ const mkdir=p=>fs.mkdirSync(p,{recursive:true});
 const write=(p,v)=>{mkdir(path.dirname(p));fs.writeFileSync(p,v);};
 const writeJson=(p,v)=>write(p,JSON.stringify(v,null,2)+'\n');
 
-test('fresh successor preparation accepts absent controller-owned final report and emits current ownership instructions',()=>{
+test('fresh successor preparation accepts absent controller-owned final report and emits the short successor message',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'lite-successor-'));
   const campaign='campaigns/demo';
   const directoryRel='Audit Campaign Directory/campaigns/demo.json';
@@ -40,22 +40,12 @@ test('fresh successor preparation accepts absent controller-owned final report a
   assert.match(result.wakeMessage,/Reviewer: reviewer-2/);
   assert.match(result.wakeMessage,/Current phase: phase-2/);
   assert.match(result.wakeMessage,/Start phase-2 now/);
-  assert.match(result.wakeMessage,/tree\/campaign%2Fref-v1\/Audit%20Skill%20-%20Current%20Authority/);
-  assert.match(result.wakeMessage,/tree\/campaign%2Fref-v1\/campaigns\/demo/);
-  assert.match(result.wakeMessage,/PHASE_02_SCHEMA_v1\.json/);
-  assert.match(result.wakeMessage,/PHASE_02_WORK_FORM_v1\.json/);
-  assert.match(result.wakeMessage,/PHASE_02_FINAL_REPORT_v1\.md/);
-  assert.match(result.wakeMessage,/PHASE_02_WORK_PACKET_v1\.json/);
-  assert.match(result.wakeMessage,/PHASE_01_RECEIPT_v1\.json/);
-  assert.match(result.wakeMessage,/PHASE2_INPUT_v1\.json/);
-  assert.match(result.wakeMessage,/Finalized controller validation: https:\/\/github\.com\/CurveYield2\/Contract-Automation\/blob\/main\/\.github\/workflows\/lite-phase-work-packet-controller-v1\.yml/);
+  // Short successor message (restored in 0338cfc7): campaign and authority links only.
+  assert.match(result.wakeMessage,/Campaign: https:\/\/github\.com\/CurveYield2\/Audit-Controller\/tree\/campaign%2Fref-v1\/campaigns\/demo/);
+  assert.match(result.wakeMessage,/Current Audit Skill Authority: https:\/\/github\.com\/CurveYield2\/Audit-Controller\/blob\/campaign%2Fref-v1\/Audit%20Skill%20-%20Current%20Authority\/Audit_Litemode_v10\.2\/SKILL\.md/);
   assert.match(result.wakeMessage,/ultimate authority/i);
   assert.match(result.wakeMessage,/in order, precisely, with no deviation/i);
   assert.match(result.wakeMessage,/do not redo sealed earlier phases/i);
-  assert.match(result.wakeMessage,/process\/agent-upload\/lite-phase-boundary\/demo-r1-phase-2\.json/);
-  assert.match(result.wakeMessage,/CONTROLLER_PHASE_PASS/);
-  assert.match(result.wakeMessage,/repair exactly the reported substantive deficiency/i);
-  assert.match(result.wakeMessage,/resubmit validation/i);
   assert.doesNotMatch(result.wakeMessage,/Controller validation request schema:/);
   assert.doesNotMatch(result.wakeMessage,/Campaign ID \/ generation:/);
 });

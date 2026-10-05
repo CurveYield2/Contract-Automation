@@ -94,7 +94,8 @@ test('private workflows use runtime authentication probing rather than presence-
 });
 
 test('every direct private controller checkout selects a probed credential first', () => {
-  const workflows = fs.readdirSync(path.join(repoRoot, '.github/workflows'))
+  // Project-specific workflows live in subfolders; cover them too.
+  const workflows = fs.readdirSync(path.join(repoRoot, '.github/workflows'), { recursive: true })
     .filter((name) => name.endsWith('.yml'));
   let checked = 0;
   for (const name of workflows) {
