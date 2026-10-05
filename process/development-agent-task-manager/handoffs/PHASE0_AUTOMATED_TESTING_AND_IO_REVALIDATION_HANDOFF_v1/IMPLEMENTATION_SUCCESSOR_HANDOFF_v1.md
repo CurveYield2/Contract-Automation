@@ -275,22 +275,15 @@ Known historic DEX v16 r3 baseline:
 
 The upgraded regression must consume existing upstream indexes/facts, not rerun full SI/Slither/function indexing.
 
-Required DEX assertions from the reviewed plan:
+Required DEX assertions:
 - formerly omitted supported tuple inputs are routable;
 - caller/context semantics preserved;
 - failed normalized script variants stay explicit;
-- positive transitions exist for each matched supported lifecycle family or the family is explicitly a typed reachability/semantic gap;
-- for a matched Balancer-style recipe, when dependencies resolve:
-  - pool creation/initialization;
-  - at least one real liquidity operation;
-  - at least one real swap;
-  - caller/body/state witnesses.
-- settlement/migration:
-  - automatic applicability;
-  - positive witness when truly supported;
-  - otherwise typed gap, never invented success.
+- positive transitions exist for each lifecycle family that is supported by a pre-existing qualified generic recipe;
+- unsupported protocol-specific lifecycle families remain typed reachability/semantic gaps;
+- settlement/migration applicability is inferred only from trusted structural evidence and otherwise remains a typed gap.
 
-Do not add one-off CurveYield production code to make this regression pass.
+The DEX packet is a held-out regression/generalization input, not a reason to add protocol-specific production logic. Do not add Balancer-, CurveYield-, campaign-, contract-name-, or fixed-address-specific behavior solely to make this packet pass.
 
 ## 11. Performance qualification still to finalize
 
@@ -385,7 +378,7 @@ Resume from the final qualification phase, not from implementation discovery.
 2. Re-read this handoff plus TEST_AND_ACCEPTANCE_PLAN_v2.
 3. Add and run renamed/reordered held-out qualification packet through the existing engine.
 4. Add/run deployment-gap packet through existing deployment execution path.
-5. Run unchanged DEX r3 regression in isolated qualification without campaign mutation.
+5. Run unchanged DEX r3 as a held-out generic regression without campaign mutation; supported generic behaviors must work and unsupported protocol-specific semantics must remain explicit gaps.
 6. Collect performance metrics.
 7. Produce A01–A34 matrix + remaining-gap list.
 8. Update PR #544 body/review summary with exact evidence.
