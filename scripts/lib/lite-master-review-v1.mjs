@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {readJson,writeJson,repoFile,requiredFile,loadPhaseSchema,getByPath} from './lite-phase-work-v1.mjs';
+import {validatePhaseScaffold} from './lite-phase-prefill-v1.mjs';
 
 export const MASTER_REVIEW_SEGMENTS_V1=Object.freeze([
   Object.freeze({segmentId:'reviewer-1-phase-01',reviewerId:'reviewer-1',phases:Object.freeze([1]),boundaryPhase:1}),
@@ -142,6 +144,11 @@ function bindingRecord({root,campaignPath,directory,predecessor,authorityRoot,re
   };
 }
 
+export const MASTER_OUTCOMES_V1=Object.freeze(['AMENDED','ACCEPT_WITHOUT_MODIFICATIONS']);
+export const SUPERSEDED_DIRECTORY_V1='superseded';
+
+function gitBlobSha1(bytes){return createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');}
+
 export function stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase,lastSealedReceiptPath,nextSequence,nextDerivedInputPaths=[],successorPrefillContext={},now}){
   const cfg=validateMasterReviewConfiguration(directory,{required:true});
   if(directory.pendingMasterReview)throw new Error('campaign already has pendingMasterReview');
@@ -149,54 +156,41 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
   if(!segment)throw new Error('unsupported master review boundary '+boundaryPhase);
   const reviewedArtifacts=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:predecessor.authority});
   const bindings=bindingRecord({root,campaignPath,directory,predecessor,authorityRoot,reviewedArtifacts});
-  const workFormRel=path.posix.join(campaignPath,'work/master-review',segment.segmentId,'MASTER_REVIEW_WORK_FORM_v1.json');
-  const workForm={
-    schemaVersion:'curveyield-lite-master-review-work-form-v1',
+  // Exact git blob identities of the sealed work forms let the controller recover
+  // each reviewer's original after the master amends it in place.
+  const sealedWorkForms=reviewedArtifacts.filter(x=>x.kind==='WORK_FORM').map(x=>({
+    phase:x.phase,path:x.path,sha256:x.sha256,
+    gitBlobSha1:gitBlobSha1(fs.readFileSync(repoFile(root,path.posix.join(campaignPath,x.path))))
+  }));
+  const recordRel=path.posix.join(campaignPath,'work/master-review',segment.segmentId,'MASTER_REVIEW_RECORD_v1.json');
+  const record={
+    schemaVersion:'curveyield-lite-master-review-record-v1',
     campaignId:directory.campaignId,
     campaignGenerationId:directory.campaignGenerationId,
     segmentId:segment.segmentId,
     reviewerId:segment.reviewerId,
     boundaryPhase:segment.boundaryPhase,
     segmentPhases:[...segment.phases],
-    reviewAttempt:1,
     masterIdentity:{chatUrl:cfg.chatUrl,reasoning:'MAXIMUM'},
     bindings,
     reviewedArtifacts,
-    review:{
-      outcome:'<REQUIRED_ACCEPT_OR_REWORK>',
-      summary:'<REQUIRED>',
-      deficiencies:[],
-      repairSpec:null
-    },
-    childRepair:null,
-    masterVerification:{
-      outcome:'<REQUIRED_ACCEPT_OR_REWORK>',
-      verifiedArtifactDigests:[],
-      deficiencyDispositions:[],
-      notes:'<REQUIRED>',
-      verifiedAt:null
-    },
-    controllerOwnedPaths:[
-      'schemaVersion','campaignId','campaignGenerationId','segmentId','reviewerId','boundaryPhase',
-      'segmentPhases','reviewAttempt','masterIdentity','bindings','reviewedArtifacts','controllerOwnedPaths'
-    ],
+    decision:null,
     createdAt:now,
     updatedAt:now
   };
-  writeJson(repoFile(root,workFormRel),workForm);
+  writeJson(repoFile(root,recordRel),record);
   const pending={
-    schemaVersion:'curveyield-lite-master-review-pending-v1',
+    schemaVersion:'curveyield-lite-master-review-pending-v2',
     segmentId:segment.segmentId,
     reviewerId:segment.reviewerId,
     boundaryPhase:segment.boundaryPhase,
     segmentPhases:[...segment.phases],
     status:'WAITING_FOR_MASTER_REVIEW',
-    workFormPath:workFormRel,
-    reviewedRevision:Math.max(...reviewedArtifacts.map(x=>x.receiptRevision??0),1),
-    reviewAttempt:1,
+    recordPath:recordRel,
     masterChatUrl:cfg.chatUrl,
     manifestSha256:bindings.segmentManifestSha256,
     bindingsSha256:digestJson(bindings),
+    sealedWorkForms,
     lastSealedReceiptPath,
     successorPlan:{
       nextPhaseSequence:nextSequence,
@@ -210,27 +204,26 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
   directory.currentAssignment=null;
   directory.campaignStatus='WAITING_FOR_MASTER_REVIEW';
   directory.updatedAt=now;
-  return {segment,pending,workForm};
+  return {segment,pending,record};
 }
 
 function exactJson(a,b){return JSON.stringify(a)===JSON.stringify(b);}
-function validateLockedForm(form,pending,directory,cfg){
+function validateLockedRecord(record,pending,directory,cfg){
   const failures=[];
-  if(form.schemaVersion!=='curveyield-lite-master-review-work-form-v1')failures.push('master work form schemaVersion mismatch');
+  if(record.schemaVersion!=='curveyield-lite-master-review-record-v1')failures.push('master review record schemaVersion mismatch');
   for(const [key,expected] of Object.entries({
     campaignId:directory.campaignId,
     campaignGenerationId:directory.campaignGenerationId,
     segmentId:pending.segmentId,
     reviewerId:pending.reviewerId,
-    boundaryPhase:pending.boundaryPhase,
-    reviewAttempt:pending.reviewAttempt
-  }))if(!exactJson(form[key],expected))failures.push('master work form '+key+' mismatch');
-  if(!exactJson(form.segmentPhases,pending.segmentPhases))failures.push('master work form segmentPhases mismatch');
-  if(form.masterIdentity?.chatUrl!==cfg.chatUrl||form.masterIdentity?.reasoning!=='MAXIMUM')failures.push('master identity/configuration mismatch');
-  if(form.bindings?.segmentManifestSha256!==pending.manifestSha256)failures.push('master manifest digest mismatch');
-  if(form.bindings?.source?.sha256!==directory.sourceSha256)failures.push('master source binding does not match current campaign directory');
-  if(digestJson(form.bindings)!==pending.bindingsSha256)failures.push('master source/build/authority bindings were modified');
-  if(digestJson(form.reviewedArtifacts)!==pending.manifestSha256)failures.push('master reviewedArtifacts were modified');
+    boundaryPhase:pending.boundaryPhase
+  }))if(!exactJson(record[key],expected))failures.push('master review record '+key+' mismatch');
+  if(!exactJson(record.segmentPhases,pending.segmentPhases))failures.push('master review record segmentPhases mismatch');
+  if(record.masterIdentity?.chatUrl!==cfg.chatUrl||record.masterIdentity?.reasoning!=='MAXIMUM')failures.push('master identity/configuration mismatch');
+  if(record.bindings?.segmentManifestSha256!==pending.manifestSha256)failures.push('master manifest digest mismatch');
+  if(record.bindings?.source?.sha256!==directory.sourceSha256)failures.push('master source binding does not match current campaign directory');
+  if(digestJson(record.bindings)!==pending.bindingsSha256)failures.push('master source/build/authority bindings were modified');
+  if(digestJson(record.reviewedArtifacts)!==pending.manifestSha256)failures.push('master reviewedArtifacts were modified');
   return failures;
 }
 function currentArtifactFailures(root,campaignPath,rows){
@@ -243,9 +236,9 @@ function currentArtifactFailures(root,campaignPath,rows){
   }
   return failures;
 }
-function currentBindingFailures(root,campaignPath,form,directory){
+function currentBindingFailures(root,campaignPath,record,directory){
   const failures=[];
-  const bindings=form.bindings??{};
+  const bindings=record.bindings??{};
   const build=bindings.build;
   if(!build||typeof build.path!=='string'||!SHA256.test(String(build.sha256??'')))failures.push('build binding is incomplete');
   else{
@@ -273,228 +266,37 @@ function currentBindingFailures(root,campaignPath,form,directory){
   }
   return failures;
 }
-function substantiveText(value){return typeof value==='string'&&value.trim().length>=8&&!/^<REQUIRED/.test(value.trim());}
-function validateRepairSpec({root,authorityRoot,segment,form}){
-  const failures=[];
-  const deficiencies=form.review?.deficiencies;
-  const spec=form.review?.repairSpec;
-  if(!substantiveText(form.review?.summary))failures.push('REWORK requires a substantive review.summary');
-  if(!Array.isArray(deficiencies)||deficiencies.length===0)failures.push('REWORK requires at least one bounded deficiency');
-  const deficiencyIds=new Set();
-  for(const deficiency of Array.isArray(deficiencies)?deficiencies:[]){
-    if(!deficiency||typeof deficiency!=='object'){failures.push('REWORK deficiencies must be objects');continue;}
-    if(typeof deficiency.id!=='string'||!deficiency.id||deficiencyIds.has(deficiency.id))failures.push('REWORK deficiency IDs must be non-empty and unique');
-    else deficiencyIds.add(deficiency.id);
-    if(!segment.phases.includes(Number(deficiency.phase)))failures.push('REWORK deficiency phase is outside the reviewed segment: '+String(deficiency.id));
-    if(!Array.isArray(deficiency.ownedPaths)||deficiency.ownedPaths.length===0||deficiency.ownedPaths.some(x=>typeof x!=='string'||!x))failures.push('REWORK deficiency ownedPaths must be non-empty: '+String(deficiency.id));
-    if(!Array.isArray(deficiency.evidenceRefs)||deficiency.evidenceRefs.length===0||deficiency.evidenceRefs.some(x=>typeof x!=='string'||!x))failures.push('REWORK deficiency evidenceRefs must be non-empty: '+String(deficiency.id));
-  }
-  if(!spec||typeof spec!=='object')return [...failures,'REWORK requires repairSpec'];
-  if(typeof spec.scopeId!=='string'||!spec.scopeId)failures.push('repairSpec.scopeId is required');
-  if(!Array.isArray(spec.allowedFiles)||spec.allowedFiles.length===0)failures.push('repairSpec.allowedFiles must be non-empty');
-  if(!Array.isArray(spec.allowedSemanticPaths)||spec.allowedSemanticPaths.length===0)failures.push('repairSpec.allowedSemanticPaths must be non-empty');
-  const workFiles=new Map((form.reviewedArtifacts??[]).filter(x=>x.kind==='WORK_FORM').map(x=>[x.path,x.phase]));
-  const reviewedPaths=new Set((form.reviewedArtifacts??[]).map(x=>x.path));
-  for(const file of spec.allowedFiles??[])if(!workFiles.has(file))failures.push('repairSpec.allowedFiles is outside reviewed work forms: '+file);
-  const allowedFileSet=new Set(spec.allowedFiles??[]);
-  const allowedSemanticPathSet=new Set((spec.allowedSemanticPaths??[]).map(x=>String(x?.file??'')+'|'+String(x?.path??'')));
-  for(const deficiency of Array.isArray(deficiencies)?deficiencies:[]){
-    if(typeof deficiency?.file!=='string'||workFiles.get(deficiency.file)!==Number(deficiency.phase))failures.push('REWORK deficiency file/phase must identify its staged segment work form: '+String(deficiency?.id));
-    if(!substantiveText(deficiency?.rationale))failures.push('REWORK deficiency rationale must be substantive: '+String(deficiency?.id));
-    for(const ownedPath of deficiency?.ownedPaths??[])if(!allowedSemanticPathSet.has(String(deficiency?.file??'')+'|'+ownedPath))failures.push('repairSpec does not admit deficiency file/path: '+String(deficiency?.file)+'#'+ownedPath);
-    for(const evidenceRef of deficiency?.evidenceRefs??[])if(!reviewedPaths.has(evidenceRef))failures.push('REWORK deficiency evidenceRef is outside the staged segment manifest: '+evidenceRef);
-  }
-  for(const entry of spec.allowedSemanticPaths??[]){
-    if(!entry||typeof entry!=='object'){failures.push('repairSpec.allowedSemanticPaths entries must be objects');continue;}
-    if(!allowedFileSet.has(entry.file)){failures.push('repair semantic path file is not listed in repairSpec.allowedFiles: '+String(entry.file));continue;}
-    const phase=workFiles.get(entry.file);
-    if(!segment.phases.includes(phase)){failures.push('repair semantic path phase is outside segment');continue;}
-    const match=String(entry.path??'').match(/^actions\.([A-Za-z0-9._-]+)\.outputs\.([A-Za-z0-9._-]+)$/);
-    if(!match){failures.push('repair semantic path is not a reviewer action output: '+String(entry.path));continue;}
-    const schema=loadPhaseSchema(root,authorityRoot,phase).schema;
-    const field=(schema.actions?.[match[1]]?.fields??[]).find(x=>x.name===match[2]);
-    if(!field)failures.push('repair semantic path is not schema-declared: '+entry.path);
-    const controllerReducerPaths=[...(schema.bookkeepingMappings?.obligationRecordPaths??[]),...(schema.bookkeepingMappings?.invalidationRecordPaths??[])];
-    if(controllerReducerPaths.includes(entry.path))failures.push('repair semantic path requires unsupported historical obligation/invalidation replay: '+entry.path);
-  }
-  const prohibited=new Set(spec.prohibitedActions??[]);
-  for(const action of ['SEAL','ADVANCE','MUTATE_ACCEPTED_PREFILL','MUTATE_UNRELATED_EVIDENCE'])if(!prohibited.has(action))failures.push('repairSpec.prohibitedActions must include '+action);
-  if(!Array.isArray(spec.acceptanceConditions)||spec.acceptanceConditions.length===0||spec.acceptanceConditions.some(x=>!substantiveText(x)))failures.push('repairSpec.acceptanceConditions must be a non-empty substantive string array');
-  const supportedRefreshes=['REGENERATE_CANONICAL','REGENERATE_REPORT','REGENERATE_DERIVED','RESEAL_RECEIPT'];
-  if(!exactJson(spec.requiredDependentRefreshes,supportedRefreshes))failures.push('repairSpec.requiredDependentRefreshes must exactly match controller-supported deterministic refreshes');
-  return failures;
-}
 
-function repairPathsByFile(spec){
-  const out=new Map();
-  for(const entry of spec?.allowedSemanticPaths??[]){
-    if(!out.has(entry.file))out.set(entry.file,[]);
-    out.get(entry.file).push(entry.path);
-  }
+export function readSealedOriginal(root,sealed){
+  let bytes;
+  try{bytes=execFileSync('git',['-C',root,'cat-file','blob',sealed.gitBlobSha1],{stdio:['ignore','pipe','pipe'],maxBuffer:256*1024*1024});}
+  catch(error){throw new Error('cannot recover sealed original from git history: '+sealed.path);}
+  if(digestBytes(bytes)!==sealed.sha256)throw new Error('recovered sealed original digest mismatch: '+sealed.path);
+  return bytes;
+}
+function reviewerOutputPaths(schema){
+  const out=[];
+  for(const [stepKey,action] of Object.entries(schema.actions??{}))for(const field of action.fields??[])out.push('actions.'+stepKey+'.outputs.'+field.name);
   return out;
 }
-function protectedWorkFormDigest(root,campaignPath,file,semanticPaths){
-  const form=readJson(requiredFile(root,path.posix.join(campaignPath,file),'master-repair work form'));
-  const protectedForm=structuredClone(form);
-  for(const semanticPath of semanticPaths)deleteObjectPath(protectedForm,semanticPath);
-  return digestJson(protectedForm);
-}
-function createRepairBaseline({root,campaignPath,form}){
-  const pathsByFile=repairPathsByFile(form.review.repairSpec);
-  return [...pathsByFile.entries()].map(([file,semanticPaths])=>({
-    file,
-    phase:(form.reviewedArtifacts??[]).find(x=>x.kind==='WORK_FORM'&&x.path===file)?.phase??null,
-    semanticPaths:[...semanticPaths],
-    beforeSha256:digestFile(requiredFile(root,path.posix.join(campaignPath,file),'master-repair work form')),
-    protectedProjectionSha256:protectedWorkFormDigest(root,campaignPath,file,semanticPaths)
-  })).sort((a,b)=>a.file.localeCompare(b.file));
-}
-function expectedPreRefreshRows({root,campaignPath,form,baseline}){
-  const allowed=new Map((baseline??[]).map(x=>[x.file,x]));
-  return (form.reviewedArtifacts??[]).map(row=>{
-    if(row.kind!=='WORK_FORM'||!allowed.has(row.path))return row;
-    const file=requiredFile(root,path.posix.join(campaignPath,row.path),'master-repair changed work form');
-    return {...row,sha256:digestFile(file)};
-  });
-}
-function masterTransportProofFailures({root,campaignPath,form,pending,cfg}){
+function valueAt(object,dot){return String(dot).split('.').reduce((v,k)=>v===undefined||v===null?undefined:v[k],object);}
+function amendmentFailures({root,authorityRoot,sealed,original,amended}){
   const failures=[];
-  const pointer=pending.masterTransportProof;
-  const repaired=Boolean(pending.postRepairManifestSha256);
-  const proofName=repaired?'MASTER_REVIEW_TRANSPORT_PROOF_REPAIR_VERIFICATION_v1.json':'MASTER_REVIEW_TRANSPORT_PROOF_INITIAL_v1.json';
-  const expectedPath=path.posix.join(campaignPath,'work/master-review',pending.segmentId,proofName);
-  if(!pointer||pointer.schemaVersion!=='curveyield-lite-master-review-transport-proof-v1')return ['controller-bound master transport proof is absent'];
-  if(pointer.recordPath!==expectedPath||!SHA256.test(String(pointer.sha256??''))||pointer.verifiedBy!=='BROWSER_AGENT_WAKE_CONTROLLER'||!substantiveText(pointer.verifiedAt))failures.push('controller-bound master transport proof pointer is invalid');
-  let proof=null;
-  try{
-    const file=requiredFile(root,expectedPath,'master review transport proof');
-    if(digestFile(file)!==pointer.sha256)failures.push('master review transport proof digest mismatch');
-    proof=readJson(file);
-  }catch(error){failures.push(String(error.message||error));}
-  if(proof){
-    const expected={
-      schemaVersion:'curveyield-lite-master-review-transport-proof-v1',
-      campaignId:form.campaignId,
-      campaignGenerationId:form.campaignGenerationId,
-      segmentId:pending.segmentId,
-      reviewAttempt:pending.reviewAttempt,
-      masterChatUrl:cfg.chatUrl,
-      observedModel:'MASTER',
-      observedReasoning:'MAXIMUM',
-      controlVerification:'VISIBLE_UI_VERIFIED',
-      deliveryStatus:'VERIFIED',
-      messagePurpose:repaired?'REPAIR_VERIFICATION':'INITIAL_REVIEW',
-      reviewManifestSha256:repaired?pending.postRepairManifestSha256:pending.manifestSha256,
-      verifiedBy:'BROWSER_AGENT_WAKE_CONTROLLER'
-    };
-    for(const [key,value] of Object.entries(expected))if(!exactJson(proof[key],value))failures.push('master review transport proof '+key+' mismatch');
-    if(!substantiveText(proof.verifiedAt)||proof.verifiedAt!==pointer.verifiedAt)failures.push('master review transport proof verifiedAt mismatch');
-  }
-  return failures;
+  if(sealed.phase===7)return {failures:['Phase 7 is controller-generated and cannot be amended: '+sealed.path],changedFields:[]};
+  const schema=loadPhaseSchema(root,authorityRoot,sealed.phase).schema;
+  const owned=reviewerOutputPaths(schema);
+  const protectedOriginal=structuredClone(original);
+  const protectedAmended=structuredClone(amended);
+  for(const dot of owned){deleteObjectPath(protectedOriginal,dot);deleteObjectPath(protectedAmended,dot);}
+  if(!exactJson(protectedOriginal,protectedAmended))failures.push('amended work form changed controller-owned data outside reviewer-written fields: '+sealed.path);
+  const changedFields=owned.filter(dot=>!exactJson(valueAt(original,dot),valueAt(amended,dot)));
+  const reducerPaths=[...(schema.bookkeepingMappings?.obligationRecordPaths??[]),...(schema.bookkeepingMappings?.invalidationRecordPaths??[])];
+  for(const dot of changedFields)if(reducerPaths.includes(dot))failures.push('amended field requires unsupported historical obligation/invalidation replay: '+sealed.path+'#'+dot);
+  for(const deficiency of validatePhaseScaffold(sealed.phase,amended,original?.automationInputs?.controllerPrefillDigestSha256??null))failures.push(sealed.path+': '+deficiency);
+  return {failures,changedFields};
 }
 
-function repairTransportProofFailures({root,campaignPath,form,pending,cfg}){
-  const failures=[];
-  const pointer=pending.repairTransportProof;
-  const expectedPath=path.posix.join(campaignPath,'work/master-review',pending.segmentId,'MASTER_REPAIR_TRANSPORT_PROOF_v1.json');
-  if(!pointer||pointer.schemaVersion!=='curveyield-lite-master-repair-transport-proof-v1')return ['controller-bound repair transport proof is absent'];
-  if(pointer.recordPath!==expectedPath||!SHA256.test(String(pointer.sha256??''))||pointer.verifiedBy!=='BROWSER_AGENT_WAKE_CONTROLLER'||!substantiveText(pointer.verifiedAt))failures.push('controller-bound repair transport proof pointer is invalid');
-  let proof=null;
-  try{
-    const file=requiredFile(root,expectedPath,'master repair transport proof');
-    if(digestFile(file)!==pointer.sha256)failures.push('master repair transport proof digest mismatch');
-    proof=readJson(file);
-  }catch(error){failures.push(String(error.message||error));}
-  const child=form.childRepair;
-  if(proof){
-    const expected={
-      schemaVersion:'curveyield-lite-master-repair-transport-proof-v1',
-      campaignId:form.campaignId,
-      campaignGenerationId:form.campaignGenerationId,
-      segmentId:pending.segmentId,
-      reviewAttempt:pending.reviewAttempt,
-      masterChatUrl:cfg.chatUrl,
-      repairScopeId:pending.repairScopeId,
-      repairSpecSha256:pending.repairSpecSha256,
-      childChatUrl:child?.childChatUrl,
-      observedModel:'SOL',
-      observedReasoning:'HIGH',
-      controlVerification:'VISIBLE_UI_VERIFIED',
-      freshChild:true,
-      deliveryStatus:'VERIFIED'
-    };
-    for(const [key,value] of Object.entries(expected))if(!exactJson(proof[key],value))failures.push('master repair transport proof '+key+' mismatch');
-    if(proof.verifiedBy!=='BROWSER_AGENT_WAKE_CONTROLLER'||!substantiveText(proof.verifiedAt))failures.push('master repair transport proof lacks trusted verification identity/time');
-  }
-  return failures;
-}
-
-function validateRepairCompletion({root,campaignPath,form,pending,cfg,normalReviewerChatUrls=[]}){
-  const failures=[];
-  const spec=form.review?.repairSpec;
-  if(!spec||digestJson(spec)!==pending.repairSpecSha256)failures.push('repairSpec changed after bounded REWORK admission');
-  if(digestJson(form.review?.deficiencies)!==pending.originalDeficienciesSha256)failures.push('review deficiencies changed after bounded REWORK admission');
-  if(spec?.scopeId!==pending.repairScopeId)failures.push('repair scopeId changed after bounded REWORK admission');
-  const baseline=pending.repairBaseline;
-  if(!Array.isArray(baseline)||baseline.length===0)failures.push('pending repair baseline is missing');
-  const child=form.childRepair;
-  if(!child||typeof child!=='object')failures.push('childRepair evidence is required');
-  else{
-    if(child.scopeId!==pending.repairScopeId)failures.push('childRepair.scopeId mismatch');
-    if(child.model!=='SOL'||child.reasoning!=='HIGH')failures.push('childRepair must identify exact SOL / HIGH capability');
-    if(child.freshChild!==true)failures.push('childRepair.freshChild must be true');
-    if(!CHAT_URL.test(String(child.childChatUrl??''))||child.childChatUrl===cfg.chatUrl||normalReviewerChatUrls.includes(child.childChatUrl))failures.push('childRepair requires a durable fresh-child ChatGPT URL distinct from the master and registered normal reviewers');
-    if(child.result!=='COMPLETED')failures.push('childRepair.result must be COMPLETED');
-    if(typeof child.completedAt!=='string'||!child.completedAt)failures.push('childRepair.completedAt is required');
-  }
-  const expectedFiles=(baseline??[]).map(x=>x.file).sort();
-  const actualFiles=(child?.changedFiles??[]).map(x=>x?.file).sort();
-  if(!exactJson(actualFiles,expectedFiles))failures.push('childRepair.changedFiles must exactly match repairSpec.allowedFiles');
-  const expectedPaths=(spec?.allowedSemanticPaths??[]).map(x=>({file:x.file,path:x.path})).sort((a,b)=>(a.file+'|'+a.path).localeCompare(b.file+'|'+b.path));
-  const actualPaths=(child?.changedSemanticPaths??[]).map(x=>({file:x?.file,path:x?.path})).sort((a,b)=>(a.file+'|'+a.path).localeCompare(b.file+'|'+b.path));
-  if(!exactJson(actualPaths,expectedPaths))failures.push('childRepair.changedSemanticPaths must exactly match repairSpec.allowedSemanticPaths');
-  const childFiles=new Map((child?.changedFiles??[]).map(x=>[x?.file,x]));
-  for(const base of baseline??[]){
-    const file=requiredFile(root,path.posix.join(campaignPath,base.file),'master-repair changed work form');
-    const after=digestFile(file);
-    const evidence=childFiles.get(base.file);
-    if(evidence?.beforeSha256!==base.beforeSha256||evidence?.afterSha256!==after)failures.push('childRepair changed-file digest evidence mismatch: '+base.file);
-    if(after===base.beforeSha256)failures.push('childRepair did not change allowed work form: '+base.file);
-    if(protectedWorkFormDigest(root,campaignPath,base.file,base.semanticPaths)!==base.protectedProjectionSha256)failures.push('childRepair modified prefills or evidence outside allowed semantic paths: '+base.file);
-  }
-  const allowed=new Set(expectedFiles);
-  failures.push(...currentArtifactFailures(root,campaignPath,(form.reviewedArtifacts??[]).filter(x=>x.kind!=='WORK_FORM'||!allowed.has(x.path))));
-  const candidateRows=expectedPreRefreshRows({root,campaignPath,form,baseline});
-  return {failures,candidateRows};
-}
-function validateRefreshedRepairVerification({root,campaignPath,form,pending,segment,directory}){
-  const failures=[];
-  if(digestJson(form.review?.repairSpec)!==pending.repairSpecSha256)failures.push('repairSpec changed after controller refresh');
-  if(digestJson(form.review?.deficiencies)!==pending.originalDeficienciesSha256)failures.push('review deficiencies changed after controller refresh');
-  if(digestJson(form.childRepair)!==form.bindings?.repairChildSha256)failures.push('childRepair evidence changed after controller refresh');
-  const post=form.postRepair;
-  if(!post||post.schemaVersion!=='curveyield-lite-master-repair-refresh-v1')failures.push('controller postRepair record is missing');
-  else{
-    if(post.scopeId!==pending.repairScopeId||post.repairSpecSha256!==pending.repairSpecSha256)failures.push('postRepair scope binding mismatch');
-    if(post.manifestSha256!==pending.postRepairManifestSha256||digestJson(post.artifacts)!==pending.postRepairManifestSha256)failures.push('postRepair manifest binding mismatch');
-    try{
-      const currentRows=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:{homepagePath:form.bindings.authority.homepagePath,liteSkillSha256:form.bindings.authority.sha256}});
-      if(!exactJson(currentRows,post.artifacts))failures.push('refreshed segment artifacts no longer match controller postRepair manifest');
-    }catch(error){failures.push(String(error.message||error));}
-  }
-  const verification=form.masterVerification;
-  if(verification?.outcome!=='ACCEPT')failures.push('masterVerification.outcome must be ACCEPT after controller refresh');
-  const expectedDigests=(post?.artifacts??[]).map(x=>({path:x.path,sha256:x.sha256}));
-  if(!exactJson(verification?.verifiedArtifactDigests,expectedDigests))failures.push('masterVerification.verifiedArtifactDigests must exactly match controller-refreshed segment artifacts');
-  const deficiencyIds=(form.review?.deficiencies??[]).map(x=>x?.id).filter(Boolean).sort();
-  const dispositions=(verification?.deficiencyDispositions??[]);
-  const disposedIds=dispositions.map(x=>x?.deficiencyId).filter(Boolean).sort();
-  if(!exactJson(disposedIds,deficiencyIds)||dispositions.some(x=>x?.disposition!=='RESOLVED'))failures.push('masterVerification must mark every bounded deficiency RESOLVED exactly once');
-  if(typeof verification?.verifiedAt!=='string'||!verification.verifiedAt)failures.push('masterVerification.verifiedAt is required');
-  return failures;
-}
-
-export function processMasterReviewSubmission({root,campaignPath,directory,authorityRoot,segmentId,now,normalReviewerChatUrls=[]}){
+export function processMasterReviewSubmission({root,campaignPath,directory,authorityRoot,segmentId,outcome,summary=null,now}){
   const cfg=validateMasterReviewConfiguration(directory,{required:true});
   const pending=directory.pendingMasterReview;
   if(!pending)throw new Error('campaign has no pending master review');
@@ -502,91 +304,68 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   if(segmentId&&segmentId!==pending.segmentId)throw new Error('submitted segment does not match pending master review');
   const segment=segmentForId(pending.segmentId);
   if(!segment)throw new Error('pending master review segment is unsupported');
-  const form=readJson(requiredFile(root,pending.workFormPath,'master review work form'));
+  if(!MASTER_OUTCOMES_V1.includes(String(outcome??'')))return {status:'MASTER_REVIEW_INVALID',failures:['masterOutcome must be '+MASTER_OUTCOMES_V1.join(' or ')],pending};
+  const record=readJson(requiredFile(root,pending.recordPath,'master review record'));
   const failures=[
-    ...validateLockedForm(form,pending,directory,cfg),
-    ...currentBindingFailures(root,campaignPath,form,directory)
+    ...validateLockedRecord(record,pending,directory,cfg),
+    ...currentBindingFailures(root,campaignPath,record,directory)
   ];
-  const outcome=String(form.review?.outcome??'');
-  if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
-  if(pending.status==='WAITING_FOR_MASTER_REVIEW'){
-    const transportFailures=masterTransportProofFailures({root,campaignPath,form,pending,cfg});
-    if(transportFailures.length)return {status:'MASTER_REVIEW_TRANSPORT_BLOCKED',failures:transportFailures,form,pending};
+  if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,record,pending};
+  const sealedByPath=new Map((pending.sealedWorkForms??[]).map(x=>[x.path,x]));
+  // Only reviewer work forms may change; every report, canonical record, receipt
+  // and machine artifact must still match the sealed segment manifest.
+  failures.push(...currentArtifactFailures(root,campaignPath,record.reviewedArtifacts.filter(x=>!sealedByPath.has(x.path))));
+  const changed=[];
+  for(const sealed of sealedByPath.values()){
+    const file=existing(root,path.posix.join(campaignPath,sealed.path));
+    if(!file){failures.push('reviewed work form missing: '+sealed.path);continue;}
+    const afterSha256=digestFile(file);
+    if(afterSha256!==sealed.sha256)changed.push({sealed,file,afterSha256});
   }
-  if(pending.status==='MASTER_REVIEW_REWORK_REQUIRED'){
-    const transportFailures=repairTransportProofFailures({root,campaignPath,form,pending,cfg});
-    if(transportFailures.length)return {status:'MASTER_REPAIR_TRANSPORT_BLOCKED',failures:transportFailures,form,pending};
-    const completed=validateRepairCompletion({root,campaignPath,form,pending,cfg,normalReviewerChatUrls});
-    failures.push(...completed.failures);
-    if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
-    return {
-      status:'MASTER_REPAIR_READY_FOR_REFRESH',
-      failures:[],
-      form,
-      pending,
-      segment,
-      repairSpec:form.review.repairSpec,
-      repairedArtifactRows:completed.candidateRows,
-      affectedPhases:[...new Set((pending.repairBaseline??[]).map(x=>x.phase))].sort((a,b)=>a-b),
-      successorPlan:pending.successorPlan
-    };
+  if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,record,pending};
+  if(outcome==='ACCEPT_WITHOUT_MODIFICATIONS'){
+    if(changed.length)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT_WITHOUT_MODIFICATIONS was submitted but work forms changed; submit AMENDED instead: '+changed.map(x=>x.sealed.path).join(', ')],record,pending};
+    return {status:'MASTER_REVIEW_ACCEPTED',failures:[],record,pending,segment,outcome,summary,amendedForms:[],successorPlan:pending.successorPlan};
   }
-  if(pending.status==='WAITING_FOR_MASTER_REVIEW'&&pending.postRepairManifestSha256){
-    failures.push(...validateRefreshedRepairVerification({root,campaignPath,form,pending,segment,directory}));
-    if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
-    return {status:'MASTER_REPAIR_ACCEPTED',failures:[],form,pending,segment,successorPlan:pending.successorPlan};
+  if(!changed.length)return {status:'MASTER_REVIEW_INVALID',failures:['AMENDED was submitted but no segment work form changed; submit ACCEPT_WITHOUT_MODIFICATIONS instead'],record,pending};
+  const amendedForms=[];
+  for(const item of changed){
+    let original;
+    try{original=readSealedOriginal(root,item.sealed);}catch(error){failures.push(String(error.message||error));continue;}
+    let amended;
+    try{amended=readJson(item.file);}catch{failures.push('amended work form is not valid JSON: '+item.sealed.path);continue;}
+    const checked=amendmentFailures({root,authorityRoot,sealed:item.sealed,original:JSON.parse(original.toString('utf8')),amended});
+    failures.push(...checked.failures);
+    if(!checked.changedFields.length&&!checked.failures.length)failures.push('amended work form changed no reviewer-written field: '+item.sealed.path);
+    amendedForms.push({phase:item.sealed.phase,path:item.sealed.path,beforeSha256:item.sealed.sha256,afterSha256:item.afterSha256,gitBlobSha1:item.sealed.gitBlobSha1,changedFields:checked.changedFields,originalBytes:original});
   }
-  const currentRows=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:{homepagePath:form.bindings.authority.homepagePath,liteSkillSha256:form.bindings.authority.sha256}});
-  failures.push(...currentArtifactFailures(root,campaignPath,form.reviewedArtifacts));
-  if(digestJson(currentRows)!==pending.manifestSha256)failures.push('current segment manifest no longer matches the staged master-review manifest');
-  if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
-  if(outcome==='REWORK'){
-    failures.push(...validateRepairSpec({root,authorityRoot,segment,form}));
-    if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,form,pending};
-    pending.originalDeficienciesSha256=digestJson(form.review.deficiencies);
-    delete pending.masterTransportProof;
-    pending.status='MASTER_REVIEW_REWORK_REQUIRED';
-    pending.reviewAttempt=Number(pending.reviewAttempt??1);
-    pending.repairScopeId=form.review.repairSpec.scopeId;
-    pending.repairSpecSha256=digestJson(form.review.repairSpec);
-    pending.repairBaseline=createRepairBaseline({root,campaignPath,form});
-    pending.updatedAt=now;
-    directory.campaignStatus='MASTER_REVIEW_REWORK_REQUIRED';
-    directory.updatedAt=now;
-    return {status:'MASTER_REVIEW_REWORK_REQUIRED',failures:[],form,pending,repairSpec:form.review.repairSpec};
-  }
-  if(outcome!=='ACCEPT')return {status:'MASTER_REVIEW_INVALID',failures:['review.outcome must be ACCEPT or REWORK'],form,pending};
-  if(!substantiveText(form.review?.summary))return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT requires a substantive review.summary'],form,pending};
-  if(!Array.isArray(form.review?.deficiencies)||form.review.deficiencies.length)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT requires deficiencies to be an empty array'],form,pending};
-  if(form.review?.repairSpec!==null&&form.review?.repairSpec!==undefined)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT cannot retain repairSpec'],form,pending};
-  if(form.childRepair!==null&&form.childRepair!==undefined)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT without a REWORK cycle cannot retain childRepair evidence'],form,pending};
-  const verification=form.masterVerification;
-  if(verification?.outcome!=='ACCEPT')return {status:'MASTER_REVIEW_INVALID',failures:['masterVerification.outcome must be ACCEPT'],form,pending};
-  const expected=(form.reviewedArtifacts??[]).map(x=>({path:x.path,sha256:x.sha256}));
-  if(!exactJson(verification.verifiedArtifactDigests,expected))return {status:'MASTER_REVIEW_INVALID',failures:['masterVerification.verifiedArtifactDigests must exactly match the current segment manifest'],form,pending};
-  if(!Array.isArray(verification.deficiencyDispositions)||verification.deficiencyDispositions.length)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT requires empty masterVerification.deficiencyDispositions'],form,pending};
-  if(!substantiveText(verification.notes))return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT requires substantive masterVerification.notes'],form,pending};
-  if(typeof verification.verifiedAt!=='string'||!verification.verifiedAt)return {status:'MASTER_REVIEW_INVALID',failures:['masterVerification.verifiedAt is required'],form,pending};
-  return {status:'MASTER_REVIEW_ACCEPTED',failures:[],form,pending,successorPlan:pending.successorPlan};
+  if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,record,pending};
+  return {
+    status:'MASTER_AMENDMENT_READY_FOR_REFRESH',
+    failures:[],
+    record,
+    pending,
+    segment,
+    outcome,
+    summary,
+    amendedForms,
+    affectedPhases:[...new Set(amendedForms.map(x=>x.phase))].sort((a,b)=>a-b),
+    amendmentSha256:digestJson(amendedForms.map(({originalBytes,...rest})=>rest)),
+    successorPlan:pending.successorPlan
+  };
 }
 
-export function masterWakeMessage({campaignId,pending}){
+export function masterWakeMessage({campaignId,pending,auditControllerRef='main'}){
+  const phases=pending.segmentPhases.length===1?'Phase '+pending.segmentPhases[0]:'Phases '+pending.segmentPhases[0]+'-'+pending.segmentPhases.at(-1);
   return [
     'MASTER_REVIEW_REQUIRED.',
-    'Act as the persistent Maximum-intelligence master reviewer for campaign '+campaignId+'.',
-    'Review the entire '+pending.segmentId+' segment using the exact source, build, authority, receipts, forms, canonical data, reports, and digests in '+pending.workFormPath+'.',
-    'Record structured deficiencies and a bounded repair specification, or issue ACCEPT with exact verified artifact digests.',
-    'Do not claim independence from your prior master reviews. Do not perform reviewer-owned repairs, seal a phase, advance a successor, or complete the campaign.'
-  ].join(' ');
-}
-
-export function childRepairWakeMessage({campaignId,pending,repairSpec}){
-  return [
-    'MASTER_REVIEW_BOUNDED_REPAIR.',
-    'You are a fresh Sol agent at High reasoning for campaign '+campaignId+' and scope '+repairSpec.scopeId+'.',
-    'Modify only repairSpec.allowedFiles at repairSpec.allowedSemanticPaths and preserve controller prefills and accepted evidence. The controller, not the child, performs every listed dependent refresh.',
-    'Do not seal, advance, wake a successor, or broaden scope. Return changed paths and evidence to the same persistent master reviewer.',
-    'Master work form: '+pending.workFormPath+'.'
+    'You are the persistent master reviewer for campaign '+campaignId+'. '+pending.reviewerId+' has sealed '+phases+' (segment '+pending.segmentId+').',
+    '1. Open the segment record '+pending.recordPath+' in Audit-Controller. It lists every sealed work form, report, receipt and machine artifact in this segment.',
+    '2. Review the segment reports and work forms, focusing on what the next reviewer depends on: errors, unsupported conclusions, coverage gaps and missed findings.',
+    '3. If anything needs correcting, edit only the reviewer-written fields (actions.<step>.outputs.<field>) of this segment\'s work forms, in their normal locations. Do not edit reports, canonical data, receipts or controller files; the controller regenerates them and archives the originals under '+SUPERSEDED_DIRECTORY_V1+'/.',
+    '4. Do not start new executions or simulations.',
+    '5. Submit one request file to process/agent-upload/lite-phase-boundary/ in Contract-Automation: {"schemaVersion":"curveyield-lite-phase-boundary-request-v1","campaignId":"'+campaignId+'","reviewKind":"master","segmentId":"'+pending.segmentId+'","masterOutcome":"AMENDED" or "ACCEPT_WITHOUT_MODIFICATIONS","summary":"<one paragraph>","auditControllerRef":"'+auditControllerRef+'","attempt":1}.',
+    'Follow the master-reviewer instructions in the Audit Skill for details.'
   ].join(' ');
 }
 
