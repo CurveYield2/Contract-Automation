@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Final Phase-0 v2 acceptance report: generated only after behavioral gates pass.
 import fs from 'node:fs/promises';
 import fss from 'node:fs';
 import path from 'node:path';
