@@ -14,7 +14,8 @@ function revertDataV1(error){
     error?.stages?.PREFLIGHT?.error?.data,
     error?.stages?.PREFLIGHT?.callProbe?.error?.data
   ]){
-    if(typeof value==='string'&&/^0x[0-9a-fA-F]{8}/.test(value))return value;
+    const candidate=typeof value==='string'?value:(typeof value?.data==='string'?value.data:null);
+    if(candidate&&/^0x[0-9a-fA-F]{8}/.test(candidate))return candidate;
   }
   return null;
 }
@@ -78,8 +79,17 @@ export function topDecodedTelemetryRevertsV1({ethers,artifacts=[],rows=[],limit=
   const counts=new Map();
   for(const row of rows){
     if(!['SIMULATED_REJECTION','MINED_REVERT'].includes(row?.executionOutcome))continue;
-    const error=row?.error??row?.stages?.RECEIPT?.error??row?.stages?.PREFLIGHT?.error??row?.stages?.PREFLIGHT?.callProbe?.error??null;
-    const decoded=decodeTelemetryRevertReasonV1({ethers,error,selectorIndex});
+    const candidates=[
+      row?.error,
+      row?.stages?.RECEIPT?.error,
+      row?.stages?.PREFLIGHT?.error,
+      row?.stages?.PREFLIGHT?.callProbe?.error
+    ].filter(Boolean);
+    let decoded=decodeTelemetryRevertReasonV1({ethers,error:candidates[0]??null,selectorIndex});
+    for(const candidate of candidates.slice(1)){
+      if(decoded.kind!=='UNKNOWN_REVERT')break;
+      decoded=decodeTelemetryRevertReasonV1({ethers,error:candidate,selectorIndex});
+    }
     const key=JSON.stringify([decoded.kind,decoded.selector,decoded.reason]);
     const current=counts.get(key)??{...decoded,count:0};
     current.count++;
