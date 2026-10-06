@@ -1689,7 +1689,6 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   // Smoke budgets are independent and never produce campaign evidence. Medusa-only preserves the prior smoke behavior.
   const medusaSmoke=Number.isInteger(medusaSmokeCalls)&&medusaSmokeCalls>0;
   const telemetrySmoke=Number.isInteger(telemetrySmokeCalls)&&telemetrySmokeCalls>0;
-  const smoke=medusaSmoke||telemetrySmoke;
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
   const buildIdentity=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'utf8'));
   const executionBuildArtifacts=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json'),'utf8'));
