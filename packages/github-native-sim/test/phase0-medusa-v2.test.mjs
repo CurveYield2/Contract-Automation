@@ -108,7 +108,7 @@ test('Medusa state snapshot node carries deployed code, storage and block height
   const { spawn } = await import('node:child_process');
   const { startStateSnapshotAnvilV1 } = await import('../src/phase0-randomized-simulation-v1.mjs');
   const call=async(url,method,params=[])=>{const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});const b=await r.json();if(b.error)throw new Error(JSON.stringify(b.error));return b.result;};
-  const source=spawn(process.execPath,['node_modules/@foundry-rs/anvil/bin.mjs','--port','18645','--chain-id','1','--silent'],{stdio:'ignore'});
+  const source=spawn(process.execPath,['node_modules/@foundry-rs/anvil/bin.mjs','--port','18645','--chain-id','1','--silent'],{stdio:'ignore',detached:true});
   const url='http://127.0.0.1:18645';
   let node;
   try{
@@ -125,6 +125,51 @@ test('Medusa state snapshot node carries deployed code, storage and block height
     assert.equal(await call(node.url,'eth_getStorageAt',[contractAddress,'0x1f4','latest']),'0x'+'11'.repeat(32));
   }finally{
     await node?.close();
-    source.kill('SIGKILL');
+    try{process.kill(-source.pid,'SIGKILL');}catch{}
   }
+});
+
+test('Medusa plateau monitor stops a shard once calls since the last coverage gain reach 40% of the calls to reach it',async()=>{
+  const { medusaPlateauMonitorV2 } = await import('../src/phase0-randomized-simulation-v1.mjs');
+  const line=(c,b,k)=>`⇾ fuzz: elapsed: 3s, calls: ${c} (1/sec), seq/s: 0, branches: ${b}, corpus: ${k}, failures: 0/0, gas/s: 1\n`;
+  const m=medusaPlateauMonitorV2();
+  assert.equal(m.push(line(0,3,0)+line(1000,500,40)),false);
+  assert.equal(m.push(line(2000,500,41)),false,'corpus growth alone counts as a coverage gain');
+  assert.equal(m.push(line(2700,500,41)),false);
+  assert.equal(m.push(line(28),false),false);
+  assert.equal(m.push(line(2800,500,41)),true);
+  assert.equal(m.state().callsAtGain,2000);
+});
+
+test('Medusa shard configurations add one all-target shard plus source clusters, folding tiny clusters',async()=>{
+  const { medusaShardConfigurationsV2 } = await import('../src/phase0-randomized-simulation-v1.mjs');
+  const t=q=>({qualifiedName:q});
+  const configs=medusaShardConfigurationsV2([
+    t('pkg/vault/contracts/A.sol:A'),t('pkg/vault/contracts/B.sol:B'),t('pkg/vault/contracts/C.sol:C'),t('pkg/vault/contracts/auth/D.sol:D'),
+    t('pkg/utils/contracts/E.sol:E'),
+    t('contracts/hooks/H1.sol:H1'),t('contracts/hooks/H2.sol:H2'),t('contracts/hooks/H3.sol:H3'),
+    t('contracts/R.sol:R'),t('contracts/S.sol:S'),t('contracts/T.sol:T'),t('contracts/adapters/X.sol:X')
+  ]);
+  assert.deepEqual(configs.map(c=>[c.configId,c.targets.length]),[
+    ['all-targets',12],['cluster-contracts',4],['cluster-contracts-hooks',3],['cluster-pkg-vault-contracts',5]
+  ]);
+});
+
+test('Medusa shard aggregation unions call-chain variety and gates per shard and in total',async()=>{
+  const { aggregateMedusaShardsV2 } = await import('../src/phase0-randomized-simulation-v1.mjs');
+  const shard=(runId,configId,calls,gainAt,pairs,status='PASS')=>{
+    const s={runId,configId,status:'COMPLETE_WITH_ORACLE_GAPS',observedCalls:calls,targetContracts:[],variety:{callsAtLastCoverageGain:gainAt,repetitionRate:(calls-gainAt)/calls,uniqueCallChainPairs:pairs.length,status},achievedDispatchWeight:{dispatches:10,economicDispatches:8}};
+    Object.defineProperty(s,'varietySets',{value:{pairs:new Set(pairs),crossContractPairs:new Set(),triples:new Set(),logicalKeys:new Set(['a','b']),representedKeys:new Set(['a','b'])},enumerable:false});
+    return s;
+  };
+  const configs=[{configId:'all-targets'},{configId:'cluster-x'}];
+  const ok=aggregateMedusaShardsV2({configs,minimumRequiredCalls:100,shards:[shard('s1','all-targets',100,70,['a->b','b->a']),shard('s2','cluster-x',50,40,['a->b','a->a'])]});
+  assert.equal(ok.observedCalls,150);
+  assert.equal(ok.variety.uniqueCallChainPairs,3);
+  assert.equal(ok.rows[1].novelUniqueCallChainPairs,1);
+  assert.equal(ok.variety.status,'PASS');
+  const bad=aggregateMedusaShardsV2({configs,minimumRequiredCalls:100,shards:[shard('s1','all-targets',100,70,['a->b','b->a']),shard('s2','cluster-x',100,10,['a->a'],'FAIL')]});
+  assert.deepEqual(bad.variety.failures,['SHARD_VARIETY_REQUIREMENT_FAILED','COVERAGE_PLATEAUED_CALLS_ARE_REPEATING']);
+  const missing=aggregateMedusaShardsV2({configs,minimumRequiredCalls:100,shards:[shard('s1','all-targets',100,70,['a->b','b->a'])]});
+  assert.ok(missing.variety.failures.includes('SHARD_CONFIGURATION_NOT_EXECUTED'));
 });

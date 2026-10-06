@@ -35,13 +35,13 @@ export function safeRepositoryProjectPath(root, relativePath) {
   return resolved;
 }
 
-export function runProcess({ command, args = [], cwd, env = process.env }) {
+export function runProcess({ command, args = [], cwd, env = process.env, onStdout = null }) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
     let settled = false;
     const child = spawn(command, args, { cwd, env, shell: false });
-    child.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stdout?.on('data', (chunk) => { const text = chunk.toString(); stdout += text; if (onStdout) onStdout(text, child); });
     child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('error', (error) => {
       if (settled) return;

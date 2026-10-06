@@ -160,9 +160,11 @@ export async function startStateSnapshotAnvilV1({sourceUrl,projectRoot,evmVersio
   const url=`http://127.0.0.1:${port}`;
   const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
   const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--load-state',statePath,'--auto-impersonate','--silent'];
-  const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
+  // Own process group: the npm anvil entry point is a node wrapper around the native binary, so signal the group.
+  const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe'],detached:true});
   let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
-  const close=async()=>{if(child.exitCode===null){child.kill('SIGTERM');await Promise.race([new Promise(r=>child.once('exit',r)),sleep(2000)]);if(child.exitCode===null)child.kill('SIGKILL');}};
+  const signalGroup=sig=>{try{process.kill(-child.pid,sig);}catch{}};
+  const close=async()=>{signalGroup('SIGTERM');if(child.exitCode===null)await Promise.race([new Promise(r=>child.once('exit',r)),sleep(2000)]);signalGroup('SIGKILL');};
   try{
     const started=Date.now();
     while(true){
@@ -1288,7 +1290,9 @@ export function medusaCoverageTimelineV2(text){
 // Repetition rate: share of calls executed after coverage last grew (0 = still discovering, 1 = pure cycling).
 export function medusaVarietyV2({timeline=[],dispatch={}}={}){
   const last=timeline.at(-1)??{calls:0,branches:0,corpus:0};
-  const firstAtMax=timeline.find(x=>x.branches===last.branches)??last;
+  // Last coverage gain: the last progress sample where branch or corpus coverage grew.
+  let firstAtMax=timeline[0]??last,maxB=-1,maxC=-1;
+  for(const x of timeline){if(x.branches>maxB||x.corpus>maxC){firstAtMax=x;}maxB=Math.max(maxB,x.branches);maxC=Math.max(maxC,x.corpus);}
   const half=timeline.find(x=>x.calls>=last.calls/2)??last;
   const repetitionRate=last.calls>0?(last.calls-firstAtMax.calls)/last.calls:1;
   const represented=Number(dispatch.representedLogicalFunctionCount??0),pairs=Number(dispatch.uniqueCallChainPairs??0);
@@ -1297,6 +1301,7 @@ export function medusaVarietyV2({timeline=[],dispatch={}}={}){
   if(pairs<represented)failures.push('TOO_FEW_UNIQUE_CALL_CHAIN_PAIRS');
   return{
     finalBranches:last.branches,finalCorpusSequences:last.corpus,callsAtLastCoverageGain:firstAtMax.calls,
+    lastGainBasis:'PROGRESS_SAMPLE_BRANCH_OR_CORPUS_GROWTH',
     repetitionRate,maximumRepetitionRate:PHASE0_MEDUSA_MAX_REPETITION_RATE_V1,
     branchesGainedInSecondHalf:last.branches-half.branches,
     uniqueCallChainPairs:pairs,uniqueCrossContractCallChainPairs:Number(dispatch.uniqueCrossContractCallChainPairs??0),
@@ -1345,7 +1350,7 @@ async function medusaCorpusDispatchMetricsV2({corpusDest,routerRows}){
       }
     }catch{parseFailures++;}
   }
-  return{
+  const out={
     status:dispatches>0?'MEASURED_FROM_RETAINED_CORPUS':'UNAVAILABLE_NO_ROUTER_DISPATCHES_IN_RETAINED_CORPUS',
     dispatches,economicDispatches,economicShare:dispatches?economicDispatches/dispatches:null,
     parsedFiles,parseFailures,wrapperCounts,logicalCounts,
@@ -1354,6 +1359,9 @@ async function medusaCorpusDispatchMetricsV2({corpusDest,routerRows}){
     uniqueCallChainPairs:pairs.size,uniqueCrossContractCallChainPairs:crossContractPairs.size,uniqueCallChainTriples:triples.size,
     representedLogicalFunctionCount:new Set([...byWrapper.values()].map(x=>x.logicalKey)).size
   };
+  // Raw variety sets for cross-shard union; non-enumerable so they never reach serialized evidence.
+  Object.defineProperty(out,'sets',{value:{pairs,crossContractPairs,triples,logicalKeys:new Set(Object.keys(logicalCounts)),representedKeys:new Set([...byWrapper.values()].map(x=>x.logicalKey))},enumerable:false});
+  return out;
 }
 export function buildMedusaConfigV2({anvilUrl,blockNumber,routerRows,checked,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1}){
   return{
@@ -1450,7 +1458,7 @@ async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
   }finally{await provider.destroy();}
   return out;
 }
-export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,runId='medusa-anvil-fork-001'}){
+export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,runId='medusa-anvil-fork-001',routerProjectDir=null,stopAtPlateau=false}){
   const dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
   const router=renderMedusaRouterV2(ethers,targets);
   if(!router.rows.length){
@@ -1458,7 +1466,9 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
     await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(s,null,2)+'\n');return s;
   }
   const checked=router.properties.length>0,mode=checked?'CHECKED_DISCOVERY':'DISCOVERY_WITH_ORACLE_GAPS';
-  const medusaProject=path.join(dir,'router-project');await fs.mkdir(path.join(medusaProject,'src'),{recursive:true});
+  // Shards sharing one target configuration reuse one router project so Forge's build cache skips recompilation.
+  const medusaProject=routerProjectDir??path.join(dir,'router-project');await fs.mkdir(path.join(medusaProject,'src'),{recursive:true});
+  await fs.rm(path.join(medusaProject,'.curveyield-phase0-medusa-corpus-v2'),{recursive:true,force:true});
   const harnessAbs=path.join(medusaProject,'src','Phase0MedusaRouterV1.sol');
   await fs.writeFile(harnessAbs,router.source);
   await fs.writeFile(path.join(medusaProject,'foundry.toml'),'[profile.default]\nsrc = "src"\nout = "out"\nlibs = []\nsolc_version = "0.8.28"\nevm_version = "cancun"\noptimizer = true\noptimizer_runs = 200\n');
@@ -1473,9 +1483,12 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
   console.log(`[phase0-medusa] started; mode=${mode}; timeout=1800s; configuredCallLimit=${callLimit}; progress heartbeat every 300s`);
   const heartbeat=setInterval(()=>console.log(`[phase0-medusa] heartbeat: mode=${mode}; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; configuredCallLimit=${callLimit}`),300000);
   heartbeat.unref?.();
-  let r;
-  try{r=await runProcess({command:'timeout',args:['-s','INT','-k','120s','1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv()});}
+  let r,stoppedAtPlateau=false;
+  const plateau=medusaPlateauMonitorV2();
+  const onStdout=(text,child)=>{if(plateau.push(text)&&stopAtPlateau&&!stoppedAtPlateau){stoppedAtPlateau=true;child.kill('SIGINT');}};
+  try{r=await runProcess({command:'timeout',args:['-s','INT','-k','120s','1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv(),onStdout});}
   finally{clearInterval(heartbeat);}
+  const engineCompleted=r.exitCode===0||(stoppedAtPlateau&&maxMedusaCalls(r.stdout)>0);
   const raw=`${r.stdout??''}\n${r.stderr??''}`;await fs.writeFile(path.join(dir,'MEDUSA_RAW_OUTPUT_v1.log'),raw);
   let parsed;
   try{parsed=parseMedusaOutput(r.stdout??raw);}catch(error){parsed={status:'parse_failure',properties:[],falsifiedProperties:0,parseError:String(error?.message??error)};}
@@ -1513,8 +1526,8 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
   const assurance=assessMedusaV2({mode,observedCalls,engineProperties:parsed.properties??[],properties});
   const callVolumeMet=observedCalls>=minimumRequiredCalls;
   let status;
-  if(checked)status=r.exitCode===0&&callVolumeMet&&assurance.checkStatus==='CHECKED'?'PASS':'COMPLETE_WITH_FAILURES';
-  else status=r.exitCode===0&&callVolumeMet?'COMPLETE_WITH_ORACLE_GAPS':'INCOMPLETE_CALL_REQUIREMENT';
+  if(checked)status=engineCompleted&&callVolumeMet&&assurance.checkStatus==='CHECKED'?'PASS':'COMPLETE_WITH_FAILURES';
+  else status=engineCompleted&&callVolumeMet?'COMPLETE_WITH_ORACLE_GAPS':'INCOMPLETE_CALL_REQUIREMENT';
   const summary={
     schemaVersion:'curveyield-phase0-medusa-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,runId:runId,
     mode,purpose:'BROAD_PHASE0_STATEFUL_RANDOMIZED_DISCOVERY_WITH_CHECKED_PACKET_PROPERTIES_WHEN_AVAILABLE',
@@ -1529,7 +1542,7 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
     omittedFunctions:router.omitted,propertyRegistry:properties,engineProperties:parsed.properties??[],engineParseStatus:parsed.status,
     executionStatus:assurance.executionStatus,coverageStatus:assurance.coverageStatus,checkStatus:assurance.checkStatus,
     reachabilityStatus:assurance.reachabilityStatus,observationStatus:assurance.observationStatus,
-    exitCode:r.exitCode,rawOutputRef:rawRef,corpusIndexRef:`runs/${runId}/MEDUSA_CORPUS_INDEX_v1.json`,
+    exitCode:r.exitCode,stoppedAtPlateau,rawOutputRef:rawRef,corpusIndexRef:`runs/${runId}/MEDUSA_CORPUS_INDEX_v1.json`,
     retainedCorpusFileCount:corpusIndex.length,configRef:`runs/${runId}/MEDUSA_CONFIG_v1.json`,
     routerRef:`runs/${runId}/MEDUSA_ROUTER_v1.sol`,propertyWitnessRef:`runs/${runId}/PROPERTY_WITNESSES_v2.json`,
     limitations:checked?router.omitted:[...router.omitted,{type:'ORACLE_GAP',reason:'NO_EXPLICIT_PACKET_DECLARED_PROPERTY_FUNCTIONS_WERE_QUALIFIED'}],
@@ -1537,12 +1550,135 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
   };
   await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
   await fs.rm(harnessAbs,{force:true});await fs.rm(cfgPath,{force:true});
+  Object.defineProperty(summary,'varietySets',{value:corpusDispatchMetrics.sets??null,enumerable:false});
+  return summary;
+}
+// Stops a shard once coverage has plateaued: calls since the last branch or corpus gain reach 40% of the calls it took
+// to get there, leaving headroom under the 0.5 repetition limit for Medusa's 3s progress granularity and shutdown.
+export const PHASE0_MEDUSA_PLATEAU_RATIO_V1=0.4;
+export function medusaPlateauMonitorV2({ratio=PHASE0_MEDUSA_PLATEAU_RATIO_V1}={}){
+  let buffer='',maxBranches=-1,maxCorpus=-1,callsAtGain=0,lastCalls=0;
+  return{
+    push(text){
+      buffer+=text;
+      const lines=buffer.split('\n');buffer=lines.pop()??'';
+      for(const line of lines){
+        const m=/fuzz: elapsed:.*?calls:\s*([0-9,]+).*?branches:\s*([0-9,]+), corpus:\s*([0-9,]+)/.exec(line);
+        if(!m)continue;
+        const calls=Number(m[1].replaceAll(',','')),branches=Number(m[2].replaceAll(',','')),corpus=Number(m[3].replaceAll(',',''));
+        lastCalls=calls;
+        if(branches>maxBranches||corpus>maxCorpus){maxBranches=Math.max(maxBranches,branches);maxCorpus=Math.max(maxCorpus,corpus);callsAtGain=calls;continue;}
+        if(callsAtGain>0&&calls-callsAtGain>=ratio*callsAtGain)return true;
+      }
+      return false;
+    },
+    state(){return{maxBranches,maxCorpus,callsAtGain,lastCalls};}
+  };
+}
+// Diverse Medusa shards: one configuration over every target plus one per source-directory cluster, each a fresh
+// engine run (independent clock seed) stopped at its coverage plateau, cycled until the total call floor is met.
+export const PHASE0_MEDUSA_MIN_CLUSTER_TARGETS_V1=3;
+export function medusaShardConfigurationsV2(targets){
+  const clusters=new Map();
+  for(const t of targets){
+    const source=String(t.qualifiedName??'').split(':')[0];
+    const key=source.includes('/')?source.slice(0,source.lastIndexOf('/')):'.';
+    if(!clusters.has(key))clusters.set(key,[]);
+    clusters.get(key).push(t);
+  }
+  // Clusters under PHASE0_MEDUSA_MIN_CLUSTER_TARGETS_V1 contracts saturate within one progress sample, so they fold
+  // into their nearest ancestor directory cluster, or a shared misc cluster.
+  for(const key of [...clusters.keys()].sort((a,b)=>b.length-a.length)){
+    const group=clusters.get(key);
+    if(!group||group.length>=PHASE0_MEDUSA_MIN_CLUSTER_TARGETS_V1)continue;
+    let parent=key.includes('/')?key.slice(0,key.lastIndexOf('/')):null;
+    while(parent&&!clusters.has(parent))parent=parent.includes('/')?parent.slice(0,parent.lastIndexOf('/')):null;
+    if(!parent){
+      // No ancestor cluster: join the cluster sharing the longest leading path segments, if any are shared.
+      const segs=key.split('/');let best=null,bestShared=0;
+      for(const other of clusters.keys()){
+        if(other===key)continue;
+        const o=other.split('/');let shared=0;while(shared<segs.length&&shared<o.length&&segs[shared]===o[shared])shared++;
+        if(shared>bestShared||(shared===bestShared&&shared>0&&clusters.get(other).length>(clusters.get(best)?.length??0))){best=other;bestShared=shared;}
+      }
+      if(bestShared>0)parent=best;
+    }
+    const into=parent??'misc';
+    if(!clusters.has(into))clusters.set(into,[]);
+    clusters.get(into).push(...group);clusters.delete(key);
+  }
+  const configs=[{configId:'all-targets',cluster:'*',targets}];
+  if(clusters.size>1)for(const [key,group] of [...clusters.entries()].sort((a,b)=>a[0].localeCompare(b[0])))configs.push({configId:'cluster-'+key.replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'').toLowerCase(),cluster:key,targets:group});
+  return configs;
+}
+export function aggregateMedusaShardsV2({shards,minimumRequiredCalls,configs}){
+  const pairs=new Set(),cross=new Set(),triples=new Set(),logical=new Set(),represented=new Set();
+  let calls=0,callsAfterLastGain=0,dispatches=0,economicDispatches=0;
+  const rows=shards.map((s,i)=>{
+    const sets=s.varietySets,before=pairs.size;
+    if(sets){for(const x of sets.pairs)pairs.add(x);for(const x of sets.crossContractPairs)cross.add(x);for(const x of sets.triples)triples.add(x);for(const x of sets.logicalKeys)logical.add(x);for(const x of sets.representedKeys)represented.add(x);}
+    const v=s.variety??{};calls+=Number(s.observedCalls??0);callsAfterLastGain+=Math.max(0,Number(s.observedCalls??0)-Number(v.callsAtLastCoverageGain??0));
+    dispatches+=Number(s.achievedDispatchWeight?.dispatches??0);economicDispatches+=Number(s.achievedDispatchWeight?.economicDispatches??0);
+    return{shard:i+1,runId:s.runId,configId:s.configId,cluster:s.cluster,targetContracts:(s.targetContracts??[]).length,status:s.status,exitCode:s.exitCode,stoppedAtPlateau:s.stoppedAtPlateau===true,observedCalls:s.observedCalls,finalBranches:v.finalBranches??0,repetitionRate:v.repetitionRate??1,uniqueCallChainPairs:v.uniqueCallChainPairs??0,novelUniqueCallChainPairs:pairs.size-before,varietyStatus:v.status??'FAIL',rawOutputRef:s.rawOutputRef,summaryRef:`runs/${s.runId}/RUN_SUMMARY_v1.json`};
+  });
+  const failures=[];
+  if(rows.some(r=>r.varietyStatus!=='PASS'))failures.push('SHARD_VARIETY_REQUIREMENT_FAILED');
+  const repetitionRate=calls?callsAfterLastGain/calls:1;
+  if(repetitionRate>PHASE0_MEDUSA_MAX_REPETITION_RATE_V1)failures.push('COVERAGE_PLATEAUED_CALLS_ARE_REPEATING');
+  if(pairs.size<represented.size)failures.push('TOO_FEW_UNIQUE_CALL_CHAIN_PAIRS');
+  if(configs.some(c=>!rows.some(r=>r.configId===c.configId)))failures.push('SHARD_CONFIGURATION_NOT_EXECUTED');
+  return{
+    rows,observedCalls:calls,
+    dispatch:{status:dispatches>0?'MEASURED_FROM_RETAINED_CORPUS':'UNAVAILABLE_NO_ROUTER_DISPATCHES_IN_RETAINED_CORPUS',dispatches,economicDispatches,economicShare:dispatches?economicDispatches/dispatches:null,basis:'SUM_OF_SHARD_RETAINED_CORPORA'},
+    variety:{
+      basis:'UNION_ACROSS_INDEPENDENT_MEDUSA_SHARDS',shardCount:rows.length,configurationCount:configs.length,
+      repetitionRate,maximumRepetitionRate:PHASE0_MEDUSA_MAX_REPETITION_RATE_V1,
+      uniqueCallChainPairs:pairs.size,uniqueCrossContractCallChainPairs:cross.size,uniqueCallChainTriples:triples.size,
+      observedLogicalFunctionCount:logical.size,representedLogicalFunctionCount:represented.size,
+      minimumRequiredCalls,status:failures.length?'FAIL':'PASS',failures
+    }
+  };
+}
+export async function runMedusaShardsV2({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,shardCallLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,maxShards=40,maxSeconds=1800}){
+  const configs=medusaShardConfigurationsV2(targets),shards=[],started=Date.now();
+  for(let i=0;i<maxShards;i++){
+    const config=configs[i%configs.length];
+    const runId=`medusa-anvil-fork-${String(i+1).padStart(3,'0')}`;
+    console.log(`[phase0-medusa] shard ${i+1}: ${config.configId} (${config.targets.length} contracts)`);
+    const shard=await runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets:config.targets,outRoot,callLimit:shardCallLimit,minimumRequiredCalls:1,runId,routerProjectDir:path.join(outRoot,'runs',`router-${config.configId}`),stopAtPlateau:true});
+    const sets=shard.varietySets;
+    Object.assign(shard,{configId:config.configId,cluster:config.cluster});
+    Object.defineProperty(shard,'varietySets',{value:sets,enumerable:false});
+    shards.push(shard);
+    const total=shards.reduce((n,x)=>n+Number(x.observedCalls??0),0);
+    console.log(`[phase0-medusa] shard ${i+1} done: calls=${shard.observedCalls}; plateauStop=${shard.stoppedAtPlateau}; repetition=${shard.variety?.repetitionRate}; total=${total}`);
+    if(shard.status==='BLOCKED_NO_ROUTABLE_ABI_FUNCTIONS'&&config.configId==='all-targets')break;
+    if(total>=minimumRequiredCalls&&i+1>=configs.length)break;
+    if((Date.now()-started)/1000>=maxSeconds)break;
+  }
+  const base=shards[0],agg=aggregateMedusaShardsV2({shards,minimumRequiredCalls,configs});
+  const engineOk=shards.every(x=>['COMPLETE_WITH_ORACLE_GAPS','PASS'].includes(x.status));
+  const checked=base.mode==='CHECKED_DISCOVERY';
+  const volume=agg.observedCalls>=minimumRequiredCalls;
+  const status=!engineOk||!volume?(checked?'COMPLETE_WITH_FAILURES':'INCOMPLETE_CALL_REQUIREMENT'):(checked&&shards.every(x=>x.status==='PASS')?'PASS':(checked?'COMPLETE_WITH_FAILURES':'COMPLETE_WITH_ORACLE_GAPS'));
+  const summary={
+    ...base,runId:'medusa-shards',
+    configuredCallLimit:shardCallLimit*shards.length,shardCallLimit,minimumRequiredCalls,observedCalls:agg.observedCalls,
+    coverageStatus:volume?'DISCOVERY_VOLUME_MET':'DISCOVERY_VOLUME_INCOMPLETE',
+    targetContracts:base.targetContracts,
+    achievedDispatchWeight:agg.dispatch,variety:agg.variety,shards:agg.rows,
+    rawOutputRefs:shards.map(x=>x.rawOutputRef),corpusIndexRefs:shards.map(x=>x.corpusIndexRef),
+    retainedCorpusFileCount:shards.reduce((n,x)=>n+Number(x.retainedCorpusFileCount??0),0),
+    exitCode:engineOk?0:(shards.find(x=>!['COMPLETE_WITH_ORACLE_GAPS','PASS'].includes(x.status))?.exitCode??1),
+    status
+  };
+  await fs.writeFile(path.join(outRoot,'runs','MEDUSA_SHARDS_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
   return summary;
 }
 function baselineTargetRows({medusa,telemetry}){
   const refs=[medusa?.rawOutputRef,medusa?.corpusIndexRef,...telemetry.map(x=>x.rawTranscriptRef)].filter(Boolean);
   return[
-    {candidateKey:'PHASE0-BASELINE-MEDUSA',executionEvidenceRefs:[medusa?.rawOutputRef,medusa?.corpusIndexRef].filter(Boolean).length?[medusa?.rawOutputRef,medusa?.corpusIndexRef].filter(Boolean):['NO_MEDUSA_OUTPUT'],oracleOutcome:medusa?.status==='PASS'?'BASELINE_RANDOMIZED_EXECUTION_COMPLETED':'BASELINE_RANDOMIZED_EXECUTION_LIMITED',reproductionStatus:medusa?.status??'UNKNOWN',requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',requestBindingEvidenceRef:medusa?.configRef??'NO_CONFIG'},
+    {candidateKey:'PHASE0-BASELINE-MEDUSA',executionEvidenceRefs:(()=>{const refs=[...(medusa?.rawOutputRefs??[medusa?.rawOutputRef]),...(medusa?.corpusIndexRefs??[medusa?.corpusIndexRef])].filter(Boolean);return refs.length?refs:['NO_MEDUSA_OUTPUT'];})(),oracleOutcome:medusa?.status==='PASS'?'BASELINE_RANDOMIZED_EXECUTION_COMPLETED':'BASELINE_RANDOMIZED_EXECUTION_LIMITED',reproductionStatus:medusa?.status??'UNKNOWN',requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',requestBindingEvidenceRef:medusa?.configRef??'NO_CONFIG'},
     {candidateKey:'PHASE0-BASELINE-ABI-TELEMETRY',executionEvidenceRefs:refs,oracleOutcome:'INVESTIGATIVE_BASELINE_TELEMETRY_GENERATED',reproductionStatus:telemetry.every(x=>x.status==='PASS')?'PASS':'INCOMPLETE',requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',requestBindingEvidenceRef:'evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.json'}
   ];
 }
@@ -1638,7 +1774,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         }catch(error){stateSource={mode:'LIVE_FORK_ANVIL',snapshotFailure:String(error?.message??error).slice(0,1200)};}
         console.log(`[phase0-medusa] state source: ${JSON.stringify(stateSource)}`);
         try{
-          medusa=await runMedusa({projectRoot:staged.projectRoot,anvilUrl:medusaNode?.url??anvil.url,blockNumber:medusaNode?.blockNumber??baselineBlock,ethers,targets,outRoot:outputRoot,...(smoke?{callLimit:medusaSmokeCalls,minimumRequiredCalls:medusaSmokeCalls}:{})});
+          medusa=await runMedusaShardsV2({projectRoot:staged.projectRoot,anvilUrl:medusaNode?.url??anvil.url,blockNumber:medusaNode?.blockNumber??baselineBlock,ethers,targets,outRoot:outputRoot,...(smoke?{minimumRequiredCalls:medusaSmokeCalls,shardCallLimit:Math.max(medusaSmokeCalls,1000)}:{})});
           medusa.stateSource=stateSource;
         }finally{if(medusaNode)await medusaNode.close();}
       }catch(error){
@@ -1659,7 +1795,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         console.log(`[phase0-telemetry] failed but workflow will continue to evidence finalization: ${telemetryExecutionFailure.message}`);
       }
     }
-    const runIndex={schemaVersion:'curveyield-phase0-simulation-run-index-v1',purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',sourceIdentity:{campaignId:receipt.campaign.campaignId,sourceSha256:receipt.source.sha256},targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash,upstreamRpcExposed:false,identityNormalized:anvil.identityNormalized===true,observedUpstreamChainId:anvil.upstreamChainId},deployment:deploymentCombined,policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},runs:[{runId:medusa.runId,type:'MEDUSA_ANVIL_FORK',status:medusa.status,summaryRef:'runs/medusa-anvil-fork-001/RUN_SUMMARY_v1.json'},...telemetry.map(x=>({runId:x.runId,type:'ABI_ACCOUNTING_TELEMETRY',status:x.status,summaryRef:`runs/${x.runId}/RUN_SUMMARY_v1.json`,rawTranscriptRef:x.rawTranscriptRef}))]};
+    const runIndex={schemaVersion:'curveyield-phase0-simulation-run-index-v1',purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',sourceIdentity:{campaignId:receipt.campaign.campaignId,sourceSha256:receipt.source.sha256},targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash,upstreamRpcExposed:false,identityNormalized:anvil.identityNormalized===true,observedUpstreamChainId:anvil.upstreamChainId},deployment:deploymentCombined,policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},runs:[{runId:medusa.runId,type:'MEDUSA_ANVIL_FORK',status:medusa.status,summaryRef:medusa.shards?'runs/MEDUSA_SHARDS_SUMMARY_v1.json':'runs/medusa-anvil-fork-001/RUN_SUMMARY_v1.json',shards:(medusa.shards??[]).map(x=>({runId:x.runId,configId:x.configId,status:x.status,summaryRef:x.summaryRef}))},...telemetry.map(x=>({runId:x.runId,type:'ABI_ACCOUNTING_TELEMETRY',status:x.status,summaryRef:`runs/${x.runId}/RUN_SUMMARY_v1.json`,rawTranscriptRef:x.rawTranscriptRef}))]};
     const simulationLimitations=[...deploymentCombined.limitations,...(telemetry.filter(x=>x.weightingLimitation).map(x=>({type:x.weightingLimitation,runId:x.runId})))];
     if(medusaExecutionFailure)simulationLimitations.push(medusaExecutionFailure);
     if(telemetryExecutionFailure)simulationLimitations.push(telemetryExecutionFailure);
