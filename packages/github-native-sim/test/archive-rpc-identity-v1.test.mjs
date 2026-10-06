@@ -84,7 +84,7 @@ test('canonical V7 runner records archive identity before Phase 7 lifecycle exec
   assert.ok(preflightStep >= 0, 'canonical runner must invoke Phase 7 preflight');
   assert.ok(lifecycleStep > preflightStep, 'archive identity must be reconciled before lifecycle execution');
 
-  assert.match(workflow, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01:\s*\$\{\{\s*secrets\.SIM_ARCHIVE_PRIMARY_ETHEREUM_01\s*\}\}/);
+    assert.match(workflow, /ETHEREUM_FORK_RPC_URL:\\s*https:\\/\\/eth\\.drpc\\.org\\//);
   assert.match(workflow, /npm run v7:execute -- --request \.v7-request\/request\.json/);
   assert.match(workflow, /path:\s*\.audit-evidence\/v7-execution/);
 });
