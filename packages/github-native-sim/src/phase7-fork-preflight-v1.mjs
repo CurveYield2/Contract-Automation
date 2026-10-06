@@ -2,7 +2,9 @@ import { CHAINS } from '../../protocol/src/index.mjs';
 import { startAnvilEngine } from '../../runner/src/anvil-engine.mjs';
 import { probeArchiveRpcIdentity } from './archive-rpc-identity-v1.mjs';
 
-const ETHEREUM_ARCHIVE_RPC_ENV = 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01';
+const ETHEREUM_ARCHIVE_RPC_ENV = 'ETHEREUM_FORK_RPC_URL';
+const LEGACY_ETHEREUM_ARCHIVE_RPC_ENV = 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01';
+const DEFAULT_ETHEREUM_FORK_RPC_URL = 'https://eth.drpc.org/';
 const IMPERSONATION_PROBE_ACTOR = '0x000000000000000000000000000000000000dEaD';
 const ALLOWLISTED_ACTIONS = new Set([
   'deploy', 'call', 'staticCall', 'expectRevert', 'setBalance', 'transferNative',
@@ -119,10 +121,14 @@ export async function runPhase7ForkPreflightV1({
   const workflowActions = checkWorkflowActions(simulation.workflow);
   if (simulation.chain !== 'ethereum') return unsupportedArchiveChain(request, workflowActions);
 
-  const forkUrl = environment[ETHEREUM_ARCHIVE_RPC_ENV];
+  const forkUrl = environment?.[ETHEREUM_ARCHIVE_RPC_ENV]
+    || environment?.[LEGACY_ETHEREUM_ARCHIVE_RPC_ENV]
+    || DEFAULT_ETHEREUM_FORK_RPC_URL;
   const archiveRpcSecret = {
     status: typeof forkUrl === 'string' && forkUrl.length > 0 ? 'PASS' : 'FAIL',
-    profile: ETHEREUM_ARCHIVE_RPC_ENV,
+    profile: environment?.[ETHEREUM_ARCHIVE_RPC_ENV]
+      ? ETHEREUM_ARCHIVE_RPC_ENV
+      : (environment?.[LEGACY_ETHEREUM_ARCHIVE_RPC_ENV] ? LEGACY_ETHEREUM_ARCHIVE_RPC_ENV : 'DEFAULT_DRPC_ETHEREUM'),
   };
   if (archiveRpcSecret.status !== 'PASS' || workflowActions.status !== 'PASS') {
     return {
