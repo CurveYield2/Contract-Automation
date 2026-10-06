@@ -1,7 +1,7 @@
 name: Lite Phase 0 Simulation Testing v1
 
-# Proves the production Phase-0 Medusa stage end to end (real deployment on the Anvil fork, generated router,
-# Medusa engine) with a small call budget before spending a full campaign simulation. Never publishes evidence.
+# Proves production Phase-0 Medusa and/or ABI telemetry end to end on the real Anvil deployment with reduced
+# call budgets before spending a full campaign simulation. Never publishes campaign evidence.
 on:
   workflow_dispatch:
     inputs:
@@ -18,6 +18,10 @@ on:
       medusa_calls:
         required: false
         default: '1000'
+        type: string
+      telemetry_calls:
+        required: false
+        default: '0'
         type: string
 
 permissions:
@@ -66,29 +70,59 @@ jobs:
           git fetch origin "$AUDIT_CONTROLLER_REF"
           git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
 
-      - name: Deploy on Anvil and run Medusa with a reduced call budget
+      - name: Deploy on Anvil and run requested smoke stages
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
           CAMPAIGN_PATH: ${{ inputs.campaign_path }}
           MEDUSA_CALLS: ${{ inputs.medusa_calls }}
+          TELEMETRY_CALLS: ${{ inputs.telemetry_calls }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$MEDUSA_CALLS" =~ ^[1-9][0-9]{0,5}$ ]] || { echo "::error::medusa_calls must be a positive integer"; exit 1; }
-          node scripts/run-phase0-randomized-simulation-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" \
-            --output .phase0-medusa-smoke --fork-url "$ETHEREUM_FORK_RPC_URL" --medusa-smoke-calls "$MEDUSA_CALLS"
+          [[ "$MEDUSA_CALLS" =~ ^[0-9]{1,6}$ ]] || { echo "::error::medusa_calls must be an integer from 0 to 999999"; exit 1; }
+          [[ "$TELEMETRY_CALLS" =~ ^[0-9]{1,6}$ ]] || { echo "::error::telemetry_calls must be an integer from 0 to 999999"; exit 1; }
+          (( MEDUSA_CALLS > 0 || TELEMETRY_CALLS > 0 )) || { echo "::error::at least one smoke call budget must be greater than zero"; exit 1; }
+          args=(scripts/run-phase0-randomized-simulation-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --output .phase0-medusa-smoke --fork-url "$ETHEREUM_FORK_RPC_URL")
+          if (( MEDUSA_CALLS > 0 )); then args+=(--medusa-smoke-calls "$MEDUSA_CALLS"); fi
+          if (( TELEMETRY_CALLS > 0 )); then args+=(--telemetry-smoke-calls "$TELEMETRY_CALLS"); fi
+          node "${args[@]}"
 
-      - name: Report and require Medusa smoke result
+      - name: Report and require requested smoke results
         if: ${{ always() }}
         env:
           MEDUSA_CALLS: ${{ inputs.medusa_calls }}
+          TELEMETRY_CALLS: ${{ inputs.telemetry_calls }}
         shell: bash
         run: |
           set -euo pipefail
           summary=.phase0-medusa-smoke/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
           test -f "$summary" || { echo "::error::No simulation summary was produced"; exit 1; }
+          echo "---- Deployment coverage ----"
           jq '.deployment.coverage // {}' "$summary"
-          jq '.medusa | del(.targetContracts, .achievedDispatchWeight.wrapperCounts, .achievedDispatchWeight.logicalCounts)' "$summary"
-          raw="$(find .phase0-medusa-smoke -name MEDUSA_RAW_OUTPUT_v1.log -print -quit)"
-          if [ -n "$raw" ]; then echo "---- Medusa raw output (tail) ----"; tail -n 120 "$raw" | sed -E 's#https?://[^ ]+#[URL]#g'; fi
-          jq -e --argjson n "$MEDUSA_CALLS" '(.medusa.status=="PASS" or .medusa.status=="COMPLETE_WITH_ORACLE_GAPS") and (.medusa.observedCalls|tonumber)>=$n' "$summary" >/dev/null
+
+          if (( TELEMETRY_CALLS > 0 )); then
+            echo "---- Telemetry smoke summary ----"
+            jq '.telemetry[] | {runId,minedSuccess,minedRevert,simulatedRejection,positiveTransitions,positiveEconomicTransitions,accountingActionShare,observationReads}' "$summary"
+            echo "---- Top 15 decoded telemetry revert reasons ----"
+            jq -r '[.telemetry[]?.decodedRevertReasons[]?] | group_by(.reason) | map({reason:.[0].reason,kind:.[0].kind,selector:.[0].selector,count:(map(.count)|add)}) | sort_by(-.count, .reason) | .[:15] | ("COUNT\tKIND\tSELECTOR\tREASON"), (.[] | [.count,.kind,(.selector // ""),.reason] | @tsv)' "$summary"
+          fi
+
+          fixture=.phase0-medusa-smoke/PHASE0_FIXTURE_SYNTHESIS_v1.json
+          if [ -f "$fixture" ]; then
+            echo "---- Fixture synthesis evidence ----"
+            jq '.' "$fixture"
+          elif jq -e '.fixtureSynthesis? != null' "$summary" >/dev/null; then
+            echo "---- Fixture synthesis evidence ----"
+            jq '.fixtureSynthesis' "$summary"
+          fi
+
+          if (( MEDUSA_CALLS > 0 )); then
+            echo "---- Medusa smoke summary ----"
+            jq '.medusa | del(.targetContracts, .achievedDispatchWeight.wrapperCounts, .achievedDispatchWeight.logicalCounts)' "$summary"
+            raw="$(find .phase0-medusa-smoke -name MEDUSA_RAW_OUTPUT_v1.log -print -quit)"
+            if [ -n "$raw" ]; then echo "---- Medusa raw output (tail) ----"; tail -n 120 "$raw" | sed -E 's#https?://[^ ]+#[URL]#g'; fi
+            jq -e --argjson n "$MEDUSA_CALLS" '(.medusa.status=="PASS" or .medusa.status=="COMPLETE_WITH_ORACLE_GAPS") and (.medusa.observedCalls|tonumber)>=$n' "$summary" >/dev/null
+          fi
+          if (( TELEMETRY_CALLS > 0 )); then
+            jq -e --argjson n "$TELEMETRY_CALLS" '(.telemetry|length)==1 and (.telemetry[0].status=="PASS") and (.telemetry[0].calls|tonumber)==$n' "$summary" >/dev/null
+          fi
