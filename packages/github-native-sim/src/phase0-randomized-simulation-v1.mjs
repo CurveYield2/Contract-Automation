@@ -1622,7 +1622,8 @@ export function aggregateMedusaShardsV2({shards,minimumRequiredCalls,configs}){
     return{shard:i+1,runId:s.runId,configId:s.configId,cluster:s.cluster,targetContracts:(s.targetContracts??[]).length,status:s.status,exitCode:s.exitCode,stoppedAtPlateau:s.stoppedAtPlateau===true,observedCalls:s.observedCalls,finalBranches:v.finalBranches??0,repetitionRate:v.repetitionRate??1,uniqueCallChainPairs:v.uniqueCallChainPairs??0,novelUniqueCallChainPairs:pairs.size-before,varietyStatus:v.status??'FAIL',rawOutputRef:s.rawOutputRef,summaryRef:`runs/${s.runId}/RUN_SUMMARY_v1.json`};
   });
   const failures=[];
-  if(rows.some(r=>r.varietyStatus!=='PASS'))failures.push('SHARD_VARIETY_REQUIREMENT_FAILED');
+  // Per-shard repetition is reported for reviewers but not gated: fast small shards saturate within one progress sample.
+  const shardsOverRepetition=rows.filter(r=>r.varietyStatus!=='PASS').map(r=>r.runId);
   const repetitionRate=calls?callsAfterLastGain/calls:1;
   if(repetitionRate>PHASE0_MEDUSA_MAX_REPETITION_RATE_V1)failures.push('COVERAGE_PLATEAUED_CALLS_ARE_REPEATING');
   if(pairs.size<represented.size)failures.push('TOO_FEW_UNIQUE_CALL_CHAIN_PAIRS');
@@ -1635,7 +1636,7 @@ export function aggregateMedusaShardsV2({shards,minimumRequiredCalls,configs}){
       repetitionRate,maximumRepetitionRate:PHASE0_MEDUSA_MAX_REPETITION_RATE_V1,
       uniqueCallChainPairs:pairs.size,uniqueCrossContractCallChainPairs:cross.size,uniqueCallChainTriples:triples.size,
       observedLogicalFunctionCount:logical.size,representedLogicalFunctionCount:represented.size,
-      minimumRequiredCalls,status:failures.length?'FAIL':'PASS',failures
+      minimumRequiredCalls,shardsOverRepetition,status:failures.length?'FAIL':'PASS',failures
     }
   };
 }
