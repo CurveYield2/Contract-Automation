@@ -25,7 +25,7 @@ async function startLocalAnvil(){
   const bin=path.join(root,'node_modules/@foundry-rs/anvil/bin.mjs');
   const child=spawn(process.execPath,[bin,'--host','127.0.0.1','--port',String(port),'--chain-id','31337','--auto-impersonate','--silent'],{stdio:['ignore','ignore','pipe']});
   let stderr='';child.stderr.on('data',x=>{stderr+=String(x);});
-  const provider=new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`,31337,{staticNetwork:true});
+  const provider=new ethers.JsonRpcProvider(`http://127.0.0.1:${port}`,31337,{staticNetwork:true,cacheTimeout:-1});
   const deadline=Date.now()+10000;
   while(Date.now()<deadline){
     if(child.exitCode!==null)throw new Error('anvil exited before readiness: '+stderr);
