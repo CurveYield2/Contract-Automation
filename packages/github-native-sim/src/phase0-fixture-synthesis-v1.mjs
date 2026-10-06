@@ -251,9 +251,6 @@ function storageKeyV1(ethers,holder,slot,layout){
 async function storageAtV1(provider,address,key){
   return provider.send('eth_getStorageAt',[address,key,'latest']);
 }
-async function setStorageAtV1(provider,address,key,value){
-  return provider.send('anvil_setStorageAt',[address,key,ethersWordV1(value)]);
-}
 function ethersWordV1(value){
   const v=BigInt(value);
   if(v<0n||v>((1n<<256n)-1n))throw new Error('storage value outside uint256');
@@ -353,8 +350,12 @@ export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spender
         rpcMutations.push({kind:'TOKEN_BALANCE_SET',token,holder,slot:slot.slot,layout:slot.layout,storageKey:key,amount:amount.toString(),status:'PASS'});
       }catch(error){gaps.push({type:'TOKEN_BALANCE_WRITE_VERIFICATION_FAILED',token,holder,slot:slot.slot,layout:slot.layout,message:String(error?.message??error).slice(0,800)});}
     }
-    tokenRecord.decimals=decimals;tokenRecord.fundedAmount=amount.toString();tokenRecord.balanceSlot=slot.slot;tokenRecord.balanceLayout=slot.layout;
-    slotResults.push({token,status:'FOUND',slot:slot.slot,layout:slot.layout,decimals,fundedAmount:amount.toString(),holdersWritten:writes,holdersVerified:verified});
+    if(tokenRecord&&typeof tokenRecord==='object'){
+      tokenRecord.decimals=decimals;
+      tokenRecord.fundedAmount=verified===holderAddresses.length?amount.toString():null;
+      tokenRecord.balanceSlot=slot.slot;tokenRecord.balanceLayout=slot.layout;
+    }
+    slotResults.push({token,status:'FOUND',slot:slot.slot,layout:slot.layout,decimals,fundedAmount:verified===holderAddresses.length?amount.toString():null,plannedFundedAmount:amount.toString(),holdersWritten:writes,holdersVerified:verified});
   }
 
   await mapLimitV1(holderAddresses,6,async holder=>{
