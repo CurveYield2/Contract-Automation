@@ -7,7 +7,7 @@ END-STATE INVARIANT:
 CurveYield2/anvil-node is converted from the full ethui/stacks clone into the minimum proven CurveYield-owned deployment that, through GitHub-controlled automation, runs a fixed private fleet of persistent Ethereum Anvil fork nodes with stable remotely reachable HTTPS JSON-RPC URLs. The fleet preserves the upstream Stacks Anvil lifecycle, fork, persistence, readiness, graceful-shutdown, and corrupt-state recovery behavior required for long-running simulation use; removes browser/frontend, public node creation, accounts/auth/email, MCP, explorer, Graph/IPFS/subgraph, and other multi-user/SaaS surfaces; keeps node startup/configuration server-controlled; uses a replaceable server-side Ethereum fork-source RPC without exposing it to Contract-Automation; and produces at least one primary endpoint that can replace `SIM_ARCHIVE_PRIMARY_ETHEREUM_01` and passes the existing Contract-Automation archive/fork-source probes plus Phase-0 smoke/full simulation qualification. Initial target fleet is four fixed nodes (`ethereum-01` through `ethereum-04`) with independent persistent state and stable URLs; no dynamic node-provisioning API is permitted.
 
 CURRENT MAIN:
-- Contract-Automation main checked: `5d7a0f5acfe359b5388d35abcb80b81f288117f9`.
+- Contract-Automation main checked: `98c628d26d62c064df12410dd50048d4c92ba0ce`.
 - anvil-node main checked: `79ee877cbeee3a783e1e065dc4f1cea3c7524379`.
 - Final disposable fleet qualification run: `https://github.com/CurveYield2/anvil-node/actions/runs/37484638546` — PASS.
 
@@ -61,7 +61,7 @@ REMAINING DELTA:
 - Set Contract-Automation's existing `SIM_ARCHIVE_PRIMARY_ETHEREUM_01` secret to the deployed `ethereum-01` endpoint.
 - Run `.github/workflows/lite-phase0-simulation-testing-v1.yml` against the deployed primary endpoint without weakening acceptance rules.
 - Run the standard full Phase-0 randomized simulation against the deployed primary endpoint without weakening Medusa/telemetry/deployment requirements.
-- Retire/delete the merged implementation branch if GitHub has not already done so.
+- Delete the merged `agent/curveyield-anvil-node-deployment` branch. GitHub did not auto-delete it; the available GitHub connector has no branch-delete action and the attempted GitHub browser cleanup was blocked by missing browser authentication.
 
 PARKED OBSERVATIONS:
 - The upstream repository exposes no license in GitHub metadata. Confirm redistribution/licensing terms before any broader redistribution decision; this does not change the already-completed technical implementation.
@@ -69,7 +69,7 @@ PARKED OBSERVATIONS:
 - General Contract-Automation refactors, audit-system changes, browser automation, and unrelated repository cleanup remain outside this task.
 
 ACTIVE BLOCKER:
-Production deployment cannot presently execute because the required persistent GitHub self-hosted runner/host configuration is not enabled. The latest deployment preflight observed `CURVEYIELD_ANVIL_SELF_HOSTED_ENABLED` as empty, and no durable host, production DNS value, or deployment secret values are available in the current task context. GitHub-hosted Actions runners are ephemeral and cannot satisfy the persistent RPC end-state. The available GitHub connector also does not expose repository secret or self-hosted-runner administration, so those values/resources cannot be fabricated or registered from this execution environment.
+Production deployment cannot presently execute because the required persistent GitHub self-hosted runner/host configuration is not enabled. The latest deployment preflight observed `CURVEYIELD_ANVIL_SELF_HOSTED_ENABLED` as empty, and no durable host, production DNS value, or deployment secret values are available in the current task context. GitHub-hosted Actions runners are ephemeral and cannot satisfy the persistent RPC end-state. The available GitHub connector does not expose repository-secret or self-hosted-runner administration, so those resources cannot be fabricated or registered from this execution environment. Separately, the merged implementation branch still exists because repository setting `delete_branch_on_merge` is false; the connector exposes no branch-delete action and a GitHub UI deletion attempt was blocked by missing browser authentication.
 
 NEXT ACTION:
 On a durable Linux host, install Docker Engine and Docker Compose v2, register a GitHub Actions self-hosted runner for `CurveYield2/anvil-node` with the `curveyield-anvil` label, point the chosen RPC hostname to that host, and configure the three repository secrets. Then set `CURVEYIELD_ANVIL_SELF_HOSTED_ENABLED=true` and dispatch the canonical workflow from `main`. Resume this lock at the production deployment job; do not repeat implementation or disposable qualification work.
