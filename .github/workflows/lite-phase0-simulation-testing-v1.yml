@@ -23,6 +23,26 @@ on:
         required: false
         default: '0'
         type: string
+  workflow_call:
+    inputs:
+      campaign_id:
+        required: true
+        type: string
+      campaign_path:
+        required: true
+        type: string
+      audit_controller_ref:
+        required: false
+        default: main
+        type: string
+      medusa_calls:
+        required: false
+        default: '1000'
+        type: string
+      telemetry_calls:
+        required: false
+        default: '0'
+        type: string
 
 permissions:
   contents: read
