@@ -187,18 +187,20 @@ test('Stage-1 discovers associations and privileged actors, funds Solidity and V
     ];
 
     const pool=await discoverValuePoolV1({provider,ethers,targets,actors:accounts.slice(0,2)});
+    const slotTokenAddress=ethers.getAddress(await slotToken.getAddress());
+    const vyperTokenAddress=ethers.getAddress(await vyperToken.getAddress());
     const registryAddress=ethers.getAddress(await registry.getAddress());
-    assert.ok(pool.tokens.some(x=>x.address===ethers.getAddress(await slotToken.getAddress())&&x.decimals===18));
-    assert.ok(pool.tokens.some(x=>x.address===ethers.getAddress(await vyperToken.getAddress())&&x.decimals===6));
+    assert.ok(pool.tokens.some(x=>x.address===slotTokenAddress&&x.decimals===18));
+    assert.ok(pool.tokens.some(x=>x.address===vyperTokenAddress&&x.decimals===6));
     assert.ok(pool.privileged.includes(ethers.getAddress(accounts[0])));
     assert.ok(pool.associations[registryAddress] instanceof Set);
-    assert.ok(pool.associations[registryAddress].has(ethers.getAddress(await slotToken.getAddress())));
-    assert.ok(pool.associations[registryAddress].has(ethers.getAddress(await vyperToken.getAddress())));
+    assert.ok(pool.associations[registryAddress].has(slotTokenAddress));
+    assert.ok(pool.associations[registryAddress].has(vyperTokenAddress));
 
     const holders=[accounts[0],PHASE0_MEDUSA_SENDERS_V1[0]];
     const funding=await fundActorsV1({provider,ethers,tokens:pool.tokens,holders,spenders:[registryAddress]});
-    const slotRow=funding.slotResults.find(x=>x.token===ethers.getAddress(await slotToken.getAddress()));
-    const vyperRow=funding.slotResults.find(x=>x.token===ethers.getAddress(await vyperToken.getAddress()));
+    const slotRow=funding.slotResults.find(x=>x.token===slotTokenAddress);
+    const vyperRow=funding.slotResults.find(x=>x.token===vyperTokenAddress);
     assert.equal(slotRow.status,'FOUND');
     assert.equal(slotRow.layout,'SOLIDITY');
     assert.equal(vyperRow.status,'FOUND');
