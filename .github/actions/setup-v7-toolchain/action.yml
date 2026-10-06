@@ -26,8 +26,9 @@ runs:
           ~/.cache/pip
           ~/.cache/go-build
           ~/go/pkg/mod
-          ~/.cache/curveyield-v7-tools/medusa-1.5.1
-        key: v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-1.5.1
+          ~/.cache/curveyield-v7-tools/medusa-1.5.1-corpus-perf
+          ~/.cache/curveyield-v7-tools/medusa-1.5.1-corpus-perf.patch-sha256
+        key: v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-1.5.1-${{ hashFiles('.github/actions/setup-v7-toolchain/medusa-v1.5.1-corpus-perf.patch') }}
         restore-keys: |
           v7-medusa-go-${{ runner.os }}-${{ runner.arch }}-
 
@@ -37,13 +38,21 @@ runs:
         set -euo pipefail
         install_dir="$RUNNER_TEMP/v7-tools/bin"
         mkdir -p "$install_dir"
-        medusa_cache="$HOME/.cache/curveyield-v7-tools/medusa-1.5.1"
+        # Pinned Medusa 1.5.1 source plus a performance-only corpus patch: memoize corpus sequence hashes and defer
+        # corpus disk writes to shutdown. Without it every coverage-increasing call re-hashes and re-serializes under
+        # a global lock, so deep fuzzing collapses to a few calls per second. Fuzzing semantics are unchanged.
+        medusa_patch="$GITHUB_WORKSPACE/.github/actions/setup-v7-toolchain/medusa-v1.5.1-corpus-perf.patch"
+        medusa_cache="$HOME/.cache/curveyield-v7-tools/medusa-1.5.1-corpus-perf"
         mkdir -p "$(dirname "$medusa_cache")"
-        if [ -x "$medusa_cache" ]; then
+        if [ -x "$medusa_cache" ] && [ "$(cat "$medusa_cache.patch-sha256" 2>/dev/null)" = "$(sha256sum "$medusa_patch" | cut -d' ' -f1)" ]; then
           cp "$medusa_cache" "$install_dir/medusa"
         else
-          GOBIN="$install_dir" go install github.com/crytic/medusa@v1.5.1
+          medusa_src="$(go mod download -json github.com/crytic/medusa@v1.5.1 | jq -r .Dir)"
+          build_dir="$RUNNER_TEMP/medusa-1.5.1-src"
+          rm -rf "$build_dir" && cp -r "$medusa_src" "$build_dir" && chmod -R u+w "$build_dir"
+          (cd "$build_dir" && patch -p1 --forward < "$medusa_patch" && go build -o "$install_dir/medusa" .)
           cp "$install_dir/medusa" "$medusa_cache"
+          sha256sum "$medusa_patch" | cut -d' ' -f1 > "$medusa_cache.patch-sha256"
         fi
 
         forge_entry="$GITHUB_WORKSPACE/node_modules/@foundry-rs/forge/bin.mjs"
