@@ -17,6 +17,12 @@ on:
         default: main
         type: string
 
+      resume_from_finalize:
+        description: Skip qualification, intelligence and simulation whose evidence is already published for this campaign; finalize re-validates it
+        required: false
+        default: false
+        type: boolean
+
       completed_stages_manifest:
         description: Campaign-relative manifest of source-bound completed Medusa and telemetry evidence; empty executes fresh stages
         required: false
@@ -33,7 +39,7 @@ concurrency:
 
 jobs:
   qualification:
-    if: inputs.completed_stages_manifest == ''
+    if: inputs.completed_stages_manifest == '' && !inputs.resume_from_finalize
     uses: ./.github/workflows/v7-execution-infrastructure-qualification.yml
     with:
       controller_ref: ${{ inputs.audit_controller_ref }}
@@ -41,7 +47,7 @@ jobs:
     secrets: inherit
 
   resume-qualification:
-    if: inputs.completed_stages_manifest != ''
+    if: inputs.completed_stages_manifest != '' && !inputs.resume_from_finalize
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -89,7 +95,7 @@ jobs:
           NODE
 
   intelligence:
-    if: inputs.completed_stages_manifest == ''
+    if: inputs.completed_stages_manifest == '' && !inputs.resume_from_finalize
     needs: qualification
     uses: ./.github/workflows/lite-phase0-intelligence-v1.yml
     with:
@@ -100,7 +106,7 @@ jobs:
 
   randomized-simulation:
     needs: [qualification, intelligence, resume-qualification]
-    if: ${{ always() && ((inputs.completed_stages_manifest == '' && needs.qualification.result == 'success' && needs.intelligence.result == 'success') || (inputs.completed_stages_manifest != '' && needs.resume-qualification.result == 'success')) }}
+    if: ${{ always() && !inputs.resume_from_finalize && ((inputs.completed_stages_manifest == '' && needs.qualification.result == 'success' && needs.intelligence.result == 'success') || (inputs.completed_stages_manifest != '' && needs.resume-qualification.result == 'success')) }}
     uses: ./.github/workflows/lite-phase0-randomized-simulation-v1.yml
     with:
       campaign_id: ${{ inputs.campaign_id }}
@@ -111,7 +117,7 @@ jobs:
 
   finalize-and-launch-reviewer1:
     needs: randomized-simulation
-    if: ${{ always() && needs.randomized-simulation.result == 'success' }}
+    if: ${{ always() && (needs.randomized-simulation.result == 'success' || inputs.resume_from_finalize) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -125,6 +131,14 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install trusted runner dependencies
+        run: npm ci --force
 
       - name: Select Audit-Controller credential
         env:
