@@ -18,7 +18,7 @@ on:
         type: string
 
       resume_from_finalize:
-        description: Skip qualification, intelligence and simulation whose evidence is already published for this campaign; finalize re-validates it
+        description: Requalify, then skip intelligence and simulation whose evidence is already published for this campaign; finalize re-validates it
         required: false
         default: false
         type: boolean
@@ -39,7 +39,7 @@ concurrency:
 
 jobs:
   qualification:
-    if: inputs.completed_stages_manifest == '' && !inputs.resume_from_finalize
+    if: inputs.completed_stages_manifest == ''
     uses: ./.github/workflows/v7-execution-infrastructure-qualification.yml
     with:
       controller_ref: ${{ inputs.audit_controller_ref }}
@@ -116,8 +116,8 @@ jobs:
     secrets: inherit
 
   finalize-and-launch-reviewer1:
-    needs: randomized-simulation
-    if: ${{ always() && (needs.randomized-simulation.result == 'success' || inputs.resume_from_finalize) }}
+    needs: [qualification, randomized-simulation]
+    if: ${{ always() && (needs.randomized-simulation.result == 'success' || (inputs.resume_from_finalize && needs.qualification.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
