@@ -82,11 +82,14 @@ jobs:
       - name: Run Anvil baseline, deployment simulation, Medusa and ABI telemetry
         if: inputs.completed_stages_manifest == ''
         env:
-          ETHEREUM_FORK_RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          ETHEREUM_FORK_RPC_URL: https://eth.drpc.org/
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::SIM_ARCHIVE_PRIMARY_ETHEREUM_01 is required for the default Ethereum Phase-0 fork"; exit 1; }
+          chain_id="$(curl -fsS --max-time 15 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
+          test "$chain_id" = "0x1" || { echo "::error::dRPC Ethereum fork source did not report chain ID 1"; exit 1; }
+          historical_code="$(curl -fsS --max-time 30 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_getCode","params":["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2","0x112a880"]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
+          test -n "$historical_code" && test "$historical_code" != "0x" || { echo "::error::dRPC Ethereum fork source did not return historical WETH code at block 18000000"; exit 1; }
           rm -rf .phase0-randomized-output
           node scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --output .phase0-randomized-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-randomized.json
 
