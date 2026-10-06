@@ -6,8 +6,8 @@ CurveYield2/Smart-Contracts contains a complete, reviewable cyvbETH IPOR vault c
 
 ## CURRENT MAIN
 
-- Contract-Automation main at lock creation: `b1f96af78ea323bcbc2032a540b0feb25ec2f681`.
-- Smart-Contracts live main has not yet been inspected for this task because the human explicitly required creation of this focus/task lock before any other assignment work.
+- Contract-Automation main after creation of this canonical lock: `d3c37d4901a94fb0e8fa54adf5cb2018e138c341`.
+- Smart-Contracts live main verified after lock creation: `ae583cf5a616200534b06cbd2a20ba04814be07f`.
 
 ## AUTHORITY
 
