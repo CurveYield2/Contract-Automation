@@ -1,7 +1,7 @@
 name: Lite Phase 0 Simulation Testing v1
 
-# Proves the production Phase-0 Medusa stage end to end (real deployment on the Anvil fork, generated router,
-# Medusa engine) with a small call budget before spending a full campaign simulation. Never publishes evidence.
+# Proves production Phase-0 Medusa and/or ABI telemetry end to end on the real Anvil deployment with reduced
+# call budgets before spending a full campaign simulation. Never publishes campaign evidence.
 on:
   workflow_dispatch:
     inputs:
