@@ -155,7 +155,7 @@ test('Medusa shard configurations add one all-target shard plus source clusters,
   ]);
 });
 
-test('Medusa shard aggregation unions call-chain variety and gates per shard and in total',async()=>{
+test('Medusa shard aggregation unions call-chain variety, gates the total and reports per-shard repetition',async()=>{
   const { aggregateMedusaShardsV2 } = await import('../src/phase0-randomized-simulation-v1.mjs');
   const shard=(runId,configId,calls,gainAt,pairs,status='PASS')=>{
     const s={runId,configId,status:'COMPLETE_WITH_ORACLE_GAPS',observedCalls:calls,targetContracts:[],variety:{callsAtLastCoverageGain:gainAt,repetitionRate:(calls-gainAt)/calls,uniqueCallChainPairs:pairs.length,status},achievedDispatchWeight:{dispatches:10,economicDispatches:8}};
@@ -169,7 +169,8 @@ test('Medusa shard aggregation unions call-chain variety and gates per shard and
   assert.equal(ok.rows[1].novelUniqueCallChainPairs,1);
   assert.equal(ok.variety.status,'PASS');
   const bad=aggregateMedusaShardsV2({configs,minimumRequiredCalls:100,shards:[shard('s1','all-targets',100,70,['a->b','b->a']),shard('s2','cluster-x',100,10,['a->a'],'FAIL')]});
-  assert.deepEqual(bad.variety.failures,['SHARD_VARIETY_REQUIREMENT_FAILED','COVERAGE_PLATEAUED_CALLS_ARE_REPEATING']);
+  assert.deepEqual(bad.variety.failures,['COVERAGE_PLATEAUED_CALLS_ARE_REPEATING']);
+  assert.deepEqual(bad.variety.shardsOverRepetition,['s2']);
   const missing=aggregateMedusaShardsV2({configs,minimumRequiredCalls:100,shards:[shard('s1','all-targets',100,70,['a->b','b->a'])]});
   assert.ok(missing.variety.failures.includes('SHARD_CONFIGURATION_NOT_EXECUTED'));
 });
