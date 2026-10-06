@@ -173,7 +173,7 @@ async function probeErc20ShapeV1({provider,ethers,address,probeHolder}){
 }
 
 export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}){
-  const addressSet=new Set(),tokens=[],tokenByAddress=new Map(),associations={},privileged=new Set(),gaps=[];
+  const addressSet=new Set(),tokens=[],tokenByAddress=new Map(),associations={},privileged=new Set(),receipts=[],gaps=[];
   for(const actor of actors){
     const address=normalizedAddressV1(ethers,actor);
     if(address)addressSet.add(address);
@@ -184,7 +184,7 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
     const targetAddress=normalizedAddressV1(ethers,target?.address);
     if(!targetAddress)continue;
     addressSet.add(targetAddress);
-    const related=new Set();
+    const related=associations[targetAddress]??new Set();
     associations[targetAddress]=related;
     let iface,contract;
     try{
@@ -200,6 +200,7 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
         const found=collectAddressesV1(ethers,value);
         for(const address of found){related.add(address);addressSet.add(address);}
         if(isPrivilegedViewNameV1(fragment.name))for(const address of found)privileged.add(address);
+        receipts.push({kind:'ASSOCIATION_VIEW',target:targetAddress,function:fragment.format('sighash'),addresses:[...found],status:'PASS'});
       }catch(error){
         gaps.push({type:'ASSOCIATION_VIEW_REVERTED',target:targetAddress,function:fragment.format('sighash'),message:String(error?.shortMessage??error?.message??error).slice(0,800)});
       }
@@ -212,9 +213,10 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
       gaps.push({type:'CANONICAL_TOKEN_CODE_READ_FAILED',symbol:row.symbol,address,message:String(error?.message??error).slice(0,800)});
       continue;
     }
+    receipts.push({kind:'CANONICAL_TOKEN_CODE_PROBE',symbol:row.symbol,address,codePresent:Boolean(code&&code!=='0x'),status:'PASS'});
     if(!code||code==='0x')continue;
     let shape=null;
-    try{shape=await probeErc20ShapeV1({provider,ethers,address,probeHolder:deployer??ethers.ZeroAddress});}
+    try{shape=await probeErc20ShapeV1({provider,ethers,address,probeHolder:deployer??ethers.ZeroAddress});receipts.push({kind:'CANONICAL_TOKEN_ERC20_PROBE',symbol:row.symbol,address,decimals:shape.decimals,totalSupply:shape.totalSupply,status:'PASS'});}
     catch(error){gaps.push({type:'CANONICAL_TOKEN_METADATA_READ_FAILED',symbol:row.symbol,address,message:String(error?.shortMessage??error?.message??error).slice(0,800)});}
     const token={symbol:row.symbol,address,source:'CANONICAL_MAINNET',decimals:shape?.decimals??null,totalSupply:shape?.totalSupply??null};
     tokens.push(token);tokenByAddress.set(address.toLowerCase(),token);addressSet.add(address);
@@ -226,6 +228,7 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
       const shape=await probeErc20ShapeV1({provider,ethers,address,probeHolder:deployer??ethers.ZeroAddress});
       const token={symbol:null,address,source:'DISCOVERED_ERC20_SHAPE',qualifiedName:target?.qualifiedName??null,decimals:shape.decimals,totalSupply:shape.totalSupply};
       tokens.push(token);tokenByAddress.set(address.toLowerCase(),token);addressSet.add(address);
+      receipts.push({kind:'TARGET_ERC20_SHAPE_PROBE',address,qualifiedName:target?.qualifiedName??null,decimals:shape.decimals,totalSupply:shape.totalSupply,status:'PASS'});
     }catch{}
   }
   for(const address of privileged)addressSet.add(address);
@@ -235,6 +238,7 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
     associations,
     privileged:[...privileged],
     created:[],
+    receipts,
     gaps
   };
 }
@@ -412,10 +416,13 @@ export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spender
 }
 
 function associationValuesV1(valuePool,address){
-  const key=Object.keys(valuePool?.associations??{}).find(x=>x.toLowerCase()===String(address).toLowerCase());
-  if(!key)return[];
-  const value=valuePool.associations[key];
-  return value instanceof Set?[...value]:Array.isArray(value)?value:[];
+  const needle=String(address).toLowerCase(),out=[];
+  for(const [key,value] of Object.entries(valuePool?.associations??{})){
+    const rows=value instanceof Set?[...value]:Array.isArray(value)?value:[];
+    if(key.toLowerCase()===needle)out.push(...rows);
+    if(rows.some(x=>String(x).toLowerCase()===needle))out.push(key);
+  }
+  return uniqueStringsV1(out);
 }
 function bucketFillV1(out,values,weight){
   if(!values.length)return;
@@ -475,6 +482,7 @@ export function serializeValuePoolV1(valuePool={}){
     associations,
     privileged:[...(valuePool.privileged??[])],
     created:[...(valuePool.created??[])],
+    receipts:[...(valuePool.receipts??[])],
     gaps:[...(valuePool.gaps??[])]
   };
 }
