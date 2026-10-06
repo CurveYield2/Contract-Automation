@@ -1784,12 +1784,17 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       await provider.destroy();
       throw error;
     }
-    const valuePool=await discoverValuePoolV1({provider,ethers,targets,actors});
-    const fixtureFunding=await fundActorsV1({
-      provider,ethers,tokens:valuePool.tokens,
-      holders:[...actors,...PHASE0_MEDUSA_SENDERS_V1],
-      spenders:targets.map(x=>x.address)
-    });
+    // Fixture synthesis is best effort: a failure is recorded as a typed gap and never aborts the simulation.
+    let valuePool,fixtureFunding;
+    try{valuePool=await discoverValuePoolV1({provider,ethers,targets,actors});}
+    catch(error){valuePool={addresses:[],tokens:[],associations:{},privileged:[],created:[],receipts:[],gaps:[{type:'VALUE_POOL_DISCOVERY_FAILED',message:String(error?.message??error).slice(0,1200)}]};}
+    try{
+      fixtureFunding=await fundActorsV1({
+        provider,ethers,tokens:valuePool.tokens,
+        holders:[...actors,...PHASE0_MEDUSA_SENDERS_V1],
+        spenders:targets.map(x=>x.address)
+      });
+    }catch(error){fixtureFunding={holders:[],spenders:[],slotResults:[],rpcMutations:[],transactionReceipts:[],receiptCounts:{},permit2:null,gaps:[{type:'ACTOR_FUNDING_FAILED',message:String(error?.message??error).slice(0,1200)}]};}
     const serializedValuePool=serializeValuePoolV1(valuePool);
     const fixtureEvidence={
       schemaVersion:'curveyield-phase0-fixture-synthesis-v1',

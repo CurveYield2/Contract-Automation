@@ -253,6 +253,9 @@ test('Stage-1 address seeding keeps the required weighted buckets and amount can
   assert.ok(amounts.includes('1000000'));
   assert.ok(amounts.every(x=>BigInt(x)<=1000000000000n));
   assert.equal(chooseFixtureAmountV1({rng:()=>0,param:{type:'uint32'},valuePool:pool,chosenAddresses:[token]}),null);
+  assert.equal(chooseFixtureAmountV1({rng:()=>0,param:{type:'uint256',name:'deadline'},valuePool:pool,chosenAddresses:[token]}),null);
+  assert.equal(chooseFixtureAmountV1({rng:()=>0,param:{type:'uint256',name:'poolIndex'},valuePool:pool,chosenAddresses:[token]}),null);
+  assert.notEqual(chooseFixtureAmountV1({rng:()=>0,param:{type:'uint256',name:'amountIn'},valuePool:pool,chosenAddresses:[token]}),null);
 });
 
 test('Stage-1 Medusa router embeds value-pool address constants without targeting the seed helper',()=>{

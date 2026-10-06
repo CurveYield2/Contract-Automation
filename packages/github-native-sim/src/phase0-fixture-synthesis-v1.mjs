@@ -261,7 +261,9 @@ async function balanceOfV1({provider,ethers,token,holder}){
   return BigInt(await c.getFunction('balanceOf(address)').staticCall(holder));
 }
 async function findBalanceSlotV1({provider,ethers,token,holder}){
-  const before=await balanceOfV1({provider,ethers,token,holder});
+  let before;
+  try{before=await balanceOfV1({provider,ethers,token,holder});}
+  catch(error){return{status:'NOT_FOUND',reason:'BALANCE_OF_UNREADABLE',message:String(error?.shortMessage??error?.message??error).slice(0,800)};}
   const probe=before===0x13579bdf2468acen?0x2468ace13579bdfn:0x13579bdf2468acen;
   for(let slot=0;slot<=50;slot++){
     for(const layout of ['SOLIDITY','VYPER']){
@@ -459,9 +461,15 @@ export function chooseFixtureAddressV1({rng=Math.random,valuePool={},actors=[],t
   if(!weighted.length)return null;
   return weighted[Math.min(weighted.length-1,Math.floor(rng()*weighted.length))];
 }
+// Only quantity-like params get funded-amount candidates; indices, ids, deadlines and fees keep generic values.
+const AMOUNT_LIKE_PARAM_RE_V1=/(?:amount|amt|value|assets?|shares?|qty|quantity|liquidity|balance|deposit|withdraw|supply|wad|max|min|limit|in$|out$)/i;
+export function isAmountLikeParamV1(param){
+  const name=String(param?.name??'');
+  return name?AMOUNT_LIKE_PARAM_RE_V1.test(name):true;
+}
 export function chooseFixtureAmountV1({rng=Math.random,param,valuePool={},chosenAddresses=[]}={}){
   const m=String(param?.type??'').match(/^uint(\d+)?$/);
-  if(!m)return null;
+  if(!m||!isAmountLikeParamV1(param))return null;
   const bits=Number(m[1]??256);if(bits<64)return null;
   const tokens=(valuePool.tokens??[]).filter(x=>Number.isInteger(Number(x?.decimals))&&x?.fundedAmount!=null&&BigInt(x.fundedAmount)>0n);
   if(!tokens.length)return null;
