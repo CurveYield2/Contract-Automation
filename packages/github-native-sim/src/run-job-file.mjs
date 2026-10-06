@@ -13,6 +13,9 @@ import { runStage2aAnalysis } from './stage2a-toolchain.mjs';
 import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligence-technical-v1.mjs';
 import { V7_POLICY } from './v7-policy.mjs';
 
+const DEFAULT_ETHEREUM_FORK_RPC_URL = 'https://eth.drpc.org/';
+const LEGACY_ETHEREUM_FORK_RPC_ENV = 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01';
+
 function nowIso(now = () => new Date()) { return now().toISOString(); }
 
 function rawArtifactRef(component) {
@@ -124,14 +127,24 @@ function phase7RpcEnv(simulation) {
   return CHAINS[simulation.chain].rpcEnv;
 }
 
+function phase7ForkUrl(simulation, environment = {}) {
+  const rpcEnv = phase7RpcEnv(simulation);
+  if (simulation.chain === V7_POLICY.mutableRpc.chain) {
+    return environment?.[rpcEnv]
+      || environment?.[LEGACY_ETHEREUM_FORK_RPC_ENV]
+      || DEFAULT_ETHEREUM_FORK_RPC_URL;
+  }
+  return environment?.[rpcEnv];
+}
+
 async function executePhase7Simulation({ request, build, environment, startSimulationEngine, executeSimulationWorkflow }) {
   if (request.phaseId !== 'fork-simulation-lifecycle') return null;
   const simulation = request.configuration.simulation;
   const chain = CHAINS[simulation.chain];
   const rpcEnv = phase7RpcEnv(simulation);
-  const forkUrl = environment[rpcEnv];
+  const forkUrl = phase7ForkUrl(simulation, environment);
   if (!forkUrl) {
-    const error = new Error(`Runner secret ${rpcEnv} is not configured for the pinned ${simulation.chain} fork`);
+    const error = new Error(`Runner RPC profile ${rpcEnv} is not configured for the pinned ${simulation.chain} fork`);
     error.kind = 'RPC_CONFIGURATION_FAILURE';
     error.simulationEvidence = simulationFailure({ request, kind: error.kind, error });
     throw error;

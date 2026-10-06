@@ -203,7 +203,7 @@ test('Phase 7 uses the same accepted build for gas evidence and a full pinned-fo
     workspaceRoot: '/tmp/v7-phase7-gas',
     checkoutSource: checkout(calls),
     buildProject: build(calls, artifacts),
-    environment: { SIM_ARCHIVE_PRIMARY_ETHEREUM_01: 'https://ethereum-archive-rpc.example' },
+    environment: { ETHEREUM_FORK_RPC_URL: 'https://ethereum-archive-rpc.example' },
     startSimulationEngine: async (input) => {
       calls.push('start-fork');
       assert.equal(input.chainId, 1);
@@ -239,22 +239,28 @@ test('Phase 7 uses the same accepted build for gas evidence and a full pinned-fo
   assert.equal(result.simulation.deployments.vault.contractName, 'Vault');
 });
 
-test('Phase 7 refuses lifecycle execution when the authoritative archive RPC secret is unavailable', async () => {
+test('Phase 7 defaults to dRPC when no private Ethereum RPC is configured', async () => {
   const calls = [];
   const artifacts = [{ sourceName: 'contracts/Vault.sol', contractName: 'Vault', abi: [], bytecode: '0x6000', gasEstimates: null }];
   const result = await runGitHubNativeJob(phase7Request(), {
-    workspaceRoot: '/tmp/v7-phase7-no-rpc',
+    workspaceRoot: '/tmp/v7-phase7-default-rpc',
     checkoutSource: checkout(calls),
     buildProject: build(calls, artifacts),
     environment: {},
-    startSimulationEngine: async () => { calls.push('start-fork'); throw new Error('must not start'); }
+    startSimulationEngine: async (input) => {
+      calls.push('start-fork');
+      assert.equal(input.forkUrl, 'https://eth.drpc.org/');
+      return { engine: 'anvil', runtime: {}, aliases: {}, async close() { calls.push('close-fork'); } };
+    },
+    executeSimulationWorkflow: async () => {
+      calls.push('lifecycle');
+      return { steps: [], context: { deployments: {} } };
+    }
   });
-  assert.deepEqual(calls, ['checkout', 'build']);
-  assert.equal(result.status, 'failed');
-  assert.match(result.error.message, /SIM_ARCHIVE_PRIMARY_ETHEREUM_01/);
-  assert.equal(result.deploymentGasEvidence.rows[0].status, 'UNAVAILABLE');
-  assert.equal(result.simulation.status, 'failed');
-  assert.equal(result.simulation.failureKind, 'RPC_CONFIGURATION_FAILURE');
+  assert.deepEqual(calls, ['checkout', 'build', 'start-fork', 'lifecycle', 'close-fork']);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.simulation.status, 'completed');
+  assert.equal(result.simulation.engine, 'anvil');
 });
 
 test('Phase 7 captures workflow failures as typed lifecycle evidence and closes the fork engine', async () => {
@@ -267,7 +273,7 @@ test('Phase 7 captures workflow failures as typed lifecycle evidence and closes 
     workspaceRoot: '/tmp/v7-phase7-fail',
     checkoutSource: checkout(calls),
     buildProject: build(calls, artifacts),
-    environment: { SIM_ARCHIVE_PRIMARY_ETHEREUM_01: 'https://ethereum-archive-rpc.example' },
+    environment: { ETHEREUM_FORK_RPC_URL: 'https://ethereum-archive-rpc.example' },
     startSimulationEngine: async () => ({ engine: 'anvil', runtime: {}, aliases: {}, async close() { calls.push('close-fork'); } }),
     executeSimulationWorkflow: async () => { calls.push('lifecycle'); throw error; }
   });

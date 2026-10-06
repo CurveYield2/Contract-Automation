@@ -70,7 +70,7 @@ test('Phase 7 rejects a non-Anvil fork engine identity', async () => {
   const result = await runGitHubNativeJob(request(), {
     checkoutSource,
     buildProject,
-    environment: { SIM_ARCHIVE_PRIMARY_ETHEREUM_01: 'https://archive.example' },
+    environment: {},
     startSimulationEngine: async () => ({ engine: 'ganache', runtime: {}, aliases: {}, async close() {} }),
     executeSimulationWorkflow
   });
@@ -83,7 +83,7 @@ test('Phase 7 records Anvil as durable simulation evidence', async () => {
   const result = await runGitHubNativeJob(request(), {
     checkoutSource,
     buildProject,
-    environment: { SIM_ARCHIVE_PRIMARY_ETHEREUM_01: 'https://archive.example' },
+    environment: {},
     startSimulationEngine: async () => ({ engine: 'anvil', runtime: {}, aliases: {}, async close() {} }),
     executeSimulationWorkflow
   });
