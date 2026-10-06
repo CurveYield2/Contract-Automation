@@ -293,9 +293,12 @@ function receiptRowV1(kind,receipt,extra={}){
   return{kind,...extra,transactionHash:receipt?.hash??null,blockNumber:receipt?.blockNumber??null,status:Number(receipt?.status??0),gasUsed:receipt?.gasUsed?.toString?.()??null};
 }
 async function sendEncodedV1({provider,ethers,from,to,iface,signature,args,gasLimit=300000n}){
-  const signer=await provider.getSigner(from);
-  const tx=await signer.sendTransaction({to,data:iface.encodeFunctionData(signature,args),gasLimit});
-  const receipt=await tx.wait();
+  const hash=await provider.send('eth_sendTransaction',[{
+    from,to,
+    data:iface.encodeFunctionData(signature,args),
+    gas:ethers.toQuantity(gasLimit)
+  }]);
+  const receipt=await provider.waitForTransaction(hash);
   if(Number(receipt?.status)!==1)throw new Error('transaction receipt status is not successful');
   return receipt;
 }
