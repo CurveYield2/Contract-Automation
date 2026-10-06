@@ -1474,7 +1474,7 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
   const heartbeat=setInterval(()=>console.log(`[phase0-medusa] heartbeat: mode=${mode}; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; configuredCallLimit=${callLimit}`),300000);
   heartbeat.unref?.();
   let r;
-  try{r=await runProcess({command:'timeout',args:['1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv()});}
+  try{r=await runProcess({command:'timeout',args:['-s','INT','-k','120s','1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv()});}
   finally{clearInterval(heartbeat);}
   const raw=`${r.stdout??''}\n${r.stderr??''}`;await fs.writeFile(path.join(dir,'MEDUSA_RAW_OUTPUT_v1.log'),raw);
   let parsed;
