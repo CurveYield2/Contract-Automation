@@ -42,7 +42,17 @@ async function makePlan(p,id){
   solutions.sort((a,b)=>a.withdrawWbtc<b.withdrawWbtc?-1:1);const best=solutions[0];
   const block=await p.send('eth_getBlockByNumber',['latest',false]);
   const plan={positionId:id,withdrawWbtc:best.withdrawWbtc,firstMinimum,secondMinimum:best.secondMinimum,deadline:Number(BigInt(block.timestamp))+300,route:best.route};
-  save('PLAN_v5.json',{plan,firstQuote,repayFee:fees[3],withdrawFee:fees[1],solutions});return plan;
+  save('PLAN_v6.json',{plan,firstQuote,repayFee:fees[3],withdrawFee:fees[1],solutions});return plan;
+}
+async function forkSend(p,tx,label){
+  console.log('STAGE: '+label+' send');
+  const hash=await p.send('eth_sendTransaction',[tx]);
+  for(let i=0;i<120;i++){
+    const receipt=await p.send('eth_getTransactionReceipt',[hash]);
+    if(receipt){assert(BigInt(receipt.status)===1n,label+' reverted');console.log('STAGE: '+label+' mined '+hash);return receipt;}
+    await new Promise(resolve=>setTimeout(resolve,500));
+  }
+  throw Error(label+' receipt missing after 60 seconds');
 }
 async function deploy(artifact,signer){const factory=new ethers.ContractFactory(artifact.abi,artifact.bytecode.object,signer);const h=await factory.deploy(C.owner);await h.waitForDeployment();return h;}
 async function executeAndVerify(p,signer,helper,plan,simulation){
@@ -52,7 +62,9 @@ async function executeAndVerify(p,signer,helper,plan,simulation){
   const initial={usdc:await balance(p,C.usdc,helperAddress),fxusd:await balance(p,C.fxusd,helperAddress),wbtc:await balance(p,C.wbtc,helperAddress)};
   assert(Object.values(initial).every(x=>x===0n),'Executor must begin with zero tokens to prove self-funded repayment');
   const previousApproval=await nft.getApproved(plan.positionId);
-  console.log('STAGE: position approval');const approval=await nft.approve(helperAddress,plan.positionId);await approval.wait(1,60000);console.log('STAGE: position approval mined');
+  if(simulation){
+    await forkSend(p,{from:C.owner,to:C.pool,data:nft.interface.encodeFunctionData('approve',[helperAddress,plan.positionId]),gas:'0x7a120'},'position approval');
+  }else{console.log('STAGE: position approval');const approval=await nft.approve(helperAddress,plan.positionId);await approval.wait(1,180000);console.log('STAGE: position approval mined');}
   try{
     if(simulation){
       await expectRevert('199.4 fxUSD absolute floor',()=>helper.execute.staticCall({...plan,firstMinimum:199399999999999999999n}),'InvalidPlan()');
@@ -84,15 +96,15 @@ async function executeAndVerify(p,signer,helper,plan,simulation){
     assert(after[1]<before[1]&&after[0]<before[0],'Debt/collateral did not decrease');
     assert((await nft.ownerOf(plan.positionId)).toLowerCase()===C.owner,'NFT ownership was not restored');
     for(const token of [C.usdc,C.fxusd,C.wbtc])assert(await balance(p,token,helperAddress)===0n,'Executor retained tokens');
-    const result={version:5,status:'PASS',mode:simulation?'simulate-only':'live-broadcast',chainId:1,helper:helperAddress,transactionHash:receipt.hash,blockNumber:receipt.blockNumber,gasUsed:receipt.gasUsed,positionId:plan.positionId,before,after,debtDecrease:before[1]-after[1],rawCollateralDecrease:before[0]-after[0],vaultBefore,vaultAfter,flashFee:fee,initialExecutorBalances:initial,events,plan};
-    save(simulation?'SIMULATION_v5.json':'BROADCAST_v5.json',result);console.log(json(result));return result;
+    const result={version:6,status:'PASS',mode:simulation?'simulate-only':'live-broadcast',chainId:1,helper:helperAddress,transactionHash:receipt.hash,blockNumber:receipt.blockNumber,gasUsed:receipt.gasUsed,positionId:plan.positionId,before,after,debtDecrease:before[1]-after[1],rawCollateralDecrease:before[0]-after[0],vaultBefore,vaultAfter,flashFee:fee,initialExecutorBalances:initial,events,plan};
+    save(simulation?'SIMULATION_v6.json':'BROADCAST_v6.json',result);console.log(json(result));return result;
   }catch(e){
     if(simulation){
       const names=['Unauthorized()','InvalidPlan()','InsufficientOutput()','CallbackOnly()','ErrorInsufficientOutput()','ErrorNotPositionOwner()','ErrorNoSupplyAndNoBorrow()','ErrorDebtRatioTooSmall()','ErrorDebtRatioTooLarge()','ErrorTopLevelCall()','ErrorTargetNotApproved()','ErrorPositionInLiquidationMode()'];
       console.log(json({errorSelectors:Object.fromEntries(names.map(name=>[ethers.id(name).slice(0,10),name])),revertData:e.data||e.info?.error?.data}));
       try{
         const trace=await p.send('debug_traceCall',[{from:C.owner,to:helperAddress,data:helper.interface.encodeFunctionData('execute',[plan]),gas:'0x989680'},'latest',{tracer:'callTracer'}]);
-        save('TRACE_v5.json',trace);
+        save('TRACE_v6.json',trace);
         const failures=[];function walk(node,depth=0){if(node.error)failures.push({depth,to:node.to,input:node.input?.slice(0,10),output:node.output,error:node.error});for(const child of node.calls||[])walk(child,depth+1);}walk(trace);console.log(json({traceFailures:failures}));
       }catch(traceError){console.error('Trace unavailable: '+safeError(traceError));}
     }else{try{await (await nft.approve(previousApproval,plan.positionId)).wait();}catch{console.error('NFT approval cleanup requires owner action');}}
@@ -107,7 +119,8 @@ try{
   mkdirSync('fxmint-output',{recursive:true});
   anvil=spawn('anvil',['--fork-url',process.env.ETH_RPC_URL,'--fork-block-number',String(data.block),'--port','8545','--host','127.0.0.1','--chain-id','1','--silent'],{stdio:['ignore','pipe','pipe']});
   let anvilLog='';for(const stream of [anvil.stdout,anvil.stderr])stream.on('data',chunk=>{anvilLog+=safeError({message:chunk.toString()});});
-  const p=new ethers.JsonRpcProvider('http://127.0.0.1:8545',1,{staticNetwork:true});providers.push(p);
+  const forkRequest=new ethers.FetchRequest('http://127.0.0.1:8545');forkRequest.timeout=20000;
+  const p=new ethers.JsonRpcProvider(forkRequest,1,{staticNetwork:true,batchMaxCount:1,cacheTimeout:0});providers.push(p);
   let ready=false;for(let attempt=0;attempt<90;attempt++){try{assert(await p.send('eth_chainId',[])==='0x1','Fork chain mismatch');ready=true;break;}catch{await new Promise(r=>setTimeout(r,500));}}
   assert(ready,'Anvil startup failed: '+anvilLog);
   assert((await p.send('eth_getBlockByNumber',[ethers.toQuantity(data.block),false])).hash===data.blockHash,'Fork block/hash mismatch');
@@ -115,8 +128,15 @@ try{
   // Gas only: no token balances, collateral, debt, ownership or contract storage is fabricated.
   const ownerEth=BigInt(await p.send('eth_getBalance',[C.owner,'latest']));
   if(ownerEth<ethers.parseEther('1'))await p.send('anvil_setBalance',[C.owner,ethers.toQuantity(ethers.parseEther('1'))]);
-  save('FORK_v5.json',{chainId:1,block:data.block,blockHash:data.blockHash,gasBalanceOverride:ownerEth<ethers.parseEther('1'),noTokenOrProtocolStorageOverrides:true});
-  const signer=await p.getSigner(C.owner);const outsider=await p.getSigner(0);const helper=await deploy(artifact,outsider);
+  save('FORK_v6.json',{chainId:1,block:data.block,blockHash:data.blockHash,gasBalanceOverride:ownerEth<ethers.parseEther('1'),noTokenOrProtocolStorageOverrides:true});
+  console.log('STAGE: fork ready; obtain signers');
+  const signer=await p.getSigner(C.owner);const outsider=await p.getSigner(0);
+  const factory=new ethers.ContractFactory(artifact.abi,artifact.bytecode.object,outsider);
+  const deployment=await factory.getDeployTransaction(C.owner);
+  const deployed=await forkSend(p,{from:await outsider.getAddress(),data:deployment.data,gas:'0x989680'},'helper deployment');
+  assert(deployed.contractAddress,'Missing deployed helper address');
+  const helper=new ethers.Contract(deployed.contractAddress,artifact.abi,outsider);
+  console.log('STAGE: calculate repayment plan');
   const plan=await makePlan(p,position.id);
   await expectRevert('only owner executes',()=>helper.connect(outsider).execute.staticCall(plan),'Unauthorized()');
   await expectRevert('only active Balancer callback',()=>helper.connect(outsider).receiveFlashLoan.staticCall([C.usdc],[200000000n],[0n],'0x'),'CallbackOnly()');
@@ -133,5 +153,5 @@ try{
     assert(ethers.keccak256(await remote.getCode(await liveHelper.getAddress()))===expectedRuntimeHash,'Live helper runtime differs from fork-tested code');
     const livePlan=await makePlan(remote,position.id);await executeAndVerify(remote,wallet,liveHelper,livePlan,false);
   }
-}catch(e){save('ERROR_v5.json',{status:'FAIL',error:safeError(e),revertData:e.data||e.info?.error?.data});console.error(safeError(e));process.exitCode=1;}
+}catch(e){save('ERROR_v6.json',{status:'FAIL',error:safeError(e),revertData:e.data||e.info?.error?.data});console.error(safeError(e));process.exitCode=1;}
 finally{for(const provider of providers)provider.destroy();if(anvil)anvil.kill('SIGTERM');}
