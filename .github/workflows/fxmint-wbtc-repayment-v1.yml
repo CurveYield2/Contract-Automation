@@ -1,0 +1,100 @@
+name: fxMint WBTC Repayment v1
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fxmint-wbtc-repayment-v1.yml'
+      - 'packages/github-native-sim/fxmint-wbtc-repayment/contracts/FxMintWbtcRepayer_v1.sol'
+      - 'packages/github-native-sim/fxmint-wbtc-repayment/run_v1.mjs'
+      - 'packages/github-native-sim/fxmint-wbtc-repayment/requests/simulate_v1.json'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Execution mode
+        type: choice
+        options: [simulate-only, live-broadcast]
+        default: simulate-only
+      position_id:
+        description: Optional owner WBTC position ID (required only if multiple)
+        type: string
+        default: ''
+      helper_address:
+        description: Existing verified helper address, or empty to deploy in live mode
+        type: string
+        default: ''
+      confirmation:
+        description: Live mode requires exactly LIVE 200 USDC
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: fxmint-wbtc-deployer
+  cancel-in-progress: false
+jobs:
+  simulation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Install scoped dependencies in GitHub only
+        run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
+      - name: Compile and execute real-position fork acceptance
+        env:
+          ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
+          FXMINT_MODE: simulate-only
+          FXMINT_POSITION_ID: ${{ inputs.position_id }}
+        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v1.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fxmint-wbtc-simulation-v1
+          path: fxmint-output/
+          retention-days: 30
+          if-no-files-found: error
+  live:
+    needs: simulation
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.mode == 'live-broadcast' && inputs.confirmation == 'LIVE 200 USDC'
+    environment: fxmint-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Install scoped dependencies in GitHub only
+        run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
+      - name: Repeat fresh fork acceptance then broadcast as the owner
+        env:
+          ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
+          FXMINT_MODE: live-broadcast
+          FXMINT_POSITION_ID: ${{ inputs.position_id }}
+          FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
+          FXMINT_CONFIRMATION: ${{ inputs.confirmation }}
+          FXMINT_PRIVATE_KEY: ${{ secrets.FXMINT_DEPLOYER_PRIVATE_KEY }}
+        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v1.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fxmint-wbtc-broadcast-v1
+          path: fxmint-output/
+          retention-days: 30
+          if-no-files-found: error

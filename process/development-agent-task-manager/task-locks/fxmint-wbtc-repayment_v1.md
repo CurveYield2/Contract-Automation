@@ -11,6 +11,4 @@ Implementation plan:
 
 Finite scope: these two workflows and their packages/github-native-sim/fxmint-wbtc-repayment implementation only. No existing audit/browser work is modified. One canonical active version per purpose; outputs remain Actions artifacts.
 
-State: data collection implementation prepared; collection run pending. Exact resume: inspect the collection run, then implement the repayment against its actual position and quotes. Live signing configuration must be established before live use and will not be needed for simulation.
-
-Diagnosis: collection run 37776249104 incorrectly required mutable RPC for read-only data. Replace that check with pinned chain/block/code checks and direct read-only RPC collection. Original collector PR #577 is merged. The unused uncommitted collector tree was discarded; it is not an active implementation.
+State: read-only data collection passed in run 37776901714 at block 26147674, position #887. Repayment implementation prepared; GitHub compile and real-fork simulation pending. Exact resume: inspect the collection run, then implement the repayment against its actual position and quotes. Live signing configuration must be established before live use and will not be needed for simulation.
