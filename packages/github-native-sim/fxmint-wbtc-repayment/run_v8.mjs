@@ -13,7 +13,7 @@ function recordGas(receipt,label){
   const costWei=gasUsed*price;
   gasReceipts.push({label,hash:receipt.transactionHash??receipt.hash,gasUsed,gasPriceWei:price,costWei,costEth:ethers.formatEther(costWei)});
   const totalWei=gasReceipts.reduce((sum,x)=>sum+x.costWei,0n);
-  save('GAS_COST_v7.json',{gasPriceGwei:'0.12',transactions:gasReceipts,totalWei,totalEth:ethers.formatEther(totalWei)});
+  save('GAS_COST_v8.json',{gasPriceGwei:'0.12',transactions:gasReceipts,totalWei,totalEth:ethers.formatEther(totalWei)});
 }
 const root=dirname(fileURLToPath(import.meta.url));
 const artifactPath=resolve(root,'out/FxMintWbtcRepayer_v3.sol/FxMintWbtcRepayer_v3.json');
@@ -56,7 +56,7 @@ async function makePlan(p,id){
   solutions.sort((a,b)=>a.withdrawWbtc<b.withdrawWbtc?-1:1);const best=solutions[0];
   const block=await p.send('eth_getBlockByNumber',['latest',false]);
   const plan={positionId:id,withdrawWbtc:best.withdrawWbtc,firstMinimum,secondMinimum:best.secondMinimum,deadline:Number(BigInt(block.timestamp))+300,route:best.route};
-  save('PLAN_v7.json',{plan,firstQuote,repayFee:fees[3],withdrawFee:fees[1],solutions});return plan;
+  save('PLAN_v8.json',{plan,firstQuote,repayFee:fees[3],withdrawFee:fees[1],solutions});return plan;
 }
 async function forkSend(p,tx,label){
   console.log('STAGE: '+label+' send');
@@ -112,15 +112,15 @@ async function executeAndVerify(p,signer,helper,plan,simulation){
     assert(debtDelta>=TARGET_DEBT-1000000000000n&&debtDelta<=TARGET_DEBT+1000000000000n,'Debt reduction is not 100 fxUSD within protocol rounding');
     assert((await nft.ownerOf(plan.positionId)).toLowerCase()===C.owner,'NFT ownership was not restored');
     for(const token of [C.usdc,C.fxusd,C.wbtc])assert(await balance(p,token,helperAddress)===0n,'Executor retained tokens');
-    const result={version:7,status:'PASS',mode:simulation?'simulate-only':'live-broadcast',chainId:1,helper:helperAddress,transactionHash:receipt.hash,blockNumber:receipt.blockNumber,gasUsed:receipt.gasUsed,gasPriceWei:GAS_PRICE,repaymentGasCostEth:ethers.formatEther(BigInt(receipt.gasUsed)*GAS_PRICE),gasCosts:gasReceipts,positionId:plan.positionId,before,after,debtDecrease:before[1]-after[1],rawCollateralDecrease:before[0]-after[0],vaultBefore,vaultAfter,flashFee:fee,initialExecutorBalances:initial,events,plan};
-    save(simulation?'SIMULATION_v7.json':'BROADCAST_v7.json',result);console.log(json(result));return result;
+    const result={version:8,status:'PASS',mode:simulation?'simulate-only':'live-broadcast',chainId:1,helper:helperAddress,transactionHash:receipt.hash,blockNumber:receipt.blockNumber,gasUsed:receipt.gasUsed,gasPriceWei:GAS_PRICE,repaymentGasCostEth:ethers.formatEther(BigInt(receipt.gasUsed)*GAS_PRICE),gasCosts:gasReceipts,positionId:plan.positionId,before,after,debtDecrease:before[1]-after[1],rawCollateralDecrease:before[0]-after[0],vaultBefore,vaultAfter,flashFee:fee,initialExecutorBalances:initial,events,plan};
+    save(simulation?'SIMULATION_v8.json':'BROADCAST_v8.json',result);console.log(json(result));return result;
   }catch(e){
     if(simulation){
       const names=['Unauthorized()','InvalidPlan()','InsufficientOutput()','CallbackOnly()','ErrorInsufficientOutput()','ErrorNotPositionOwner()','ErrorNoSupplyAndNoBorrow()','ErrorDebtRatioTooSmall()','ErrorDebtRatioTooLarge()','ErrorTopLevelCall()','ErrorTargetNotApproved()','ErrorPositionInLiquidationMode()'];
       console.log(json({errorSelectors:Object.fromEntries(names.map(name=>[ethers.id(name).slice(0,10),name])),revertData:e.data||e.info?.error?.data}));
       try{
         const trace=await p.send('debug_traceCall',[{from:C.owner,to:helperAddress,data:helper.interface.encodeFunctionData('execute',[plan]),gas:'0x989680'},'latest',{tracer:'callTracer'}]);
-        save('TRACE_v7.json',trace);
+        save('TRACE_v8.json',trace);
         const failures=[];function walk(node,depth=0){if(node.error)failures.push({depth,to:node.to,input:node.input?.slice(0,10),output:node.output,error:node.error});for(const child of node.calls||[])walk(child,depth+1);}walk(trace);console.log(json({traceFailures:failures}));
       }catch(traceError){console.error('Trace unavailable: '+safeError(traceError));}
     }else{try{await (await nft.approve(previousApproval,plan.positionId)).wait();}catch{console.error('NFT approval cleanup requires owner action');}}
@@ -140,12 +140,19 @@ try{
   let ready=false;for(let attempt=0;attempt<90;attempt++){try{assert(await p.send('eth_chainId',[])==='0x1','Fork chain mismatch');ready=true;break;}catch{await new Promise(r=>setTimeout(r,500));}}
   assert(ready,'Anvil startup failed: '+anvilLog);
   assert((await p.send('eth_getBlockByNumber',[ethers.toQuantity(data.block),false])).hash===data.blockHash,'Fork block/hash mismatch');
-  const feeBlock=await p.send('eth_getBlockByNumber',['latest',false]);assert(BigInt(feeBlock.baseFeePerGas)<=GAS_PRICE,'Current Ethereum base fee exceeds requested 0.12 gwei');
+  const feeBlock=await p.send('eth_getBlockByNumber',['latest',false]);
+  const upstreamBaseFee=BigInt(feeBlock.baseFeePerGas);
+  const feeScenarioOverride=upstreamBaseFee>GAS_PRICE;
+  if(feeScenarioOverride){
+    console.log('FEE SCENARIO: upstream base fee '+ethers.formatUnits(upstreamBaseFee,'gwei')+' gwei exceeds 0.12; local fork base fee set to zero for requested cost scenario');
+    await p.send('anvil_setNextBlockBaseFeePerGas',['0x0']);
+    await p.send('evm_mine',[]);
+  }
   await p.send('anvil_impersonateAccount',[C.owner]);
   // Gas only: no token balances, collateral, debt, ownership or contract storage is fabricated.
   const ownerEth=BigInt(await p.send('eth_getBalance',[C.owner,'latest']));
   if(ownerEth<ethers.parseEther('1'))await p.send('anvil_setBalance',[C.owner,ethers.toQuantity(ethers.parseEther('1'))]);
-  save('FORK_v7.json',{chainId:1,block:data.block,blockHash:data.blockHash,gasBalanceOverride:ownerEth<ethers.parseEther('1'),noTokenOrProtocolStorageOverrides:true});
+  save('FORK_v8.json',{gasPriceWei:GAS_PRICE,upstreamBaseFeeWei:upstreamBaseFee,feeScenarioOverride,chainId:1,block:data.block,blockHash:data.blockHash,gasBalanceOverride:ownerEth<ethers.parseEther('1'),noTokenOrProtocolStorageOverrides:true});
   console.log('STAGE: fork ready; obtain signers');
   const signer=await p.getSigner(C.owner);const outsider=await p.getSigner(0);
   const factory=new ethers.ContractFactory(artifact.abi,artifact.bytecode.object,outsider);
@@ -166,10 +173,11 @@ try{
     const wallet=new ethers.Wallet(process.env.FXMINT_PRIVATE_KEY,remote);assert(wallet.address.toLowerCase()===C.owner,'Live signer is not the position owner');
     gasReceipts.length=0;
     const liveData=await collect(remote);await choosePosition(liveData);
+    const liveFeeBlock=await remote.send('eth_getBlockByNumber',['latest',false]);assert(BigInt(liveFeeBlock.baseFeePerGas)<=GAS_PRICE,'Live Ethereum base fee exceeds 0.12 gwei; no broadcast attempted');
     const liveHelper=process.env.FXMINT_HELPER_ADDRESS?new ethers.Contract(process.env.FXMINT_HELPER_ADDRESS,artifact.abi,wallet):await deploy(artifact,wallet);
     assert((await liveHelper.owner()).toLowerCase()===C.owner,'Live helper owner mismatch');
     assert(ethers.keccak256(await remote.getCode(await liveHelper.getAddress()))===expectedRuntimeHash,'Live helper runtime differs from fork-tested code');
     const livePlan=await makePlan(remote,position.id);await executeAndVerify(remote,wallet,liveHelper,livePlan,false);
   }
-}catch(e){save('ERROR_v7.json',{status:'FAIL',error:safeError(e),revertData:e.data||e.info?.error?.data});console.error(safeError(e));process.exitCode=1;}
+}catch(e){save('ERROR_v8.json',{status:'FAIL',error:safeError(e),revertData:e.data||e.info?.error?.data});console.error(safeError(e));process.exitCode=1;}
 finally{for(const provider of providers)provider.destroy();if(anvil)anvil.kill('SIGTERM');}
