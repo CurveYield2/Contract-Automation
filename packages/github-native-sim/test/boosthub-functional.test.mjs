@@ -18,7 +18,7 @@ const fixtureFile = path.join(here, 'fixtures/boosthub/current-source.json');
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 const DAY = 86400;
 
-test('Unchanged BoostHub v9 / interface v4 / helper v6 functional verification',
+test('BoostHub v10 / interface v4 / helper v7 Merkle isolation verification',
   { skip: process.env.GITHUB_ACTIONS !== 'true', timeout: 900000 }, async t => {
   // Runtime compilation/dependency installation is deliberately GitHub-only.
   const evidence = { version: 2, sourceBindings: [], supportDeclarations: [],
@@ -276,7 +276,7 @@ test('Unchanged BoostHub v9 / interface v4 / helper v6 functional verification',
       const args=[value.from,value.space,value.timestamp,value.proposal,value.choice,value.reason,value.app,value.metadata];assert.equal(await hub.approveSnapshotVoteUint32.staticCall(...args),hash);await tx(hub.approveSnapshotVoteUint32(...args));assert.equal(await hub.isValidSignature(hash,'0xabcd'),'0x1626ba7e');
     });
     await run('Helper binding is configurator-only, nonzero and one-time',['systemInfo'],['setBoostHub','boostHub','configurator','merkleStash','VERSION'],async()=>{
-      assert.equal(await helper.boostHub(),hub.target);assert.equal(await helper.configurator(),O);assert.equal(await helper.merkleStash(),stash.target);assert.equal(await helper.VERSION(),6n);
+      assert.equal(await helper.boostHub(),hub.target);assert.equal(await helper.configurator(),O);assert.equal(await helper.merkleStash(),stash.target);assert.equal(await helper.VERSION(),7n);
       await revert(()=>helper.setBoostHub(hub.target));await revert(()=>helper.setBoostHub(B));const fresh=await deploy('StakeDaoMerkleClaimExecutor.sol','StakeDaoMerkleClaimExecutor',[O,stash.target]);
       await revert(()=>fresh.connect(alice).setBoostHub(hub.target));await revert(()=>fresh.setBoostHub(ZeroAddress));await revert(()=>fresh.supplyClaim(0,r1.target,0,1,[]));await tx(fresh.setBoostHub(hub.target));
     });
@@ -291,23 +291,23 @@ test('Unchanged BoostHub v9 / interface v4 / helper v6 functional verification',
       await tx(helper.supplyClaim(0,r1.target,7,100,[sibling]));const c=await helper.getClaim(r1.target);assert.equal(c[0].index,7n);assert.equal(c[0].amount,100n);assert.equal(c[0].exists,true);assert.deepEqual([...c[1]],[sibling]);
       await tx(stash.markClaimed(r1.target,7));await revert(()=>helper.supplyClaim(0,r1.target,7,100,[sibling]));await revert(()=>helper.supplyClaim(0,r2.target,0,100,[]));
     });
-    await run('Pool-ID-only aggregate succeeds when one of three tokens has a proof',['claimStakeDaoRewards','claim','positionInfo'],['claimPool','pendingTokens','hasPendingClaims','getClaim','buildBoostHubClaimCalldata'],async()=>{
+    await run('Pool-ID-only aggregate succeeds when one of three tokens has a proof',['claimStakeDaoRewards','claim','positionInfo'],['claimToken','pendingTokens','hasPendingClaims','getClaim','buildBoostHubClaimCalldata'],async()=>{
       await deposit();await supply(r1,123n);assert.deepEqual([...(await helper.pendingTokens(0))],[r1.target]);assert.equal(await helper.hasPendingClaims(0),true);
-      assert.equal(await helper.buildBoostHubClaimCalldata(0),hub.interface.encodeFunctionData('claimStakeDaoRewards',[0]));await assert.rejects(()=>helper.buildBoostHubClaimCalldata(1));await revert(()=>helper.claimPool(0));
+      assert.equal(await helper.buildBoostHubClaimCalldata(0),hub.interface.encodeFunctionData('claimStakeDaoRewards',[0]));await assert.rejects(()=>helper.buildBoostHubClaimCalldata(1));await revert(()=>helper.claimToken(0,r1.target));
       const v=await hub.claimStakeDaoRewards.staticCall(0);assert.deepEqual([...v[1]],[0n,123n,0n]);await tx(hub.claimStakeDaoRewards(0));assert.equal(await helper.hasPendingClaims(0),false);assert.equal((await helper.getClaim(r1.target))[0].exists,false);assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],123n);
       await tx(hub.connect(alice).claim(0,[r1.target],A));assert.equal(await r1.balanceOf(A),123n);await tx(hub.claimStakeDaoRewards(0));
     });
-    await run('Aggregate succeeds with two proofs, future pool/token and no historical fixed registry',['claimStakeDaoRewards','addPoolsBatch','setDepositors'],['supplyClaim','claimPool'],async()=>{
+    await run('Aggregate succeeds with two proofs, future pool/token and no historical fixed registry',['claimStakeDaoRewards','addPoolsBatch','setDepositors'],['supplyClaim','claimToken'],async()=>{
       await deposit();await supply(r1,100n);await supply(r2,200n);await tx(hub.claimStakeDaoRewards(0));assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],100n);assert.equal((await hub.positionInfo(0,A)).pendingRewards[2],200n);
       const tok=await deploy('Mocks.sol','TestToken'),g=await deploy('Mocks.sol','TestGauge',[asset.target,recorder.target]);await tx(hub.addPoolsBatch([asset.target],[g.target],[[tok.target]]));await configure(B,{pid:1});await tx(hub.executeTransactions());await tx(hub.connect(bob).deposit(1,10000));
       const root=keccak256(solidityPacked(['uint256','address','uint256'],[0,hub.target,100]));await tx(stash.publish(tok.target,root,100));await tx(helper.supplyClaim(1,tok.target,0,100,[]));await tx(hub.claimStakeDaoRewards(1));assert.equal((await hub.positionInfo(1,B)).pendingRewards[0],100n);
     });
-    await run('Stash claim failure preserves failed proof and pays other token for later retry',['claimStakeDaoRewards'],['claimPool','getClaim','pendingTokens'],async()=>{
+    await run('Stash claim failure preserves failed proof and pays other token for later retry',['claimStakeDaoRewards'],['claimToken','getClaim','pendingTokens'],async()=>{
       await deposit();await supply(r1,100n);await supply(r2,200n);await tx(stash.setFailure(r1.target,true));await tx(hub.claimStakeDaoRewards(0));
       assert.equal((await helper.getClaim(r1.target))[0].exists,true);assert.equal((await helper.getClaim(r2.target))[0].exists,false);assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],0n);assert.equal((await hub.positionInfo(0,A)).pendingRewards[2],200n);
       await tx(stash.setFailure(r1.target,false));await tx(hub.claimStakeDaoRewards(0));assert.equal((await helper.getClaim(r1.target))[0].exists,false);assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],100n);
     });
-    await run('Stale root/update and externally claimed indexes clear safely',['claimStakeDaoRewards'],['clearStaleClaim','claimPool','getClaim'],async()=>{
+    await run('Stale root/update and externally claimed indexes clear safely',['claimStakeDaoRewards'],['clearStaleClaim','claimToken','getClaim'],async()=>{
       await deposit();assert.equal(await helper.clearStaleClaim.staticCall(r1.target),false);await supply(r1,100n);assert.equal(await helper.clearStaleClaim.staticCall(r1.target),false);
       await publish(r1,200n);assert.equal(await helper.clearStaleClaim.staticCall(r1.target),true);await tx(helper.connect(alice).clearStaleClaim(r1.target));assert.equal((await helper.getClaim(r1.target))[0].exists,false);
       await supply(r1,100n,2);await tx(stash.markClaimed(r1.target,2));await tx(hub.claimStakeDaoRewards(0));assert.equal((await helper.getClaim(r1.target))[0].exists,false);
@@ -336,6 +336,60 @@ test('Unchanged BoostHub v9 / interface v4 / helper v6 functional verification',
       assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],100n);
       await tx(hub.connect(alice).claim(0,[r1.target],A));assert.equal(await r1.balanceOf(A),100n);
       return {availableProofs:1,unrelatedRegisteredTokenBalanceReadFails:true,healthyRewardPaid:'100'};
+    });
+
+    await run('Failed pre-claim balance read preserves that proof and lets the next reward complete',['claimStakeDaoRewards'],['getClaim'],async()=>{
+      await deposit();await supply(r1,100n);await supply(r2,200n);await tx(r1.faults(true,false,false));
+      const result=await hub.claimStakeDaoRewards.staticCall(0);assert.deepEqual([...result[1]],[0n,0n,200n]);
+      const receipt=await tx(hub.claimStakeDaoRewards(0));
+      const failures=receipt.logs.map(l=>{try{return hub.interface.parseLog(l);}catch{return null;}}).filter(l=>l?.name==='StakeDaoRewardFailed');
+      assert.equal(failures.length,1);assert.equal(failures[0].args.token,r1.target);
+      assert.equal((await helper.getClaim(r1.target))[0].exists,true);assert.equal((await helper.getClaim(r2.target))[0].exists,false);
+      assert.equal(await stash.isClaimed(r1.target,0),false);assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],0n);assert.equal((await hub.positionInfo(0,A)).pendingRewards[2],200n);
+      await tx(r1.faults(false,false,false));await tx(hub.claimStakeDaoRewards(0));
+      assert.equal((await helper.getClaim(r1.target))[0].exists,false);assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],100n);assert.equal((await hub.positionInfo(0,A)).pendingRewards[2],200n);
+      await tx(hub.connect(alice).claim(0,[r1.target,r2.target],A));assert.equal(await r1.balanceOf(A),100n);assert.equal(await r2.balanceOf(A),200n);
+    });
+    await run('Post-claim balance read failure rolls back the stash payment and restores the full proof',['claimStakeDaoRewards'],['getClaim'],async()=>{
+      await deposit();const sibling=keccak256('0x5678');await supply(r1,100n,7,owner,[sibling]);await supply(r2,200n);await tx(r1.failFundedBalance(hub.target));
+      await tx(hub.claimStakeDaoRewards(0));
+      const pending=await helper.getClaim(r1.target);assert.equal(pending[0].exists,true);assert.equal(pending[0].index,7n);assert.deepEqual([...pending[1]],[sibling]);
+      assert.equal(await stash.isClaimed(r1.target,7),false);assert.equal(await r1.balanceOf(stash.target),100n);assert.equal(await r1.balanceOf(hub.target),0n);
+      assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],0n);assert.equal((await hub.positionInfo(0,A)).pendingRewards[2],200n);
+      await tx(r1.failFundedBalance(ZeroAddress));await tx(hub.claimStakeDaoRewards(0));await tx(hub.connect(alice).claim(0,[r1.target,r2.target],A));
+      assert.equal(await r1.balanceOf(A),100n);assert.equal(await r2.balanceOf(A),200n);assert.equal(await stash.isClaimed(r1.target,7),true);
+    });
+    await run('Fee-recipient transfer failure restores the claim while healthy fees and rewards settle',['claimStakeDaoRewards'],['getClaim'],async()=>{
+      await configure(A,{bps:1000});await tx(hub.executeTransactions());await deposit();await supply(r1,100n);await supply(r2,200n);await tx(r1.blockRecipient(T));
+      await tx(hub.claimStakeDaoRewards(0));assert.equal((await helper.getClaim(r1.target))[0].exists,true);assert.equal(await stash.isClaimed(r1.target,0),false);
+      assert.equal(await r1.balanceOf(hub.target),0n);assert.equal(await r1.balanceOf(T),0n);assert.equal(await r1.balanceOf(stash.target),100n);
+      assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],0n);assert.equal((await hub.positionInfo(0,A)).pendingRewards[2],180n);assert.equal(await r2.balanceOf(T),20n);
+      await tx(r1.blockRecipient(ZeroAddress));await tx(hub.claimStakeDaoRewards(0));
+      assert.equal(await r1.balanceOf(T),10n);assert.equal(await r2.balanceOf(T),20n);assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],90n);
+      await tx(hub.connect(alice).claim(0,[r1.target,r2.target],A));assert.equal(await r1.balanceOf(A),90n);assert.equal(await r2.balanceOf(A),180n);
+    });
+    await run('Retention deposit failure rolls back its fee, claim and stake while another reward completes',['claimStakeDaoRewards','poolInfo'],['getClaim'],async()=>{
+      await configure(A,{bps:1000});await tx(hub.executeTransactions());await deposit();await supply(asset,10000n);await supply(r1,1000n);await tx(gauge.faults(true,false,false,true));
+      await tx(hub.claimStakeDaoRewards(0));assert.equal((await helper.getClaim(asset.target))[0].exists,true);assert.equal(await stash.isClaimed(asset.target,0),false);
+      assert.equal(await asset.balanceOf(T),0n);assert.equal(await asset.balanceOf(hub.target),0n);assert.equal(await asset.balanceOf(stash.target),10000n);
+      assert.equal((await hub.poolInfo(0)).retainedStakingToken,0n);assert.equal(await gauge.balances(hub.target),10000n);
+      assert.equal((await hub.positionInfo(0,A)).pendingRewards[0],0n);assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],900n);assert.equal(await r1.balanceOf(T),100n);
+      await tx(gauge.faults(false,false,false,true));await tx(hub.claimStakeDaoRewards(0));
+      assert.equal((await helper.getClaim(asset.target))[0].exists,false);assert.equal(await asset.balanceOf(T),1000n);assert.equal((await hub.poolInfo(0)).retainedStakingToken,270n);
+      assert.equal(await gauge.balances(hub.target),10270n);assert.equal((await hub.positionInfo(0,A)).pendingRewards[0],8730n);
+      const before=await asset.balanceOf(A);await tx(hub.connect(alice).claim(0,[asset.target,r1.target],A));assert.equal((await asset.balanceOf(A))-before,8730n);assert.equal(await r1.balanceOf(A),900n);
+    });
+    await run('Token isolation endpoint rejects direct callers and helper token execution stays hub-only',['processStakeDaoReward'],['claimToken'],async()=>{
+      for(const signer of [owner,alice,outsider]) {
+        await revert(()=>hub.connect(signer).processStakeDaoReward(0,r1.target));
+        await revert(()=>helper.connect(signer).claimToken(0,r1.target));
+      }
+      await deposit();await supply(r1,100n);await tx(hub.claimStakeDaoRewards(0));assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],100n);
+    });
+    await run('Token callbacks cannot reenter reward collection during an isolated claim',['claimStakeDaoRewards'],[],async()=>{
+      await configure(A,{bps:1000});await tx(hub.executeTransactions());await deposit();await supply(r1,100n);
+      await tx(r1.setCallback(hub.target,hub.interface.encodeFunctionData('harvest',[0])));await tx(hub.claimStakeDaoRewards(0));
+      assert.equal(await r1.callbackRejected(),true);assert.equal((await hub.positionInfo(0,A)).pendingRewards[1],90n);assert.equal(await r1.balanceOf(T),10n);assert.equal((await helper.getClaim(r1.target))[0].exists,false);
     });
 
     const abiNames=a=>a.filter(x=>x.type==='function').map(x=>x.name).sort();
