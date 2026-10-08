@@ -79,7 +79,18 @@ async function executeAndVerify(p,signer,helper,plan,simulation){
     for(const token of [C.usdc,C.fxusd,C.wbtc])assert(await balance(p,token,helperAddress)===0n,'Executor retained tokens');
     const result={version:1,status:'PASS',mode:simulation?'simulate-only':'live-broadcast',chainId:1,helper:helperAddress,transactionHash:receipt.hash,blockNumber:receipt.blockNumber,gasUsed:receipt.gasUsed,positionId:plan.positionId,before,after,debtDecrease:before[1]-after[1],rawCollateralDecrease:before[0]-after[0],vaultBefore,vaultAfter,flashFee:fee,initialExecutorBalances:initial,events,plan};
     save(simulation?'SIMULATION_v1.json':'BROADCAST_v1.json',result);console.log(json(result));return result;
-  }catch(e){if(!simulation){try{await (await nft.approve(previousApproval,plan.positionId)).wait();}catch{console.error('NFT approval cleanup requires owner action');}}throw e;}
+  }catch(e){
+    if(simulation){
+      const names=['Unauthorized()','InvalidPlan()','InsufficientOutput()','CallbackOnly()','ErrorInsufficientOutput()','ErrorNotPositionOwner()','ErrorNoSupplyAndNoBorrow()','ErrorDebtRatioTooSmall()','ErrorDebtRatioTooLarge()','ErrorTopLevelCall()','ErrorTargetNotApproved()','ErrorPositionInLiquidationMode()'];
+      console.log(json({errorSelectors:Object.fromEntries(names.map(name=>[ethers.id(name).slice(0,10),name])),revertData:e.data||e.info?.error?.data}));
+      try{
+        const trace=await p.send('debug_traceCall',[{from:C.owner,to:helperAddress,data:helper.interface.encodeFunctionData('execute',[plan]),gas:'0x989680'},'latest',{tracer:'callTracer'}]);
+        save('TRACE_v3.json',trace);
+        const failures=[];function walk(node,depth=0){if(node.error)failures.push({depth,to:node.to,input:node.input?.slice(0,10),output:node.output,error:node.error});for(const child of node.calls||[])walk(child,depth+1);}walk(trace);console.log(json({traceFailures:failures}));
+      }catch(traceError){console.error('Trace unavailable: '+safeError(traceError));}
+    }else{try{await (await nft.approve(previousApproval,plan.positionId)).wait();}catch{console.error('NFT approval cleanup requires owner action');}}
+    throw e;
+  }
 }
 let anvil;
 try{
