@@ -2,7 +2,7 @@ import {spawn,spawnSync} from 'node:child_process';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {ethers,C,R,quote,read,collect,json,save,safeError} from '../../src/fxmint-wbtc-repayment-data-v2.mjs';
+import {ethers,C,R,quote,read,collect,json,save,safeError} from '../src/fxmint-wbtc-repayment-data-v2.mjs';
 const root=dirname(fileURLToPath(import.meta.url));
 const artifactPath=resolve(root,'out/FxMintWbtcRepayer_v1.sol/FxMintWbtcRepayer_v1.json');
 const nftAbi=['function approve(address,uint256)','function getApproved(uint256) view returns(address)','function ownerOf(uint256) view returns(address)','function getPosition(uint256) view returns(uint256,uint256)'];

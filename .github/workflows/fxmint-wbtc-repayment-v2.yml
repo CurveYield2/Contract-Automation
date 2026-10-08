@@ -1,11 +1,11 @@
-name: fxMint WBTC Repayment v1
+name: fxMint WBTC Repayment v2
 on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/fxmint-wbtc-repayment-v1.yml'
+      - '.github/workflows/fxmint-wbtc-repayment-v2.yml'
       - 'packages/github-native-sim/fxmint-wbtc-repayment/contracts/FxMintWbtcRepayer_v1.sol'
-      - 'packages/github-native-sim/fxmint-wbtc-repayment/run_v1.mjs'
+      - 'packages/github-native-sim/fxmint-wbtc-repayment/run_v2.mjs'
       - 'packages/github-native-sim/fxmint-wbtc-repayment/requests/simulate_v1.json'
   workflow_dispatch:
     inputs:
@@ -54,7 +54,7 @@ jobs:
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: simulate-only
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
-        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v1.mjs
+        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v2.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -90,7 +90,7 @@ jobs:
           FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
           FXMINT_CONFIRMATION: ${{ inputs.confirmation }}
           FXMINT_PRIVATE_KEY: ${{ secrets.FXMINT_DEPLOYER_PRIVATE_KEY }}
-        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v1.mjs
+        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v2.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
