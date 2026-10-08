@@ -26,7 +26,7 @@ interface IFxMintRouter {
 /// @notice Restricted owner-only repayment; uses the existing approved fxMint router.
 /// @dev Routing copied from AladdinDAO/fx-sdk src/configs/routers.ts.
 /// Balancer callback flow follows AladdinDAO FlashLoanCallbackFacet's authenticated callback/repay pattern.
-contract FxMintWbtcRepayer_v1 {
+contract FxMintWbtcRepayer_v2 {
     using SafeERC20 for IERC20;
     address public immutable owner;
     address public constant POOL=0xAB709e26Fa6B0A30c119D8c55B887DeD24952473;
@@ -75,17 +75,15 @@ contract FxMintWbtcRepayer_v1 {
         (uint256 beforeColl,uint256 beforeDebt)=IPositionNFT(POOL).getPosition(plan.positionId);
         IPositionNFT(POOL).approve(ROUTER,plan.positionId);
         IERC20(FXUSD).forceApprove(ROUTER,fx);
-        // The official router accounts for its protocol repay fee before reducing debt.
+        // Use one official operation: PoolConfiguration forbids a second manager operation in the same transaction.
+        // The router accounts for repayment fees and applies debt paydown and collateral withdrawal together.
         IFxMintRouter.ConvertIn memory input=IFxMintRouter.ConvertIn(FXUSD,fx,CONVERTER,"",0,"");
-        IFxMintRouter(ROUTER).repayToLong(input,IFxMintRouter.Repay(POOL,plan.positionId,0));
+        uint256 wbtcBefore=IERC20(WBTC).balanceOf(address(this));
+        IFxMintRouter(ROUTER).repayToLong(input,IFxMintRouter.Repay(POOL,plan.positionId,plan.withdrawWbtc));
         IERC20(FXUSD).forceApprove(ROUTER,0);
         (,uint256 afterDebt)=IPositionNFT(POOL).getPosition(plan.positionId);
         if(afterDebt>=beforeDebt)revert InvalidPlan();
         emit DebtRepaid(plan.positionId,fx,beforeDebt,afterDebt);
-        IPositionNFT(POOL).approve(ROUTER,plan.positionId);
-        uint256 wbtcBefore=IERC20(WBTC).balanceOf(address(this));
-        input.amount=0;
-        IFxMintRouter(ROUTER).repayToLong(input,IFxMintRouter.Repay(POOL,plan.positionId,plan.withdrawWbtc));
         uint256 wbtc=IERC20(WBTC).balanceOf(address(this))-wbtcBefore;
         uint256 proceeds=_swap(WBTC,FXUSD,wbtc,_routes(1,plan.route),plan.secondMinimum,25);
         uint256 due=FLASH_AMOUNT+fees[0];

@@ -1,11 +1,11 @@
-name: fxMint WBTC Repayment v3
+name: fxMint WBTC Repayment v4
 on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/fxmint-wbtc-repayment-v3.yml'
-      - 'packages/github-native-sim/fxmint-wbtc-repayment/contracts/FxMintWbtcRepayer_v1.sol'
-      - 'packages/github-native-sim/fxmint-wbtc-repayment/run_v3.mjs'
+      - '.github/workflows/fxmint-wbtc-repayment-v4.yml'
+      - 'packages/github-native-sim/fxmint-wbtc-repayment/contracts/FxMintWbtcRepayer_v2.sol'
+      - 'packages/github-native-sim/fxmint-wbtc-repayment/run_v4.mjs'
       - 'packages/github-native-sim/fxmint-wbtc-repayment/requests/simulate_v1.json'
   workflow_dispatch:
     inputs:
@@ -38,7 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -54,11 +54,11 @@ jobs:
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: simulate-only
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
-        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v3.mjs
+        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v4.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-wbtc-simulation-v1
+          name: fxmint-wbtc-simulation-v4
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
@@ -71,7 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -90,11 +90,11 @@ jobs:
           FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
           FXMINT_CONFIRMATION: ${{ inputs.confirmation }}
           FXMINT_PRIVATE_KEY: ${{ secrets.FXMINT_DEPLOYER_PRIVATE_KEY }}
-        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v3.mjs
+        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v4.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-wbtc-broadcast-v1
+          name: fxmint-wbtc-broadcast-v4
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
