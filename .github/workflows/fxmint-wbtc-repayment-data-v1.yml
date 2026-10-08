@@ -1,0 +1,36 @@
+name: fxMINT WBTC Read-Only Data v1
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fxmint-wbtc-repayment-data-v1.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fxmint-wbtc-read-main
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm install --no-save --package-lock=false --ignore-scripts @aladdindao/fx-sdk@1.0.5
+      - name: Collect RPC evidence
+        env:
+          SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        run: node packages/github-native-sim/src/fxmint-wbtc-repayment-data-v1.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fxmint-wbtc-repayment-data-v1
+          path: fxmint-wbtc-evidence/
+          if-no-files-found: warn
+          retention-days: 14
