@@ -6,8 +6,9 @@ CurveYield2/Smart-Contracts contains a complete, reviewable cyvbETH IPOR vault c
 
 ## CURRENT MAIN
 
-- Contract-Automation main after creation of this canonical lock: `d3c37d4901a94fb0e8fa54adf5cb2018e138c341`.
-- Smart-Contracts live main verified after lock creation: `ae583cf5a616200534b06cbd2a20ba04814be07f`.
+- Contract-Automation main last checked for this lock: `d7b003d54c838a7c65b1c3e9073a67828ab1c34b`.
+- Smart-Contracts live main baseline: `ae583cf5a616200534b06cbd2a20ba04814be07f`.
+- Active Smart-Contracts implementation branch: `cyvbeth-vault-stack-v1`; discovery checkpoint `04375c16dd0ac888fc94fc3ccd0edd22a9083138`.
 
 ## AUTHORITY
 
@@ -20,24 +21,24 @@ CurveYield2/Smart-Contracts contains a complete, reviewable cyvbETH IPOR vault c
 
 ## SATISFIED
 
-- Task scope and end-state are locked before Smart-Contracts implementation work.
-- The required Morpho market identifier is recorded exactly: `0x2c4f26c76b4de51d3c9260c15a796cd2a35efab17786d0aa78ca2e638b0f8ba8`.
-- The keeper-allocation rule is locked: cyvbETH is not required to place 100% of vbETH into f(x)/fxMINT; the keeper controls how much vbETH is supplied to the specified Morpho market.
-- The smallest-delta implementation rule is locked: start from the current cyvbWBTC stack and change only what vbETH and the optional Morpho allocation require.
+- Task scope/end-state locked before Smart-Contracts implementation.
+- Live cyvbWBTC contract, deployment, tests, workflow, and repository-local rules inspected; it is the behavioral baseline.
+- vbETH verified as `0xEE7D8BCFb72bC1880D0Cf19822eB0A2e6577aB62`.
+- No f(x) vbETH collateral pool exists. The matching current cyvbWBTC-manager ETH-side pool is the weETH pool `0x6776ce77f47aab00405fd5776c4baadc68c8ce3d`, using weETH `0x9893989433e7a383Cb313953e4c2365107dc19a7`, fxUSD `0x4c03ff0f44A55e7098a09016E02a01d3cdC2FDF9`, oracle `0x849b9e3119B7c4E4Dd0DdfaD1E0DFe587158692d`, and the same f(x) manager/config family as cyvbWBTC.
+- Required Morpho market verified on-chain: `0x2c4f26c76b4de51d3c9260c15a796cd2a35efab17786d0aa78ca2e638b0f8ba8`; loan token vbETH, collateral yvvbUSDC `0x80c34BD3A3569E126e7055831036aa7b212cB159`, LLTV 77%.
+- Official IPOR Katana Morpho integration verified: market ID 14, SupplyFuse `0xC66c3F5cC5e1550A0Ff960c06D630A2FBB80E19d`, BalanceFuse `0x83790D83C23461cd22429276406C4f09DB885A85`, Morpho `0xD50F2DffFd62f94Ee4AEd9ca05C61d0753268aBc`.
+- Official Chainlink Katana ETH/USD proxy resolved as `0x7BdBDB772f4a073BadD676A567C6ED82049a8eEE`.
+- Keeper-allocation rule locked: any selected deployable vbETH portion may go to Morpho instead of f(x); fee/accounting protections cannot be bypassed.
+- Smallest-delta rule locked: reuse cyvbWBTC and official IPOR Morpho fuses rather than building a new Morpho protocol adapter.
 
 ## REMAINING DELTA
 
-1. Inspect Smart-Contracts current main, repository instructions, and the complete live cyvbWBTC contract/deployment/test stack; identify the exact minimum clone surface.
-2. Resolve and verify the live Katana vbETH token address plus the vbETH-specific f(x)/fxMINT market/configuration needed to reproduce cyvbWBTC behavior for vbETH.
-3. Resolve and verify the specified Morpho market's exact on-chain parameters and the existing official Morpho interfaces/code path that should be reused.
-4. Create the versioned cyvbETH contract/deployment/testing files by copying the proven cyvbWBTC equivalents and applying minimal vbETH-specific substitutions.
-5. Add the smallest keeper-controlled Morpho allocation interface required to supply/withdraw/reallocate vbETH while preserving vault accounting, access control, fees, and liquidity behavior.
-6. Ensure total-assets/accounting includes idle vbETH, f(x)/fxMINT exposure, and the Morpho supplied position without double counting.
-7. Add/update focused tests for parity with cyvbWBTC plus keeper Morpho allocation, withdrawal/reallocation, accounting, authorization, and mixed-allocation behavior.
-8. Add/update deployment configuration/scripts for cyvbETH and the verified Katana addresses.
-9. Run repository-supported compile/static validation and focused tests in GitHub; repair only failures that block this invariant.
-10. Run the available Katana fork/deployment/lifecycle simulation for the completed cyvbETH stack, including mixed f(x)/Morpho allocation, and capture verifiable execution evidence.
-11. Verify the final repository delta against this invariant and leave no unresolved implementation requirement.
+1. Implement the versioned cyvbETH folder by copying/adapting the proven cyvbWBTC stack: vbETH underlying, vbETH↔weETH conversion around the verified f(x) weETH pool, and identical LTV/fee/nested-stable behavior.
+2. Add a minimal keeper Morpho allocator wrapper over IPOR's official Morpho SupplyFuse, grant only the exact user-specified Morpho substrate, and put that wrapper before the f(x) fuse in instant-withdraw ordering.
+3. Include Morpho supplied vbETH in cyvbETH NAV/PPS accounting and preserve scheduled/instant withdrawal reservation semantics.
+4. Add vbETH/weETH price sources and the required CurveYield-router route installer using verified Sushi V3 pools.
+5. Create the cyvbETH deployment script and focused unit/fork verification workflow.
+6. Compile/test/simulate in GitHub, repair blocking failures, remove the temporary discovery workflow, verify final delta, and leave the implementation branch in a reviewable terminal state.
 
 ## PARKED OBSERVATIONS
 
@@ -52,4 +53,4 @@ None.
 
 ## NEXT ACTION
 
-Inspect the exact current Smart-Contracts main state and repository-local instructions, then map the current cyvbWBTC contract, deployment, tests, and Katana simulation inputs file-by-file. Use that live implementation as the immutable behavioral baseline and compute the smallest cyvbETH delta before editing implementation code.
+Create the cyvbETH implementation files on `cyvbeth-vault-stack-v1` by cloning the live cyvbWBTC equivalents and applying only the verified vbETH/weETH/Morpho delta above.
