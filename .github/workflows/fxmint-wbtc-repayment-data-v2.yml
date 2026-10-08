@@ -1,0 +1,39 @@
+name: fxMint WBTC Data Collection v2
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fxmint-wbtc-repayment-data-v2.yml'
+      - 'packages/github-native-sim/src/fxmint-wbtc-repayment-data-v2.mjs'
+      - 'packages/github-native-sim/fxmint-wbtc-repayment/requests/collect_v1.json'
+permissions:
+  contents: read
+concurrency:
+  group: fxmint-wbtc-deployer
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing ethers version in GitHub runner
+        run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0
+      - name: Collect pinned Ethereum state and quotes
+        env:
+          ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
+        run: node packages/github-native-sim/src/fxmint-wbtc-repayment-data-v2.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fxmint-wbtc-data-v2
+          path: fxmint-output/
+          if-no-files-found: error
+          retention-days: 30
