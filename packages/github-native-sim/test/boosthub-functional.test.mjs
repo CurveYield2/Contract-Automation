@@ -17,7 +17,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureFile = path.join(here, 'fixtures/boosthub/current-source.json');
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 const DAY = 86400;
-const checkpointSelector = '0x4b820093'; // independently replaced below from ABI
 
 test('Unchanged BoostHub v9 / interface v4 / helper v6 functional verification',
   { skip: process.env.GITHUB_ACTIONS !== 'true', timeout: 900000 }, async t => {
@@ -68,11 +67,15 @@ test('Unchanged BoostHub v9 / interface v4 / helper v6 functional verification',
     await fs.writeFile(path.join(out,'compiled-abi.json'),JSON.stringify({hub:hubArtifact.abi,helper:helperArtifact.abi},null,2));
     await fs.writeFile(path.join(out,'compiler-evidence.json'),JSON.stringify({profiles:evidence.compileProfiles,imports:imported,sizes:evidence.runtimeBytes},null,2));
     const port = await new Promise((resolve,reject)=>{const s=net.createServer();s.on('error',reject);s.listen(0,'127.0.0.1',()=>{const p=s.address().port;s.close(()=>resolve(p));});});
-    processHandle=spawn('anvil',['--port',String(port),'--hardfork','paris','--silent'],{env:childEnv,stdio:['ignore','pipe','pipe']});
+    const anvilEntry=path.resolve('node_modules/@foundry-rs/anvil/bin.mjs');
+    const anvilVersion=await exec(process.execPath,[anvilEntry,'--version'],{env:childEnv,timeout:30000});
+    evidence.anvilVersion=anvilVersion.stdout.trim();
+    processHandle=spawn(process.execPath,[anvilEntry,'--port',String(port),'--hardfork','paris','--silent'],{env:childEnv,stdio:['ignore','pipe','pipe']});
+    let spawnError;processHandle.on('error',e=>{spawnError=e;});
     let anvilLogs='';processHandle.stdout.on('data',b=>anvilLogs+=b);processHandle.stderr.on('data',b=>anvilLogs+=b);
     provider=new JsonRpcProvider(`http://127.0.0.1:${port}`,undefined,{cacheTimeout:-1});
     provider.pollingInterval=40;
-    for(let i=0;i<150;i++) { try {await provider.getBlockNumber();break;} catch {if(processHandle.exitCode!==null) throw Error('Anvil exited: '+anvilLogs); await new Promise(r=>setTimeout(r,100));} }
+    for(let i=0;i<150;i++) { try {await provider.getBlockNumber();break;} catch {if(spawnError)throw spawnError;if(processHandle.exitCode!==null) throw Error('Anvil exited: '+anvilLogs); await new Promise(r=>setTimeout(r,100));} }
     const owner=await provider.getSigner(0), alice=await provider.getSigner(1), bob=await provider.getSigner(2), carol=await provider.getSigner(3), treasury=await provider.getSigner(4), outsider=await provider.getSigner(5);
     const A=await alice.getAddress(),B=await bob.getAddress(),C=await carol.getAddress(),O=await owner.getAddress(),T=await treasury.getAddress();
     const tx=async p=>{const x=await p;return x.wait();};
