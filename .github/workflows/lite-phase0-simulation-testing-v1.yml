@@ -92,7 +92,7 @@ jobs:
 
       - name: Deploy on Anvil and run requested smoke stages
         env:
-          ETHEREUM_FORK_RPC_URL: https://eth.drpc.org/
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || 'https://eth.drpc.org/' }}
           CAMPAIGN_PATH: ${{ inputs.campaign_path }}
           MEDUSA_CALLS: ${{ inputs.medusa_calls }}
           TELEMETRY_CALLS: ${{ inputs.telemetry_calls }}
@@ -103,9 +103,9 @@ jobs:
           [[ "$TELEMETRY_CALLS" =~ ^[0-9]{1,6}$ ]] || { echo "::error::telemetry_calls must be an integer from 0 to 999999"; exit 1; }
           (( MEDUSA_CALLS > 0 || TELEMETRY_CALLS > 0 )) || { echo "::error::at least one smoke call budget must be greater than zero"; exit 1; }
           chain_id="$(curl -fsS --max-time 15 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
-          test "$chain_id" = "0x1" || { echo "::error::dRPC Ethereum fork source did not report chain ID 1"; exit 1; }
+          test "$chain_id" = "0x1" || { echo "::error::Ethereum fork source did not report chain ID 1"; exit 1; }
           historical_code="$(curl -fsS --max-time 30 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_getCode","params":["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2","0x112a880"]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
-          test -n "$historical_code" && test "$historical_code" != "0x" || { echo "::error::dRPC Ethereum fork source did not return historical WETH code at block 18000000"; exit 1; }
+          test -n "$historical_code" && test "$historical_code" != "0x" || { echo "::error::Ethereum fork source did not return historical WETH code at block 18000000"; exit 1; }
           args=(scripts/run-phase0-randomized-simulation-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --output .phase0-medusa-smoke --fork-url "$ETHEREUM_FORK_RPC_URL")
           if (( MEDUSA_CALLS > 0 )); then args+=(--medusa-smoke-calls "$MEDUSA_CALLS"); fi
           if (( TELEMETRY_CALLS > 0 )); then args+=(--telemetry-smoke-calls "$TELEMETRY_CALLS"); fi
