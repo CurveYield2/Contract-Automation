@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 const require = createRequire(`${process.env.FXMINT_DEPS}/package.json`);
 export const ethers = require('ethers');
 export const C = Object.fromEntries(Object.entries({
-  owner:'0x9f2B20A772246960810045905B7daccf960eE288',
+  owner:'0xFF90b414D84F7Ec4FAEADBD8Da86Ad515F930654',
   pool:'0xAB709e26Fa6B0A30c119D8c55B887DeD24952473',
   manager:'0x250893CA4Ba5d05626C785e8da758026928FCD24',
   router:'0xB753366082466c4B5984312f0c4Bb97554be067E',
@@ -41,7 +41,7 @@ export async function collect(provider){
   const chain=await provider.send('eth_chainId',[]);if(chain!=='0x1')throw Error('Ethereum chain ID 1 required');
   const block=await provider.send('eth_blockNumber',[]);
   const header=await provider.send('eth_getBlockByNumber',[block,false]);
-  const result={version:2,chainId:1,block:Number(BigInt(block)),blockHash:header.hash,timestamp:Number(BigInt(header.timestamp)),addresses:C,routes:R};
+  const result={version:3,chainId:1,block:Number(BigInt(block)),blockHash:header.hash,timestamp:Number(BigInt(header.timestamp)),addresses:C,routes:R};
   for(const [name,address] of Object.entries(C)){if(name==='owner')continue;const code=await provider.send('eth_getCode',[address,block]);if(code==='0x')throw Error(`No deployed code: ${name}`);result.codeHashes??={};result.codeHashes[name]=ethers.keccak256(code);}
   result.decimals={};for(const name of ['usdc','fxusd','wbtc'])result.decimals[name]=Number(await read(provider,C[name],'decimals() view returns(uint8)',[],block));
   if(json(result.decimals)!==json({usdc:6,fxusd:18,wbtc:8}))throw Error('Unexpected token decimals');
@@ -65,17 +65,17 @@ export async function collect(provider){
   result.balancerUsdc=await read(provider,C.usdc,'balanceOf(address) view returns(uint256)',[C.balancer],block);
   result.feeCollector=await read(provider,C.balancer,'getProtocolFeesCollector() view returns(address)',[],block);
   result.flashFeePercentage=await read(provider,result.feeCollector,'getFlashLoanFeePercentage() view returns(uint256)',[],block);
-  result.firstQuote=await quote(provider,200000000n,R.usdcFx,block);
+  result.firstQuote=await quote(provider,100400000n,R.usdcFx,block);
   result.firstMinOut=result.firstQuote*999n/1000n;
-  if(result.firstMinOut<199400000000000000000n)result.firstMinOut=199400000000000000000n;
-  result.returnQuote=await quote(provider,200500000000000000000n,R.fxUsdc,block);
+  if(result.firstMinOut<100200000000000000000n)result.firstMinOut=100200000000000000000n;
+  result.returnQuote=await quote(provider,100900000000000000000n,R.fxUsdc,block);
   result.wbtcQuotes=[];for(const routes of R.wbtcFx){try{result.wbtcQuotes.push({routes,input:1000000n,out:await quote(provider,1000000n,routes,block)});}catch(e){result.wbtcQuotes.push({routes,error:safeError(e)});}}
-  save('DATA_v2.json',result);console.log(json(result));
+  save('DATA_v3.json',result);console.log(json(result));
   if(!result.positions.some(x=>x.rawDebt>0n))throw Error('Owner has no indebted WBTC position');
-  if(result.firstQuote<result.firstMinOut)throw Error('200 USDC quote fails 199.4 fxUSD floor');
+  if(result.firstQuote<result.firstMinOut)throw Error('100.4 USDC quote fails 100.2 fxUSD repayment floor');
   return result;
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   if(!process.env.ETH_RPC_URL)throw Error('Repository Ethereum RPC secret is missing');
-  collect(new ethers.JsonRpcProvider(process.env.ETH_RPC_URL,1,{staticNetwork:true})).catch(e=>{save('ERROR_v2.json',{error:safeError(e)});console.error(safeError(e));process.exitCode=1;});
+  collect(new ethers.JsonRpcProvider(process.env.ETH_RPC_URL,1,{staticNetwork:true})).catch(e=>{save('ERROR_v3.json',{error:safeError(e)});console.error(safeError(e));process.exitCode=1;});
 }

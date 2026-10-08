@@ -17,6 +17,9 @@ interface IConverter {
 interface IBalancer {
     function flashLoan(address recipient,address[] calldata tokens,uint256[] calldata amounts,bytes calldata data) external;
 }
+interface IPoolConfiguration {
+    function getPoolFeeRatio(address pool,address sender) external view returns(uint256,uint256,uint256,uint256);
+}
 interface IFxMintRouter {
     struct ConvertIn {address tokenIn;uint256 amount;address target;bytes data;uint256 minOut;bytes signature;}
     struct Repay {address pool;uint256 positionId;uint256 withdrawAmount;}
@@ -26,7 +29,7 @@ interface IFxMintRouter {
 /// @notice Restricted owner-only repayment; uses the existing approved fxMint router.
 /// @dev Routing copied from AladdinDAO/fx-sdk src/configs/routers.ts.
 /// Balancer callback flow follows AladdinDAO FlashLoanCallbackFacet's authenticated callback/repay pattern.
-contract FxMintWbtcRepayer_v2 {
+contract FxMintWbtcRepayer_v3 {
     using SafeERC20 for IERC20;
     address public immutable owner;
     address public constant POOL=0xAB709e26Fa6B0A30c119D8c55B887DeD24952473;
@@ -36,9 +39,11 @@ contract FxMintWbtcRepayer_v2 {
     address public constant USDC=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
     address public constant FXUSD=0x085780639CC2cACd35E474e71f4d000e2405d8f6;
     address public constant WBTC=0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
-    uint256 public constant FLASH_AMOUNT=200e6;
-    uint256 public constant FIRST_FLOOR=1994e17;
-    uint256 public constant SECOND_FLOOR=2005e17;
+    uint256 public constant FLASH_AMOUNT=1004e5;
+    uint256 public constant FIRST_FLOOR=1002e17;
+    uint256 public constant SECOND_FLOOR=1009e17;
+    uint256 public constant TARGET_DEBT_REPAYMENT=100e18;
+    address public constant CONFIGURATION=0x16b334f2644cc00b85DB1A1efF0C2C395e00C28d;
     uint8 private state;
     bytes32 private activeHash;
     struct Plan {uint256 positionId;uint256 withdrawWbtc;uint256 firstMinimum;uint256 secondMinimum;uint256 deadline;uint8 route;}
@@ -53,7 +58,7 @@ contract FxMintWbtcRepayer_v2 {
         if(state!=0||block.timestamp>plan.deadline||plan.withdrawWbtc==0||plan.route>1||plan.firstMinimum<FIRST_FLOOR||plan.secondMinimum<SECOND_FLOOR)revert InvalidPlan();
         if(IPositionNFT(POOL).ownerOf(plan.positionId)!=owner)revert Unauthorized();
         (uint256 beforeColl,uint256 beforeDebt)=IPositionNFT(POOL).getPosition(plan.positionId);
-        if(beforeDebt==0)revert InvalidPlan();
+        if(beforeDebt<TARGET_DEBT_REPAYMENT)revert InvalidPlan();
         state=1;bytes memory data=abi.encode(plan);activeHash=keccak256(data);
         IPositionNFT(POOL).transferFrom(owner,address(this),plan.positionId);
         address[] memory tokens=new address[](1);tokens[0]=USDC;
@@ -74,16 +79,19 @@ contract FxMintWbtcRepayer_v2 {
         uint256 fx=_swap(USDC,FXUSD,FLASH_AMOUNT,_routes(0,0),plan.firstMinimum,10);
         (uint256 beforeColl,uint256 beforeDebt)=IPositionNFT(POOL).getPosition(plan.positionId);
         IPositionNFT(POOL).approve(ROUTER,plan.positionId);
-        IERC20(FXUSD).forceApprove(ROUTER,fx);
+        (,,,uint256 repaymentFee)=IPoolConfiguration(CONFIGURATION).getPoolFeeRatio(POOL,ROUTER);
+        uint256 repaymentAmount=(TARGET_DEBT_REPAYMENT*(1e9+repaymentFee)+1e9-1)/1e9;
+        if(fx<repaymentAmount)revert InsufficientOutput();
+        IERC20(FXUSD).forceApprove(ROUTER,repaymentAmount);
         // Use one official operation: PoolConfiguration forbids a second manager operation in the same transaction.
         // The router accounts for repayment fees and applies debt paydown and collateral withdrawal together.
-        IFxMintRouter.ConvertIn memory input=IFxMintRouter.ConvertIn(FXUSD,fx,CONVERTER,"",0,"");
+        IFxMintRouter.ConvertIn memory input=IFxMintRouter.ConvertIn(FXUSD,repaymentAmount,CONVERTER,"",0,"");
         uint256 wbtcBefore=IERC20(WBTC).balanceOf(address(this));
         IFxMintRouter(ROUTER).repayToLong(input,IFxMintRouter.Repay(POOL,plan.positionId,plan.withdrawWbtc));
         IERC20(FXUSD).forceApprove(ROUTER,0);
         (,uint256 afterDebt)=IPositionNFT(POOL).getPosition(plan.positionId);
         if(afterDebt>=beforeDebt)revert InvalidPlan();
-        emit DebtRepaid(plan.positionId,fx,beforeDebt,afterDebt);
+        emit DebtRepaid(plan.positionId,repaymentAmount,beforeDebt,afterDebt);
         uint256 wbtc=IERC20(WBTC).balanceOf(address(this))-wbtcBefore;
         uint256 proceeds=_swap(WBTC,FXUSD,wbtc,_routes(1,plan.route),plan.secondMinimum,25);
         uint256 due=FLASH_AMOUNT+fees[0];

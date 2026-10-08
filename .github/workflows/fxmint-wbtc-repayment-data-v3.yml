@@ -1,11 +1,11 @@
-name: fxMint WBTC Data Collection v2
+name: fxMint WBTC Data Collection v3
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/fxmint-wbtc-repayment-data-v2.yml'
-      - 'packages/github-native-sim/src/fxmint-wbtc-repayment-data-v2.mjs'
+      - '.github/workflows/fxmint-wbtc-repayment-data-v3.yml'
+      - 'packages/github-native-sim/src/fxmint-wbtc-repayment-data-v3.mjs'
       - 'packages/github-native-sim/fxmint-wbtc-repayment/requests/collect_v1.json'
 permissions:
   contents: read
@@ -29,11 +29,11 @@ jobs:
         env:
           ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
-        run: node packages/github-native-sim/src/fxmint-wbtc-repayment-data-v2.mjs
+        run: node packages/github-native-sim/src/fxmint-wbtc-repayment-data-v3.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-wbtc-data-v2
+          name: fxmint-wbtc-data-v3
           path: fxmint-output/
           if-no-files-found: error
           retention-days: 30

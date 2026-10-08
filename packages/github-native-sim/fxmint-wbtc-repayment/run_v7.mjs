@@ -2,9 +2,21 @@ import {spawn,spawnSync} from 'node:child_process';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {ethers,C,R,quote,read,collect,json,save,safeError} from '../src/fxmint-wbtc-repayment-data-v2.mjs';
+import {ethers,C,R,quote,read,collect,json,save,safeError} from '../src/fxmint-wbtc-repayment-data-v3.mjs';
+const GAS_PRICE=120000000n;
+const TARGET_DEBT=100000000000000000000n;
+const gasReceipts=[];
+function recordGas(receipt,label){
+  const gasUsed=BigInt(receipt.gasUsed);
+  const price=BigInt(receipt.effectiveGasPrice??receipt.gasPrice);
+  assert(price===GAS_PRICE,'Receipt did not use requested 0.12 gwei');
+  const costWei=gasUsed*price;
+  gasReceipts.push({label,hash:receipt.transactionHash??receipt.hash,gasUsed,gasPriceWei:price,costWei,costEth:ethers.formatEther(costWei)});
+  const totalWei=gasReceipts.reduce((sum,x)=>sum+x.costWei,0n);
+  save('GAS_COST_v7.json',{gasPriceGwei:'0.12',transactions:gasReceipts,totalWei,totalEth:ethers.formatEther(totalWei)});
+}
 const root=dirname(fileURLToPath(import.meta.url));
-const artifactPath=resolve(root,'out/FxMintWbtcRepayer_v2.sol/FxMintWbtcRepayer_v2.json');
+const artifactPath=resolve(root,'out/FxMintWbtcRepayer_v3.sol/FxMintWbtcRepayer_v3.json');
 const nftAbi=['function approve(address,uint256)','function getApproved(uint256) view returns(address)','function ownerOf(uint256) view returns(address)','function getPosition(uint256) view returns(uint256,uint256)'];
 const balance=(p,t,a)=>read(p,t,'balanceOf(address) view returns(uint256)',[a]);
 const assert=(condition,message)=>{if(!condition)throw Error(message);};
@@ -23,9 +35,11 @@ async function choosePosition(data){
 }
 async function makePlan(p,id){
   const fees=await read(p,C.configuration,'getPoolFeeRatio(address,address) view returns(uint256,uint256,uint256,uint256)',[C.pool,C.router]);
-  const firstQuote=await quote(p,200000000n,R.usdcFx);const firstMinimum=firstQuote*999n/1000n>199400000000000000000n?firstQuote*999n/1000n:199400000000000000000n;
+  const firstQuote=await quote(p,100400000n,R.usdcFx);const firstMinimum=firstQuote*999n/1000n>100200000000000000000n?firstQuote*999n/1000n:100200000000000000000n;
+  const repaymentSpend=(TARGET_DEBT*(1000000000n+fees[3])+999999999n)/1000000000n;
+  assert(firstMinimum>=repaymentSpend,'First swap minimum does not cover exact 100 fxUSD repayment plus protocol fee');
   assert(firstQuote>=firstMinimum,'USDC->fxUSD quote fails required floor');
-  const target=200500000000000000000n;
+  const target=100900000000000000000n;
   const requiredQuote=(target*10000n+9974n)/9975n;
   const [rawColl]=await read(p,C.pool,'getPosition(uint256) view returns(uint256,uint256)',[id]);
   const net=gross=>gross-gross*fees[1]/1000000000n;
@@ -38,23 +52,23 @@ async function makePlan(p,id){
       const q=await quote(p,net(hi),R.wbtcFx[route]);solutions.push({route,withdrawWbtc:hi,netWbtc:net(hi),quote:q,secondMinimum:q*9975n/10000n});
     }catch(e){console.log(`Route ${route} unavailable: ${safeError(e)}`);}
   }
-  assert(solutions.length>0,'No WBTC route can reach 200.5 fxUSD with 0.25% slippage');
+  assert(solutions.length>0,'No WBTC route can reach 100.9 fxUSD with 0.25% slippage');
   solutions.sort((a,b)=>a.withdrawWbtc<b.withdrawWbtc?-1:1);const best=solutions[0];
   const block=await p.send('eth_getBlockByNumber',['latest',false]);
   const plan={positionId:id,withdrawWbtc:best.withdrawWbtc,firstMinimum,secondMinimum:best.secondMinimum,deadline:Number(BigInt(block.timestamp))+300,route:best.route};
-  save('PLAN_v6.json',{plan,firstQuote,repayFee:fees[3],withdrawFee:fees[1],solutions});return plan;
+  save('PLAN_v7.json',{plan,firstQuote,repayFee:fees[3],withdrawFee:fees[1],solutions});return plan;
 }
 async function forkSend(p,tx,label){
   console.log('STAGE: '+label+' send');
-  const hash=await p.send('eth_sendTransaction',[tx]);
+  const hash=await p.send('eth_sendTransaction',[{...tx,gasPrice:ethers.toQuantity(GAS_PRICE)}]);
   for(let i=0;i<120;i++){
     const receipt=await p.send('eth_getTransactionReceipt',[hash]);
-    if(receipt){assert(BigInt(receipt.status)===1n,label+' reverted');console.log('STAGE: '+label+' mined '+hash);return receipt;}
+    if(receipt){assert(BigInt(receipt.status)===1n,label+' reverted');recordGas(receipt,label);console.log('STAGE: '+label+' mined '+hash);return receipt;}
     await new Promise(resolve=>setTimeout(resolve,500));
   }
   throw Error(label+' receipt missing after 60 seconds');
 }
-async function deploy(artifact,signer){const factory=new ethers.ContractFactory(artifact.abi,artifact.bytecode.object,signer);const h=await factory.deploy(C.owner);await h.waitForDeployment();return h;}
+async function deploy(artifact,signer){const factory=new ethers.ContractFactory(artifact.abi,artifact.bytecode.object,signer);const h=await factory.deploy(C.owner,{gasPrice:GAS_PRICE});const receipt=await h.deploymentTransaction().wait(1,180000);recordGas(receipt,'helper deployment');return h;}
 async function executeAndVerify(p,signer,helper,plan,simulation){
   const nft=new ethers.Contract(C.pool,nftAbi,signer);const helperAddress=await helper.getAddress();
   const before=Array.from(await nft.getPosition(plan.positionId));
@@ -64,11 +78,11 @@ async function executeAndVerify(p,signer,helper,plan,simulation){
   const previousApproval=await nft.getApproved(plan.positionId);
   if(simulation){
     await forkSend(p,{from:C.owner,to:C.pool,data:nft.interface.encodeFunctionData('approve',[helperAddress,plan.positionId]),gas:'0x7a120'},'position approval');
-  }else{console.log('STAGE: position approval');const approval=await nft.approve(helperAddress,plan.positionId);await approval.wait(1,180000);console.log('STAGE: position approval mined');}
+  }else{console.log('STAGE: position approval');const approval=await nft.approve(helperAddress,plan.positionId,{gasPrice:GAS_PRICE});const approvalReceipt=await approval.wait(1,180000);recordGas(approvalReceipt,'position approval');console.log('STAGE: position approval mined');}
   try{
     if(simulation){
-      await expectRevert('199.4 fxUSD absolute floor',()=>helper.execute.staticCall({...plan,firstMinimum:199399999999999999999n}),'InvalidPlan()');
-      await expectRevert('200.5 fxUSD absolute floor',()=>helper.execute.staticCall({...plan,secondMinimum:200499999999999999999n}),'InvalidPlan()');
+      await expectRevert('100.2 fxUSD absolute floor',()=>helper.execute.staticCall({...plan,firstMinimum:100199999999999999999n}),'InvalidPlan()');
+      await expectRevert('100.9 fxUSD absolute floor',()=>helper.execute.staticCall({...plan,secondMinimum:100899999999999999999n}),'InvalidPlan()');
       await expectRevert('expired deadline',()=>helper.execute.staticCall({...plan,deadline:1}),'InvalidPlan()');
       await expectRevert('unachievable output rolls back all state',()=>helper.execute.staticCall({...plan,secondMinimum:1000000000000000000000000n}),'InsufficientOutput()');
       const unchanged=Array.from(await nft.getPosition(plan.positionId));assert(json(unchanged)===json(before),'Failed call changed position');
@@ -77,34 +91,36 @@ async function executeAndVerify(p,signer,helper,plan,simulation){
     console.log('STAGE: estimate atomic repayment');const gas=await helper.execute.estimateGas(plan);console.log('STAGE: repayment estimate passed '+gas);
     let receipt;
     if(simulation){
-      const hash=await p.send('eth_sendTransaction',[{from:C.owner,to:helperAddress,data:helper.interface.encodeFunctionData('execute',[plan]),gas:ethers.toQuantity(gas*130n/100n)}]);
+      const hash=await p.send('eth_sendTransaction',[{from:C.owner,to:helperAddress,data:helper.interface.encodeFunctionData('execute',[plan]),gas:ethers.toQuantity(gas*130n/100n),gasPrice:ethers.toQuantity(GAS_PRICE)}]);
       console.log('STAGE: fork repayment sent '+hash);
       for(let i=0;i<120;i++){const raw=await p.send('eth_getTransactionReceipt',[hash]);if(raw){receipt={...raw,hash:raw.transactionHash,status:Number(BigInt(raw.status)),gasUsed:BigInt(raw.gasUsed),blockNumber:Number(BigInt(raw.blockNumber))};break;}await new Promise(r=>setTimeout(r,500));}
       assert(receipt,'Fork repayment receipt missing after 60 seconds');
-    }else{const tx=await helper.execute(plan,{gasLimit:gas*130n/100n});console.log('STAGE: live repayment sent '+tx.hash);receipt=await tx.wait(1,180000);}
-    console.log('STAGE: repayment mined; verify balances');assert(receipt.status===1,'Repayment receipt status failed');
+    }else{const tx=await helper.execute(plan,{gasLimit:gas*130n/100n,gasPrice:GAS_PRICE});console.log('STAGE: live repayment sent '+tx.hash);receipt=await tx.wait(1,180000);}
+    console.log('STAGE: repayment mined; verify balances');assert(receipt.status===1,'Repayment receipt status failed');recordGas(receipt,'atomic repayment');
     const after=Array.from(await nft.getPosition(plan.positionId));
     const events=receipt.logs.filter(l=>l.address.toLowerCase()===helperAddress.toLowerCase()).map(l=>helper.interface.parseLog(l)).filter(Boolean).map(e=>({name:e.name,args:Array.from(e.args)}));
     const swaps=events.filter(e=>e.name==='Swap');const flash=events.find(e=>e.name==='FlashLoanRepaid');const debt=events.find(e=>e.name==='DebtRepaid');
     assert(swaps.length===3&&flash&&debt,'Required complete flash-loan/swap/debt events missing');
-    assert(BigInt(swaps[0].args[2])===200000000n,'Flash principal swap mismatch');
+    assert(BigInt(swaps[0].args[2])===100400000n,'Flash principal swap mismatch');
     assert(BigInt(swaps[0].args[3])>=plan.firstMinimum,'First swap floor violated');
     assert(BigInt(swaps[1].args[3])>=plan.secondMinimum,'WBTC proceeds floor violated');
-    assert(BigInt(flash.args[0])===200000000n,'Flash principal mismatch');
+    assert(BigInt(flash.args[0])===100400000n,'Flash principal mismatch');
     const fee=BigInt(flash.args[1]);const vaultAfter=await balance(p,C.usdc,C.balancer);
     assert(vaultAfter-vaultBefore===fee,'Balancer did not receive principal plus exact fee');
     assert(after[1]<before[1]&&after[0]<before[0],'Debt/collateral did not decrease');
+    const debtDelta=before[1]-after[1];
+    assert(debtDelta>=TARGET_DEBT-1000000000000n&&debtDelta<=TARGET_DEBT+1000000000000n,'Debt reduction is not 100 fxUSD within protocol rounding');
     assert((await nft.ownerOf(plan.positionId)).toLowerCase()===C.owner,'NFT ownership was not restored');
     for(const token of [C.usdc,C.fxusd,C.wbtc])assert(await balance(p,token,helperAddress)===0n,'Executor retained tokens');
-    const result={version:6,status:'PASS',mode:simulation?'simulate-only':'live-broadcast',chainId:1,helper:helperAddress,transactionHash:receipt.hash,blockNumber:receipt.blockNumber,gasUsed:receipt.gasUsed,positionId:plan.positionId,before,after,debtDecrease:before[1]-after[1],rawCollateralDecrease:before[0]-after[0],vaultBefore,vaultAfter,flashFee:fee,initialExecutorBalances:initial,events,plan};
-    save(simulation?'SIMULATION_v6.json':'BROADCAST_v6.json',result);console.log(json(result));return result;
+    const result={version:7,status:'PASS',mode:simulation?'simulate-only':'live-broadcast',chainId:1,helper:helperAddress,transactionHash:receipt.hash,blockNumber:receipt.blockNumber,gasUsed:receipt.gasUsed,gasPriceWei:GAS_PRICE,repaymentGasCostEth:ethers.formatEther(BigInt(receipt.gasUsed)*GAS_PRICE),gasCosts:gasReceipts,positionId:plan.positionId,before,after,debtDecrease:before[1]-after[1],rawCollateralDecrease:before[0]-after[0],vaultBefore,vaultAfter,flashFee:fee,initialExecutorBalances:initial,events,plan};
+    save(simulation?'SIMULATION_v7.json':'BROADCAST_v7.json',result);console.log(json(result));return result;
   }catch(e){
     if(simulation){
       const names=['Unauthorized()','InvalidPlan()','InsufficientOutput()','CallbackOnly()','ErrorInsufficientOutput()','ErrorNotPositionOwner()','ErrorNoSupplyAndNoBorrow()','ErrorDebtRatioTooSmall()','ErrorDebtRatioTooLarge()','ErrorTopLevelCall()','ErrorTargetNotApproved()','ErrorPositionInLiquidationMode()'];
       console.log(json({errorSelectors:Object.fromEntries(names.map(name=>[ethers.id(name).slice(0,10),name])),revertData:e.data||e.info?.error?.data}));
       try{
         const trace=await p.send('debug_traceCall',[{from:C.owner,to:helperAddress,data:helper.interface.encodeFunctionData('execute',[plan]),gas:'0x989680'},'latest',{tracer:'callTracer'}]);
-        save('TRACE_v6.json',trace);
+        save('TRACE_v7.json',trace);
         const failures=[];function walk(node,depth=0){if(node.error)failures.push({depth,to:node.to,input:node.input?.slice(0,10),output:node.output,error:node.error});for(const child of node.calls||[])walk(child,depth+1);}walk(trace);console.log(json({traceFailures:failures}));
       }catch(traceError){console.error('Trace unavailable: '+safeError(traceError));}
     }else{try{await (await nft.approve(previousApproval,plan.positionId)).wait();}catch{console.error('NFT approval cleanup requires owner action');}}
@@ -124,34 +140,36 @@ try{
   let ready=false;for(let attempt=0;attempt<90;attempt++){try{assert(await p.send('eth_chainId',[])==='0x1','Fork chain mismatch');ready=true;break;}catch{await new Promise(r=>setTimeout(r,500));}}
   assert(ready,'Anvil startup failed: '+anvilLog);
   assert((await p.send('eth_getBlockByNumber',[ethers.toQuantity(data.block),false])).hash===data.blockHash,'Fork block/hash mismatch');
+  const feeBlock=await p.send('eth_getBlockByNumber',['latest',false]);assert(BigInt(feeBlock.baseFeePerGas)<=GAS_PRICE,'Current Ethereum base fee exceeds requested 0.12 gwei');
   await p.send('anvil_impersonateAccount',[C.owner]);
   // Gas only: no token balances, collateral, debt, ownership or contract storage is fabricated.
   const ownerEth=BigInt(await p.send('eth_getBalance',[C.owner,'latest']));
   if(ownerEth<ethers.parseEther('1'))await p.send('anvil_setBalance',[C.owner,ethers.toQuantity(ethers.parseEther('1'))]);
-  save('FORK_v6.json',{chainId:1,block:data.block,blockHash:data.blockHash,gasBalanceOverride:ownerEth<ethers.parseEther('1'),noTokenOrProtocolStorageOverrides:true});
+  save('FORK_v7.json',{chainId:1,block:data.block,blockHash:data.blockHash,gasBalanceOverride:ownerEth<ethers.parseEther('1'),noTokenOrProtocolStorageOverrides:true});
   console.log('STAGE: fork ready; obtain signers');
   const signer=await p.getSigner(C.owner);const outsider=await p.getSigner(0);
   const factory=new ethers.ContractFactory(artifact.abi,artifact.bytecode.object,outsider);
   const deployment=await factory.getDeployTransaction(C.owner);
-  const deployed=await forkSend(p,{from:await outsider.getAddress(),data:deployment.data,gas:'0x989680'},'helper deployment');
+  const deployed=await forkSend(p,{from:C.owner,data:deployment.data,gas:'0x989680'},'helper deployment');
   assert(deployed.contractAddress,'Missing deployed helper address');
   const helper=new ethers.Contract(deployed.contractAddress,artifact.abi,outsider);
   console.log('STAGE: calculate repayment plan');
   const plan=await makePlan(p,position.id);
   await expectRevert('only owner executes',()=>helper.connect(outsider).execute.staticCall(plan),'Unauthorized()');
-  await expectRevert('only active Balancer callback',()=>helper.connect(outsider).receiveFlashLoan.staticCall([C.usdc],[200000000n],[0n],'0x'),'CallbackOnly()');
+  await expectRevert('only active Balancer callback',()=>helper.connect(outsider).receiveFlashLoan.staticCall([C.usdc],[100400000n],[0n],'0x'),'CallbackOnly()');
   await executeAndVerify(p,signer,helper.connect(signer),plan,true);
   const expectedRuntimeHash=ethers.keccak256(await p.getCode(await helper.getAddress()));
   p.destroy();anvil.kill('SIGTERM');anvil=undefined;
   if(process.env.FXMINT_MODE==='live-broadcast'){
-    assert(process.env.FXMINT_CONFIRMATION==='LIVE 200 USDC','Live confirmation mismatch');
+    assert(process.env.FXMINT_CONFIRMATION==='LIVE 100 FXUSD','Live confirmation mismatch');
     assert(process.env.FXMINT_PRIVATE_KEY,'Configure FXMINT_DEPLOYER_PRIVATE_KEY in the protected production environment');
     const wallet=new ethers.Wallet(process.env.FXMINT_PRIVATE_KEY,remote);assert(wallet.address.toLowerCase()===C.owner,'Live signer is not the position owner');
+    gasReceipts.length=0;
     const liveData=await collect(remote);await choosePosition(liveData);
     const liveHelper=process.env.FXMINT_HELPER_ADDRESS?new ethers.Contract(process.env.FXMINT_HELPER_ADDRESS,artifact.abi,wallet):await deploy(artifact,wallet);
     assert((await liveHelper.owner()).toLowerCase()===C.owner,'Live helper owner mismatch');
     assert(ethers.keccak256(await remote.getCode(await liveHelper.getAddress()))===expectedRuntimeHash,'Live helper runtime differs from fork-tested code');
     const livePlan=await makePlan(remote,position.id);await executeAndVerify(remote,wallet,liveHelper,livePlan,false);
   }
-}catch(e){save('ERROR_v6.json',{status:'FAIL',error:safeError(e),revertData:e.data||e.info?.error?.data});console.error(safeError(e));process.exitCode=1;}
+}catch(e){save('ERROR_v7.json',{status:'FAIL',error:safeError(e),revertData:e.data||e.info?.error?.data});console.error(safeError(e));process.exitCode=1;}
 finally{for(const provider of providers)provider.destroy();if(anvil)anvil.kill('SIGTERM');}
