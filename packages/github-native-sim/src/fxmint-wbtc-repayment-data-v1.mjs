@@ -1,6 +1,6 @@
 // fxMINT WBTC repayment: read-only Ethereum evidence collector v1.
 // All RPC access is supplied by the existing runner-owned secret.
-import { JsonRpcProvider, Contract, formatUnits } from 'ethers';
+import { JsonRpcProvider, Contract } from 'ethers';
 import { writeFile, mkdir, appendFile } from 'node:fs/promises';
 import { FxSdk } from '@aladdindao/fx-sdk';
 import { createPhase6MutableRpcSession } from './phase6-mutable-rpc-v1.mjs';
@@ -12,10 +12,17 @@ const ADDR = {
   fxUSD: '0x085780639CC2cACd35E474e71f4d000e2405d8f6',
   balancerV2Vault: '0xBA12222222228d8Ba445958a75a0704d566BF2C8',
   uniswapV3Factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+  uniswapV3Quoter: '0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6',
+  fxPoolManager: '0x250893CA4Ba5d05626C785e8da758026928FCD24',
+  fxWbtcLongPool: '0xAB709e26Fa6B0A30c119D8c55B887DeD24952473',
 };
 const ERC20 = ['function decimals() view returns (uint8)', 'function symbol() view returns (string)', 'function balanceOf(address) view returns (uint256)'];
 const FACTORY = ['function getPool(address,address,uint24) view returns (address)'];
 const POOL = ['function liquidity() view returns (uint128)', 'function slot0() view returns (uint160,int24,uint16,uint16,uint16,uint8,bool)'];
+const FX_POOL = ['function ownerOf(uint256) view returns(address)', 'function getPosition(uint256) view returns(uint256,uint256)', 'function getPositionDebtRatio(uint256) view returns(uint256)'];
+const FX_MANAGER = ['function configuration() view returns(address)'];
+const FX_CONFIG = ['function getPoolFeeRatio(address,address) view returns(uint256,uint256,uint256,uint256)'];
+const QUOTER = ['function quoteExactInputSingle(address,address,uint24,uint256,uint160) returns (uint256)'];
 const outfile = 'fxmint-wbtc-repayment-v1-data.json';
 const report = {version:'v1',mode:'read-only',owner:OWNER,tokenAddresses:ADDR,observedAt:new Date().toISOString(),checks:{},positions:[],markets:[],failures:[],status:'INCOMPLETE'};
 let session;
@@ -53,19 +60,49 @@ try {
       currentLeverage:p.currentLeverage,lsdLeverage:p.lsdLeverage
     });
   }
+  const manager=new Contract(ADDR.fxPoolManager,FX_MANAGER,rpc);
+  const configAddr=await probe('fx pool configuration',()=>manager.configuration());
+  if (configAddr) {
+    report.checks.fxPoolConfiguration=configAddr;
+    const config=new Contract(configAddr,FX_CONFIG,rpc);
+    const fees=await probe('fx WBTC closing and withdrawal fees',()=>config.getPoolFeeRatio(ADDR.fxWbtcLongPool,OWNER));
+    if (fees) {
+      report.checks.fxPoolFeeRatios1e9={supply:fees[0].toString(),withdraw:fees[1].toString(),borrow:fees[2].toString(),repay:fees[3].toString()};
+      report.checks.estimatedFxusdNeededFor199_4Debt=(199400000000000000000n+(199400000000000000000n*fees[3]/1000000000n)).toString();
+    }
+  }
+  const nft=new Contract(ADDR.fxWbtcLongPool,FX_POOL,rpc);
+  for (const position of report.positions.filter(x=>x.type==='long')) {
+    const state=await probe('on-chain owner/collateral/debt for position '+position.positionId,async()=>{
+      const [owner,values,ratio]=await Promise.all([nft.ownerOf(position.positionId),nft.getPosition(position.positionId),nft.getPositionDebtRatio(position.positionId)]);
+      return {actualOwner:owner,rawCollateral:values[0].toString(),rawDebt:values[1].toString(),debtRatio1e18:ratio.toString()};
+    });
+    if(state) position.onchain=state;
+  }
   const factory=new Contract(ADDR.uniswapV3Factory,FACTORY,rpc);
+  const quoter=new Contract(ADDR.uniswapV3Quoter,QUOTER,rpc);
   const pairs=[['USDC','fxUSD'],['WBTC','USDC'],['WBTC','fxUSD']];
   for (const pair of pairs) for (const fee of [100,500,3000,10000]) {
     const address=await probe('Uniswap V3 '+pair.join('/')+' fee '+fee,()=>factory.getPool(ADDR[pair[0]],ADDR[pair[1]],fee));
     if (!address || /^0x0{40}$/i.test(address)) continue;
     const pool=new Contract(address,POOL,rpc);
     const state=await probe('pool '+address,async()=>({liquidity:(await pool.liquidity()).toString(),sqrtPriceX96:(await pool.slot0())[0].toString()}));
-    report.markets.push({pair:pair.join('/'),fee,address,...(state||{})});
+    let quote200UsdcToFxusd=null;
+    let quote200_5FxusdToUsdc=null;
+    if (pair[0]==='USDC' && pair[1]==='fxUSD') {
+      const q1=await probe('quote 200 USDC to fxUSD via '+fee,()=>quoter.quoteExactInputSingle.staticCall(ADDR.USDC,ADDR.fxUSD,fee,200000000n,0));
+      const q3=await probe('quote 200.5 fxUSD to USDC via '+fee,()=>quoter.quoteExactInputSingle.staticCall(ADDR.fxUSD,ADDR.USDC,fee,200500000000000000000n,0));
+      quote200UsdcToFxusd=q1?.toString()||null;
+      quote200_5FxusdToUsdc=q3?.toString()||null;
+    }
+    report.markets.push({pair:pair.join('/'),fee,address,...(state||{}),quote200UsdcToFxusd,quote200_5FxusdToUsdc});
   }
   const usdc=report.checks.USDC;
   const enoughFlashLiquidity=usdc&&BigInt(usdc.balancerV2VaultBalance)>=200000000n;
   report.checks.enoughBalancerUSDC=Boolean(enoughFlashLiquidity);
   report.checks.positionFound=report.positions.length>0;
+  report.checks.oneOwnerControlledLongPosition=report.positions.some(p=>p.type==='long' && p.onchain?.actualOwner?.toLowerCase()===OWNER.toLowerCase());
+  report.checks.positionWithdrawalAuthority='f(x) WBTC pool requires ownerOf(positionId)==msg.sender for collateral withdrawal; a flash-loan receiver contract needs escrow NFT ownership or a separately proven authorized router path';
   report.checks.requiredFlow='USDC -> fxUSD -> debt repayment + WBTC collateral withdrawal -> USDC (additional fxUSD -> USDC leg needed if withdrawn WBTC is sold for fxUSD)';
   report.status = !report.checks.positionFound ? 'POSITION_NOT_DISCOVERED' : !enoughFlashLiquidity ? 'FLASH_LIQUIDITY_MISSING' : 'POSITION_AND_FLASH_LIQUIDITY_DISCOVERED';
 } catch(e) {
