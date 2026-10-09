@@ -1,8 +1,8 @@
-# fxMint WBTC repayment v4
+# fxMint WBTC repayment v5
 
 Current owner: `0xFF90b414D84F7Ec4FAEADBD8Da86Ad515F930654`. Position #887.
 
-Current workflows: `.github/workflows/fxmint-wbtc-repayment-data-v3.yml` and `.github/workflows/fxmint-wbtc-repayment-v9.yml`. Sources: `contracts/FxMintWbtcRepayer_v3.sol` and `run_v9.mjs`.
+Current workflows: `.github/workflows/fxmint-wbtc-repayment-data-v4.yml` and `.github/workflows/fxmint-wbtc-repayment-v9.yml`. Sources: `contracts/FxMintWbtcRepayer_v3.sol` and `run_v9.mjs`.
 
 ## Completed mainnet execution
 
@@ -32,3 +32,11 @@ Manual mode remains simulate-only by default. Manual live mode on main requires 
 The completed single-use request was archived and removed. Automatic code/config pushes run simulation only; trusted live requests require the bounded request validator. Do not rerun the completed intent: the runner binds live execution to the pre-authorization debt state, which has now changed, and the remaining debt is below the 100 fxUSD target.
 
 RPC uses existing secrets `SD_ETH_RPC_URL` or `SIM_ARCHIVE_PRIMARY_ETHEREUM_01` without printing URLs. Compilation and dependencies occur only in GitHub. Solidity 0.8.28, Cancun, optimizer 200, viaIR; ethers 6.15.0 and OpenZeppelin 5.4.0; official AladdinDAO routes and approved router integration.
+
+## Requested 74 fxUSD reuse — blocked
+
+Read-only RPC verification [37862379764](https://github.com/CurveYield2/Contract-Automation/actions/runs/37862379764) at Ethereum block 26151117 confirmed the deployed helper's TARGET_DEBT_REPAYMENT is fixed at 100 fxUSD and FLASH_AMOUNT at 100.4 USDC. The contract source has no amount setter, repayment-amount argument, proxy or upgrade entrypoint. Current debt is 94.470130433123808237 fxUSD. A legitimate execute eth_call reverted with InvalidPlan() (0x21f24259); no transaction or deployment was broadcast.
+
+The 74 fxUSD request cannot execute through this unchanged helper. This was an implementation design error: the requested repayment and associated amounts should have been parameterized for reuse. A corrected helper would require a new deployment, which the user explicitly prohibited for this request. Native FX router flash operations were inspected; they use collateral-token flash loans rather than the requested helper's USDC flow and are not a drop-in way to make this fixed helper repay 74. The no-redeployment instruction remains in force.
+
+The current collector workflow v4 includes reusable deployed-helper amount capability checks and records HELPER_CAPABILITY_v1.json in its artifact. Do not run the live workflow for the blocked 74 fxUSD request.
