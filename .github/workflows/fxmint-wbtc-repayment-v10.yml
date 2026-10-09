@@ -1,13 +1,12 @@
-name: fxMint WBTC Repayment v9
+name: fxMint WBTC Repayment v10
 on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/fxmint-wbtc-repayment-v9.yml'
+      - '.github/workflows/fxmint-wbtc-repayment-v10.yml'
       - 'packages/github-native-sim/fxmint-wbtc-repayment/contracts/FxMintWbtcRepayer_v3.sol'
-      - 'packages/github-native-sim/fxmint-wbtc-repayment/run_v9.mjs'
+      - 'packages/github-native-sim/fxmint-wbtc-repayment/run_v10.mjs'
       - 'packages/github-native-sim/fxmint-wbtc-repayment/requests/simulate_v1.json'
-      - 'packages/github-native-sim/fxmint-wbtc-repayment/requests/live_v1.json'
   workflow_dispatch:
     inputs:
       mode:
@@ -20,9 +19,9 @@ on:
         type: string
         default: ''
       helper_address:
-        description: Existing verified helper address, or empty to deploy in live mode
+        description: Existing helper only; no deployment supported
         type: string
-        default: ''
+        default: '0x69B658189d63C39126F7BD017D883A872487713e'
       confirmation:
         description: Live mode requires exactly LIVE 100 FXUSD
         type: string
@@ -34,8 +33,6 @@ concurrency:
   cancel-in-progress: false
 jobs:
   simulation:
-    outputs:
-      live_request: ${{ steps.request.outputs.live_request }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -44,23 +41,6 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
           fetch-depth: 2
-      - name: Validate one-shot authorized live request
-        id: request
-        run: |
-          node --input-type=module <<'JS'
-          import fs from 'node:fs';
-          import {execFileSync} from 'node:child_process';
-          const event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
-          const path='packages/github-native-sim/fxmint-wbtc-repayment/requests/live_v1.json';
-          const touched=execFileSync('git',['diff','--name-only','HEAD^','HEAD'],{encoding:'utf8'}).trim().split('\n').includes(path);
-          let live=false;
-          if(process.env.GITHUB_EVENT_NAME==='push'&&touched){
-            const r=JSON.parse(fs.readFileSync(path,'utf8'));
-            if(r.id!=='live-20261008-2332-v1'||r.owner.toLowerCase()!=='0xff90b414d84f7ec4faeadbd8da86ad515f930654'||r.positionId!==887||r.debtRepaymentFxusd!=='100'||r.maxFeeGwei!=='0.22'||r.priorityFeeGwei!=='0.0001'||r.confirmation!=='LIVE 100 FXUSD'||Date.now()>Date.parse(r.expiresAt)||process.env.GITHUB_RUN_ATTEMPT!=='1'||!event.head_commit.message.includes('[fxmint-live: live-20261008-2332-v1]'))throw Error('Invalid or expired live authorization');
-            live=true;
-          }
-          fs.appendFileSync(process.env.GITHUB_OUTPUT,'live_request='+live+'\n');
-          JS
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -75,17 +55,17 @@ jobs:
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: simulate-only
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
-        run: timeout 240s node packages/github-native-sim/fxmint-wbtc-repayment/run_v9.mjs
+        run: timeout 240s node packages/github-native-sim/fxmint-wbtc-repayment/run_v10.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-wbtc-simulation-v9
+          name: fxmint-wbtc-simulation-v10
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
   live:
     needs: simulation
-    if: github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && inputs.mode == 'live-broadcast' && inputs.confirmation == 'LIVE 100 FXUSD') || (github.event_name == 'push' && needs.simulation.outputs.live_request == 'true'))
+    if: github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && inputs.mode == 'live-broadcast' && inputs.confirmation == 'LIVE 100 FXUSD'))
     environment: fxmint-production
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -111,12 +91,11 @@ jobs:
           FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
           FXMINT_CONFIRMATION: ${{ inputs.confirmation || 'LIVE 100 FXUSD' }}
           FXMINT_PRIVATE_KEY: ${{ secrets.DEPLOYER_FX }}
-          FXMINT_AUTHORIZATION_EXPIRES: ${{ github.event_name == 'push' && '2026-10-09T00:02:00Z' || '' }}
-        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v9.mjs
+        run: node packages/github-native-sim/fxmint-wbtc-repayment/run_v10.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-wbtc-broadcast-v9
+          name: fxmint-wbtc-broadcast-v10
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
