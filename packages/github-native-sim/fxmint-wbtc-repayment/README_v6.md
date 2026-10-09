@@ -1,8 +1,8 @@
-# fxMint WBTC repayment v5
+# fxMint WBTC repayment v6
 
 Current owner: `0xFF90b414D84F7Ec4FAEADBD8Da86Ad515F930654`. Position #887.
 
-Current workflows: `.github/workflows/fxmint-wbtc-repayment-data-v4.yml` and `.github/workflows/fxmint-wbtc-repayment-v9.yml`. Sources: `contracts/FxMintWbtcRepayer_v3.sol` and `run_v9.mjs`.
+Current workflows: `.github/workflows/fxmint-wbtc-repayment-data-v5.yml` and `.github/workflows/fxmint-wbtc-repayment-v10.yml`. Sources: `contracts/FxMintWbtcRepayer_v3.sol` and `run_v10.mjs`.
 
 ## Completed mainnet execution
 
@@ -27,9 +27,9 @@ The helper borrows 100.4 USDC from Balancer V2 and swaps it to fxUSD with 0.1% q
 
 Simulation tests owner-only execution, authenticated callback, output floors, expiry, atomic rollback, mined success, exact debt reduction, full flash repayment, owner NFT return and zero retained helper balances. Only owner gas ETH is increased on the fork; no token balances or protocol/NFT state are fabricated.
 
-Manual mode remains simulate-only by default. Manual live mode on main requires confirmation `LIVE 100 FXUSD`, environment `fxmint-production`, and the existing `DEPLOYER_FX` signing secret. Preserve environment protections. EIP-1559 fee caps are applied to deployment, approval and repayment. Current mainnet base fee plus priority must fit under the cap before broadcasting. Existing helpers must match the compiled runtime and owner.
+Manual mode remains simulate-only by default. Manual live mode on main requires confirmation `LIVE 100 FXUSD`, environment `fxmint-production`, and the existing `DEPLOYER_FX` signing secret. Preserve environment protections. EIP-1559 fee caps are applied to deployment, approval and repayment. Current mainnet base fee plus priority must fit under the cap before broadcasting. The existing helper must match the verified deployed runtime hash and owner. Version 10 supports only helper 0x69B658189d63C39126F7BD017D883A872487713e; it has no deployment path. Fork simulation also reuses that existing helper.
 
-The completed single-use request was archived and removed. Automatic code/config pushes run simulation only; trusted live requests require the bounded request validator. Do not rerun the completed intent: the runner binds live execution to the pre-authorization debt state, which has now changed, and the remaining debt is below the 100 fxUSD target.
+The completed single-use request was archived and removed. Version 10 code/config pushes run simulation only, and live broadcast requires human workflow_dispatch with mode live-broadcast and confirmation LIVE 100 FXUSD. The approved production environment and DEPLOYER_FX secret remain in use. No automatic live-push request is accepted. The new run binds live execution to refreshed debt 100.070130433123808237 fxUSD rather than the completed intent's prestate. Its maxFeePerGas is 155000000 wei (0.155 gwei), with maxPriorityFeePerGas 100000 wei (0.0001 gwei).
 
 RPC uses existing secrets `SD_ETH_RPC_URL` or `SIM_ARCHIVE_PRIMARY_ETHEREUM_01` without printing URLs. Compilation and dependencies occur only in GitHub. Solidity 0.8.28, Cancun, optimizer 200, viaIR; ethers 6.15.0 and OpenZeppelin 5.4.0; official AladdinDAO routes and approved router integration.
 
@@ -39,4 +39,10 @@ Read-only RPC verification [37862379764](https://github.com/CurveYield2/Contract
 
 The 74 fxUSD request cannot execute through this unchanged helper. This was an implementation design error: the requested repayment and associated amounts should have been parameterized for reuse. A corrected helper would require a new deployment, which the user explicitly prohibited for this request. Native FX router flash operations were inspected; they use collateral-token flash loans rather than the requested helper's USDC flow and are not a drop-in way to make this fixed helper repay 74. The no-redeployment instruction remains in force.
 
-The current collector workflow v4 includes reusable deployed-helper amount capability checks and records HELPER_CAPABILITY_v1.json in its artifact. Do not run the live workflow for the blocked 74 fxUSD request.
+The current collector workflow v5 includes reusable deployed-helper amount and fee capability checks and records HELPER_CAPABILITY_v2.json in its artifact. Do not run the live workflow for the blocked 74 fxUSD request.
+
+## Requested 100 fxUSD reuse at 0.155 gwei
+
+Read-only collection [37864289687](https://github.com/CurveYield2/Contract-Automation/actions/runs/37864289687) at Ethereum block 26151226 observed debt increased to 100.070130433123808237 fxUSD, enough for the helper's fixed 100 fxUSD repayment. Base fee was 0.126144887 gwei. The helper and NFT owner remained the authorized owner. The diagnostic eth_call reached the NFT transfer and reverted because helper approval was absent; the execution workflow performs that approval before repayment. No deployment or transaction occurred in collection.
+
+Simulation run [37864470615](https://github.com/CurveYield2/Contract-Automation/actions/runs/37864470615), commit 35c877efb5a7f29237cba4d79cd3ab60eab5a31d, reuses the exact deployed helper and fresh pinned Ethereum state with the requested cap. Simulation PASSED: exact debt reduction 100 fxUSD, debt before 100.070130433123808237 and after 0.070130433123808237. Complete Balancer repayment, owner NFT return, output floors, rollback checks and zero retained helper token balances all passed. No helper deployment occurred. Approval used 55,948 gas and repayment 1,348,716 gas. Simulated gas cost total 148658961633420 wei (0.000148658961633420 ETH); at the requested maximum 0.155 gwei the same measured gas totals 217722920000000 wei (0.000217722920000000 ETH). These are fork measurements, not live receipt costs. The live job was skipped; no new mainnet transaction was broadcast. Live mode is available only through manual workflow_dispatch with position_id 887, mode live-broadcast and confirmation LIVE 100 FXUSD; the helper input defaults to the deployed address. The workflow repeats fresh acceptance and verifies current fees and authorized debt before signing.
