@@ -1,15 +1,19 @@
-name: fxMint WBTC Data Collection v4
+name: fxMint WBTC Data Collection v5
 on:
   workflow_dispatch:
     inputs:
       repayment_fxusd:
         description: Requested repayment to check against the deployed helper
         type: string
-        default: '74'
+        default: '100'
+      max_fee_gwei:
+        description: Maximum fee cap for capability verification
+        type: string
+        default: '0.155'
   push:
     branches: [main]
     paths:
-      - '.github/workflows/fxmint-wbtc-repayment-data-v4.yml'
+      - '.github/workflows/fxmint-wbtc-repayment-data-v5.yml'
       - 'packages/github-native-sim/src/fxmint-wbtc-repayment-data-v3.mjs'
       - 'packages/github-native-sim/fxmint-wbtc-repayment/requests/collect_v1.json'
 permissions:
@@ -39,7 +43,8 @@ jobs:
         env:
           ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
-          REQUESTED_REPAYMENT: ${{ inputs.repayment_fxusd || '74' }}
+          REQUESTED_REPAYMENT: ${{ inputs.repayment_fxusd || '100' }}
+          MAX_FEE_GWEI: ${{ inputs.max_fee_gwei || '0.155' }}
         run: |
           node --input-type=module <<'JS'
           import {ethers,C,read,save,json,safeError} from './packages/github-native-sim/src/fxmint-wbtc-repayment-data-v3.mjs';
@@ -57,18 +62,20 @@ jobs:
             const nftOwner=await read(p,C.pool,'ownerOf(uint256) view returns(address)',[887],block);
             const [collateral,debt]=await read(p,C.pool,'getPosition(uint256) view returns(uint256,uint256)',[887],block);
             const header=await p.send('eth_getBlockByNumber',[block,false]);
+            const maxFee=ethers.parseUnits(process.env.MAX_FEE_GWEI,9),priority=100000n,baseFee=BigInt(header.baseFeePerGas);
+            const reasons=[];if(target!==requested)reasons.push('Requested amount differs from fixed helper repayment');if(debt<target)reasons.push('Remaining debt is below fixed helper repayment');if(baseFee+priority>maxFee)reasons.push('Current base fee plus priority exceeds maximum fee cap');
             const iface=new ethers.Interface(['function execute((uint256 positionId,uint256 withdrawWbtc,uint256 firstMinimum,uint256 secondMinimum,uint256 deadline,uint8 route))']);
             const plan={positionId:887,withdrawWbtc:1,firstMinimum:firstFloor,secondMinimum:secondFloor,deadline:Number(BigInt(header.timestamp))+300,route:0};
             let call={};
             try{await p.send('eth_call',[{from:C.owner,to:helper,data:iface.encodeFunctionData('execute',[plan])},block]);call={status:'SUCCESS'};}catch(e){call={status:'REVERT',data:e.data||e.info?.error?.data,error:safeError(e)};}
-            const result={status:target===requested&&debt>=target?'SUPPORTED':'BLOCKED',helper,owner,nftOwner,chainId:1,block:Number(BigInt(block)),requestedFxusd:ethers.formatUnits(requested,18),fixedRepaymentFxusd:ethers.formatUnits(target,18),fixedFlashUsdc:ethers.formatUnits(flash,6),debtFxusd:ethers.formatUnits(debt,18),codeHash:ethers.keccak256(await p.getCode(helper,block)),executeCall:call,broadcast:false,deployment:false};
-            save('HELPER_CAPABILITY_v1.json',result);console.log(json(result));
+            const result={status:reasons.length?'BLOCKED':'SUPPORTED',reasons,maxFeeGwei:ethers.formatUnits(maxFee,9),priorityFeeGwei:ethers.formatUnits(priority,9),baseFeeGwei:ethers.formatUnits(baseFee,9),debtShortfallFxusd:ethers.formatUnits(debt<target?target-debt:0n,18),helper,owner,nftOwner,chainId:1,block:Number(BigInt(block)),requestedFxusd:ethers.formatUnits(requested,18),fixedRepaymentFxusd:ethers.formatUnits(target,18),fixedFlashUsdc:ethers.formatUnits(flash,6),debtFxusd:ethers.formatUnits(debt,18),codeHash:ethers.keccak256(await p.getCode(helper,block)),executeCall:call,broadcast:false,deployment:false};
+            save('HELPER_CAPABILITY_v2.json',result);console.log(json(result));
           }catch(e){console.error(safeError(e));process.exitCode=1;}finally{p.destroy();}
           JS
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-wbtc-data-v4
+          name: fxmint-wbtc-data-v5
           path: fxmint-output/
           if-no-files-found: error
           retention-days: 30
