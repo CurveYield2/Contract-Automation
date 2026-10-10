@@ -1,9 +1,9 @@
 {
   "schemaVersion": "curveyield-v7-current-qualification-status-v1",
   "status": "PASS",
-  "qualifiedCommit": "46c922c2a3a1ce55f68581d4bcc8dd30502b9650",
-  "workflowRunId": "37415633864",
-  "qualifiedAt": "2026-10-06T04:54:56.749Z",
+  "qualifiedCommit": "d4879ceaa318c7bb746e3393cbd67168eeff7b6d",
+  "workflowRunId": "38030290616",
+  "qualifiedAt": "2026-10-10T06:19:11.192Z",
   "requestSchema": "deep-assurance-github-request-v2",
   "profiles": [
     "github-native-compile-v2",
@@ -42,13 +42,13 @@
   },
   "controllerQualification": {
     "schemaVersion": "v26-controller-qualification-v1",
-    "controllerCommit": "b42f6b36d4cb3042591d12118a93a7b943a5618a",
+    "controllerCommit": "35bc3b27b449469ee332f85ba7f85544d5999ae8",
     "controllerRef": "main",
     "status": "PASS",
-    "qualificationRunId": "37415633864",
-    "qualifiedAt": "2026-10-06T04:53:32Z",
-    "runnerQualifiedCommit": "46c922c2a3a1ce55f68581d4bcc8dd30502b9650",
-    "runnerQualificationRunId": "37415633864",
+    "qualificationRunId": "38030290616",
+    "qualifiedAt": "2026-10-10T06:18:03Z",
+    "runnerQualifiedCommit": "d4879ceaa318c7bb746e3393cbd67168eeff7b6d",
+    "runnerQualificationRunId": "38030290616",
     "testedSchemas": [
       "audit-v7-sequential-review-state-v3",
       "v26-phase-contract-v1",
@@ -118,26 +118,26 @@
     "status": "PASS",
     "identityNormalization": {
       "status": "PASS",
-      "observedUpstreamChainId": 15597657,
+      "observedUpstreamChainId": 1,
       "observedNormalizedChainId": 1,
-      "upstreamIdentityVirtualized": true,
-      "mode": "EXISTING_RPC_IDENTITY_PROXY",
+      "upstreamIdentityVirtualized": false,
+      "mode": "LOCAL_EPHEMERAL_ANVIL_FORK",
       "rawIdentityProbeBypassUsed": false
     },
     "runtime": {
       "identityNormalized": true,
-      "blockNumber": 26131077,
-      "blockHash": "0x4f640bce1bcd1f80576960ccc367ed4b017cec5a94c56d799e6b7921d70157a0",
-      "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
+      "blockNumber": 26160189,
+      "blockHash": "0x11301f5e07931bdff4ba0fd094cce306dbb1ab2a92693b2c65e8d5e070b27d3c",
+      "profile": "ETHEREUM_FORK_RPC_URL",
       "rpcUrlExposed": false
     },
     "medusaSmoke": {
       "schemaVersion": "curveyield-v7-medusa-e2e-smoke-v1",
       "status": "PASS",
       "rpc": {
-        "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01",
-        "blockNumber": 26131077,
-        "blockHash": "0x4f640bce1bcd1f80576960ccc367ed4b017cec5a94c56d799e6b7921d70157a0",
+        "profile": "ETHEREUM_FORK_RPC_URL",
+        "blockNumber": 26160189,
+        "blockHash": "0x11301f5e07931bdff4ba0fd094cce306dbb1ab2a92693b2c65e8d5e070b27d3c",
         "urlExposed": false
       },
       "checks": {
@@ -183,21 +183,21 @@
       },
       "archiveRpcSecret": {
         "status": "PASS",
-        "profile": "SIM_ARCHIVE_PRIMARY_ETHEREUM_01"
+        "profile": "ETHEREUM_FORK_RPC_URL"
       },
       "chainIdentity": {
         "status": "PASS",
         "expectedChainId": 1,
-        "remoteChainId": 15597657,
-        "remoteNetworkId": 15597657,
-        "directIdentityMatch": false,
+        "remoteChainId": 1,
+        "remoteNetworkId": 1,
+        "directIdentityMatch": true,
         "sampleTransactionChainId": 1,
         "transactionChainMatch": true,
         "upstreamBlockHash": "0xb7f45fdc91b604d7c0450a505cf5c9571c9bb6267c86b6a8d535f4bc11b3f4ee",
         "localAnvilBlockHash": "0xb7f45fdc91b604d7c0450a505cf5c9571c9bb6267c86b6a8d535f4bc11b3f4ee",
         "localHashMatch": true,
-        "reconciliationMode": "IDENTITY_PROXY_STATE_RECONCILED",
-        "identityProxyRequired": true,
+        "reconciliationMode": "DIRECT_IDENTITY_AND_STATE_MATCH",
+        "identityProxyRequired": false,
         "anvilChainId": 1,
         "anvilChainIdMatchesExpected": true
       },
