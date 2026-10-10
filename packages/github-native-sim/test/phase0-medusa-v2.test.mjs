@@ -115,7 +115,10 @@ test('Medusa state snapshot node carries deployed code, storage and block height
     for(let i=0;i<300;i++){try{await call(url,'eth_chainId');break;}catch{await new Promise(r=>setTimeout(r,100));}}
     const [from]=await call(url,'eth_accounts');
     const tx=await call(url,'eth_sendTransaction',[{from,data:'0x602a600055600a6011600039600a6000f360005460005260206000f3'}]);
-    const {contractAddress}=await call(url,'eth_getTransactionReceipt',[tx]);
+    await call(url,'anvil_mine',['0x1']); // Explicitly mine before requesting the deployment receipt.
+    const receipt=await call(url,'eth_getTransactionReceipt',[tx]);
+    assert.ok(receipt?.contractAddress,'contract deployment must be mined before snapshot verification');
+    const {contractAddress}=receipt;
     await call(url,'anvil_mine',['0x5']);
     for(let i=1;i<=500;i++)await call(url,'anvil_setStorageAt',[contractAddress,'0x'+i.toString(16),'0x'+'11'.repeat(32)]);
     const height=Number(await call(url,'eth_blockNumber'));
