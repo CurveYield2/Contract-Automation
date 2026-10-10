@@ -1,0 +1,120 @@
+name: fxMint ETH Repayment v1
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fxmint-eth-repayment-v1.yml'
+      - 'packages/github-native-sim/fxmint-eth-repayment/contracts/FxMintEthRepayer_v1.sol'
+      - 'packages/github-native-sim/fxmint-eth-repayment/data_v1.mjs'
+      - 'packages/github-native-sim/fxmint-eth-repayment/run_v1.mjs'
+      - 'packages/github-native-sim/fxmint-eth-repayment/requests/simulate_v1.json'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Execution mode
+        type: choice
+        options: [simulate-only, collect-only, live-broadcast]
+        default: simulate-only
+      repayment_fxusd:
+        description: Exact net debt repayment in fxUSD (positive decimal)
+        type: string
+        default: '100'
+      position_id:
+        description: Leave empty to discover the unique eligible ETH long position
+        type: string
+        default: ''
+      helper_address:
+        description: Reuse this ETH helper; empty permits deployment in manual live mode
+        type: string
+        default: ''
+      max_fee_gwei:
+        description: Maximum total gas price in gwei
+        type: string
+        default: '1'
+      priority_fee_gwei:
+        description: Maximum priority fee in gwei
+        type: string
+        default: '0.0001'
+      confirmation:
+        description: Live requires LIVE <repayment amount> FXUSD (example LIVE 100 FXUSD)
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: fxmint-eth-deployer
+  cancel-in-progress: false
+jobs:
+  simulation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Install scoped dependencies in GitHub only
+        run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
+      - name: Discover position, compile, compare complete routes and verify repayment
+        env:
+          ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
+          FXMINT_MODE: ${{ inputs.mode == 'collect-only' && 'collect-only' || 'simulate-only' }}
+          FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd || '100' }}
+          FXMINT_POSITION_ID: ${{ inputs.position_id }}
+          FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
+          FXMINT_MAX_FEE_GWEI: ${{ inputs.max_fee_gwei || '1' }}
+          FXMINT_PRIORITY_GWEI: ${{ inputs.priority_fee_gwei || '0.0001' }}
+        run: timeout 1500s node packages/github-native-sim/fxmint-eth-repayment/run_v1.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fxmint-eth-simulation-v1
+          path: fxmint-output/
+          retention-days: 30
+          if-no-files-found: error
+  live:
+    needs: simulation
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'live-broadcast'
+    environment: fxmint-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Install scoped dependencies in GitHub only
+        run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
+      - name: Repeat fresh route acceptance then perform manually requested broadcast
+        env:
+          ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
+          FXMINT_MODE: live-broadcast
+          FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd }}
+          FXMINT_POSITION_ID: ${{ inputs.position_id }}
+          FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
+          FXMINT_MAX_FEE_GWEI: ${{ inputs.max_fee_gwei }}
+          FXMINT_PRIORITY_GWEI: ${{ inputs.priority_fee_gwei }}
+          FXMINT_CONFIRMATION: ${{ inputs.confirmation }}
+          FXMINT_PRIVATE_KEY: ${{ secrets.DEPLOYER_FX }}
+        run: node packages/github-native-sim/fxmint-eth-repayment/run_v1.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fxmint-eth-broadcast-v1
+          path: fxmint-output/
+          retention-days: 30
+          if-no-files-found: error
