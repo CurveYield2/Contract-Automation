@@ -45,12 +45,12 @@ jobs:
             audits/functional-verification/boosthub-four-contracts-v1
       - name: Install pinned OpenZeppelin only on GitHub
         run: |
-          git clone --depth 1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git process/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts
-          git -C process/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts rev-parse HEAD
+          git clone --depth 1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git .controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts
+          git -C .controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts rev-parse HEAD
       - name: Verify exact uploaded bytes and compile Vyper
-        run: python3 process/functional-verification/boosthub-four-contracts-v1/prepare_remote_v1.py
+        run: python3 .controller/audits/functional-verification/boosthub-four-contracts-v1/prepare_remote_v1.py
       - name: Compile Solidity and execute unit and compatibility checks
-        working-directory: process/functional-verification/boosthub-four-contracts-v1
+        working-directory: .controller/audits/functional-verification/boosthub-four-contracts-v1
         shell: bash
         run: |
           set -o pipefail
@@ -59,15 +59,15 @@ jobs:
           forge test -vvv 2>&1 | tee evidence/foundry_results_v1.txt
       - name: Capture ABI and production contract sizes
         if: always()
-        run: python3 process/functional-verification/boosthub-four-contracts-v1/summarize_remote_v1.py
+        run: python3 .controller/audits/functional-verification/boosthub-four-contracts-v1/summarize_remote_v1.py
       - name: Upload exact verification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: boosthub-four-contracts-verification-v1
           path: |
-            process/functional-verification/boosthub-four-contracts-v1/evidence
-            process/functional-verification/boosthub-four-contracts-v1/contracts/interfaces/IStakeDaoGauge.sol
-            process/functional-verification/boosthub-four-contracts-v1/contracts/interfaces/IvlBoost.sol
-            process/functional-verification/boosthub-four-contracts-v1/contracts/libraries/BoostHubErrors.sol
+            .controller/audits/functional-verification/boosthub-four-contracts-v1/evidence
+            .controller/audits/functional-verification/boosthub-four-contracts-v1/contracts/interfaces/IStakeDaoGauge.sol
+            .controller/audits/functional-verification/boosthub-four-contracts-v1/contracts/interfaces/IvlBoost.sol
+            .controller/audits/functional-verification/boosthub-four-contracts-v1/contracts/libraries/BoostHubErrors.sol
           retention-days: 30
