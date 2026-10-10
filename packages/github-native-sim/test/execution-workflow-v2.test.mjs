@@ -30,7 +30,7 @@ test('canonical V7 execution workflow scopes private controller auth and archive
   assert.match(workflow, /name:\s*Execute V7 request/);
   assert.match(workflow, /AUDIT_CONTROLLER_GITHUB_TOKEN:\s*\$\{\{ env\.AUDIT_CONTROLLER_GITHUB_TOKEN \}\}/);
   assert.doesNotMatch(workflow, /AUDIT_CONTROLLER_GITHUB_TOKEN\s*\|\|\s*secrets\.PREFLIGHTSIM_GITHUB_TOKEN/);
-    assert.match(workflow, /ETHEREUM_FORK_RPC_URL:\\s*https:\\/\\/eth\\.drpc\\.org\\//);
+    assert.ok(workflow.includes('ETHEREUM_FORK_RPC_URL: https://eth.drpc.org/'));
   assert.match(workflow, /npm run v7:execute -- --request \.v7-request\/request\.json/);
   assert.match(workflow, /actions\/upload-artifact@v4/);
   assert.match(workflow, /path:\s*\.audit-evidence\/v7-execution/);
