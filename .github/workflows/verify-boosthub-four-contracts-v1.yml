@@ -36,7 +36,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CurveYield2/Audit-Controller
-          ref: eacc41671cbc2fbb6d84e5c9cf616d756f591ead
+          ref: 577ce1b163e3ec1fcc3a6d6ca65cee48edf2b0f5
           token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: .controller
           persist-credentials: false
