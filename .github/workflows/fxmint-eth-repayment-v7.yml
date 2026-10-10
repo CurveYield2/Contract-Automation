@@ -1,12 +1,12 @@
-name: fxMint ETH Repayment v6
+name: fxMint ETH Repayment v7
 on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/fxmint-eth-repayment-v6.yml'
+      - '.github/workflows/fxmint-eth-repayment-v7.yml'
       - 'packages/github-native-sim/fxmint-eth-repayment/contracts/FxMintEthRepayer_v1.sol'
       - 'packages/github-native-sim/fxmint-eth-repayment/data_v3.mjs'
-      - 'packages/github-native-sim/fxmint-eth-repayment/run_v4.mjs'
+      - 'packages/github-native-sim/fxmint-eth-repayment/run_v5.mjs'
       - 'packages/github-native-sim/fxmint-eth-repayment/requests/simulate_v1.json'
   workflow_dispatch:
     inputs:
@@ -20,9 +20,9 @@ on:
         type: string
         default: '10'
       owner_address:
-        description: Position owner for simulate/collect; live automatically derives DEPLOYER_FX address
+        description: Simulate/collect owner; empty follows position_id or NFT 1920. Live derives DEPLOYER_FX
         type: string
-        default: '0x9f2B20A772246960810045905B7daccf960eE288'
+        default: ''
       position_id:
         description: Leave empty to discover the unique eligible ETH long position
         type: string
@@ -107,16 +107,16 @@ jobs:
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: ${{ inputs.mode == 'collect-only' && 'collect-only' || 'simulate-only' }}
           FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd || '10' }}
-          FXMINT_OWNER_ADDRESS: ${{ needs.resolve-owner.outputs.owner || inputs.owner_address || '0x9f2B20A772246960810045905B7daccf960eE288' }}
+          FXMINT_OWNER_ADDRESS: ${{ needs.resolve-owner.outputs.owner || inputs.owner_address }}
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
           FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
           FXMINT_MAX_FEE_GWEI: ${{ inputs.max_fee_gwei || '1' }}
           FXMINT_MAX_BASE_GWEI: ${{ inputs.max_base_gwei || '0.09' }}
-        run: timeout 1500s node packages/github-native-sim/fxmint-eth-repayment/run_v4.mjs
+        run: timeout 1500s node packages/github-native-sim/fxmint-eth-repayment/run_v5.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-simulation-v6
+          name: fxmint-eth-simulation-v7
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
@@ -152,11 +152,11 @@ jobs:
           FXMINT_MAX_BASE_GWEI: ${{ inputs.max_base_gwei || '0.09' }}
           FXMINT_CONFIRMATION: ${{ inputs.confirmation }}
           FXMINT_PRIVATE_KEY: ${{ secrets.DEPLOYER_FX }}
-        run: node packages/github-native-sim/fxmint-eth-repayment/run_v4.mjs
+        run: node packages/github-native-sim/fxmint-eth-repayment/run_v5.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-broadcast-v6
+          name: fxmint-eth-broadcast-v7
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error

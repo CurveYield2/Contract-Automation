@@ -1,8 +1,8 @@
 # fxMint ETH long repayment
 
-Active workflow: [fxMint ETH Repayment v6](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v6.yml).
+Active workflow: [fxMint ETH Repayment v7](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v7.yml).
 
-Original position owner / default read-only simulation owner: `0x9f2B20A772246960810045905B7daccf960eE288`. Live mode derives the current public owner address from `DEPLOYER_FX` before simulation; transfer the NFT to that address before running live.
+Original position owner: `0x9f2B20A772246960810045905B7daccf960eE288`. Live mode derives the current public owner address from `DEPLOYER_FX` before simulation; transfer the NFT to that address before running live.
 Pool: `0x6Ecfa38FeE8a5277B91eFdA204c235814F0122E8` (WstETHLongPool).
 Discovery found NFT #1920 with approximately 21.045126289 fxUSD debt and NFT #1925 with zero debt/collateral. Every run rediscovers ownership, debt, rates, fees, liquidity and contract hashes; these historical balances are not execution inputs.
 
@@ -12,7 +12,7 @@ Discovery found NFT #1920 with approximately 21.045126289 fxUSD debt and NFT #19
 |---|---|
 | mode | `simulate-only` (default), `collect-only`, or manually dispatched `live-broadcast` |
 | repayment_fxusd | Net fxUSD debt reduction, default 10; positive decimal with up to 18 decimals |
-| owner_address | Owner for simulate-only / collect-only, default original account; ignored in live mode, which derives DEPLOYER_FX automatically |
+| owner_address | Optional owner for simulate-only / collect-only; empty follows position_id or NFT #1920 at its current owner. Live derives DEPLOYER_FX automatically |
 | position_id | Empty discovers the unique eligible owned NFT; enter an ID if multiple are eligible |
 | helper_address | Empty creates a fork helper for simulation; manual live can deploy an ETH helper once. Enter the deployed ETH helper address on subsequent runs to reuse it with a different amount |
 | max_fee_gwei | EIP-1559 total fee cap, default 1 gwei |
@@ -89,9 +89,12 @@ Pushes trigger simulation only. Live mode requires manual workflow_dispatch, suc
 
 ## Run live after the NFT transfer
 
-Open [the workflow page](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v6.yml), click **Run workflow**, select branch **main**, mode **live-broadcast**, enter the desired fxUSD amount and gas caps, and enter the exact confirmation (for example `LIVE 10 FXUSD`). Owner is derived automatically from `DEPLOYER_FX`; `owner_address` is only for independent simulate/collect runs. Enter `1920` for this NFT or leave auto-discovery empty. The first ETH live execution needs a helper deployment, so leave `helper_address` empty; reuse its emitted mainnet address afterward. This accepts the ETH helper only, not the existing WBTC helper.
+Open [the workflow page](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v7.yml), click **Run workflow**, select branch **main**, mode **live-broadcast**, enter the desired fxUSD amount and gas caps, and enter the exact confirmation (for example `LIVE 10 FXUSD`). Owner is derived automatically from `DEPLOYER_FX`; `owner_address` is only for independent simulate/collect runs. Enter `1920` for this NFT or leave auto-discovery empty. The first ETH live execution needs a helper deployment, so leave `helper_address` empty; reuse its emitted mainnet address afterward. This accepts the ETH helper only, not the existing WBTC helper.
 
 At **0.09 gwei**, the measured **3,307,301 gas** for deployment + NFT approval + atomic repayment is **0.00029765709 ETH**. Repayment alone is **0.00012039444 ETH**. NFT transfer into the signing account is separate and is not included. These are estimates based on the verified 10 fxUSD sequence; future state/amount/route may change gas.
 
 
 Signer derivation is restricted to main/manual live dispatch and uses the protected fxmint-production environment. Only the public address is passed to the unkeyed simulation; the live job requires that same address and DEPLOYER_FX. Push verification does not derive a private signer or broadcast.
+
+
+After the user transferred NFT #1920, the fee-update push check (run 38017559011) correctly stopped because the original account no longer held an indebted position. The current simulation default reads `ownerOf(position_id || 1920)` from Ethereum before collecting positions; it follows real transfers and fabricates no NFT ownership. A provided owner input is still honored, and live mode always uses the DEPLOYER_FX-derived address.

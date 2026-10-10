@@ -1,4 +1,4 @@
-# fxMint ETH long repayment workflow v7
+# fxMint ETH long repayment workflow v8
 
 State: BASE_FEE_INPUT_AND_FIXED_PRIORITY_AWAITING_VERIFICATION.
 
@@ -37,3 +37,6 @@ Terminal configuration evidence: run 38016737798 at source commit 8fc8b19e0c2772
 
 
 Latest governing request: add max base gwei input and fix priority to 0.00001 gwei without per-run priority input. Finite extension: workflow v6 max_base_gwei default 0.09; retain separate max_fee_gwei total cap; runner v4 fixes priority at 10000 wei, limits encoded max fee to min(total cap, base cap + fixed priority), rejects observed base above cap at pinned fork and immediately before each fork/live send, and logs base/total/effective caps. No helper or collector changes. Existing DEPLOYER_FX owner resolution retained. Archived workflow v5, runner v3, README v3, lock v6 exactly before replacement. Terminal condition: fee-boundary checks, one successful changed-input simulation, canonical file/digest verification, current workflow link. No live dispatch or broadcasting authorized in this extension.
+
+
+New chain evidence: run 38017559011 failed before compilation/deployment because original owner position count is now zero; the user's announced NFT transfer occurred. Recovery changes that relevant input: workflow v7 owner input defaults empty, runner v5 reads on-chain ownerOf(input position_id or tracked NFT1920) when no owner is supplied. Live owner remains signer-derived; no owner/NFT storage overrides. Collector/helper unchanged. Fresh single simulation is justified by changed ownership resolution; no identical rerun. Canonical pending workflow v7, runner v5, README v5, lock v8.

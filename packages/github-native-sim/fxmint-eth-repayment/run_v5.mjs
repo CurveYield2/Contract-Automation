@@ -85,7 +85,7 @@ async function plans(p,data,position,target){
     plan:{positionId:position.id,debtRepayment:target,flashUsdc:f.flash,withdrawCollateral:amount,firstMinimum:f.firstMinimum,secondMinimum,deadline:Number(BigInt(header.timestamp))+1800,firstRoutes:f.first.routes,collateralRoutes:sale.routes}});
   }catch(e){failures.push({first:f.first.name,sale:sale.name,error:safeError(e)});}
  }
- save('QUOTES_v4.json',{target,plans:out,failures});assert(out.length,'No feasible collateral sale');return {plans:out,failures};
+ save('QUOTES_v5.json',{target,plans:out,failures});assert(out.length,'No feasible collateral sale');return {plans:out,failures};
 }
 async function verify(p,helper,plan,receipt,before,vaultBefore,ownerBefore){
  const address=await helper.getAddress(),nft=new ethers.Contract(C.pool,nftAbi,p);
@@ -118,8 +118,12 @@ let anvil;const providers=[];
 try{
  assert(TARGET>0n,'Repayment must be positive');assert(MAX_BASE_FEE>0n&&TOTAL_FEE_CAP>=PRIORITY,'Invalid gas fee settings');
  const remote=new ethers.JsonRpcProvider(process.env.ETH_RPC_URL,1,{staticNetwork:true});providers.push(remote);
+ if(!process.env.FXMINT_OWNER_ADDRESS){
+  const trackedPosition=process.env.FXMINT_POSITION_ID||'1920';
+  C.owner=(await read(remote,C.pool,'ownerOf(uint256) view returns(address)',[trackedPosition])).toLowerCase();
+ }
  const data=await collect(remote);
- if(process.env.FXMINT_MODE==='collect-only'){save('COLLECTION_v4.json',{status:'PASS',positions:data.positions,target:TARGET});}
+ if(process.env.FXMINT_MODE==='collect-only'){save('COLLECTION_v5.json',{status:'PASS',positions:data.positions,target:TARGET});}
  else{const position=await choosePosition(data);
  const artifact=compile();mkdirSync('fxmint-output',{recursive:true});
  anvil=spawn('anvil',['--fork-url',process.env.ETH_RPC_URL,'--fork-block-number',String(data.block),'--port','8545','--host','127.0.0.1','--chain-id','1','--silent'],{stdio:['ignore','pipe','pipe']});
@@ -133,7 +137,7 @@ try{
  const rankingGasPrice=baseFee+PRIORITY;
  await p.send('anvil_impersonateAccount',[C.owner]);const ownerEth=BigInt(await p.send('eth_getBalance',[C.owner,'latest']));
  if(ownerEth<ethers.parseEther('1'))await p.send('anvil_setBalance',[C.owner,ethers.toQuantity(ethers.parseEther('1'))]);
- save('FORK_v4.json',{block:data.block,blockHash:data.blockHash,baseFee,rankingGasPrice,maxBaseFee:MAX_BASE_FEE,totalFeeCap:TOTAL_FEE_CAP,maxFee:MAX_FEE,priority:PRIORITY,gasBalanceOverride:ownerEth<ethers.parseEther('1'),noTokenOrProtocolStorageOverrides:true});
+ save('FORK_v5.json',{block:data.block,blockHash:data.blockHash,baseFee,rankingGasPrice,maxBaseFee:MAX_BASE_FEE,totalFeeCap:TOTAL_FEE_CAP,maxFee:MAX_FEE,priority:PRIORITY,gasBalanceOverride:ownerEth<ethers.parseEther('1'),noTokenOrProtocolStorageOverrides:true});
  const signer=await p.getSigner(C.owner),outsider=await p.getSigner(0);
  let helper,deploymentReceipt=null;
  if(process.env.FXMINT_HELPER_ADDRESS){
@@ -180,7 +184,7 @@ try{
  assert(results.length,'No route completed full atomic repayment');
  results.sort((a,b)=>a.totalCostUsdc18<b.totalCostUsdc18?-1:a.totalCostUsdc18>b.totalCostUsdc18?1:a.gasUsed<b.gasUsed?-1:1);
  const best=results[0];
- save('ROUTE_COMPARISON_v4.json',{status:'PASS',target:TARGET,block:data.block,rankingGasPrice,ethUsdcPerEth,wstUsdcPerToken,fxUsdcPerToken,collateralScalingFactor,marks,wstMarks,results,failures,selected:best.name,scope:'Available Uniswap v3 fee tiers 100/500/3000/10000, official Curve/Lido routes, Curve factory stETH pool, Tricrypto, Balancer V2 and SDK round-trip reference; no global-optimum claim for all aggregators'});
+ save('ROUTE_COMPARISON_v5.json',{status:'PASS',target:TARGET,block:data.block,rankingGasPrice,ethUsdcPerEth,wstUsdcPerToken,fxUsdcPerToken,collateralScalingFactor,marks,wstMarks,results,failures,selected:best.name,scope:'Available Uniswap v3 fee tiers 100/500/3000/10000, official Curve/Lido routes, Curve factory stETH pool, Tricrypto, Balancer V2 and SDK round-trip reference; no global-optimum claim for all aggregators'});
  await negative('owner only',()=>helper.connect(outsider).execute.staticCall(best.plan),'Unauthorized()');
  await negative('authenticated callback',()=>helper.connect(outsider).receiveFlashLoan.staticCall([C.usdc],[best.plan.flashUsdc],[0],'0x'),'CallbackOnly()');
  await negative('zero repayment',()=>helper.execute.staticCall({...best.plan,debtRepayment:0}),'InvalidPlan()');
@@ -196,15 +200,15 @@ try{
   const snap=await p.send('evm_snapshot',[]);
   try{const one={...data,candidates:{...data.candidates,first:data.candidates.first.filter(x=>x.name===best.firstName),sale:data.candidates.sale.filter(x=>x.name===best.saleName)}};
    const alternatePlans=await plans(p,one,position,alternate);
-   const check=await executeFork(p,helper,alternatePlans.plans[0].plan);save('CONFIGURABLE_AMOUNT_CHECK_v4.json',check);console.log('PASS configurable amount on same helper: '+ethers.formatUnits(alternate,18));
+   const check=await executeFork(p,helper,alternatePlans.plans[0].plan);save('CONFIGURABLE_AMOUNT_CHECK_v5.json',check);console.log('PASS configurable amount on same helper: '+ethers.formatUnits(alternate,18));
   }finally{assert(await p.send('evm_revert',[snap]),'Alternate test rollback failed');}
  }
  const final=await executeFork(p,helper,best.plan);
  const commonGas=(deploymentReceipt?.gasUsed||0n)+(approvalReceipt?.gasUsed||0n);
  const totalGas=final.gasUsed+commonGas,totalCost=final.gasUsed*final.gasPrice+(deploymentReceipt?deploymentReceipt.gasUsed*deploymentReceipt.gasPrice:0n)+(approvalReceipt?approvalReceipt.gasUsed*approvalReceipt.gasPrice:0n);
  const runtimeHash=ethers.keccak256(await p.getCode(helperAddress));
- const report={version:4,status:'PASS',mode:'simulate-only',owner:C.owner,target:TARGET,positionId:position.id,route:best.name,firstRoute:best.firstName,saleRoute:best.saleName,forkBlock:data.block,forkHash:data.blockHash,runtimeHash,maxBaseFee:MAX_BASE_FEE,totalFeeCap:TOTAL_FEE_CAP,maxFee:MAX_FEE,priority:PRIORITY,repaymentGas:final.gasUsed,deploymentGas:deploymentReceipt?.gasUsed||0n,approvalGas:approvalReceipt?.gasUsed||0n,totalGas,totalEthCost:ethers.formatEther(totalCost),maxEthCost:ethers.formatEther(totalGas*MAX_FEE),result:final};
- save('SIMULATION_v4.json',report);console.log(json(report));
+ const report={version:5,status:'PASS',mode:'simulate-only',owner:C.owner,target:TARGET,positionId:position.id,route:best.name,firstRoute:best.firstName,saleRoute:best.saleName,forkBlock:data.block,forkHash:data.blockHash,runtimeHash,maxBaseFee:MAX_BASE_FEE,totalFeeCap:TOTAL_FEE_CAP,maxFee:MAX_FEE,priority:PRIORITY,repaymentGas:final.gasUsed,deploymentGas:deploymentReceipt?.gasUsed||0n,approvalGas:approvalReceipt?.gasUsed||0n,totalGas,totalEthCost:ethers.formatEther(totalCost),maxEthCost:ethers.formatEther(totalGas*MAX_FEE),result:final};
+ save('SIMULATION_v5.json',report);console.log(json(report));
  p.destroy();anvil.kill('SIGTERM');anvil=undefined;
  if(process.env.FXMINT_MODE==='live-broadcast'){
   assert(process.env.FXMINT_CONFIRMATION==='LIVE '+ethers.formatUnits(TARGET,18).replace(/\.0$/,'')+' FXUSD','Live amount confirmation mismatch');
@@ -221,15 +225,15 @@ try{
   if(process.env.FXMINT_HELPER_ADDRESS)liveHelper=new ethers.Contract(process.env.FXMINT_HELPER_ADDRESS,artifact.abi,wallet);
   else{
    await checkCurrentBaseFee(remote,'Helper deployment');
-   liveHelper=await factory.deploy(C.owner,feeOverrides);save('DEPLOYMENT_PENDING_v4.json',{hash:liveHelper.deploymentTransaction().hash,helper:await liveHelper.getAddress()});
-   const receipt=await liveHelper.deploymentTransaction().wait(1,600000);save('DEPLOYMENT_v4.json',{hash:receipt.hash,helper:await liveHelper.getAddress(),gasUsed:receipt.gasUsed,gasPrice:receipt.gasPrice});
+   liveHelper=await factory.deploy(C.owner,feeOverrides);save('DEPLOYMENT_PENDING_v5.json',{hash:liveHelper.deploymentTransaction().hash,helper:await liveHelper.getAddress()});
+   const receipt=await liveHelper.deploymentTransaction().wait(1,600000);save('DEPLOYMENT_v5.json',{hash:receipt.hash,helper:await liveHelper.getAddress(),gasUsed:receipt.gasUsed,gasPrice:receipt.gasPrice});
   }
   const liveAddress=await liveHelper.getAddress();assert((await liveHelper.owner()).toLowerCase()===C.owner,'Live helper owner mismatch');
   assert(ethers.keccak256(await remote.getCode(liveAddress))===runtimeHash,'Live helper runtime mismatch');
   const liveNft=new ethers.Contract(C.pool,nftAbi,wallet);
   if((await liveNft.getApproved(position.id)).toLowerCase()!==liveAddress.toLowerCase()){
    await checkCurrentBaseFee(remote,'NFT approval');
-   const tx=await liveNft.approve(liveAddress,position.id,feeOverrides);save('APPROVAL_PENDING_v4.json',{hash:tx.hash});await tx.wait(1,600000);
+   const tx=await liveNft.approve(liveAddress,position.id,feeOverrides);save('APPROVAL_PENDING_v5.json',{hash:tx.hash});await tx.wait(1,600000);
   }
   const before=Array.from(await liveNft.getPosition(position.id)),vaultBefore=await balance(remote,C.usdc,C.balancer);
   assert(json(before)===json([BigInt(livePosition.rawCollateral),BigInt(livePosition.rawDebt)]),'Position changed before broadcast');
@@ -237,11 +241,11 @@ try{
   const gas=await liveHelper.execute.estimateGas(livePlan);
   await checkCurrentBaseFee(remote,'Atomic repayment');
   const tx=await liveHelper.execute(livePlan,{...feeOverrides,gasLimit:gas*130n/100n});
-  save('REPAYMENT_PENDING_v4.json',{hash:tx.hash,helper:liveAddress,plan:livePlan});
+  save('REPAYMENT_PENDING_v5.json',{hash:tx.hash,helper:liveAddress,plan:livePlan});
   const receipt=await tx.wait(1,600000);assert(receipt.status===1,'Live transaction failed');
   const result=await verify(remote,liveHelper,livePlan,receipt,before,vaultBefore,ownerBefore);
-  save('BROADCAST_v4.json',{version:4,mode:'live-broadcast',...result});console.log(json({mode:'live-broadcast',...result}));
+  save('BROADCAST_v5.json',{version:5,mode:'live-broadcast',...result});console.log(json({mode:'live-broadcast',...result}));
  }
  }
-}catch(e){save('ERROR_v4.json',{status:'FAIL',error:safeError(e),data:e.data||e.info?.error?.data});console.error(safeError(e));process.exitCode=1;}
+}catch(e){save('ERROR_v5.json',{status:'FAIL',error:safeError(e),data:e.data||e.info?.error?.data});console.error(safeError(e));process.exitCode=1;}
 finally{for(const p of providers)p.destroy();if(anvil)anvil.kill('SIGTERM');}
