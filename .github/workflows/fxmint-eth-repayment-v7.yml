@@ -1,4 +1,4 @@
-name: fxMint ETH Repayment v7
+name: fxMint ETH Repayment v8
 on:
   push:
     branches: [main]
@@ -101,11 +101,12 @@ jobs:
           version: stable
       - name: Install scoped dependencies in GitHub only
         run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
-      - name: Discover position, compile, compare complete routes and verify repayment
+      - name: Discover position and verify repayment (live uses proven route only)
         env:
           ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: ${{ inputs.mode == 'collect-only' && 'collect-only' || 'simulate-only' }}
+          FXMINT_ROUTE_MODE: ${{ (github.event_name == 'push' || inputs.mode == 'live-broadcast') && 'proven-only' || 'compare' }}
           FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd || '10' }}
           FXMINT_OWNER_ADDRESS: ${{ needs.resolve-owner.outputs.owner || inputs.owner_address }}
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
@@ -116,7 +117,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-simulation-v7
+          name: fxmint-eth-simulation-v8
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
@@ -139,11 +140,12 @@ jobs:
           version: stable
       - name: Install scoped dependencies in GitHub only
         run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
-      - name: Repeat fresh route acceptance then perform manually requested broadcast
+      - name: Verify the single proven route then perform manually requested broadcast
         env:
           ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: live-broadcast
+          FXMINT_ROUTE_MODE: proven-only
           FXMINT_OWNER_ADDRESS: ${{ needs.resolve-owner.outputs.owner }}
           FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd }}
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
@@ -156,7 +158,8 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-broadcast-v7
+          name: fxmint-eth-broadcast-v8
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
+

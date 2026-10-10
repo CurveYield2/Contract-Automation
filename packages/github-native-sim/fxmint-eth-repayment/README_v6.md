@@ -1,6 +1,6 @@
-# fxMint ETH long repayment
+# fxMint ETH long repayment v7
 
-Active workflow: [fxMint ETH Repayment v7](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v7.yml).
+Active workflow: [fxMint ETH Repayment v8](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v7.yml).
 
 Original position owner: `0x9f2B20A772246960810045905B7daccf960eE288`. Live mode derives the current public owner address from `DEPLOYER_FX` before simulation; transfer the NFT to that address before running live.
 Pool: `0x6Ecfa38FeE8a5277B91eFdA204c235814F0122E8` (WstETHLongPool).
@@ -23,7 +23,7 @@ Priority fee is fixed in the runner at **0.00001 gwei (10,000 wei)**. There is n
 
 The target cannot exceed available position debt or collateral, and must pass the complete transaction. A 100 fxUSD target was rejected because this NFT held only approximately 21.045 fxUSD debt. Both the amount and fees must reflect the current state.
 
-User preference: use whichever ETH collateral form produces the best estimated final outcome, **including gas**. The workflow selects by total cost rather than forcing a native ETH withdrawal.
+User preference: use whichever ETH collateral form produces the best estimated final outcome, **including gas**. Explicit `simulate-only` mode compares complete routes by total cost. `live-broadcast` uses the previously verified winner only: Curve USDC/fxUSD, followed by direct UniV3 wstETH/USDC at fee tier 500 (0.05%).
 
 ## Method and routes
 
@@ -46,9 +46,9 @@ Primary implementation references:
 
 ### Cost comparison
 
-At a pinned Ethereum block, the collector discovers available UniV3 fee tiers 100/500/3000/10000 and the official Lido/Curve routes, the second Curve stETH/ETH pool, Curve Tricrypto and the Balancer V2 wstETH/WETH pool. It also compares the former collateral -> fxUSD -> USDC round trip as a reference.
+In explicit `simulate-only` mode, at a pinned Ethereum block, the collector discovers available UniV3 fee tiers 100/500/3000/10000 and the official Lido/Curve routes, the second Curve stETH/ETH pool, Curve Tricrypto and the Balancer V2 wstETH/WETH pool. It also compares the former collateral -> fxUSD -> USDC round trip as a reference.
 
-For each feasible route it solves the required collateral amount, executes the entire flash repayment from the same fork snapshot, verifies the transaction, and reverts before the next candidate. The score is market value of collateral consumed minus USDC/fxUSD refunds plus measured repayment gas valued in USDC, using common market marks and a common upstream base fee plus priority. Deployment and NFT approval are common setup costs, reported separately. This is the lowest estimated total cost among the tested paths, not a guarantee across every aggregator or future block. Routing is recalculated on every run.
+For each feasible route it solves the required collateral amount, executes the entire flash repayment from the same fork snapshot, verifies the transaction, and reverts before the next candidate. The score is market value of collateral consumed minus USDC/fxUSD refunds plus measured repayment gas valued in USDC, using common market marks and a common upstream base fee plus priority. Deployment and NFT approval are common setup costs, reported separately. This is the lowest estimated total cost among the tested paths, not a guarantee across every aggregator or future block. Comparison runs recalculate the ranking. Live broadcast never runs that comparison, including in its prerequisite simulation job. Each live acceptance checks only Curve USDC/fxUSD and the direct UniV3 wstETH/USDC 500 pool `0x4622df6fb2d9bee0dcdacf545acdb6a2b2f4f863`. It recalculates amounts and slippage floors from fresh state, executes one complete repayment on the fork, and fails if that route is unavailable. Live skips alternative route discovery, cost-ranking quotes and the alternate-amount test; ownership, runtime, gas caps, rollback checks and repayment verification remain.
 
 ## Verified result
 
@@ -80,11 +80,11 @@ Observed fork repayment gas cost: **0.000086687165266920 ETH** at **0.064802370 
 
 ## Verification and operation
 
-Only owner gas ETH may be topped up on the fork. No token balances, NFT ownership or protocol storage are fabricated. Acceptance checks exact requested debt reduction within a small rounding tolerance, flash principal/fee returned, NFT ownership restored, collateral reduction, token refunds and zero helper leftovers. Owner-only execution, authenticated callback, zero/excess repayment, deadline and impossible minimum checks are exercised with rollback. A second amount is tested on the same helper before the final selected-route transaction.
+Only owner gas ETH may be topped up on the fork. No token balances, NFT ownership or protocol storage are fabricated. Acceptance checks exact requested debt reduction within a small rounding tolerance, flash principal/fee returned, NFT ownership restored, collateral reduction, token refunds and zero helper leftovers. Owner-only execution, authenticated callback, zero/excess repayment, deadline and impossible minimum checks are exercised with rollback. Explicit comparison mode also tests a second amount on the same helper. Live acceptance executes only the requested amount through the proven swap routes.
 
 The workflow uses `SD_ETH_RPC_URL`, falling back to `SIM_ARCHIVE_PRIMARY_ETHEREUM_01`, without printing RPC credentials. Installation and Solidity compilation occur only in GitHub Actions. Artifacts contain pinned data, quotes, candidate outcomes, cost comparison, configurable-amount evidence and simulation report; retention is 30 days.
 
-Pushes trigger simulation only. Live mode requires manual workflow_dispatch, successful fresh fork acceptance and the `fxmint-production` environment. A protected preparation job derives only the public address from `DEPLOYER_FX` without signing. The simulation then discovers the NFT in that account and binds the helper to that owner. The live job uses the same secret and requires its address to match the accepted simulation. Until the NFT is transferred there, live selection fails before deployment or broadcast. Existing helper input must match this ETH helper's compiled runtime/owner/pool. Reuse that ETH helper to change repayment amounts without redeployment. No mainnet ETH helper address exists in these simulation reports.
+Pushes trigger an unkeyed simulation of the same proven routes, without broadcasting. Manually selected `simulate-only` retains full route comparison. Live mode requires manual workflow_dispatch, successful fresh fork acceptance and the `fxmint-production` environment. A protected preparation job derives only the public address from `DEPLOYER_FX` without signing. The simulation then discovers the NFT in that account and binds the helper to that owner. The live job uses the same secret and requires its address to match the accepted simulation. Until the NFT is transferred there, live selection fails before deployment or broadcast. Existing helper input must match this ETH helper's compiled runtime/owner/pool. Reuse that ETH helper to change repayment amounts without redeployment. No mainnet ETH helper address exists in these simulation reports.
 
 
 ## Run live after the NFT transfer
@@ -105,3 +105,4 @@ After the user transferred NFT #1920, the fee-update push check (run 38017559011
 [Run 38017714742](https://github.com/CurveYield2/Contract-Automation/actions/runs/38017714742) passed at Ethereum block **26159094**, code commit `a30917c6b780b750b96c9f20ff9fddcc6fbf4bbd`, with NFT #1920 now owned by `0xff90b414d84f7ec4faeadbd8da86ad515f930654`. Both 10 and 5 fxUSD repayments passed using the same helper. Owner/callback/zero/overpay/deadline/minimum negative checks also passed. Separate fee checks exercised the exact base ceiling, above-ceiling rejection, a tighter total cap and rereading a changed latest fee. Resolver and live jobs were skipped; no live deployment or transaction occurred.
 
 The report confirms base ceiling **0.09 gwei**, fixed priority **0.00001 gwei**, effective total cap **0.09001 gwei**, and selected Curve USDC/fxUSD -> direct UniV3 wstETH/USDC 500 route. This receiving account's sequence measured **3325101 gas** (deployment 1913649, approval 55936, repayment 1355516). Its measured fork cost was **0.000242808734761631 ETH**; those gas counts at the configured total cap imply at most **0.00029929234101 ETH**, excluding NFT transfer. At a total gas price of exactly 0.09 gwei, the same counts imply **0.00029925909 ETH**. Prior estimates above refer to the earlier account/state and should not be substituted for this current report.
+

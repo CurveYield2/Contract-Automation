@@ -1,9 +1,11 @@
+// Runner implementation v6; canonical path retained for the existing workflow.
 import {spawn,spawnSync} from 'node:child_process';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ethers,C,R,quote,read,collect,json,save,safeError} from './data_v3.mjs';
 const root=dirname(fileURLToPath(import.meta.url));
+const PROVEN_ROUTE_ONLY=process.env.FXMINT_MODE==='live-broadcast'||process.env.FXMINT_ROUTE_MODE==='proven-only';
 const artifactPath=resolve(root,'out/FxMintEthRepayer_v1.sol/FxMintEthRepayer_v1.json');
 const TARGET=ethers.parseUnits(process.env.FXMINT_REPAYMENT_FXUSD||'10',18);
 const TOTAL_FEE_CAP=ethers.parseUnits(process.env.FXMINT_MAX_FEE_GWEI||'1',9);
@@ -122,7 +124,7 @@ try{
   const trackedPosition=process.env.FXMINT_POSITION_ID||'1920';
   C.owner=(await read(remote,C.pool,'ownerOf(uint256) view returns(address)',[trackedPosition])).toLowerCase();
  }
- const data=await collect(remote);
+ const data=await collect(remote,PROVEN_ROUTE_ONLY);
  if(process.env.FXMINT_MODE==='collect-only'){save('COLLECTION_v5.json',{status:'PASS',positions:data.positions,target:TARGET});}
  else{const position=await choosePosition(data);
  const artifact=compile();mkdirSync('fxmint-output',{recursive:true});
@@ -155,6 +157,13 @@ try{
  let approvalReceipt=null;
  if((await nft.getApproved(position.id)).toLowerCase()!==helperAddress.toLowerCase())approvalReceipt=await mine(p,{from:C.owner,to:C.pool,data:nft.interface.encodeFunctionData('approve',[helperAddress,position.id]),gas:'0x7a120'},'position approval');
  const candidates=await plans(p,data,position,TARGET);
+ let best;
+ if(PROVEN_ROUTE_ONLY){
+  assert(candidates.plans.length===1,'Proven route must produce exactly one feasible plan');
+  best=candidates.plans[0];
+  save('ROUTE_SELECTION_v6.json',{version:6,target:TARGET,block:data.block,selected:best.name,scope:'Previously verified gas-inclusive winner only; no route comparison or fallback',evidenceRuns:[38017714742,38018612642]});
+  console.log('Proven route only: '+best.name);
+ }else{
  // Use one common reference mark for assets and one common gas price for every candidate.
  const marks=[];
  for(const route of data.candidates.wethSale){try{marks.push({name:route.name,quote:await quote(p,10000000000000000n,route.routes)});}catch{}}
@@ -183,8 +192,9 @@ try{
  }
  assert(results.length,'No route completed full atomic repayment');
  results.sort((a,b)=>a.totalCostUsdc18<b.totalCostUsdc18?-1:a.totalCostUsdc18>b.totalCostUsdc18?1:a.gasUsed<b.gasUsed?-1:1);
- const best=results[0];
+ best=results[0];
  save('ROUTE_COMPARISON_v5.json',{status:'PASS',target:TARGET,block:data.block,rankingGasPrice,ethUsdcPerEth,wstUsdcPerToken,fxUsdcPerToken,collateralScalingFactor,marks,wstMarks,results,failures,selected:best.name,scope:'Available Uniswap v3 fee tiers 100/500/3000/10000, official Curve/Lido routes, Curve factory stETH pool, Tricrypto, Balancer V2 and SDK round-trip reference; no global-optimum claim for all aggregators'});
+ }
  await negative('owner only',()=>helper.connect(outsider).execute.staticCall(best.plan),'Unauthorized()');
  await negative('authenticated callback',()=>helper.connect(outsider).receiveFlashLoan.staticCall([C.usdc],[best.plan.flashUsdc],[0],'0x'),'CallbackOnly()');
  await negative('zero repayment',()=>helper.execute.staticCall({...best.plan,debtRepayment:0}),'InvalidPlan()');
@@ -196,7 +206,7 @@ try{
  assert((await nft.ownerOf(position.id)).toLowerCase()===C.owner,'Reverted operation changed NFT owner');
  // Prove variable amounts work on the SAME deployed helper before the main acceptance.
  const alternate=TARGET/2n;
- if(alternate>0n){
+ if(!PROVEN_ROUTE_ONLY&&alternate>0n){
   const snap=await p.send('evm_snapshot',[]);
   try{const one={...data,candidates:{...data.candidates,first:data.candidates.first.filter(x=>x.name===best.firstName),sale:data.candidates.sale.filter(x=>x.name===best.saleName)}};
    const alternatePlans=await plans(p,one,position,alternate);
@@ -215,7 +225,7 @@ try{
   assert(process.env.FXMINT_PRIVATE_KEY,'Protected production signing secret missing');
   const wallet=new ethers.Wallet(process.env.FXMINT_PRIVATE_KEY,remote);assert(wallet.address.toLowerCase()===C.owner,'Signing secret is not the position owner');
   await checkCurrentBaseFee(remote,'Live preflight');
-  const liveData=await collect(remote),livePosition=liveData.positions.find(x=>x.id===position.id);
+  const liveData=await collect(remote,true),livePosition=liveData.positions.find(x=>x.id===position.id);
   assert(livePosition&&String(livePosition.rawDebt)===String(position.rawDebt)&&String(livePosition.rawCollateral)===String(position.rawCollateral),'Position changed after accepted simulation');
   const refreshed=await plans(remote,{...liveData,candidates:{...liveData.candidates,first:liveData.candidates.first.filter(x=>x.name===best.firstName),sale:liveData.candidates.sale.filter(x=>x.name===best.saleName)}},livePosition,TARGET);
   assert(refreshed.plans.length===1,'Selected live route unavailable');const livePlan=refreshed.plans[0].plan;
@@ -249,3 +259,4 @@ try{
  }
 }catch(e){save('ERROR_v5.json',{status:'FAIL',error:safeError(e),data:e.data||e.info?.error?.data});console.error(safeError(e));process.exitCode=1;}
 finally{for(const p of providers)p.destroy();if(anvil)anvil.kill('SIGTERM');}
+
