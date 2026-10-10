@@ -1,4 +1,4 @@
-name: fxMint ETH Repayment v8
+name: fxMint ETH Repayment v9
 on:
   push:
     branches: [main, fxmint-eth-deployment-recovery]
@@ -28,9 +28,9 @@ on:
         type: string
         default: ''
       helper_address:
-        description: Reuse this ETH helper; empty permits deployment in manual live mode
+        description: Reuse the deployed ETH helper; clear only to deploy another helper
         type: string
-        default: ''
+        default: '0x4Af01712F88aa23eE696501928c8e57cf0214d38'
       max_fee_gwei:
         description: Maximum total gas price in gwei
         type: string
@@ -101,48 +101,23 @@ jobs:
           version: stable
       - name: Install scoped dependencies in GitHub only
         run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
-      - name: Inspect previous deployment receipt and helper reads without signing
-        env:
-          ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
-          FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
-        run: |
-          node --input-type=module <<'NODE'
-          import {createRequire} from 'node:module';
-          const require=createRequire(process.env.FXMINT_DEPS+'/package.json');
-          const {ethers}=require('ethers');
-          const p=new ethers.JsonRpcProvider(process.env.ETH_RPC_URL,1,{staticNetwork:true,batchMaxCount:1,cacheTimeout:0});
-          const hash='0x73c475bd91d8261e6458637930a1789448786b31fe5ad0166d63d676ec25a96a';
-          const expected='0x4Af01712F88aa23eE696501928c8e57cf0214d38';
-          try{
-            const receipt=await p.send('eth_getTransactionReceipt',[hash]);
-            const tx=await p.send('eth_getTransactionByHash',[hash]);
-            console.log(JSON.stringify({receipt,transaction:tx&&{from:tx.from,to:tx.to,nonce:tx.nonce,creates:ethers.getCreateAddress({from:tx.from,nonce:tx.nonce})}}));
-            const iface=new ethers.Interface(['function owner() view returns(address)']);
-            for(const block of ['latest',receipt.blockNumber]){
-              const code=await p.send('eth_getCode',[expected,block]);
-              const owner=await p.send('eth_call',[{to:expected,data:iface.encodeFunctionData('owner')},block]);
-              console.log(JSON.stringify({block,expected,codeBytes:(code.length-2)/2,codeHash:ethers.keccak256(code),ownerRaw:owner}));
-            }
-          }catch(e){console.error(JSON.stringify({code:e.code,shortMessage:e.shortMessage,data:e.data,method:e.info?.payload?.method}));process.exitCode=1;}
-          finally{p.destroy();}
-          NODE
       - name: Discover position and verify repayment (live uses proven route only)
         env:
           ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: ${{ inputs.mode == 'collect-only' && 'collect-only' || 'simulate-only' }}
           FXMINT_ROUTE_MODE: ${{ (github.event_name == 'push' || inputs.mode == 'live-broadcast') && 'proven-only' || 'compare' }}
-          FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd || '10' }}
+          FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd || '21.03' }}
           FXMINT_OWNER_ADDRESS: ${{ needs.resolve-owner.outputs.owner || inputs.owner_address }}
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
-          FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
+          FXMINT_HELPER_ADDRESS: ${{ github.event_name == 'push' && '0x4Af01712F88aa23eE696501928c8e57cf0214d38' || inputs.helper_address }}
           FXMINT_MAX_FEE_GWEI: ${{ inputs.max_fee_gwei || '1' }}
           FXMINT_MAX_BASE_GWEI: ${{ inputs.max_base_gwei || '0.09' }}
         run: timeout 1500s node packages/github-native-sim/fxmint-eth-repayment/run_v5.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-simulation-v8
+          name: fxmint-eth-simulation-v9
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
@@ -183,7 +158,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-broadcast-v8
+          name: fxmint-eth-broadcast-v9
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error

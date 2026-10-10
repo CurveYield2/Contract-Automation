@@ -1,4 +1,4 @@
-// Runner implementation v6; canonical path retained for the existing workflow.
+// Runner implementation v7; canonical path retained for the existing workflow.
 import {spawn,spawnSync} from 'node:child_process';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
@@ -26,6 +26,26 @@ function validateBaseFee(base,label){
 async function checkCurrentBaseFee(p,label){
  const header=await p.send('eth_getBlockByNumber',['latest',false]);
  return validateBaseFee(BigInt(header.baseFeePerGas),label);
+}
+async function waitForLiveHelper(p,helper,runtimeHash,minBlock=0,attempts=30){
+ const address=await helper.getAddress();
+ for(let i=0;i<attempts;i++){
+  const block=await p.send('eth_blockNumber',[]);
+  if(BigInt(block)>=BigInt(minBlock)){
+   const code=await p.send('eth_getCode',[address,block]);
+   if(code!=='0x'){
+    assert(ethers.keccak256(code)===runtimeHash,'Live helper runtime mismatch');
+    const raw=await p.send('eth_call',[{to:address,data:helper.interface.encodeFunctionData('owner')},block]);
+    if(raw!=='0x'){
+     const owner=helper.interface.decodeFunctionResult('owner',raw)[0].toLowerCase();
+     assert(owner===C.owner,'Live helper owner mismatch');
+     return {address,block,runtimeHash,owner};
+    }
+   }
+  }
+  if(i+1<attempts)await new Promise(r=>setTimeout(r,1000));
+ }
+ throw Error('Live helper not readable after bounded RPC synchronization; reuse '+address+' instead of redeploying');
 }
 async function mine(p,tx,label){
  await checkCurrentBaseFee(p,label);
@@ -119,7 +139,7 @@ async function executeFork(p,helper,plan){
 let anvil;const providers=[];
 try{
  assert(TARGET>0n,'Repayment must be positive');assert(MAX_BASE_FEE>0n&&TOTAL_FEE_CAP>=PRIORITY,'Invalid gas fee settings');
- const remote=new ethers.JsonRpcProvider(process.env.ETH_RPC_URL,1,{staticNetwork:true});providers.push(remote);
+ const remote=new ethers.JsonRpcProvider(process.env.ETH_RPC_URL,1,{staticNetwork:true,batchMaxCount:1,cacheTimeout:0});providers.push(remote);
  if(!process.env.FXMINT_OWNER_ADDRESS){
   const trackedPosition=process.env.FXMINT_POSITION_ID||'1920';
   C.owner=(await read(remote,C.pool,'ownerOf(uint256) view returns(address)',[trackedPosition])).toLowerCase();
@@ -217,6 +237,7 @@ try{
  const commonGas=(deploymentReceipt?.gasUsed||0n)+(approvalReceipt?.gasUsed||0n);
  const totalGas=final.gasUsed+commonGas,totalCost=final.gasUsed*final.gasPrice+(deploymentReceipt?deploymentReceipt.gasUsed*deploymentReceipt.gasPrice:0n)+(approvalReceipt?approvalReceipt.gasUsed*approvalReceipt.gasPrice:0n);
  const runtimeHash=ethers.keccak256(await p.getCode(helperAddress));
+ if(process.env.FXMINT_HELPER_ADDRESS)save('LIVE_HELPER_v7.json',await waitForLiveHelper(remote,helper,runtimeHash));
  const report={version:5,status:'PASS',mode:'simulate-only',owner:C.owner,target:TARGET,positionId:position.id,route:best.name,firstRoute:best.firstName,saleRoute:best.saleName,forkBlock:data.block,forkHash:data.blockHash,runtimeHash,maxBaseFee:MAX_BASE_FEE,totalFeeCap:TOTAL_FEE_CAP,maxFee:MAX_FEE,priority:PRIORITY,repaymentGas:final.gasUsed,deploymentGas:deploymentReceipt?.gasUsed||0n,approvalGas:approvalReceipt?.gasUsed||0n,totalGas,totalEthCost:ethers.formatEther(totalCost),maxEthCost:ethers.formatEther(totalGas*MAX_FEE),result:final};
  save('SIMULATION_v5.json',report);console.log(json(report));
  p.destroy();anvil.kill('SIGTERM');anvil=undefined;
@@ -231,15 +252,20 @@ try{
   assert(refreshed.plans.length===1,'Selected live route unavailable');const livePlan=refreshed.plans[0].plan;
   assert(livePlan.withdrawCollateral<=best.plan.withdrawCollateral,'Live route needs more collateral than the accepted simulation');
   const factory=new ethers.ContractFactory(artifact.abi,artifact.bytecode.object,wallet);
-  let liveHelper;
+  let liveHelper,minHelperBlock=0;
   if(process.env.FXMINT_HELPER_ADDRESS)liveHelper=new ethers.Contract(process.env.FXMINT_HELPER_ADDRESS,artifact.abi,wallet);
   else{
    await checkCurrentBaseFee(remote,'Helper deployment');
    liveHelper=await factory.deploy(C.owner,feeOverrides);save('DEPLOYMENT_PENDING_v5.json',{hash:liveHelper.deploymentTransaction().hash,helper:await liveHelper.getAddress()});
-   const receipt=await liveHelper.deploymentTransaction().wait(1,600000);save('DEPLOYMENT_v5.json',{hash:receipt.hash,helper:await liveHelper.getAddress(),gasUsed:receipt.gasUsed,gasPrice:receipt.gasPrice});
+   const receipt=await liveHelper.deploymentTransaction().wait(1,600000);
+   assert(receipt.status===1,'Live helper deployment failed');
+   assert(receipt.contractAddress?.toLowerCase()===(await liveHelper.getAddress()).toLowerCase(),'Deployment receipt helper address mismatch');
+   minHelperBlock=receipt.blockNumber;
+   save('DEPLOYMENT_v5.json',{hash:receipt.hash,helper:receipt.contractAddress,block:receipt.blockNumber,status:receipt.status,gasUsed:receipt.gasUsed,gasPrice:receipt.gasPrice});
   }
-  const liveAddress=await liveHelper.getAddress();assert((await liveHelper.owner()).toLowerCase()===C.owner,'Live helper owner mismatch');
-  assert(ethers.keccak256(await remote.getCode(liveAddress))===runtimeHash,'Live helper runtime mismatch');
+  const readiness=await waitForLiveHelper(remote,liveHelper,runtimeHash,minHelperBlock);
+  save('LIVE_HELPER_v7.json',readiness);
+  const liveAddress=readiness.address;
   const liveNft=new ethers.Contract(C.pool,nftAbi,wallet);
   if((await liveNft.getApproved(position.id)).toLowerCase()!==liveAddress.toLowerCase()){
    await checkCurrentBaseFee(remote,'NFT approval');
