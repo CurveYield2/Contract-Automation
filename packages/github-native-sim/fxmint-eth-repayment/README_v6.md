@@ -98,3 +98,10 @@ Signer derivation is restricted to main/manual live dispatch and uses the protec
 
 
 After the user transferred NFT #1920, the fee-update push check (run 38017559011) correctly stopped because the original account no longer held an indebted position. The current simulation default reads `ownerOf(position_id || 1920)` from Ethereum before collecting positions; it follows real transfers and fabricates no NFT ownership. A provided owner input is still honored, and live mode always uses the DEPLOYER_FX-derived address.
+
+
+## Current fee-setting verification
+
+[Run 38017714742](https://github.com/CurveYield2/Contract-Automation/actions/runs/38017714742) passed at Ethereum block **26159094**, code commit `a30917c6b780b750b96c9f20ff9fddcc6fbf4bbd`, with NFT #1920 now owned by `0xff90b414d84f7ec4faeadbd8da86ad515f930654`. Both 10 and 5 fxUSD repayments passed using the same helper. Owner/callback/zero/overpay/deadline/minimum negative checks also passed. Separate fee checks exercised the exact base ceiling, above-ceiling rejection, a tighter total cap and rereading a changed latest fee. Resolver and live jobs were skipped; no live deployment or transaction occurred.
+
+The report confirms base ceiling **0.09 gwei**, fixed priority **0.00001 gwei**, effective total cap **0.09001 gwei**, and selected Curve USDC/fxUSD -> direct UniV3 wstETH/USDC 500 route. This receiving account's sequence measured **3325101 gas** (deployment 1913649, approval 55936, repayment 1355516). Its measured fork cost was **0.000242808734761631 ETH**; those gas counts at the configured total cap imply at most **0.00029929234101 ETH**, excluding NFT transfer. At a total gas price of exactly 0.09 gwei, the same counts imply **0.00029925909 ETH**. Prior estimates above refer to the earlier account/state and should not be substituted for this current report.
