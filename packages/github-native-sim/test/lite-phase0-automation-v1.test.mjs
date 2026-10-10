@@ -63,3 +63,16 @@ test('reusable Phase-0 intelligence materializes its request from inputs even wh
   assert.match(workflow,/if \[ -s \.phase0-request\.json \]; then/);
   assert.doesNotMatch(workflow,/if \[ "\$GITHUB_EVENT_NAME" = "workflow_call" \]; then/);
 });
+
+test('Phase-0, smoke, and rebind route the known-good dRPC upstream into their local Anvil subprocess without stale SD_ETH_RPC_URL',()=>{
+  for(const name of ['lite-phase0-randomized-simulation-v1.yml','lite-phase0-simulation-testing-v1.yml','lite-phase0-simulation-rebind-v1.yml']){
+    const workflow=read('.github/workflows/'+name);
+    assert.match(workflow,/ETHEREUM_FORK_RPC_URL: https:\/\/eth\.drpc\.org\//);
+    assert.doesNotMatch(workflow,/secrets\.SD_ETH_RPC_URL/);
+    assert.match(workflow,/--fork-url "\$ETHEREUM_FORK_RPC_URL"/);
+  }
+  const source=read('packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs');
+  assert.match(source,/startRpcIdentityProxy\(\{upstreamUrl:forkUrl,chainId:1\}\)/);
+  assert.match(source,/--fork-url',identityProxy\.url/);
+  assert.match(source,/spawn\(process\.execPath,args/);
+});
