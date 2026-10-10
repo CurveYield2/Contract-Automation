@@ -1,7 +1,7 @@
 name: fxMint ETH Repayment v9
 on:
   push:
-    branches: [main, fxmint-eth-deployment-recovery]
+    branches: [main]
     paths:
       - '.github/workflows/fxmint-eth-repayment-v7.yml'
       - 'packages/github-native-sim/fxmint-eth-repayment/contracts/FxMintEthRepayer_v1.sol'
@@ -107,7 +107,7 @@ jobs:
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: ${{ inputs.mode == 'collect-only' && 'collect-only' || 'simulate-only' }}
           FXMINT_ROUTE_MODE: ${{ (github.event_name == 'push' || inputs.mode == 'live-broadcast') && 'proven-only' || 'compare' }}
-          FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd || '21.03' }}
+          FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd || '10' }}
           FXMINT_OWNER_ADDRESS: ${{ needs.resolve-owner.outputs.owner || inputs.owner_address }}
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
           FXMINT_HELPER_ADDRESS: ${{ github.event_name == 'push' && '0x4Af01712F88aa23eE696501928c8e57cf0214d38' || inputs.helper_address }}
