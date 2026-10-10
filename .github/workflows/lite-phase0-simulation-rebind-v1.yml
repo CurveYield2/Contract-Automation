@@ -112,7 +112,7 @@ jobs:
 
       - name: Execute corrected randomized simulation on canonical Ethereum Anvil baseline
         env:
-          ETHEREUM_FORK_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || 'https://eth.drpc.org/' }}
+          ETHEREUM_FORK_RPC_URL: https://eth.drpc.org/
         shell: bash
         run: |
           set -euo pipefail
