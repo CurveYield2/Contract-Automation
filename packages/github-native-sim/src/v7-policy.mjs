@@ -17,10 +17,10 @@ export const V7_POLICY = Object.freeze({
     toolchainSetup: '.github/actions/setup-v7-toolchain/action.yml',
   }),
   mutableRpc: Object.freeze({
-    ethereumProfile: 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01',
+    ethereumProfile: 'ETHEREUM_FORK_RPC_URL',
     chain: 'ethereum',
     chainId: 1,
-    backendPolicy: 'EXISTING_CURVEYIELD_MUTABLE_ANVIL_RPC_ONLY',
+    backendPolicy: 'LOCAL_EPHEMERAL_ANVIL_WITH_UPSTREAM_FORK_RPC',
     requesterSuppliedRpcAllowed: false,
   }),
   phase6: Object.freeze({

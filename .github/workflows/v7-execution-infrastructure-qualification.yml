@@ -16,8 +16,6 @@ on:
         required: false
       PREFLIGHTSIM_GITHUB_TOKEN:
         required: false
-      SIM_ARCHIVE_PRIMARY_ETHEREUM_01:
-        required: false
   workflow_dispatch:
     inputs:
       controller_ref:
@@ -531,7 +529,7 @@ jobs:
       - name: Live trusted-main Phase 6 and Phase 7 mutable-Anvil qualification
         if: github.event_name != 'pull_request' && env.V7_QUALIFICATION_LANE == 'FULL'
         env:
-          SIM_ARCHIVE_PRIMARY_ETHEREUM_01: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          ETHEREUM_FORK_RPC_URL: https://eth.drpc.org/
         run: |
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
@@ -589,12 +587,12 @@ jobs:
             dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true' && fs.existsSync('package-lock.json'),
             phase6MutableRpcPass:phase6.status==='PASS',
             phase6IdentityNormalized:phase6.runtime?.identityNormalized===true && phase6.identityNormalization?.status==='PASS',
-            phase6RpcSecretNotExposed:JSON.stringify(phase6).includes(process.env.SIM_ARCHIVE_PRIMARY_ETHEREUM_01)===false,
+            phase6ForkSourceNotExposed:JSON.stringify(phase6).includes(process.env.ETHEREUM_FORK_RPC_URL)===false,
             medusaSmokePass:phase6MedusaSmoke?.checks?.medusaSmokePass===true,
             medusaSmokeFalsification:phase6MedusaSmoke?.checks?.medusaSmokeFalsification===true,
             medusaSmokeNoTests:phase6MedusaSmoke?.checks?.medusaSmokeNoTests===true,
             rawEvidencePreserved:phase6MedusaSmoke?.checks?.rawEvidencePreserved===true,
-            medusaSmokeSecretNotExposed:JSON.stringify(phase6MedusaSmoke).includes(process.env.SIM_ARCHIVE_PRIMARY_ETHEREUM_01)===false,
+            medusaSmokeForkSourceNotExposed:JSON.stringify(phase6MedusaSmoke).includes(process.env.ETHEREUM_FORK_RPC_URL)===false,
             phase7PreflightPass:preflight.status==='PASS',
             recipeEnforced:preflight.checks?.lifecycleRecipe?.status==='PASS',
             recipeId:preflight.recipeId==='external-readiness-v1',

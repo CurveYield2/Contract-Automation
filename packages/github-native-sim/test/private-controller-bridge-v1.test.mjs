@@ -112,7 +112,7 @@ test('private source checkout resolves a relative destination once and uses that
   assert.equal(result.destination, expectedDestination);
 });
 
-test('Phase 7 Ethereum lifecycle uses SIM_ARCHIVE_PRIMARY_ETHEREUM_01 as the authoritative fork RPC', async () => {
+test('Phase 7 Ethereum lifecycle honors an explicit ETHEREUM_FORK_RPC_URL override', async () => {
   const calls = [];
   const archiveUrl = 'https://archive-rpc.example';
   const request = phase7Request();
@@ -133,7 +133,7 @@ test('Phase 7 Ethereum lifecycle uses SIM_ARCHIVE_PRIMARY_ETHEREUM_01 as the aut
     }),
     buildProject: async () => ({ status: 'completed', compilerVersion: '0.8.28', artifacts }),
     environment: {
-      SIM_ARCHIVE_PRIMARY_ETHEREUM_01: archiveUrl,
+      ETHEREUM_FORK_RPC_URL: archiveUrl,
       RPC_ETHEREUM: 'https://non-archive-rpc.example'
     },
     startSimulationEngine: async (input) => {

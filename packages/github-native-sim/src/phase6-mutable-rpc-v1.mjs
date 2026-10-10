@@ -1,9 +1,11 @@
-import { startRpcIdentityProxy } from '../../runner/src/rpc-identity-proxy-v1.mjs';
+import { startAnvilEngine } from '../../runner/src/anvil-engine.mjs';
 import { V7_POLICY } from './v7-policy.mjs';
 
 export const PHASE6_MUTABLE_RPC_ENV = V7_POLICY.mutableRpc.ethereumProfile;
 export const PHASE6_MUTABLE_RPC_CHAIN = V7_POLICY.mutableRpc.chain;
 export const PHASE6_MUTABLE_RPC_CHAIN_ID = V7_POLICY.mutableRpc.chainId;
+export const DEFAULT_ETHEREUM_FORK_RPC_URL = 'https://eth.drpc.org/';
+const LEGACY_PHASE6_MUTABLE_RPC_ENV = 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01';
 
 function hexQuantity(value, label) {
   if (typeof value !== 'string' || !/^0x[0-9a-fA-F]+$/.test(value)) throw new Error(`${label} must be a hex quantity`);
@@ -51,8 +53,10 @@ async function probeNormalizedRpc(url, fetchImpl, { frozenBlockNumber = null, fr
 }
 
 export function resolvePhase6MutableRpcUrl(environment = process.env) {
-  const url = environment?.[PHASE6_MUTABLE_RPC_ENV];
-  if (typeof url !== 'string' || url.length === 0) throw new Error(`Runner secret ${PHASE6_MUTABLE_RPC_ENV} is required for Phase 6 mutable-RPC execution`);
+  const url = environment?.[PHASE6_MUTABLE_RPC_ENV]
+    || environment?.[LEGACY_PHASE6_MUTABLE_RPC_ENV]
+    || DEFAULT_ETHEREUM_FORK_RPC_URL;
+  if (typeof url !== 'string' || url.length === 0) throw new Error('Ethereum fork RPC URL is required for Phase 6 local-Anvil execution');
   return url;
 }
 
@@ -66,33 +70,48 @@ function failedSessionEvidence(failureKind, reason) {
   };
 }
 
-function observedUpstreamChainId(proxy) {
-  const observation = proxy?.getUpstreamIdentityObservation?.();
-  if (!observation?.chainId) return null;
-  try { return hexQuantity(observation.chainId, 'upstream eth_chainId'); }
-  catch { return null; }
+async function probeUpstreamChainId(url, fetchImpl) {
+  try {
+    return hexQuantity(await rpcCall(url, 'eth_chainId', [], fetchImpl), 'upstream eth_chainId');
+  } catch {
+    return null;
+  }
 }
 
 export async function createPhase6MutableRpcSession({
   environment = process.env,
   fetchImpl = globalThis.fetch,
-  startIdentityProxy = startRpcIdentityProxy,
+  startEngine = startAnvilEngine,
   frozenBlockNumber = null,
   frozenBlockHash = null,
 } = {}) {
   let upstreamUrl;
   try { upstreamUrl = resolvePhase6MutableRpcUrl(environment); }
   catch (error) {
-    return { evidence: failedSessionEvidence('MUTABLE_RPC_SECRET_MISSING', error.message), runtime: null, async close() {} };
+    return { evidence: failedSessionEvidence('MUTABLE_RPC_SOURCE_MISSING', error.message), runtime: null, async close() {} };
   }
 
-  let proxy;
+  let engine;
   try {
-    proxy = await startIdentityProxy({ upstreamUrl, chainId: PHASE6_MUTABLE_RPC_CHAIN_ID, fetchImpl });
-    const normalized = await probeNormalizedRpc(proxy.url, fetchImpl, { frozenBlockNumber, frozenBlockHash });
-    const upstreamChainId = observedUpstreamChainId(proxy);
+    const requestPinned = Number.isSafeInteger(frozenBlockNumber)
+      && frozenBlockNumber >= 0
+      && typeof frozenBlockHash === 'string';
+    const placeholderArtifacts = { get() { throw new Error('Phase 6 local-Anvil session does not deploy artifacts directly'); } };
+    engine = await startEngine({
+      artifacts: placeholderArtifacts,
+      workflow: { steps: [] },
+      chainId: PHASE6_MUTABLE_RPC_CHAIN_ID,
+      forkUrl: upstreamUrl,
+      block: requestPinned ? frozenBlockNumber : 'latest',
+      evmVersion: 'cancun',
+      quiet: true,
+      fetchImpl,
+    });
+
+    const normalized = await probeNormalizedRpc(engine.url, fetchImpl, { frozenBlockNumber, frozenBlockHash });
+    const upstreamChainId = await probeUpstreamChainId(upstreamUrl, fetchImpl);
     if (normalized.status !== 'PASS') {
-      await proxy.close().catch(() => {});
+      await engine.close().catch(() => {});
       return {
         evidence: {
           ...failedSessionEvidence(
@@ -100,8 +119,8 @@ export async function createPhase6MutableRpcSession({
               ? 'MUTABLE_RPC_FROZEN_BLOCK_MISMATCH'
               : 'MUTABLE_RPC_IDENTITY_FAILURE',
             normalized.requestPinned && normalized.blockHashMatchesExpected === false
-              ? 'Identity-normalized Phase 6 RPC did not return the admitted frozen block hash'
-              : 'Identity-normalized Phase 6 RPC did not reconcile to Ethereum'
+              ? 'Local Phase 6 Anvil did not return the admitted frozen block hash'
+              : 'Local Phase 6 Anvil did not reconcile to Ethereum'
           ),
           observedChainId: normalized.chainId,
           chainIdMatchesExpected: normalized.chainIdMatchesExpected,
@@ -114,6 +133,7 @@ export async function createPhase6MutableRpcSession({
           identityNormalization: {
             status: 'FAIL', observedUpstreamChainId: upstreamChainId, observedNormalizedChainId: normalized.chainId,
             upstreamIdentityVirtualized: upstreamChainId === null ? null : upstreamChainId !== PHASE6_MUTABLE_RPC_CHAIN_ID,
+            mode: 'LOCAL_EPHEMERAL_ANVIL_FORK',
           },
         },
         runtime: null,
@@ -136,11 +156,11 @@ export async function createPhase6MutableRpcSession({
       identityNormalization: {
         status: 'PASS', observedUpstreamChainId: upstreamChainId, observedNormalizedChainId: normalized.chainId,
         upstreamIdentityVirtualized: upstreamChainId === null ? null : upstreamChainId !== PHASE6_MUTABLE_RPC_CHAIN_ID,
-        mode: 'EXISTING_RPC_IDENTITY_PROXY', rawIdentityProbeBypassUsed: false,
+        mode: 'LOCAL_EPHEMERAL_ANVIL_FORK', rawIdentityProbeBypassUsed: false,
       },
     };
     const runtime = {
-      url: proxy.url, blockNumber: normalized.blockNumber, blockHash: normalized.blockHash,
+      url: engine.url, blockNumber: normalized.blockNumber, blockHash: normalized.blockHash,
       requestPinned: normalized.requestPinned,
       chain: PHASE6_MUTABLE_RPC_CHAIN, chainId: PHASE6_MUTABLE_RPC_CHAIN_ID,
       profile: PHASE6_MUTABLE_RPC_ENV, identityNormalized: true,
@@ -151,11 +171,11 @@ export async function createPhase6MutableRpcSession({
       async close() {
         if (closed) return;
         closed = true;
-        await proxy.close();
+        await engine.close();
       },
     };
   } catch (error) {
-    if (proxy) await proxy.close().catch(() => {});
+    if (engine) await engine.close().catch(() => {});
     return {
       evidence: failedSessionEvidence('MUTABLE_RPC_PROBE_FAILURE', redactMutableRpcSecret(error?.message ?? String(error), upstreamUrl)),
       runtime: null,
