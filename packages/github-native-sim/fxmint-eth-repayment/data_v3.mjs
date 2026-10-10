@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 const require = createRequire(`${process.env.FXMINT_DEPS}/package.json`);
 export const ethers = require('ethers');
 export const C = Object.fromEntries(Object.entries({
- owner:'0x9f2B20A772246960810045905B7daccf960eE288',
+ owner:ethers.getAddress(process.env.FXMINT_OWNER_ADDRESS||'0x9f2B20A772246960810045905B7daccf960eE288'),
  pool:'0x6Ecfa38FeE8a5277B91eFdA204c235814F0122E8',
  manager:'0x250893CA4Ba5d05626C785e8da758026928FCD24',
  router:'0xB753366082466c4B5984312f0c4Bb97554be067E',
@@ -18,6 +18,7 @@ export const C = Object.fromEntries(Object.entries({
  multicall:'0xcA11bde05977b3631167028862bE2a173976CA11',
  factory:'0x1F98431c8aD98523631AE4a59f267346ea31F984'
 }).map(([k,v])=>[k,v.toLowerCase()]));
+if(C.owner===ethers.ZeroAddress)throw Error('Position owner cannot be zero');
 // Official AladdinDAO/fx-sdk routes and aladdin-v3-contracts V3 hint encoding.
 export const R={
  usdcFx:['0x01054062fa20b733978fcbcec244eb8825ae6cfed87c0c'],
@@ -70,7 +71,7 @@ export async function collect(provider){
   const rate=rateProvider===ethers.ZeroAddress?1000000000000000000n:await read(provider,rateProvider,'getRate() view returns(uint256)',[],block);
   result.collateralScalingFactor=BigInt(scalar)*rate;result.collateralRateProvider=rateProvider;
   result.candidates=await discover(provider,block);
-  save('DATA_v2.json',result);console.log(json({block:result.block,positions:result.positions,candidateCounts:Object.fromEntries(Object.entries(result.candidates).map(([k,v])=>[k,v.length]))}));
+  save('DATA_v3.json',result);console.log(json({block:result.block,positions:result.positions,candidateCounts:Object.fromEntries(Object.entries(result.candidates).map(([k,v])=>[k,v.length]))}));
   if(!result.positions.some(x=>x.rawDebt>0n))throw Error('Owner has no indebted wstETH long position');
   return result;
 }
@@ -112,5 +113,5 @@ export async function discover(p,block='latest'){
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  const p=new ethers.JsonRpcProvider(process.env.ETH_RPC_URL,1,{staticNetwork:true});
- try{await collect(p);}catch(e){save('ERROR_v2.json',{error:safeError(e)});console.error(safeError(e));process.exitCode=1;}finally{p.destroy();}
+ try{await collect(p);}catch(e){save('ERROR_v3.json',{error:safeError(e)});console.error(safeError(e));process.exitCode=1;}finally{p.destroy();}
 }

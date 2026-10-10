@@ -1,8 +1,8 @@
 # fxMint ETH long repayment
 
-Active workflow: [fxMint ETH Repayment v3](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v3.yml).
+Active workflow: [fxMint ETH Repayment v4](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v4.yml).
 
-Owner: `0x9f2B20A772246960810045905B7daccf960eE288`.
+Original position owner / default read-only simulation owner: `0x9f2B20A772246960810045905B7daccf960eE288`. Live mode derives the current public owner address from `DEPLOYER_FX` before simulation; transfer the NFT to that address before running live.
 Pool: `0x6Ecfa38FeE8a5277B91eFdA204c235814F0122E8` (WstETHLongPool).
 Discovery found NFT #1920 with approximately 21.045126289 fxUSD debt and NFT #1925 with zero debt/collateral. Every run rediscovers ownership, debt, rates, fees, liquidity and contract hashes; these historical balances are not execution inputs.
 
@@ -12,6 +12,7 @@ Discovery found NFT #1920 with approximately 21.045126289 fxUSD debt and NFT #19
 |---|---|
 | mode | `simulate-only` (default), `collect-only`, or manually dispatched `live-broadcast` |
 | repayment_fxusd | Net fxUSD debt reduction, default 10; positive decimal with up to 18 decimals |
+| owner_address | Owner for simulate-only / collect-only, default original account; ignored in live mode, which derives DEPLOYER_FX automatically |
 | position_id | Empty discovers the unique eligible owned NFT; enter an ID if multiple are eligible |
 | helper_address | Empty creates a fork helper for simulation; manual live can deploy an ETH helper once. Enter the deployed ETH helper address on subsequent runs to reuse it with a different amount |
 | max_fee_gwei | EIP-1559 total fee cap, default 1 gwei |
@@ -81,4 +82,11 @@ Only owner gas ETH may be topped up on the fork. No token balances, NFT ownershi
 
 The workflow uses `SD_ETH_RPC_URL`, falling back to `SIM_ARCHIVE_PRIMARY_ETHEREUM_01`, without printing RPC credentials. Installation and Solidity compilation occur only in GitHub Actions. Artifacts contain pinned data, quotes, candidate outcomes, cost comparison, configurable-amount evidence and simulation report; retention is 30 days.
 
-Pushes trigger simulation only. Live mode requires manual workflow_dispatch, successful fresh fork acceptance and the `fxmint-production` environment. The signing secret `DEPLOYER_FX` must resolve to the owner above; a key for the earlier transferred WBTC position will fail the address guard. Existing helper input must match this ETH helper's compiled runtime/owner/pool. Reuse that ETH helper to change repayment amounts without redeployment. No mainnet ETH helper address exists in these simulation reports.
+Pushes trigger simulation only. Live mode requires manual workflow_dispatch, successful fresh fork acceptance and the `fxmint-production` environment. A protected preparation job derives only the public address from `DEPLOYER_FX` without signing. The simulation then discovers the NFT in that account and binds the helper to that owner. The live job uses the same secret and requires its address to match the accepted simulation. Until the NFT is transferred there, live selection fails before deployment or broadcast. Existing helper input must match this ETH helper's compiled runtime/owner/pool. Reuse that ETH helper to change repayment amounts without redeployment. No mainnet ETH helper address exists in these simulation reports.
+
+
+## Run live after the NFT transfer
+
+Open [the workflow page](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v4.yml), click **Run workflow**, select branch **main**, mode **live-broadcast**, enter the desired fxUSD amount and gas caps, and enter the exact confirmation (for example `LIVE 10 FXUSD`). Owner is derived automatically from `DEPLOYER_FX`; `owner_address` is only for independent simulate/collect runs. Enter `1920` for this NFT or leave auto-discovery empty. The first ETH live execution needs a helper deployment, so leave `helper_address` empty; reuse its emitted mainnet address afterward. This accepts the ETH helper only, not the existing WBTC helper.
+
+At **0.09 gwei**, the measured **3,307,301 gas** for deployment + NFT approval + atomic repayment is **0.00029765709 ETH**. Repayment alone is **0.00012039444 ETH**. NFT transfer into the signing account is separate and is not included. These are estimates based on the verified 10 fxUSD sequence; future state/amount/route may change gas.

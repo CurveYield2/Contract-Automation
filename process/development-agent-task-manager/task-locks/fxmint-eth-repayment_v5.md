@@ -1,6 +1,6 @@
-# fxMint ETH long repayment workflow v4
+# fxMint ETH long repayment workflow v5
 
-State: COMPLETE_VERIFIED_SIMULATION_ONLY.
+State: SIGNER_OWNER_CONFIGURATION_AWAITING_PUSH_SIMULATION.
 
 Owner: 0x9f2B20A772246960810045905B7daccf960eE288.
 Pool: official WstETHLongPool 0x6Ecfa38FeE8a5277B91eFdA204c235814F0122E8.
@@ -28,3 +28,6 @@ Current canonical files: workflow v3; data_v2.mjs; run_v2.mjs; helper FxMintEthR
 
 
 Final user steering: any ETH collateral form is acceptable; select the best end price including gas. Current selection/ranking already follows this requirement. No implementation change or additional unchanged simulation is required.
+
+
+User requested configuring manual live broadcast for DEPLOYER_FX and will transfer the ETH NFT to that signer, then requested total gas cost at 0.09 gwei including deployment. New finite scope: resolve public signer address in a protected preparation job without signing, pass it to collector/simulation/live, retain wallet address match and current ownership guard, expose owner input only for separate simulation/collection, preserve helper source, and provide live workflow link. Workflow v4, collector/runner v3, README v2, lock v5 supersede prior active files after exact archival. Push only simulates original still-owned position; resolve/live jobs are skipped on pushes. No NFT state fabrication, live dispatch or broadcast. Measured total sequence cost at 0.09 gwei = 3307301 * 90000000 wei = 0.00029765709 ETH, excluding user NFT transfer. Same helper contract source remains v1. Terminal condition: one successful push simulation for configurable owner wiring, exact archive and one active implementation, and live link/usage instructions.
