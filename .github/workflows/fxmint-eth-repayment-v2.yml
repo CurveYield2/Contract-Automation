@@ -1,9 +1,9 @@
-name: fxMint ETH Repayment v1
+name: fxMint ETH Repayment v2
 on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/fxmint-eth-repayment-v1.yml'
+      - '.github/workflows/fxmint-eth-repayment-v2.yml'
       - 'packages/github-native-sim/fxmint-eth-repayment/contracts/FxMintEthRepayer_v1.sol'
       - 'packages/github-native-sim/fxmint-eth-repayment/data_v1.mjs'
       - 'packages/github-native-sim/fxmint-eth-repayment/run_v1.mjs'
@@ -18,7 +18,7 @@ on:
       repayment_fxusd:
         description: Exact net debt repayment in fxUSD (positive decimal)
         type: string
-        default: '100'
+        default: '10'
       position_id:
         description: Leave empty to discover the unique eligible ETH long position
         type: string
@@ -66,7 +66,7 @@ jobs:
           ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: ${{ inputs.mode == 'collect-only' && 'collect-only' || 'simulate-only' }}
-          FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd || '100' }}
+          FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd || '10' }}
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
           FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
           FXMINT_MAX_FEE_GWEI: ${{ inputs.max_fee_gwei || '1' }}
@@ -75,7 +75,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-simulation-v1
+          name: fxmint-eth-simulation-v2
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
@@ -114,7 +114,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-broadcast-v1
+          name: fxmint-eth-broadcast-v2
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
