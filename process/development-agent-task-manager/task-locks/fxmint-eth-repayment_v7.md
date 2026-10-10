@@ -1,6 +1,6 @@
-# fxMint ETH long repayment workflow v6
+# fxMint ETH long repayment workflow v7
 
-State: COMPLETE_DEPLOYER_FX_LIVE_CONFIGURATION_VERIFIED.
+State: BASE_FEE_INPUT_AND_FIXED_PRIORITY_AWAITING_VERIFICATION.
 
 Owner: 0x9f2B20A772246960810045905B7daccf960eE288.
 Pool: official WstETHLongPool 0x6Ecfa38FeE8a5277B91eFdA204c235814F0122E8.
@@ -34,3 +34,6 @@ User requested configuring manual live broadcast for DEPLOYER_FX and will transf
 
 
 Terminal configuration evidence: run 38016737798 at source commit 8fc8b19e0c27724536154ecaa8ad2c1cff69681e passed the configurable-owner fork flow; simulation 114108566477 success, resolver 114108567311 skipped, live 114109218327 skipped. Both 10/5 fxUSD and negative checks passed. Final workflow v5 adds the same derived owner explicitly to live job and restricts derivation to trusted main; local YAML assertions verified both simulation/live owner bindings, DEPLOYER_FX broadcast-key binding, and absence of key in simulation env. Resolver source and runner/collector syntax parsed without local compilation or dependency installation. No live request/key resolution/deployment/broadcast was executed. Final configuration-only commit skips Actions to avoid repeating unchanged simulation. Active canonical files: workflow v5, collector/runner v3, helper v1, README v3, task lock v6. User can transfer NFT to their current DEPLOYER_FX account then manually run live-broadcast on main; owner is auto-derived, NFT absence fails before deployment. Gas cost supplied: approximately 0.00029765709 ETH at 0.09 gwei for measured deployment+approval+repayment sequence; user NFT transfer excluded. Scope complete, no autonomous follow-up or unchanged rerun required.
+
+
+Latest governing request: add max base gwei input and fix priority to 0.00001 gwei without per-run priority input. Finite extension: workflow v6 max_base_gwei default 0.09; retain separate max_fee_gwei total cap; runner v4 fixes priority at 10000 wei, limits encoded max fee to min(total cap, base cap + fixed priority), rejects observed base above cap at pinned fork and immediately before each fork/live send, and logs base/total/effective caps. No helper or collector changes. Existing DEPLOYER_FX owner resolution retained. Archived workflow v5, runner v3, README v3, lock v6 exactly before replacement. Terminal condition: fee-boundary checks, one successful changed-input simulation, canonical file/digest verification, current workflow link. No live dispatch or broadcasting authorized in this extension.

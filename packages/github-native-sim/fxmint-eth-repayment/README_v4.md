@@ -1,6 +1,6 @@
 # fxMint ETH long repayment
 
-Active workflow: [fxMint ETH Repayment v5](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v5.yml).
+Active workflow: [fxMint ETH Repayment v6](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v6.yml).
 
 Original position owner / default read-only simulation owner: `0x9f2B20A772246960810045905B7daccf960eE288`. Live mode derives the current public owner address from `DEPLOYER_FX` before simulation; transfer the NFT to that address before running live.
 Pool: `0x6Ecfa38FeE8a5277B91eFdA204c235814F0122E8` (WstETHLongPool).
@@ -16,8 +16,10 @@ Discovery found NFT #1920 with approximately 21.045126289 fxUSD debt and NFT #19
 | position_id | Empty discovers the unique eligible owned NFT; enter an ID if multiple are eligible |
 | helper_address | Empty creates a fork helper for simulation; manual live can deploy an ETH helper once. Enter the deployed ETH helper address on subsequent runs to reuse it with a different amount |
 | max_fee_gwei | EIP-1559 total fee cap, default 1 gwei |
-| priority_fee_gwei | EIP-1559 priority cap, default 0.0001 gwei |
+| max_base_gwei | Maximum observed base fee permitted before transaction submission, default 0.09 gwei |
 | confirmation | Manual live only: `LIVE <normalized repayment amount> FXUSD`, for example `LIVE 10 FXUSD` |
+
+Priority fee is fixed in the runner at **0.00001 gwei (10,000 wei)**. There is no per-run input or environment override. Before deployment, NFT approval and atomic repayment, the runner rereads the current base fee and rejects a value above `max_base_gwei`; it also checks base plus fixed priority against the total cap. Submitted EIP-1559 `maxFeePerGas` is the smaller of `max_fee_gwei` and `max_base_gwei + 0.00001`, and `maxPriorityFeePerGas` is fixed at 0.00001. The input is a submission-time base-fee gate; the signed transaction bounds total price, since EIP-1559 does not encode a separate base-fee field.
 
 The target cannot exceed available position debt or collateral, and must pass the complete transaction. A 100 fxUSD target was rejected because this NFT held only approximately 21.045 fxUSD debt. Both the amount and fees must reflect the current state.
 
@@ -74,7 +76,7 @@ The comparison evaluated 28 collateral sale candidates: **22 completed**; five B
 
 Selected route saved **153,432 gas** versus the displayed ETH/WETH conversion path and **320,952 gas (19.35%)** versus the fxUSD round trip. These estimated costs include collateral, refunds and gas at the common ranking fee **0.0796553 gwei**, with **2493.3874 USDC/ETH** and **3105.9543 USDC/wstETH** market marks.
 
-Observed fork repayment gas cost: **0.000086687165266920 ETH** at **0.064802370 gwei**. Deployment (1,913,637 gas), approval (55,948 gas) and repayment totaled **0.000251237034313170 ETH** in this fork. At the default 1 gwei cap, those same gas counts imply maximum **0.003307301 ETH** including deployment/approval, or **0.001337716 ETH** for repayment alone. Live costs and gas consumption can change.
+Observed fork repayment gas cost: **0.000086687165266920 ETH** at **0.064802370 gwei**. Deployment (1,913,637 gas), approval (55,948 gas) and repayment totaled **0.000251237034313170 ETH** in this fork. With the current default base cap 0.09 gwei and fixed priority 0.00001 gwei, the effective total cap is **0.09001 gwei** (subject to the separate total cap). These gas counts imply at most **0.00029769016301 ETH** including deployment/approval or **0.00012040781716 ETH** for repayment alone. Live costs and gas consumption can change.
 
 ## Verification and operation
 
@@ -87,7 +89,7 @@ Pushes trigger simulation only. Live mode requires manual workflow_dispatch, suc
 
 ## Run live after the NFT transfer
 
-Open [the workflow page](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v5.yml), click **Run workflow**, select branch **main**, mode **live-broadcast**, enter the desired fxUSD amount and gas caps, and enter the exact confirmation (for example `LIVE 10 FXUSD`). Owner is derived automatically from `DEPLOYER_FX`; `owner_address` is only for independent simulate/collect runs. Enter `1920` for this NFT or leave auto-discovery empty. The first ETH live execution needs a helper deployment, so leave `helper_address` empty; reuse its emitted mainnet address afterward. This accepts the ETH helper only, not the existing WBTC helper.
+Open [the workflow page](https://github.com/CurveYield2/Contract-Automation/actions/workflows/fxmint-eth-repayment-v6.yml), click **Run workflow**, select branch **main**, mode **live-broadcast**, enter the desired fxUSD amount and gas caps, and enter the exact confirmation (for example `LIVE 10 FXUSD`). Owner is derived automatically from `DEPLOYER_FX`; `owner_address` is only for independent simulate/collect runs. Enter `1920` for this NFT or leave auto-discovery empty. The first ETH live execution needs a helper deployment, so leave `helper_address` empty; reuse its emitted mainnet address afterward. This accepts the ETH helper only, not the existing WBTC helper.
 
 At **0.09 gwei**, the measured **3,307,301 gas** for deployment + NFT approval + atomic repayment is **0.00029765709 ETH**. Repayment alone is **0.00012039444 ETH**. NFT transfer into the signing account is separate and is not included. These are estimates based on the verified 10 fxUSD sequence; future state/amount/route may change gas.
 

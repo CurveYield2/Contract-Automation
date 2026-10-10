@@ -1,12 +1,12 @@
-name: fxMint ETH Repayment v5
+name: fxMint ETH Repayment v6
 on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/fxmint-eth-repayment-v5.yml'
+      - '.github/workflows/fxmint-eth-repayment-v6.yml'
       - 'packages/github-native-sim/fxmint-eth-repayment/contracts/FxMintEthRepayer_v1.sol'
       - 'packages/github-native-sim/fxmint-eth-repayment/data_v3.mjs'
-      - 'packages/github-native-sim/fxmint-eth-repayment/run_v3.mjs'
+      - 'packages/github-native-sim/fxmint-eth-repayment/run_v4.mjs'
       - 'packages/github-native-sim/fxmint-eth-repayment/requests/simulate_v1.json'
   workflow_dispatch:
     inputs:
@@ -35,10 +35,10 @@ on:
         description: Maximum total gas price in gwei
         type: string
         default: '1'
-      priority_fee_gwei:
-        description: Maximum priority fee in gwei
+      max_base_gwei:
+        description: Maximum current base fee allowed before submitting each transaction (gwei)
         type: string
-        default: '0.0001'
+        default: '0.09'
       confirmation:
         description: Live requires LIVE <repayment amount> FXUSD (example LIVE 100 FXUSD)
         type: string
@@ -111,12 +111,12 @@ jobs:
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
           FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
           FXMINT_MAX_FEE_GWEI: ${{ inputs.max_fee_gwei || '1' }}
-          FXMINT_PRIORITY_GWEI: ${{ inputs.priority_fee_gwei || '0.0001' }}
-        run: timeout 1500s node packages/github-native-sim/fxmint-eth-repayment/run_v3.mjs
+          FXMINT_MAX_BASE_GWEI: ${{ inputs.max_base_gwei || '0.09' }}
+        run: timeout 1500s node packages/github-native-sim/fxmint-eth-repayment/run_v4.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-simulation-v5
+          name: fxmint-eth-simulation-v6
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
@@ -149,14 +149,14 @@ jobs:
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
           FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
           FXMINT_MAX_FEE_GWEI: ${{ inputs.max_fee_gwei }}
-          FXMINT_PRIORITY_GWEI: ${{ inputs.priority_fee_gwei }}
+          FXMINT_MAX_BASE_GWEI: ${{ inputs.max_base_gwei || '0.09' }}
           FXMINT_CONFIRMATION: ${{ inputs.confirmation }}
           FXMINT_PRIVATE_KEY: ${{ secrets.DEPLOYER_FX }}
-        run: node packages/github-native-sim/fxmint-eth-repayment/run_v3.mjs
+        run: node packages/github-native-sim/fxmint-eth-repayment/run_v4.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-broadcast-v5
+          name: fxmint-eth-broadcast-v6
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
