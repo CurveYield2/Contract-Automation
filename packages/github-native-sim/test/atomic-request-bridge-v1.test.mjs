@@ -23,7 +23,7 @@ test('canonical V7 bridge resolves exactly one atomic request file from request 
   assert.match(resolver, /const candidates = await findPrRequests/);
   assert.match(resolver, /candidates\.length !== 1/);
   assert.match(resolver, /PR request source must contain exactly one atomic request/);
-    assert.match(workflow, /ETHEREUM_FORK_RPC_URL:\\s*https:\\/\\/eth\\.drpc\\.org\\//);
+    assert.ok(workflow.includes('ETHEREUM_FORK_RPC_URL: https://eth.drpc.org/'));
   assert.doesNotMatch(workflow, /push:\s*[\s\S]*github-native-sim\/requests/);
 });
 
