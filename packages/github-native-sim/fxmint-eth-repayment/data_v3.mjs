@@ -1,3 +1,4 @@
+// Collector implementation v4; canonical path retained for the existing workflow.
 import { createRequire } from 'node:module';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -39,7 +40,7 @@ export async function read(provider,to,fragment,args=[],block='latest'){
   const out=iface.decodeFunctionResult(name,result);return out.length===1?out[0]:Array.from(out);
 }
 export const quote = (p,amount,routes,block='latest')=>read(p,C.converter,'queryConvert(uint256,uint256,uint256[]) returns(uint256)',[amount,encoding(routes),routes],block);
-export async function collect(provider){
+export async function collect(provider,provenRouteOnly=false){
   const chain=await provider.send('eth_chainId',[]);if(chain!=='0x1')throw Error('Ethereum chain ID 1 required');
   const block=await provider.send('eth_blockNumber',[]);
   const header=await provider.send('eth_getBlockByNumber',[block,false]);
@@ -70,14 +71,14 @@ export async function collect(provider){
   const [scalar,rateProvider]=await read(provider,C.manager,'tokenRates(address) view returns(uint96,address)',[C.collateral],block);
   const rate=rateProvider===ethers.ZeroAddress?1000000000000000000n:await read(provider,rateProvider,'getRate() view returns(uint256)',[],block);
   result.collateralScalingFactor=BigInt(scalar)*rate;result.collateralRateProvider=rateProvider;
-  result.candidates=await discover(provider,block);
+  result.candidates=await discover(provider,block,provenRouteOnly);
   save('DATA_v3.json',result);console.log(json({block:result.block,positions:result.positions,candidateCounts:Object.fromEntries(Object.entries(result.candidates).map(([k,v])=>[k,v.length]))}));
   if(!result.positions.some(x=>x.rawDebt>0n))throw Error('Owner has no indebted wstETH long position');
   return result;
 }
 
 export function hint(pool,type,extra=0n,action=0){return ethers.toBeHex((((BigInt(pool)|extra)<<2n)|BigInt(action))<<8n|BigInt(type));}
-export async function discover(p,block='latest'){
+export async function discover(p,block='latest',provenRouteOnly=false){
  const first=[{name:'Curve USDC/fxUSD',routes:R.usdcFx}];
  const sale=[],wethSale=[],wstWeth=[];
  async function uni(from,to,fee){
@@ -88,6 +89,13 @@ export async function discover(p,block='latest'){
    const token1=await read(p,pool,'token1() view returns(address)',[],block);
    if(new Set([token0.toLowerCase(),token1.toLowerCase()]).size!==2||![token0,token1].some(x=>x.toLowerCase()===from))throw Error('Unexpected Uniswap pool tokens');
    return {pool,fee,routes:[hint(pool,1,(BigInt(fee)<<160n)|(BigInt(from<to?1:0)<<184n))]};
+ }
+ if(provenRouteOnly){
+   // Lowest gas-inclusive cost in simulation runs 38017714742 and 38018612642.
+   const direct=await uni(C.collateral,C.usdc,500);
+   if(!direct)throw Error('Proven wstETH/USDC 500 route unavailable');
+   if(direct.pool.toLowerCase()!=='0x4622df6fb2d9bee0dcdacf545acdb6a2b2f4f863')throw Error('Proven wstETH/USDC pool mismatch');
+   return {first,sale:[{name:'Uniswap direct wstETH/USDC 500',...direct}],wethSale};
  }
  for(const fee of [100,500,3000,10000]){
    const a=await uni(C.usdc,C.fxusd,fee);if(a)first.push({name:'Uniswap USDC/fxUSD '+fee,...a});
@@ -115,3 +123,4 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  const p=new ethers.JsonRpcProvider(process.env.ETH_RPC_URL,1,{staticNetwork:true});
  try{await collect(p);}catch(e){save('ERROR_v3.json',{error:safeError(e)});console.error(safeError(e));process.exitCode=1;}finally{p.destroy();}
 }
+
