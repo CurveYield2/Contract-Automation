@@ -1,7 +1,7 @@
-name: fxMint ETH Repayment v9
+name: fxMint ETH Repayment v10
 on:
   push:
-    branches: [main]
+    branches: [main, fxmint-eth-single-live-simulation]
     paths:
       - '.github/workflows/fxmint-eth-repayment-v7.yml'
       - 'packages/github-native-sim/fxmint-eth-repayment/contracts/FxMintEthRepayer_v1.sol'
@@ -85,7 +85,7 @@ jobs:
           NODE
   simulation:
     needs: resolve-owner
-    if: always() && !cancelled() && (needs.resolve-owner.result == 'success' || needs.resolve-owner.result == 'skipped')
+    if: always() && !cancelled() && inputs.mode != 'live-broadcast' && (needs.resolve-owner.result == 'success' || needs.resolve-owner.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -101,6 +101,35 @@ jobs:
           version: stable
       - name: Install scoped dependencies in GitHub only
         run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
+      - name: Inspect failed repayment funding without signing
+        env:
+          ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
+        run: |
+          node --input-type=module <<'NODE'
+          import {createRequire} from 'node:module';
+          const require=createRequire(process.env.FXMINT_DEPS+'/package.json');
+          const {ethers}=require('ethers');
+          const p=new ethers.JsonRpcProvider(process.env.ETH_RPC_URL,1,{staticNetwork:true,batchMaxCount:1,cacheTimeout:0});
+          const owner='0xff90b414d84f7ec4faeadbd8da86ad515f930654';
+          const helper='0x4Af01712F88aa23eE696501928c8e57cf0214d38';
+          const approvalHash='0xc52b0eb94727651defed665d8b0a8e6a5655fc74f9d645547f03bbddcb194576';
+          const plan={"positionId":1920,"debtRepayment":"21030000000000000000","flashUsdc":"21095071","withdrawCollateral":"6823108733866433","firstMinimum":"21072060113075040551","secondMinimum":"21095072","deadline":1791604511,"firstRoutes":["0x01054062fa20b733978fcbcec244eb8825ae6cfed87c0c"],"collateralRoutes":["0x040007d1188b7dbecb66fb83736b3d516b36da8acbd3e18c01"]};
+          try{
+            const block=await p.send('eth_blockNumber',[]);
+            const balance=BigInt(await p.send('eth_getBalance',[owner,block]));
+            const receipt=await p.send('eth_getTransactionReceipt',[approvalHash]);
+            const pool=new ethers.Contract('0x6Ecfa38FeE8a5277B91eFdA204c235814F0122E8',['function getApproved(uint256) view returns(address)','function getPosition(uint256) view returns(uint256,uint256)'],p);
+            console.log(JSON.stringify({block,balanceWei:balance.toString(),balanceEth:ethers.formatEther(balance),approvalReceipt:receipt&&{status:receipt.status,block:receipt.blockNumber,gasUsed:receipt.gasUsed,gasPrice:receipt.effectiveGasPrice},approved:await pool.getApproved(1920),position:(await pool.getPosition(1920)).map(String)}));
+            const iface=new ethers.Interface(['function execute((uint256 positionId,uint256 debtRepayment,uint256 flashUsdc,uint256 withdrawCollateral,uint256 firstMinimum,uint256 secondMinimum,uint256 deadline,uint256[] firstRoutes,uint256[] collateralRoutes) plan)']);
+            try{
+              const estimate=BigInt(await p.send('eth_estimateGas',[{from:owner,to:helper,data:iface.encodeFunctionData('execute',[plan]),gasPrice:'0x0'}]));
+              const gasLimit=estimate*130n/100n,required=gasLimit*90010000n;
+              console.log(JSON.stringify({estimate:estimate.toString(),gasLimit:gasLimit.toString(),maxFeeWei:'90010000',requiredWei:required.toString(),requiredEth:ethers.formatEther(required),shortfallEth:ethers.formatEther(required>balance?required-balance:0n)}));
+            }catch(e){console.log(JSON.stringify({estimateError:e.shortMessage,code:e.code,data:e.data}));}
+          }catch(e){console.error(JSON.stringify({code:e.code,shortMessage:e.shortMessage}));process.exitCode=1;}
+          finally{p.destroy();}
+          NODE
       - name: Discover position and verify repayment (live uses proven route only)
         env:
           ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
@@ -117,12 +146,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-simulation-v9
+          name: fxmint-eth-simulation-v10
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
   live:
-    needs: [resolve-owner, simulation]
+    needs: resolve-owner
     if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'live-broadcast'
     environment: fxmint-production
     runs-on: ubuntu-latest
@@ -158,7 +187,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-broadcast-v9
+          name: fxmint-eth-broadcast-v10
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
