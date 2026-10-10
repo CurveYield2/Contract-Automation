@@ -1,4 +1,4 @@
-name: fxMint ETH Repayment v8
+name: fxMint ETH Repayment v9
 on:
   push:
     branches: [main]
@@ -28,9 +28,9 @@ on:
         type: string
         default: ''
       helper_address:
-        description: Reuse this ETH helper; empty permits deployment in manual live mode
+        description: Reuse the deployed ETH helper; clear only to deploy another helper
         type: string
-        default: ''
+        default: '0x4Af01712F88aa23eE696501928c8e57cf0214d38'
       max_fee_gwei:
         description: Maximum total gas price in gwei
         type: string
@@ -110,14 +110,14 @@ jobs:
           FXMINT_REPAYMENT_FXUSD: ${{ inputs.repayment_fxusd || '10' }}
           FXMINT_OWNER_ADDRESS: ${{ needs.resolve-owner.outputs.owner || inputs.owner_address }}
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
-          FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
+          FXMINT_HELPER_ADDRESS: ${{ github.event_name == 'push' && '0x4Af01712F88aa23eE696501928c8e57cf0214d38' || inputs.helper_address }}
           FXMINT_MAX_FEE_GWEI: ${{ inputs.max_fee_gwei || '1' }}
           FXMINT_MAX_BASE_GWEI: ${{ inputs.max_base_gwei || '0.09' }}
         run: timeout 1500s node packages/github-native-sim/fxmint-eth-repayment/run_v5.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-simulation-v8
+          name: fxmint-eth-simulation-v9
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
@@ -158,7 +158,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-broadcast-v8
+          name: fxmint-eth-broadcast-v9
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
