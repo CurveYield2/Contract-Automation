@@ -36,12 +36,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CurveYield2/Audit-Controller
-          ref: 577ce1b163e3ec1fcc3a6d6ca65cee48edf2b0f5
+          ref: 2e244d55674d7cd20f2b971f1a4c439092874173
           token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: .controller
           persist-credentials: false
           sparse-checkout: |
             campaigns/Boosthub Staking v2/source
+            campaigns/cyvlSDT v30 Audit v29/source
+            campaigns/CurveYield DEX v16 Source r4/source
+            campaigns/CurveYield_DEX_Fresh_Audit_Package_2026-08-16.zip
             audits/functional-verification/boosthub-four-contracts-v1
       - name: Install pinned OpenZeppelin only on GitHub
         run: |
