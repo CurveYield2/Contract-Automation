@@ -1,12 +1,12 @@
-name: fxMint ETH Repayment v2
+name: fxMint ETH Repayment v3
 on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/fxmint-eth-repayment-v2.yml'
+      - '.github/workflows/fxmint-eth-repayment-v3.yml'
       - 'packages/github-native-sim/fxmint-eth-repayment/contracts/FxMintEthRepayer_v1.sol'
-      - 'packages/github-native-sim/fxmint-eth-repayment/data_v1.mjs'
-      - 'packages/github-native-sim/fxmint-eth-repayment/run_v1.mjs'
+      - 'packages/github-native-sim/fxmint-eth-repayment/data_v2.mjs'
+      - 'packages/github-native-sim/fxmint-eth-repayment/run_v2.mjs'
       - 'packages/github-native-sim/fxmint-eth-repayment/requests/simulate_v1.json'
   workflow_dispatch:
     inputs:
@@ -71,11 +71,11 @@ jobs:
           FXMINT_HELPER_ADDRESS: ${{ inputs.helper_address }}
           FXMINT_MAX_FEE_GWEI: ${{ inputs.max_fee_gwei || '1' }}
           FXMINT_PRIORITY_GWEI: ${{ inputs.priority_fee_gwei || '0.0001' }}
-        run: timeout 1500s node packages/github-native-sim/fxmint-eth-repayment/run_v1.mjs
+        run: timeout 1500s node packages/github-native-sim/fxmint-eth-repayment/run_v2.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-simulation-v2
+          name: fxmint-eth-simulation-v3
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error
@@ -110,11 +110,11 @@ jobs:
           FXMINT_PRIORITY_GWEI: ${{ inputs.priority_fee_gwei }}
           FXMINT_CONFIRMATION: ${{ inputs.confirmation }}
           FXMINT_PRIVATE_KEY: ${{ secrets.DEPLOYER_FX }}
-        run: node packages/github-native-sim/fxmint-eth-repayment/run_v1.mjs
+        run: node packages/github-native-sim/fxmint-eth-repayment/run_v2.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: fxmint-eth-broadcast-v2
+          name: fxmint-eth-broadcast-v3
           path: fxmint-output/
           retention-days: 30
           if-no-files-found: error

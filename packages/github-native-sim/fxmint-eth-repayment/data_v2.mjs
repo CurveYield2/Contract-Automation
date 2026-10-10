@@ -42,7 +42,7 @@ export async function collect(provider){
   const chain=await provider.send('eth_chainId',[]);if(chain!=='0x1')throw Error('Ethereum chain ID 1 required');
   const block=await provider.send('eth_blockNumber',[]);
   const header=await provider.send('eth_getBlockByNumber',[block,false]);
-  const result={version:1,chainId:1,block:Number(BigInt(block)),blockHash:header.hash,timestamp:Number(BigInt(header.timestamp)),addresses:C,routes:R};
+  const result={version:2,chainId:1,block:Number(BigInt(block)),blockHash:header.hash,timestamp:Number(BigInt(header.timestamp)),addresses:C,routes:R};
   for(const [name,address] of Object.entries(C)){if(name==='owner')continue;const code=await provider.send('eth_getCode',[address,block]);if(code==='0x')throw Error(`No deployed code: ${name}`);result.codeHashes??={};result.codeHashes[name]=ethers.keccak256(code);}
   result.decimals={};for(const name of ['usdc','fxusd','collateral'])result.decimals[name]=Number(await read(provider,C[name],'decimals() view returns(uint8)',[],block));
   if(json(result.decimals)!==json({usdc:6,fxusd:18,collateral:18}))throw Error('Unexpected token decimals');
@@ -66,8 +66,11 @@ export async function collect(provider){
   result.balancerUsdc=await read(provider,C.usdc,'balanceOf(address) view returns(uint256)',[C.balancer],block);
   result.feeCollector=await read(provider,C.balancer,'getProtocolFeesCollector() view returns(address)',[],block);
   result.flashFeePercentage=await read(provider,result.feeCollector,'getFlashLoanFeePercentage() view returns(uint256)',[],block);
+  const [scalar,rateProvider]=await read(provider,C.manager,'tokenRates(address) view returns(uint96,address)',[C.collateral],block);
+  const rate=rateProvider===ethers.ZeroAddress?1000000000000000000n:await read(provider,rateProvider,'getRate() view returns(uint256)',[],block);
+  result.collateralScalingFactor=BigInt(scalar)*rate;result.collateralRateProvider=rateProvider;
   result.candidates=await discover(provider,block);
-  save('DATA_v1.json',result);console.log(json({block:result.block,positions:result.positions,candidateCounts:Object.fromEntries(Object.entries(result.candidates).map(([k,v])=>[k,v.length]))}));
+  save('DATA_v2.json',result);console.log(json({block:result.block,positions:result.positions,candidateCounts:Object.fromEntries(Object.entries(result.candidates).map(([k,v])=>[k,v.length]))}));
   if(!result.positions.some(x=>x.rawDebt>0n))throw Error('Owner has no indebted wstETH long position');
   return result;
 }
@@ -109,5 +112,5 @@ export async function discover(p,block='latest'){
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  const p=new ethers.JsonRpcProvider(process.env.ETH_RPC_URL,1,{staticNetwork:true});
- try{await collect(p);}catch(e){save('ERROR_v1.json',{error:safeError(e)});console.error(safeError(e));process.exitCode=1;}finally{p.destroy();}
+ try{await collect(p);}catch(e){save('ERROR_v2.json',{error:safeError(e)});console.error(safeError(e));process.exitCode=1;}finally{p.destroy();}
 }
