@@ -1,6 +1,6 @@
-# fxMint ETH long repayment workflow v3
+# fxMint ETH long repayment workflow v4
 
-State: CORRECTED_COLLATERAL_UNITS_AWAITING_FRESH_COMPARISON.
+State: COMPLETE_VERIFIED_SIMULATION_ONLY.
 
 Owner: 0x9f2B20A772246960810045905B7daccf960eE288.
 Pool: official WstETHLongPool 0x6Ecfa38FeE8a5277B91eFdA204c235814F0122E8.
@@ -20,3 +20,11 @@ RPC collection run 38015374969 at block 26158905 discovered position #1920, coll
 Run 38015475074 passed 23 complete candidate transactions, authorization/minimum/deadline negative checks, 5 fxUSD on the same helper and final 10 fxUSD repayment. Five Balancer sale candidates were infeasible at planning. Live was skipped. A post-run review found raw position collateral is rate-scaled stETH-equivalent, whereas sale quotes are wstETH token units; v2 collector records the manager scalar/rate, runner converts balances and cost marks consistently and uses available market wstETH/USDC quotes. The next push changes that evidenced issue and repeats comparison once.
 
 User clarification: wallet withdrawal is native ETH. Official SDK repayAndWithdraw uses repayToLongAndZapOut for a requested ETH output, converts wstETH to WETH, and LibRouter.convertAndTransferOut unwraps WETH and sends ETH. The pool's collateralToken and plain repayToLong output remain wstETH, verified in the fork. Candidate scope includes the Lido unwrap -> Curve stETH/ETH -> WETH/USDC paths. Direct wstETH/USDC is permissible as a cost comparison candidate: it skips optional wallet-output conversion while selling collateral for flash loan repayment. No assumption that native ETH is an ERC20 or direct pool output.
+
+
+Terminal evidence: run 38016120617 at code commit 9f6aceb6517b4a8935dce8dfc1306dab3dfe690e succeeded. simulation job 114106645466 success; live job 114107040470 skipped. Pinned block 26158964 hash 0xe0d138068483fb70e58ef37d85d1c95bfe555e11eeaddefd146c21411c4a1735. Artifact fxmint-eth-simulation-v3 ID 11656247020. 22/28 sale candidates passed; five Balancer candidates infeasible at balance-bound planning and direct UniV3 3000 failed acceptance. Selected Curve USDC/fxUSD + direct UniV3 wstETH/USDC 500. 10 fxUSD net target +1 wei rounding, flash principal 10.030947 USDC with fee zero, debt 21.045126289000959443 -> 11.045126289000959442, NFT returned, zero helper token leftovers, verified refunds. Same helper passed 5 fxUSD. Authorization/deadline/minimum/zero/overpay negative checks passed. Atomic gas 1337716, first-use deployment+approval+repayment gas 3307301. Fork total ETH cost 0.00025123703431317. Ranking unit fix accepted and selected route remains direct500. Cost 10.286115995565088739 USDC equivalent, compared to 10.317267917246888912 for Lido/Curve ETH/WETH path and 10.357565882999828894 for prior fxUSD round-trip reference. Savings 153432 and 320952 gas respectively.
+
+Current canonical files: workflow v3; data_v2.mjs; run_v2.mjs; helper FxMintEthRepayer_v1.sol; README_v1.md; this task lock v4. Exact superseded lock v3 archived before deletion. Final docs commit has skip actions; no repeat of already passing simulation. No mainnet ETH deployment or transaction performed. Existing WBTC implementation untouched. Task complete; reopening requires a user-requested change or evidenced failure, not further unchanged runs.
+
+
+Final user steering: any ETH collateral form is acceptable; select the best end price including gas. Current selection/ranking already follows this requirement. No implementation change or additional unchanged simulation is required.
