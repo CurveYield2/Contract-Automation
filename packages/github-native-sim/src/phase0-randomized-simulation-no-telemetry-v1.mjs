@@ -2142,8 +2142,10 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const stage2Holders=[...actors,...PHASE0_MEDUSA_SENDERS_V1];
     const stage2Creations=[],stage2CreationGaps=[],stage2Approvals=[],stage2CreatedTokenFunding=[],stage2Rounds=[],stage2CreatedDeployments=[];
     let pendingCreatorTargets=[...targets],stage2Round=0;
+    console.log('[phase0-smoke-progress] START Stage 2 creator synthesis');
     while(pendingCreatorTargets.length&&(valuePool.created?.length??0)<20&&stage2Round<20){
       stage2Round++;
+      console.log(`[phase0-smoke-progress] START Stage 2 creator round ${stage2Round}; candidateTargets=${pendingCreatorTargets.length}`);
       let creatorRound;
       try{
         creatorRound=await executeCreatorSynthesisV1({
@@ -2155,6 +2157,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         stage2CreationGaps.push({type:'CREATOR_SYNTHESIS_EXECUTION_FAILED',round:stage2Round,message:String(error?.message??error).slice(0,1600)});
         break;
       }
+      console.log(`[phase0-smoke-progress] END Stage 2 creator round ${stage2Round} on-chain synthesis; creations=${creatorRound.creations.length} bindings=${creatorRound.createdDeployments.length}`);
       stage2Creations.push(...creatorRound.creations);
       stage2CreationGaps.push(...creatorRound.creationGaps);
       stage2CreatedDeployments.push(...creatorRound.createdDeployments);
@@ -2164,13 +2167,29 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       }
       const createdAddresses=[...new Set(creatorRound.creations.flatMap(row=>row.createdAddresses??[]).map(x=>String(x).toLowerCase()))];
       const existingTokens=valuePool.tokens.filter(token=>!creatorRound.createdTokens.some(created=>String(created.address).toLowerCase()===String(token?.address??token).toLowerCase()));
-      if(createdAddresses.length){
+      // Balancer Vault routers, not BPT pool contracts, take ERC20 inputs.
+      // Stage 1 already granted the actual router/Permit2 allowances.
+      // Blanket approvals to freshly deployed BPT pools are redundant and
+      // can turn a 300-call smoke run into hundreds of slow Anvil txs.
+      // Preserve approvals for genuinely created non-Balancer spenders.
+      const balancerPoolChildren=new Set(creatorRound.creations
+        .filter(row=>/CURVEYIELD_WRAPPER_ALLOWLIST|BALANCER_V3_FACTORY/.test(String(row.recipeBasis??'')))
+        .flatMap(row=>row.createdAddresses??[])
+        .map(address=>String(address).toLowerCase()));
+      const approvalSpenders=createdAddresses.filter(address=>!balancerPoolChildren.has(address));
+      if(approvalSpenders.length){
+        console.log(`[phase0-smoke-progress] START Stage 2 created spender approvals round ${stage2Round}; spenders=${approvalSpenders.length}`);
         try{
-          const approval=await approveFixtureSpendersV1({provider,ethers,tokens:existingTokens,holders:stage2Holders,spenders:createdAddresses});
+          const approval=await approveFixtureSpendersV1({provider,ethers,tokens:existingTokens,holders:stage2Holders,spenders:approvalSpenders});
           stage2Approvals.push({round:stage2Round,...approval});
-        }catch(error){stage2Approvals.push({round:stage2Round,holders:stage2Holders,spenders:createdAddresses,transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_SPENDER_APPROVALS_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
+        }catch(error){stage2Approvals.push({round:stage2Round,holders:stage2Holders,spenders:approvalSpenders,transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_SPENDER_APPROVALS_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
+        console.log(`[phase0-smoke-progress] END Stage 2 created spender approvals round ${stage2Round}`);
+      }else if(balancerPoolChildren.size){
+        stage2Approvals.push({round:stage2Round,spenders:[],skippedBalancerPools:[...balancerPoolChildren],reason:'BALANCER_V3_POOLS_ARE_NOT_TOKEN_SPENDERS',receiptCounts:{erc20Approvals:0,permit2Allowances:0,gaps:0},gaps:[]});
+        console.log(`[phase0-smoke-progress] END Stage 2 unnecessary Balancer pool approvals skipped round ${stage2Round}; pools=${balancerPoolChildren.size}`);
       }
       if(creatorRound.createdTokens.length){
+        console.log(`[phase0-smoke-progress] START Stage 2 created BPT/token funding round ${stage2Round}; tokens=${creatorRound.createdTokens.length}`);
         try{
           const funding=await fundActorsV1({
             provider,ethers,tokens:creatorRound.createdTokens,holders:stage2Holders,
@@ -2178,6 +2197,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
           });
           stage2CreatedTokenFunding.push({round:stage2Round,...funding});
         }catch(error){stage2CreatedTokenFunding.push({round:stage2Round,holders:stage2Holders,spenders:createdAddresses,slotResults:[],transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_TOKEN_FUNDING_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
+        console.log(`[phase0-smoke-progress] END Stage 2 created BPT/token funding round ${stage2Round}`);
       }
       const boundRows=creatorRound.createdDeployments.filter(row=>row?.qualifiedName);
       let newTargets=targetObjects(ethers,artifacts,boundRows,sourceIntelligence);
@@ -2202,11 +2222,13 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         createdContracts:creatorRound.createdContracts,boundTargets:admitted.length,createdAddresses
       });
       pendingCreatorTargets=admitted;
+      console.log(`[phase0-smoke-progress] END Stage 2 round ${stage2Round}; addedTargets=${admitted.length}`);
       if(!creatorRound.creations.length&&!admitted.length)break;
     }
     console.log(`[phase0-smoke-progress] END Stage 2 creators; rounds=${stage2Rounds.length}; created=${valuePool.created?.length??0}`);
     let stage3AssociationHarvest={receipts:[],gaps:[],newTokens:[]},stage3AssociationTokenFunding=null,stage3Activation={activations:[],activationGaps:[],createdContracts:valuePool.created?.length??0};
     if((valuePool.created?.length??0)>0){
+      console.log('[phase0-smoke-progress] START Stage 3 association harvesting');
       try{
         stage3AssociationHarvest=await refreshCreatedAssociationsV1({
           provider,ethers,createdAddresses:valuePool.created,targets,
@@ -2215,7 +2237,9 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       }catch(error){
         stage3AssociationHarvest={receipts:[],gaps:[{type:'CREATED_ASSOCIATION_REFRESH_FAILED',message:String(error?.message??error).slice(0,1600)}],newTokens:[]};
       }
+      console.log(`[phase0-smoke-progress] END Stage 3 association harvesting; tokens=${stage3AssociationHarvest.newTokens.length}`);
       if(stage3AssociationHarvest.newTokens.length){
+        console.log('[phase0-smoke-progress] START Stage 3 associated token funding');
         try{
           stage3AssociationTokenFunding=await fundActorsV1({
             provider,ethers,tokens:stage3AssociationHarvest.newTokens,holders:stage2Holders,
@@ -2225,6 +2249,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
           stage3AssociationTokenFunding={holders:stage2Holders,spenders:targets.map(target=>target.address),slotResults:[],rpcMutations:[],transactionReceipts:[],receiptCounts:{},permit2:null,gaps:[{type:'STAGE3_ASSOCIATION_TOKEN_FUNDING_FAILED',message:String(error?.message??error).slice(0,1600)}]};
         }
       }
+      console.log('[phase0-smoke-progress] START Stage 3 activation synthesis');
       try{
         stage3Activation=await executeActivationSynthesisV1({
           provider,ethers,targets,actors,valuePool,artifacts,createdAddresses:valuePool.created,maxAttemptsPerCreated:30
