@@ -444,7 +444,7 @@ test('Stage-2 runner executes creator synthesis before the shared Medusa/telemet
   assert.match(runner,/maxAttemptsPerCandidate:24,maxSuccessesPerCandidate:3/);
   assert.match(runner,/20-\(valuePool\.created\?\.length\?\?0\)/);
   assert.match(runner,/targets\.push\(target\)/);
-  assert.match(runner,/STAGE_2_CREATOR_DISCOVERY_AND_EXECUTION/);
+  assert.match(runner,/creatorRounds:stage2Rounds/);
   assert.match(runner,/createdSpenderApprovals/);
   assert.match(runner,/createdTokenFunding/);
 });
