@@ -46,7 +46,6 @@ test('FULL-only expensive steps remain gated away from controller-only lane', ()
     'Record verified dependency lock',
     'Install and verify canonical V7 toolchain',
     'Verify canonical runner manifest',
-    'Anvil-only runner qualification',
     'Full repository Node test suite',
     'Repository static checks',
     'Live trusted-main Phase 6 and Phase 7 mutable-Anvil qualification',
@@ -62,6 +61,17 @@ test('FULL-only expensive steps remain gated away from controller-only lane', ()
   assert.match(cacheAction, /if: steps\.locked-modules\.outputs\.cache-hit != 'true'/);
   assert.match(cacheAction, /npm ci --force/);
   assert.match(cacheAction, /Verify restored Node toolchain/);
+  // One repository-wide node --test invocation discovers all V7 and Anvil tests.
+  // Keep explicit discovery assertions so removal of any suite fails closed.
+  const fullStart=workflow.indexOf('- name: Full repository Node test suite');
+  const fullEnd=workflow.indexOf('\n      - name:',fullStart+1);
+  const fullBlock=workflow.slice(fullStart,fullEnd);
+  assert.match(fullBlock,/npm test/);
+  assert.match(fullBlock,/packages\/github-native-sim\/test/);
+  assert.match(fullBlock,/packages\/runner\/test/);
+  assert.match(fullBlock,/full-simulation-anvil-only-v1\.test\.mjs/);
+  assert.doesNotMatch(workflow,/- name: V7 request and execution contract qualification/);
+  assert.doesNotMatch(workflow,/- name: Anvil-only runner qualification/);
 
 });
 
