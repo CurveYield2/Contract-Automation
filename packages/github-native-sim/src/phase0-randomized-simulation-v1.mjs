@@ -628,6 +628,53 @@ export async function baselineSentinelV2({provider,ethers,targets,actors}){
   const body={blockNumber,blockHash:block?.hash??null,states:normalize(states)};
   return{...body,digestSha256:sha256(Buffer.from(JSON.stringify(body)))};
 }
+// Preserve the measurements already made by the baseline-reset sentinel. These are
+// baseline accounting values, NOT proof that a project economic action executed.
+export function buildAccountingBaselineEvidenceV1(sentinel={}){
+  const readings=[],failures=[];
+  const add=(state,scope,name,result)=>{
+    const source={target:state.logicalQualifiedName,address:state.address,contextType:state.contextType??'DIRECT',scope,name};
+    if(result?.ok!==true){
+      failures.push({...source,error:String(result?.error??'READ_UNAVAILABLE').slice(0,600)});
+      return;
+    }
+    const raw=result.value;
+    if(typeof raw!=='string'||!(/^-?\\d+$/.test(raw))){
+      failures.push({...source,error:'NON_NUMERIC_ACCOUNTING_READ'});
+      return;
+    }
+    readings.push({...source,value:raw});
+  };
+  for(const state of sentinel.states??[]){
+    const observations=state.observations??{};
+    for(const [name,result] of Object.entries(observations.views??{}))add(state,'PROJECT_ACCOUNTING_VIEW',name,result);
+    for(const [token,values] of Object.entries(observations.related??{})){
+      for(const [name,result] of Object.entries(values??{})){
+        if(name==='address')continue;
+        add(state,'RELATED_TOKEN_ACCOUNTING_VIEW',token+':'+name,result);
+      }
+    }
+    for(const [name,value] of Object.entries(observations.native??{})){
+      if(typeof value==='string'&&/^-?\\d+$/.test(value))readings.push({target:state.logicalQualifiedName,address:state.address,contextType:state.contextType??'DIRECT',scope:'NATIVE_BALANCE',name,value});
+    }
+  }
+  const projectReadings=readings.filter(row=>row.scope==='PROJECT_ACCOUNTING_VIEW').length;
+  const relatedTokenReadings=readings.filter(row=>row.scope==='RELATED_TOKEN_ACCOUNTING_VIEW').length;
+  const nativeReadings=readings.filter(row=>row.scope==='NATIVE_BALANCE').length;
+  return{
+    schemaVersion:'curveyield-phase0-accounting-baseline-v1',
+    source:'EXISTING_BASELINE_RESET_SENTINEL_NO_ADDITIONAL_RPC_READS',
+    baselineDigestSha256:sentinel.digestSha256??null,
+    blockNumber:sentinel.blockNumber??null,
+    targetCount:(sentinel.states??[]).length,
+    projectReadings,relatedTokenReadings,nativeReadings,
+    successfulAccountingReadings:projectReadings+relatedTokenReadings,
+    failedAccountingReadings:failures.length,
+    provesEconomicStateChange:false,
+    status:projectReadings+relatedTokenReadings>0?'BASELINE_ACCOUNTING_AVAILABLE':'NO_BASELINE_ACCOUNTING_VIEWS',
+    readings,failures
+  };
+}
 function flattenNumbers(v,p='',o={}){
   if(typeof v==='string'&&/^-?\d+$/.test(v)){o[p]=BigInt(v);return o;}
   if(Array.isArray(v)){v.forEach((x,i)=>flattenNumbers(x,`${p}[${i}]`,o));return o;}
@@ -1272,6 +1319,10 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
   const summaries=[],callerResolutionState=new Map(),contextWeightMultipliers=new Map();
   let snapshotId=baselineSnapshot;
   const canonicalBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
+  const accountingBaseline=buildAccountingBaselineEvidenceV1(canonicalBaseline);
+  const accountingBaselineRef='PHASE0_ACCOUNTING_BASELINE_v1.json';
+  await fs.writeFile(path.join(outRoot,accountingBaselineRef),JSON.stringify(accountingBaseline,null,2)+'\\n');
+  console.log(`[phase0-accounting] baseline: projectViews=${accountingBaseline.projectReadings}; relatedTokenViews=${accountingBaseline.relatedTokenReadings}; nativeBalances=${accountingBaseline.nativeReadings}; failedViews=${accountingBaseline.failedAccountingReadings}; status=${accountingBaseline.status}`);
   for(let run=1;run<=telemetryRuns;run++){
     let resetEvidence={required:run>1,revertAccepted:run===1,sentinelMatch:run===1,expectedDigestSha256:canonicalBaseline.digestSha256,observedDigestSha256:canonicalBaseline.digestSha256};
     if(run>1){
@@ -1473,6 +1524,19 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       observationReadsPerAccountingCall:stats.accountingObservationCalls?stats.observationReads/stats.accountingObservationCalls:0,
       interleavedCrossContractBursts:true,executionStatus:'COMPLETED',coverageStatus:stats.calls===callsPerRun?'COMPLETE':'INCOMPLETE',
       checkStatus:'NOT_APPLICABLE',reachabilityStatus,observationStatus,reconciliation,lifecycleFamilies,resetEvidence,
+      // Baseline observations are retained separately, never added to mutation observationReads.
+      accountingEvidence:{
+        baselineRef:accountingBaselineRef,
+        baselineDigestSha256:accountingBaseline.baselineDigestSha256,
+        projectBaselineReadings:accountingBaseline.projectReadings,
+        relatedTokenBaselineReadings:accountingBaseline.relatedTokenReadings,
+        baselineSuccessfulAccountingReadings:accountingBaseline.successfulAccountingReadings,
+        baselineFailedAccountingReadings:accountingBaseline.failedAccountingReadings,
+        positiveEconomicTransitions:stats.positiveEconomicTransitions,
+        mutationObservationCalls:stats.accountingObservationCalls,
+        status:stats.positiveEconomicTransitions>0?'ECONOMIC_TRANSITION_WITNESSED':'ECONOMIC_REACHABILITY_GAP',
+        baselineIsNotTransitionEvidence:true
+      },
       feedbackStatus:stats.feedbackUpdates>0&&stats.feedbackSelections>0?'ACTIVE':'NO_FEEDBACK_WITNESS',decodedRevertReasons,
       actionSequenceDigestSha256,outcomeSequenceDigestSha256,
       rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,
