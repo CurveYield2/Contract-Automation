@@ -1,0 +1,204 @@
+name: Lite Phase 0 Intelligence v1 No Telemetry
+
+on:
+  workflow_call:
+    inputs:
+      campaign_id:
+        required: true
+        type: string
+      campaign_path:
+        required: true
+        type: string
+      audit_controller_ref:
+        required: false
+        type: string
+        default: main
+permissions:
+  contents: read
+
+concurrency:
+  group: lite-phase0-intelligence-no-telemetry-${{ inputs.campaign_id || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  phase0-intelligence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout trusted Contract-Automation base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Checkout atomic request
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .request-source
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install trusted runner dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --force
+
+      - name: Install and verify retained audit toolchain
+        uses: ./.github/actions/setup-v7-toolchain
+
+      - name: Select cross-repository credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Materialize workflow-call Phase-0 request
+        if: inputs.campaign_id != ''
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$CAMPAIGN_PATH" in campaigns/*) ;; *) echo "::error::campaign_path must be under campaigns/"; exit 1;; esac
+          receipt_path="$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"
+          gh api "repos/CurveYield2/Audit-Controller/contents/$receipt_path?ref=$AUDIT_CONTROLLER_REF" --jq '.content' | base64 -d > /tmp/phase0-receipt.json
+          test "$(jq -r '.campaign.campaignId' /tmp/phase0-receipt.json)" = "$CAMPAIGN_ID"
+          test "$(jq -r '.phase.sequence' /tmp/phase0-receipt.json)" = "0"
+          jq -n             --arg requestId "phase0-$CAMPAIGN_ID-$GITHUB_RUN_ID"             --arg campaignId "$CAMPAIGN_ID"             --arg campaignGenerationId "$(jq -r '.campaign.campaignGenerationId' /tmp/phase0-receipt.json)"             --arg sourceCommit "$(jq -r '.source.archiveCommit' /tmp/phase0-receipt.json)"             --arg archivePath "$(jq -r '.source.archivePath' /tmp/phase0-receipt.json)"             --arg archiveSha "$(jq -r '.source.sha256' /tmp/phase0-receipt.json)"             --arg destRef "$AUDIT_CONTROLLER_REF"             --arg campaignPath "$CAMPAIGN_PATH"             '{
+              schemaVersion:"curveyield-lite-phase0-intelligence-request-v1",
+              requestId:$requestId,
+              campaignId:$campaignId,
+              campaignGenerationId:$campaignGenerationId,
+              source:{repository:"CurveYield2/Audit-Controller",commit:$sourceCommit,archivePath:$archivePath,archiveSha256:$archiveSha},
+              destination:{repository:"CurveYield2/Audit-Controller",ref:$destRef,campaignPath:$campaignPath}
+            }' > .phase0-request.json
+
+      - name: Resolve exactly one lean Phase-0 request
+        id: request
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -s .phase0-request.json ]; then
+            echo "path=.phase0-request.json" >> "$GITHUB_OUTPUT"
+          else
+            mapfile -t requests < <(find .request-source/lite-phase0/requests -type f -name request.json | sort)
+            test "${#requests[@]}" -eq 1
+            echo "path=${requests[0]}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate useful Phase-0 machine intelligence No Telemetry (stage diagnostics and bounded commands)
+        env:
+          AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .phase0-intelligence-output
+          node packages/github-native-sim/src/lite-phase0-intelligence-no-telemetry-v1.mjs \
+            --request "${{ steps.request.outputs.path }}" \
+            --output .phase0-intelligence-output
+
+      - name: Write only useful outputs to Audit-Controller campaign
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          REQUEST_PATH: ${{ steps.request.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          destination_repo="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.repository)")"
+          destination_ref="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.ref)")"
+          campaign_path="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.campaignPath)")"
+          request_id="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.requestId)")"
+
+          rm -rf .audit-controller-output
+          gh repo clone "$destination_repo" .audit-controller-output -- --filter=blob:none --no-checkout
+          cd .audit-controller-output
+          git fetch origin "$destination_ref"
+          git checkout -B "$destination_ref" "origin/$destination_ref"
+
+          authority_folder="Audit Skill - Current Authority"
+          mapfile -t authority_packages < <(find "$authority_folder" -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/SKILL.md' ';' -print | sort)
+          [ "${#authority_packages[@]}" -eq 1 ] || { echo "::error::Authority folder must contain exactly one unpacked package directory with root SKILL.md."; exit 1; }
+          skill_root="${authority_packages[0]}"
+
+          mkdir -p "$campaign_path/evidence/build"
+          mkdir -p "$campaign_path/evidence/dependencies"
+          mkdir -p "$campaign_path/evidence/static-analysis"
+          mkdir -p "$campaign_path/evidence/source-intelligence"
+          mkdir -p "$campaign_path/evidence/readiness"
+          mkdir -p "$campaign_path/evidence/phase0"
+          mkdir -p "$campaign_path/shared/source-intelligence"
+          mkdir -p "$campaign_path/controller"
+
+          cp ../.phase0-intelligence-output/BUILD_AND_SOURCE_IDENTITY_v1.json "$campaign_path/evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json"
+          cp ../.phase0-intelligence-output/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json "$campaign_path/evidence/build/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json"
+          cp ../.phase0-intelligence-output/SBOM_v1.json "$campaign_path/evidence/dependencies/SBOM_v1.json"
+          cp ../.phase0-intelligence-output/SLITHER_v1.json "$campaign_path/evidence/static-analysis/SLITHER_v1.json"
+          cp ../.phase0-intelligence-output/SOURCE_INTELLIGENCE_AUTOMATED_v1.json "$campaign_path/evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json"
+          cp ../.phase0-intelligence-output/PROJECT_READINESS_AUTOMATED_v1.json "$campaign_path/evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json"
+          cp ../.phase0-intelligence-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json "$campaign_path/evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json"
+
+          # Project machine evidence into the exact canonical output paths already
+          # required by the Lite Phase-0 skill. The automation adapts to the skill;
+          # the skill contract is not weakened or renamed to match runner internals.
+          node ../packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
+            --campaign-root "$campaign_path" \
+            --skill-root "$skill_root" \
+            --stage core
+
+          git add "$campaign_path/evidence" "$campaign_path/shared" "$campaign_path/controller" "$campaign_path/work"
+          git config user.name 'CurveYield Lite Phase0 Automation'
+          git config user.email 'lite-phase0-automation@users.noreply.github.com'
+          if ! git diff --cached --quiet; then
+            git commit -m "audit(phase0): write machine evidence and canonical skill outputs $request_id"
+          fi
+
+          # Bundle acceptedCommitSha values must refer to the immutable core/overlay
+          # commit, so create the bundle index only after that commit exists.
+          accepted_commit="$(git rev-parse HEAD)"
+          node ../packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs \
+            --campaign-root "$campaign_path" \
+            --skill-root "$skill_root" \
+            --stage bundle \
+            --accepted-commit "$accepted_commit"
+          git add "$campaign_path/shared/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_TEMPLATE.json" \
+            "$campaign_path/evidence/source-intelligence/SOURCE_INTELLIGENCE_BUNDLE_INDEX_v1.json"
+          if ! git diff --cached --quiet; then
+            git commit -m "audit(phase0): bind canonical Source Intelligence bundle $request_id"
+          fi
+          git push origin "HEAD:$destination_ref"
+
+      - name: Summarize useful outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Lite Phase 0 Intelligence"
+            echo
+            echo "- Build/source identity: generated"
+            echo "- Reusable execution build artifacts v2: generated from the accepted build; no downstream rebuild required"
+            echo "- SBOM: generated"
+            echo "- Slither: successful terminal evidence required"
+            echo "- Automated Source Intelligence: generated"
+            echo "- Canonical skill-required Source Intelligence core/overlays/bundle: generated at the exact Phase-0 contract paths"
+            echo "- Deployment/config + testing/tooling readiness inventory: generated"
+            echo "- Source-known local deploy/config machine execution: generated"
+            echo "- Phase-6 deploy/config matrix: generated from Phase-0 machine evidence"
+            echo "- Campaign-global graph/ledger/invalidation canonical paths: initialized"
+            echo "- Phase-0 audit surface: generated"
+            echo "- No observer/ingestion/retirement/handoff receipts generated"
+          } >> "$GITHUB_STEP_SUMMARY"

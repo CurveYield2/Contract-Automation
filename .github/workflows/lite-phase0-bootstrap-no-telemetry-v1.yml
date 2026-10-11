@@ -42,7 +42,7 @@ jobs:
   intelligence:
     if: ${{ !inputs.resume_from_finalize }}
     needs: qualification
-    uses: ./.github/workflows/lite-phase0-intelligence-v1.yml
+    uses: ./.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml
     with:
       campaign_id: ${{ inputs.campaign_id }}
       campaign_path: ${{ inputs.campaign_path }}
