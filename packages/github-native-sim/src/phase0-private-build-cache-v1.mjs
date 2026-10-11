@@ -23,9 +23,11 @@ const SHA40=/^[0-9a-f]{40}$/;
 const identityParts=[
   'HEAD:packages/runner/src/build-dispatch.mjs',
   'HEAD:packages/runner/src/compiler.mjs',
+  'HEAD:packages/runner/src/hermetic-standard-json.mjs',
   'HEAD:packages/runner/src/embedded-profile-build-v1.mjs',
   'HEAD:packages/runner/src/native-build.mjs',
   'HEAD:packages/runner/src/vyper-build.mjs',
+  'HEAD:packages/github-native-sim/src/execution.mjs',
   'HEAD:package-lock.json',
   'HEAD:package.json'
 ];
@@ -192,7 +194,11 @@ export async function compileWithPrivateCacheV1({request,pseudo,projectRoot,comp
   enabled=process.env.PHASE0_PRIVATE_BUILD_CACHE_ENABLED==='true'}){
   if(!enabled||!token){
     console.log('[phase0-build-cache] disabled (untrusted request or missing private credential); compiling');
-    return compile();
+    console.log('[phase0-build-cache] COMPILATION_START cache_disabled=true');
+    const start=Date.now();
+    const build=await compile();
+    console.log('[phase0-build-cache] COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-start)/1000));
+    return build;
   }
   let identity,url;
   try{
@@ -200,7 +206,11 @@ export async function compileWithPrivateCacheV1({request,pseudo,projectRoot,comp
     url=privateContentUrl({request,key:identity.key});
   }catch(error){
     console.log('[phase0-build-cache] cannot establish exact provenance; compiling: '+String(error.message).slice(0,200));
-    return compile();
+    console.log('[phase0-build-cache] COMPILATION_START identity_unavailable=true');
+    const start=Date.now();
+    const build=await compile();
+    console.log('[phase0-build-cache] COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-start)/1000));
+    return build;
   }
   try{
     const build=await tryLoad({url,ref:PRIVATE_CACHE_REF,token,identity,pseudo});
