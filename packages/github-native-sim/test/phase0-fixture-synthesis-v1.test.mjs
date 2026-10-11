@@ -735,3 +735,84 @@ test('Stage-3 runner executes association refresh and activation before the shar
   assert.match(runner,/activationGaps:stage3Activation\.activationGaps/);
   assert.match(runner,/associationTokenFunding/);
 });
+
+
+function compileStage4Contracts(){
+  const source=[
+    '// SPDX-License-Identifier: UNLICENSED',
+    'pragma solidity ^0.8.20;',
+    '',
+    'contract VaultMarker {}',
+    '',
+    'contract CallbackOnly {',
+    '  error SenderIsNotVault(address expected);',
+    '  address public immutable vault;',
+    '  uint256 public calls;',
+    '  constructor(address vault_) { vault = vault_; }',
+    '  function callback(uint256 value) external {',
+    '    if (msg.sender != vault) revert SenderIsNotVault(vault);',
+    '    calls += value + 1;',
+    '  }',
+    '}',
+    '',
+    'contract KnownCaller {',
+    '  uint256 public pings;',
+    '  function ping() external { pings++; }',
+    '}',
+    '',
+    'contract AssociationGate {',
+    '  error OnlyVault();',
+    '  address public immutable allowed;',
+    '  constructor(address allowed_) { allowed = allowed_; }',
+    '  function callback() external { if (msg.sender != allowed) revert OnlyVault(); }',
+    '}',
+    '',
+    'contract OwnerOnly {',
+    '  error NotOwner();',
+    '  address public owner;',
+    '  uint256 public calls;',
+    '  constructor(address owner_) { owner = owner_; }',
+    '  function ownerOnly() external { if (msg.sender != owner) revert NotOwner(); calls++; }',
+    '}',
+    '',
+    'contract UnresolvedGate {',
+    '  error OnlyVault();',
+    '  function callback() external pure { revert OnlyVault(); }',
+    '}',
+    '',
+    'contract DelegateExtension {',
+    '  error NotDelegateCall();',
+    '  address private immutable SELF;',
+    '  uint256 public counter;',
+    '  constructor() { SELF = address(this); }',
+    '  function doThing(uint256 value) external {',
+    '    if (address(this) == SELF) revert NotDelegateCall();',
+    '    counter += value + 1;',
+    '  }',
+    '}',
+    '',
+    'contract FallbackFacade {',
+    '  address private immutable impl;',
+    '  constructor(address impl_) { impl = impl_; }',
+    '  fallback() external payable {',
+    '    (bool ok,) = impl.delegatecall(msg.data);',
+    '    require(ok, "DELEGATE_FAILED");',
+    '  }',
+    '}'
+  ].join('\n');
+  const input={
+    language:'Solidity',
+    sources:{'Stage4.sol':{content:source}},
+    settings:{outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object','evm.deployedBytecode.linkReferences']}}}
+  };
+  const output=JSON.parse(solc.compile(JSON.stringify(input)));
+  const failures=(output.errors??[]).filter(row=>row.severity==='error');
+  assert.deepEqual(failures,[]);
+  return output.contracts['Stage4.sol'];
+}
+function stage4Artifact(name,compiled){
+  return normalizedTestArtifact('Stage4.sol',name,compiled[name]);
+}
+function stage4Deployment(name,address){
+  return{qualifiedName:'Stage4.sol:'+name,contractName:name,sourceName:'Stage4.sol',address};
+}
