@@ -521,7 +521,7 @@ function paramIsUintArrayV1(param){
   return param?.baseType==='array'&&/^uint(?:\d+)?$/.test(String(param?.arrayChildren?.type??''));
 }
 function functionKeyV1(target,selected){
-  return \`\${String(target?.address??'').toLowerCase()}|\${target?.logicalQualifiedName??target?.qualifiedName??'UNKNOWN'}|\${selected?.signature??selected?.fragment?.format?.('sighash')??'UNKNOWN'}\`;
+  return `${String(target?.address??'').toLowerCase()}|${target?.logicalQualifiedName??target?.qualifiedName??'UNKNOWN'}|${selected?.signature??selected?.fragment?.format?.('sighash')??'UNKNOWN'}`;
 }
 export function discoverCreatorCandidatesV1({targets=[]}={}){
   const rows=[];
@@ -551,7 +551,7 @@ function deterministicIndexV1(ethers,seed,n){
 function tokenSetForAttemptV1({ethers,tokens,attempt}){
   if(tokens.length<2)return[];
   const requested=attempt%2===0?2:3,size=Math.min(requested,tokens.length);
-  const start=deterministicIndexV1(ethers,\`token-set:\${attempt}\`,tokens.length);
+  const start=deterministicIndexV1(ethers,`token-set:${attempt}`,tokens.length);
   const picked=[];
   for(let i=0;i<tokens.length&&picked.length<size;i++)picked.push(tokens[(start+i)%tokens.length]);
   return picked.sort((a,b)=>String(a.address).toLowerCase().localeCompare(String(b.address).toLowerCase()));
@@ -588,7 +588,7 @@ function tupleValueForCreatorV1({ethers,param,attempt,actor,tokenSet,valuePool,t
     if(/^u?int(?:\d+)?$/.test(String(component?.type??'')))return 0;
     if(String(component?.type??'')==='string')return attempt%2===0?'P0':'P0T';
     if(String(component?.type??'')==='bytes')return '0x';
-    if(String(component?.type??'')==='bytes32')return ethers.id(\`p0-stage2-tuple:\${attempt}:\${index}\`);
+    if(String(component?.type??'')==='bytes32')return ethers.id(`p0-stage2-tuple:${attempt}:${index}`);
     return 0;
   });
 }
@@ -643,7 +643,7 @@ function creatorParamValueV1({ethers,param,attempt,actor,tokenSet,valuePool,targ
   }
   if(type==='bool')return false;
   if(type==='string')return attempt%2===0?'P0':'P0T';
-  if(type==='bytes32')return ethers.id(\`p0-stage2:\${context.candidateKey}:\${attempt}:\${param?.name??''}\`);
+  if(type==='bytes32')return ethers.id(`p0-stage2:${context.candidateKey}:${attempt}:${param?.name??''}`);
   if(type==='bytes')return '0x';
   if(/^uint8$/.test(type))return 0;
   if(/^uint(?:\d+)?$/.test(type)){
@@ -779,7 +779,7 @@ function matchedRuntimeArtifactV1({code,artifacts=[]}){
 function syntheticErc20ArtifactV1(address){
   return{
     sourceName:'PHASE0_FIXTURE_SYNTHESIS',
-    contractName:\`ERC20Shape_\${String(address).replace(/^0x/,'').slice(0,10)}\`,
+    contractName:`ERC20Shape_${String(address).replace(/^0x/,'').slice(0,10)}`,
     abi:[
       'function decimals() view returns (uint8)',
       'function totalSupply() view returns (uint256)',
@@ -812,16 +812,16 @@ export async function bindCreatedContractV1({provider,ethers,address,artifacts=[
     try{
       const shape=await probeErc20ShapeV1({provider,ethers,address:createdAddress,probeHolder});
       syntheticArtifact=syntheticErc20ArtifactV1(createdAddress);artifact=syntheticArtifact;mappingStatus='ERC20_SHAPE_FALLBACK';
-      token={symbol:null,address:createdAddress,source:'CREATED_ERC20_SHAPE',qualifiedName:\`\${artifact.sourceName}:\${artifact.contractName}\`,decimals:shape.decimals,totalSupply:shape.totalSupply};
+      token={symbol:null,address:createdAddress,source:'CREATED_ERC20_SHAPE',qualifiedName:`${artifact.sourceName}:${artifact.contractName}`,decimals:shape.decimals,totalSupply:shape.totalSupply};
     }catch{}
   }else{
     try{
       const shape=await probeErc20ShapeV1({provider,ethers,address:createdAddress,probeHolder});
-      token={symbol:null,address:createdAddress,source:'CREATED_ERC20_SHAPE',qualifiedName:\`\${artifact.sourceName}:\${artifact.contractName}\`,decimals:shape.decimals,totalSupply:shape.totalSupply};
+      token={symbol:null,address:createdAddress,source:'CREATED_ERC20_SHAPE',qualifiedName:`${artifact.sourceName}:${artifact.contractName}`,decimals:shape.decimals,totalSupply:shape.totalSupply};
     }catch{}
   }
   if(!artifact)return{address:createdAddress,status:'UNMAPPED_RUNTIME_BYTECODE',implementationAddress,deployment:null,artifact:null,syntheticArtifact:null,token:null};
-  const qualifiedName=\`\${artifact.sourceName}:\${artifact.contractName}\`;
+  const qualifiedName=`${artifact.sourceName}:${artifact.contractName}`;
   return{
     address:createdAddress,status:mappingStatus,implementationAddress,artifact,syntheticArtifact,token,
     deployment:{address:createdAddress,transactionHash:null,blockNumber:null,qualifiedName,contractName:artifact.contractName,sourceName:artifact.sourceName,mappingStatus,implementationAddress}
@@ -856,7 +856,7 @@ async function attemptCreatorCallV1({provider,ethers,candidate,sender,args,selec
 function topCreationRevertsV1(attempts,limit=10){
   const counts=new Map();
   for(const attempt of attempts.filter(x=>x.status==='REVERTED')){
-    const reason=attempt.decoded?.reason??'UNKNOWN_REVERT',key=\`\${attempt.decoded?.kind??'UNKNOWN'}|\${attempt.decoded?.selector??''}|\${reason}\`;
+    const reason=attempt.decoded?.reason??'UNKNOWN_REVERT',key=`${attempt.decoded?.kind??'UNKNOWN'}|${attempt.decoded?.selector??''}|${reason}`;
     const row=counts.get(key)??{kind:attempt.decoded?.kind??'UNKNOWN_REVERT',selector:attempt.decoded?.selector??null,reason,count:0};
     row.count++;counts.set(key,row);
   }
@@ -871,7 +871,7 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
     if(createdCount>=maxCreatedContracts)break;
     const attempts=[];let successes=0;
     for(let strategy=0;strategy<maxAttemptsPerCandidate&&attempts.length<maxAttemptsPerCandidate&&successes<maxSuccessesPerCandidate&&createdCount<maxCreatedContracts;strategy++){
-      const actor=actorRows[deterministicIndexV1(ethers,\`\${candidate.key}:\${strategy}\`,actorRows.length)]??privileged[0]??ethers.ZeroAddress;
+      const actor=actorRows[deterministicIndexV1(ethers,`${candidate.key}:${strategy}`,actorRows.length)]??privileged[0]??ethers.ZeroAddress;
       const built=buildCreatorArgumentsV1({ethers,candidate,attempt:strategy,actor,valuePool,targets});
       const senders=[actor],base=await attemptCreatorCallV1({provider,ethers,candidate,sender:actor,args:built.args,selectorIndex});
       attempts.push({attempt:attempts.length+1,strategy,sender:actor,args:normalizeEvidenceValueV1(built.args),tokenSet:built.tokenSet,status:base.status,decoded:base.decoded??null,error:base.error??null});
@@ -898,7 +898,7 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
         if(!valuePool.created.some(x=>String(x).toLowerCase()===address.toLowerCase()))valuePool.created.push(address);
         if(!valuePool.addresses.some(x=>String(x).toLowerCase()===address.toLowerCase()))valuePool.addresses.push(address);
         createdCount++;
-        if(binding.syntheticArtifact&&!syntheticArtifacts.some(x=>\`\${x.sourceName}:\${x.contractName}\`===\`\${binding.syntheticArtifact.sourceName}:\${binding.syntheticArtifact.contractName}\`))syntheticArtifacts.push(binding.syntheticArtifact);
+        if(binding.syntheticArtifact&&!syntheticArtifacts.some(x=>`${x.sourceName}:${x.contractName}`===`${binding.syntheticArtifact.sourceName}:${binding.syntheticArtifact.contractName}`))syntheticArtifacts.push(binding.syntheticArtifact);
         if(binding.deployment){
           binding.deployment.transactionHash=result.transactionHash;binding.deployment.blockNumber=result.receipt?.blockNumber??null;
           createdDeployments.push(binding.deployment);
