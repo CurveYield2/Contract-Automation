@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {execFileSync} from 'node:child_process';
 import {readJson,writeJson,repoFile,requiredFile,loadPhaseSchema,getByPath} from './lite-phase-work-v1.mjs';
 import {validatePhaseScaffold} from './lite-phase-prefill-v1.mjs';
 
@@ -281,40 +280,14 @@ function currentBindingFailures(root,campaignPath,record,directory){
   return failures;
 }
 
-export function readSealedOriginal(root,sealed,{campaignPath=null,segmentId=null}={}){
+export function readSealedOriginal(root,sealed,{campaignPath,segmentId}={}){
   if(!/^[0-9a-f]{40}$/.test(String(sealed.gitBlobSha1??''))||!SHA256.test(String(sealed.sha256??'')))throw new Error('sealed work form has invalid Git/SHA256 identity: '+sealed.path);
-  let bytes;
-  if(campaignPath&&segmentId){
-    const expected=sealedOriginalSnapshotPath(campaignPath,segmentId,sealed);
-    if(sealed.sealedOriginalPath&&sealed.sealedOriginalPath!==expected)throw new Error('sealed original snapshot path mismatch: '+sealed.path);
-    const snapshot=repoFile(root,expected);
-    if(fs.existsSync(snapshot)){
-      if(!fs.statSync(snapshot).isFile())throw new Error('sealed original snapshot is not a file: '+expected);
-      bytes=fs.readFileSync(snapshot);
-      // A corrupted immutable campaign snapshot is a hard failure; never silently
-      // substitute another object from Git history or the remote blob API.
-      if(gitBlobSha1(bytes)!==sealed.gitBlobSha1||digestBytes(bytes)!==sealed.sha256)throw new Error('sealed original campaign snapshot digest mismatch: '+expected);
-      return bytes;
-    }
-    if(sealed.sealedOriginalPath)throw new Error('sealed original campaign snapshot missing: '+expected);
-  }
-  // Backward compatibility for master reviews staged before campaign-local
-  // snapshots existed. New reviews MUST use the snapshot above.
-  try{
-    bytes=execFileSync('git',['-C',root,'cat-file','blob',sealed.gitBlobSha1],{stdio:['ignore','pipe','pipe'],maxBuffer:256*1024*1024});
-  }catch{
-    try{
-      const env={...process.env,GH_TOKEN:process.env.AUDIT_CONTROLLER_GITHUB_TOKEN||process.env.GH_TOKEN};
-      const output=execFileSync('gh',['api','--method','GET','repos/CurveYield2/Audit-Controller/git/blobs/'+sealed.gitBlobSha1],
-        {env,stdio:['ignore','pipe','pipe'],maxBuffer:256*1024*1024});
-      const blob=JSON.parse(output.toString('utf8'));
-      if(blob.sha!==sealed.gitBlobSha1||blob.encoding!=='base64'||typeof blob.content!=='string')throw new Error('GitHub blob identity/encoding mismatch');
-      bytes=Buffer.from(blob.content.replace(/\s+/g,''),'base64');
-    }catch{
-      throw new Error('cannot recover sealed original from campaign snapshot, local git or authenticated GitHub blob: '+sealed.path);
-    }
-  }
-  if(gitBlobSha1(bytes)!==sealed.gitBlobSha1||digestBytes(bytes)!==sealed.sha256)throw new Error('recovered sealed original Git/SHA256 digest mismatch: '+sealed.path);
+  if(!campaignPath||!segmentId)throw new Error('sealed original requires campaign and segment context');
+  const expected=sealedOriginalSnapshotPath(campaignPath,segmentId,sealed);
+  if(sealed.sealedOriginalPath&&sealed.sealedOriginalPath!==expected)throw new Error('sealed original snapshot path mismatch: '+sealed.path);
+  const snapshot=requiredFile(root,expected,'campaign-local sealed master-review original');
+  const bytes=fs.readFileSync(snapshot);
+  if(gitBlobSha1(bytes)!==sealed.gitBlobSha1||digestBytes(bytes)!==sealed.sha256)throw new Error('sealed original campaign snapshot Git/SHA256 digest mismatch: '+expected);
   return bytes;
 }
 function reviewerOutputPaths(schema){
