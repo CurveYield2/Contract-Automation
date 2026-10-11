@@ -11,7 +11,7 @@ function sealedForm(bytes){
   return {
     phase:1,
     path:'work/phase-01/PHASE_01_WORK_FORM_v1.json',
-    gitBlobSha1:createHash('sha1').update('blob '+bytes.length+'\\0').update(bytes).digest('hex'),
+    gitBlobSha1:createHash('sha1').update('blob '+bytes.length + String.fromCharCode(0)).update(bytes).digest('hex'),
     sha256:createHash('sha256').update(bytes).digest('hex')
   };
 }
@@ -21,11 +21,11 @@ function fixture(callback){
   const bin=path.join(root,'bin');
   fs.mkdirSync(bin);
   const gh=path.join(bin,'gh');
-  fs.writeFileSync(gh,\`#!/usr/bin/env node
+  fs.writeFileSync(gh,`#!/usr/bin/env node
 const fs=require('node:fs');
 fs.writeFileSync(process.env.MOCK_GH_ARGS_PATH,JSON.stringify({args:process.argv.slice(2),token:process.env.GH_TOKEN}));
 process.stdout.write(fs.readFileSync(process.env.MOCK_GH_BLOB_PATH));
-\`);
+`);
   fs.chmodSync(gh,0o755);
   const backup={PATH:process.env.PATH,GH_TOKEN:process.env.GH_TOKEN,AUDIT_CONTROLLER_GITHUB_TOKEN:process.env.AUDIT_CONTROLLER_GITHUB_TOKEN,MOCK_GH_ARGS_PATH:process.env.MOCK_GH_ARGS_PATH,MOCK_GH_BLOB_PATH:process.env.MOCK_GH_BLOB_PATH};
   process.env.PATH=bin+path.delimiter+process.env.PATH;
