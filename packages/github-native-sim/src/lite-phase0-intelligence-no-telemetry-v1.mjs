@@ -9,6 +9,7 @@ import { runSlitherAnalysis } from './analysis.mjs';
 import { generateBuildSbomV1 } from './sbom-v1.mjs';
 import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligence-technical-v1.mjs';
 import { buildExecutionArtifactBundleV2 } from './phase0-execution-input-v2.mjs';
+import { compileWithPrivateCacheV1 } from './phase0-private-build-cache-v1.mjs';
 
 
 /*
@@ -679,7 +680,7 @@ async function main(){
     configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],analysis:{slither:{version:'0.11.6'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
   };
 
-  const build=await withStage('compile-exact-build',480000,()=>buildProject({projectRoot:detected.absolute,request:pseudo}));
+  const build=await withStage('compile-exact-build',480000,()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
   const executionBuildArtifacts=buildExecutionArtifactBundleV2({request:pseudo,build});
   const effectiveCfg={...cfg,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
   const slither=await withStage('slither-static-analysis',480000,()=>slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit}));
