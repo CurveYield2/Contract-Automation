@@ -232,6 +232,32 @@ export function bptWithdrawalAmountV1(holderBalance){
   const proportional=balance/100n; // 1% of the current verified holding
   return proportional>0n?proportional:1n;
 }
+// BPT is an ERC20 with real holder balances, not a token with arbitrary
+// sender/amount parameters. Preserve caller authorization on transferFrom.
+export function balancerV3BptTransferRecipeV1({target,selected,discovery,actors=[]}={}){
+  const signature=String(selected?.signature??'');
+  const transfer=signature==='transfer(address,uint256)';
+  const transferFrom=signature==='transferFrom(address,address,uint256)';
+  if(!transfer&&!transferFrom)return null;
+  const pool=(discovery?.pools??[]).find(p=>lower(p.address)===lower(target?.address)&&p.initialized);
+  if(!pool)return null;
+  const funded=(pool.bptHolders??[]).filter(h=>BigInt(h.amount??0)>1n);
+  if(!funded.length)return{kind:'BLOCKED',reason:'BALANCER_BPT_REQUIRES_VERIFIED_FUNDED_HOLDER',pool:pool.address};
+  const holder=funded[0],owner=holder.actor;
+  const recipient=actors.find(a=>lower(a)!==lower(owner))??null;
+  if(!recipient)return{kind:'BLOCKED',reason:'BALANCER_BPT_REQUIRES_DISTINCT_RECIPIENT',pool:pool.address};
+  const amount=bptWithdrawalAmountV1(holder.amount);
+  if(amount<=0n)return{kind:'BLOCKED',reason:'BALANCER_BPT_BALANCE_TOO_SMALL',pool:pool.address};
+  const spender=transferFrom?(actors.find(a=>lower(a)!==lower(owner)&&lower(a)!==lower(recipient))??recipient):owner;
+  return{
+    kind:'READY',protocol:'BALANCER_V3',pool:pool.address,
+    basis:'VERIFIED_POOL_BPT_HOLDER_TRANSFER_RECIPE',
+    sender:spender,
+    args:transferFrom?[owner,recipient,amount]:[recipient,amount],
+    value:0n,transferFrom,owner,spender,recipient,amount:amount.toString(),
+    holderBalance:holder.amount
+  };
+}
 export function buildBalancerV3ActionV1({ethers,target,selected,discovery,valuePool={},actors=[],poolSelectionIndex=0}={}){
   const requirement=balancerV3ActionRequirementsV1(target,selected);
   if(requirement.kind==='GENERIC')return{kind:'GENERIC'};
