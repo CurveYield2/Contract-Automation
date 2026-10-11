@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-test('authority zip sync remains a Contract-Automation workflow and is deterministic', () => {
-  const workflow=fs.readFileSync('.github/workflows/sync-lite-authority-zip-v1.yml','utf8');
+test('authority zip sync v2 keeps deterministic packaging without noisy qualification-completion triggers', () => {
+  const workflow=fs.readFileSync('.github/workflows/sync-lite-authority-zip-v2.yml','utf8');
   const script=fs.readFileSync('scripts/sync-lite-authority-zip-v1.py','utf8');
-  assert.match(workflow,/workflow_run:/);
-  assert.match(workflow,/V7 Execution Infrastructure Qualification/);
+  assert.match(workflow,/workflow_dispatch:/);
+  assert.match(workflow,/schedule:/);
+  assert.doesNotMatch(workflow,/^\s+workflow_run:/m);
+  assert.match(workflow,/git diff --quiet --/);
   assert.match(workflow,/CurveYield2\/Audit-Controller/);
   assert.match(workflow,/python3 \.sync-lite-authority-zip-v1\.py/);
   assert.match(script,/date_time=\(1980, 1, 1, 0, 0, 0\)/);
