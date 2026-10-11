@@ -89,19 +89,14 @@ test('Stage-0 decoder resolves custom errors from compiled artifact ABIs and pre
   }
 });
 
-test('Stage-0 smoke wiring exposes independent telemetry and Medusa budgets and the required report fields',()=>{
-  const runner=fs.readFileSync(path.join(root,'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  const cli=fs.readFileSync(path.join(root,'scripts/run-phase0-randomized-simulation-v1.mjs'),'utf8');
+test('Phase 0 smoke now validates native source-package deploy/config evidence without Medusa or ABI telemetry',()=>{
   const workflow=fs.readFileSync(path.join(root,'.github/workflows/lite-phase0-simulation-testing-v1.yml'),'utf8');
-  assert.match(cli,/telemetry-smoke-calls/);
-  assert.match(runner,/telemetrySmokeCalls/);
-  assert.match(runner,/telemetryRuns:1,callsPerRun:telemetrySmokeCalls/);
-  assert.match(workflow,/telemetry_calls:/);
-  for(const field of ['minedSuccess','minedRevert','simulatedRejection','positiveTransitions','positiveEconomicTransitions','accountingActionShare','observationReads']){
-    assert.match(workflow,new RegExp(field));
-  }
-  assert.match(workflow,/decodedRevertReasons/);
-  assert.match(workflow,/PHASE0_FIXTURE_SYNTHESIS_v1\.json/);
+  const cli=fs.readFileSync(path.join(root,'scripts/run-phase0-fork-deploy-config-v1.mjs'),'utf8');
+  assert.match(cli,/deploymentOnly:true/);
+  assert.match(workflow,/ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY/);
+  assert.match(workflow,/PHASE0_DEPLOY_CONFIG_EXECUTION_v1\.json/);
+  assert.match(workflow,/EXECUTED_PASS/);
+  assert.doesNotMatch(workflow,/medusa_calls|telemetry_calls|PHASE0_FIXTURE_SYNTHESIS_v1\.json/);
 });
 
 
