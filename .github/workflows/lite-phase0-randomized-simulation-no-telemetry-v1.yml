@@ -37,6 +37,25 @@ jobs:
       - name: Install trusted runner dependencies
         run: npm ci --force
 
+      - name: Validate No Telemetry fork before running an audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check packages/github-native-sim/src/phase0-randomized-simulation-no-telemetry-v1.mjs
+          node --check scripts/run-phase0-randomized-simulation-no-telemetry-v1.mjs
+          node --check scripts/write-phase0-simulation-outputs-no-telemetry-v1.mjs
+          node --check scripts/lite-phase0-finalize-no-telemetry-v1.mjs
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const engine=fs.readFileSync('packages/github-native-sim/src/phase0-randomized-simulation-no-telemetry-v1.mjs','utf8');
+          const writer=fs.readFileSync('scripts/write-phase0-simulation-outputs-no-telemetry-v1.mjs','utf8');
+          const finalizer=fs.readFileSync('scripts/lite-phase0-finalize-no-telemetry-v1.mjs','utf8');
+          if(engine.includes('await runTelemetry(')) throw new Error('Unexpected ABI telemetry execution');
+          if(!engine.includes("executionMode='NO_TELEMETRY'")) throw new Error('Missing No Telemetry mode binding');
+          if(writer.includes('PHASE0_TELEMETRY_ANALYSIS_v1.json') || writer.includes('telemetry:(summary.telemetry')) throw new Error('Later-phase telemetry dependence');
+          if(finalizer.includes('const telemetry=simulation.telemetry')) throw new Error('Finalizer still requires telemetry shards');
+          NODE
+
       - name: Install retained audit toolchain
         uses: ./.github/actions/setup-v7-toolchain
 
