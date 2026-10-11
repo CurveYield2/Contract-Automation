@@ -52,7 +52,7 @@ jobs:
 
       - name: Query pinned executable routes and oracle baselines
         env:
-          RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          RPC_URL: ${{ secrets.ETHEREUM_RPC }}
         shell: bash
         run: |
           set -euo pipefail

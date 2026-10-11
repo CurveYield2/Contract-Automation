@@ -65,7 +65,7 @@ jobs:
 
       - name: Execute 0.1 wstETH route and test 1 percent floor
         env:
-          RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          RPC_URL: ${{ secrets.ETHEREUM_RPC }}
         shell: bash
         run: |
           set -euo pipefail

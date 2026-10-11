@@ -529,7 +529,7 @@ jobs:
       - name: Live trusted-main Phase 6 and Phase 7 mutable-Anvil qualification
         if: github.event_name != 'pull_request' && env.V7_QUALIFICATION_LANE == 'FULL'
         env:
-          ETHEREUM_FORK_RPC_URL: https://eth.drpc.org/
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.ETHEREUM_RPC }}
         run: |
           node --input-type=module <<'NODE'
           import fs from 'node:fs';

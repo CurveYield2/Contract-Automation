@@ -72,7 +72,7 @@ jobs:
 
       - name: Probe exact executable routes at pinned block
         env:
-          RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          RPC_URL: ${{ secrets.ETHEREUM_RPC }}
         shell: bash
         run: |
           set -euo pipefail

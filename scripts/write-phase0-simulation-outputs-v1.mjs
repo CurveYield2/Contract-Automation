@@ -19,6 +19,10 @@ const simEvidence=path.join(phase0Evidence,'simulations');
 await fs.mkdir(simEvidence,{recursive:true});
 await fs.copyFile(path.join(src,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),path.join(phase0Evidence,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'));
 await fs.copyFile(path.join(src,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),path.join(simEvidence,'PHASE0_SIMULATION_RUN_INDEX_v1.json'));
+// Retain the workflow-level telemetry analysis alongside the raw ABI evidence for subsequent reviewers.
+for(const name of ['PHASE0_TELEMETRY_ANALYSIS_v1.json','PHASE0_TELEMETRY_ANALYSIS_v1.md']){
+  await fs.copyFile(path.join(src,name),path.join(simEvidence,name));
+}
 const campaignDeployPath=path.join(phase0Evidence,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json');
 try{
   await fs.copyFile(deployPath,campaignDeployPath);

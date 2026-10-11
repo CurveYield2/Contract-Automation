@@ -25,7 +25,7 @@ permissions:
 jobs:
   phase0-randomized-simulation:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 25
     steps:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
@@ -82,18 +82,25 @@ jobs:
       - name: Run Anvil baseline, deployment simulation, Medusa and ABI telemetry
         if: inputs.completed_stages_manifest == ''
         env:
-          ETHEREUM_FORK_RPC_URL: https://eth.drpc.org/
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.ETHEREUM_RPC }}
         shell: bash
         run: |
           set -euo pipefail
+          test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::ETHEREUM_RPC secret is missing"; exit 1; }
           chain_id="$(curl -fsS --max-time 15 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
           test "$chain_id" = "0x1" || { echo "::error::Ethereum fork source did not report chain ID 1"; exit 1; }
           historical_code="$(curl -fsS --max-time 30 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_getCode","params":["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2","0x112a880"]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
           test -n "$historical_code" && test "$historical_code" != "0x" || { echo "::error::Ethereum fork source did not return historical WETH code at block 18000000"; exit 1; }
           rm -rf .phase0-randomized-output
-          # Reserve time for always()-run diagnostics/artifact upload when RPC or harness execution stalls.
-          # This is a wall-clock watchdog, not a reduction of the 100,001 Medusa / 4,800 ABI call gates.
-          timeout -s TERM -k 30s 2520s node scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --output .phase0-randomized-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-randomized.json
+          # Reserve time for always()-run telemetry analysis and artifact upload when RPC or harness execution stalls.
+          # 21-minute wall-clock watchdog (50% of prior 42 minutes); the 100,001 Medusa / 4,800 ABI gates remain unchanged.
+          timeout -s TERM -k 30s 1260s node scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --output .phase0-randomized-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-randomized.json
+
+      - name: Analyze raw ABI telemetry, decoded reverts and observation gaps
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          node scripts/phase0-telemetry-analysis-v1.mjs .phase0-randomized-output
 
       - name: Report randomized simulation diagnostics
         if: ${{ always() }}
@@ -134,6 +141,9 @@ jobs:
           set -euo pipefail
           summary=.phase0-randomized-output/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
           index=.phase0-randomized-output/PHASE0_SIMULATION_RUN_INDEX_v1.json
+          analysis=.phase0-randomized-output/PHASE0_TELEMETRY_ANALYSIS_v1.json
+          test -s "$analysis" || { echo "::error::Missing retained telemetry analysis"; exit 1; }
+          jq -e '.schemaVersion=="curveyield-phase0-telemetry-analysis-v1"' "$analysis" >/dev/null
           jq -e '
             .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE" and
             ((.deployment.coverage.sourcePlanUnresolved // 0)|tonumber)==0 and

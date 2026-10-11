@@ -61,7 +61,7 @@ function fakeEngine() {
 test('Phase 7 deployment-only workflow does not fail preflight solely because it has no literal external call target', async () => {
   const result = await runPhase7ForkPreflightV1({
     request: requestWithDeploymentOnlyWorkflow(),
-    environment: { SIM_ARCHIVE_PRIMARY_ETHEREUM_01: 'https://archive.invalid' },
+    environment: { ETHEREUM_FORK_RPC_URL: 'https://archive.invalid' },
     startEngine: async () => fakeEngine(),
     probeUpstreamIdentity: async () => ({
       remoteChainId: 1,

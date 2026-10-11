@@ -122,7 +122,7 @@ jobs:
 
       - name: Fresh pinned sdYB V17 deployment regression
         env:
-          RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          RPC_URL: ${{ secrets.ETHEREUM_RPC }}
           ROOT: ${{ steps.src.outputs.root }}
           V17_ARTIFACT: ${{ github.workspace }}/phase9-v17-artifact-v3.json
         shell: bash
@@ -136,7 +136,7 @@ jobs:
 
       - name: Correct-interface pinned oracle/execution regression
         env:
-          RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          RPC_URL: ${{ secrets.ETHEREUM_RPC }}
           ROOT: ${{ steps.src.outputs.root }}
         shell: bash
         run: |

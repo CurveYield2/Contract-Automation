@@ -163,7 +163,7 @@ jobs:
 
       - name: Deploy on Anvil and run requested smoke stages
         env:
-          ETHEREUM_FORK_RPC_URL: https://eth.drpc.org/
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.ETHEREUM_RPC }}
           CAMPAIGN_PATH: ${{ steps.invocation.outputs.campaign_path }}
           MEDUSA_CALLS: ${{ steps.invocation.outputs.medusa_calls }}
           TELEMETRY_CALLS: ${{ steps.invocation.outputs.telemetry_calls }}
