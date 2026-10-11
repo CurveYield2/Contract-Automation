@@ -24,7 +24,7 @@ jobs:
 
       - name: Trace live sdCRV and sdFXN harvest paths on disposable fork
         env:
-          PRIVATE_RPC: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          PRIVATE_RPC: ${{ secrets.ETHEREUM_RPC }}
         shell: bash
         run: |
           set -u
@@ -38,24 +38,10 @@ jobs:
               | grep -q '"result":"0x'
           }
 
-          RPC_URL=''
-          RPC_LABEL=''
-          if [ -n "${PRIVATE_RPC:-}" ] && probe_rpc "$PRIVATE_RPC"; then
-            RPC_URL="$PRIVATE_RPC"; RPC_LABEL='configured-private'
-          else
-            for CANDIDATE in \
-              'https://ethereum-rpc.publicnode.com' \
-              'https://eth.llamarpc.com' \
-              'https://1rpc.io/eth'; do
-              if probe_rpc "$CANDIDATE"; then
-                RPC_URL="$CANDIDATE"; RPC_LABEL="$CANDIDATE"; break
-              fi
-            done
-          fi
-          if [ -z "$RPC_URL" ]; then
-            echo 'No responsive Ethereum RPC endpoint' >&2
-            exit 1
-          fi
+          test -n "${PRIVATE_RPC:-}" || { echo 'Missing ETHEREUM_RPC secret' >&2; exit 1; }
+          probe_rpc "$PRIVATE_RPC" || { echo 'Private Ethereum RPC is unavailable' >&2; exit 1; }
+          RPC_URL="$PRIVATE_RPC"
+          RPC_LABEL='configured-private'
           echo "rpc_selected=$RPC_LABEL" | tee harvest-diagnostic-v2/summary-v2.txt
 
           anvil --fork-url "$RPC_URL" --host 127.0.0.1 --port 8545 > harvest-diagnostic-v2/anvil.log 2>&1 &
