@@ -208,11 +208,19 @@ jobs:
 
           if (( TELEMETRY_CALLS > 0 )); then
             echo "---- Telemetry smoke summary ----"
-            jq '.telemetry[] | {runId,minedSuccess,minedRevert,simulatedRejection,positiveTransitions,positiveEconomicTransitions,accountingActionShare,observationReads,accountingObservationCalls,skippedObservationCalls,observationReadsPerAccountingCall}' "$summary"
+            jq '.telemetry[] | {runId,minedSuccess,minedRevert,simulatedRejection,positiveTransitions,positiveEconomicTransitions,accountingActionShare,observationReads,accountingObservationCalls,skippedObservationCalls,observationReadsPerAccountingCall,accountingEvidence}' "$summary"
             echo "---- Top 15 decoded telemetry revert reasons ----"
             jq -r '[.telemetry[]?.decodedRevertReasons[]?] | group_by(.reason) | map({reason:.[0].reason,kind:.[0].kind,selector:.[0].selector,count:(map(.count)|add)}) | sort_by(-.count, .reason) | .[:15] | ("COUNT\tKIND\tSELECTOR\tREASON"), (.[] | [.count,.kind,(.selector // ""),.reason] | @tsv)' "$summary"
           fi
 
+          echo "---- Accounting fixture control (not project economic coverage) ----"
+          jq '.accountingFixtureWitness' "$summary"
+          echo "---- Project accounting reachability gaps ----"
+          jq '[.limitations[]? | select(.type=="PROJECT_ACCOUNTING_REACHABILITY_GAP")]' "$summary"
+          echo "---- Project accounting baseline evidence ----"
+          if [ -f .phase0-medusa-smoke/PHASE0_ACCOUNTING_BASELINE_v1.json ]; then
+            jq '{status,projectReadings,relatedTokenReadings,nativeReadings,failedAccountingReadings,provesEconomicStateChange}' .phase0-medusa-smoke/PHASE0_ACCOUNTING_BASELINE_v1.json
+          fi
           fixture=.phase0-medusa-smoke/runs/PHASE0_FIXTURE_SYNTHESIS_v1.json
           if [ -f "$fixture" ]; then
             echo "---- Fixture synthesis evidence ----"
@@ -235,6 +243,10 @@ jobs:
               and (.telemetry[0].calls|tonumber)==$n
               and .fixtureSynthesis.stage=="STAGE_5_ACCOUNTING_READS_ONLY"
               and .fixtureSynthesis.accountingObservationPolicy.policy=="PREFLIGHT_PASS_AND_ECONOMIC_OR_CREATED_TOKEN_CONTEXT_ONLY"
+              and .accountingFixtureWitness.countsAsProjectEconomicTransition==false
+              and .accountingFixtureWitness.status=="VERIFIED_FIXTURE_ACCOUNTING_TRANSITION"
+              and (.accountingFixtureWitness.verifiedTransitions|tonumber)>0
+              and .telemetry[0].accountingEvidence.baselineIsNotTransitionEvidence==true
               and ((.telemetry[0].accountingObservationCalls|tonumber)+(.telemetry[0].skippedObservationCalls|tonumber))==$n' "$summary" >/dev/null
           fi
 
@@ -246,6 +258,8 @@ jobs:
           path: |
             .phase0-smoke-run.log
             .phase0-medusa-smoke/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
+            .phase0-medusa-smoke/PHASE0_ACCOUNTING_BASELINE_v1.json
+            .phase0-medusa-smoke/PHASE0_FORK_TOKEN_ACCOUNTING_WITNESS_v1.json
             .phase0-medusa-smoke/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
             .phase0-medusa-smoke/runs/PHASE0_FIXTURE_SYNTHESIS_v1.json
             .phase0-medusa-smoke/runs/**/RAW_SIMULATION_TRANSCRIPT_v1.jsonl
