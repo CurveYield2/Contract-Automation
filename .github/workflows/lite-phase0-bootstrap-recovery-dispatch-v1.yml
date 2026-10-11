@@ -56,6 +56,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          gh workflow run lite-phase0-bootstrap-v1.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
+            -f campaign_path="${{ steps.request.outputs.campaign_path }}" \
+            -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
 
       - name: Summarize
         shell: bash

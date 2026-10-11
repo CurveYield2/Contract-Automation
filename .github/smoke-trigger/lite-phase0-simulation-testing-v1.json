@@ -1,9 +1,7 @@
 {
-  "schemaVersion": "curveyield-lite-phase0-smoke-trigger-v1",
+  "schemaVersion": "curveyield-lite-phase0-deploy-config-smoke-request-v1",
   "campaign_id": "curveyield-dex-v16-source-r4",
   "campaign_path": "campaigns/CurveYield DEX v16 Source r4",
   "audit_controller_ref": "main",
-  "medusa_calls": 0,
-  "telemetry_calls": 300,
-  "trigger_nonce": "balancer-router-economy-family-cycle-and-bpt-target-witness-smoke-v12"
+  "trigger_nonce": "deploy-config-only-v1"
 }
