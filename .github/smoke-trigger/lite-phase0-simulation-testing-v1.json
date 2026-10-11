@@ -5,5 +5,5 @@
   "audit_controller_ref": "main",
   "medusa_calls": 0,
   "telemetry_calls": 300,
-  "trigger_nonce": "stage5-smoke-v2"
+  "trigger_nonce": "stage5-smoke-github-connector-r3"
 }
