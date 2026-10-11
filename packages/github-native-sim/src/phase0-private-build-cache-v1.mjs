@@ -9,8 +9,8 @@ import {execFileSync} from 'node:child_process';
 import {buildExecutionArtifactBundleV2} from './phase0-execution-input-v2.mjs';
 
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
-const PRIVATE_CACHE_ROOT='Phase0 Build Cache';
-const PRIVATE_CACHE_REF='main';
+const PRIVATE_CACHE_ROOT = 'Phase0 Build Cache';
+const PRIVATE_CACHE_REF = 'main';
 const REPO='CurveYield2/Audit-Controller';
 const MAX_BYTES=768*1024*1024;
 const MAX_GZIP_BYTES=256*1024*1024;
