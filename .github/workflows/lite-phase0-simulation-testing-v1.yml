@@ -197,7 +197,7 @@ jobs:
             echo "::error::No simulation summary was produced; inspect retained smoke log and partial evidence"
             if [ -f .phase0-smoke-run.log ]; then
               echo "---- Last stage progress markers ----"
-              grep -E '\\[phase0-(smoke-progress|fixture|telemetry|medusa)\\]' .phase0-smoke-run.log | tail -n 40 || true
+              grep -E '\[phase0-(smoke-progress|fixture|telemetry|medusa)\]' .phase0-smoke-run.log | tail -n 40 || true
               echo "---- Last 60 log lines ----"
               tail -n 60 .phase0-smoke-run.log
             fi
