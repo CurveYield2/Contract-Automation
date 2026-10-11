@@ -67,7 +67,7 @@ test('reusable Phase-0 intelligence materializes its request from inputs even wh
 test('Phase-0, smoke, and rebind require the private Ethereum RPC secret and never fall back to public nodes',()=>{
   for(const name of ['lite-phase0-randomized-simulation-v1.yml','lite-phase0-simulation-testing-v1.yml','lite-phase0-simulation-rebind-v1.yml']){
     const workflow=read('.github/workflows/'+name);
-    const secretName=name==='lite-phase0-randomized-simulation-v1.yml'?'RPC_ETHEREUM':'ETHEREUM_RPC';
+    const secretName=['lite-phase0-randomized-simulation-v1.yml','lite-phase0-simulation-testing-v1.yml'].includes(name)?'RPC_ETHEREUM':'ETHEREUM_RPC';
     assert.ok(workflow.includes('ETHEREUM_FORK_RPC_URL: ${{ secrets.'+secretName+' }}'),name);
     assert.doesNotMatch(workflow,/secrets\.SD_ETH_RPC_URL/);
     assert.match(workflow,/--fork-url "\$ETHEREUM_FORK_RPC_URL"/);

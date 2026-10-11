@@ -5,5 +5,5 @@
   "audit_controller_ref": "main",
   "medusa_calls": 0,
   "telemetry_calls": 300,
-  "trigger_nonce": "telemetry-allowance-fastpath-v1"
+  "trigger_nonce": "balancer-verified-pool-routing-smoke-v5"
 }

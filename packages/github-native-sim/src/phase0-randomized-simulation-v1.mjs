@@ -12,7 +12,8 @@ import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
-import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1,executeCreatorSynthesisV1,approveFixtureSpendersV1,refreshCreatedAssociationsV1,executeActivationSynthesisV1} from './phase0-fixture-synthesis-v1.mjs';
+import {isBalancerV3TargetV1,discoverBalancerV3PoolsV1,buildBalancerV3ActionV1,bootstrapBalancerV3PoolsV1} from './phase0-balancer-v3-planner-v1.mjs';
+import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1,executeForkTokenAccountingWitnessV1,executeCreatorSynthesisV1,approveFixtureSpendersV1,refreshCreatedAssociationsV1,executeActivationSynthesisV1} from './phase0-fixture-synthesis-v1.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
 export const PHASE0_MEDUSA_MIN_CALLS_V1=100001;
@@ -590,7 +591,13 @@ async function safeStatic(contract,f,args){try{return{ok:true,value:normalize(aw
 export async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
   const out={native:{},views:{},systemNative:{},related:{}};
   const c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),provider);
-  const relatedAddresses=[...new Set([target.recipeRuntime?.assetAddress,target.recipeRuntime?.tokenAddress].filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x))))];
+  const accountingContext=target.accountingContext??null;
+  const relatedAddresses=[...new Set([
+    target.recipeRuntime?.assetAddress,
+    target.recipeRuntime?.tokenAddress,
+    ...(accountingContext?.tokens??[]),
+    accountingContext?.poolAddress
+  ].filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x))))].slice(0,12);
   const erc20ViewAbi=[
     'function balanceOf(address) view returns (uint256)',
     'function allowance(address,address) view returns (uint256)',
@@ -614,6 +621,8 @@ export async function snapshot({provider,ethers,target,sender,plan,systemTargets
         address,
         balanceSender:await read('balanceOf(address)',[sender]),
         balanceTarget:await read('balanceOf(address)',[target.address]),
+        ...(accountingContext?.vaultAddress?{balanceVault:await read('balanceOf(address)',[accountingContext.vaultAddress])}:{}),
+        ...(accountingContext?.poolAddress?{balancePool:await read('balanceOf(address)',[accountingContext.poolAddress])}:{}),
         allowanceSenderTarget:await read('allowance(address,address)',[sender,target.address]),
         totalSupply:await read('totalSupply()',[])
       };
@@ -642,6 +651,53 @@ export async function baselineSentinelV2({provider,ethers,targets,actors}){
   }
   const body={blockNumber,blockHash:block?.hash??null,states:normalize(states)};
   return{...body,digestSha256:sha256(Buffer.from(JSON.stringify(body)))};
+}
+// Preserve the measurements already made by the baseline-reset sentinel. These are
+// baseline accounting values, NOT proof that a project economic action executed.
+export function buildAccountingBaselineEvidenceV1(sentinel={}){
+  const readings=[],failures=[];
+  const add=(state,scope,name,result)=>{
+    const source={target:state.logicalQualifiedName,address:state.address,contextType:state.contextType??'DIRECT',scope,name};
+    if(result?.ok!==true){
+      failures.push({...source,error:String(result?.error??'READ_UNAVAILABLE').slice(0,600)});
+      return;
+    }
+    const raw=result.value;
+    if(typeof raw!=='string'||!(/^-?\d+$/.test(raw))){
+      failures.push({...source,error:'NON_NUMERIC_ACCOUNTING_READ'});
+      return;
+    }
+    readings.push({...source,value:raw});
+  };
+  for(const state of sentinel.states??[]){
+    const observations=state.observations??{};
+    for(const [name,result] of Object.entries(observations.views??{}))add(state,'PROJECT_ACCOUNTING_VIEW',name,result);
+    for(const [token,values] of Object.entries(observations.related??{})){
+      for(const [name,result] of Object.entries(values??{})){
+        if(name==='address')continue;
+        add(state,'RELATED_TOKEN_ACCOUNTING_VIEW',token+':'+name,result);
+      }
+    }
+    for(const [name,value] of Object.entries(observations.native??{})){
+      if(typeof value==='string'&&/^-?\d+$/.test(value))readings.push({target:state.logicalQualifiedName,address:state.address,contextType:state.contextType??'DIRECT',scope:'NATIVE_BALANCE',name,value});
+    }
+  }
+  const projectReadings=readings.filter(row=>row.scope==='PROJECT_ACCOUNTING_VIEW').length;
+  const relatedTokenReadings=readings.filter(row=>row.scope==='RELATED_TOKEN_ACCOUNTING_VIEW').length;
+  const nativeReadings=readings.filter(row=>row.scope==='NATIVE_BALANCE').length;
+  return{
+    schemaVersion:'curveyield-phase0-accounting-baseline-v1',
+    source:'EXISTING_BASELINE_RESET_SENTINEL_NO_ADDITIONAL_RPC_READS',
+    baselineDigestSha256:sentinel.digestSha256??null,
+    blockNumber:sentinel.blockNumber??null,
+    targetCount:(sentinel.states??[]).length,
+    projectReadings,relatedTokenReadings,nativeReadings,
+    successfulAccountingReadings:projectReadings+relatedTokenReadings,
+    failedAccountingReadings:failures.length,
+    provesEconomicStateChange:false,
+    status:projectReadings+relatedTokenReadings>0?'BASELINE_ACCOUNTING_AVAILABLE':'NO_BASELINE_ACCOUNTING_VIEWS',
+    readings,failures
+  };
 }
 function flattenNumbers(v,p='',o={}){
   if(typeof v==='string'&&/^-?\d+$/.test(v)){o[p]=BigInt(v);return o;}
@@ -774,7 +830,7 @@ async function eip1967ImplementationAddressV2({provider,ethers,address}){
     return code&&code!=='0x'?candidate:null;
   }catch{return null;}
 }
-export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={},associations={},probeSelectors=true}){
+export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={},probeSelectors=true}){
   const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
   const deployedByAddress=new Map(deployed.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
   const targetByAddress=new Map(targets.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
@@ -843,15 +899,35 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
     addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'EIP1967_IMPLEMENTATION_SLOT'});
   }
 
-  for(const [holderRaw,value] of Object.entries(associations??{})){
-    const facadeDeployment=asDeployment(holderRaw);
-    if(!facadeDeployment?.address)continue;
-    for(const calleeRaw of associationValuesV2(value)){
-      const implDeployment=asDeployment(calleeRaw),implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
-      if(!implDeployment||!implArtifact||String(implDeployment.address).toLowerCase()===String(facadeDeployment.address).toLowerCase())continue;
-      addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'ASSOCIATION_POINTS_TO_EXTENSION'});
+  // Balancer v3 has a two-hop proxy: Vault -> VaultExtension -> VaultAdmin.
+  // The only valid mutation entrypoint is Vault, never the extension address.
+  // Verify immutable on-chain pointers before attaching implementation ABIs.
+  for(const vault of deployed.filter(d=>/\/Vault\.sol:Vault$/.test(String(d.qualifiedName??'')))){
+    try{
+      const c=new ethers.Contract(vault.address,['function getVaultExtension() view returns (address)'],provider);
+      const extensionAddress=await c.getVaultExtension();
+      const extensionDeployment=asDeployment(extensionAddress);
+      const extensionArtifact=extensionDeployment?.qualifiedName?byQ.get(extensionDeployment.qualifiedName):null;
+      if(extensionArtifact&&/VaultExtension\.sol:VaultExtension$/.test(String(extensionDeployment.qualifiedName))){
+        addVariant({facadeDeployment:vault,implDeployment:extensionDeployment,implArtifact:extensionArtifact,contextType:'FACADE',basis:'BALANCER_VERIFIED_VAULT_EXTENSION'});
+      }
+      const ext=new ethers.Contract(extensionAddress,['function getVaultAdmin() view returns (address)'],provider);
+      const adminAddress=await ext.getVaultAdmin();
+      const adminDeployment=asDeployment(adminAddress);
+      const adminArtifact=adminDeployment?.qualifiedName?byQ.get(adminDeployment.qualifiedName):null;
+      if(adminArtifact&&/VaultAdmin\.sol:VaultAdmin$/.test(String(adminDeployment.qualifiedName))){
+        addVariant({facadeDeployment:vault,implDeployment:adminDeployment,implArtifact:adminArtifact,contextType:'FACADE',basis:'BALANCER_VERIFIED_VAULT_EXTENSION_ADMIN_CHAIN'});
+      }
+    }catch(error){
+      contextEvidence.push({contextType:'FACADE',facadeQualifiedName:vault.qualifiedName,status:'CONTEXT_REQUIRED',reason:'BALANCER_VAULT_DELEGATION_UNVERIFIED',message:String(error?.shortMessage??error?.message??error).slice(0,700)});
     }
   }
+
+  // Associations can identify connected contracts and candidate callers, but
+  // they never prove that one contract executes another contract's ABI.
+  // Only mount an implementation ABI on a verified proxy implementation getter,
+  // EIP-1967 slot, or explicit Balancer Vault delegation pointer (above).
+  // Do not invent facades from an arbitrary address association on ANY protocol.
 
   if(probeSelectors){
     const accounts=await provider.send('eth_accounts',[]).catch(()=>[]);
@@ -866,6 +942,9 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
         if(probes>=96)break;
         const facadeArtifact=facadeDeployment?.qualifiedName?byQ.get(facadeDeployment.qualifiedName):null;
         if(!facadeArtifact)continue;
+        // Selector-level probes on the wrong Balancer contract often respond
+        // with generic revert data and are NOT evidence of valid delegation.
+        if(isBalancerV3TargetV1(extension)||isBalancerV3TargetV1(facadeDeployment))continue;
         let facadeIface;
         try{facadeIface=new ethers.Interface(normalizedAbi(facadeArtifact.abi??[]));}catch{continue;}
         const probeFunction=(extension.functions??[]).find(selected=>{
@@ -881,6 +960,7 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
     }
     contextEvidence.push({contextType:'FACADE_DISCOVERY',status:'COMPLETE',discoveryBasis:'SELECTOR_PROBE_BOUNDED',probeCount:probes,probeLimit:96});
   }
+
   for(const target of out)if(!target.contextType){target.contextType='DIRECT';target.contextDisposition='READY';}
   return{targets:out,contextEvidence};
 }
@@ -1286,7 +1366,16 @@ export async function resolveTelemetryCallerContextV2({
 export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,artifacts=[],valuePool=null,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
   const summaries=[],callerResolutionState=new Map(),contextWeightMultipliers=new Map();
   let snapshotId=baselineSnapshot;
+  let balancerDiscovery=await discoverBalancerV3PoolsV1({provider,ethers,targets,valuePool,actors});
+  if(balancerDiscovery.active){
+    await fs.writeFile(path.join(outRoot,'PHASE0_BALANCER_V3_CALL_CONTEXT_v1.json'),JSON.stringify(balancerDiscovery,null,2)+'\n');
+    console.log(`[phase0-balancer] vaults=${balancerDiscovery.vaults.length}; verified=${balancerDiscovery.vaults.filter(v=>v.verified).length}; registeredPools=${balancerDiscovery.pools.length}; initializedPools=${balancerDiscovery.pools.filter(p=>p.initialized).length}; status=${balancerDiscovery.status}`);
+  }
   const canonicalBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
+  const accountingBaseline=buildAccountingBaselineEvidenceV1(canonicalBaseline);
+  const accountingBaselineRef='PHASE0_ACCOUNTING_BASELINE_v1.json';
+  await fs.writeFile(path.join(outRoot,accountingBaselineRef),JSON.stringify(accountingBaseline,null,2)+'\n');
+  console.log(`[phase0-accounting] baseline: projectViews=${accountingBaseline.projectReadings}; relatedTokenViews=${accountingBaseline.relatedTokenReadings}; nativeBalances=${accountingBaseline.nativeReadings}; failedViews=${accountingBaseline.failedAccountingReadings}; status=${accountingBaseline.status}`);
   for(let run=1;run<=telemetryRuns;run++){
     let resetEvidence={required:run>1,revertAccepted:run===1,sentinelMatch:run===1,expectedDigestSha256:canonicalBaseline.digestSha256,observedDigestSha256:canonicalBaseline.digestSha256};
     if(run>1){
@@ -1295,6 +1384,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       const observedBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
       resetEvidence={required:true,...verifyBaselineResetV2({reverted,expectedDigestSha256:canonicalBaseline.digestSha256,observedDigestSha256:observedBaseline.digestSha256})};
       snapshotId=await provider.send('evm_snapshot',[]);
+      // A reverted run has no initialized pools created by the previous run.
+      balancerDiscovery=await discoverBalancerV3PoolsV1({provider,ethers,targets,valuePool,actors});
     }
     const runId=`${runPrefix}-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
     const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(repeatSameSeedAcrossRuns?seedSalt:`${runId}-${seedSalt}`);
@@ -1309,10 +1400,18 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       simulationInfrastructureError:0,submissionInfrastructureError:0,submittedOutcomeUnknown:0,
       notExecutedEncodingOrPlanning:0,positiveTransitions:0,positiveEconomicTransitions:0,
       observationFailures:0,observationReads:0,accountingObservationCalls:0,skippedObservationCalls:0,byContract:{},byFunction:{},
-      feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],
+      feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],protocolPlanningFailures:{},protocolAwareCalls:0,
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
-    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set();
+    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),preflightRejections=new Map(),successfulFunctionContexts=new Map();
+    // A Balancer router action is routable only if actual on-chain pool metadata
+    // supplies the registered pool and exact Vault token order. Do not guess.
+    const refreshBalancerReadyActions=()=>balancerDiscovery.active?targets.flatMap((t)=>t.functions.flatMap((fn)=>{
+      const plan=buildBalancerV3ActionV1({ethers,target:t,selected:fn,discovery:balancerDiscovery,valuePool,actors});
+      return plan.kind==='READY'?[{target:t,selected:fn,plan}]:[];
+    })):[];
+    let balancerReadyActions=refreshBalancerReadyActions();
+
     const telemetryStartedAt=Date.now();
     console.log(`[phase0-telemetry] ${runId} started; targetCalls=${callsPerRun}; lifecycle=v2; heartbeat every 30s`);
     const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${callsPerRun}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),30000);
@@ -1327,16 +1426,41 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
               (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
               pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers)
-            );
+            )??targets.find(candidate=>candidate!==target&&pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers));
             if(alternate){
               stats.contextAdaptations.push({kind:'REROUTE_TO_QUALIFIED_CONTEXT',fromContext:target.contextType??'DIRECT',toContext:alternate.contextType??'DIRECT',logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,atCallIndex:stats.calls+1});
               target=alternate;
               picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers);
             }
           }
-          if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
-          const selected=picked.selected,f=selected.fragment,iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
-          const qualifiedAction=qualifiedActionV2({target,selected,actors,rng});
+          if(!picked){
+            // A 30-call burst must not repeat a permanently blocked function
+            // after the whole contract has exhausted all plausible contexts.
+            // Recycle only as a bounded fallback when no alternative exists.
+            blockedContextFunctions.clear();
+            picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers);
+            if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
+          }
+          let selected=picked.selected;
+          let balancerAction=balancerDiscovery.active
+            ? buildBalancerV3ActionV1({ethers,target,selected,discovery:balancerDiscovery,valuePool,actors})
+            : {kind:'GENERIC'};
+          if(balancerAction.kind==='BLOCKED'){
+            const substitutes=balancerReadyActions.filter(candidate=>candidate.selected.semanticFamily===selected.semanticFamily);
+            if(substitutes.length){
+              const next=substitutes[ri(rng,substitutes.length)];
+              const previous=target;
+              target=next.target;selected=next.selected;balancerAction=next.plan;
+              picked={...picked,selectionKey:`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${selected.signature}`,feedbackWeight:1,selectionWeightMultiplier:1};
+              stats.contextAdaptations.push({kind:'BALANCER_V3_ROUTE_RESELECTION',fromTarget:previous.qualifiedName,toTarget:target.qualifiedName,signature:selected.signature,atCallIndex:stats.calls+1});
+            }
+          }
+          if(balancerAction.kind==='BLOCKED')stats.protocolPlanningFailures[balancerAction.reason]=(stats.protocolPlanningFailures[balancerAction.reason]??0)+1;
+          if(balancerAction.kind==='READY')stats.protocolAwareCalls++;
+          const f=selected.fragment,iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
+          const qualifiedAction=balancerAction.kind==='READY'
+            ? {sender:balancerAction.sender,args:balancerAction.args,value:balancerAction.value,basis:balancerAction.basis,pool:balancerAction.pool}
+            : balancerAction.kind==='BLOCKED'?null:qualifiedActionV2({target,selected,actors,rng});
           let sender=qualifiedAction?.sender??actors[ri(rng,actors.length)];
           const rec={
             schemaVersion:'curveyield-phase0-raw-simulation-call-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
@@ -1358,11 +1482,16 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
 
           let args=null,argError=null;
           try{
+            if(balancerAction.kind==='BLOCKED'){
+              rec.protocolPlan={kind:'BLOCKED',reason:balancerAction.reason};
+              const error=new Error(balancerAction.reason);error.code='BALANCER_V3_PROTOCOL_LIFECYCLE_BLOCKED';throw error;
+            }
             const argumentContext={actors,targets:targets.map(x=>x.address),valuePool,chosenAddresses:[]};
             args=qualifiedAction?.args??f.inputs.map(p=>randomValue(p,rng,argumentContext));
             rec.decodedInputs=normalize(args);
             rec.stages.ARG_GEN={status:'PASS',basis:qualifiedAction?.basis??'BOUNDED_RECURSIVE_ABI_GENERATION'};
-            if(qualifiedAction)rec.recipeAction={basis:qualifiedAction.basis};
+            if(qualifiedAction)rec.recipeAction={basis:qualifiedAction.basis,...(qualifiedAction.pool?{pool:qualifiedAction.pool,protocol:'BALANCER_V3'}:{})};
+            if(balancerAction.kind==='READY')rec.protocolPlan={kind:'READY',pool:balancerAction.pool,protocol:'BALANCER_V3'};
           }
           catch(error){argError=error;rec.stages.ARG_GEN={status:'FAILED',error:{code:error?.code??'ABI_ARGUMENT_GENERATION_LIMITATION',message:String(error?.message??error),limitation:error?.limitation??null}};}
           if(argError){
@@ -1381,13 +1510,22 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             fnStats.callerResolution=resolved.resolution;
             for(const adaptation of resolved.adaptations??[])stats.contextAdaptations.push({...adaptation,selectionKey:picked.selectionKey,atCallIndex:stats.calls});
             if((resolved.adaptations??[]).length)rec.contextAdaptations=resolved.adaptations;
-            const executionTarget=resolved.executionAddress.toLowerCase()===String(target.address).toLowerCase()
+            let executionTarget=resolved.executionAddress.toLowerCase()===String(target.address).toLowerCase()
               ? target
               : {...target,address:resolved.executionAddress,contextType:'FACADE',contextDisposition:'READY'};
+            if(balancerAction.kind==='READY'&&balancerAction.pool){
+              const protocolPool=balancerDiscovery.pools.find(p=>String(p.address).toLowerCase()===String(balancerAction.pool).toLowerCase());
+              if(protocolPool){
+                executionTarget={...executionTarget,accountingContext:{
+                  protocol:'BALANCER_V3',poolAddress:protocolPool.address,vaultAddress:protocolPool.vault,tokens:protocolPool.tokens
+                }};
+              }
+            }
             const estimate=resolved.estimate,preflightError=resolved.success?null:resolved.error,callProbe=resolved.callProbe,data=resolved.data;
             const observationPolicy=shouldObserveAccountingCallV1({selected,target,valuePool,executionAddress:resolved.executionAddress});
             const shouldObserve=!preflightError&&observationPolicy.observe===true;
             if(shouldObserve){
+              if(executionTarget.accountingContext)rec.accountingContext=executionTarget.accountingContext;
               const before=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
               rec.observations.before=observationRowsV2(before,executionTarget.recipe,'BEFORE');
               rec.observation='ACCOUNTING_BEFORE_AFTER';
@@ -1446,6 +1584,55 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             if(preflightError)rec.error=resolved.errorDetails??errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
           }
 
+          // Router.initialize is a lifecycle transition: all subsequent Router
+          // arguments must use the pool's new initialized state, not run-start
+          // metadata. Never count a predicted initialization as confirmed.
+          // Factory.create deploys and registers a real pool in the same
+          // transaction. Re-discover from the factory getters; do not trust
+          // random addresses, prediction, or arbitrary return-data alone.
+          if(rec.executionOutcome==='MINED_SUCCESS'&&balancerAction.createsPool){
+            const next=await discoverBalancerV3PoolsV1({provider,ethers,targets,valuePool,actors});
+            const prior=new Set(balancerDiscovery.pools.map(row=>String(row.address).toLowerCase()));
+            const created=next.pools.filter(row=>!prior.has(String(row.address).toLowerCase()));
+            balancerDiscovery=next;
+            balancerReadyActions=refreshBalancerReadyActions();
+            blockedContextFunctions.clear();
+            stats.contextAdaptations.push({kind:'BALANCER_V3_FACTORY_POOL_REDISCOVERY',newRegisteredPools:created.map(row=>row.address),atCallIndex:stats.calls});
+          }
+          if(rec.executionOutcome==='MINED_SUCCESS'&&balancerAction.kind==='READY'&&selected.signature==='initialize(address,address[],uint256[],uint256,bool,bytes)'){
+            const pool=balancerDiscovery.pools.find(row=>String(row.address).toLowerCase()===String(balancerAction.pool).toLowerCase());
+            if(pool){
+              pool.initialized=true;
+              try{
+                const bpt=new ethers.Contract(pool.address,['function balanceOf(address) view returns (uint256)'],provider);
+                const balance=await bpt.balanceOf(sender);
+                pool.bptHolders=BigInt(balance)>0n?[{actor:sender,amount:BigInt(balance).toString()}]:[];
+              }catch{pool.bptHolders=[];}
+              balancerReadyActions=refreshBalancerReadyActions();
+              blockedContextFunctions.clear();
+              stats.contextAdaptations.push({kind:'BALANCER_V3_POOL_INITIALIZED',pool:pool.address,atCallIndex:stats.calls});
+            }
+          }
+          // Learn from actual preflight/mined execution rather than rewarding only
+          // positive accounting deltas (which requires successful execution first).
+          // Permanent stub functions are never repeatedly sampled.
+          const errorText=JSON.stringify(rec.stages.PREFLIGHT?.error??rec.error??{});
+          if(rec.executionOutcome==='SIMULATED_REJECTION'){
+            const failures=1+(preflightRejections.get(picked.selectionKey)??0);
+            preflightRejections.set(picked.selectionKey,failures);
+            contextWeightMultipliers.set(picked.selectionKey,Math.max(0.01,Math.pow(0.55,failures)));
+            const permanentStub=/not implemented|notimplemented|function selector was not recognized/i.test(errorText);
+            const exhausted=failures>=(rec.semanticFamily==='ECONOMIC'?4:3);
+            if(permanentStub||exhausted){
+              blockedContextFunctions.add(picked.selectionKey);
+              stats.contextAdaptations.push({kind:permanentStub?'STUB_FUNCTION_PRUNED':'REPEATED_UNREACHABLE_CALL_PRUNED',selectionKey:picked.selectionKey,failures,atCallIndex:stats.calls});
+            }
+          }else if(rec.executionOutcome==='MINED_SUCCESS'){
+            preflightRejections.delete(picked.selectionKey);
+            contextWeightMultipliers.set(picked.selectionKey,Math.min(12,2+(feedback.get(picked.selectionKey)??0)));
+            successfulFunctionContexts.set(picked.selectionKey,{target:target.qualifiedName,signature:selected.signature});
+            feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
+          }
           stats.terminalActions++;
           if(['MINED_SUCCESS','MINED_REVERT','SUBMITTED_OUTCOME_UNKNOWN'].includes(rec.executionOutcome))stats.submittedActions++;
           if(rec.executionOutcome==='MINED_SUCCESS'){stats.minedSuccess++;stats.successes++;}
@@ -1458,7 +1645,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
           if(rec.positiveTransition){
             stats.positiveTransitions++;
             if(rec.semanticFamily==='ECONOMIC')stats.positiveEconomicTransitions++;
-            feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
+            // Already reinforced on mined success, even when the observed
+            // accounting surfaces do not yet expose a measurable delta.
             stats.feedbackUpdates++;
           }
           if(rec.observation==='SKIPPED_NON_ACCOUNTING_OR_REJECTED'){
@@ -1484,11 +1672,26 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
     const bytes=await fs.readFile(file),summary={
       schemaVersion:'curveyield-phase0-abi-telemetry-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
       runId,purpose:'AUTOMATED_LIFECYCLE_TELEMETRY_WITH_TYPED_OUTCOMES_AND_ACCOUNTING_OBSERVATIONS',...stats,
+      balancerV3Context:balancerDiscovery.active?{status:balancerDiscovery.status,registeredPools:balancerDiscovery.pools.length,initializedPools:balancerDiscovery.pools.filter(p=>p.initialized).length,protocolAwareCalls:stats.protocolAwareCalls,planningFailures:stats.protocolPlanningFailures,evidenceRef:'PHASE0_BALANCER_V3_CALL_CONTEXT_v1.json'}:null,
       accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,
       observationReadsPerAccountingCall:stats.accountingObservationCalls?stats.observationReads/stats.accountingObservationCalls:0,
       interleavedCrossContractBursts:true,executionStatus:'COMPLETED',coverageStatus:stats.calls===callsPerRun?'COMPLETE':'INCOMPLETE',
       checkStatus:'NOT_APPLICABLE',reachabilityStatus,observationStatus,reconciliation,lifecycleFamilies,resetEvidence,
-      feedbackStatus:stats.feedbackUpdates>0&&stats.feedbackSelections>0?'ACTIVE':'NO_FEEDBACK_WITNESS',decodedRevertReasons,
+      // Baseline observations are retained separately, never added to mutation observationReads.
+      accountingEvidence:{
+        baselineRef:accountingBaselineRef,
+        baselineDigestSha256:accountingBaseline.baselineDigestSha256,
+        projectBaselineReadings:accountingBaseline.projectReadings,
+        relatedTokenBaselineReadings:accountingBaseline.relatedTokenReadings,
+        baselineSuccessfulAccountingReadings:accountingBaseline.successfulAccountingReadings,
+        baselineFailedAccountingReadings:accountingBaseline.failedAccountingReadings,
+        positiveEconomicTransitions:stats.positiveEconomicTransitions,
+        mutationObservationCalls:stats.accountingObservationCalls,
+        status:stats.positiveEconomicTransitions>0?'ECONOMIC_TRANSITION_WITNESSED':'ECONOMIC_REACHABILITY_GAP',
+        baselineIsNotTransitionEvidence:true
+      },
+      adaptiveDispatch:{blacklistedStubFunctions:[...blockedContextFunctions].sort(),rejectionSamples:[...preflightRejections.entries()].map(([functionKey,failures])=>({functionKey,failures})),successfulFunctionContexts:[...successfulFunctionContexts.values()],policy:'PRELIGHT_FAILURE_PENALTY_MINED_SUCCESS_REWARD_PERMANENT_STUB_PRUNING'},
+      feedbackStatus:successfulFunctionContexts.size>0?'ACTIVE_MINED_EXECUTION_LEARNING':'NO_EXECUTABLE_FUNCTION_WITNESS',decodedRevertReasons,
       actionSequenceDigestSha256,outcomeSequenceDigestSha256,
       rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,
       legacyCompatibility:{legacyRevertCounterWasPreflightDominated:true,currentRevertsAreMinedRevertsOnly:true},
@@ -2099,21 +2302,30 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const scriptDeployments=[...deploymentRowsByAddress.values()];
     const expectedNativeNames=new Set(build.deploymentOrder??[]);
     const observedNativeNames=new Set(scriptDeployments.map(x=>x.contractName).filter(Boolean));
-    const nativeScriptComplete=deployment.status==='PASS'&&[...expectedNativeNames].every(name=>observedNativeNames.has(name));
+    const nativeScriptComplete=deployment.status==='PASS'&&scriptDeployments.length>0&&[...expectedNativeNames].every(name=>observedNativeNames.has(name));
     console.log('[phase0-smoke-progress] START source-known deployment plan');
     const sourcePlan=nativeScriptComplete
       ? {status:'SKIPPED_PACKAGE_DEPLOYMENT_SCRIPT_COMPLETE',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0}
       : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
     console.log(`[phase0-smoke-progress] END source-known deployment plan; deployed=${sourcePlan.rows.length}; unresolved=${sourcePlan.unresolvedSteps}`);
     const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows];
+    const sourceDeploymentFidelity={
+      status:scriptDeployments.length+sourcePlan.rows.length>0?'SOURCE_DEPLOYMENT_OBSERVED':'FALLBACK_ONLY_SOURCE_GRAPH_UNVERIFIED',
+      scriptDeployments:scriptDeployments.length,
+      sourcePlanDeployments:sourcePlan.rows.length,
+      fallbackDeployments:fallback.rows.length,
+      sourcePlanPlanned:sourcePlan.planned,
+      provesConfiguredEconomicSystem:scriptDeployments.length+sourcePlan.rows.length>0&&sourcePlan.unresolvedSteps===0,
+      limitation:scriptDeployments.length+sourcePlan.rows.length===0?'NO_SOURCE_DEPLOYED_CONTRACTS':'NONE'
+    };
     console.log(`[phase0-smoke-progress] END fallback deployment; deployed=${deployed.length}`);
     let targets=targetObjects(ethers,artifacts,deployed,sourceIntelligence);
-    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence,probeSelectors:false});
+    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence});
     targets=delegateContexts.targets;
     const runtimePreparation=await prepareQualifiedRuntimeV2({provider,ethers,targets,actors});
     runtimePreparation.contextEvidence=delegateContexts.contextEvidence;
     targets=runtimePreparation.targets;
-    const deploymentCombined={detectedScripts:detected,scriptDispositions:deployment.scriptDispositions??[],attempts:[...deployment.attempts,...sourcePlan.attempts],runtimePreparation,limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
+    const deploymentCombined={sourceDeploymentFidelity,detectedScripts:detected,scriptDispositions:deployment.scriptDispositions??[],attempts:[...deployment.attempts,...sourcePlan.attempts],runtimePreparation,limitations:[...deployment.limitations,...reported.limitations,...(sourceKnownCompilation.limitations??[]),...sourcePlan.limitations,...fallback.limitations],deployedContracts:deployed,sourceKnownCompilation:{status:sourceKnownCompilation.status,path:sourceKnownCompilation.planPath,declaredGroups:sourceKnownCompilation.groups?.length??0,compiledArtifacts:sourceKnownCompilation.artifacts?.length??0,selectedTargets:sourceKnownCompilation.selectedTargets?.length??0,missingTargets:sourceKnownCompilation.missingTargets?.length??0},sourceKnownPlan:{status:sourcePlan.status,path:sourcePlan.planPath,plannedContracts:sourcePlan.planned,deployedContracts:sourcePlan.rows.length,unresolvedSteps:sourcePlan.unresolvedSteps},coverage:{sourcePlanPlanned:sourcePlan.planned,sourcePlanDeployed:sourcePlan.rows.length,sourcePlanUnresolved:sourcePlan.unresolvedSteps,sourceKnownCompiledTargets:sourceKnownCompilation.selectedTargets?.length??0,sourceKnownMissingTargets:sourceKnownCompilation.missingTargets?.length??0,zeroArgFallbackCandidates:fallback.candidateCount??0,zeroArgFallbackDeployed:fallback.rows.length,mutableTargets:targets.length},status:(deployment.status==='PASS'||sourcePlan.status==='PASS'||deployed.length)?(sourcePlan.unresolvedSteps===0&&(sourceKnownCompilation.missingTargets?.length??0)===0?'PASS':'COMPLETE_WITH_FAILURES'):'NO_EXECUTABLE_DEPLOYMENT'};
     // Persist deployment diagnostics before any expensive randomized stage.
     deploymentEvidence={...deploymentCombined,packageDependencyInstall,policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS'};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deploymentEvidence,null,2)+'\n');
@@ -2162,17 +2374,33 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         if(!artifacts.some(a=>`${a.sourceName}:${a.contractName}`===q))artifacts.push(synthetic);
       }
       const createdAddresses=[...new Set(creatorRound.creations.flatMap(row=>row.createdAddresses??[]).map(x=>String(x).toLowerCase()))];
+      // Balancer pool BPT contracts are NOT token spenders. Router/Permit2
+      // were already approved in Stage 1. Hundreds of unnecessary ERC20 and
+      // Permit2 approve transactions here caused the post-creation timeout.
+      const newBptAddresses=new Set(creatorRound.creations
+        .filter(row=>/CURVEYIELD_WRAPPER_ALLOWLIST|BALANCER_V3_FACTORY/.test(String(row.basis??'')))
+        .flatMap(row=>row.createdAddresses??[]).map(x=>String(x).toLowerCase()));
+      const spendableChildren=createdAddresses.filter(x=>!newBptAddresses.has(x));
       const existingTokens=valuePool.tokens.filter(token=>!creatorRound.createdTokens.some(created=>String(created.address).toLowerCase()===String(token?.address??token).toLowerCase()));
-      if(createdAddresses.length){
+      console.log(`[phase0-fixture] Stage2 round=${stage2Round} created=${createdAddresses.length} pools=${newBptAddresses.size} approvedSpenders=${spendableChildren.length}`);
+      if(spendableChildren.length){
         try{
-          const approval=await approveFixtureSpendersV1({provider,ethers,tokens:existingTokens,holders:stage2Holders,spenders:createdAddresses});
+          const approval=await approveFixtureSpendersV1({provider,ethers,tokens:existingTokens,holders:stage2Holders,spenders:spendableChildren});
           stage2Approvals.push({round:stage2Round,...approval});
-        }catch(error){stage2Approvals.push({round:stage2Round,holders:stage2Holders,spenders:createdAddresses,transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_SPENDER_APPROVALS_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
+        }catch(error){stage2Approvals.push({round:stage2Round,holders:stage2Holders,spenders:spendableChildren,transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_SPENDER_APPROVALS_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
+      }else{
+        stage2Approvals.push({round:stage2Round,holders:stage2Holders,spenders:[],transactionReceipts:[],receiptCounts:{erc20Approvals:0,permit2Allowances:0,gaps:0},gaps:[],status:'BALANCER_POOL_APPROVALS_NOT_REQUIRED'});
       }
-      if(creatorRound.createdTokens.length){
+      // BPT shares must originate from Vault initialize/addLiquidity; never
+      // fabricate balances into storage.
+      const newlyCreatedUnderlyingTokens=creatorRound.createdTokens.filter(t=>!newBptAddresses.has(String(t.address).toLowerCase()));
+      if(creatorRound.createdTokens.length>newlyCreatedUnderlyingTokens.length){
+        stage2CreatedTokenFunding.push({round:stage2Round,status:'POOL_BPT_STORAGE_FUNDING_PREVENTED',poolTokens:creatorRound.createdTokens.filter(t=>newBptAddresses.has(String(t.address).toLowerCase())).map(t=>t.address),policy:'BPT_ONLY_MINTED_BY_VAULT'});
+      }
+      if(newlyCreatedUnderlyingTokens.length){
         try{
           const funding=await fundActorsV1({
-            provider,ethers,tokens:creatorRound.createdTokens,holders:stage2Holders,
+            provider,ethers,tokens:newlyCreatedUnderlyingTokens,holders:stage2Holders,
             spenders:[...targets.map(x=>x.address),...createdAddresses]
           });
           stage2CreatedTokenFunding.push({round:stage2Round,...funding});
@@ -2180,6 +2408,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       }
       const boundRows=creatorRound.createdDeployments.filter(row=>row?.qualifiedName);
       let newTargets=targetObjects(ethers,artifacts,boundRows,sourceIntelligence);
+      console.log(`[phase0-fixture] Stage2 round=${stage2Round} createdTargets=${newTargets.length} runtimePreparation=START`);
       if(newTargets.length){
         try{
           const prepared=await prepareQualifiedRuntimeV2({provider,ethers,targets:newTargets,actors});
@@ -2196,6 +2425,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         if(existingTargetKeys.has(key))continue;
         existingTargetKeys.add(key);targets.push(target);admitted.push(target);
       }
+      console.log(`[phase0-fixture] Stage2 round=${stage2Round} runtimePreparation=END admitted=${admitted.length}`);
       stage2Rounds.push({
         round:stage2Round,candidates:creatorRound.candidates,successfulCreations:creatorRound.creations.length,
         createdContracts:creatorRound.createdContracts,boundTargets:admitted.length,createdAddresses
@@ -2206,6 +2436,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     console.log(`[phase0-smoke-progress] END Stage 2 creators; rounds=${stage2Rounds.length}; created=${valuePool.created?.length??0}`);
     let stage3AssociationHarvest={receipts:[],gaps:[],newTokens:[]},stage3AssociationTokenFunding=null,stage3Activation={activations:[],activationGaps:[],createdContracts:valuePool.created?.length??0};
     if((valuePool.created?.length??0)>0){
+      console.log('[phase0-smoke-progress] START Stage 3 created-association harvest');
       try{
         stage3AssociationHarvest=await refreshCreatedAssociationsV1({
           provider,ethers,createdAddresses:valuePool.created,targets,
@@ -2214,24 +2445,53 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       }catch(error){
         stage3AssociationHarvest={receipts:[],gaps:[{type:'CREATED_ASSOCIATION_REFRESH_FAILED',message:String(error?.message??error).slice(0,1600)}],newTokens:[]};
       }
+      console.log(`[phase0-smoke-progress] END Stage 3 association harvest; newTokens=${stage3AssociationHarvest.newTokens.length}`);
       if(stage3AssociationHarvest.newTokens.length){
         try{
+          // Newly registered Balancer BPT is minted only via the Vault. Never
+          // fake a pool-share holder using anvil_setStorageAt.
+          const registeredBpts=new Set((valuePool.created??[]).map(x=>String(x).toLowerCase()));
+          const fundable=stage3AssociationHarvest.newTokens.filter(x=>!registeredBpts.has(String(x.address).toLowerCase()));
           stage3AssociationTokenFunding=await fundActorsV1({
-            provider,ethers,tokens:stage3AssociationHarvest.newTokens,holders:stage2Holders,
+            provider,ethers,tokens:fundable,holders:stage2Holders,
             spenders:targets.map(target=>target.address)
           });
         }catch(error){
           stage3AssociationTokenFunding={holders:stage2Holders,spenders:targets.map(target=>target.address),slotResults:[],rpcMutations:[],transactionReceipts:[],receiptCounts:{},permit2:null,gaps:[{type:'STAGE3_ASSOCIATION_TOKEN_FUNDING_FAILED',message:String(error?.message??error).slice(0,1600)}]};
         }
       }
+      // Registered Balancer pools are not generic contracts needing ABI-random
+      // "activation": only the real Router.initialize can mint their first
+      // BPT and establish valid Vault balances. Avoid 30 unproductive calls
+      // per pool before the protocol-aware lifecycle bootstrap below.
+      let registeredBalancerPools=new Set();
       try{
-        stage3Activation=await executeActivationSynthesisV1({
-          provider,ethers,targets,actors,valuePool,artifacts,createdAddresses:valuePool.created,maxAttemptsPerCreated:30
-        });
+        const observed=await discoverBalancerV3PoolsV1({provider,ethers,targets,valuePool,actors});
+        registeredBalancerPools=new Set((observed.pools??[]).map(row=>String(row.address).toLowerCase()));
       }catch(error){
-        stage3Activation={activations:[],activationGaps:[{type:'ACTIVATION_SYNTHESIS_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1600)}],createdContracts:valuePool.created.length};
+        console.log(`[phase0-balancer] Stage3 pool discovery unavailable: ${String(error?.message??error).slice(0,250)}`);
       }
+      const activationAddresses=(valuePool.created??[]).filter(address=>!registeredBalancerPools.has(String(address).toLowerCase()));
+      console.log(`[phase0-balancer] Stage3 registered pools bypass generic activation; pools=${registeredBalancerPools.size} remainingCreatorChildren=${activationAddresses.length}`);
+      if(activationAddresses.length){
+        try{
+          stage3Activation=await executeActivationSynthesisV1({
+            provider,ethers,targets,actors,valuePool,artifacts,createdAddresses:activationAddresses,maxAttemptsPerCreated:30
+          });
+        }catch(error){
+          stage3Activation={activations:[],activationGaps:[{type:'ACTIVATION_SYNTHESIS_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1600)}],createdContracts:valuePool.created.length};
+        }
+      }
+      stage3Activation.balancerRegisteredPoolsExcluded=[...registeredBalancerPools];
     }
+    // The Balancer v3 Vault must register AND initialize pools before Router
+    // swaps / addLiquidity have valid context. This setup is a real on-chain
+    // Router call on the ephemeral Anvil fork, not an invented telemetry delta.
+    let balancerBootstrap;
+    try{balancerBootstrap=await bootstrapBalancerV3PoolsV1({provider,ethers,targets,valuePool,actors});}
+    catch(error){balancerBootstrap={status:'BOOTSTRAP_EXECUTION_FAILED',initializedPoolCount:0,attempts:[],limitations:[{type:'BOOTSTRAP_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1000)}]};}
+    await fs.writeFile(path.join(outputRoot,'PHASE0_BALANCER_V3_BOOTSTRAP_v1.json'),JSON.stringify(balancerBootstrap,null,2)+'\n');
+    console.log(`[phase0-balancer] Stage 3 Router bootstrap status=${balancerBootstrap.status}; initialized=${balancerBootstrap.initializedPoolCount}; attempts=${balancerBootstrap.attempts?.length??0}`);
     console.log('[phase0-smoke-progress] END Stage 3 association and activation');
     let stage4ContextPreparation={contextEvidence:[],addedTargets:[],gaps:[]};
     try{
@@ -2285,6 +2545,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       activations:stage3Activation.activations,
       activationGaps:stage3Activation.activationGaps,
       contextCallerPreparation:stage4ContextPreparation,
+      balancerBootstrap,
       callerResolutions:[]
     };
     await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
@@ -2321,6 +2582,11 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       contextCallerPreparation:stage4ContextPreparation,
       callerResolutions:[]
     };
+    // A separate, rollback-isolated ERC20 transfer verifies that fork-token fixtures
+    // are executable. It cannot satisfy audited-project economic coverage.
+    const accountingFixtureWitness=await executeForkTokenAccountingWitnessV1({provider,ethers,valuePool,actors});
+    await fs.writeFile(path.join(outputRoot,'PHASE0_FORK_TOKEN_ACCOUNTING_WITNESS_v1.json'),JSON.stringify(accountingFixtureWitness,null,2)+'\n');
+    console.log(`[phase0-accounting] fork-token control: status=${accountingFixtureWitness.status}; checkedTokens=${accountingFixtureWitness.checkedTokens}; verifiedTransitions=${accountingFixtureWitness.verifiedTransitions}`);
     const baselineBlock=Number(await provider.getBlockNumber()),baselineHash=(await provider.getBlock(baselineBlock))?.hash??null,baselineSnapshot=await provider.send('evm_snapshot',[]);
     const deploymentComplete=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;
     let medusa;
@@ -2389,8 +2655,21 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     fixtureEvidence.accountingObservationPolicy=accountingObservationPolicy;
     fixtureSynthesis.accountingObservationPolicy=accountingObservationPolicy;
     await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
-    const runIndex={schemaVersion:'curveyield-phase0-simulation-run-index-v1',purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',sourceIdentity:{campaignId:receipt.campaign.campaignId,sourceSha256:receipt.source.sha256},targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash,upstreamRpcExposed:false,identityNormalized:anvil.identityNormalized===true,observedUpstreamChainId:anvil.upstreamChainId},deployment:deploymentCombined,policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},runs:[{runId:medusa.runId,type:'MEDUSA_ANVIL_FORK',status:medusa.status,summaryRef:medusa.shards?'runs/MEDUSA_SHARDS_SUMMARY_v1.json':'runs/medusa-anvil-fork-001/RUN_SUMMARY_v1.json',shards:(medusa.shards??[]).map(x=>({runId:x.runId,configId:x.configId,status:x.status,summaryRef:x.summaryRef}))},...telemetry.map(x=>({runId:x.runId,type:'ABI_ACCOUNTING_TELEMETRY',status:x.status,summaryRef:`runs/${x.runId}/RUN_SUMMARY_v1.json`,rawTranscriptRef:x.rawTranscriptRef}))]};
+    const runIndex={accountingEvidenceRefs:['PHASE0_ACCOUNTING_BASELINE_v1.json','PHASE0_FORK_TOKEN_ACCOUNTING_WITNESS_v1.json','PHASE0_BALANCER_V3_CALL_CONTEXT_v1.json'],schemaVersion:'curveyield-phase0-simulation-run-index-v1',purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',sourceIdentity:{campaignId:receipt.campaign.campaignId,sourceSha256:receipt.source.sha256},targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash,upstreamRpcExposed:false,identityNormalized:anvil.identityNormalized===true,observedUpstreamChainId:anvil.upstreamChainId},deployment:deploymentCombined,policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},runs:[{runId:medusa.runId,type:'MEDUSA_ANVIL_FORK',status:medusa.status,summaryRef:medusa.shards?'runs/MEDUSA_SHARDS_SUMMARY_v1.json':'runs/medusa-anvil-fork-001/RUN_SUMMARY_v1.json',shards:(medusa.shards??[]).map(x=>({runId:x.runId,configId:x.configId,status:x.status,summaryRef:x.summaryRef}))},...telemetry.map(x=>({runId:x.runId,type:'ABI_ACCOUNTING_TELEMETRY',status:x.status,summaryRef:`runs/${x.runId}/RUN_SUMMARY_v1.json`,rawTranscriptRef:x.rawTranscriptRef}))]};
     const simulationLimitations=[...deploymentCombined.limitations,...(telemetry.filter(x=>x.weightingLimitation).map(x=>({type:x.weightingLimitation,runId:x.runId})))];
+    for(const row of telemetry){
+      if(row.accountingActions>0&&row.positiveEconomicTransitions===0){
+        simulationLimitations.push({type:'PROJECT_ACCOUNTING_REACHABILITY_GAP',runId:row.runId,accountingActions:row.accountingActions,simulatedRejections:row.simulatedRejection,fixtureControlStatus:accountingFixtureWitness.status});
+      }
+    }
+    if(accountingFixtureWitness.verifiedTransitions===0)simulationLimitations.push({type:'FORK_TOKEN_ACCOUNTING_CONTROL_UNVERIFIED',status:accountingFixtureWitness.status});
+    if(sourceDeploymentFidelity.status==='FALLBACK_ONLY_SOURCE_GRAPH_UNVERIFIED')simulationLimitations.push({type:'SOURCE_DEPLOYMENT_GRAPH_UNVERIFIED',sourceDeploymentFidelity});
+    if(balancerBootstrap.status==='INITIALIZATION_FAILED'||balancerBootstrap.status==='BOOTSTRAP_EXECUTION_FAILED'||balancerBootstrap.status==='NO_REGISTERED_POOLS')simulationLimitations.push({type:'BALANCER_V3_LIFECYCLE_BOOTSTRAP_GAP',status:balancerBootstrap.status,attempts:balancerBootstrap.attempts?.slice(0,8)});
+    for(const row of telemetry){
+      if(row.balancerV3Context?.status&&row.balancerV3Context.status!=='INITIALIZED_POOL_AVAILABLE'&&row.balancerV3Context.status!=='NOT_APPLICABLE'){
+        simulationLimitations.push({type:'BALANCER_V3_PROTOCOL_FIXTURE_UNAVAILABLE',runId:row.runId,protocolStatus:row.balancerV3Context.status,registeredPools:row.balancerV3Context.registeredPools,initializedPools:row.balancerV3Context.initializedPools});
+      }
+    }
     if(medusaExecutionFailure)simulationLimitations.push(medusaExecutionFailure);
     if(telemetryExecutionFailure)simulationLimitations.push(telemetryExecutionFailure);
     if(!['PASS','BLOCKED_NO_EXECUTABLE_TARGETS','SKIPPED_TELEMETRY_SMOKE'].includes(medusa.status))simulationLimitations.push({type:'MEDUSA_BASELINE_'+String(medusa.status),runId:medusa.runId});
@@ -2398,10 +2677,13 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const medusaRequired=!telemetrySmoke||medusaSmoke;
     const telemetryComplete=telemetry.length===expectedTelemetryRuns&&telemetry.every(x=>x.status==='PASS');
     const medusaComplete=!medusaRequired||medusa.status==='PASS';
+    const projectEconomicReachable=telemetry.every(row=>row.accountingActions===0||row.positiveEconomicTransitions>0);
+    const sourceDeploymentObserved=sourceDeploymentFidelity.status==='SOURCE_DEPLOYMENT_OBSERVED';
+    const qualifiedEconomicCoverage=projectEconomicReachable&&sourceDeploymentObserved;
     const executionMode=telemetrySmoke?(medusaSmoke?'MEDUSA_AND_TELEMETRY_SMOKE':'TELEMETRY_SMOKE'):(medusaSmoke?'MEDUSA_SMOKE':'ALL_PHASE0_STAGES');
-    const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode,status:medusaComplete&&telemetryComplete?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:medusaComplete&&telemetryComplete?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.length&&telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),fixtureSynthesis,medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,lifecycleFamilies:x.lifecycleFamilies,observationReads:x.observationReads,observationFailures:x.observationFailures,accountingObservationCalls:x.accountingObservationCalls,skippedObservationCalls:x.skippedObservationCalls,observationReadsPerAccountingCall:x.observationReadsPerAccountingCall,decodedRevertReasons:x.decodedRevertReasons,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
+    const summary={balancerBootstrap,accountingFixtureWitness:{status:accountingFixtureWitness.status,verifiedTransitions:accountingFixtureWitness.verifiedTransitions,checkedTokens:accountingFixtureWitness.checkedTokens,evidenceRef:'PHASE0_FORK_TOKEN_ACCOUNTING_WITNESS_v1.json',countsAsProjectEconomicTransition:false},schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode,status:medusaComplete&&telemetryComplete&&qualifiedEconomicCoverage?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:medusaComplete&&telemetryComplete?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.length&&telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),fixtureSynthesis,medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,lifecycleFamilies:x.lifecycleFamilies,observationReads:x.observationReads,observationFailures:x.observationFailures,accountingObservationCalls:x.accountingObservationCalls,skippedObservationCalls:x.skippedObservationCalls,observationReadsPerAccountingCall:x.observationReadsPerAccountingCall,accountingEvidence:x.accountingEvidence,balancerV3Context:x.balancerV3Context,protocolPlanningFailures:x.protocolPlanningFailures,protocolAwareCalls:x.protocolAwareCalls,decodedRevertReasons:x.decodedRevertReasons,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
-    const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',packageDependencyInstall,fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,scriptDispositions:deploymentCombined.scriptDispositions,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
+    const deployEvidence={sourceDeploymentFidelity,schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',packageDependencyInstall,fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,scriptDispositions:deploymentCombined.scriptDispositions,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deployEvidence,null,2)+'\n');await provider.destroy();
     return{summary,runIndex,deployEvidence};
   }catch(error){
