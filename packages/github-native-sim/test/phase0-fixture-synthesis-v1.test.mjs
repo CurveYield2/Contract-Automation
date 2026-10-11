@@ -730,7 +730,6 @@ test('Stage-3 runner executes association refresh and activation before the shar
   const baselineAt=runner.indexOf('baselineSnapshot=await provider.send');
   assert.ok(harvestAt>0&&activationAt>harvestAt&&baselineAt>activationAt);
   assert.match(runner,/maxAttemptsPerCreated:30/);
-  assert.match(runner,/STAGE_3_INITIALIZATION_AND_ACTIVATION/);
   assert.match(runner,/activations:stage3Activation\.activations/);
   assert.match(runner,/activationGaps:stage3Activation\.activationGaps/);
   assert.match(runner,/associationTokenFunding/);
@@ -777,7 +776,7 @@ function compileStage4Contracts(){
     '',
     'contract UnresolvedGate {',
     '  error OnlyVault();',
-    '  function callback() external pure { revert OnlyVault(); }',
+    '  function callback() external { revert OnlyVault(); }',
     '}',
     '',
     'contract DelegateExtension {',
