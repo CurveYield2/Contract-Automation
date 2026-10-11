@@ -296,12 +296,13 @@ test('Medusa compiles its standalone router without invoking production framewor
   assert.match(run,/cwd:medusaProject/);
   assert.doesNotMatch(run,/cwd:projectRoot/);
 });
-test('batched accounting snapshots preserve all observations',async()=>{
+test('batched baseline accounting preserves local observations without sweeping unrelated deployed contracts',async()=>{
   class FakeContract {
     getFunction(signature){return{staticCall:async(...args)=>signature+args.join(',')};}
   }
+  const balanceReads=[];
   const result=await snapshot({
-    provider:{getBalance:async a=>BigInt(a)},
+    provider:{getBalance:async a=>{balanceReads.push(a);return BigInt(a);}},
     ethers:{Contract:FakeContract},
     target:{address:'2',artifact:{abi:[]}},
     sender:'1',
@@ -309,7 +310,8 @@ test('batched accounting snapshots preserve all observations',async()=>{
     systemTargets:[{address:'2'},{address:'3'}]
   });
   assert.deepEqual(result.native,{sender:'1',target:'2'});
-  assert.deepEqual(result.systemNative,{'2':'2','3':'3'});
+  assert.deepEqual(result.systemNative,{});
+  assert.deepEqual(balanceReads.sort(),['1','2']);
   assert.equal(Object.keys(result.views).length,3);
 });
 
