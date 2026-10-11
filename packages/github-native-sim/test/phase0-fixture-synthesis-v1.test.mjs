@@ -995,7 +995,7 @@ function compileStage5Contracts(){
     '  uint256 public value;',
     '  bool public flag;',
     '  function deposit(uint256 amount) external { value = amount; }',
-    '  function depositFail(uint256) external pure { revert("ACCOUNTING_REJECTED"); }',
+    '  function depositFail(uint256) external { revert("ACCOUNTING_REJECTED"); }',
     '  function poke() external { flag = !flag; }',
     '}',
     '',
