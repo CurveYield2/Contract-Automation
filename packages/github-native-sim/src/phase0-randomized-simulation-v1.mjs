@@ -12,6 +12,7 @@ import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
+import {isBalancerV3TargetV1,discoverBalancerV3PoolsV1,buildBalancerV3ActionV1} from './phase0-balancer-v3-planner-v1.mjs';
 import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1,executeForkTokenAccountingWitnessV1,executeCreatorSynthesisV1,approveFixtureSpendersV1,refreshCreatedAssociationsV1,executeActivationSynthesisV1} from './phase0-fixture-synthesis-v1.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
@@ -881,6 +882,25 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
     for(const calleeRaw of associationValuesV2(value)){
       const implDeployment=asDeployment(calleeRaw),implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
       if(!implDeployment||!implArtifact||String(implDeployment.address).toLowerCase()===String(facadeDeployment.address).toLowerCase())continue;
+      // Association alone is NOT a delegate relationship. Balancer v3 delegates
+      // through explicit Vault -> VaultExtension -> VaultAdmin pointers.
+      // Reject unrelated ProtocolFeeController/Router/Authorizer facades.
+      if(isBalancerV3TargetV1(implDeployment)||isBalancerV3TargetV1(facadeDeployment)){
+        const facadeName=String(facadeDeployment.qualifiedName??''),implName=String(implDeployment.qualifiedName??'');
+        const link=/\/Vault\.sol:Vault$/.test(facadeName)&&/VaultExtension\.sol:VaultExtension$/.test(implName)
+          ? 'getVaultExtension()'
+          : /VaultExtension\.sol:VaultExtension$/.test(facadeName)&&/VaultAdmin\.sol:VaultAdmin$/.test(implName)
+            ? 'getVaultAdmin()' : null;
+        if(!link)continue;
+        let linked=null;
+        try{
+          const c=new ethers.Contract(facadeDeployment.address,[`function ${link} view returns (address)`],provider);
+          linked=await c.getFunction(link).staticCall();
+        }catch{}
+        if(String(linked??'').toLowerCase()!==String(implDeployment.address).toLowerCase())continue;
+        addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'VERIFIED_VAULT_EXTENSION_POINTER'});
+        continue;
+      }
       addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'ASSOCIATION_POINTS_TO_EXTENSION'});
     }
   }
@@ -898,6 +918,9 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
         if(probes>=96)break;
         const facadeArtifact=facadeDeployment?.qualifiedName?byQ.get(facadeDeployment.qualifiedName):null;
         if(!facadeArtifact)continue;
+        // Selector-level probes on the wrong Balancer contract often respond
+        // with generic revert data and are NOT evidence of valid delegation.
+        if(isBalancerV3TargetV1(extension)||isBalancerV3TargetV1(facadeDeployment))continue;
         let facadeIface;
         try{facadeIface=new ethers.Interface(normalizedAbi(facadeArtifact.abi??[]));}catch{continue;}
         const probeFunction=(extension.functions??[]).find(selected=>{
@@ -1318,6 +1341,11 @@ export async function resolveTelemetryCallerContextV2({
 export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,artifacts=[],valuePool=null,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
   const summaries=[],callerResolutionState=new Map(),contextWeightMultipliers=new Map();
   let snapshotId=baselineSnapshot;
+  const balancerDiscovery=await discoverBalancerV3PoolsV1({provider,ethers,targets,valuePool});
+  if(balancerDiscovery.active){
+    await fs.writeFile(path.join(outRoot,'PHASE0_BALANCER_V3_CALL_CONTEXT_v1.json'),JSON.stringify(balancerDiscovery,null,2)+'\n');
+    console.log(`[phase0-balancer] vaults=${balancerDiscovery.vaults.length}; verified=${balancerDiscovery.vaults.filter(v=>v.verified).length}; registeredPools=${balancerDiscovery.pools.length}; initializedPools=${balancerDiscovery.pools.filter(p=>p.initialized).length}; status=${balancerDiscovery.status}`);
+  }
   const canonicalBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
   const accountingBaseline=buildAccountingBaselineEvidenceV1(canonicalBaseline);
   const accountingBaselineRef='PHASE0_ACCOUNTING_BASELINE_v1.json';
@@ -1345,10 +1373,17 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       simulationInfrastructureError:0,submissionInfrastructureError:0,submittedOutcomeUnknown:0,
       notExecutedEncodingOrPlanning:0,positiveTransitions:0,positiveEconomicTransitions:0,
       observationFailures:0,observationReads:0,accountingObservationCalls:0,skippedObservationCalls:0,byContract:{},byFunction:{},
-      feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],
+      feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],protocolPlanningFailures:{},protocolAwareCalls:0,
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
     const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set();
+    // A Balancer router action is routable only if actual on-chain pool metadata
+    // supplies the registered pool and exact Vault token order. Do not guess.
+    const balancerReadyActions=balancerDiscovery.active?targets.flatMap((t)=>t.functions.flatMap((fn)=>{
+      const plan=buildBalancerV3ActionV1({target:t,selected:fn,discovery:balancerDiscovery,valuePool,actors});
+      return plan.kind==='READY'?[{target:t,selected:fn,plan}]:[];
+    })):[];
+
     const telemetryStartedAt=Date.now();
     console.log(`[phase0-telemetry] ${runId} started; targetCalls=${callsPerRun}; lifecycle=v2; heartbeat every 30s`);
     const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${callsPerRun}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),30000);
@@ -1371,8 +1406,26 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             }
           }
           if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
-          const selected=picked.selected,f=selected.fragment,iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
-          const qualifiedAction=qualifiedActionV2({target,selected,actors,rng});
+          let selected=picked.selected;
+          let balancerAction=balancerDiscovery.active
+            ? buildBalancerV3ActionV1({target,selected,discovery:balancerDiscovery,valuePool,actors})
+            : {kind:'GENERIC'};
+          if(balancerAction.kind==='BLOCKED'){
+            const substitutes=balancerReadyActions.filter(candidate=>candidate.selected.semanticFamily===selected.semanticFamily);
+            if(substitutes.length){
+              const next=substitutes[ri(rng,substitutes.length)];
+              const previous=target;
+              target=next.target;selected=next.selected;balancerAction=next.plan;
+              picked={...picked,selectionKey:`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${selected.signature}`,feedbackWeight:1,selectionWeightMultiplier:1};
+              stats.contextAdaptations.push({kind:'BALANCER_V3_ROUTE_RESELECTION',fromTarget:previous.qualifiedName,toTarget:target.qualifiedName,signature:selected.signature,atCallIndex:stats.calls+1});
+            }
+          }
+          if(balancerAction.kind==='BLOCKED')stats.protocolPlanningFailures[balancerAction.reason]=(stats.protocolPlanningFailures[balancerAction.reason]??0)+1;
+          if(balancerAction.kind==='READY')stats.protocolAwareCalls++;
+          const f=selected.fragment,iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
+          const qualifiedAction=balancerAction.kind==='READY'
+            ? {sender:balancerAction.sender,args:balancerAction.args,value:balancerAction.value,basis:balancerAction.basis,pool:balancerAction.pool}
+            : balancerAction.kind==='BLOCKED'?null:qualifiedActionV2({target,selected,actors,rng});
           let sender=qualifiedAction?.sender??actors[ri(rng,actors.length)];
           const rec={
             schemaVersion:'curveyield-phase0-raw-simulation-call-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
@@ -1394,11 +1447,15 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
 
           let args=null,argError=null;
           try{
+            if(balancerAction.kind==='BLOCKED'){
+              const error=new Error(balancerAction.reason);error.code='BALANCER_V3_PROTOCOL_LIFECYCLE_BLOCKED';throw error;
+            }
             const argumentContext={actors,targets:targets.map(x=>x.address),valuePool,chosenAddresses:[]};
             args=qualifiedAction?.args??f.inputs.map(p=>randomValue(p,rng,argumentContext));
             rec.decodedInputs=normalize(args);
             rec.stages.ARG_GEN={status:'PASS',basis:qualifiedAction?.basis??'BOUNDED_RECURSIVE_ABI_GENERATION'};
-            if(qualifiedAction)rec.recipeAction={basis:qualifiedAction.basis};
+            if(qualifiedAction)rec.recipeAction={basis:qualifiedAction.basis,...(qualifiedAction.pool?{pool:qualifiedAction.pool,protocol:'BALANCER_V3'}:{})};
+            if(balancerAction.kind==='BLOCKED')rec.protocolPlan={kind:'BLOCKED',reason:balancerAction.reason};
           }
           catch(error){argError=error;rec.stages.ARG_GEN={status:'FAILED',error:{code:error?.code??'ABI_ARGUMENT_GENERATION_LIMITATION',message:String(error?.message??error),limitation:error?.limitation??null}};}
           if(argError){
@@ -1520,6 +1577,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
     const bytes=await fs.readFile(file),summary={
       schemaVersion:'curveyield-phase0-abi-telemetry-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
       runId,purpose:'AUTOMATED_LIFECYCLE_TELEMETRY_WITH_TYPED_OUTCOMES_AND_ACCOUNTING_OBSERVATIONS',...stats,
+      balancerV3Context:balancerDiscovery.active?{status:balancerDiscovery.status,registeredPools:balancerDiscovery.pools.length,initializedPools:balancerDiscovery.pools.filter(p=>p.initialized).length,protocolAwareCalls:stats.protocolAwareCalls,planningFailures:stats.protocolPlanningFailures,evidenceRef:'PHASE0_BALANCER_V3_CALL_CONTEXT_v1.json'}:null,
       accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,
       observationReadsPerAccountingCall:stats.accountingObservationCalls?stats.observationReads/stats.accountingObservationCalls:0,
       interleavedCrossContractBursts:true,executionStatus:'COMPLETED',coverageStatus:stats.calls===callsPerRun?'COMPLETE':'INCOMPLETE',
