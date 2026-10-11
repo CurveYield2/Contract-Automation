@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 import solc from 'solc';
 import * as ethers from 'ethers';
 import {buildCompiledArtifactErrorSelectorIndexV1,decodeTelemetryRevertReasonV1,topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAmountV1,discoverCreatorCandidatesV1,buildCreatorArgumentsV1,executeCreatorSynthesisV1,bindCreatedContractV1,refreshCreatedAssociationsV1,discoverActivationCandidatesV1,buildActivationArgumentsV1,executeActivationSynthesisV1} from '../src/phase0-fixture-synthesis-v1.mjs';
-import {renderMedusaRouterV2,buildMedusaConfigV2,targetObjects,augmentDelegateProxyContextsV2,resolveTelemetryCallerContextV2,pickFn,runTelemetry} from '../src/phase0-randomized-simulation-v1.mjs';
+import {renderMedusaRouterV2,buildMedusaConfigV2,targetObjects,augmentDelegateProxyContextsV2,resolveTelemetryCallerContextV2,pickFn,runTelemetry,shouldObserveAccountingCallV1} from '../src/phase0-randomized-simulation-v1.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 
@@ -983,4 +983,193 @@ test('Stage-4 runner prepares contexts before baseline and persists learned call
   assert.match(runner,/STAGE_4_CONTEXT_CORRECT_CALLERS/);
   assert.match(runner,/contextCallerPreparation:stage4ContextPreparation/);
   assert.match(runner,/callerResolutions=callerResolutionEvidence/);
+});
+
+
+function compileStage5Contracts(){
+  const source=[
+    '// SPDX-License-Identifier: UNLICENSED',
+    'pragma solidity ^0.8.20;',
+    '',
+    'contract AccountingProbe {',
+    '  uint256 public value;',
+    '  bool public flag;',
+    '  function deposit(uint256 amount) external { value = amount; }',
+    '  function depositFail(uint256) external { revert("ACCOUNTING_REJECTED"); }',
+    '  function poke() external { flag = !flag; }',
+    '}',
+    '',
+    'contract CreatedTokenLike {',
+    '  uint256 public totalSupply = 1000 ether;',
+    '  mapping(address => uint256) public balanceOf;',
+    '  bool public touched;',
+    '  constructor() { balanceOf[msg.sender] = totalSupply; }',
+    '  function poke() external { touched = !touched; }',
+    '}'
+  ].join('\n');
+  const input={
+    language:'Solidity',
+    sources:{'Stage5.sol':{content:source}},
+    settings:{outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object','evm.deployedBytecode.linkReferences']}}}
+  };
+  const output=JSON.parse(solc.compile(JSON.stringify(input)));
+  const failures=(output.errors??[]).filter(row=>row.severity==='error');
+  assert.deepEqual(failures,[]);
+  return output.contracts['Stage5.sol'];
+}
+function stage5Artifact(name,compiled){
+  return normalizedTestArtifact('Stage5.sol',name,compiled[name]);
+}
+function stage5Deployment(name,address){
+  return{qualifiedName:'Stage5.sol:'+name,contractName:name,sourceName:'Stage5.sol',address};
+}
+function onlyStage5Function(target,signature){
+  return{...target,functions:target.functions.filter(row=>row.signature===signature)};
+}
+async function readTelemetryRows(outRoot,runId='stage5-001'){
+  const file=path.join(outRoot,'runs',runId,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl');
+  return fs.readFileSync(file,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
+}
+
+test('Stage-5 observation policy admits economic calls and eligible created token contexts only',()=>{
+  const target={address:'0x0000000000000000000000000000000000000011'};
+  const economic={semanticFamily:'ECONOMIC'},other={semanticFamily:'UNKNOWN'};
+  assert.deepEqual(shouldObserveAccountingCallV1({selected:economic,target,valuePool:null}),{observe:true,basis:'ECONOMIC'});
+  assert.deepEqual(
+    shouldObserveAccountingCallV1({
+      selected:other,target,
+      valuePool:{created:[target.address],tokens:[{address:target.address}],associations:{}}
+    }),
+    {observe:true,basis:'CREATED_TOKEN_LIKE'}
+  );
+  const token='0x0000000000000000000000000000000000000022';
+  assert.deepEqual(
+    shouldObserveAccountingCallV1({
+      selected:other,target,
+      valuePool:{created:[target.address],tokens:[{address:token}],associations:{[target.address]:new Set([token])}}
+    }),
+    {observe:true,basis:'CREATED_TOKEN_ASSOCIATION'}
+  );
+  assert.deepEqual(
+    shouldObserveAccountingCallV1({selected:other,target,valuePool:{created:[],tokens:[],associations:{}}}),
+    {observe:false,basis:'NON_ACCOUNTING_OR_REJECTED'}
+  );
+});
+
+test('Stage-5 observes successful economic calls only after preflight and reports reads per accounting call on local Anvil',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  const outRoot=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-stage5-economic-'));
+  try{
+    const compiled=compileStage5Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const probe=await deployArtifact(provider,compiled.AccountingProbe);
+    const artifact=stage5Artifact('AccountingProbe',compiled);
+    let target=targetObjects(ethers,[artifact],[stage5Deployment('AccountingProbe',await probe.getAddress())],{})[0];
+    target=onlyStage5Function(target,'deposit(uint256)');
+    const baselineSnapshot=await provider.send('evm_snapshot',[]);
+    const runs=await runTelemetry({
+      provider,ethers,targets:[target],actors:[accounts[0]],outRoot,baselineSnapshot,artifacts:[artifact],
+      valuePool:{addresses:[await probe.getAddress()],tokens:[],associations:{},privileged:[],created:[]},
+      telemetryRuns:1,callsPerRun:3,seedSalt:'stage5-economic',runPrefix:'stage5'
+    });
+    const run=runs[0],rows=await readTelemetryRows(outRoot);
+    assert.equal(run.minedSuccess,3);
+    assert.equal(run.accountingObservationCalls,3);
+    assert.equal(run.skippedObservationCalls,0);
+    assert.ok(run.observationReads>0);
+    assert.equal(run.observationReadsPerAccountingCall,run.observationReads/3);
+    assert.ok(rows.every(row=>row.stages.PREFLIGHT.status==='PASS'));
+    assert.ok(rows.every(row=>row.observation==='ACCOUNTING_BEFORE_AFTER'));
+    assert.ok(rows.every(row=>row.observations.before.length>0&&row.observations.after.length>0));
+  }finally{
+    fs.rmSync(outRoot,{recursive:true,force:true});
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-5 skips all snapshots for successful non-accounting calls and rejected economic calls on local Anvil',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  const outRootA=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-stage5-other-'));
+  const outRootB=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-stage5-rejected-'));
+  try{
+    const compiled=compileStage5Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const probe=await deployArtifact(provider,compiled.AccountingProbe);
+    const artifact=stage5Artifact('AccountingProbe',compiled);
+    const baseTarget=targetObjects(ethers,[artifact],[stage5Deployment('AccountingProbe',await probe.getAddress())],{})[0];
+
+    let baselineSnapshot=await provider.send('evm_snapshot',[]);
+    const otherRuns=await runTelemetry({
+      provider,ethers,targets:[onlyStage5Function(baseTarget,'poke()')],actors:[accounts[0]],outRoot:outRootA,baselineSnapshot,artifacts:[artifact],
+      valuePool:{addresses:[await probe.getAddress()],tokens:[],associations:{},privileged:[],created:[]},
+      telemetryRuns:1,callsPerRun:3,seedSalt:'stage5-other',runPrefix:'stage5'
+    });
+    const otherRows=await readTelemetryRows(outRootA);
+    assert.equal(otherRuns[0].minedSuccess,3);
+    assert.equal(otherRuns[0].observationReads,0);
+    assert.equal(otherRuns[0].accountingObservationCalls,0);
+    assert.equal(otherRuns[0].skippedObservationCalls,3);
+    assert.equal(otherRuns[0].observationReadsPerAccountingCall,0);
+    assert.ok(otherRows.every(row=>row.observation==='SKIPPED_NON_ACCOUNTING_OR_REJECTED'));
+    assert.ok(otherRows.every(row=>row.stages.OBSERVATION.status==='SKIPPED'));
+    assert.ok(otherRows.every(row=>row.observations.before.length===0&&row.observations.after.length===0));
+
+    baselineSnapshot=await provider.send('evm_snapshot',[]);
+    const rejectedRuns=await runTelemetry({
+      provider,ethers,targets:[onlyStage5Function(baseTarget,'depositFail(uint256)')],actors:[accounts[0]],outRoot:outRootB,baselineSnapshot,artifacts:[artifact],
+      valuePool:{addresses:[await probe.getAddress()],tokens:[],associations:{},privileged:[],created:[]},
+      telemetryRuns:1,callsPerRun:3,seedSalt:'stage5-rejected',runPrefix:'stage5'
+    });
+    const rejectedRows=await readTelemetryRows(outRootB);
+    assert.equal(rejectedRuns[0].simulatedRejection,3);
+    assert.equal(rejectedRuns[0].observationReads,0);
+    assert.equal(rejectedRuns[0].accountingObservationCalls,0);
+    assert.equal(rejectedRuns[0].skippedObservationCalls,3);
+    assert.ok(rejectedRows.every(row=>row.stages.PREFLIGHT.status==='FAILED'));
+    assert.ok(rejectedRows.every(row=>row.observation==='SKIPPED_NON_ACCOUNTING_OR_REJECTED'));
+  }finally{
+    fs.rmSync(outRootA,{recursive:true,force:true});
+    fs.rmSync(outRootB,{recursive:true,force:true});
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-5 observes non-economic calls on a created token-like contract on local Anvil',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  const outRoot=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-stage5-created-token-'));
+  try{
+    const compiled=compileStage5Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const token=await deployArtifact(provider,compiled.CreatedTokenLike);
+    const address=await token.getAddress(),artifact=stage5Artifact('CreatedTokenLike',compiled);
+    let target=targetObjects(ethers,[artifact],[stage5Deployment('CreatedTokenLike',address)],{})[0];
+    target=onlyStage5Function(target,'poke()');
+    assert.notEqual(target.functions[0].semanticFamily,'ECONOMIC');
+    const baselineSnapshot=await provider.send('evm_snapshot',[]);
+    const runs=await runTelemetry({
+      provider,ethers,targets:[target],actors:[accounts[0]],outRoot,baselineSnapshot,artifacts:[artifact],
+      valuePool:{addresses:[address],tokens:[{address,decimals:18,fundedAmount:(10n**18n).toString()}],associations:{},privileged:[],created:[address]},
+      telemetryRuns:1,callsPerRun:2,seedSalt:'stage5-created-token',runPrefix:'stage5'
+    });
+    const rows=await readTelemetryRows(outRoot);
+    assert.equal(runs[0].minedSuccess,2);
+    assert.equal(runs[0].accountingActions,0);
+    assert.equal(runs[0].accountingObservationCalls,2);
+    assert.ok(runs[0].observationReads>0);
+    assert.ok(rows.every(row=>row.observation==='ACCOUNTING_BEFORE_AFTER'&&row.observationBasis==='CREATED_TOKEN_LIKE'));
+  }finally{
+    fs.rmSync(outRoot,{recursive:true,force:true});
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-5 runner persists accounting observation policy evidence and top-level telemetry metrics',()=>{
+  const runner=fs.readFileSync(path.join(root,'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const telemetryAt=runner.indexOf('telemetry=await runTelemetry');
+  const policyAt=runner.indexOf('const accountingObservationPolicy=');
+  assert.ok(telemetryAt>0&&policyAt>telemetryAt);
+  assert.match(runner,/STAGE_5_ACCOUNTING_READS_ONLY/);
+  assert.match(runner,/SKIPPED_NON_ACCOUNTING_OR_REJECTED/);
+  assert.match(runner,/observationReadsPerAccountingCall/);
+  assert.match(runner,/fixtureEvidence\.accountingObservationPolicy=accountingObservationPolicy/);
 });
