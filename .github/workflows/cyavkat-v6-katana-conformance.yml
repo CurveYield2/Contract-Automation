@@ -73,7 +73,7 @@ jobs:
           forge build --sizes 2>&1 | tee "$GITHUB_WORKSPACE/.cyavkat-test-results/build.log"
       - name: Run all V6 unit and integration tests
         id: unit
-        if: steps.build.outcome == 'success'
+        if: always() && steps.build.outcome == 'success'
         shell: bash
         working-directory: .cyavkat-v6/cyavKAT/upgrade
         run: |
@@ -81,7 +81,7 @@ jobs:
           forge test --no-match-path 'test/fork/*' -vv 2>&1 | tee "$GITHUB_WORKSPACE/.cyavkat-test-results/unit.log"
       - name: Run V6 Katana fork conformance tests
         id: fork
-        if: steps.build.outcome == 'success'
+        if: always() && steps.build.outcome == 'success'
         shell: bash
         working-directory: .cyavkat-v6/cyavKAT/upgrade
         run: |
@@ -94,6 +94,7 @@ jobs:
           name: cyavkat-v6-katana-tests
           path: .cyavkat-test-results/
           retention-days: 14
+          include-hidden-files: true
       - name: Report outcomes
         if: always()
         shell: bash
