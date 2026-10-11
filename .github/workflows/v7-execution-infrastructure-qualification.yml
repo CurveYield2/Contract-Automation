@@ -438,28 +438,22 @@ jobs:
             echo "controller_only_delta_lane=$observed_lane"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Cache npm download cache
+      - name: Restore pinned Node dependencies (shared Phase 0 cache)
         if: env.V7_QUALIFICATION_LANE == 'FULL'
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm
-          key: v7-qualification-npm-${{ runner.os }}-${{ hashFiles('package-lock.json', 'package.json') }}
-          restore-keys: |
-            v7-qualification-npm-${{ runner.os }}-
+        uses: ./.github/actions/setup-phase0-node-cache
 
-      - name: Install exact Node dependencies
+      - name: Record verified dependency lock
         if: env.V7_QUALIFICATION_LANE == 'FULL'
         shell: bash
         run: |
           set -euo pipefail
           test -s package-lock.json
           node -e "const p=require('./package-lock.json'); if(p.lockfileVersion!==3) process.exit(1)"
-          npm ci --force
           echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
 
       - name: Install and verify canonical V7 toolchain
         if: env.V7_QUALIFICATION_LANE == 'FULL'
-        uses: ./.github/actions/setup-v7-toolchain
+        uses: ./.github/actions/setup-v7-toolchain-cached
 
       - name: Initialize qualification evidence
         run: mkdir -p .audit-evidence/v7-infrastructure-qualification
