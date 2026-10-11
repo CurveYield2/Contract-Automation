@@ -731,22 +731,22 @@ async function eip1967ImplementationAddressV2({provider,ethers,address}){
   }catch{return null;}
 }
 export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={},associations={},probeSelectors=true}){
-  const byQ=new Map(artifacts.map(a=>[\`${a.sourceName}:${a.contractName}\`,a]));
+  const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
   const deployedByAddress=new Map(deployed.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
   const targetByAddress=new Map(targets.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
   const out=[...targets],contextEvidence=[];
-  const variantKeys=new Set(out.map(target=>\`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}\`));
+  const variantKeys=new Set(out.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
   const asDeployment=address=>deployedByAddress.get(String(address).toLowerCase())??targetByAddress.get(String(address).toLowerCase())??null;
   const addVariant=({facadeDeployment,implDeployment,implArtifact,contextType,basis,evidence={}})=>{
     if(!facadeDeployment?.address||!implDeployment?.qualifiedName||!implArtifact)return false;
     const built=mutableFunctionsForArtifactV2({ethers,artifact:implArtifact,qualifiedName:implDeployment.qualifiedName,sourceIntelligence});
     if(!built.functions.length)return false;
-    const key=\`${String(facadeDeployment.address).toLowerCase()}|${implDeployment.qualifiedName}|${contextType}\`;
+    const key=`${String(facadeDeployment.address).toLowerCase()}|${implDeployment.qualifiedName}|${contextType}`;
     if(variantKeys.has(key))return false;
     variantKeys.add(key);
     out.push({
       ...facadeDeployment,
-      qualifiedName:facadeDeployment.qualifiedName??\`FACADE:${facadeDeployment.address}\`,
+      qualifiedName:facadeDeployment.qualifiedName??`FACADE:${facadeDeployment.address}`,
       logicalQualifiedName:implDeployment.qualifiedName,
       artifact:implArtifact,
       functions:built.functions,
