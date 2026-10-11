@@ -174,10 +174,20 @@ function amountForTokenV1(token,valuePool){
   if(funded<=0n)return null;
   return funded<units?funded:units;
 }
-function choosePoolV1(pools,initialized){
-  return pools.find(p=>p.initialized===initialized&&Array.isArray(p.tokens)&&p.tokens.length>=2)??null;
+export function choosePoolV1(pools,initialized,poolSelectionIndex=0){
+  const eligible=pools.filter(p=>p.initialized===initialized&&Array.isArray(p.tokens)&&p.tokens.length>=2);
+  if(!eligible.length)return null;
+  const index=Number.isSafeInteger(poolSelectionIndex)?poolSelectionIndex:0;
+  return eligible[((index%eligible.length)+eligible.length)%eligible.length];
 }
-export function buildBalancerV3ActionV1({ethers,target,selected,discovery,valuePool={},actors=[]}={}){
+// BPT exits must use actual initialized holder balances, not 1 wei of BPT.
+export function bptWithdrawalAmountV1(holderBalance){
+  const balance=BigInt(holderBalance??0);
+  if(balance<=1n)return 0n;
+  const proportional=balance/100n; // 1% of the current verified holding
+  return proportional>0n?proportional:1n;
+}
+export function buildBalancerV3ActionV1({ethers,target,selected,discovery,valuePool={},actors=[],poolSelectionIndex=0}={}){
   const requirement=balancerV3ActionRequirementsV1(target,selected);
   if(requirement.kind==='GENERIC')return{kind:'GENERIC'};
   if(discovery?.hasCurveYieldWrapper&&/^create\(/.test(String(selected?.signature??''))&&/Factory/.test(nameOf(target))){
@@ -200,13 +210,15 @@ export function buildBalancerV3ActionV1({ethers,target,selected,discovery,valueP
   if(!isInit&&!isUnbalanced&&!isProportional&&!isSwapIn&&!isSwapOut&&!isRemove&&!isRemoveSingle){
     return{kind:'BLOCKED',reason:'BALANCER_V3_NEEDS_PROTOCOL_RECIPE_FOR_SIGNATURE',signature};
   }
-  const pool=choosePoolV1(discovery?.pools??[],!isInit);
+  const pool=choosePoolV1(discovery?.pools??[],!isInit,poolSelectionIndex);
   if(!pool)return{kind:'BLOCKED',reason:isInit?'NO_REGISTERED_UNINITIALIZED_POOL':'NO_INITIALIZED_BALANCER_POOL'};
   const amounts=pool.tokens.map(token=>amountForTokenV1(token,valuePool));
   if(amounts.some(amount=>amount===null||amount===0n))return{kind:'BLOCKED',reason:'POOL_TOKEN_NOT_FUNDED',pool:pool.address};
   if(!actors.length)return{kind:'BLOCKED',reason:'NO_FUNDED_ACTORS'};
   const bpt=(pool.bptHolders??[]).find(row=>BigInt(row.amount??'0')>0n);
   if((isRemove||isRemoveSingle)&&!bpt)return{kind:'BLOCKED',reason:'NO_FUNDED_BALANCER_POOL_SHARE_HOLDER',pool:pool.address};
+  const bptIn=(isRemove||isRemoveSingle)?bptWithdrawalAmountV1(bpt?.amount):0n;
+  if((isRemove||isRemoveSingle)&&bptIn<=0n)return{kind:'BLOCKED',reason:'BPT_HOLDER_BALANCE_TOO_SMALL_FOR_EXIT',pool:pool.address};
   // Router unlocks Vault and settles internal transient token deltas atomically.
   // Amounts follow the Vault's registered token order.
   // Swapping the entire funded amount would exhaust the newly initialized
@@ -219,7 +231,7 @@ export function buildBalancerV3ActionV1({ethers,target,selected,discovery,valueP
     :isProportional?[pool.address,amounts,1n,false,'0x']
     :isSwapIn?[pool.address,pool.tokens[0],pool.tokens[1],smallSwapIn,1n,ethersMaxUint256V1(),false,'0x']
     :isSwapOut?[pool.address,pool.tokens[0],pool.tokens[1],smallSwapOut,maxSwapIn,ethersMaxUint256V1(),false,'0x']
-    :isRemove?[pool.address,1n,pool.tokens.map(()=>0n),false,'0x']
-    :[pool.address,1n,pool.tokens[0],1n,false,'0x'];
-  return{kind:'READY',sender:(isRemove||isRemoveSingle)?bpt.actor:actors[0],args,value:0n,pool:pool.address,protocol:'BALANCER_V3',basis:'VERIFIED_VAULT_POOL_STATE_ROUTER_ARGUMENTS',poolInitialized:pool.initialized};
+    :isRemove?[pool.address,bptIn,pool.tokens.map(()=>0n),false,'0x']
+    :[pool.address,bptIn,pool.tokens[0],0n,false,'0x'];
+  return{kind:'READY',sender:(isRemove||isRemoveSingle)?bpt.actor:actors[0],args,value:0n,pool:pool.address,protocol:'BALANCER_V3',basis:'VERIFIED_VAULT_POOL_STATE_ROUTER_ARGUMENTS',poolInitialized:pool.initialized,...((isRemove||isRemoveSingle)?{verifiedBptBalance:bpt.amount,bptInput:bptIn.toString()}:{} )};
 }
