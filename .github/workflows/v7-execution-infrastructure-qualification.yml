@@ -517,14 +517,6 @@ jobs:
         if: env.V7_QUALIFICATION_LANE == 'FULL'
         run: npm run v7:manifest -- --check
 
-      - name: V7 request and execution contract qualification
-        if: env.V7_QUALIFICATION_LANE == 'FULL'
-        run: node --test packages/github-native-sim/test/*.test.mjs
-
-      - name: Anvil-only runner qualification
-        if: env.V7_QUALIFICATION_LANE == 'FULL'
-        run: node --test packages/runner/test/anvil-*.test.mjs packages/runner/test/full-simulation-anvil-only-v1.test.mjs
-
       - name: Control-plane lightweight qualification
         if: env.V7_QUALIFICATION_LANE == 'CONTROL_LIGHT' || env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
         shell: bash
@@ -534,9 +526,30 @@ jobs:
           node --check scripts/browser-agent-wake.mjs
           bash -n scripts/select-audit-controller-token.sh
 
+      # npm test = node --test: Node 22 discovers *.test.mjs in all package
+      # trees, including the V7 request suite, Anvil runner suite, and all
+      # other repository tests. They must run ONCE, not in overlapping steps.
       - name: Full repository Node test suite
         if: env.V7_QUALIFICATION_LANE == 'FULL'
-        run: npm test
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));
+          if(pkg.scripts?.test!=='node --test')throw new Error('Full qualification requires Node built-in test discovery');
+          const checks=[
+            ['packages/github-native-sim/test',name=>name.endsWith('.test.mjs')],
+            ['packages/runner/test',name=>/^anvil-.*\.test\.mjs$/.test(name)],
+            ['packages/runner/test',name=>name==='full-simulation-anvil-only-v1.test.mjs']
+          ];
+          for(const [dir,predicate] of checks){
+            if(!fs.readdirSync(dir).some(predicate))throw new Error('Missing discovered V7/Anvil suite: '+dir);
+          }
+          console.log('Full Node test discovery includes V7, Anvil and all repository tests');
+          NODE
+          npm test
 
       - name: Repository static checks
         if: env.V7_QUALIFICATION_LANE == 'FULL'
