@@ -1446,13 +1446,14 @@ export async function resolveTelemetryCallerContextV2({
   // Global privileged pools can contain an unrelated project's owner and are
   // not a sound first choice for the target being called.
   const archiveRole=target.archiveRoleCallers??null;
-  if(archiveRole&&(authRequired||/(?:NotConfigurator|NotFeeReceiver|NotPendingFeeReceiver|OnlyAdmin|NotNotifier)/i.test(text))){
+  if(archiveRole&&(authRequired||contextRequired||/(?:NotConfigurator|NotFeeReceiver|NotPendingFeeReceiver|OnlyAdmin|NotNotifier)/i.test(text))){
     const relevant=/(?:NotConfigurator)/i.test(text)?['configurator','owner']:
       /(?:NotPendingFeeReceiver)/i.test(text)?['pendingFeeReceiver']:
       /(?:NotFeeReceiver)/i.test(text)?['feeReceiver']:
       /(?:OnlyAdmin)/i.test(text)?['admin']:
       /(?:NotNotifier)/i.test(text)?['notifier']:
       /(?:UnauthorizedMinter)/i.test(text)?['verifiedMinter']:
+      /(?:NotVault|OnlyVault)/i.test(text)?['vault']:
       ['owner','admin','feeReceiver','configurator'];
     for(const role of relevant){
       const raw=archiveRole[role];
@@ -1667,6 +1668,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             ? {sender:balancerAction.sender,args:balancerAction.args,value:balancerAction.value,basis:balancerAction.basis,pool:balancerAction.pool}
             : balancerAction.kind==='BLOCKED'?null:qualifiedActionV2({target,selected,actors,rng});
           let sender=qualifiedAction?.sender??actors[ri(rng,actors.length)];
+          if(target.archiveRoleCallers&&selected.signature==='acceptOwnership()')sender=actors[1]??actors[0];
           const rec={
             schemaVersion:'curveyield-phase0-raw-simulation-call-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
             runId,callIndex:stats.calls+1,target:{qualifiedName:target.qualifiedName,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,address:target.address,recipeId:target.recipe?.recipeId??null,contextType:target.contextType??'DIRECT',contextDisposition:target.contextDisposition??'READY'},
@@ -1689,7 +1691,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
           // in an archive smoke. Test the *real source transaction* in its
           // own fork snapshot, observe its receipt, then restore the exact
           // pre-call state. Production telemetry is not affected.
-          const archiveDestructive=Boolean(target.archiveRoleCallers&&/^(?:renounceOwnership|transferOwnership)\(/.test(selected.signature));
+          const archiveDestructive=Boolean(target.archiveRoleCallers&&/^(?:renounceOwnership|transferOwnership|acceptOwnership|setMinter|setMinters|setMinterAllocation|setTransferWhitelist)\(/.test(selected.signature));
           const archiveActionSnapshot=archiveDestructive?await provider.send('evm_snapshot',[]):null;
           let args=null,argError=null;
           try{
@@ -1710,6 +1712,18 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             rec.error=rec.stages.ARG_GEN.error;
           }else{
             const value=qualifiedAction?.value??(f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n);
+            if(archiveActionSnapshot!==null&&selected.signature==='acceptOwnership()'&&target.archiveRoleCallers?.owner){
+              try{
+                const controlling=target.archiveRoleCallers.owner;
+                await ensureImpersonatedSenderV2({provider,ethers,address:controlling});
+                const roleTransfer=new ethers.Contract(target.address,['function transferOwnership(address)'],await provider.getSigner(controlling));
+                const pendingTx=await roleTransfer.getFunction('transferOwnership(address)').send(sender);
+                const pendingReceipt=await pendingTx.wait();
+                rec.archivePrerequisiteTransaction={kind:'SOURCE_OWNER_HANDOFF_PROPOSAL',hash:pendingTx.hash,status:pendingReceipt.status,newPendingOwner:sender};
+              }catch(error){
+                rec.archivePrerequisiteGap={kind:'SOURCE_OWNER_HANDOFF_UNAVAILABLE',error:String(error?.shortMessage??error?.message??error).slice(0,250)};
+              }
+            }
             // transferFrom's spender must have an actual BPT allowance from
             // the verified holder. Execute a local-Anvil holder-signed approval,
             // retain its receipt, and never assume unlimited allowance.
