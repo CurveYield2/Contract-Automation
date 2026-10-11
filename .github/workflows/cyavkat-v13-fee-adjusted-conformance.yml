@@ -86,7 +86,7 @@ jobs:
         working-directory: .cyavkat-v13/cyavKAT/upgrade
         run: |
           set -o pipefail
-          ONLY=deployAssets forge test --match-path 'test/fork/*' -vv 2>&1 | tee "$GITHUB_WORKSPACE/.cyavkat-test-results-v13/fork.log"
+          forge test --match-path 'test/fork/*' -vv 2>&1 | tee "$GITHUB_WORKSPACE/.cyavkat-test-results-v13/fork.log"
       - name: Save complete source-level and fork test evidence
         if: always()
         uses: actions/upload-artifact@v4
