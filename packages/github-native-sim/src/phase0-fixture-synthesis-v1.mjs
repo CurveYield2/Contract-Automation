@@ -108,6 +108,72 @@ export const PHASE0_CANONICAL_MAINNET_TOKENS_V1=Object.freeze([
   {symbol:'wstETH',address:'0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0'}
 ]);
 export const PHASE0_PERMIT2_ADDRESS_V1='0x000000000022d473030f116ddee9f6b43ac78ba3';
+// Stage 5 fixture-health control: prove that funded fork tokens can execute real
+// before/after accounting changes. Never count this as an audited-project transition.
+export async function executeForkTokenAccountingWitnessV1({provider,ethers,valuePool={},actors=[]}={}){
+  const evidence={
+    schemaVersion:'curveyield-phase0-fork-token-accounting-witness-v1',
+    scope:'FORK_TOKEN_FIXTURE_ONLY',
+    policy:'ISOLATED_EVM_SNAPSHOT_REAL_ERC20_TRANSFER_AND_READBACK',
+    countsAsProjectEconomicTransition:false,
+    status:'NO_VERIFIED_FIXTURE_TRANSITION',
+    checkedTokens:0,
+    attempts:[],
+    verifiedTransitions:0
+  };
+  if(actors.length<2||String(actors[0]).toLowerCase()===String(actors[1]).toLowerCase()){
+    evidence.status='UNAVAILABLE_NO_DISTINCT_ACTORS';
+    return evidence;
+  }
+  const sender=ethers.getAddress(actors[0]),receiver=ethers.getAddress(actors[1]);
+  const abi=['function balanceOf(address) view returns (uint256)','function transfer(address,uint256) returns (bool)'];
+  const tokens=(valuePool.tokens??[]).filter(token=>/^0x[0-9a-fA-F]{40}$/.test(String(token?.address??token))).slice(0,6);
+  for(const tokenInfo of tokens){
+    const address=ethers.getAddress(String(tokenInfo.address??tokenInfo));
+    const item={token:address,sender,receiver,amount:'1',status:'NOT_ATTEMPTED'};
+    evidence.attempts.push(item);evidence.checkedTokens++;
+    let snapshotId=null;
+    try{
+      const code=await provider.getCode(address);
+      if(!code||code==='0x'){item.status='NO_TOKEN_CODE';continue;}
+      const token=new ethers.Contract(address,abi,provider);
+      const beforeSender=BigInt(await token.balanceOf(sender));
+      const beforeReceiver=BigInt(await token.balanceOf(receiver));
+      item.before={sender:beforeSender.toString(),receiver:beforeReceiver.toString()};
+      if(beforeSender<1n){item.status='UNFUNDED_SENDER';continue;}
+      snapshotId=await provider.send('evm_snapshot',[]);
+      const signer=await provider.getSigner(sender);
+      const tx=await token.connect(signer).transfer(receiver,1n);
+      const receipt=await tx.wait();
+      item.transactionHash=receipt?.hash??tx.hash;
+      item.receiptStatus=receipt?.status??null;
+      const afterSender=BigInt(await token.balanceOf(sender));
+      const afterReceiver=BigInt(await token.balanceOf(receiver));
+      item.after={sender:afterSender.toString(),receiver:afterReceiver.toString()};
+      item.delta={sender:(afterSender-beforeSender).toString(),receiver:(afterReceiver-beforeReceiver).toString()};
+      item.status=receipt?.status===1&&(afterSender!==beforeSender||afterReceiver!==beforeReceiver)?'VERIFIED_ACCOUNTING_DELTA':'NO_VERIFIED_ACCOUNTING_DELTA';
+      if(item.status==='VERIFIED_ACCOUNTING_DELTA')evidence.verifiedTransitions++;
+    }catch(error){
+      item.status='TRANSFER_OR_READ_FAILED';
+      item.error=String(error?.shortMessage??error?.message??error).slice(0,800);
+    }finally{
+      if(snapshotId!==null){
+        const reverted=await provider.send('evm_revert',[snapshotId]);
+        if(reverted!==true){
+          const error=new Error('Accounting witness failed to restore isolated fixture snapshot');
+          error.code='PHASE0_ACCOUNTING_WITNESS_RESET_FAILED';
+          throw error;
+        }
+        item.snapshotRestored=true;
+      }
+    }
+    if(evidence.verifiedTransitions>0)break;
+  }
+  if(evidence.verifiedTransitions>0)evidence.status='VERIFIED_FIXTURE_ACCOUNTING_TRANSITION';
+  else if(evidence.checkedTokens===0)evidence.status='UNAVAILABLE_NO_FORK_TOKENS';
+  return evidence;
+}
+
 export const PHASE0_MEDUSA_SENDERS_V1=Object.freeze([
   '0x0000000000000000000000000000000000010000',
   '0x0000000000000000000000000000000000020000',
@@ -613,7 +679,7 @@ export function serializeValuePoolV1(valuePool={}){
 }
 
 
-const CREATOR_NAME_RE_V1=/^(?:create|deploy|new|clone|launch|register|add|open|make|build)/i;
+const CREATOR_NAME_RE_V1=/^(?:create|deploy|new|clone|launch|make|build)/i; // register/add change configuration; they are not evidence of deployed child contracts
 const AUTHORIZATION_RE_V1=/(?:owner|auth|admin|allowed|permission|role|sender|caller|only)/i;
 const CALLBACK_NAME_RE_V1=/(?:^on[A-Z]|Hook|Callback)/;
 
