@@ -132,6 +132,16 @@ jobs:
           runphase P2_00_VerifyQuestSigning
           runphase P2_01_Deploy
           runphase P2_02_ConfigureVault
+          echo "::group::Old withdrawal manager expiry-queue preflight"
+          old_wm=0x59B340EAb30AFE0cecD51C609d3190e8C75C40AE
+          echo "Active shares before permissionless expiry-prune:"
+          cast call "$old_wm" 'activeRequestedShares()(uint256)' --rpc-url http://127.0.0.1:8545 | tee "$evidence/old_requests_before.txt"
+          echo "Release shares:"
+          cast call "$old_wm" 'getSharesToRelease()(uint256)' --rpc-url http://127.0.0.1:8545 | tee "$evidence/old_released_shares.txt"
+          cast send "$old_wm" 'pruneExpiredRequests(uint256)' 500 --unlocked --from "$DEPLOYER" --rpc-url http://127.0.0.1:8545 2>&1 | tee "$evidence/phase-logs/prune_old_expired_requests.log"
+          echo "Active shares after permissionless expiry-prune:"
+          cast call "$old_wm" 'activeRequestedShares()(uint256)' --rpc-url http://127.0.0.1:8545 | tee "$evidence/old_requests_after.txt"
+          echo "::endgroup::"
           runphase P2_03_Cutover
           runphase P2_04_RemoveV1Fuses
           runphase P3_03_DeployGovernanceCore
