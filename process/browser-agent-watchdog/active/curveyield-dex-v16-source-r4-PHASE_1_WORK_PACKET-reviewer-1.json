@@ -4,9 +4,9 @@
   "campaignId": "curveyield-dex-v16-source-r4",
   "phaseId": "phase-1",
   "workerRole": "reviewer",
-  "status": "PAUSED_UNVERIFIED_DELIVERY",
+  "status": "PAUSED_RESPONSE_INTERRUPTED",
   "chatUrl": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac4013d-6ba4-83e8-b704-8cff2a4df8c8",
-  "lastProvider": "normal-system-chrome-x11-phase1-fixed-point",
+  "lastProvider": "normal-system-chrome-x11-manual-persistence-verified",
   "armedAt": "2026-10-11T18:57:15Z",
   "intervalMinutes": 5,
   "pokeIntervalMinutes": 20,
@@ -14,7 +14,10 @@
   "observation": {
     "assistantCount": 0,
     "lastAssistantHash": "",
-    "observedAt": "2026-10-11T18:57:15Z"
+    "observedAt": "2026-10-11T20:13:51Z",
+    "visualSendRunId": 38170808158,
+    "visualPersistenceRunId": 38171177088,
+    "responseState": "CONNECTION_INTERRUPTED_WAITING_FOR_COMPLETE_ANSWER"
   },
   "gate": {
     "mode": "LITE",
@@ -47,8 +50,8 @@
   },
   "watchdogRunId": "38166102753",
   "watchdogSweepStartedAt": "2026-10-11T18:59:52Z",
-  "lastDecision": "WAKE_DESKTOP_VISUALLY_UNVERIFIED",
+  "lastDecision": "WAKE_PERSISTED_AFTER_REOPEN_RESPONSE_CONNECTION_INTERRUPTED",
   "lastNoReadSweepAt": "2026-10-11T18:59:55Z",
   "elapsedSinceLastPokeMinutes": 2,
-  "deliveryConfirmed": false
+  "deliveryConfirmed": true
 }
