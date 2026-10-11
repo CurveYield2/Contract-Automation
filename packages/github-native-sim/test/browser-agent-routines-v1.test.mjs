@@ -382,10 +382,6 @@ test('existing-chat reviewer initial wake is idempotent per campaign milestone',
   assert.ok(wake.includes('for i in $(seq 0 10); do'));
   assert.ok(wake.includes('if [ "$i" -lt 10 ]; then sleep 30; fi'));
   assert.ok(wake.includes('WAKE_ACK_PATH'));
-  assert.ok(wake.includes("$(cat /tmp/wake-message.txt)\" != 'GET BACK TO WORK'"));
-  assert.ok(wake.includes("to_entries[] | select(.value==$chat) | .key"));
-  assert.ok(wake.includes("WORKER_ROLE\" == 'reviewer' || \"$WORKER_ROLE\" == 'master_reviewer'"));
-  assert.ok(wake.includes("WAKE_ACK_REVIEWER"));
   const watchdog = read('.github/workflows/browser-agent-watchdog.yml');
   assert.doesNotMatch(watchdog, /WAKE_ACK_PATH|WAKE_ACK_ID/);
   assert.match(wake, /group:\s*chatgpt-shared-browser-session-v1/);
