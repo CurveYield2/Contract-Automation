@@ -90,7 +90,7 @@ jobs:
 
       - name: Execute setter authority and cap boundary on pinned fork
         env:
-          RPC_URL: ${{ secrets.ETHEREUM_RPC }}
+          RPC_URL: ${{ secrets.RPC_ETHEREUM }}
           ROOT: ${{ steps.src.outputs.root }}
         shell: bash
         run: |
