@@ -37,7 +37,7 @@ test('canonical Phase 0, qualification and execution workflows use the private s
     'v7-execution-infrastructure-qualification.yml'
   ]){
     const content=fs.readFileSync(path.join(root,'.github/workflows',name),'utf8');
-    const secretName=['lite-phase0-randomized-simulation-v1.yml','v7-execution-infrastructure-qualification.yml'].includes(name)?'RPC_ETHEREUM':'ETHEREUM_RPC';
+    const secretName=['lite-phase0-randomized-simulation-v1.yml','lite-phase0-simulation-testing-v1.yml','v7-execution-infrastructure-qualification.yml'].includes(name)?'RPC_ETHEREUM':'ETHEREUM_RPC';
     assert.ok(content.includes('ETHEREUM_FORK_RPC_URL: ${{ secrets.'+secretName+' }}'),name);
   }
 });
