@@ -48,3 +48,19 @@ test('CurveYield wrapper child discovery checks the predicted pool has real on-c
   assert.deepEqual(await verifiedPredictedCurveYieldPoolV1({provider:{getCode:async()=> '0x'},ethers,expectedPool}),[]);
   assert.deepEqual(await verifiedPredictedCurveYieldPoolV1({provider,ethers,expectedPool:'not-an-address'}),[]);
 });
+
+test('Stage2 classifies Balancer BPT by executed recipe, excluding pools from ERC20 spender approval',()=>{
+  const weighted='0x0000000000000000000000000000000000000001';
+  const stable='0x0000000000000000000000000000000000000002';
+  const unrelated='0x0000000000000000000000000000000000000003';
+  const created=balancerCreatedPoolAddressesV1([
+    {target:'contracts/CurveYieldPoolFactoryWrapper.sol:CurveYieldPoolFactoryWrapper',
+      basis:'RETURNS_ADDRESS',recipeBasis:'CURVEYIELD_WRAPPER_ALLOWLIST_EXACT_POOL_PREDICTION_FEE_AND_TOKEN_CONFIG',createdAddresses:[weighted]},
+    {target:'@balancer-labs/v3-pool-stable/contracts/StablePoolFactory.sol:StablePoolFactory',
+      basis:'RETURNS_ADDRESS',recipeBasis:'BALANCER_V3_FACTORY_SORTED_TOKEN_CONFIG_AND_VALID_WEIGHTS',createdAddresses:[stable]},
+    {target:'contracts/OtherFactory.sol:OtherFactory',basis:'RETURNS_ADDRESS',recipeBasis:'GENERIC_ABI',createdAddresses:[unrelated]}
+  ]);
+  assert.deepEqual([...created].sort(),[weighted,stable].sort());
+  assert.ok(!created.has(unrelated));
+  assert.equal(created.size,2);
+});
