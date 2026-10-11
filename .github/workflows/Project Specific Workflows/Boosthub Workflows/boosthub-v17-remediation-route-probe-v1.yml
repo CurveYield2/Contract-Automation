@@ -82,7 +82,7 @@ jobs:
 
       - name: Reproduce prior sdYB route and assert V17 floor passes
         env:
-          RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          RPC_URL: ${{ secrets.ETHEREUM_RPC }}
         shell: bash
         run: |
           set -euo pipefail
