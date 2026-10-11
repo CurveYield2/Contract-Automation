@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import {assertDeployGateEvidenceV2,digestV2} from './lib/phase0-deploy-gate-v2.mjs';
 import { createHash } from 'node:crypto';
 import {preparePhaseWork} from './lib/lite-phase-work-v1.mjs';
 
@@ -56,11 +57,12 @@ if(artifacts.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2'||a
 const deploy=read(evidence.deployConfigExecution);
 if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||deploy.executionMode!=='ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY')throw new Error('Phase-0 requires only source package forked deployment evidence');
 if(deploy.campaignId!==receipt.campaign.campaignId||deploy.sourceSha256!==sourceSha||deploy.fork?.engine!=='anvil'||deploy.fork?.chainId!==1)throw new Error('Phase-0 fork deployment identity mismatch');
-if(deploy.status==='PASS'){
-  if(!(deploy.attempts?.length>0)||deploy.attempts.some(x=>x.status!=='PASS'||x.exitCode!==0)||deploy.scriptDispositions?.some(x=>x.disposition!=='EXECUTED_PASS'))throw new Error('Phase-0 native deployment scripts are incomplete');
-}else if(deploy.status==='NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'){
-  if((deploy.attempts?.length??0)!==0||(deploy.scriptDispositions?.length??0)!==0)throw new Error('Non-applicable deploy status has executed scripts');
-}else throw new Error('Phase-0 deploy/config failed: '+String(deploy.status));
+assertDeployGateEvidenceV2(deploy);
+if(deploy.reconciliation){
+  const rawFile=required(path.join(campaignRoot,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json'),'immutable original fork deploy evidence');
+  if(digestV2(fs.readFileSync(rawFile))!==deploy.reconciliation.originalEvidenceSha256)throw new Error('Phase-0 original deployment evidence is not byte-identical');
+  evidence.deployConfigExecutionRaw=rawFile;
+}
 
 const now=new Date().toISOString();
 const refs=Object.entries(evidence).map(([role,file])=>({role,path:rel(campaignRoot,file),sha256:digestFile(file)}));
