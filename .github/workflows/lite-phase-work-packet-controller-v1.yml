@@ -62,7 +62,9 @@ concurrency:
 jobs:
   validate-bookkeep-advance:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Phase 5 may run multiple 35-minute candidate-specific V7 executions.
+    # Preflight fails immediately on missing RPC; this is only the outer ceiling.
+    timeout-minutes: 90
     steps:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
