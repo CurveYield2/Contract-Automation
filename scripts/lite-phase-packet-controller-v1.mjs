@@ -549,6 +549,24 @@ if(reviewKind==='master'){
   };
   if(result.status==='MASTER_REVIEW_HELD')emit(result.status,'MASTER_REVIEW_HELD: '+result.failures.join('; ')+'. No campaign state or reviewed artifact was changed.');
   if(result.status==='MASTER_REVIEW_INVALID')emit(result.status,['Master-review submission is invalid. Repair only the exact items below, then submit the master request again with attempt increased by 1.','',...result.failures.map(x=>'- '+x),'','The campaign has not advanced.'].join('\n'));
+  // Legacy sealed Phase-5 machine failures cannot be accepted unchanged
+  // at the Reviewer-2 master-review boundary. An amended segment is
+  // reexecuted through the new mandatory pre-seal gate.
+  if(pending.segmentId==='reviewer-2-phases-02-05'&&result.status==='MASTER_REVIEW_ACCEPTED'){
+    const phase5=canonicalFor(root,campaignPath,5);
+    const failures=validatePhase5TargetExecutionGateV1({
+      controllerRoot:root,campaignPath,
+      targetDesigns:phaseOutput(phase5,'step-3','targetDesigns')??[],
+      materialCandidateKeys:materialPhase5CandidateKeys({root,campaignPath,form:phase5}),
+      executionResults:pending.successorPlan?.prefillContext?.phase5ExecutionResults??{},
+      expectedSourceSha256:directory.sourceSha256
+    });
+    if(failures.length)emit('MASTER_REVIEW_INVALID',[
+      'A sealed Phase 5 with missing or inconclusive mandatory simulations cannot be accepted unchanged.',
+      'Submit a substantive AMENDED reviewer-2 work-form correction; the controller will rerun Phase 5 before resealing.',
+      ...failures.map(x=>'- '+x)
+    ].join('\n'));
+  }
   let nextAssignment=null;
   const decision={outcome:result.outcome,summary,submittedAt:now};
   if(result.status==='MASTER_AMENDMENT_READY_FOR_REFRESH'){
