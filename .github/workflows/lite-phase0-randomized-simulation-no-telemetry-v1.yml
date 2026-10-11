@@ -20,7 +20,8 @@ permissions:
 jobs:
   phase0-randomized-simulation:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Simulation may run for 50 minutes; retain time for failed-run evidence upload.
+    timeout-minutes: 60
     steps:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
@@ -84,8 +85,13 @@ jobs:
           test -n "$historical_code" && test "$historical_code" != "0x" || { echo "::error::Ethereum fork source did not return historical WETH code at block 18000000"; exit 1; }
           rm -rf .phase0-randomized-output
           # Reserve time for diagnostics and artifact upload if RPC or Medusa stalls.
-          # 21-minute wall-clock watchdog; the Medusa minimum stays above 100,000.
-          timeout -s TERM -k 30s 1260s node scripts/run-phase0-randomized-simulation-no-telemetry-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --output .phase0-randomized-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-randomized.json
+          # 50-minute HARD limit plus independent child-process watchdog: RPC
+          # failure or stalled calls terminate early even if the runner is blocked.
+          timeout -s TERM -k 30s 3000s node scripts/phase0-no-telemetry-watchdog-v1.mjs -- node scripts/run-phase0-randomized-simulation-no-telemetry-v1.mjs \
+            --controller-root .audit-controller \
+            --campaign-path "${{ inputs.campaign_path }}" \
+            --output .phase0-randomized-output \
+            --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-randomized.json
 
       - name: Report randomized simulation diagnostics
         if: ${{ always() }}
