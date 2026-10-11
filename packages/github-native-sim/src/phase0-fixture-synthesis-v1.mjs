@@ -838,7 +838,42 @@ function creatorParamValueV1({ethers,param,attempt,actor,tokenSet,valuePool,targ
   if(/^bytes\d+$/.test(type))return ethers.zeroPadValue('0x',Number(type.slice(5)));
   return 0;
 }
+// Balancer v3 factories require sorted TokenConfig tuples and exact pool math
+// parameters. Generic address/uint generation cannot produce valid pools.
+export function buildBalancerV3CreatorArgumentsV1({ethers,candidate,attempt=0,actor,valuePool={}}={}){
+  const targetName=String(candidate?.target?.logicalQualifiedName??candidate?.target?.qualifiedName??'');
+  const fragment=candidate?.selected?.fragment;
+  if(!/@balancer-labs\/v3-/.test(targetName)||!/Pool.*Factory|WeightedPool8020Factory/.test(targetName)||fragment?.name!=='create')return null;
+  const tokens=fundedTokensV1(valuePool);
+  if(tokens.length<2)return null;
+  const picked=tokens.slice((attempt%Math.max(1,tokens.length-1)),(attempt%Math.max(1,tokens.length-1))+2);
+  if(picked.length!==2)return null;
+  const rows=picked.sort((a,b)=>String(a.address).toLowerCase().localeCompare(String(b.address).toLowerCase()));
+  const tokenConfigs=rows.map(token=>[ethers.getAddress(token.address),0,ethers.ZeroAddress,false]);
+  const roleAccounts=[ethers.ZeroAddress,ethers.ZeroAddress,ethers.ZeroAddress,ethers.ZeroAddress];
+  const amounts=[500000000000000000n,500000000000000000n];
+  const fill=(param)=>{
+    const name=String(param?.name??'').toLowerCase(),type=String(param?.type??'');
+    if(param?.baseType==='array'&&param.arrayChildren?.baseType==='tuple'&&(param.arrayChildren.components??[]).some(c=>/token/i.test(String(c.name??''))))return tokenConfigs;
+    if(param?.baseType==='array'&&/^uint/.test(String(param.arrayChildren?.type??''))&&/weight/.test(name))return amounts;
+    if(param?.baseType==='tuple'&&/role|account/i.test(name))return roleAccounts;
+    if(param?.baseType==='tuple'&&/tokenconfig/i.test(name))return tokenConfigs[0];
+    if(type==='string')return /symbol/i.test(name)?'P0BPT':'Phase0 Pool';
+    if(type==='address')return /hook/i.test(name)?ethers.ZeroAddress:actor;
+    if(type==='bytes32')return ethers.id('phase0-balancer-v3:'+targetName+':'+attempt);
+    if(type==='bytes')return '0x';
+    if(type==='bool')return false;
+    if(/^uint/.test(type))return /(?:swapfee|feepercentage)/i.test(name)?10000000000000000n:/amplification/i.test(name)?100n:0n;
+    return null;
+  };
+  const args=(fragment.inputs??[]).map(fill);
+  if(args.some(arg=>arg===null))return null;
+  // Every dynamic array has protocol-specific dimensions, never random lengths.
+  return{args,basis:'BALANCER_V3_FACTORY_SORTED_TOKEN_CONFIG_AND_VALID_WEIGHTS',tokens:rows.map(row=>row.address)};
+}
 export function buildCreatorArgumentsV1({ethers,candidate,attempt=0,actor,valuePool={},targets=[]}){
+  const balancer=buildBalancerV3CreatorArgumentsV1({ethers,candidate,attempt,actor,valuePool});
+  if(balancer)return{...balancer,chosenAddresses:[]};
   const tokens=fundedTokensV1(valuePool),tokenSet=tokenSetForAttemptV1({ethers,tokens,attempt});
   const callbacks=callbackTargetAddressesV1({ethers,targets});
   const context={candidateKey:candidate?.key??functionKeyV1(candidate?.target,candidate?.selected),tokenArrayLength:null,tokenSet,chosenAddresses:[]};
