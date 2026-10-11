@@ -89,15 +89,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .phase0-regression-evidence
-          gh run download 38157021296 --repo "$GITHUB_REPOSITORY" \\
-            --name phase0-deploy-config-curveyield-dex-v16-source-r4-38157021296 \\
+          gh run download 38157021296 --repo "$GITHUB_REPOSITORY" \
+            --name phase0-deploy-config-curveyield-dex-v16-source-r4-38157021296 \
             --dir .phase0-regression-evidence
       - name: Source-verify all exclusions without executing a deployment
         run: |
           set -euo pipefail
-          node scripts/reconcile-phase0-deploy-evidence-v1.mjs \\
-            --input .phase0-regression-evidence/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json \\
-            --output .phase0-regression-reconciled/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json \\
-            --campaign-root '.audit-controller/campaigns/CurveYield DEX v16 Source r4' \\
+          node scripts/reconcile-phase0-deploy-evidence-v1.mjs \
+            --input .phase0-regression-evidence/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json \
+            --output .phase0-regression-reconciled/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json \
+            --campaign-root '.audit-controller/campaigns/CurveYield DEX v16 Source r4' \
             --source-run-id 38157021296
           node --input-type=module -e 'import fs from "node:fs";import {assertDeployGateEvidenceV2} from "./scripts/lib/phase0-deploy-gate-v2.mjs";const e=JSON.parse(fs.readFileSync(".phase0-regression-reconciled/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json","utf8"));assertDeployGateEvidenceV2(e);if(e.reconciliation.excludedScripts.length!==4)process.exit(3)'
