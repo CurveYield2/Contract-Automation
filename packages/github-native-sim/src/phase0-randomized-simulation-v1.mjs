@@ -1134,6 +1134,16 @@ export async function prepareQualifiedRuntimeV2({provider,ethers,targets,actors}
 }
 function qualifiedActionV2({target,selected,actors,rng}){
   const recipeId=target.recipe?.recipeId,runtime=target.recipeRuntime??{},sig=selected.signature;
+  // Archived source lane: these amount/caller pairs are justified by mined
+  // stake setup receipts, not inferred from arbitrary ABI field names.
+  const seededStake=target.archiveStakeRuntime;
+  if(seededStake?.ready===true){
+    const {holder,receiver}=seededStake;
+    if(sig==='stake(uint256)'||sig==='deposit(uint256)')return{sender:holder,args:[100n],value:0n,basis:'ARCHIVE_SOURCE_STAKE_LIFECYCLE'};
+    if(sig==='withdraw(uint256,address)'||sig==='withdrawImmediate(uint256,address)')return{sender:holder,args:[1n,receiver],value:0n,basis:'ARCHIVE_SOURCE_FUNDED_STAKE_EXIT'};
+    if(sig==='requestWithdrawal(uint256)')return{sender:holder,args:[1n],value:0n,basis:'ARCHIVE_SOURCE_FUNDED_STAKE_QUEUE'};
+    if(sig==='withdrawAll(address)')return{sender:holder,args:[receiver],value:0n,basis:'ARCHIVE_SOURCE_FUNDED_STAKE_EXIT'};
+  }
   // Archived-source fixture lane only: use real signed token calls with funded,
   // verified balances and on-chain allowance, never randomly forged amounts.
   const archive=target.archiveTokenRuntime;
@@ -1432,6 +1442,34 @@ export async function resolveTelemetryCallerContextV2({
     }
   }
 
+  // Use per-contract role getters gathered from the actual source deployment.
+  // Global privileged pools can contain an unrelated project's owner and are
+  // not a sound first choice for the target being called.
+  const archiveRole=target.archiveRoleCallers??null;
+  if(archiveRole&&(authRequired||/(?:NotConfigurator|NotFeeReceiver|NotPendingFeeReceiver|OnlyAdmin|NotNotifier)/i.test(text))){
+    const relevant=/(?:NotConfigurator)/i.test(text)?['configurator','owner']:
+      /(?:NotPendingFeeReceiver)/i.test(text)?['pendingFeeReceiver']:
+      /(?:NotFeeReceiver)/i.test(text)?['feeReceiver']:
+      /(?:OnlyAdmin)/i.test(text)?['admin']:
+      /(?:NotNotifier)/i.test(text)?['notifier']:
+      /(?:UnauthorizedMinter)/i.test(text)?['verifiedMinter']:
+      ['owner','admin','feeReceiver','configurator'];
+    for(const role of relevant){
+      const raw=archiveRole[role];
+      if(!raw||!ethers.isAddress(raw)||raw===ethers.ZeroAddress)continue;
+      const privileged=ethers.getAddress(raw);
+      if(privileged.toLowerCase()===String(defaultSender).toLowerCase())continue;
+      const sender=await ensureImpersonatedSenderV2({provider,ethers,address:privileged});
+      const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender,to:target.address,value});
+      adaptations.push({kind:'SOURCE_ROLE_CALLER_RETRY',role,targetAddress:target.address,signature:selected.signature,status:attempt.success?'PASS':'REVERTED'});
+      if(attempt.success){
+        const resolution=`SOURCE_ROLE:${role}:${sender}`;
+        callerState.set(key,{resolution,executionAddress:target.address,sender});
+        weightMultipliers.set(key,1);
+        return{...attempt,resolution,executionAddress:target.address,sender,adaptations,reused:false};
+      }
+    }
+  }
   if(authRequired){
     for(const raw of valuePool?.privileged??[]){
       let privileged;
