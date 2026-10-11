@@ -639,7 +639,7 @@ export function buildAccountingBaselineEvidenceV1(sentinel={}){
       return;
     }
     const raw=result.value;
-    if(typeof raw!=='string'||!(/^-?\\d+$/.test(raw))){
+    if(typeof raw!=='string'||!(/^-?\d+$/.test(raw))){
       failures.push({...source,error:'NON_NUMERIC_ACCOUNTING_READ'});
       return;
     }
@@ -655,7 +655,7 @@ export function buildAccountingBaselineEvidenceV1(sentinel={}){
       }
     }
     for(const [name,value] of Object.entries(observations.native??{})){
-      if(typeof value==='string'&&/^-?\\d+$/.test(value))readings.push({target:state.logicalQualifiedName,address:state.address,contextType:state.contextType??'DIRECT',scope:'NATIVE_BALANCE',name,value});
+      if(typeof value==='string'&&/^-?\d+$/.test(value))readings.push({target:state.logicalQualifiedName,address:state.address,contextType:state.contextType??'DIRECT',scope:'NATIVE_BALANCE',name,value});
     }
   }
   const projectReadings=readings.filter(row=>row.scope==='PROJECT_ACCOUNTING_VIEW').length;
@@ -1321,7 +1321,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
   const canonicalBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
   const accountingBaseline=buildAccountingBaselineEvidenceV1(canonicalBaseline);
   const accountingBaselineRef='PHASE0_ACCOUNTING_BASELINE_v1.json';
-  await fs.writeFile(path.join(outRoot,accountingBaselineRef),JSON.stringify(accountingBaseline,null,2)+'\\n');
+  await fs.writeFile(path.join(outRoot,accountingBaselineRef),JSON.stringify(accountingBaseline,null,2)+'\n');
   console.log(`[phase0-accounting] baseline: projectViews=${accountingBaseline.projectReadings}; relatedTokenViews=${accountingBaseline.relatedTokenReadings}; nativeBalances=${accountingBaseline.nativeReadings}; failedViews=${accountingBaseline.failedAccountingReadings}; status=${accountingBaseline.status}`);
   for(let run=1;run<=telemetryRuns;run++){
     let resetEvidence={required:run>1,revertAccepted:run===1,sentinelMatch:run===1,expectedDigestSha256:canonicalBaseline.digestSha256,observedDigestSha256:canonicalBaseline.digestSha256};
