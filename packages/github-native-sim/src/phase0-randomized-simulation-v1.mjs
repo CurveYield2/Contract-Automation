@@ -559,6 +559,15 @@ function randomValue(param,rng,ctx){
     const amount=chooseFixtureAmountV1({rng,param,valuePool:ctx.valuePool,chosenAddresses});
     if(amount!==null)return amount;
   }
+  // For ABI fields explicitly named as monetary amounts, a small nonzero
+  // value is a safer source-backed probe than the generic 0/MAX uint extremes.
+  // IDs, timestamps, flags, bps and index parameters keep generic handling.
+  const pName=String(param?.name??'');
+  if(/^uint(?:[0-9]+)?$/.test(String(param?.type??''))&&
+     /^(?:amount|assets|shares|value|quantity|qty|depositAmount|withdrawAmount|mintAmount|stakeAmount|repayAmount|inputAmount|outputAmount|tokenAmount)$/i.test(pName) &&
+     !(ctx.valuePool?.tokens??[]).some(t=>t.fundedAmount!=null&&BigInt(t.fundedAmount)>0n)){
+    return [1n,10n,100n][ri(rng,3)];
+  }
   const generated=generateTypedValueV2(param,rng,{
     addresses:ctx.valuePool
       ? weightedFixtureAddressSeedV1({valuePool:ctx.valuePool,actors:ctx.actors,targets:ctx.targets,chosenAddresses})
