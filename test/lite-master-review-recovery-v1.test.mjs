@@ -65,7 +65,7 @@ test('rejects substituted GitHub blob even when API claims the requested identit
     const original=Buffer.from('sealed source');
     const row=sealedForm(original);
     setBlob(Buffer.from('changed source'),row);
-    assert.throws(()=>readSealedOriginal(root,row),/Git\\/SHA256 digest mismatch/);
+    assert.throws(()=>readSealedOriginal(root,row),/Git\/SHA256 digest mismatch/);
   });
 });
 
@@ -102,7 +102,7 @@ test('master wake references authority instead of duplicating the review manual'
   });
   assert.ok(message.length<650,'wake must remain much shorter than the prior instructions');
   assert.match(message,/MASTER_REVIEW_REQUIRED/);
-  assert.match(message,/master-review\\/START_HERE\\.md/);
-  assert.match(message,/MASTER_REVIEW_RECORD_v1\\.json/);
+  assert.match(message,/master-review\/START_HERE\.md/);
+  assert.match(message,/MASTER_REVIEW_RECORD_v1\.json/);
   assert.doesNotMatch(message,/Do not start new executions|schemaVersion|Step-by-step instructions/);
 });
