@@ -764,21 +764,6 @@ export function shouldObserveAccountingCallV1({selected,target,valuePool=null,ex
   }
   return{observe:false,basis:'NON_ACCOUNTING_OR_REJECTED'};
 }
-function zeroAbiValueV2(ethers,param){
-  if(param?.baseType==='array'){
-    if(Number.isInteger(param.arrayLength)&&param.arrayLength>=0)return Array.from({length:param.arrayLength},()=>zeroAbiValueV2(ethers,param.arrayChildren));
-    return[];
-  }
-  if(param?.baseType==='tuple')return (param.components??[]).map(child=>zeroAbiValueV2(ethers,child));
-  const type=String(param?.type??'');
-  if(type==='address')return ethers.ZeroAddress;
-  if(type==='bool')return false;
-  if(type==='string')return '';
-  if(type==='bytes')return '0x';
-  if(/^bytes\d+$/.test(type))return ethers.zeroPadValue('0x',Number(type.slice(5)));
-  if(/^u?int(?:\d+)?$/.test(type))return 0n;
-  return 0;
-}
 function mutableFunctionsForArtifactV2({ethers,artifact,qualifiedName,sourceIntelligence={}}){
   const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,qualifiedName);
   const recipe=qualifyRecipeV2({qualifiedName,abi:artifact.abi,declaredStandards});
@@ -787,23 +772,6 @@ function mutableFunctionsForArtifactV2({ethers,artifact,qualifiedName,sourceInte
     return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
   });
   return{declaredStandards,recipe,functions};
-}
-function decodedErrorMatchesInterfaceV2(iface,error){
-  const data=error?.data??error?.info?.error?.data??null;
-  if(typeof data!=='string'||data==='0x')return false;
-  try{return Boolean(iface.parseError(data));}catch{return false;}
-}
-async function facadeAnswersSelectorV2({provider,ethers,facadeAddress,implArtifact,selected,from}){
-  let iface;
-  try{iface=new ethers.Interface(normalizedAbi(implArtifact.abi));}catch{return false;}
-  let data;
-  try{data=iface.encodeFunctionData(selected.signature,(selected.fragment.inputs??[]).map(param=>zeroAbiValueV2(ethers,param)));}catch{return false;}
-  try{
-    await provider.call({from,to:facadeAddress,data,value:0n});
-    return true;
-  }catch(error){
-    return decodedErrorMatchesInterfaceV2(iface,error);
-  }
 }
 async function eip1967ImplementationAddressV2({provider,ethers,address}){
   try{
@@ -815,7 +783,7 @@ async function eip1967ImplementationAddressV2({provider,ethers,address}){
     return code&&code!=='0x'?candidate:null;
   }catch{return null;}
 }
-export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={},associations={},probeSelectors=true}){
+export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={}}){
   const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
   const deployedByAddress=new Map(deployed.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
   const targetByAddress=new Map(targets.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
@@ -2277,7 +2245,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     };
     console.log(`[phase0-smoke-progress] END fallback deployment; deployed=${deployed.length}`);
     let targets=targetObjects(ethers,artifacts,deployed,sourceIntelligence);
-    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence,probeSelectors:false});
+    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence});
     targets=delegateContexts.targets;
     const runtimePreparation=await prepareQualifiedRuntimeV2({provider,ethers,targets,actors});
     runtimePreparation.contextEvidence=delegateContexts.contextEvidence;
