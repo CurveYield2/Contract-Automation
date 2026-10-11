@@ -989,7 +989,9 @@ function tokenByAddressV1(valuePool={}){
 }
 function associatedTokensV1(valuePool,address){
   const byAddress=tokenByAddressV1(valuePool);
-  return associationRowsForV1(valuePool,address).map(row=>byAddress.get(String(row).toLowerCase())).filter(Boolean);
+  return associationRowsForV1(valuePool,address)
+    .map(row=>byAddress.get(String(row).toLowerCase()))
+    .filter(token=>token&&token.fundedAmount!=null&&BigInt(token.fundedAmount)>0n);
 }
 function activationCandidateKeyV1(target,selected,createdAddress){
   return functionKeyV1(target,selected)+'|created:'+String(createdAddress).toLowerCase();
@@ -1068,7 +1070,7 @@ export function buildActivationArgumentsV1({ethers,candidate,attempt=0,actor,val
   const addressLeaves=(candidate.selected?.fragment?.inputs??[]).reduce((n,param)=>n+addressLeafCountV1(param),0);
   const ctx={
     actor,attempt,associations,tokens,createdAddress:ethers.getAddress(candidate.createdAddress),
-    mustPlaceCreated:addressLeaves>0,createdSlot:addressLeaves?attempt%addressLeaves:0,addressCounter:0,placedCreated:false
+    mustPlaceCreated:!candidate.namedLocal&&addressLeaves>0,createdSlot:addressLeaves?attempt%addressLeaves:0,addressCounter:0,placedCreated:false
   };
   const args=(candidate.selected?.fragment?.inputs??[]).map(param=>activationValueV1({ethers,param,ctx}));
   return{args,associations,tokens:tokens.map(token=>token.address),createdPlaced:ctx.placedCreated,createdSlot:ctx.createdSlot};
