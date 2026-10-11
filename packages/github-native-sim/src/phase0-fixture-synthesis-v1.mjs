@@ -180,7 +180,8 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
   }
   const deployer=normalizedAddressV1(ethers,actors[0]);
   if(deployer)privileged.add(deployer);
-  for(const target of targets){
+  let discoveredTargets=0;
+  await mapLimitV1(targets,6,async target=>{
     const targetAddress=normalizedAddressV1(ethers,target?.address);
     if(!targetAddress)continue;
     addressSet.add(targetAddress);
@@ -205,7 +206,10 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
         gaps.push({type:'ASSOCIATION_VIEW_REVERTED',target:targetAddress,function:fragment.format('sighash'),message:String(error?.shortMessage??error?.message??error).slice(0,800)});
       }
     }
-  }
+    discoveredTargets++;
+    if(discoveredTargets%5===0||discoveredTargets===targets.length)console.log(`[phase0-fixture] association discovery ${discoveredTargets}/${targets.length} targets`);
+  });
+  console.log('[phase0-fixture] association discovery complete; canonical token probes started');
   for(const row of PHASE0_CANONICAL_MAINNET_TOKENS_V1){
     const address=ethers.getAddress(row.address);
     let code='0x';
@@ -221,7 +225,8 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
     const token={symbol:row.symbol,address,source:'CANONICAL_MAINNET',decimals:shape?.decimals??null,totalSupply:shape?.totalSupply??null};
     tokens.push(token);tokenByAddress.set(address.toLowerCase(),token);addressSet.add(address);
   }
-  for(const target of targets){
+  console.log('[phase0-fixture] canonical token probes complete; deployed target token probes started');
+  await mapLimitV1(targets,6,async target=>{
     const address=normalizedAddressV1(ethers,target?.address);
     if(!address||tokenByAddress.has(address.toLowerCase()))continue;
     try{
@@ -230,7 +235,8 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
       tokens.push(token);tokenByAddress.set(address.toLowerCase(),token);addressSet.add(address);
       receipts.push({kind:'TARGET_ERC20_SHAPE_PROBE',address,qualifiedName:target?.qualifiedName??null,decimals:shape.decimals,totalSupply:shape.totalSupply,status:'PASS'});
     }catch{}
-  }
+  });
+  console.log(`[phase0-fixture] token discovery complete; discovered=${tokens.length}; gaps=${gaps.length}`);
   for(const address of privileged)addressSet.add(address);
   return{
     addresses:[...addressSet],
