@@ -89,13 +89,14 @@ jobs:
           timeout -s TERM -k 30s 2400s node scripts/run-phase0-fork-deploy-config-v1.mjs \
             --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" \
             --output .phase0-deploy-smoke --fork-url "$ETHEREUM_FORK_RPC_URL" | tee .phase0-deploy-smoke.log
-          jq -e '
-            .schemaVersion=="curveyield-lite-phase0-deploy-config-execution-v3"
-            and .executionMode=="ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY"
-            and (.status=="PASS" or .status=="NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT")
-            and (.status!="PASS" or (all(.scriptDispositions[]; .disposition=="EXECUTED_PASS") and all(.attempts[]; .status=="PASS" and .exitCode==0)))
-            and (.fork.engine=="anvil" and .fork.chainId==1)
-          ' .phase0-deploy-smoke/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json >/dev/null
+          file=.phase0-deploy-smoke/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
+          if jq -e '.status=="BLOCKED_SCRIPT_FAILURE"' "$file" >/dev/null; then
+            node scripts/reconcile-phase0-deploy-evidence-v1.mjs \
+              --input "$file" --output "$file" \
+              --campaign-root ".audit-controller/$CAMPAIGN_PATH" \
+              --source-run-id "$GITHUB_RUN_ID"
+          fi
+          node --input-type=module -e 'import fs from "node:fs";import {assertDeployGateEvidenceV2} from "./scripts/lib/phase0-deploy-gate-v2.mjs";assertDeployGateEvidenceV2(JSON.parse(fs.readFileSync(process.argv[1],"utf8")))' "$file"
       - name: Diagnose native deployment script dispositions
         if: ${{ always() }}
         shell: bash

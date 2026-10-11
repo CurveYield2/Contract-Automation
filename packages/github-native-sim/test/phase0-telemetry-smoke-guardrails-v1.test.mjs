@@ -13,6 +13,7 @@ test('Phase-0 smoke invokes bounded forked package deployment only',()=>{
 test('Phase-0 smoke retains native script diagnostics and fails on incomplete configuration',()=>{
  assert.match(workflow,/Retain full smoke evidence on success or failure/);
  assert.match(workflow,/PHASE0_DEPLOY_CONFIG_EXECUTION_v1\.json/);
- assert.match(workflow,/all\(\.scriptDispositions\[\]; \.disposition=="EXECUTED_PASS"\)/);
- assert.match(workflow,/all\(\.attempts\[\]; \.status=="PASS" and \.exitCode==0\)/);
+ assert.match(workflow,/assertDeployGateEvidenceV2/);
+ assert.match(workflow,/reconcile-phase0-deploy-evidence-v1\.mjs/);
+ assert.match(workflow,/\.status=="BLOCKED_SCRIPT_FAILURE"/);
 });

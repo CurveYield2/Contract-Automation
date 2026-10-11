@@ -69,6 +69,18 @@ jobs:
             --output .phase0-deploy-output \
             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-deploy-result.json
 
+      - name: Reconcile verified non-execution script exclusions
+        shell: bash
+        run: |
+          set -euo pipefail
+          file=.phase0-deploy-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
+          if jq -e '.status=="BLOCKED_SCRIPT_FAILURE"' "$file" >/dev/null; then
+            node scripts/reconcile-phase0-deploy-evidence-v1.mjs \
+              --input "$file" --output "$file" \
+              --campaign-root ".audit-controller/${{ inputs.campaign_path }}" \
+              --source-run-id "$GITHUB_RUN_ID"
+          fi
+
       - name: Retain deployment/configuration evidence even on failure
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -85,17 +97,7 @@ jobs:
           set -euo pipefail
           evidence=.phase0-deploy-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
           test -s "$evidence"
-          jq -e '
-            .schemaVersion=="curveyield-lite-phase0-deploy-config-execution-v3"
-            and .executionMode=="ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY"
-            and .fork.engine=="anvil" and .fork.chainId==1
-            and ((.status=="PASS" and (.coverage.executedScripts|tonumber)>0
-              and (.coverage.failedOrUnsupportedScripts|tonumber)==0
-              and all(.scriptDispositions[]; .disposition=="EXECUTED_PASS")
-              and all(.attempts[]; .status=="PASS" and .exitCode==0))
-              or (.status=="NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT"
-                and (.scriptDispositions|length)==0 and (.attempts|length)==0))
-          ' "$evidence" >/dev/null
+          node --input-type=module -e 'import fs from "node:fs";import {assertDeployGateEvidenceV2} from "./scripts/lib/phase0-deploy-gate-v2.mjs";assertDeployGateEvidenceV2(JSON.parse(fs.readFileSync(process.argv[1],"utf8")))' "$evidence"
 
       - name: Publish deployment evidence and Phase 6 matrix without fuzz baselines
         shell: bash

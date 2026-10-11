@@ -7,10 +7,18 @@ const campaignRoot=path.join(path.resolve(a['controller-root']),...a['campaign-p
 const src=path.resolve(a['simulation-output']);
 const raw=await fs.readFile(path.join(src,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),'utf8');
 const deploy=JSON.parse(raw);
+const {assertDeployGateEvidenceV2,digestV2}=await import('./lib/phase0-deploy-gate-v2.mjs');
+assertDeployGateEvidenceV2(deploy);
+const rawPath=path.join(src,'PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json');
+if(deploy.reconciliation){
+  const original=await fs.readFile(rawPath);
+  if(digestV2(original)!==deploy.reconciliation.originalEvidenceSha256)throw new Error('Original deployment evidence digest mismatch');
+}
 if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||!['PASS','NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'].includes(deploy.status))throw new Error('Deployment evidence does not satisfy Phase-0 deploy/config-only gate');
 const destination=path.join(campaignRoot,'evidence/phase0');
 await fs.mkdir(destination,{recursive:true});
 await fs.writeFile(path.join(destination,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),raw);
+if(deploy.reconciliation)await fs.copyFile(rawPath,path.join(destination,'PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json'));
 const readiness=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'utf8'));
 const work=path.join(campaignRoot,'work/phase-06');await fs.mkdir(work,{recursive:true});
 await fs.writeFile(path.join(work,'LITE_DEPLOY_CONFIG_MATRIX.md'),renderDeployConfigMatrixV1({readiness,execution:deploy}));
