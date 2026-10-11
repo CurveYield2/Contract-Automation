@@ -48,19 +48,23 @@ test('primary and No Telemetry only use private cache through exact intelligence
   }
 });
 
-test('compilation outputs are stored only on the private cache branch, never authoritative main',()=>{
+test('compilation outputs live only in an isolated folder on private Audit-Controller main',()=>{
   const source=fs.readFileSync(new URL('../src/phase0-private-build-cache-v1.mjs',import.meta.url),'utf8');
-  assert.match(source,/PRIVATE_CACHE_BRANCH = 'phase0-verified-build-cache'/);
-  assert.match(source,/ensurePrivateCacheBranch\(token\);await tryPublish/);
-  assert.match(source,/ref:PRIVATE_CACHE_BRANCH/);
+  assert.match(source,/PRIVATE_CACHE_ROOT = 'Phase0 Build Cache'/);
+  assert.match(source,/PRIVATE_CACHE_REF = 'main'/);
+  assert.match(source,/ref:PRIVATE_CACHE_REF/);
   assert.match(source,/repos\/CurveYield2\/Audit-Controller\/contents/);
+  assert.doesNotMatch(source,/phase0-verified-build-cache/);
   assert.doesNotMatch(source,/actions\/cache@/);
 });
 
-test('V7 exact reuse requires matching immutable runner, private controller and proven successful run',()=>{
+test('V7 reuse requires an exact runner, previously qualified controller tree, and only private cache-folder changes',()=>{
   const workflow=fs.readFileSync(new URL('../../../.github/workflows/v7-execution-infrastructure-qualification.yml',import.meta.url),'utf8');
   assert.match(workflow,/qualifiedCommit==\$runner/);
-  assert.match(workflow,/controllerQualification\.controllerCommit==\$controller/);
+  assert.match(workflow,/prior_controller_commit=.*controllerQualification\.controllerCommit/);
+  assert.match(workflow,/git -C \.controller-under-test diff --name-only -z/);
+  assert.match(workflow,/all\(p\.startswith\(b"Phase0 Build Cache\/"\) for p in files\)/);
+  assert.match(workflow,/private controller contains non-cache changes/);
   assert.match(workflow,/\.status=="completed" and \.conclusion=="success" and \.head_sha==\$sha/);
   assert.match(workflow,/V7_QUALIFICATION_LANE=REUSE_EXACT/);
   assert.match(workflow,/V7_QUALIFICATION_LANE != 'REUSE_EXACT'/);
