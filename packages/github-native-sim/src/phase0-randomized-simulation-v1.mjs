@@ -12,7 +12,7 @@ import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
-import {isBalancerV3TargetV1,discoverBalancerV3PoolsV1,buildBalancerV3ActionV1} from './phase0-balancer-v3-planner-v1.mjs';
+import {isBalancerV3TargetV1,discoverBalancerV3PoolsV1,buildBalancerV3ActionV1,bootstrapBalancerV3PoolsV1} from './phase0-balancer-v3-planner-v1.mjs';
 import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1,executeForkTokenAccountingWitnessV1,executeCreatorSynthesisV1,approveFixtureSpendersV1,refreshCreatedAssociationsV1,executeActivationSynthesisV1} from './phase0-fixture-synthesis-v1.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
@@ -2366,10 +2366,18 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
           stage2Approvals.push({round:stage2Round,...approval});
         }catch(error){stage2Approvals.push({round:stage2Round,holders:stage2Holders,spenders:createdAddresses,transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_SPENDER_APPROVALS_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
       }
-      if(creatorRound.createdTokens.length){
+      // A newly created Balancer pool is an ERC20 BPT, but its shares must
+      // originate from Vault initialize/addLiquidity. Writing arbitrary
+      // balances into pool storage violates its supply/accounting invariants.
+      const newBptAddresses=new Set(createdAddresses.map(x=>String(x).toLowerCase()));
+      const newlyCreatedUnderlyingTokens=creatorRound.createdTokens.filter(t=>!newBptAddresses.has(String(t.address).toLowerCase()));
+      if(creatorRound.createdTokens.length>newlyCreatedUnderlyingTokens.length){
+        stage2CreatedTokenFunding.push({round:stage2Round,status:'POOL_BPT_STORAGE_FUNDING_PREVENTED',poolTokens:creatorRound.createdTokens.filter(t=>newBptAddresses.has(String(t.address).toLowerCase())).map(t=>t.address),policy:'BPT_ONLY_MINTED_BY_VAULT'});
+      }
+      if(newlyCreatedUnderlyingTokens.length){
         try{
           const funding=await fundActorsV1({
-            provider,ethers,tokens:creatorRound.createdTokens,holders:stage2Holders,
+            provider,ethers,tokens:newlyCreatedUnderlyingTokens,holders:stage2Holders,
             spenders:[...targets.map(x=>x.address),...createdAddresses]
           });
           stage2CreatedTokenFunding.push({round:stage2Round,...funding});
@@ -2413,8 +2421,12 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       }
       if(stage3AssociationHarvest.newTokens.length){
         try{
+          // Newly registered Balancer BPT is minted only via the Vault. Never
+          // fake a pool-share holder using anvil_setStorageAt.
+          const registeredBpts=new Set((valuePool.created??[]).map(x=>String(x).toLowerCase()));
+          const fundable=stage3AssociationHarvest.newTokens.filter(x=>!registeredBpts.has(String(x.address).toLowerCase()));
           stage3AssociationTokenFunding=await fundActorsV1({
-            provider,ethers,tokens:stage3AssociationHarvest.newTokens,holders:stage2Holders,
+            provider,ethers,tokens:fundable,holders:stage2Holders,
             spenders:targets.map(target=>target.address)
           });
         }catch(error){
@@ -2429,6 +2441,14 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         stage3Activation={activations:[],activationGaps:[{type:'ACTIVATION_SYNTHESIS_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1600)}],createdContracts:valuePool.created.length};
       }
     }
+    // The Balancer v3 Vault must register AND initialize pools before Router
+    // swaps / addLiquidity have valid context. This setup is a real on-chain
+    // Router call on the ephemeral Anvil fork, not an invented telemetry delta.
+    let balancerBootstrap;
+    try{balancerBootstrap=await bootstrapBalancerV3PoolsV1({provider,ethers,targets,valuePool,actors});}
+    catch(error){balancerBootstrap={status:'BOOTSTRAP_EXECUTION_FAILED',initializedPoolCount:0,attempts:[],limitations:[{type:'BOOTSTRAP_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1000)}]};}
+    await fs.writeFile(path.join(outputRoot,'PHASE0_BALANCER_V3_BOOTSTRAP_v1.json'),JSON.stringify(balancerBootstrap,null,2)+'\n');
+    console.log(`[phase0-balancer] Stage 3 Router bootstrap status=${balancerBootstrap.status}; initialized=${balancerBootstrap.initializedPoolCount}; attempts=${balancerBootstrap.attempts?.length??0}`);
     console.log('[phase0-smoke-progress] END Stage 3 association and activation');
     let stage4ContextPreparation={contextEvidence:[],addedTargets:[],gaps:[]};
     try{
@@ -2482,6 +2502,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       activations:stage3Activation.activations,
       activationGaps:stage3Activation.activationGaps,
       contextCallerPreparation:stage4ContextPreparation,
+      balancerBootstrap,
       callerResolutions:[]
     };
     await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
@@ -2600,6 +2621,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     }
     if(accountingFixtureWitness.verifiedTransitions===0)simulationLimitations.push({type:'FORK_TOKEN_ACCOUNTING_CONTROL_UNVERIFIED',status:accountingFixtureWitness.status});
     if(sourceDeploymentFidelity.status==='FALLBACK_ONLY_SOURCE_GRAPH_UNVERIFIED')simulationLimitations.push({type:'SOURCE_DEPLOYMENT_GRAPH_UNVERIFIED',sourceDeploymentFidelity});
+    if(balancerBootstrap.status==='INITIALIZATION_FAILED'||balancerBootstrap.status==='BOOTSTRAP_EXECUTION_FAILED'||balancerBootstrap.status==='NO_REGISTERED_POOLS')simulationLimitations.push({type:'BALANCER_V3_LIFECYCLE_BOOTSTRAP_GAP',status:balancerBootstrap.status,attempts:balancerBootstrap.attempts?.slice(0,8)});
     for(const row of telemetry){
       if(row.balancerV3Context?.status&&row.balancerV3Context.status!=='INITIALIZED_POOL_AVAILABLE'&&row.balancerV3Context.status!=='NOT_APPLICABLE'){
         simulationLimitations.push({type:'BALANCER_V3_PROTOCOL_FIXTURE_UNAVAILABLE',runId:row.runId,protocolStatus:row.balancerV3Context.status,registeredPools:row.balancerV3Context.registeredPools,initializedPools:row.balancerV3Context.initializedPools});
@@ -2616,7 +2638,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const sourceDeploymentObserved=sourceDeploymentFidelity.status==='SOURCE_DEPLOYMENT_OBSERVED';
     const qualifiedEconomicCoverage=projectEconomicReachable&&sourceDeploymentObserved;
     const executionMode=telemetrySmoke?(medusaSmoke?'MEDUSA_AND_TELEMETRY_SMOKE':'TELEMETRY_SMOKE'):(medusaSmoke?'MEDUSA_SMOKE':'ALL_PHASE0_STAGES');
-    const summary={accountingFixtureWitness:{status:accountingFixtureWitness.status,verifiedTransitions:accountingFixtureWitness.verifiedTransitions,checkedTokens:accountingFixtureWitness.checkedTokens,evidenceRef:'PHASE0_FORK_TOKEN_ACCOUNTING_WITNESS_v1.json',countsAsProjectEconomicTransition:false},schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode,status:medusaComplete&&telemetryComplete&&qualifiedEconomicCoverage?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:medusaComplete&&telemetryComplete?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.length&&telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),fixtureSynthesis,medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,lifecycleFamilies:x.lifecycleFamilies,observationReads:x.observationReads,observationFailures:x.observationFailures,accountingObservationCalls:x.accountingObservationCalls,skippedObservationCalls:x.skippedObservationCalls,observationReadsPerAccountingCall:x.observationReadsPerAccountingCall,accountingEvidence:x.accountingEvidence,balancerV3Context:x.balancerV3Context,protocolPlanningFailures:x.protocolPlanningFailures,protocolAwareCalls:x.protocolAwareCalls,decodedRevertReasons:x.decodedRevertReasons,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
+    const summary={balancerBootstrap,accountingFixtureWitness:{status:accountingFixtureWitness.status,verifiedTransitions:accountingFixtureWitness.verifiedTransitions,checkedTokens:accountingFixtureWitness.checkedTokens,evidenceRef:'PHASE0_FORK_TOKEN_ACCOUNTING_WITNESS_v1.json',countsAsProjectEconomicTransition:false},schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode,status:medusaComplete&&telemetryComplete&&qualifiedEconomicCoverage?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:medusaComplete&&telemetryComplete?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.length&&telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),fixtureSynthesis,medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,lifecycleFamilies:x.lifecycleFamilies,observationReads:x.observationReads,observationFailures:x.observationFailures,accountingObservationCalls:x.accountingObservationCalls,skippedObservationCalls:x.skippedObservationCalls,observationReadsPerAccountingCall:x.observationReadsPerAccountingCall,accountingEvidence:x.accountingEvidence,balancerV3Context:x.balancerV3Context,protocolPlanningFailures:x.protocolPlanningFailures,protocolAwareCalls:x.protocolAwareCalls,decodedRevertReasons:x.decodedRevertReasons,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
     const deployEvidence={sourceDeploymentFidelity,schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',packageDependencyInstall,fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,scriptDispositions:deploymentCombined.scriptDispositions,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deployEvidence,null,2)+'\n');await provider.destroy();
