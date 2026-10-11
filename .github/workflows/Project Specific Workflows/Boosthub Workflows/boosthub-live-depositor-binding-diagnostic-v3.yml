@@ -24,7 +24,7 @@ jobs:
 
       - name: Check current BoostHub depositor bindings and prove repair on fork
         env:
-          PRIVATE_RPC: ${{ secrets.ETHEREUM_RPC }}
+          PRIVATE_RPC: ${{ secrets.RPC_ETHEREUM }}
         shell: bash
         run: |
           set -euo pipefail
@@ -34,7 +34,7 @@ jobs:
             curl -sS --connect-timeout 4 --max-time 8 -X POST "$url" -H 'content-type: application/json' \
               --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | grep -q '"result":"0x'
           }
-          test -n "${PRIVATE_RPC:-}" || { echo 'Missing ETHEREUM_RPC secret' >&2; exit 1; }
+          test -n "${PRIVATE_RPC:-}" || { echo 'Missing RPC_ETHEREUM secret' >&2; exit 1; }
           probe_rpc "$PRIVATE_RPC" || { echo 'Private Ethereum RPC is unavailable' >&2; exit 1; }
           RPC_URL="$PRIVATE_RPC"
           RPC_LABEL='configured-private'
