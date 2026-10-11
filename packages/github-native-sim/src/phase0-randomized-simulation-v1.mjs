@@ -2378,7 +2378,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       // were already approved in Stage 1. Hundreds of unnecessary ERC20 and
       // Permit2 approve transactions here caused the post-creation timeout.
       const newBptAddresses=new Set(creatorRound.creations
-        .filter(row=>/CURVEYIELD_WRAPPER_ALLOWLIST|BALANCER_V3_FACTORY/.test(String(row.basis??'')))
+        .filter(row=>/CURVEYIELD_WRAPPER_ALLOWLIST|BALANCER_V3_FACTORY/.test(String(row.recipeBasis??'')) || /CurveYieldPoolFactoryWrapper\.sol:CurveYieldPoolFactoryWrapper$/.test(String(row.target??'')))
         .flatMap(row=>row.createdAddresses??[]).map(x=>String(x).toLowerCase()));
       const spendableChildren=createdAddresses.filter(x=>!newBptAddresses.has(x));
       const existingTokens=valuePool.tokens.filter(token=>!creatorRound.createdTokens.some(created=>String(created.address).toLowerCase()===String(token?.address??token).toLowerCase()));
