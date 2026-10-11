@@ -23,7 +23,7 @@ manifest=root/'package_manifest_v11.json'
 data=json.loads(manifest.read_text())
 key='beefy/contracts/converter/BoostHubEthereumRewardConverter_v6.sol'
 data['sha256'][key]=hashlib.sha256(p.read_bytes()).hexdigest()
-manifest.write_text(json.dumps(data,indent=2)+'\\n')
+manifest.write_text(json.dumps(data,indent=2)+'\n')
 
 print('Fork-only remediation: stETH/ETH legacy pool with NO EMA -> NG pool with proven pool price_oracle()')
 PY
