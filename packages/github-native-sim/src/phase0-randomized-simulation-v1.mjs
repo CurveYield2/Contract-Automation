@@ -1429,7 +1429,14 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers);
             }
           }
-          if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
+          if(!picked){
+            // A 30-call burst must not repeat a permanently blocked function
+            // after the whole contract has exhausted all plausible contexts.
+            // Recycle only as a bounded fallback when no alternative exists.
+            blockedContextFunctions.clear();
+            picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers);
+            if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
+          }
           let selected=picked.selected;
           let balancerAction=balancerDiscovery.active
             ? buildBalancerV3ActionV1({ethers,target,selected,discovery:balancerDiscovery,valuePool,actors})
@@ -1585,6 +1592,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             const created=next.pools.filter(row=>!prior.has(String(row.address).toLowerCase()));
             balancerDiscovery=next;
             balancerReadyActions=refreshBalancerReadyActions();
+            blockedContextFunctions.clear();
             stats.contextAdaptations.push({kind:'BALANCER_V3_FACTORY_POOL_REDISCOVERY',newRegisteredPools:created.map(row=>row.address),atCallIndex:stats.calls});
           }
           if(rec.executionOutcome==='MINED_SUCCESS'&&balancerAction.kind==='READY'&&selected.signature==='initialize(address,address[],uint256[],uint256,bool,bytes)'){
@@ -1597,6 +1605,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
                 pool.bptHolders=BigInt(balance)>0n?[{actor:sender,amount:BigInt(balance).toString()}]:[];
               }catch{pool.bptHolders=[];}
               balancerReadyActions=refreshBalancerReadyActions();
+              blockedContextFunctions.clear();
               stats.contextAdaptations.push({kind:'BALANCER_V3_POOL_INITIALIZED',pool:pool.address,atCallIndex:stats.calls});
             }
           }
@@ -1608,9 +1617,11 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             const failures=1+(preflightRejections.get(picked.selectionKey)??0);
             preflightRejections.set(picked.selectionKey,failures);
             contextWeightMultipliers.set(picked.selectionKey,Math.max(0.01,Math.pow(0.55,failures)));
-            if(/not implemented|notimplemented|function selector was not recognized/i.test(errorText)){
+            const permanentStub=/not implemented|notimplemented|function selector was not recognized/i.test(errorText);
+            const exhausted=failures>=(rec.semanticFamily==='ECONOMIC'?4:3);
+            if(permanentStub||exhausted){
               blockedContextFunctions.add(picked.selectionKey);
-              stats.contextAdaptations.push({kind:'STUB_FUNCTION_PRUNED',selectionKey:picked.selectionKey,atCallIndex:stats.calls});
+              stats.contextAdaptations.push({kind:permanentStub?'STUB_FUNCTION_PRUNED':'REPEATED_UNREACHABLE_CALL_PRUNED',selectionKey:picked.selectionKey,failures,atCallIndex:stats.calls});
             }
           }else if(rec.executionOutcome==='MINED_SUCCESS'){
             preflightRejections.delete(picked.selectionKey);
