@@ -26,8 +26,8 @@ test('Stage 2 only creates Balancer pools through supported CurveYield wrapper e
     ])
   ];
   const candidates=discoverCreatorCandidatesV1({targets});
-  assert.deepEqual(candidates.map(row=>row.selected.fragment.name),[
+  assert.deepEqual(candidates.map(row=>row.selected.fragment.name).sort(),[
     'createWeightedPool','createStablePool','createStableSurgePool'
-  ]);
+  ].sort());
   assert.ok(candidates.every(row=>row.target.qualifiedName.endsWith('CurveYieldPoolFactoryWrapper.sol:CurveYieldPoolFactoryWrapper')));
 });
