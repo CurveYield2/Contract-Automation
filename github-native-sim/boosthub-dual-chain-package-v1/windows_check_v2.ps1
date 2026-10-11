@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$PackageRoot)
 $ErrorActionPreference='Stop'
-$script=Join-Path $PackageRoot 'deployment\Deploy_Configure_v1.ps1'
+$script=Join-Path $PackageRoot 'deployment\Deploy_Configure_v2.ps1'
 $tokens=$null;$errors=$null
 [void][System.Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$errors)
 if($errors.Count -ne 0){throw ($errors|Out-String)}

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import solc from 'solc';
 import {build} from 'esbuild';
-const root=path.dirname(new URL(import.meta.url).pathname),release=path.join(root,'release_v2');
+const root=path.dirname(new URL(import.meta.url).pathname),release=path.join(root,'release_v3');
 const sources={};
 for(const file of ['contracts/BoostHub.sol','contracts/interfaces/IBoostHub.sol','contracts/StakeDaoMerkleClaimExecutor.sol','contracts/StakeDaoFraxtalSdFxsUrdClaimExecutor_v5.sol','contracts/BoostHubDeploymentFactory_v1.sol'])sources[file]={content:fs.readFileSync(path.join(release,file),'utf8')};
 const settings={optimizer:{enabled:true,runs:200},viaIR:true,evmVersion:'cancun',outputSelection:{'*':{'*':['abi','evm.bytecode','evm.deployedBytecode','metadata']}}};
@@ -34,7 +34,7 @@ for(const [project,label]of [['openzeppelin-contracts','OpenZeppelin'],['solmate
     if(fs.existsSync(source))fs.copyFileSync(source,path.join(release,'dependencies_v1',label+'_'+candidate));
   }
 }
-await build({entryPoints:[path.join(root,'deployment/deploy_runner_v1.mjs')],outfile:path.join(release,'deployment/deploy_runner_v1.cjs'),bundle:true,platform:'node',format:'cjs',target:'node22',legalComments:'external'});
+await build({entryPoints:[path.join(root,'deployment/deploy_runner_v2.mjs')],outfile:path.join(release,'deployment/deploy_runner_v2.cjs'),bundle:true,platform:'node',format:'cjs',target:'node22',legalComments:'external'});
 for(const [name,obj]of Object.entries(sources)){
   if(name.startsWith('@openzeppelin/')||name.startsWith('solmate/')){
     const p=path.join(release,'dependencies_v1',name);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,obj.content);

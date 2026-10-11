@@ -1,11 +1,11 @@
 #requires -Version 5.1
-<## Deploy/configure the compiled BoostHub stack with the selected chain's reward helper. Version v1. ##>
+<## Deploy/configure the compiled BoostHub stack with the selected chain's reward helper. Version v2. ##>
 [CmdletBinding()]
 param(
     [ValidateSet('Check','Deploy','Verify','AcceptRoles')][string]$Mode = 'Check',
     [ValidateSet('Both','Ethereum','Fraxtal')][string]$Chain = 'Ethereum',
-    [string]$ConfigPath = (Join-Path $PSScriptRoot 'deployment_config_v1.json'),
-    [string]$StateDirectory = (Join-Path $PSScriptRoot 'state_v1'),
+    [string]$ConfigPath = (Join-Path $PSScriptRoot 'deployment_config_v2.json'),
+    [string]$StateDirectory = (Join-Path $PSScriptRoot 'state_v2'),
     [string]$DeployerAddress,
     [string]$DeploymentId,
     [string]$EthereumRpcUrl,
@@ -15,7 +15,7 @@ $ErrorActionPreference = 'Stop'
 $node = Get-Command node -ErrorAction Stop
 $major = [int]((& $node.Source --version).TrimStart('v').Split('.')[0])
 if ($major -lt 22) { throw 'Install Node.js 22 or newer, then reopen PowerShell.' }
-$runner = Join-Path $PSScriptRoot 'deploy_runner_v1.cjs'
+$runner = Join-Path $PSScriptRoot 'deploy_runner_v2.cjs'
 if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) { throw 'Keep the complete extracted ZIP together; the bundled deployment runner is missing.' }
 $config = (Resolve-Path -LiteralPath $ConfigPath).Path
 $request = @{
@@ -49,7 +49,7 @@ try {
     $process.StandardInput.WriteLine($inputJson)
     $process.StandardInput.Close()
     $process.WaitForExit()
-    if ($process.ExitCode -ne 0) { throw 'The runner stopped. Correct the reported issue, retain state_v1, and rerun the same command.' }
+    if ($process.ExitCode -ne 0) { throw 'The runner stopped. Correct the reported issue, retain state_v2, and rerun the same command.' }
 } finally {
     if ($bstr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
     if ($secure) { $secure.Dispose() }

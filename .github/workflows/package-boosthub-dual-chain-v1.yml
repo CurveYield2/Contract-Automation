@@ -60,17 +60,71 @@ jobs:
           test "$(git -C github-native-sim/boosthub-dual-chain-package-v1/lib/solmate rev-parse HEAD)" = 89365b880c4f3c786bdd453d4b8e8fe410344a69
           ln -s "$GITHUB_WORKSPACE/.controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts" github-native-sim/boosthub-dual-chain-package-v1/lib/openzeppelin-contracts
       - name: Restore verified original dependencies and compile Vyper
-        run: python3 github-native-sim/boosthub-dual-chain-package-v1/prepare_build_v1.py
+        run: python3 github-native-sim/boosthub-dual-chain-package-v1/prepare_build_v2.py
       - name: Verify the updated Hub, both helpers and staking together
         working-directory: .controller/audits/functional-verification/boosthub-four-contracts-v1
         run: |
+          cp "$GITHUB_WORKSPACE/github-native-sim/boosthub-dual-chain-package-v1/FraxtalCompatibility_v1.t.sol" test/FraxtalCompatibility_v1.t.sol
           cp "$GITHUB_WORKSPACE/github-native-sim/boosthub-dual-chain-package-v1/RewardTokenSync_v1.t.sol" test/RewardTokenSync_v1.t.sol
+          cp "$GITHUB_WORKSPACE/github-native-sim/boosthub-dual-chain-package-v1/StakingHubCompatibility_v2.t.sol" test/StakingHubCompatibility_v2.t.sol
           set -o pipefail
-          forge test --match-contract RewardTokenSyncTest -vv 2>&1 | tee "$GITHUB_WORKSPACE/github-native-sim/boosthub-dual-chain-package-v1/evidence/reward_sync_red_v1.txt"
-      - name: Publish reward-sync baseline evidence
+          forge test -vv 2>&1 | tee "$GITHUB_WORKSPACE/github-native-sim/boosthub-dual-chain-package-v1/evidence/full_stack_green_v3.txt"
+      - name: Compile the exact release and bundle the standalone runner
+        run: node github-native-sim/boosthub-dual-chain-package-v1/compile_release_v2.mjs
+      - name: Prepare editable operator configuration
+        run: node github-native-sim/boosthub-dual-chain-package-v1/build_config_v2.mjs
+      - name: Run deployment acceptance tests
+        run: node --test github-native-sim/boosthub-dual-chain-package-v1/runner.test_v2.mjs
+      - name: Deploy and configure the release against live dependencies on local Anvil forks
+        run: node github-native-sim/boosthub-dual-chain-package-v1/fork_deployment_v2.mjs
+      - name: Assemble the versioned release
+        run: python3 github-native-sim/boosthub-dual-chain-package-v1/finalize_package_v2.py
+      - name: Stage package for Windows verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: boosthub-release-for-windows-v3
+          path: github-native-sim/boosthub-dual-chain-package-v1/BoostHub_Contract_Stack_v3.zip
+          retention-days: 7
+      - name: Publish retrieval evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-reward-sync-red-v1
-          path: github-native-sim/boosthub-dual-chain-package-v1/evidence
+          name: boosthub-dual-chain-package-v1
+          path: |
+            github-native-sim/boosthub-dual-chain-package-v1/evidence
+            github-native-sim/boosthub-dual-chain-package-v1/release_v3
+          retention-days: 30
+
+  windows-powershell:
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: boosthub-release-for-windows-v3
+          path: incoming_release
+      - name: Exercise extracted package under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          Expand-Archive -LiteralPath incoming_release/BoostHub_Contract_Stack_v3.zip -DestinationPath windows_package
+          & ./github-native-sim/boosthub-dual-chain-package-v1/windows_check_v2.ps1 -PackageRoot "$PWD/windows_package" 2>&1 | Tee-Object -FilePath PowerShell_Compatibility_v2.txt
+          if (-not $?) { throw 'Windows PowerShell validation failed' }
+      - name: Attach Windows evidence and finalize ZIP
+        run: python github-native-sim/boosthub-dual-chain-package-v1/windows_finalize_v2.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BoostHub_Contract_Stack_v3
+          path: |
+            BoostHub_Contract_Stack_v3.zip
+            BoostHub_Contract_Stack_v3.sha256
           retention-days: 30

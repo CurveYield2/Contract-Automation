@@ -4,11 +4,11 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {Wallet,JsonRpcProvider,FetchRequest,Contract,ZeroAddress} from 'ethers';
-import {preflight,predictAddresses,deployAndConfigure,verifyStack,validateConfig} from './deployment/deploy_runner_v1.mjs';
-const root=path.dirname(new URL(import.meta.url).pathname),release=path.join(root,'release_v2');
-const original=JSON.parse(fs.readFileSync(path.join(release,'deployment/deployment_config_v1.json')));
+import {preflight,predictAddresses,deployAndConfigure,verifyStack,validateConfig} from './deployment/deploy_runner_v2.mjs';
+const root=path.dirname(new URL(import.meta.url).pathname),release=path.join(root,'release_v3');
+const original=JSON.parse(fs.readFileSync(path.join(release,'deployment/deployment_config_v2.json')));
 const snapshot=JSON.parse(fs.readFileSync(path.join(root,'evidence/live_stack_snapshot_v1.json')));
-const artifacts={};for(const k of ['factory','hub','helper','helperFraxtal','staking'])artifacts[k]=JSON.parse(fs.readFileSync(path.join(release,'artifacts_v1',k+'_v1.json')));
+const artifacts={};for(const k of ['factory','hub','helper','helperFraxtal','staking'])artifacts[k]=JSON.parse(fs.readFileSync(path.join(release,'artifacts_v1',k+(k==='staking'?'_v2.json':'_v1.json'))));
 const config=structuredClone(original);
 // Public Anvil fixture key; it is only accepted after the loopback guard below.
 const testKey='0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
@@ -48,5 +48,5 @@ for(const [name,port]of [['ethereum',8545],['fraxtal',8546]]) {
     results.push({chain:name,chainId:n.chainId,forkBlock:snapshot[name].blockNumber,hub:predicted.hub,helper:predicted.helper,pools:n.pools.length,transactions:count,status:state.status,idempotentRerun:true});
   }finally{provider.destroy();child.kill('SIGTERM');fs.closeSync(log);}
 }
-fs.writeFileSync(path.join(root,'evidence/fork_deployment_results_v1.json'),JSON.stringify({version:'v1',testScope:'Fresh release deployments onto local Anvil forks; no public-chain transactions',results},null,2));
+fs.writeFileSync(path.join(root,'evidence/fork_deployment_results_v2.json'),JSON.stringify({version:'v1',testScope:'Fresh release deployments onto local Anvil forks; no public-chain transactions',results},null,2));
 console.log('Fork deployment/configuration and idempotent rerun passed for both selected helpers');

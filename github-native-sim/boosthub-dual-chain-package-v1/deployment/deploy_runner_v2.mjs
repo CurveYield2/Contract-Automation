@@ -17,7 +17,7 @@ export function parseJson(text) { return JSON.parse(String(text).replace(/^\uFEF
 function address(a,label) { try { const v=getAddress(a);requireThat(v!==ZeroAddress,label+' cannot be zero');return v; } catch {throw new Error(label+' must be a nonzero EVM address');} }
 
 export function validateConfig(c) {
-  requireThat(c.version==='v1','Configuration version must be v1');
+  requireThat(c.version==='v2','Configuration version must be v2');
   address(c.deployer,'deployer');
   requireThat(typeof c.deploymentId==='string'&&c.deploymentId.length>0,'deploymentId is required');
   requireThat(c.chains&&Object.keys(c.chains).length>0,'At least one chain must be configured');
@@ -53,7 +53,7 @@ export function validateConfig(c) {
       }
       requireThat(p.hubRewardTokens.length<=8,'Hub supports at most eight rewards');
       const rewards=[p.asset,...p.hubRewardTokens.filter(a=>!eq(a,p.asset)),...p.externalRewardTokens];
-      requireThat(rewards.length<=8&&new Set(rewards.map(a=>a.toLowerCase())).size===rewards.length,'Staking supports eight unique rewards including its principal token');
+      requireThat(rewards.length<=9&&new Set(rewards.map(a=>a.toLowerCase())).size===rewards.length,'Staking supports nine unique rewards including its principal token');
       p.disabledRewardTokens.forEach(a=>requireThat(rewards.some(t=>eq(t,a)),'Disabled reward is unregistered'));
     });
     if(name==='fraxtal')requireThat(eq(n.pools[0].asset,FRAXTAL_SDFXS)&&n.pools[0].hubRewardTokens.some(t=>eq(t,FRAXTAL_SDFXS)),'Fraxtal helper v5 requires sdFXS as registered PID-0 asset/reward');
@@ -116,12 +116,12 @@ function codeMatches(artifact,actual) {
 }
 
 function loadArtifacts(root) {
-  const manifest=parseJson(fs.readFileSync(path.join(root,'package_manifest_v1.json'),'utf8'));
+  const manifest=parseJson(fs.readFileSync(path.join(root,'package_manifest_v2.json'),'utf8'));
   for(const [relative,digest] of Object.entries(manifest.sha256)) {
     const full=path.resolve(root,relative);requireThat(full.startsWith(root+path.sep),'Invalid manifest path');
     requireThat(sha256(fs.readFileSync(full))===digest,'Package integrity mismatch: '+relative);
   }
-  const result={};for(const key of ['factory','hub','helper','helperFraxtal','staking']) result[key]=parseJson(fs.readFileSync(path.join(root,'artifacts_v1',key+'_v1.json'),'utf8'));
+  const result={};for(const key of ['factory','hub','helper','helperFraxtal','staking']) result[key]=parseJson(fs.readFileSync(path.join(root,'artifacts_v1',key+(key==='staking'?'_v2.json':'_v1.json')),'utf8'));
   return result;
 }
 
@@ -202,7 +202,7 @@ export async function deployAndConfigure(ctx,artifacts,prediction) {
     const info=await hub.poolInfo(p.pid);
     requireThat(eq(info.asset,p.asset)&&eq(info.gauge,p.gauge),'Existing pool differs from configuration');
     requireThat(json(info.rewardTokens.map(a=>a.toLowerCase()))===json(p.hubRewardTokens.map(a=>a.toLowerCase())),'Existing Hub reward list differs');
-    const rewardArgs=p.hubRewardTokens.filter(t=>!eq(t,p.asset));while(rewardArgs.length<8)rewardArgs.push(ZeroAddress);
+    const rewardArgs=Array(8).fill(ZeroAddress); // Staking discovers all Hub rewards in its constructor.
     const staking=await deploy('staking/'+p.pid,artifacts.staking,[p.asset,prediction.hub,p.pid,deployer,rewardArgs,p.stakingFeeReceiver,p.rewardSmoothingUnits,p.keeper],prediction.staking[p.pid]);
     requireThat(eq(await staking.lp_token(),p.asset)&&eq(await staking.boost_hub(),prediction.hub)&&Number(await staking.pid())===p.pid,'Staking constructor differs');
     for(const token of p.externalRewardTokens) {
