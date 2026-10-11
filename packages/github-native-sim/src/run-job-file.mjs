@@ -13,8 +13,6 @@ import { runStage2aAnalysis } from './stage2a-toolchain.mjs';
 import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligence-technical-v1.mjs';
 import { V7_POLICY } from './v7-policy.mjs';
 
-const DEFAULT_ETHEREUM_FORK_RPC_URL = 'https://eth.drpc.org/';
-const LEGACY_ETHEREUM_FORK_RPC_ENV = 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01';
 
 function nowIso(now = () => new Date()) { return now().toISOString(); }
 
@@ -130,9 +128,8 @@ function phase7RpcEnv(simulation) {
 function phase7ForkUrl(simulation, environment = {}) {
   const rpcEnv = phase7RpcEnv(simulation);
   if (simulation.chain === V7_POLICY.mutableRpc.chain) {
-    return environment?.[rpcEnv]
-      || environment?.[LEGACY_ETHEREUM_FORK_RPC_ENV]
-      || DEFAULT_ETHEREUM_FORK_RPC_URL;
+    if (!environment?.[rpcEnv]) throw new Error('Private Ethereum RPC is required: ETHEREUM_FORK_RPC_URL');
+    return environment[rpcEnv];
   }
   return environment?.[rpcEnv];
 }
