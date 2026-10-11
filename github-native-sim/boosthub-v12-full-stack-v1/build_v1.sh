@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$GITHUB_WORKSPACE/.boosthub-v12-full"
 SRC=github-native-sim/boosthub-v12-full-stack-v1/source/BoostHub_v12_exact_source_v1.tar.xz
-echo '349898d22f953f9fd6b57c6cf3b52a82ed4f7e210afbc09cf9e76de4e637a5b0  '${SRC} | sha256sum -c -
+echo '1de589c60facc6a931c04c9cc16f58815df1a222320124824a670d32eefede9a  '${SRC} | sha256sum -c -
 mkdir -p "$ROOT"
 tar -xJf "$SRC" -C "$ROOT"
 python3 github-native-sim/boosthub-v12-full-stack-v1/validate_source_v1.py "$ROOT"
