@@ -536,6 +536,20 @@ function compileStage3Contracts(){
     'contract AlwaysRevertPool {',
     '  error NotInitialized(address dependency);',
     '  function initialize(address dependency) external { revert NotInitialized(dependency); }',
+    '}',
+    '',
+    'interface InitializationState { function initialized() external view returns (bool); }',
+    'contract SimpleInitializable {',
+    '  bool public initialized;',
+    '  function initialize() external { initialized = true; }',
+    '}',
+    'contract DependentPool {',
+    '  error NotInitialized(address dependency);',
+    '  bool public active;',
+    '  function start(address dependency) external {',
+    '    if (!InitializationState(dependency).initialized()) revert NotInitialized(dependency);',
+    '    active = true;',
+    '  }',
     '}'
   ].join('\n');
   const input={
@@ -667,6 +681,40 @@ test('Stage-3 enforces the 30-attempt ceiling per created contract and preserves
     assert.equal(result.activationGaps[0].attempts.length,30);
     assert.ok(result.activationGaps[0].topDecodedRevertReasons.some(x=>x.reason==='NotInitialized(address)'&&x.count===30));
     assert.ok(result.activationGaps[0].attempts.every(x=>x.dependency===true));
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-3 prioritizes a created dependency named by NotInitialized(address) before resuming the blocked object',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage3Contracts();
+    const dependency=await deployArtifact(provider,compiled.SimpleInitializable);
+    const blocked=await deployArtifact(provider,compiled.DependentPool);
+    const accounts=await provider.send('eth_accounts',[]);
+    const dependencyArtifact=normalizedTestArtifact('Stage3.sol','SimpleInitializable',compiled.SimpleInitializable);
+    const blockedArtifact=normalizedTestArtifact('Stage3.sol','DependentPool',compiled.DependentPool);
+    const dependencyAddress=await dependency.getAddress(),blockedAddress=await blocked.getAddress();
+    const targets=[
+      stage3MutableTarget(blockedAddress,'Stage3.sol','DependentPool',blockedArtifact),
+      stage3MutableTarget(dependencyAddress,'Stage3.sol','SimpleInitializable',dependencyArtifact)
+    ];
+    const valuePool={
+      addresses:[blockedAddress,dependencyAddress],tokens:[],
+      associations:{[ethers.getAddress(blockedAddress)]:new Set([ethers.getAddress(dependencyAddress)]),[ethers.getAddress(dependencyAddress)]:new Set()},
+      privileged:[],created:[blockedAddress,dependencyAddress],receipts:[],gaps:[]
+    };
+    const result=await executeActivationSynthesisV1({
+      provider,ethers,targets,actors:[accounts[0]],valuePool,artifacts:[blockedArtifact,dependencyArtifact],
+      createdAddresses:[blockedAddress,dependencyAddress],maxAttemptsPerCreated:30
+    });
+    assert.equal(await dependency.initialized(),true);
+    assert.equal(await blocked.active(),true);
+    const initIndex=result.activations.findIndex(row=>row.createdAddress.toLowerCase()===dependencyAddress.toLowerCase()&&row.function==='initialize()');
+    const startIndex=result.activations.findIndex(row=>row.createdAddress.toLowerCase()===blockedAddress.toLowerCase()&&row.function==='start(address)');
+    assert.ok(initIndex>=0&&startIndex>initIndex);
   }finally{
     await provider.destroy();
     child.kill('SIGTERM');
