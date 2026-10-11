@@ -31,6 +31,10 @@ jobs:
           sed -i 's/function isSupportedPair(address tokenIn, address tokenOut) public pure returns (bool)/function isSupportedPair(address tokenIn, address tokenOut) public view returns (bool)/' .boosthub-multioracle/beefy/contracts/converter/BoostHubFraxtalRewardConverter_v2.sol
           sed -i 's/function _checkPair(address tokenIn, address tokenOut) internal pure/function _checkPair(address tokenIn, address tokenOut) internal view/' .boosthub-multioracle/beefy/contracts/converter/BoostHubFraxtalRewardConverter_v2.sol
           cp github-native-sim/boosthub-multi-oracle-v1/BoostHubMultiOracleRoutes_v1.t.sol .boosthub-multioracle/beefy/tests/BoostHubMultiOracleRoutes_v1.t.sol
+          OVERLAY=github-native-sim/boosthub-v13-full-stack-v1/source/BoostHub_v13_helper_overlay_v1.tar.xz
+          echo 'a73da8645241de4ddef52cf3ef9be1392139cf616bec7104b37d871f5fc0ec0c  '${OVERLAY} | sha256sum -c
+          tar -xJf "$OVERLAY" -C .boosthub-multioracle
+          rm -f .boosthub-multioracle/beefy/contracts/converter/BoostHubDexTwapRoutes_v1.sol .boosthub-multioracle/beefy/contracts/converter/BoostHubEthereumRewardConverter_v8.sol .boosthub-multioracle/beefy/contracts/converter/BoostHubFraxtalRewardConverter_v2.sol
           cd .boosthub-multioracle
           mkdir -p lib
           git clone -q --depth 1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git lib/openzeppelin-contracts
