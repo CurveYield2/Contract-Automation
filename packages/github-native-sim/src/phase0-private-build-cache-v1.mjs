@@ -213,7 +213,7 @@ export async function compileWithPrivateCacheV1({request,pseudo,projectRoot,comp
     markCompilation('COMPILATION_START identity_unavailable=true');
     const start=Date.now();
     const build=await compile();
-    console.log('[phase0-build-cache] COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-start)/1000));
+    markCompilation('COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-start)/1000));
     return build;
   }
   try{
