@@ -223,7 +223,7 @@ test('Phase-0 incomplete deployment is preserved and blocks randomized execution
 });
 
 test('legacy Phase-0 randomized rebind is disabled after deployment-only migration',()=>{
-  const workflow=fs.readFileSync(path.resolve(here,'../../../.github/workflows/lite-phase0-simulation-rebind-v1.yml'),'utf8');
+  const workflow=fs.readFileSync(new URL('../../../.github/workflows/lite-phase0-simulation-rebind-v1.yml',import.meta.url),'utf8');
   assert.match(workflow,/Retired Phase 0 Randomized Simulation Rebind v2/);
   assert.doesNotMatch(workflow,/run-phase0-randomized-simulation-v1\.mjs|phase0-simulation-rebind\/\*\.json/);
 });
