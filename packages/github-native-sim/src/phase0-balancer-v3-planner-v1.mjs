@@ -1,4 +1,5 @@
 // Protocol-aware Phase 0 actions for Balancer v3. No Uniswap-style pair assumptions.
+import {buildBalancerV3CreatorArgumentsV1} from './phase0-fixture-synthesis-v1.mjs';
 // All addresses and token orders are validated against the deployed Vault.
 const ADDRESS_RE=/^0x[0-9a-fA-F]{40}$/;
 const BALANCER_RE=/@balancer-labs\/v3-|balancer\/v3|balancer-v3/i;
@@ -21,6 +22,15 @@ export function isBalancerV3TargetV1(target){
 export function balancerV3ActionRequirementsV1(target,selected){
   if(!isBalancerV3TargetV1(target))return{kind:'GENERIC'};
   const name=nameOf(target),signature=String(selected?.signature??'');
+  if(/(?:RouterHooks|CompositeLiquidityRouterHooks|BufferRouterHooks)\.sol:/.test(name)||/^(?:[A-Za-z0-9_]*Hook|query[A-Z][^(]*)\(/.test(signature)){
+    return{kind:'UNROUTABLE',reason:'BALANCER_V3_HOOK_REQUIRES_VAULT_UNLOCK_CALLBACK'};
+  }
+  if(/ProtocolFeeController\.sol:/.test(name)&&/^registerPool\(/.test(signature)){
+    return{kind:'UNROUTABLE',reason:'BALANCER_V3_REGISTER_POOL_MUST_BE_CALLED_BY_VAULT'};
+  }
+  if(/Pool.*Factory|WeightedPool8020Factory/.test(name)&&/^create\(/.test(signature)){
+    return{kind:'FACTORY_CREATE'};
+  }
   if(/(?:VaultExtension|VaultAdmin)\.sol:/.test(name)&&(target.contextType??'DIRECT')==='DIRECT'){
     return{kind:'UNROUTABLE',reason:'BALANCER_V3_REQUIRES_REAL_VAULT_DELEGATE_CONTEXT'};
   }
@@ -114,10 +124,15 @@ function amountForTokenV1(token,valuePool){
 function choosePoolV1(pools,initialized){
   return pools.find(p=>p.initialized===initialized&&Array.isArray(p.tokens)&&p.tokens.length>=2)??null;
 }
-export function buildBalancerV3ActionV1({target,selected,discovery,valuePool={},actors=[]}={}){
+export function buildBalancerV3ActionV1({ethers,target,selected,discovery,valuePool={},actors=[]}={}){
   const requirement=balancerV3ActionRequirementsV1(target,selected);
   if(requirement.kind==='GENERIC')return{kind:'GENERIC'};
   if(requirement.kind==='UNROUTABLE')return{kind:'BLOCKED',reason:requirement.reason};
+  if(requirement.kind==='FACTORY_CREATE'){
+    const built=buildBalancerV3CreatorArgumentsV1({ethers,candidate:{target,selected},attempt:0,actor:actors[0],valuePool});
+    if(!built)return{kind:'BLOCKED',reason:'BALANCER_V3_FACTORY_NEEDS_FUNDED_SORTED_TOKENS_AND_KNOWN_ABI'};
+    return{kind:'READY',sender:actors[0],args:built.args,value:0n,pool:null,protocol:'BALANCER_V3',basis:built.basis,createsPool:true};
+  }
   const signature=String(selected.signature??'');
   const isInit=signature==='initialize(address,address[],uint256[],uint256,bool,bytes)';
   const isUnbalanced=signature==='addLiquidityUnbalanced(address,uint256[],uint256,bool,bytes)';
