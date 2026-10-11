@@ -1376,7 +1376,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],protocolPlanningFailures:{},protocolAwareCalls:0,
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
-    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set();
+    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),preflightRejections=new Map(),successfulFunctionContexts=new Map();
     // A Balancer router action is routable only if actual on-chain pool metadata
     // supplies the registered pool and exact Vault token order. Do not guess.
     const balancerReadyActions=balancerDiscovery.active?targets.flatMap((t)=>t.functions.flatMap((fn)=>{
@@ -1398,7 +1398,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
               (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
               pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers)
-            );
+            )??targets.find(candidate=>candidate!==target&&pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers));
             if(alternate){
               stats.contextAdaptations.push({kind:'REROUTE_TO_QUALIFIED_CONTEXT',fromContext:target.contextType??'DIRECT',toContext:alternate.contextType??'DIRECT',logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,atCallIndex:stats.calls+1});
               target=alternate;
@@ -1539,6 +1539,24 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             if(preflightError)rec.error=resolved.errorDetails??errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
           }
 
+          // Learn from actual preflight/mined execution rather than rewarding only
+          // positive accounting deltas (which requires successful execution first).
+          // Permanent stub functions are never repeatedly sampled.
+          const errorText=JSON.stringify(rec.stages.PREFLIGHT?.error??rec.error??{});
+          if(rec.executionOutcome==='SIMULATED_REJECTION'){
+            const failures=1+(preflightRejections.get(picked.selectionKey)??0);
+            preflightRejections.set(picked.selectionKey,failures);
+            contextWeightMultipliers.set(picked.selectionKey,Math.max(0.01,Math.pow(0.55,failures)));
+            if(/not implemented|notimplemented|function selector was not recognized/i.test(errorText)){
+              blockedContextFunctions.add(picked.selectionKey);
+              stats.contextAdaptations.push({kind:'STUB_FUNCTION_PRUNED',selectionKey:picked.selectionKey,atCallIndex:stats.calls});
+            }
+          }else if(rec.executionOutcome==='MINED_SUCCESS'){
+            preflightRejections.delete(picked.selectionKey);
+            contextWeightMultipliers.set(picked.selectionKey,Math.min(12,2+(feedback.get(picked.selectionKey)??0)));
+            successfulFunctionContexts.set(picked.selectionKey,{target:target.qualifiedName,signature:selected.signature});
+            feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
+          }
           stats.terminalActions++;
           if(['MINED_SUCCESS','MINED_REVERT','SUBMITTED_OUTCOME_UNKNOWN'].includes(rec.executionOutcome))stats.submittedActions++;
           if(rec.executionOutcome==='MINED_SUCCESS'){stats.minedSuccess++;stats.successes++;}
@@ -1551,7 +1569,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
           if(rec.positiveTransition){
             stats.positiveTransitions++;
             if(rec.semanticFamily==='ECONOMIC')stats.positiveEconomicTransitions++;
-            feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
+            // Already reinforced on mined success, even when the observed
+            // accounting surfaces do not yet expose a measurable delta.
             stats.feedbackUpdates++;
           }
           if(rec.observation==='SKIPPED_NON_ACCOUNTING_OR_REJECTED'){
@@ -1595,7 +1614,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
         status:stats.positiveEconomicTransitions>0?'ECONOMIC_TRANSITION_WITNESSED':'ECONOMIC_REACHABILITY_GAP',
         baselineIsNotTransitionEvidence:true
       },
-      feedbackStatus:stats.feedbackUpdates>0&&stats.feedbackSelections>0?'ACTIVE':'NO_FEEDBACK_WITNESS',decodedRevertReasons,
+      adaptiveDispatch:{blacklistedStubFunctions:[...blockedContextFunctions].sort(),rejectionSamples:[...preflightRejections.entries()].map(([functionKey,failures])=>({functionKey,failures})),successfulFunctionContexts:[...successfulFunctionContexts.values()],policy:'PRELIGHT_FAILURE_PENALTY_MINED_SUCCESS_REWARD_PERMANENT_STUB_PRUNING'},
+      feedbackStatus:successfulFunctionContexts.size>0?'ACTIVE_MINED_EXECUTION_LEARNING':'NO_EXECUTABLE_FUNCTION_WITNESS',decodedRevertReasons,
       actionSequenceDigestSha256,outcomeSequenceDigestSha256,
       rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,
       legacyCompatibility:{legacyRevertCounterWasPreflightDominated:true,currentRevertsAreMinedRevertsOnly:true},
