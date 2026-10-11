@@ -149,6 +149,11 @@ export const SUPERSEDED_DIRECTORY_V1='superseded';
 
 function gitBlobSha1(bytes){return createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');}
 
+function sealedOriginalSnapshotPath(campaignPath,segmentId,sealed){
+  if(!segmentForId(segmentId)||!Number.isInteger(Number(sealed.phase))||!/^[A-Za-z0-9._-]+$/.test(path.posix.basename(String(sealed.path??''))))throw new Error('invalid master sealed-original snapshot binding');
+  return path.posix.join(campaignPath,'work/master-review',segmentId,'sealed-originals','phase-'+phaseNumber(sealed.phase),path.posix.basename(sealed.path));
+}
+
 export function stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase,lastSealedReceiptPath,nextSequence,nextDerivedInputPaths=[],successorPrefillContext={},now}){
   const cfg=validateMasterReviewConfiguration(directory,{required:true});
   if(directory.pendingMasterReview)throw new Error('campaign already has pendingMasterReview');
@@ -156,12 +161,21 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
   if(!segment)throw new Error('unsupported master review boundary '+boundaryPhase);
   const reviewedArtifacts=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:predecessor.authority});
   const bindings=bindingRecord({root,campaignPath,directory,predecessor,authorityRoot,reviewedArtifacts});
-  // Exact git blob identities of the sealed work forms let the controller recover
-  // each reviewer's original after the master amends it in place.
-  const sealedWorkForms=reviewedArtifacts.filter(x=>x.kind==='WORK_FORM').map(x=>({
-    phase:x.phase,path:x.path,sha256:x.sha256,
-    gitBlobSha1:gitBlobSha1(fs.readFileSync(repoFile(root,path.posix.join(campaignPath,x.path))))
-  }));
+  // Preserve the exact sealed reviewer originals in this campaign, not only in Git
+  // history (which a partial clone may not contain). Never overwrite a snapshot.
+  const sealedWorkForms=reviewedArtifacts.filter(x=>x.kind==='WORK_FORM').map(x=>{
+    const bytes=fs.readFileSync(repoFile(root,path.posix.join(campaignPath,x.path)));
+    if(digestBytes(bytes)!==x.sha256)throw new Error('sealed form changed while staging master review: '+x.path);
+    const sealedOriginalPath=sealedOriginalSnapshotPath(campaignPath,segment.segmentId,x);
+    const snapshot=repoFile(root,sealedOriginalPath);
+    if(fs.existsSync(snapshot)){
+      if(!fs.statSync(snapshot).isFile()||!fs.readFileSync(snapshot).equals(bytes))throw new Error('sealed master snapshot already exists with different content: '+sealedOriginalPath);
+    }else{
+      fs.mkdirSync(path.dirname(snapshot),{recursive:true});
+      fs.writeFileSync(snapshot,bytes,{flag:'wx'});
+    }
+    return {phase:x.phase,path:x.path,sha256:x.sha256,gitBlobSha1:gitBlobSha1(bytes),sealedOriginalPath};
+  });
   const recordRel=path.posix.join(campaignPath,'work/master-review',segment.segmentId,'MASTER_REVIEW_RECORD_v1.json');
   const record={
     schemaVersion:'curveyield-lite-master-review-record-v1',
@@ -267,15 +281,28 @@ function currentBindingFailures(root,campaignPath,record,directory){
   return failures;
 }
 
-export function readSealedOriginal(root,sealed){
+export function readSealedOriginal(root,sealed,{campaignPath=null,segmentId=null}={}){
   if(!/^[0-9a-f]{40}$/.test(String(sealed.gitBlobSha1??''))||!SHA256.test(String(sealed.sha256??'')))throw new Error('sealed work form has invalid Git/SHA256 identity: '+sealed.path);
   let bytes;
+  if(campaignPath&&segmentId){
+    const expected=sealedOriginalSnapshotPath(campaignPath,segmentId,sealed);
+    if(sealed.sealedOriginalPath&&sealed.sealedOriginalPath!==expected)throw new Error('sealed original snapshot path mismatch: '+sealed.path);
+    const snapshot=repoFile(root,expected);
+    if(fs.existsSync(snapshot)){
+      if(!fs.statSync(snapshot).isFile())throw new Error('sealed original snapshot is not a file: '+expected);
+      bytes=fs.readFileSync(snapshot);
+      // A corrupted immutable campaign snapshot is a hard failure; never silently
+      // substitute another object from Git history or the remote blob API.
+      if(gitBlobSha1(bytes)!==sealed.gitBlobSha1||digestBytes(bytes)!==sealed.sha256)throw new Error('sealed original campaign snapshot digest mismatch: '+expected);
+      return bytes;
+    }
+    if(sealed.sealedOriginalPath)throw new Error('sealed original campaign snapshot missing: '+expected);
+  }
+  // Backward compatibility for master reviews staged before campaign-local
+  // snapshots existed. New reviews MUST use the snapshot above.
   try{
     bytes=execFileSync('git',['-C',root,'cat-file','blob',sealed.gitBlobSha1],{stdio:['ignore','pipe','pipe'],maxBuffer:256*1024*1024});
   }catch{
-    // The Actions controller uses a partial clone; historical blob objects may not
-    // be materialized even when the original remains reachable in Audit-Controller.
-    // GitHub's Git Blob API retrieves the exact object by its sealed SHA-1.
     try{
       const env={...process.env,GH_TOKEN:process.env.AUDIT_CONTROLLER_GITHUB_TOKEN||process.env.GH_TOKEN};
       const output=execFileSync('gh',['api','--method','GET','repos/CurveYield2/Audit-Controller/git/blobs/'+sealed.gitBlobSha1],
@@ -284,10 +311,9 @@ export function readSealedOriginal(root,sealed){
       if(blob.sha!==sealed.gitBlobSha1||blob.encoding!=='base64'||typeof blob.content!=='string')throw new Error('GitHub blob identity/encoding mismatch');
       bytes=Buffer.from(blob.content.replace(/\s+/g,''),'base64');
     }catch{
-      throw new Error('cannot recover sealed original using local git or authenticated GitHub blob: '+sealed.path);
+      throw new Error('cannot recover sealed original from campaign snapshot, local git or authenticated GitHub blob: '+sealed.path);
     }
   }
-  // Never admit a substituted, truncated or mismatched object from either source.
   if(gitBlobSha1(bytes)!==sealed.gitBlobSha1||digestBytes(bytes)!==sealed.sha256)throw new Error('recovered sealed original Git/SHA256 digest mismatch: '+sealed.path);
   return bytes;
 }
@@ -348,7 +374,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   const amendedForms=[];
   for(const item of changed){
     let original;
-    try{original=readSealedOriginal(root,item.sealed);}catch(error){failures.push(String(error.message||error));continue;}
+    try{original=readSealedOriginal(root,item.sealed,{campaignPath,segmentId:pending.segmentId});}catch(error){failures.push(String(error.message||error));continue;}
     let amended;
     try{amended=readJson(item.file);}catch{failures.push('amended work form is not valid JSON: '+item.sealed.path);continue;}
     const checked=amendmentFailures({root,authorityRoot,sealed:item.sealed,original:JSON.parse(original.toString('utf8')),amended});
