@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {discoverCreatorCandidatesV1,creatorAttemptBudgetV1,verifiedPredictedCurveYieldPoolV1} from '../src/phase0-fixture-synthesis-v1.mjs';
+import {discoverCreatorCandidatesV1,creatorAttemptBudgetV1,verifiedPredictedCurveYieldPoolV1,balancerCreatedPoolAddressesV1} from '../src/phase0-fixture-synthesis-v1.mjs';
 
 function candidateTarget(qualifiedName,methodNames){
   return {
