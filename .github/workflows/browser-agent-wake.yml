@@ -350,6 +350,11 @@ jobs:
           ' /tmp/browser-context.json >/dev/null
 
           echo "WAKE_MESSAGE_PURPOSE=$message_purpose" >> "$GITHUB_ENV"
+          if [ "$(cat /tmp/wake-message.txt)" = 'GET BACK TO WORK' ]; then
+            echo 'WAKE_IS_POKE=true' >> "$GITHUB_ENV"
+          else
+            echo 'WAKE_IS_POKE=false' >> "$GITHUB_ENV"
+          fi
           echo "WAKE_DIAGNOSTIC_ONLY=$(jq -r '.diagnosticOnly // false' /tmp/browser-context.json)" >> "$GITHUB_ENV"
 
           {
@@ -590,7 +595,7 @@ jobs:
           fi
 
       - name: Persist existing-chat reviewer wake into campaign registration
-        if: ${{ inputs.mode == 'resume_existing' && inputs.worker_role == 'reviewer' && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
+        if: ${{ inputs.mode == 'resume_existing' && inputs.worker_role == 'reviewer' && env.WAKE_IS_POKE != 'true' && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           GH_TOKEN: ${{ github.token }}
           RESOLVED_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}
@@ -603,6 +608,8 @@ jobs:
           CURRENT_GATE_REF: ${{ inputs.gate_ref }}
           CURRENT_GATE_STATE_PATH: ${{ inputs.gate_state_path }}
           CURRENT_GATE_POINTER_PATH: ${{ inputs.gate_active_pointer_path }}
+          WAKE_ACK_ID: ${{ env.WAKE_ACK_ID }}
+          ACKNOWLEDGEMENT_VERIFIED: ${{ steps.receipt.outputs.verified }}
         shell: bash
         run: |
           set -euo pipefail
@@ -629,6 +636,8 @@ jobs:
             --arg gateStatePath "$CURRENT_GATE_STATE_PATH" \
             --arg gatePointerPath "$CURRENT_GATE_POINTER_PATH" \
             --arg deliveredAt "$delivered_at" \
+            --arg ackId "$WAKE_ACK_ID" \
+            --arg ackVerified "$ACKNOWLEDGEMENT_VERIFIED" \
             '.mode="resume_existing"
              | .chatUrl=$url
              | .browserRoutine=""
@@ -637,7 +646,11 @@ jobs:
              | .wakeMessage=$wakeMessage
              | .thinkingEffort=$thinkingEffort
              | .activeAssignment={phaseId:$phaseId,milestoneId:$milestoneId,workerRole:$workerRole,reviewer:$reviewer,thinkingEffort:$thinkingEffort}
-             | .wakeDelivery={milestoneId:$milestoneId,chatUrl:$url,deliveredAt:$deliveredAt,verification:"REVIEWER_GITHUB_CHECK_IN",ackId:$ENV.WAKE_ACK_ID}
+             | if $ackVerified=="true" then
+                 .wakeDelivery={milestoneId:$milestoneId,chatUrl:$url,deliveredAt:$deliveredAt,verification:"REVIEWER_GITHUB_CHECK_IN",ackId:$ackId}
+               else
+                 .lastWakeAttempt={milestoneId:$milestoneId,chatUrl:$url,attemptedAt:$deliveredAt,verification:"X11_VISUAL_SEND_ATTEMPT"}
+               end
              | .watchdog=((.watchdog // {}) + {idleMessage:$idleMessage})
              | .watchdog.gate=((.watchdog.gate // {}) + {mode:$gateMode,repository:$gateRepository,ref:$gateRef,statePath:$gateStatePath,expectedPhaseId:$phaseId,expectedMilestoneId:$milestoneId,activePointerPath:$gatePointerPath})
              | .updatedAt=(now|todate)' \
@@ -650,7 +663,7 @@ jobs:
             -f content="$content" -f sha="$sha" -f branch=main >/dev/null
 
       - name: Activate prepared Lite receipt successor
-        if: ${{ inputs.worker_role == 'reviewer' && inputs.gate_mode == 'LITE' && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
+        if: ${{ inputs.worker_role == 'reviewer' && inputs.gate_mode == 'LITE' && env.WAKE_IS_POKE != 'true' && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           DIRECTORY_PATH: ${{ inputs.gate_state_path }}
