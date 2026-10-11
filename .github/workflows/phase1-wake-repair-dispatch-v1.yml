@@ -32,12 +32,11 @@ jobs:
           test "$chat_url" = "$(jq -r '.chatUrl' "$registration")"
           wake_b64="$(jq -r .wakeMessage "$registration" | base64 -w0)"
           test -n "$wake_b64"
-          context_b64="$(jq -cn '{routineId:"",projectName:"",projectUrl:"",chatName:"reviewer-1",repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"initial_wake"}' | base64 -w0)"
+          context_b64="$(jq -cn --argjson diagnostic "$diagnostic" '{routineId:"",projectName:"",projectUrl:"",chatName:"reviewer-1",diagnosticOnly:$diagnostic,repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:"initial_wake"}' | base64 -w0)"
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id=curveyield-dex-v16-source-r4-PHASE_1_WORK_PACKET-reviewer-1 \
             -f campaign_id=curveyield-dex-v16-source-r4 \
             -f phase_id=phase-1 \
-            -f diagnostic_only="$diagnostic" \
             -f mode=resume_existing \
             -f chat_url="$chat_url" \
             -f wake_message_b64="$wake_b64" \
