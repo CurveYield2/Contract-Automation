@@ -104,12 +104,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh auth setup-git
-          rm -rf .audit-controller
-          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
-          cd .audit-controller
-          git fetch origin "$AUDIT_CONTROLLER_REF"
-          git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
+          bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF"
 
       - name: Finalize machine Phase 0 receipt
         id: finalize

@@ -13,10 +13,13 @@ test('qualification workflow supports fail-closed controller-only verification w
   assert.match(workflow, /classify-v7-qualification-change\.mjs/);
   assert.match(workflow, /CONTROLLER_ONLY refused/);
   assert.match(workflow, /secrets\.AUDIT_CONTROLLER_GITHUB_TOKEN/);
-  assert.match(workflow, /gh repo clone CurveYield2\/Audit-Controller \.controller-under-test/);
-  assert.match(workflow, /git fetch --depth=1 origin "\$CONTROLLER_REF"/);
-  assert.match(workflow, /expected_controller_commit="\$\(git rev-parse FETCH_HEAD\)"/);
-  assert.match(workflow, /test "\$\(git rev-parse HEAD\)" = "\$expected_controller_commit"/);
+  assert.match(workflow, /bash scripts\/checkout-audit-controller-once-v1\.sh \.controller-under-test "\$CONTROLLER_REF" detach/);
+  const helper=fs.readFileSync('scripts/checkout-audit-controller-once-v1.sh','utf8');
+  assert.ok(helper.includes('gh auth setup-git'));
+  assert.ok(helper.includes('git -C "$destination" fetch --no-tags --depth=1 --filter=blob:none origin "$ref"'));
+  assert.ok(helper.includes('git -C "$destination" checkout --quiet --detach FETCH_HEAD'));
+  assert.ok(helper.includes('test "$(git -C "$destination" rev-parse HEAD)" = "$expected"'));
+  assert.doesNotMatch(helper,/gh repo clone/);
   assert.match(workflow, /working-directory:\s*\.controller-under-test/);
   assert.match(workflow, /npm test/);
   assert.match(workflow, /npm run check/);

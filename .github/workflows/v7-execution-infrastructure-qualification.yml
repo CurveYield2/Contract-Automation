@@ -246,14 +246,7 @@ jobs:
           set -euo pipefail
           test -n "${GH_TOKEN:-}"
           gh api repos/CurveYield2/Audit-Controller --silent
-          rm -rf .controller-under-test
-          gh auth setup-git
-          gh repo clone CurveYield2/Audit-Controller .controller-under-test -- --filter=blob:none --no-checkout
-          cd .controller-under-test
-          git fetch --depth=1 origin "$CONTROLLER_REF"
-          expected_controller_commit="$(git rev-parse FETCH_HEAD)"
-          git checkout --detach "$expected_controller_commit"
-          test "$(git rev-parse HEAD)" = "$expected_controller_commit"
+          bash scripts/checkout-audit-controller-once-v1.sh .controller-under-test "$CONTROLLER_REF" detach
 
       - name: Reuse successful V7 qualification with cache-only private main changes
         if: env.V7_QUALIFICATION_LANE == 'FULL' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && env.CONTROLLER_REF_TO_TEST == 'main'
