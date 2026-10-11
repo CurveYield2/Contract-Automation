@@ -572,7 +572,7 @@ async function runNormalChromeExistingSession(chromium) {
       throw new BrowserAgentError('UNSUPPORTED_ACTION', 'Normal Chrome existing-session path only supports observe or wake', false);
     }
 
-    // Proven Phase-1 wake interaction. Do not machine-read the composer,
+    // phase1-fixed-x11-submit-no-chatgpt-page-read: X11-only ChatGPT input.\n    // Proven Phase-1 wake interaction. Do not machine-read the composer,
     // DOM focus, bounding box, or active element. The visible ChatGPT composer
     // occupies this stable point in the fixed 1920x1080 X11 Chrome display.
     const geometry = await x11Capture(['getdisplaygeometry'], 'x11-display-geometry');
