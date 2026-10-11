@@ -268,10 +268,27 @@ function currentBindingFailures(root,campaignPath,record,directory){
 }
 
 export function readSealedOriginal(root,sealed){
+  if(!/^[0-9a-f]{40}$/.test(String(sealed.gitBlobSha1??''))||!SHA256.test(String(sealed.sha256??'')))throw new Error('sealed work form has invalid Git/SHA256 identity: '+sealed.path);
   let bytes;
-  try{bytes=execFileSync('git',['-C',root,'cat-file','blob',sealed.gitBlobSha1],{stdio:['ignore','pipe','pipe'],maxBuffer:256*1024*1024});}
-  catch(error){throw new Error('cannot recover sealed original from git history: '+sealed.path);}
-  if(digestBytes(bytes)!==sealed.sha256)throw new Error('recovered sealed original digest mismatch: '+sealed.path);
+  try{
+    bytes=execFileSync('git',['-C',root,'cat-file','blob',sealed.gitBlobSha1],{stdio:['ignore','pipe','pipe'],maxBuffer:256*1024*1024});
+  }catch{
+    // The Actions controller uses a partial clone; historical blob objects may not
+    // be materialized even when the original remains reachable in Audit-Controller.
+    // GitHub's Git Blob API retrieves the exact object by its sealed SHA-1.
+    try{
+      const env={...process.env,GH_TOKEN:process.env.AUDIT_CONTROLLER_GITHUB_TOKEN||process.env.GH_TOKEN};
+      const output=execFileSync('gh',['api','--method','GET','repos/CurveYield2/Audit-Controller/git/blobs/'+sealed.gitBlobSha1],
+        {env,stdio:['ignore','pipe','pipe'],maxBuffer:256*1024*1024});
+      const blob=JSON.parse(output.toString('utf8'));
+      if(blob.sha!==sealed.gitBlobSha1||blob.encoding!=='base64'||typeof blob.content!=='string')throw new Error('GitHub blob identity/encoding mismatch');
+      bytes=Buffer.from(blob.content.replace(/\s+/g,''),'base64');
+    }catch{
+      throw new Error('cannot recover sealed original using local git or authenticated GitHub blob: '+sealed.path);
+    }
+  }
+  // Never admit a substituted, truncated or mismatched object from either source.
+  if(gitBlobSha1(bytes)!==sealed.gitBlobSha1||digestBytes(bytes)!==sealed.sha256)throw new Error('recovered sealed original Git/SHA256 digest mismatch: '+sealed.path);
   return bytes;
 }
 function reviewerOutputPaths(schema){
@@ -357,16 +374,11 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
 
 export function masterWakeMessage({campaignId,pending,auditControllerRef='main',authorityRoot=null}){
   const phases=pending.segmentPhases.length===1?'Phase '+pending.segmentPhases[0]:'Phases '+pending.segmentPhases[0]+'-'+pending.segmentPhases.at(-1);
-  return [
-    'MASTER_REVIEW_REQUIRED.',
-    'You are the persistent master reviewer for campaign '+campaignId+'. '+pending.reviewerId+' has sealed '+phases+' (segment '+pending.segmentId+').',
-    '1. Open the segment record '+pending.recordPath+' in Audit-Controller. It lists every sealed work form, report, receipt and machine artifact in this segment.',
-    '2. Review the segment reports and work forms, focusing on what the next reviewer depends on: errors, unsupported conclusions, coverage gaps and missed findings.',
-    '3. If anything needs correcting, edit only the reviewer-written fields (actions.<step>.outputs.<field>) of this segment\'s work forms, in their normal locations. Do not edit reports, canonical data, receipts or controller files; the controller regenerates them and archives the originals under '+SUPERSEDED_DIRECTORY_V1+'/.',
-    '4. Do not start new executions or simulations.',
-    '5. Submit one request file to process/agent-upload/lite-phase-boundary/ in Contract-Automation: {"schemaVersion":"curveyield-lite-phase-boundary-request-v1","campaignId":"'+campaignId+'","reviewKind":"master","segmentId":"'+pending.segmentId+'","masterOutcome":"AMENDED" or "ACCEPT_WITHOUT_MODIFICATIONS","summary":"<one paragraph>","auditControllerRef":"'+auditControllerRef+'","attempt":1}.',
-    'Step-by-step instructions: '+(authorityRoot?authorityRoot+'/':'')+'master-review/START_HERE.md in Audit-Controller.'
-  ].join(' ');
+  const guide=(authorityRoot?authorityRoot+'/':'')+'master-review/START_HERE.md';
+  return 'MASTER_REVIEW_REQUIRED: campaign '+campaignId+', segment '+pending.segmentId+' ('+pending.reviewerId+', '+phases+'). '+
+    'Read the segment record '+pending.recordPath+' in Audit-Controller. '+
+    'Follow the authoritative Audit Skill guide '+guide+' for review, amendment limits, and submission. '+
+    'Use the campaign ref '+auditControllerRef+'.';
 }
 
 function assertDigest(root,record,label){
