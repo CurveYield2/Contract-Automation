@@ -441,6 +441,8 @@ async function runNormalChromeExistingSession(chromium) {
   const chromeProcess = spawn(chromePath, [
     '--user-data-dir=' + profileDir,
     '--remote-debugging-port=' + port,
+    '--window-position=0,0',
+    '--window-size=1920,1080',
     'about:blank'
   ], {
     env: { ...process.env, DISPLAY: process.env.DISPLAY || ':99' },
@@ -462,7 +464,20 @@ async function runNormalChromeExistingSession(chromium) {
     const pages = context.pages();
     const page = pages[0] || await context.newPage();
 
-    await x11Key(['key', '--clearmodifiers', 'alt+F10'], 'x11-maximize-window');
+    // Xvfb does not run a window manager. Alt+F10 is ignored, leaving Chrome
+    // 820px wide while the old fixed-point composer click landed at x=1210.
+    // Size the real OS window explicitly; this reads X11 metadata only.
+    const windowMatches=await x11Capture(['search','--onlyvisible','--class','[Cc]hrome'],'x11-chrome-window-search');
+    const windowIds=windowMatches.stdout.split(/\\s+/).filter(Boolean);
+    const chromeWindow=windowIds.at(-1);
+    if(!chromeWindow)throw new BrowserAgentError('X11_CHROME_WINDOW_MISSING','No visible Chrome desktop window',true);
+    await x11Key(['windowsize','--sync',chromeWindow,'1920','1080'],'x11-chrome-full-screen-size');
+    await x11Key(['windowmove','--sync',chromeWindow,'0','0'],'x11-chrome-top-left-position');
+    await x11Key(['windowfocus','--sync',chromeWindow],'x11-chrome-focus');
+    const geometryCheck=await x11Capture(['getwindowgeometry','--shell',chromeWindow],'x11-chrome-geometry');
+    console.log('[normal-chrome-watchdog] desktop-window-geometry='+JSON.stringify(geometryCheck.stdout.split('\\n').filter(x=>/^(WIDTH|HEIGHT|X|Y)=/.test(x))));
+    const sizeMatch=geometryCheck.stdout.match(/(?:^|\\n)WIDTH=(\\d+)/);
+    if(!sizeMatch||Number(sizeMatch[1])<1600)throw new BrowserAgentError('CHROME_WINDOW_NOT_MAXIMIZED','OS Chrome window too narrow for safe composer coordinates',false);
     await page.waitForTimeout(randomDelayMs(650, 1100));
 
     await x11Key(['key', '--clearmodifiers', 'ctrl+l'], 'x11-address-bar');
@@ -472,6 +487,10 @@ async function runNormalChromeExistingSession(chromium) {
     await page.waitForTimeout(15000);
     await captureX11VisualEvidence('01_after_chat_navigation');
     if (bool(env.WAKE_DIAGNOSTIC_ONLY)) {
+      await page.waitForTimeout(25000);
+      await captureX11VisualEvidence('02_after_40s_navigation');
+      await page.waitForTimeout(30000);
+      await captureX11VisualEvidence('03_after_70s_navigation');
       const diagnostic={
         ok:false, posted:false, persisted:false, wakeId,
         provider:'normal-system-chrome-x11',
