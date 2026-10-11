@@ -17,6 +17,14 @@ old='0xDC24316b9AE028F1497c275EB9192a3Ea0f67022'
 new='0x21E27a5E5513D6e65C4f830167390997aA84843a'
 assert s.count(old)==1, 'Expected exactly one legacy stETH pool address'
 p.write_text(s.replace(old,new))
+import hashlib,json
+root=p.parents[3]
+manifest=root/'package_manifest_v11.json'
+data=json.loads(manifest.read_text())
+key='beefy/contracts/converter/BoostHubEthereumRewardConverter_v6.sol'
+data['sha256'][key]=hashlib.sha256(p.read_bytes()).hexdigest()
+manifest.write_text(json.dumps(data,indent=2)+'\\n')
+
 print('Fork-only remediation: stETH/ETH legacy pool with NO EMA -> NG pool with proven pool price_oracle()')
 PY
 mkdir -p "$ROOT/ci-src"
