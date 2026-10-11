@@ -1020,24 +1020,24 @@ function activationAmountUnitV1(token){
   if(!Number.isInteger(decimals)||decimals<0||decimals>70)return 1n;
   return 10n**BigInt(decimals);
 }
-function activationArrayLengthV1(param,associatedTokenRows,associationRows=[]){
+function fixedOrDynamicLengthV1(param,dynamicLength){
   if(Number.isInteger(param?.arrayLength)&&param.arrayLength>=0)return Math.min(8,param.arrayLength);
-  const discovered=Math.max(associatedTokenRows.length,associationRows.length);
-  return Math.min(8,discovered);
+  return Math.min(8,Math.max(0,dynamicLength));
 }
 function activationValueV1({ethers,param,ctx}){
   if(param?.baseType==='array'){
-    const length=activationArrayLengthV1(param,ctx.tokens,ctx.associations);
     if(param.arrayChildren?.baseType==='address'){
       const source=(ctx.tokens.length?ctx.tokens.map(x=>x.address):ctx.associations);
+      const length=fixedOrDynamicLengthV1(param,source.length);
       if(!source.length)return[];
       return Array.from({length},(_,i)=>ethers.getAddress(source[i%source.length]));
     }
     if(/^uint(?:\d+)?$/.test(String(param.arrayChildren?.type??''))){
-      const bits=uintBitsV1(param.arrayChildren);
-      const tokenRows=ctx.tokens.length?ctx.tokens:[null];
-      return Array.from({length},(_,i)=>capUintV1(activationAmountUnitV1(tokenRows[i%tokenRows.length]),bits));
+      const length=fixedOrDynamicLengthV1(param,ctx.tokens.length),bits=uintBitsV1(param.arrayChildren);
+      if(!ctx.tokens.length)return[];
+      return Array.from({length},(_,i)=>capUintV1(activationAmountUnitV1(ctx.tokens[i%ctx.tokens.length]),bits));
     }
+    const length=fixedOrDynamicLengthV1(param,ctx.associations.length);
     return Array.from({length},()=>activationValueV1({ethers,param:param.arrayChildren,ctx}));
   }
   if(param?.baseType==='tuple')return (param.components??[]).map(component=>activationValueV1({ethers,param:component,ctx}));
