@@ -42,8 +42,8 @@ test('controller-only lane preserves runner qualification identity and publishes
 
 test('FULL-only expensive steps remain gated away from controller-only lane', () => {
   for (const name of [
-    'Cache npm download cache',
-    'Install exact Node dependencies',
+    'Restore pinned Node dependencies (shared Phase 0 cache)',
+    'Record verified dependency lock',
     'Install and verify canonical V7 toolchain',
     'Verify canonical runner manifest',
     'Anvil-only runner qualification',
@@ -57,6 +57,12 @@ test('FULL-only expensive steps remain gated away from controller-only lane', ()
     const block=workflow.slice(start,next===-1?undefined:next);
     assert.match(block,/V7_QUALIFICATION_LANE == 'FULL'/,name);
   }
+  // The delegated action itself must keep install expensive work cache-miss-only.
+  const cacheAction=fs.readFileSync('.github/actions/setup-phase0-node-cache/action.yml','utf8');
+  assert.match(cacheAction, /if: steps\.locked-modules\.outputs\.cache-hit != 'true'/);
+  assert.match(cacheAction, /npm ci --force/);
+  assert.match(cacheAction, /Verify restored Node toolchain/);
+
 });
 
 
