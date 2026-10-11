@@ -1158,7 +1158,10 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
       &&/^create(?:Weighted|Stable|StableSurge)Pool$/.test(String(candidate.selected.fragment?.name??''));
     // Pool inputs cycle through the available adjacent funded token pairs.
     // Trying 24 different salts against the same invalid pair is not useful.
-    const attemptBudget=isCurveYieldWrapper?Math.min(maxAttemptsPerCandidate,Math.max(2,fundedTokensV1(valuePool).length)):maxAttemptsPerCandidate;
+    // One verified wrapper recipe per adjacent token pair. Replaying the same
+    // pair under six salts does not fix a failed Balancer permission or config.
+    // Bound candidate work so Stage 2 cannot consume the telemetry smoke budget.
+    const attemptBudget=isCurveYieldWrapper?Math.min(maxAttemptsPerCandidate,2):maxAttemptsPerCandidate;
     const successBudget=isCurveYieldWrapper?1:maxSuccessesPerCandidate;
     console.log(`[phase0-fixture] Stage2 creator ${candidateIndex+1}/${candidates.length}: ${candidate.selected.signature}; maxAttempts=${attemptBudget}`);
     for(let strategy=0;strategy<attemptBudget&&attempts.length<attemptBudget&&successes<successBudget&&createdCount<maxCreatedContracts;strategy++){
@@ -1166,12 +1169,16 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
       const wrapper=await buildCurveYieldWrapperCreationV1({provider,ethers,candidate,attempt:strategy,actor,valuePool});
       const built=wrapper===null?buildCreatorArgumentsV1({ethers,candidate,attempt:strategy,actor,valuePool,targets}):wrapper;
       if(built.status==='NOT_READY'){
+        console.log(`[phase0-fixture] Stage2 creator ${candidateIndex+1}/${candidates.length} strategy=${strategy} INPUTS_UNAVAILABLE ${built.reason}: ${String(built.error??'').slice(0,200)}`);
         attempts.push({attempt:attempts.length+1,strategy,sender:actor,status:'PROTOCOL_INPUTS_UNAVAILABLE',reason:built.reason,error:built.error??null});
         // Don't spend all 24 attempts on a structural missing dependency.
         if(/PREDICTION_FAILED|NEED_TWO|TUPLE_ABI_MISMATCH/.test(built.reason))break;
         continue;
       }
-      const senders=[actor],base=await attemptCreatorCallV1({provider,ethers,candidate,sender:actor,args:built.args,selectorIndex,value:built.value??0n});
+      console.log(`[phase0-fixture] Stage2 creator ${candidateIndex+1}/${candidates.length} strategy=${strategy} PROTOCOL_PREFLIGHT ${built.basis??'GENERIC_ABI'}`);
+      const startAttempt=Date.now();
+      const base=await attemptCreatorCallV1({provider,ethers,candidate,sender:actor,args:built.args,selectorIndex,value:built.value??0n});
+      console.log(`[phase0-fixture] Stage2 creator ${candidateIndex+1}/${candidates.length} strategy=${strategy} ${base.status} elapsedMs=${Date.now()-startAttempt} reason=${base.decoded?.reason??'none'}`);
       attempts.push({attempt:attempts.length+1,strategy,sender:actor,args:normalizeEvidenceValueV1(built.args),tokenSet:built.tokenSet,status:base.status,decoded:base.decoded??null,error:base.error??null});
       let result=base,sender=actor;
       if(base.status!=='PASS'&&authorizationLookingV1(base.decoded)){
@@ -1185,11 +1192,25 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
       }
       if(result.status!=='PASS')continue;
       successes++;
-      const newAddresses=await receiptAddressCandidatesV1({provider,ethers,receipt:result.receipt,artifacts,returnedValue:result.returnedValue,known});
+      // The CurveYield wrapper computes its pool address on-chain *before*
+      // creation, and enforces expectedPool in _finishPoolCreated. Resolve
+      // that actual deployed child directly rather than rebuilding every
+      // vendor ABI and trying to parse every log (very slow with Balancer
+      // enums and a full compiled-artifact inventory).
+      let newAddresses;
+      if(isCurveYieldWrapper&&built.expectedPool){
+        const expectedCode=await provider.getCode(built.expectedPool);
+        newAddresses=expectedCode!=='0x'?[ethers.getAddress(built.expectedPool)]:[];
+        console.log(`[phase0-fixture] Stage2 wrapper verified predictedPool=${built.expectedPool} deployed=${newAddresses.length===1}`);
+      }else{
+        newAddresses=await receiptAddressCandidatesV1({provider,ethers,receipt:result.receipt,artifacts,returnedValue:result.returnedValue,known});
+      }
       const bound=[];
       for(const address of newAddresses){
         if(createdCount>=maxCreatedContracts)break;
+        console.log(`[phase0-fixture] Stage2 binding created child ${address}`);
         const binding=await bindCreatedContractV1({provider,ethers,address,artifacts:[...artifacts,...syntheticArtifacts],probeHolder:sender});
+        console.log(`[phase0-fixture] Stage2 binding complete ${address} status=${binding.status}`);
         known.add(address.toLowerCase());
         if(!valuePool.created) valuePool.created=[];
         if(!valuePool.addresses) valuePool.addresses=[];
@@ -1215,6 +1236,7 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
         createdAddresses:newAddresses,boundArtifacts:bound
       });
     }
+    console.log(`[phase0-fixture] Stage2 creator ${candidateIndex+1}/${candidates.length} complete successes=${successes} calls=${attempts.length}`);
     const failedAttempts=attempts.filter(x=>x.status!=='PASS');
     if(failedAttempts.length||successes<maxSuccessesPerCandidate){
       creationGaps.push({
