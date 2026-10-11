@@ -3,6 +3,8 @@ name: Lite Phase 0 Simulation Testing v1
 # Proves production Phase-0 Medusa and/or ABI telemetry end to end on a local ephemeral Anvil fork with reduced
 # call budgets before spending a full campaign simulation. Never publishes campaign evidence.
 on:
+  issue_comment:
+    types: [created]
   workflow_dispatch:
     inputs:
       campaign_id:
@@ -46,18 +48,66 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
-  group: lite-phase0-simulation-testing-${{ inputs.campaign_id }}
+  group: lite-phase0-simulation-testing-${{ github.event.issue.number || inputs.campaign_id || github.run_id }}
   cancel-in-progress: true
 
 jobs:
   simulation-testing:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (
+        github.event.issue.pull_request &&
+        github.event.comment.body == '/phase0-smoke' &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Resolve smoke invocation
+        id: invocation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          MANUAL_CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          MANUAL_CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+          MANUAL_AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          MANUAL_MEDUSA_CALLS: ${{ inputs.medusa_calls }}
+          MANUAL_TELEMETRY_CALLS: ${{ inputs.telemetry_calls }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "issue_comment" ]; then
+            pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+            head_repo="$(jq -r '.head.repo.full_name // empty' <<<"$pr_json")"
+            head_sha="$(jq -r '.head.sha // empty' <<<"$pr_json")"
+            test "$head_repo" = "$GITHUB_REPOSITORY" || { echo "::error::Connector smoke comments may only execute same-repository PR heads"; exit 1; }
+            test -n "$head_sha" || { echo "::error::Could not resolve PR head SHA"; exit 1; }
+            {
+              echo "target_ref=$head_sha"
+              echo "campaign_id=curveyield-dex-v16-source-r4"
+              echo "campaign_path=campaigns/CurveYield DEX v16 Source r4"
+              echo "audit_controller_ref=main"
+              echo "medusa_calls=0"
+              echo "telemetry_calls=300"
+            } >> "$GITHUB_OUTPUT"
+          else
+            {
+              echo "target_ref=$GITHUB_SHA"
+              echo "campaign_id=$MANUAL_CAMPAIGN_ID"
+              echo "campaign_path=$MANUAL_CAMPAIGN_PATH"
+              echo "audit_controller_ref=$MANUAL_AUDIT_CONTROLLER_REF"
+              echo "medusa_calls=$MANUAL_MEDUSA_CALLS"
+              echo "telemetry_calls=$MANUAL_TELEMETRY_CALLS"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
         with:
+          ref: ${{ steps.invocation.outputs.target_ref }}
           persist-credentials: false
           fetch-depth: 1
 
@@ -80,7 +130,7 @@ jobs:
       - name: Checkout exact campaign
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          AUDIT_CONTROLLER_REF: ${{ steps.invocation.outputs.audit_controller_ref }}
         shell: bash
         run: |
           set -euo pipefail
@@ -93,9 +143,9 @@ jobs:
       - name: Deploy on Anvil and run requested smoke stages
         env:
           ETHEREUM_FORK_RPC_URL: https://eth.drpc.org/
-          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
-          MEDUSA_CALLS: ${{ inputs.medusa_calls }}
-          TELEMETRY_CALLS: ${{ inputs.telemetry_calls }}
+          CAMPAIGN_PATH: ${{ steps.invocation.outputs.campaign_path }}
+          MEDUSA_CALLS: ${{ steps.invocation.outputs.medusa_calls }}
+          TELEMETRY_CALLS: ${{ steps.invocation.outputs.telemetry_calls }}
         shell: bash
         run: |
           set -euo pipefail
@@ -114,8 +164,8 @@ jobs:
       - name: Report and require requested smoke results
         if: ${{ always() }}
         env:
-          MEDUSA_CALLS: ${{ inputs.medusa_calls }}
-          TELEMETRY_CALLS: ${{ inputs.telemetry_calls }}
+          MEDUSA_CALLS: ${{ steps.invocation.outputs.medusa_calls }}
+          TELEMETRY_CALLS: ${{ steps.invocation.outputs.telemetry_calls }}
         shell: bash
         run: |
           set -euo pipefail
@@ -126,7 +176,7 @@ jobs:
 
           if (( TELEMETRY_CALLS > 0 )); then
             echo "---- Telemetry smoke summary ----"
-            jq '.telemetry[] | {runId,minedSuccess,minedRevert,simulatedRejection,positiveTransitions,positiveEconomicTransitions,accountingActionShare,observationReads}' "$summary"
+            jq '.telemetry[] | {runId,minedSuccess,minedRevert,simulatedRejection,positiveTransitions,positiveEconomicTransitions,accountingActionShare,observationReads,accountingObservationCalls,skippedObservationCalls,observationReadsPerAccountingCall}' "$summary"
             echo "---- Top 15 decoded telemetry revert reasons ----"
             jq -r '[.telemetry[]?.decodedRevertReasons[]?] | group_by(.reason) | map({reason:.[0].reason,kind:.[0].kind,selector:.[0].selector,count:(map(.count)|add)}) | sort_by(-.count, .reason) | .[:15] | ("COUNT\tKIND\tSELECTOR\tREASON"), (.[] | [.count,.kind,(.selector // ""),.reason] | @tsv)' "$summary"
           fi
