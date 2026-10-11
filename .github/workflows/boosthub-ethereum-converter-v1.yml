@@ -1,4 +1,4 @@
-name: Build Ethereum BoostHub unified converter v1 # bind source runtime and route red test 7
+name: Build Ethereum BoostHub unified converter v1 # first integrated build and fork test 8
 on:
   push:
     branches: [build-boosthub-ethereum-converter-v1]
@@ -17,42 +17,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Select configured private-source credential
-        env:
-          AUDIT_CONTROLLER_PROBE_REPOSITORY: CurveYield2/Audit-Controller
-          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
-        run: bash scripts/select-audit-controller-token.sh
-      - uses: actions/checkout@v4
+      - uses: foundry-rs/foundry-toolchain@v1
         with:
-          repository: CurveYield2/Audit-Controller
-          ref: 93062463611e798ab26544a88c4e119f9620be9a
-          token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          path: .controller
-          persist-credentials: false
-          sparse-checkout: campaigns/Boosthub Staking v2/source
-      - name: Extract versioned converter references
-        run: python3 github-native-sim/boosthub-ethereum-converter-v1/retrieve_reference_v1.py
+          version: v1.7.1
       - name: Install pinned compilation tools on GitHub
         working-directory: github-native-sim/boosthub-ethereum-converter-v1
         run: npm install --no-audit --no-fund
-      - name: Bind converter source to deployed executable runtime
+      - name: Compile the exact standalone converter and test fixtures
         working-directory: github-native-sim/boosthub-ethereum-converter-v1
-        run: node bind_sources_v1.mjs
-      - name: Verify combined-route regression fails for an existing single-route converter
+        run: npm run build
+      - name: Run the complete converter suite and Ethereum fork checks
         working-directory: github-native-sim/boosthub-ethereum-converter-v1
-        run: |
-          set +e
-          node --test combined_routes_v1.test.mjs > binding_evidence_v1/combined_routes_red_v1.txt 2>&1
-          status=$?
-          cat binding_evidence_v1/combined_routes_red_v1.txt
-          test "$status" -ne 0
+        run: npm test
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: boosthub-ethereum-converter-source-bindings-v1
+          name: boosthub-ethereum-converter-build-v1
           path: |
-            github-native-sim/boosthub-ethereum-converter-v1/binding_evidence_v1
-            github-native-sim/boosthub-ethereum-converter-v1/reference_evidence_v1
+            github-native-sim/boosthub-ethereum-converter-v1/build_v1
+            github-native-sim/boosthub-ethereum-converter-v1/test_evidence_v1
+            github-native-sim/boosthub-ethereum-converter-v1/package-lock.json
           retention-days: 14

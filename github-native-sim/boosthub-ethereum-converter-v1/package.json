@@ -1,1 +1,1 @@
-{"name":"boosthub-ethereum-converter-v1","version":"1.0.0","private":true,"type":"module","dependencies":{"ethers":"6.15.0","solc":"0.8.28","@openzeppelin/contracts":"5.4.0","esbuild":"0.25.5"}}
+{"name":"boosthub-ethereum-converter-v1","version":"1.0.0","private":true,"type":"module","scripts":{"build":"node compile_v1.mjs","test":"node run_tests_v1.mjs"},"dependencies":{"ethers":"6.15.0","solc":"0.8.28","@openzeppelin/contracts":"5.4.0","esbuild":"0.25.5"}}
