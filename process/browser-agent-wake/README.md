@@ -78,6 +78,20 @@ Lifecycle:
 
 A successor wake must not overlap the predecessor watchdog.
 
+## Initial reviewer wake check-in (v1)
+
+Initial reviewer and initial master-reviewer wakes only (`messagePurpose=initial_wake`) prepend **DO THIS FIRST, RIGHT NOW** to the existing custom wake instructions. Before reading the audit skill or performing any other task, the receiving reviewer must use the GitHub connector to create or update exactly one acknowledgement file in its Audit-Controller campaign workspace:
+
+`campaigns/<campaign name>/work/browser/WAKE_ACK_<reviewer>_v1.json`
+
+The message supplies the exact path and exact JSON object containing `schemaVersion`, `ackId`, `wakeId`, `runId`, `phaseId`, and `reviewer`. The acknowledgement is a one-file mutable check-in per reviewer, not a phase receipt, controller transition, or test artifact.
+
+After a visible X11 send attempt, the wake workflow checks that exact file **immediately and every 30 seconds up to five minutes** (11 checks at t=0,30,...,300 seconds). Only a matching acknowledgement constitutes verified initial-wake reception; absence is **UNCONFIRMED**, not proof of failure, and does not trigger a duplicate initial message. A valid check-in can independently verify delivery even when an OS screenshot transition is inconclusive.
+
+Follow-up phase-continuation messages, rework notices, technical callbacks, and watchdog pokes are not given check-in instructions and do not run the five-minute loop. They preserve their exact caller-authored payload, except that watchdog pokes always send the literal `GET BACK TO WORK`.
+
+This mechanism never machine-reads ChatGPT. The browser uses only visible system Chrome with human-style X11 interactions and OS screenshots. The GitHub acknowledgement is read via ordinary GitHub repository API operations, not ChatGPT browser inspection.
+
 ## Watchdog
 
 `.github/workflows/browser-agent-watchdog.yml` runs scheduled sweeps every five minutes.
