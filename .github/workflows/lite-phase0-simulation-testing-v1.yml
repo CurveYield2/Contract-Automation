@@ -23,12 +23,15 @@ on:
         required: false
         default: '0'
         type: string
+  push:
+    paths:
+      - '.github/smoke-trigger/lite-phase0-simulation-testing-v1.json'
 
 permissions:
   contents: read
 
 concurrency:
-  group: lite-phase0-simulation-testing-${{ inputs.campaign_id }}
+  group: lite-phase0-simulation-testing-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -49,6 +52,44 @@ jobs:
 
       - uses: ./.github/actions/setup-v7-toolchain
 
+      - name: Resolve smoke inputs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_CAMPAIGN_ID: ${{ inputs.campaign_id }}
+          INPUT_CAMPAIGN_PATH: ${{ inputs.campaign_path }}
+          INPUT_AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          INPUT_MEDUSA_CALLS: ${{ inputs.medusa_calls }}
+          INPUT_TELEMETRY_CALLS: ${{ inputs.telemetry_calls }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            campaign_id="$INPUT_CAMPAIGN_ID"
+            campaign_path="$INPUT_CAMPAIGN_PATH"
+            audit_controller_ref="${INPUT_AUDIT_CONTROLLER_REF:-main}"
+            medusa_calls="${INPUT_MEDUSA_CALLS:-1000}"
+            telemetry_calls="${INPUT_TELEMETRY_CALLS:-0}"
+          else
+            trigger=.github/smoke-trigger/lite-phase0-simulation-testing-v1.json
+            test -f "$trigger" || { echo "::error::Connector trigger file is missing"; exit 1; }
+            campaign_id="$(jq -er '.campaign_id | select(type=="string" and length>0)' "$trigger")"
+            campaign_path="$(jq -er '.campaign_path | select(type=="string" and length>0)' "$trigger")"
+            audit_controller_ref="$(jq -er '.audit_controller_ref // "main" | select(type=="string" and length>0)' "$trigger")"
+            medusa_calls="$(jq -er '.medusa_calls | tostring | select(test("^[0-9]{1,6}$"))' "$trigger")"
+            telemetry_calls="$(jq -er '.telemetry_calls | tostring | select(test("^[0-9]{1,6}$"))' "$trigger")"
+          fi
+          [[ "$medusa_calls" =~ ^[0-9]{1,6}$ ]] || { echo "::error::medusa_calls must be an integer from 0 to 999999"; exit 1; }
+          [[ "$telemetry_calls" =~ ^[0-9]{1,6}$ ]] || { echo "::error::telemetry_calls must be an integer from 0 to 999999"; exit 1; }
+          (( medusa_calls > 0 || telemetry_calls > 0 )) || { echo "::error::at least one smoke call budget must be greater than zero"; exit 1; }
+          {
+            echo "SMOKE_CAMPAIGN_ID=$campaign_id"
+            echo "SMOKE_CAMPAIGN_PATH=$campaign_path"
+            echo "SMOKE_AUDIT_CONTROLLER_REF=$audit_controller_ref"
+            echo "SMOKE_MEDUSA_CALLS=$medusa_calls"
+            echo "SMOKE_TELEMETRY_CALLS=$telemetry_calls"
+          } >> "$GITHUB_ENV"
+          echo "Resolved smoke config: campaign_id=$campaign_id audit_controller_ref=$audit_controller_ref medusa_calls=$medusa_calls telemetry_calls=$telemetry_calls"
+
       - name: Select Audit-Controller credential
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -60,7 +101,7 @@ jobs:
       - name: Checkout exact campaign
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
+          AUDIT_CONTROLLER_REF: ${{ env.SMOKE_AUDIT_CONTROLLER_REF }}
         shell: bash
         run: |
           set -euo pipefail
@@ -73,9 +114,9 @@ jobs:
       - name: Deploy on Anvil and run requested smoke stages
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
-          CAMPAIGN_PATH: ${{ inputs.campaign_path }}
-          MEDUSA_CALLS: ${{ inputs.medusa_calls }}
-          TELEMETRY_CALLS: ${{ inputs.telemetry_calls }}
+          CAMPAIGN_PATH: ${{ env.SMOKE_CAMPAIGN_PATH }}
+          MEDUSA_CALLS: ${{ env.SMOKE_MEDUSA_CALLS }}
+          TELEMETRY_CALLS: ${{ env.SMOKE_TELEMETRY_CALLS }}
         shell: bash
         run: |
           set -euo pipefail
@@ -90,8 +131,8 @@ jobs:
       - name: Report and require requested smoke results
         if: ${{ always() }}
         env:
-          MEDUSA_CALLS: ${{ inputs.medusa_calls }}
-          TELEMETRY_CALLS: ${{ inputs.telemetry_calls }}
+          MEDUSA_CALLS: ${{ env.SMOKE_MEDUSA_CALLS }}
+          TELEMETRY_CALLS: ${{ env.SMOKE_TELEMETRY_CALLS }}
         shell: bash
         run: |
           set -euo pipefail
