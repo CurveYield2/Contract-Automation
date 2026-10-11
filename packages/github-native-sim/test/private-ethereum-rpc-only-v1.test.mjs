@@ -7,8 +7,10 @@ import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const sources=[
   '.github/workflows',
-  'packages/github-native-sim/src',
-  'packages/runner/src'
+  'packages',
+  'scripts',
+  'process',
+  'protocol'
 ];
 function allFiles(dir){
   return fs.readdirSync(dir,{withFileTypes:true}).flatMap(entry=>{
