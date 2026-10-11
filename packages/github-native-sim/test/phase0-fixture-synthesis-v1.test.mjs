@@ -280,7 +280,7 @@ test('Stage-1 Medusa router embeds value-pool address constants without targetin
 function compileStage2Contracts(){
   const input={
     language:'Solidity',
-    sources:{'Stage2.sol':{content:\`// SPDX-License-Identifier: UNLICENSED
+    sources:{'Stage2.sol':{content:`// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
 contract GenericToken {
@@ -337,7 +337,7 @@ contract GenericFactory {
     child = address(new GenericChild(tokens[0], tokens[1]));
     emit Created(child, tokens[0], tokens[1]);
   }
-}\`}},
+}`}},
     settings:{outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object','evm.deployedBytecode.linkReferences']}}}
   };
   const output=JSON.parse(solc.compile(JSON.stringify(input)));
