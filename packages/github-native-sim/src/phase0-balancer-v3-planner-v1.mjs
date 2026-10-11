@@ -2,7 +2,7 @@
 import {buildBalancerV3CreatorArgumentsV1} from './phase0-fixture-synthesis-v1.mjs';
 // All addresses and token orders are validated against the deployed Vault.
 const ADDRESS_RE=/^0x[0-9a-fA-F]{40}$/;
-const BALANCER_RE=/@balancer-labs\/v3-|balancer\/v3|balancer-v3/i;
+const BALANCER_RE=/@balancer-labs\/v3-|balancer\/v3|balancer-v3|CurveYieldPoolFactoryWrapper\.sol:|PermanentLiquidityVaultV2\.sol:|FeeSettlementRouter\.sol:|contracts\/factories\/CurveYield\w+PoolFactory\.sol:/i;
 const VIEW_ABI=[
   'function isPoolRegistered(address) view returns (bool)',
   'function isPoolInitialized(address) view returns (bool)',
@@ -22,6 +22,20 @@ export function isBalancerV3TargetV1(target){
 export function balancerV3ActionRequirementsV1(target,selected){
   if(!isBalancerV3TargetV1(target))return{kind:'GENERIC'};
   const name=nameOf(target),signature=String(selected?.signature??'');
+  if(/CurveYieldPoolFactoryWrapper\.sol:/.test(name)&&/^create(?:Weighted|Stable|StableSurge|GyroECLP|ReClamm)Pool\(/.test(signature)){
+    // Creator synthesis handles the payable, predicted-address and policy
+    // constraints. ABI-random telemetry cannot invoke these entrypoints.
+    return{kind:'UNROUTABLE',reason:'CURVEYIELD_WRAPPER_CREATION_REQUIRES_STAGE2_PREDICTION_AND_PAYABLE_FEE'};
+  }
+  if(/PermanentLiquidityVaultV2\.sol:/.test(name)&&/^(?:recordPermanentLiquidity|executeCreatorMigration|migrateAdminLot|requestCreatorMigration|approveCreatorMigration)\(/.test(signature)){
+    return{kind:'UNROUTABLE',reason:'CURVEYIELD_PERMANENT_LIQUIDITY_REQUIRES_EXISTING_POOL_AND_SETTLEMENT_LOT'};
+  }
+  if(/FeeSettlementRouter\.sol:/.test(name)&&/^(?:settle|collect|distribute|execute|process|swap)\w*\(/.test(signature)){
+    return{kind:'UNROUTABLE',reason:'CURVEYIELD_SETTLEMENT_REQUIRES_INITIALIZED_POOL_AND_ROUTE_REGISTRATION'};
+  }
+  if(/contracts\/factories\/CurveYield\w+PoolFactory\.sol:/.test(name)&&/^create\(/.test(signature)){
+    return{kind:'UNROUTABLE',reason:'CURVEYIELD_FACTORY_CALLER_MUST_BE_ALLOWLISTED_WRAPPER'};
+  }
   if(/(?:RouterHooks|CompositeLiquidityRouterHooks|BufferRouterHooks)\.sol:/.test(name)||/^(?:[A-Za-z0-9_]*Hook|query[A-Z][^(]*)\(/.test(signature)){
     return{kind:'UNROUTABLE',reason:'BALANCER_V3_HOOK_REQUIRES_VAULT_UNLOCK_CALLBACK'};
   }
@@ -51,7 +65,7 @@ export async function discoverBalancerV3PoolsV1({provider,ethers,targets=[],valu
     active:systemTargets.length>0,
     status:'NOT_APPLICABLE',vaults:[],pools:[],
     limitations:[],
-    candidateCount:0
+    candidateCount:0,hasCurveYieldWrapper:systemTargets.some(x=>/CurveYieldPoolFactoryWrapper\.sol:/.test(nameOf(x)))
   };
   if(!systemTargets.length)return evidence;
   // Only the main Vault owns registration state. A standalone VaultExtension or
@@ -127,6 +141,9 @@ function choosePoolV1(pools,initialized){
 export function buildBalancerV3ActionV1({ethers,target,selected,discovery,valuePool={},actors=[]}={}){
   const requirement=balancerV3ActionRequirementsV1(target,selected);
   if(requirement.kind==='GENERIC')return{kind:'GENERIC'};
+  if(discovery?.hasCurveYieldWrapper&&/^create\(/.test(String(selected?.signature??''))&&/Factory/.test(nameOf(target))){
+    return{kind:'BLOCKED',reason:'FACTORY_CREATE_REQUIRES_CURVEYIELD_ALLOWLISTED_WRAPPER'};
+  }
   if(requirement.kind==='UNROUTABLE')return{kind:'BLOCKED',reason:requirement.reason};
   if(requirement.kind==='FACTORY_CREATE'){
     const built=buildBalancerV3CreatorArgumentsV1({ethers,candidate:{target,selected},attempt:0,actor:actors[0],valuePool});
