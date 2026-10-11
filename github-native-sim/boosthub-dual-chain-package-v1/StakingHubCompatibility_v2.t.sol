@@ -181,11 +181,12 @@ contract StakingHubCompatibility_v2 {
         require(_create(tokens, 0) != address(0), "converter still required");
     }
     function testExternalNonGovernanceRewardNeedsNoConverterOrTax() public {
-        _start(false, 0); vm.warp(vm.getBlockTimestamp() + 45 days); staking.checkpoint(USER); staking.add_external_reward(address(reward));
-        reward.mint(address(this), 100e18); reward.approve(address(staking), 100e18);
-        staking.deposit_reward_token(address(reward), 100e18);
-        vm.prank(USER); staking.claim_reward(address(reward));
-        require(reward.balanceOf(USER) == 100e18, "external reward was taxed");
+        TokenMock directReward = new TokenMock();
+        _start(false, 0); vm.warp(vm.getBlockTimestamp() + 45 days); staking.checkpoint(USER); staking.add_external_reward(address(directReward));
+        directReward.mint(address(this), 100e18); directReward.approve(address(staking), 100e18);
+        staking.deposit_reward_token(address(directReward), 100e18);
+        vm.prank(USER); staking.claim_reward(address(directReward));
+        require(directReward.balanceOf(USER) == 100e18, "external reward was taxed");
     }
     function testForegoneWantBuffersSixtyFivePercentAndSendsNoHubAllocation() public {
         _start(false, 0); want.approve(address(staking), 100e18);

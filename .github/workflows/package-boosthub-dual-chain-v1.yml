@@ -1,5 +1,5 @@
 name: Verify automatic staking reward synchronization v3
-# Release scope: dedicated Fraxtal helper v5; no boost dependency on Fraxtal.
+# Release scope: staking v21 automatic Hub reward sync; no governance-token defaults.
 # Windows input accepts the UTF-8 byte-order mark emitted by PowerShell 5.1.
 on:
   push:
