@@ -664,15 +664,110 @@ export function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
     return{...d,artifact,functions,plan:probePlan(ethers,artifact),declaredStandards,recipe};
   }).filter(t=>t.functions.length);
 }
-export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={}}){
-  const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
+const EIP1967_IMPLEMENTATION_SLOT_V2='0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
+
+function associationValuesV2(value){
+  if(value instanceof Set)return [...value];
+  if(Array.isArray(value))return value;
+  return[];
+}
+function associationHoldsV2(associations,holder,callee){
+  const h=String(holder??'').toLowerCase(),c=String(callee??'').toLowerCase();
+  for(const [key,value] of Object.entries(associations??{})){
+    if(String(key).toLowerCase()!==h)continue;
+    return associationValuesV2(value).some(row=>String(row).toLowerCase()===c);
+  }
+  return false;
+}
+function zeroAbiValueV2(ethers,param){
+  if(param?.baseType==='array'){
+    if(Number.isInteger(param.arrayLength)&&param.arrayLength>=0)return Array.from({length:param.arrayLength},()=>zeroAbiValueV2(ethers,param.arrayChildren));
+    return[];
+  }
+  if(param?.baseType==='tuple')return (param.components??[]).map(child=>zeroAbiValueV2(ethers,child));
+  const type=String(param?.type??'');
+  if(type==='address')return ethers.ZeroAddress;
+  if(type==='bool')return false;
+  if(type==='string')return '';
+  if(type==='bytes')return '0x';
+  if(/^bytes\d+$/.test(type))return ethers.zeroPadValue('0x',Number(type.slice(5)));
+  if(/^u?int(?:\d+)?$/.test(type))return 0n;
+  return 0;
+}
+function mutableFunctionsForArtifactV2({ethers,artifact,qualifiedName,sourceIntelligence={}}){
+  const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,qualifiedName);
+  const recipe=qualifyRecipeV2({qualifiedName,abi:artifact.abi,declaredStandards});
+  const functions=mutableFunctions(ethers,artifact).map(x=>{
+    const semantic=classifySemanticFamilyV2({signature:x.signature,stateMutability:x.fragment.stateMutability,recipe:recipe.status==='QUALIFIED'?recipe:null});
+    return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
+  });
+  return{declaredStandards,recipe,functions};
+}
+function decodedErrorMatchesInterfaceV2(iface,error){
+  const data=error?.data??error?.info?.error?.data??null;
+  if(typeof data!=='string'||data==='0x')return false;
+  try{return Boolean(iface.parseError(data));}catch{return false;}
+}
+async function facadeAnswersSelectorV2({provider,ethers,facadeAddress,implArtifact,selected,from}){
+  let iface;
+  try{iface=new ethers.Interface(normalizedAbi(implArtifact.abi));}catch{return false;}
+  let data;
+  try{data=iface.encodeFunctionData(selected.signature,(selected.fragment.inputs??[]).map(param=>zeroAbiValueV2(ethers,param)));}catch{return false;}
+  try{
+    await provider.call({from,to:facadeAddress,data,value:0n});
+    return true;
+  }catch(error){
+    return decodedErrorMatchesInterfaceV2(iface,error);
+  }
+}
+async function eip1967ImplementationAddressV2({provider,ethers,address}){
+  try{
+    const word=await provider.send('eth_getStorageAt',[address,EIP1967_IMPLEMENTATION_SLOT_V2,'latest']);
+    if(!/^0x[0-9a-fA-F]{64}$/.test(String(word??'')))return null;
+    const candidate=ethers.getAddress('0x'+String(word).slice(-40));
+    if(candidate===ethers.ZeroAddress)return null;
+    const code=await provider.getCode(candidate);
+    return code&&code!=='0x'?candidate:null;
+  }catch{return null;}
+}
+export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={},associations={},probeSelectors=true}){
+  const byQ=new Map(artifacts.map(a=>[\`${a.sourceName}:${a.contractName}\`,a]));
   const deployedByAddress=new Map(deployed.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
+  const targetByAddress=new Map(targets.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
   const out=[...targets],contextEvidence=[];
-  for(const proxyDeployment of deployed){
-    const proxyArtifact=proxyDeployment?.qualifiedName?byQ.get(proxyDeployment.qualifiedName):null;
-    if(!proxyArtifact)continue;
+  const variantKeys=new Set(out.map(target=>\`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}\`));
+  const asDeployment=address=>deployedByAddress.get(String(address).toLowerCase())??targetByAddress.get(String(address).toLowerCase())??null;
+  const addVariant=({facadeDeployment,implDeployment,implArtifact,contextType,basis,evidence={}})=>{
+    if(!facadeDeployment?.address||!implDeployment?.qualifiedName||!implArtifact)return false;
+    const built=mutableFunctionsForArtifactV2({ethers,artifact:implArtifact,qualifiedName:implDeployment.qualifiedName,sourceIntelligence});
+    if(!built.functions.length)return false;
+    const key=\`${String(facadeDeployment.address).toLowerCase()}|${implDeployment.qualifiedName}|${contextType}\`;
+    if(variantKeys.has(key))return false;
+    variantKeys.add(key);
+    out.push({
+      ...facadeDeployment,
+      qualifiedName:facadeDeployment.qualifiedName??\`FACADE:${facadeDeployment.address}\`,
+      logicalQualifiedName:implDeployment.qualifiedName,
+      artifact:implArtifact,
+      functions:built.functions,
+      plan:probePlan(ethers,implArtifact),
+      declaredStandards:built.declaredStandards,recipe:built.recipe,
+      contextType,contextDisposition:'READY',
+      contextEvidence:{facadeAddress:facadeDeployment.address,implementationAddress:implDeployment.address??null,discoveryBasis:basis,...evidence}
+    });
+    contextEvidence.push({
+      contextType,facadeQualifiedName:facadeDeployment.qualifiedName??null,logicalQualifiedName:implDeployment.qualifiedName,
+      status:'READY',facadeAddress:facadeDeployment.address,implementationAddress:implDeployment.address??null,
+      discoveryBasis:basis,...evidence
+    });
+    return true;
+  };
+
+  for(const facadeDeployment of deployed){
+    const facadeArtifact=facadeDeployment?.qualifiedName?byQ.get(facadeDeployment.qualifiedName):null;
+    if(!facadeArtifact)continue;
     let iface;
-    try{iface=new ethers.Interface(normalizedAbi(proxyArtifact.abi));}catch{continue;}
+    try{iface=new ethers.Interface(normalizedAbi(facadeArtifact.abi));}catch{continue;}
     let getter=null;
     for(const candidate of ['implementation()','getImplementation()']){
       try{if(iface.getFunction(candidate)){getter=candidate;break;}}catch{}
@@ -680,39 +775,65 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
     if(!getter)continue;
     let implementationAddress;
     try{
-      const c=new ethers.Contract(proxyDeployment.address,normalizedAbi(proxyArtifact.abi),provider);
+      const c=new ethers.Contract(facadeDeployment.address,normalizedAbi(facadeArtifact.abi),provider);
       implementationAddress=await c.getFunction(getter).staticCall();
     }catch(error){
-      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,status:'CONTEXT_REQUIRED',reason:'IMPLEMENTATION_READ_FAILED',message:String(error?.shortMessage??error?.message??error).slice(0,1200)});
+      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:facadeDeployment.qualifiedName,status:'CONTEXT_REQUIRED',reason:'IMPLEMENTATION_READ_FAILED',message:String(error?.shortMessage??error?.message??error).slice(0,1200)});
       continue;
     }
-    const implDeployment=deployedByAddress.get(String(implementationAddress).toLowerCase());
+    const implDeployment=asDeployment(implementationAddress);
     const implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
     if(!implDeployment||!implArtifact){
-      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,status:'FIXTURE_GAP',implementationAddress:String(implementationAddress),reason:'IMPLEMENTATION_NOT_IN_DEPLOYED_ADMITTED_INVENTORY'});
+      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:facadeDeployment.qualifiedName,status:'FIXTURE_GAP',implementationAddress:String(implementationAddress),reason:'IMPLEMENTATION_NOT_IN_DEPLOYED_ADMITTED_INVENTORY'});
       continue;
     }
-    const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,implDeployment.qualifiedName);
-    const recipe=qualifyRecipeV2({qualifiedName:implDeployment.qualifiedName,abi:implArtifact.abi,declaredStandards});
-    const functions=mutableFunctions(ethers,implArtifact).map(x=>{
-      const semantic=classifySemanticFamilyV2({signature:x.signature,stateMutability:x.fragment.stateMutability,recipe:recipe.status==='QUALIFIED'?recipe:null});
-      return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
-    });
-    if(!functions.length)continue;
-    const variant={
-      ...proxyDeployment,
-      qualifiedName:proxyDeployment.qualifiedName,
-      logicalQualifiedName:implDeployment.qualifiedName,
-      artifact:implArtifact,
-      functions,
-      plan:probePlan(ethers,implArtifact),
-      declaredStandards,recipe,
-      contextType:'DELEGATE_PROXY',
-      contextDisposition:'READY',
-      contextEvidence:{facadeAddress:proxyDeployment.address,implementationAddress:String(implementationAddress),implementationGetter:getter}
-    };
-    out.push(variant);
-    contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,logicalQualifiedName:implDeployment.qualifiedName,status:'READY',facadeAddress:proxyDeployment.address,implementationAddress:String(implementationAddress),implementationGetter:getter});
+    addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'DELEGATE_PROXY',basis:'IMPLEMENTATION_GETTER',evidence:{implementationGetter:getter}});
+  }
+
+  for(const facadeDeployment of deployed){
+    if(!facadeDeployment?.address)continue;
+    const implementationAddress=await eip1967ImplementationAddressV2({provider,ethers,address:facadeDeployment.address});
+    if(!implementationAddress)continue;
+    const implDeployment=asDeployment(implementationAddress),implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
+    if(!implDeployment||!implArtifact)continue;
+    addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'EIP1967_IMPLEMENTATION_SLOT'});
+  }
+
+  for(const [holderRaw,value] of Object.entries(associations??{})){
+    const facadeDeployment=asDeployment(holderRaw);
+    if(!facadeDeployment?.address)continue;
+    for(const calleeRaw of associationValuesV2(value)){
+      const implDeployment=asDeployment(calleeRaw),implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
+      if(!implDeployment||!implArtifact||String(implDeployment.address).toLowerCase()===String(facadeDeployment.address).toLowerCase())continue;
+      addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'ASSOCIATION_POINTS_TO_EXTENSION'});
+    }
+  }
+
+  if(probeSelectors){
+    const accounts=await provider.send('eth_accounts',[]).catch(()=>[]);
+    const from=accounts[0]??ethers.ZeroAddress;
+    let probes=0;
+    const directExtensions=targets.filter(target=>(target.contextType??'DIRECT')==='DIRECT');
+    for(const extension of directExtensions){
+      if(probes>=96)break;
+      const implArtifact=extension.artifact,implDeployment=asDeployment(extension.address)??extension;
+      if(!implArtifact||!implDeployment?.qualifiedName)continue;
+      for(const facade of targets.filter(candidate=>String(candidate.address).toLowerCase()!==String(extension.address).toLowerCase())){
+        if(probes>=96)break;
+        let facadeIface;
+        try{facadeIface=new ethers.Interface(normalizedAbi(facade.artifact?.abi??[]));}catch{continue;}
+        const probeFunction=(extension.functions??[]).find(selected=>{
+          try{facadeIface.getFunction(selected.signature);return false;}catch{return true;}
+        });
+        if(!probeFunction)continue;
+        probes++;
+        const answered=await facadeAnswersSelectorV2({provider,ethers,facadeAddress:facade.address,implArtifact,selected:probeFunction,from});
+        if(!answered)continue;
+        const added=addVariant({facadeDeployment:facade,implDeployment,implArtifact,contextType:'FACADE',basis:'SELECTOR_ANSWERED_BY_FACADE',evidence:{selectorProbe:probeFunction.signature}});
+        if(added)break;
+      }
+    }
+    contextEvidence.push({contextType:'FACADE_DISCOVERY',status:'COMPLETE',discoveryBasis:'SELECTOR_PROBE_BOUNDED',probeCount:probes,probeLimit:96});
   }
   for(const target of out)if(!target.contextType){target.contextType='DIRECT';target.contextDisposition='READY';}
   return{targets:out,contextEvidence};
