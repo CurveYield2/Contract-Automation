@@ -19,9 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
-      PACKAGE_URL: \${{ inputs.source_url || 'https://drive.google.com/file/d/1epGQ6VuGfss81dUZ0b8VV4UY79bkqSv9/view' }}
+      PACKAGE_URL: ${{ inputs.source_url || 'https://drive.google.com/file/d/1epGQ6VuGfss81dUZ0b8VV4UY79bkqSv9/view' }}
       PACKAGE_SHA256: b605c80ebdf2c06d62bb7bda5dfc5c681a3963bc14fa53f781d4b9130908b1be
-      FORK_SOURCE_RPC: \${{ secrets.RPC_KATANA }}
+      FORK_SOURCE_RPC: ${{ secrets.RPC_KATANA }}
       DEPLOYER: '0x11b78837cadC8E894F1c6e13fA9f3A085a75FA35'
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +32,7 @@ jobs:
           mkdir -p katana-cyavkat-v21-evidence
           download="$PACKAGE_URL"
           if [[ "$download" =~ ^https://drive\.google\.com/file/d/([A-Za-z0-9_-]+) ]]; then
-            download="https://drive.usercontent.google.com/download?id=\${BASH_REMATCH[1]}&export=download&confirm=t"
+            download="https://drive.usercontent.google.com/download?id=${BASH_REMATCH[1]}&export=download&confirm=t"
           fi
           curl --fail --location --retry 2 --connect-timeout 15 --max-time 120 --output /tmp/cyavkat-v21.zip "$download"
           python3 - <<'PY'
@@ -62,10 +62,10 @@ jobs:
       - name: Start isolated Katana Anvil fork
         shell: bash
         env:
-          KATANA_RPC_URL: \${{ secrets.RPC_KATANA }}
+          KATANA_RPC_URL: ${{ secrets.RPC_KATANA }}
         run: |
           set -euo pipefail
-          upstream="\${KATANA_RPC_URL:-https://katana.drpc.org/}"
+          upstream="${KATANA_RPC_URL:-https://katana.drpc.org/}"
           echo "::add-mask::$upstream"
           anvil --fork-url "$upstream" --chain-id 747474 --auto-impersonate --host 127.0.0.1 --port 8545 >katana-cyavkat-v21-evidence/anvil.log 2>&1 &
           echo "$!" >/tmp/katana-anvil.pid
