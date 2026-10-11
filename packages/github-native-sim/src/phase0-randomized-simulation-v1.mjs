@@ -614,7 +614,18 @@ export function accountingWitnessPlanV1({target,selected,protocolPlan,qualifiedA
       return{schemaVersion:'phase0-accounting-witness-v1',mode:'BALANCER_V3',operation,tokens:[...new Set(tokens.map(x=>String(x).toLowerCase()))],poolAddress:context.poolAddress,vaultAddress:context.vaultAddress,includeBpt:operation!=='SWAP',includeNative:native,...(operation==='BPT_TRANSFER'?{owner,recipient}:{})};
     }
   }
-  return{schemaVersion:'phase0-accounting-witness-v1',mode:'TARGET_LOCAL',includeNative:native,includeAllowance:/^(?:approve|increaseAllowance|decreaseAllowance|transferFrom)\(/.test(signature),includeSupply:/^(?:mint|burn|deposit|withdraw|redeem|stake|unstake|addLiquidity|removeLiquidity)\(/.test(signature)};
+  // A transferFrom mutation changes the token owner's and recipient's holdings,
+  // not necessarily msg.sender's. Capture these exact ABI argument addresses.
+  // Only numeric on-chain balanceOf reads count as economic witnesses.
+  const trackedTokenAddresses=/^transfer\(address,uint256\)$/.test(signature)
+    ? [qualifiedAction?.sender,qualifiedAction?.args?.[0]]
+    : /^transferFrom\(address,address,uint256\)$/.test(signature)
+      ? [qualifiedAction?.args?.[0],qualifiedAction?.args?.[1]]
+      : /^mint\(address,uint256\)$/.test(signature)?[qualifiedAction?.args?.[0]]
+      : /^burn\(address,uint256\)$/.test(signature)?[qualifiedAction?.args?.[0]]:[];
+  return{schemaVersion:'phase0-accounting-witness-v1',mode:'TARGET_LOCAL',includeNative:native,
+    trackedTokenAddresses:trackedTokenAddresses.filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x))).slice(0,3),
+    includeAllowance:/^(?:approve|increaseAllowance|decreaseAllowance|transferFrom)\(/.test(signature),includeSupply:/^(?:mint|burn|deposit|withdraw|redeem|stake|unstake|addLiquidity|removeLiquidity)\(/.test(signature)};
 }
 export async function snapshot({provider,ethers,target,sender,plan,systemTargets,witness=null}){
   const out={native:{},views:{},systemNative:{},related:{}};
@@ -678,6 +689,9 @@ export async function snapshot({provider,ethers,target,sender,plan,systemTargets
       (async()=>{out.views[`${sig}::target`]=await safeStatic(c,f,[target.address]);})()
     ];}),
     ...(probes.addressPair??[]).map(async f=>{const sig=f.format('sighash');out.views[`${sig}::sender::target`]=await safeStatic(c,f,[sender,target.address]);}),
+    ...(witness?.trackedTokenAddresses??[]).flatMap(address=>(probes.address??[])
+      .filter(f=>f.format('sighash')==='balanceOf(address)')
+      .map(f=>(async()=>{out.views[`balanceOf(address)::economic-actor:${address.toLowerCase()}`]=await safeStatic(c,f,[address]);})())),
     ...relatedAddresses.map(async address=>{
       const token=new ethers.Contract(address,tokenAbi,provider);
       const [balanceSender,balanceTarget,balanceVault,balancePool,allowance,totalSupply]=await Promise.all([
@@ -1111,6 +1125,15 @@ export async function prepareQualifiedRuntimeV2({provider,ethers,targets,actors}
 }
 function qualifiedActionV2({target,selected,actors,rng}){
   const recipeId=target.recipe?.recipeId,runtime=target.recipeRuntime??{},sig=selected.signature;
+  // Archived-source fixture lane only: use real signed token calls with funded,
+  // verified balances and on-chain allowance, never randomly forged amounts.
+  const archive=target.archiveTokenRuntime;
+  if(archive?.funded===true){
+    const primary=archive.holder,spender=archive.spender,receiver=archive.receiver;
+    if(sig==='transfer(address,uint256)')return{sender:primary,args:[receiver,1n],value:0n,basis:'ARCHIVE_VERIFIED_FUNDED_TOKEN_TRANSFER'};
+    if(sig==='transferFrom(address,address,uint256)')return{sender:spender,args:[primary,receiver,1n],value:0n,basis:'ARCHIVE_VERIFIED_FUNDED_TOKEN_ALLOWANCE'};
+    if(sig==='approve(address,uint256)')return{sender:primary,args:[spender,ethers.MaxUint256],value:0n,basis:'ARCHIVE_TOKEN_ALLOWANCE'};
+  }
   if(recipeId==='erc20-standard-v1'&&runtime.primaryActor){
     const primary=runtime.primaryActor,spender=runtime.spenderActor??actors[1]??actors[0],receiver=actors.find(x=>x.toLowerCase()!==primary.toLowerCase()&&x.toLowerCase()!==spender.toLowerCase())??spender;
     if(sig==='transfer(address,uint256)')return{sender:primary,args:[receiver,1n],value:0n,basis:'ERC20_FUNDED_ACTOR_RECIPE'};
