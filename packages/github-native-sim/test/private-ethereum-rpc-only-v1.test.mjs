@@ -18,9 +18,9 @@ function allFiles(dir){
 }
 test('Ethereum execution sources contain no public RPC URLs',()=>{
   const bad=[];
-  const banned=/eth\\.drpc\\.org|ethereum-rpc\\.publicnode\\.com|eth\\.llamarpc\\.com|1rpc\\.io\\/eth|rpc\\.ankr\\.com\\/eth/i;
+  const banned=/eth\.drpc\.org|ethereum-rpc\.publicnode\.com|eth\.llamarpc\.com|1rpc\.io\/eth|rpc\.ankr\.com\/eth/i;
   for(const sub of sources)for(const file of allFiles(path.join(root,sub))){
-    if(!/\\.(yml|yaml|mjs|js|ts|sh)$/.test(file))continue;
+    if(!/\.(yml|yaml|mjs|js|ts|sh)$/.test(file))continue;
     const txt=fs.readFileSync(file,'utf8');
     if(banned.test(txt))bad.push(path.relative(root,file));
   }
