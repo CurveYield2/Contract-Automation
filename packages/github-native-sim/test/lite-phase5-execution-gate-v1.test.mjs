@@ -20,14 +20,15 @@ function fixture(){
   const controllerRoot=fs.mkdtempSync(path.join(os.tmpdir(),'lite-p5-gate-'));
   const file=path.join(controllerRoot,...evidenceRef.split('/'));
   fs.mkdirSync(path.dirname(file),{recursive:true});
-  fs.writeFileSync(file,'{"schemaVersion":"machine-result-v1"}\n');
+  // Persist the exact machine record, not a status-only placeholder.
   const rawResult={
-    status:'completed',blocking:false,preflight:{status:'PASS'},
+    requestId,status:'completed',blocking:false,preflight:{status:'PASS'},
     source:{archiveSha256:sourceSha},
     reproduction:{candidateId:key,status:'REPRODUCED',
       observedPredicate:{matched:true,observed:{componentStatus:'COMPLETED'}}},
     analysis:{nativeFuzz:{componentStatus:'COMPLETED',toolInvoked:true}}
   };
+  fs.writeFileSync(file,JSON.stringify(rawResult)+'\n');
   const executionResults={[key]:{
     status:'PASS',exitCode:0,requestBindingStatus:'PASS_STRUCTURAL_BINDING_REQUIRES_PHASE6_SEMANTIC_HARNESS_REVIEW',
     evidenceRef,rawResult
@@ -62,7 +63,7 @@ test('an orphan raw path, preflight failure, source mismatch, or missing reprodu
   const {args,controllerRoot,file}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
   fs.unlinkSync(file);
   assert.match(validatePhase5TargetExecutionGateV1(args).join(' '),/missing exact persisted/);
-  fs.writeFileSync(file,'{"status":"completed"}\n');
+  fs.writeFileSync(file,JSON.stringify(args.executionResults[key].rawResult)+'\n');
   const noRpc=structuredClone(args);
   noRpc.executionResults[key].rawResult.preflight={status:'BLOCKED',failureKind:'MUTABLE_RPC_SOURCE_MISSING'};
   assert.match(validatePhase5TargetExecutionGateV1(noRpc).join(' '),/preflight/);
