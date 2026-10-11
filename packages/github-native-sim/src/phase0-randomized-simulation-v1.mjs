@@ -202,16 +202,29 @@ function detectHardhatScripts(files,configText){
     unsafe:hasLocalhostNetwork?[]:scripts.map(rel=>({framework:'HARDHAT',path:rel,entry:rel,reason:'Hardhat localhost network is not mechanically proven to bind to a local RPC URL.'}))
   };
 }
-async function installPackageRuntimeDependenciesV1(projectRoot){
+// Existing exact-archive compile artifacts are already accepted: a package npm
+// install is needed only to run a mechanically admitted Node/Hardhat deployment.
+export function needsPackageRuntimeDependenciesV1(detected){
+  return (detected?.hardhat??[]).length>0 ||
+    (detected?.genericPackageScripts??[]).some(item=>item.safe===true);
+}
+async function installPackageRuntimeDependenciesV1(projectRoot,detected){
   const pkgPath=path.join(projectRoot,'package.json');
   const lockPath=path.join(projectRoot,'package-lock.json');
   const pkgStat=await fs.stat(pkgPath).catch(()=>null);
   if(!pkgStat)return{status:'NOT_APPLICABLE',manager:null,reason:'NO_PACKAGE_JSON'};
   const lockStat=await fs.stat(lockPath).catch(()=>null);
   if(!lockStat)return{status:'BLOCKED',manager:'npm',reason:'PACKAGE_LOCK_REQUIRED_FOR_SIMULATION_TESTING'};
+  if(!needsPackageRuntimeDependenciesV1(detected)){
+    console.log('[phase0-deps] SKIP npm ci: no runnable Hardhat or local Node deployment entrypoint');
+    return{status:'NOT_APPLICABLE',manager:'npm',lockfile:'package-lock.json',
+      reason:'NO_RUNNABLE_NODE_DEPLOYMENT_SCRIPTS',ignoreScripts:true,exitCode:null};
+  }
+  const started=Date.now();
+  console.log('[phase0-deps] Installing pinned source-project runtime dependencies (scripts disabled; 240s cap)');
   const r=await runProcess({
     command:'timeout',
-    args:['240s','npm','ci','--ignore-scripts','--audit=false','--fund=false'],
+    args:['240s','npm','ci','--ignore-scripts','--prefer-offline','--audit=false','--fund=false'],
     cwd:projectRoot,
     env:scrubbedEnv()
   });
@@ -221,7 +234,9 @@ async function installPackageRuntimeDependenciesV1(projectRoot){
     e.install={manager:'npm',exitCode:r.exitCode,stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)};
     throw e;
   }
-  return{status:'PASS',manager:'npm',lockfile:'package-lock.json',ignoreScripts:true,exitCode:r.exitCode};
+  const elapsedSeconds=Math.floor((Date.now()-started)/1000);
+  console.log(`[phase0-deps] pinned npm install PASS elapsed_seconds=${elapsedSeconds}`);
+  return{status:'PASS',manager:'npm',lockfile:'package-lock.json',ignoreScripts:true,exitCode:r.exitCode,elapsedSeconds};
 }
 export async function detectDeploymentScripts(projectRoot){
   const files=await walk(projectRoot),texts=new Map();
@@ -2035,7 +2050,8 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   const archivePath=receipt.source.archivePath,archiveSha256=receipt.source.sha256,workspace=path.join(path.dirname(outputRoot),'.phase0-simulation-work');
   const staged=await stageExactArchiveSource({checkoutRoot:controllerRoot,workspaceRoot:workspace,archivePath,archiveSha256,projectPath:buildIdentity.discovery.projectPath});
   const cfg=buildIdentity.configurationDetection,pseudo={requestId:`phase0-sim-${receipt.campaign.campaignId}`,requestDigest:sha256(JSON.stringify(buildIdentity)),campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,assignmentId:'phase0-simulation',phaseId:'phase-0',profileId:'github-native-compile-v2',source:{repository:'CurveYield2/Audit-Controller',commit:receipt.source.archiveCommit,projectPath:buildIdentity.discovery.projectPath,archivePath,archiveSha256},configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}};
-  const packageDependencyInstall=await installPackageRuntimeDependenciesV1(staged.projectRoot);
+  const detected=await detectDeploymentScripts(staged.projectRoot);
+  const packageDependencyInstall=await installPackageRuntimeDependenciesV1(staged.projectRoot,detected);
   const build={
     status:'completed',
     system:executionBuildArtifacts.buildIdentity?.system??buildIdentity.build?.system??null,
@@ -2051,7 +2067,6 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   let anvil;
   let deploymentEvidence=null;
   try{
-    const detected=await detectDeploymentScripts(staged.projectRoot);
     const sourceKnownCompilation={
       status:'PASS',
       planPath:build.embeddedBuildContract?.deploymentSetModule??null,
