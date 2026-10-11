@@ -19,5 +19,5 @@ test('wake workflow retains screenshot evidence and cannot arm state for unverif
  assert.match(yml,/WAKE_DIAGNOSTIC_ONLY/);
  assert.match(yml,/Browser result claimed success without proven durable message delivery/);
  assert.match(yml,/if: \$\{\{ steps.deliver.outputs.ok == 'true'/);
- assert.match(dispatch,/diagnosticOnly:\\$diagnostic/);
+ assert.match(dispatch,/diagnosticOnly:\$diagnostic/);
 });
