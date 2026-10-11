@@ -576,7 +576,13 @@ async function safeStatic(contract,f,args){try{return{ok:true,value:normalize(aw
 export async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
   const out={native:{},views:{},systemNative:{},related:{}};
   const c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),provider);
-  const relatedAddresses=[...new Set([target.recipeRuntime?.assetAddress,target.recipeRuntime?.tokenAddress].filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x))))];
+  const accountingContext=target.accountingContext??null;
+  const relatedAddresses=[...new Set([
+    target.recipeRuntime?.assetAddress,
+    target.recipeRuntime?.tokenAddress,
+    ...(accountingContext?.tokens??[]),
+    accountingContext?.poolAddress
+  ].filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x))))].slice(0,12);
   const erc20ViewAbi=[
     'function balanceOf(address) view returns (uint256)',
     'function allowance(address,address) view returns (uint256)',
@@ -600,6 +606,8 @@ export async function snapshot({provider,ethers,target,sender,plan,systemTargets
         address,
         balanceSender:await read('balanceOf(address)',[sender]),
         balanceTarget:await read('balanceOf(address)',[target.address]),
+        ...(accountingContext?.vaultAddress?{balanceVault:await read('balanceOf(address)',[accountingContext.vaultAddress])}:{}),
+        ...(accountingContext?.poolAddress?{balancePool:await read('balanceOf(address)',[accountingContext.poolAddress])}:{}),
         allowanceSenderTarget:await read('allowance(address,address)',[sender,target.address]),
         totalSupply:await read('totalSupply()',[])
       };
@@ -1478,13 +1486,22 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             fnStats.callerResolution=resolved.resolution;
             for(const adaptation of resolved.adaptations??[])stats.contextAdaptations.push({...adaptation,selectionKey:picked.selectionKey,atCallIndex:stats.calls});
             if((resolved.adaptations??[]).length)rec.contextAdaptations=resolved.adaptations;
-            const executionTarget=resolved.executionAddress.toLowerCase()===String(target.address).toLowerCase()
+            let executionTarget=resolved.executionAddress.toLowerCase()===String(target.address).toLowerCase()
               ? target
               : {...target,address:resolved.executionAddress,contextType:'FACADE',contextDisposition:'READY'};
+            if(balancerAction.kind==='READY'&&balancerAction.pool){
+              const protocolPool=balancerDiscovery.pools.find(p=>String(p.address).toLowerCase()===String(balancerAction.pool).toLowerCase());
+              if(protocolPool){
+                executionTarget={...executionTarget,accountingContext:{
+                  protocol:'BALANCER_V3',poolAddress:protocolPool.address,vaultAddress:protocolPool.vault,tokens:protocolPool.tokens
+                }};
+              }
+            }
             const estimate=resolved.estimate,preflightError=resolved.success?null:resolved.error,callProbe=resolved.callProbe,data=resolved.data;
             const observationPolicy=shouldObserveAccountingCallV1({selected,target,valuePool,executionAddress:resolved.executionAddress});
             const shouldObserve=!preflightError&&observationPolicy.observe===true;
             if(shouldObserve){
+              if(executionTarget.accountingContext)rec.accountingContext=executionTarget.accountingContext;
               const before=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
               rec.observations.before=observationRowsV2(before,executionTarget.recipe,'BEFORE');
               rec.observation='ACCOUNTING_BEFORE_AFTER';
