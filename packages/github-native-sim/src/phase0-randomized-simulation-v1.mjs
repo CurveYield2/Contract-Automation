@@ -326,6 +326,11 @@ export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,lo
     attempts.push({framework:'HARDHAT',path:item.path,entry:item.entry,command:`npx hardhat run ${item.path} --network localhost`,exitCode:r.exitCode,status:r.exitCode===0?'PASS':'FAILED',blockRange:[before+1,after],stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
   }
   for(const item of detected.genericPackageScripts){
+    const requestedNetwork=String(item.argsText??'').match(/(?:^|\s)--network(?:=|\s+)([^\s]+)/i)?.[1]?.toLowerCase()??null;
+    if(requestedNetwork&&!['ethereum','mainnet','localhost','anvil'].includes(requestedNetwork)){
+      limitations.push({type:'NON_CANONICAL_CHAIN_DEPLOYMENT_SKIPPED',framework:'GENERIC_NODE',script:item.name,path:item.entry,requestedNetwork,canonicalChain:'ethereum',reason:'Do not execute an explicitly non-Ethereum deployment profile on the Phase-0 Ethereum baseline.'});
+      continue;
+    }
     if(!item.safe){
       limitations.push({type:'DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE',framework:'GENERIC_NODE',script:item.name,command:item.command,reason:item.reason});
       continue;
@@ -2062,7 +2067,12 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     for(const artifact of build.artifacts??[])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
     const artifacts=[...artifactByQualified.values()];
     anvil=await startAnvil({forkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
-    const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true,cacheTimeout:-1}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
+    const localRequest=new ethers.FetchRequest(anvil.url);
+    localRequest.timeout=20000;
+    // Keep a small representative actor set; Medusa's four separate actors are funded below.
+    // The previous 20+4 actor set multiplied ERC20/Permit2 approvals by each deployed target.
+    const provider=new ethers.JsonRpcProvider(localRequest,1,{staticNetwork:true,cacheTimeout:-1});
+    const actors=(await provider.send('eth_accounts',[])).slice(0,4),initialBlock=Number(await provider.getBlockNumber());
     console.log('[phase0-smoke-progress] START native deployment scripts');
     const deployment=await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],localSigner:anvil.localSigner,detected});
     console.log(`[phase0-smoke-progress] END native deployment scripts; attempts=${deployment.attempts.length}; failed=${deployment.attempts.filter(x=>x.status==='FAILED').length}`);
@@ -2104,6 +2114,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     let valuePool,fixtureFunding;
     try{valuePool=await discoverValuePoolV1({provider,ethers,targets,actors});}
     catch(error){valuePool={addresses:[],tokens:[],associations:{},privileged:[],created:[],receipts:[],gaps:[{type:'VALUE_POOL_DISCOVERY_FAILED',message:String(error?.message??error).slice(0,1200)}]};}
+    console.log(`[phase0-fixture] token discovery returned; tokens=${valuePool.tokens.length}; holders=${actors.length+PHASE0_MEDUSA_SENDERS_V1.length}; spenders=${targets.length}`);
     try{
       fixtureFunding=await fundActorsV1({
         provider,ethers,tokens:valuePool.tokens,
