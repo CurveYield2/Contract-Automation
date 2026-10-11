@@ -1,4 +1,4 @@
-name: Verify BoostHub yield-token removal v1 (baseline red)
+name: Verify BoostHub yield-token removal v1 (all-token baseline red)
 on:
   push:
     branches: ['verify-boosthub-four-contracts-v1']
@@ -36,7 +36,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CurveYield2/Audit-Controller
-          ref: ea5fc8915e1fc50d27975cad8a453e132faf76fb
+          ref: a25f0288cc2dcb9614fe7b6f9f605ab03d2ff6e1
           token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: .controller
           persist-credentials: false
