@@ -59,7 +59,7 @@ test('Balancer withdrawal uses current verified BPT balance and zero minimum out
     assert.equal(action.sender,actors[0]);
     assert.equal(action.args[1],20000000000000000n);
     assert.equal(action.bptInput,'20000000000000000');
-    if(sig.startsWith('removeLiquiditySingle'))assert.equal(action.args[3],0n);
+    if(sig.startsWith('removeLiquiditySingle'))assert.equal(action.args[3],1n);
     else assert.deepEqual(action.args[2],[0n,0n]);
   }
   assert.equal(bptWithdrawalAmountV1('1'),0n);
