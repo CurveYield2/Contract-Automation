@@ -9,6 +9,9 @@ on:
       - 'scripts/lite-phase0-*.mjs'
       - 'scripts/run-phase0-fork-deploy-config-v1.mjs'
       - 'scripts/write-phase0-fork-deploy-outputs-v1.mjs'
+      - 'scripts/reconcile-phase0-deploy-evidence-v1.mjs'
+      - 'scripts/lib/phase0-deploy-gate-v2.mjs'
+      - 'test/phase0-deploy-gate-v2.test.mjs'
       - 'scripts/lib/lite-phase-prefill-v1.mjs'
       - 'scripts/lite-phase-packet-controller-v1.mjs'
       - 'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'
@@ -19,6 +22,9 @@ on:
     paths:
       - '.github/workflows/lite-phase0-*.yml'
       - 'scripts/lite-phase0-*.mjs'
+      - 'scripts/reconcile-phase0-deploy-evidence-v1.mjs'
+      - 'scripts/lib/phase0-deploy-gate-v2.mjs'
+      - 'test/phase0-deploy-gate-v2.test.mjs'
       - 'packages/github-native-sim/test/phase0-*.test.mjs'
 permissions:
   contents: read
@@ -42,8 +48,11 @@ jobs:
           node --check scripts/lite-phase0-finalize-v1.mjs
           node --check scripts/lite-phase0-finalize-no-telemetry-v1.mjs
           node --check scripts/lib/lite-phase-prefill-v1.mjs
+          node --check scripts/reconcile-phase0-deploy-evidence-v1.mjs
+          node --check scripts/lib/phase0-deploy-gate-v2.mjs
       - name: Run Phase 0 deploy/config migration regression tests
         run: |
+          node --test test/phase0-deploy-gate-v2.test.mjs
           node --test \
             packages/github-native-sim/test/lite-phase0-automation-v2.test.mjs \
             packages/github-native-sim/test/phase0-v2-consumers.test.mjs \
