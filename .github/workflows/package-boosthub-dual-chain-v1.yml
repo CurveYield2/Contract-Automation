@@ -1,0 +1,37 @@
+name: Package BoostHub dual-chain deployment v1
+on:
+  push:
+    branches: ['package-boosthub-dual-chain-v1']
+    paths: ['.github/workflows/package-boosthub-dual-chain-v1.yml']
+permissions:
+  contents: read
+concurrency:
+  group: package-boosthub-dual-chain-v1
+  cancel-in-progress: false
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install read-only tooling on GitHub
+        working-directory: github-native-sim/boosthub-dual-chain-package-v1
+        run: npm install --no-package-lock --ignore-scripts ethers@6.15.0
+      - name: Retrieve exact verified explorer sources on GitHub
+        run: python3 github-native-sim/boosthub-dual-chain-package-v1/harvest_verified_sources_v1.py
+      - name: Read both live deployments without submitting transactions
+        env:
+          ETHEREUM_RPC: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+        run: node github-native-sim/boosthub-dual-chain-package-v1/probe_live_stack_v1.mjs
+      - name: Publish retrieval evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boosthub-dual-chain-package-v1
+          path: github-native-sim/boosthub-dual-chain-package-v1/evidence
+          retention-days: 30
