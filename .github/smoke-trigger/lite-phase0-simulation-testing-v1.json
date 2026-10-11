@@ -3,5 +3,5 @@
   "campaign_id": "curveyield-dex-v16-source-r4",
   "campaign_path": "campaigns/CurveYield DEX v16 Source r4",
   "audit_controller_ref": "main",
-  "trigger_nonce": "deploy-config-only-v1"
+  "trigger_nonce": "deploy-config-dispositions-diagnostics-v2"
 }

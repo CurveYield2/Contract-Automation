@@ -96,6 +96,20 @@ jobs:
             and (.status!="PASS" or (all(.scriptDispositions[]; .disposition=="EXECUTED_PASS") and all(.attempts[]; .status=="PASS" and .exitCode==0)))
             and (.fork.engine=="anvil" and .fork.chainId==1)
           ' .phase0-deploy-smoke/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json >/dev/null
+      - name: Diagnose native deployment script dispositions
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          evidence=.phase0-deploy-smoke/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
+          if [ -f "$evidence" ]; then
+            echo "---- detected native package script dispositions ----"
+            jq '[.scriptDispositions[]? | {scriptKey,disposition,attemptStatus,gapType,gapReason}]' "$evidence"
+            echo "---- non-passing script attempts ----"
+            jq '[.attempts[]? | select(.status!="PASS") | {script,path,status,exitCode}]' "$evidence"
+            echo "---- typed limitations ----"
+            jq '[.gaps[]? | {type,script,path,reason}]' "$evidence"
+          fi
+
       - name: Retain full smoke evidence on success or failure
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
@@ -105,4 +119,5 @@ jobs:
             .phase0-deploy-smoke
             .phase0-deploy-smoke.log
           retention-days: 14
+          include-hidden-files: true
           if-no-files-found: warn
