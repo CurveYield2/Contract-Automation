@@ -850,14 +850,14 @@ export function buildBalancerV3CreatorArgumentsV1({ethers,candidate,attempt=0,ac
   if(picked.length!==2)return null;
   const rows=picked.sort((a,b)=>String(a.address).toLowerCase().localeCompare(String(b.address).toLowerCase()));
   const tokenConfigs=rows.map(token=>[ethers.getAddress(token.address),0,ethers.ZeroAddress,false]);
-  const roleAccounts=[ethers.ZeroAddress,ethers.ZeroAddress,ethers.ZeroAddress,ethers.ZeroAddress];
+  let tokenConfigIndex=0;
   const amounts=[500000000000000000n,500000000000000000n];
   const fill=(param)=>{
     const name=String(param?.name??'').toLowerCase(),type=String(param?.type??'');
     if(param?.baseType==='array'&&param.arrayChildren?.baseType==='tuple'&&(param.arrayChildren.components??[]).some(c=>/token/i.test(String(c.name??''))))return tokenConfigs;
     if(param?.baseType==='array'&&/^uint/.test(String(param.arrayChildren?.type??''))&&/weight/.test(name))return amounts;
-    if(param?.baseType==='tuple'&&/role|account/i.test(name))return roleAccounts;
-    if(param?.baseType==='tuple'&&/tokenconfig/i.test(name))return tokenConfigs[0];
+    if(param?.baseType==='tuple'&&/role|account/i.test(name))return (param.components??[]).map(component=>component.type==='address'?ethers.ZeroAddress:0n);
+    if(param?.baseType==='tuple'&&/tokenconfig/i.test(name))return tokenConfigs[Math.min(tokenConfigIndex++,tokenConfigs.length-1)];
     if(type==='string')return /symbol/i.test(name)?'P0BPT':'Phase0 Pool';
     if(type==='address')return /hook/i.test(name)?ethers.ZeroAddress:actor;
     if(type==='bytes32')return ethers.id('phase0-balancer-v3:'+targetName+':'+attempt);
