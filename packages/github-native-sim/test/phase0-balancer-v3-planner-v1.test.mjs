@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as ethers from 'ethers';
-import {isBalancerV3TargetV1,balancerV3ActionRequirementsV1,buildBalancerV3ActionV1} from '../src/phase0-balancer-v3-planner-v1.mjs';
+import {isBalancerV3TargetV1,balancerV3ActionRequirementsV1,buildBalancerV3ActionV1,choosePoolV1,bptWithdrawalAmountV1} from '../src/phase0-balancer-v3-planner-v1.mjs';
 import {buildBalancerV3CreatorArgumentsV1} from '../src/phase0-fixture-synthesis-v1.mjs';
 
 const vault={qualifiedName:'@balancer-labs/v3-vault/contracts/Vault.sol:Vault',contextType:'DIRECT'};
@@ -39,4 +39,30 @@ test('Balancer v3 uses two sorted real tokens and valid normalized weights in fa
   assert.deepEqual(action.args[3],[500000000000000000n,500000000000000000n]);
   assert.equal(action.args[5],10000000000000000n);
   assert.equal(action.args[6],ethers.ZeroAddress);
+});
+
+test('Balancer economic router recipes cycle across all three verified pools',()=>{
+  const pools=[0,1,2].map((i)=>({address:'0x'+String(400+i).padStart(40,'0'),poolType:['WEIGHTED','STABLE','STABLE_SURGE'][i],initialized:true,registered:true,tokens:[usdc,weth],bptHolders:[{actor:actors[0],amount:'2000000000000000000'}]}));
+  const selected={signature:'swapSingleTokenExactOut(address,address,address,uint256,uint256,uint256,bool,bytes)'};
+  const all=Array.from({length:9},(_,i)=>buildBalancerV3ActionV1({ethers,target:router,selected,discovery:{pools},valuePool:values,actors,poolSelectionIndex:i}));
+  assert.ok(all.every(x=>x.kind==='READY'));
+  assert.deepEqual(all.map(x=>x.pool),[...pools.map(x=>x.address),...pools.map(x=>x.address),...pools.map(x=>x.address)]);
+  assert.equal(choosePoolV1(pools,true,4).poolType,'STABLE');
+});
+
+test('Balancer withdrawal uses current verified BPT balance and zero minimum output',()=>{
+  const tokenPool={address:pool,initialized:true,registered:true,tokens:[usdc,weth],bptHolders:[{actor:actors[0],amount:'2000000000000000000'}]};
+  const discovery={pools:[tokenPool]};
+  for(const sig of ['removeLiquidityProportional(address,uint256,uint256[],bool,bytes)','removeLiquiditySingleTokenExactIn(address,uint256,address,uint256,bool,bytes)']){
+    const action=buildBalancerV3ActionV1({ethers,target:router,selected:{signature:sig},discovery,valuePool:values,actors});
+    assert.equal(action.kind,'READY');
+    assert.equal(action.sender,actors[0]);
+    assert.equal(action.args[1],20000000000000000n);
+    assert.equal(action.bptInput,'20000000000000000');
+    if(sig.startsWith('removeLiquiditySingle'))assert.equal(action.args[3],0n);
+    else assert.deepEqual(action.args[2],[0n,0n]);
+  }
+  assert.equal(bptWithdrawalAmountV1('1'),0n);
+  assert.equal(bptWithdrawalAmountV1('50'),1n);
+  assert.equal(bptWithdrawalAmountV1('1000000'),10000n);
 });
