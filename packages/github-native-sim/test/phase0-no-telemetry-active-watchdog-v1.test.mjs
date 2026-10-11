@@ -31,14 +31,12 @@ test('native 337s deployment is allowed, but hung subprocesses fail before the 5
   assert.equal(decide({...baseline,phase:'simulation',now:t+config.generalNoProgressMs}),'SIMULATION_STAGE_STALLED');
 });
 
-test('No Telemetry workflow uses 50-minute runner bound, 60-minute job only for uploading evidence',()=>{
+test('No Telemetry workflow is now bounded native deploy/config only',()=>{
   const wf=fs.readFileSync('.github/workflows/lite-phase0-randomized-simulation-no-telemetry-v1.yml','utf8');
-  assert.match(wf,/timeout-minutes: 60/);
-  assert.match(wf,/timeout -s TERM -k 30s 3000s node scripts\/phase0-no-telemetry-watchdog-v1\.mjs/);
-  assert.match(wf,/-- node scripts\/run-phase0-randomized-simulation-no-telemetry-v1\.mjs/);
-  assert.doesNotMatch(wf,/timeout -s TERM -k 30s 1260s/);
-  assert.match(wf,/Retain raw randomized simulation output/);
-  assert.match(wf,/run_medusa|Medusa/i);
+  assert.match(wf,/timeout-minutes: 50/);
+  assert.match(wf,/run-phase0-fork-deploy-config-v1\.mjs/);
+  assert.match(wf,/Retain deployment\/configuration evidence even on failure/);
+  assert.doesNotMatch(wf,/MEDUSA_CALLS|TELEMETRY_CALLS|runMedusaShardsV2/);
 });
 
 test('Medusa uses global residual budget rather than stopping at previous 20m limit',()=>{

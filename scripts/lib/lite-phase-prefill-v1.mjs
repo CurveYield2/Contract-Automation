@@ -554,39 +554,22 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
 
   if(sequence===5){
     form.actions['step-1'].outputs.economicReviewRecords=economicScaffold(si??{},form.actions['step-1'].outputs.economicReviewRecords);
-    const phase0Baseline=
-      readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0-rebind/PHASE5_SIMULATION_BASELINE_INPUT_v1.json'))) ??
-      readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0/PHASE5_SIMULATION_BASELINE_INPUT_v1.json')));
-    const baselineInput=phase0Baseline?.data?.automationInputs?.phase0BaselineSimulation;
-    if(baselineInput!==undefined){
-      form.automationInputs.phase0BaselineSimulation=baselineInput;
-      form.automationInputs.controllerOwnedAutomationInputs=uniq([...(form.automationInputs.controllerOwnedAutomationInputs??[]),'phase0BaselineSimulation']);
-    }
+    // Phase 5 designs its own candidate-specific simulations from reviewed source evidence.
+    // No Phase-0 randomized simulation, telemetry, or Medusa baseline is required.
+    delete form.automationInputs.phase0BaselineSimulation;
+    form.automationInputs.controllerOwnedAutomationInputs=(form.automationInputs.controllerOwnedAutomationInputs??[]).filter(x=>x!=='phase0BaselineSimulation');
   }
 
   if(sequence===6){
     const deployRows=deployAssessmentScaffold(root,campaignPath);
-    const phase0Baseline=
-      readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0-rebind/PHASE6_SIMULATION_BASELINE_INPUT_v1.json'))) ??
-      readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0/PHASE6_SIMULATION_BASELINE_INPUT_v1.json')));
-    const baselineRows=phase0Baseline?.data?.automationInputs?.phase0BaselineTargetDispositions??[];
     const phase5Rows=targetDispositionScaffold(prefillContext.targetDesigns??[],prefillContext.phase5ExecutionResults??{});
-    const targetRows=[...(Array.isArray(baselineRows)?baselineRows:[]),...(Array.isArray(phase5Rows)?phase5Rows.filter(x=>typeof x==='object'):[])];
+    const targetRows=Array.isArray(phase5Rows)?phase5Rows.filter(x=>typeof x==='object'):[];
     form.actions['step-1'].outputs.deploymentAssessments=deployRows;
     form.actions['step-2'].outputs.targetDispositions=targetRows.length?targetRows:['NONE_IDENTIFIED'];
-    if(phase0Baseline?.data?.automationInputs){
-      form.automationInputs.phase0SimulationRunIndexRef=phase0Baseline.data.automationInputs.phase0SimulationRunIndexRef;
-      form.automationInputs.controllerOwnedAutomationInputs=uniq([...(form.automationInputs.controllerOwnedAutomationInputs??[]),'phase0SimulationRunIndexRef']);
-    }
+    delete form.automationInputs.phase0SimulationRunIndexRef;
+    form.automationInputs.controllerOwnedAutomationInputs=(form.automationInputs.controllerOwnedAutomationInputs??[]).filter(x=>x!=='phase0SimulationRunIndexRef');
     if(form.actions['step-3']){
-      const phase0Limitations=(phase0Baseline?.data?.automationInputs?.phase0SimulationLimitations??[]).map(x=>{
-        if(typeof x==='string') return x;
-        if(!x||typeof x!=='object') return String(x);
-        const type=x.type??x.code??'PHASE0_SIMULATION_LIMITATION';
-        const detail=x.reason??x.message??x.runId??x.qualifiedName??'SEE_PHASE0_SIMULATION_SUMMARY';
-        return type+': '+detail;
-      });
-      form.actions['step-3'].outputs.typedExecutionLimitations=uniq([...machineLimitations(deployRows,targetRows),...phase0Limitations]);
+      form.actions['step-3'].outputs.typedExecutionLimitations=uniq(machineLimitations(deployRows,targetRows));
       const schema=readJsonIf(repoFile(root,path.posix.join(authorityRoot,'phases/phase-6/PHASE_06_SCHEMA_v1.json')))??{};
       form.actions['step-3'].outputs.fullOnlyOmissions=schema.controllerOwnedDefaults?.fullOnlyOmissions??['NONE_IDENTIFIED'];
       form.automationInputs.controllerOwnedOutputPaths=[

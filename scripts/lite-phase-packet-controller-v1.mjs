@@ -779,11 +779,8 @@ if(sequence===5){
   });
   successorPrefillContext={targetDesigns,phase5ExecutionResults:executionResults};
   const targetMatrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
-  const phase0Baseline=
-    readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0-rebind/PHASE6_SIMULATION_BASELINE_INPUT_v1.json'))) ??
-    readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-0/PHASE6_SIMULATION_BASELINE_INPUT_v1.json'))) ??
-    {};
-  const baselineRows=phase0Baseline.baselineMatrixRows??[];
+  // Phase 6 receives Phase-5 candidate-specific tests; no broad Phase-0 fuzz baseline is required.
+  const baselineRows=[];
   fs.mkdirSync(path.dirname(repoFile(root,targetMatrixRel)),{recursive:true});
   fs.writeFileSync(repoFile(root,targetMatrixRel),renderTargetedTestMatrixV1({targetDesigns,executionResults,baselineRows}));
   boundaryArtifactRels.push(targetMatrixRel);

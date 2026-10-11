@@ -31,7 +31,6 @@ test('Ethereum execution sources contain no public RPC URLs',()=>{
 test('canonical Phase 0, qualification and execution workflows use the private secret',()=>{
   for(const name of [
     'lite-phase0-randomized-simulation-v1.yml',
-    'lite-phase0-simulation-rebind-v1.yml',
     'lite-phase0-simulation-testing-v1.yml',
     'audit-controller-execution.yml',
     'v7-execution-infrastructure-qualification.yml'
@@ -40,6 +39,9 @@ test('canonical Phase 0, qualification and execution workflows use the private s
     const secretName=['lite-phase0-randomized-simulation-v1.yml','lite-phase0-simulation-testing-v1.yml','v7-execution-infrastructure-qualification.yml'].includes(name)?'RPC_ETHEREUM':'ETHEREUM_RPC';
     assert.ok(content.includes('ETHEREUM_FORK_RPC_URL: ${{ secrets.'+secretName+' }}'),name);
   }
+  const retired=fs.readFileSync(path.join(root,'.github/workflows/lite-phase0-simulation-rebind-v1.yml'),'utf8');
+  assert.match(retired,/Retired Phase 0 Randomized Simulation Rebind v2/);
+  assert.doesNotMatch(retired,/ETHEREUM_RPC|run-phase0-randomized-simulation-v1\.mjs/);
 });
 test('Phase 6 and Phase 7 have no implicit public or legacy RPC fallback',()=>{
   for(const name of ['phase6-mutable-rpc-v1.mjs','phase7-fork-preflight-v1.mjs','run-job-file.mjs']){

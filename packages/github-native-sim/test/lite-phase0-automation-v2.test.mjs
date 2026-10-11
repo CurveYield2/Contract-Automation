@@ -64,16 +64,14 @@ test('reusable Phase-0 intelligence materializes its request from inputs even wh
   assert.doesNotMatch(workflow,/if \[ "\$GITHUB_EVENT_NAME" = "workflow_call" \]; then/);
 });
 
-test('Phase-0, smoke, and rebind require the private Ethereum RPC secret and never fall back to public nodes',()=>{
-  for(const name of ['lite-phase0-randomized-simulation-v1.yml','lite-phase0-simulation-testing-v1.yml','lite-phase0-simulation-rebind-v1.yml']){
+test('Phase 0 and smoke use the private RPC and only execute package deploy/config scripts on Anvil',()=>{
+  for(const name of ['lite-phase0-randomized-simulation-v1.yml','lite-phase0-randomized-simulation-no-telemetry-v1.yml','lite-phase0-simulation-testing-v1.yml']){
     const workflow=read('.github/workflows/'+name);
-    const secretName=['lite-phase0-randomized-simulation-v1.yml','lite-phase0-simulation-testing-v1.yml'].includes(name)?'RPC_ETHEREUM':'ETHEREUM_RPC';
-    assert.ok(workflow.includes('ETHEREUM_FORK_RPC_URL: ${{ secrets.'+secretName+' }}'),name);
-    assert.doesNotMatch(workflow,/secrets\.SD_ETH_RPC_URL/);
-    assert.match(workflow,/--fork-url "\$ETHEREUM_FORK_RPC_URL"/);
+    assert.ok(workflow.includes('ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}'),name);
+    assert.match(workflow,/run-phase0-fork-deploy-config-v1\.mjs/);
+    assert.doesNotMatch(workflow,/run-phase0-randomized-simulation-v1\.mjs|runMedusaShardsV2|runTelemetry\(/);
   }
-  const source=read('packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs');
-  assert.match(source,/startRpcIdentityProxy\(\{upstreamUrl:forkUrl,chainId:1\}\)/);
-  assert.match(source,/'--fork-url',identityProxy\.url/);
-  assert.match(source,/spawn\(process\.execPath,args/);
+  const engine=read('packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs');
+  assert.match(engine,/if\(deploymentOnly\)/);
+  assert.match(engine,/ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY/);
 });
