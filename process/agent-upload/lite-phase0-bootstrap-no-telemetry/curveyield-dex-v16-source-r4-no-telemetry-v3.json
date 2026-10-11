@@ -5,7 +5,7 @@
   "audit_controller_ref": "main",
   "resume_from_finalize": false,
   "source_telemetry_run_id": 38126544342,
-  "prior_no_telemetry_run_id": 38140366036,
+  "prior_no_telemetry_run_id": 38144078985,
   "workflow": "lite-phase0-bootstrap-no-telemetry-v1.yml",
   "request_version": "v3",
   "repairs": [
@@ -18,7 +18,8 @@
     611,
     612,
     613,
-    614
+    614,
+    615
   ],
-  "recovery_reason": "Full Phase 0 No Telemetry rerun after PR 614: 30-minute CPU-monitored compile, repaired private chunked cache and 50-minute simulation"
+  "recovery_reason": "Rerun exact DEX v16 r4 No Telemetry with PR 615 bounded Balancer creator bookkeeping and nonredundant Stage 2 approvals; retain 30-minute compile and verified private cache"
 }
