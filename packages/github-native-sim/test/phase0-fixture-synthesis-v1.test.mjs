@@ -586,6 +586,11 @@ test('Stage-3 re-harvests created associations and builds created-address, token
     assert.ok(associations.some(x=>x.toLowerCase()===(await token1.getAddress()).toLowerCase()));
     assert.ok(associations.some(x=>x.toLowerCase()===(await token2.getAddress()).toLowerCase()));
     assert.equal(harvest.newTokens.length,2);
+    const associationFunding=await fundActorsV1({
+      provider,ethers,tokens:harvest.newTokens,holders:[accounts[0],accounts[1]],
+      spenders:[await pool.getAddress(),await registry.getAddress()]
+    });
+    assert.equal(associationFunding.receiptCounts.gaps,0);
 
     const candidates=discoverActivationCandidatesV1({targets,createdAddress:await pool.getAddress()});
     assert.ok(candidates.some(x=>x.namedLocal&&x.selected.signature.startsWith('initialize(')));
@@ -618,11 +623,16 @@ test('Stage-3 initializes a created pool with associated-token amounts and privi
     const poolArtifact=artifacts.find(x=>x.contractName==='CreatedPool');
     const target=stage3MutableTarget(await pool.getAddress(),'Stage3.sol','CreatedPool',poolArtifact);
     const valuePool={addresses:[await pool.getAddress()],tokens:[],associations:{},privileged:[ethers.getAddress(accounts[0])],created:[await pool.getAddress()],receipts:[],gaps:[]};
-    await refreshCreatedAssociationsV1({
+    const harvest=await refreshCreatedAssociationsV1({
       provider,ethers,createdAddresses:valuePool.created,targets:[target],
       bindings:[{address:await pool.getAddress(),qualifiedName:'Stage3.sol:CreatedPool'}],
       artifacts,valuePool
     });
+    const associationFunding=await fundActorsV1({
+      provider,ethers,tokens:harvest.newTokens,holders:[accounts[0],accounts[1]],
+      spenders:[await pool.getAddress()]
+    });
+    assert.equal(associationFunding.receiptCounts.gaps,0);
     const result=await executeActivationSynthesisV1({
       provider,ethers,targets:[target],actors:[accounts[1]],valuePool,artifacts,
       createdAddresses:valuePool.created,maxAttemptsPerCreated:30
