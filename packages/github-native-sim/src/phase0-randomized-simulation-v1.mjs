@@ -914,37 +914,10 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
   // EIP-1967 slot, or explicit Balancer Vault delegation pointer (above).
   // Do not invent facades from an arbitrary address association on ANY protocol.
 
-  if(probeSelectors){
-    const accounts=await provider.send('eth_accounts',[]).catch(()=>[]);
-    const from=accounts[0]??ethers.ZeroAddress;
-    let probes=0;
-    const directExtensions=targets.filter(target=>(target.contextType??'DIRECT')==='DIRECT');
-    for(const extension of directExtensions){
-      if(probes>=96)break;
-      const implArtifact=extension.artifact,implDeployment=asDeployment(extension.address)??extension;
-      if(!implArtifact||!implDeployment?.qualifiedName)continue;
-      for(const facadeDeployment of deployed.filter(candidate=>String(candidate.address).toLowerCase()!==String(extension.address).toLowerCase())){
-        if(probes>=96)break;
-        const facadeArtifact=facadeDeployment?.qualifiedName?byQ.get(facadeDeployment.qualifiedName):null;
-        if(!facadeArtifact)continue;
-        // Selector-level probes on the wrong Balancer contract often respond
-        // with generic revert data and are NOT evidence of valid delegation.
-        if(isBalancerV3TargetV1(extension)||isBalancerV3TargetV1(facadeDeployment))continue;
-        let facadeIface;
-        try{facadeIface=new ethers.Interface(normalizedAbi(facadeArtifact.abi??[]));}catch{continue;}
-        const probeFunction=(extension.functions??[]).find(selected=>{
-          try{return !facadeIface.getFunction(selected.signature);}catch{return true;}
-        });
-        if(!probeFunction)continue;
-        probes++;
-        const answered=await facadeAnswersSelectorV2({provider,ethers,facadeAddress:facadeDeployment.address,implArtifact,selected:probeFunction,from});
-        if(!answered)continue;
-        const added=addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'SELECTOR_ANSWERED_BY_FACADE',evidence:{selectorProbe:probeFunction.signature}});
-        if(added)break;
-      }
-    }
-    contextEvidence.push({contextType:'FACADE_DISCOVERY',status:'COMPLETE',discoveryBasis:'SELECTOR_PROBE_BOUNDED',probeCount:probes,probeLimit:96});
-  }
+  // An arbitrary selector response (including a matching custom revert) does not
+  // establish an ABI delegation relationship. Do not synthesize facades via
+  // selector probing. Require an on-chain implementation pointer as above.
+
   for(const target of out)if(!target.contextType){target.contextType='DIRECT';target.contextDisposition='READY';}
   return{targets:out,contextEvidence};
 }
