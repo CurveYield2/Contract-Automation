@@ -884,6 +884,30 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
     addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'EIP1967_IMPLEMENTATION_SLOT'});
   }
 
+  // Balancer v3 has a two-hop proxy: Vault -> VaultExtension -> VaultAdmin.
+  // The only valid mutation entrypoint is Vault, never the extension address.
+  // Verify immutable on-chain pointers before attaching implementation ABIs.
+  for(const vault of deployed.filter(d=>/\/Vault\.sol:Vault$/.test(String(d.qualifiedName??'')))){
+    try{
+      const c=new ethers.Contract(vault.address,['function getVaultExtension() view returns (address)'],provider);
+      const extensionAddress=await c.getVaultExtension();
+      const extensionDeployment=asDeployment(extensionAddress);
+      const extensionArtifact=extensionDeployment?.qualifiedName?byQ.get(extensionDeployment.qualifiedName):null;
+      if(extensionArtifact&&/VaultExtension\.sol:VaultExtension$/.test(String(extensionDeployment.qualifiedName))){
+        addVariant({facadeDeployment:vault,implDeployment:extensionDeployment,implArtifact:extensionArtifact,contextType:'FACADE',basis:'BALANCER_VERIFIED_VAULT_EXTENSION'});
+      }
+      const ext=new ethers.Contract(extensionAddress,['function getVaultAdmin() view returns (address)'],provider);
+      const adminAddress=await ext.getVaultAdmin();
+      const adminDeployment=asDeployment(adminAddress);
+      const adminArtifact=adminDeployment?.qualifiedName?byQ.get(adminDeployment.qualifiedName):null;
+      if(adminArtifact&&/VaultAdmin\.sol:VaultAdmin$/.test(String(adminDeployment.qualifiedName))){
+        addVariant({facadeDeployment:vault,implDeployment:adminDeployment,implArtifact:adminArtifact,contextType:'FACADE',basis:'BALANCER_VERIFIED_VAULT_EXTENSION_ADMIN_CHAIN'});
+      }
+    }catch(error){
+      contextEvidence.push({contextType:'FACADE',facadeQualifiedName:vault.qualifiedName,status:'CONTEXT_REQUIRED',reason:'BALANCER_VAULT_DELEGATION_UNVERIFIED',message:String(error?.shortMessage??error?.message??error).slice(0,700)});
+    }
+  }
+
   for(const [holderRaw,value] of Object.entries(associations??{})){
     const facadeDeployment=asDeployment(holderRaw);
     if(!facadeDeployment?.address)continue;
@@ -894,19 +918,8 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
       // through explicit Vault -> VaultExtension -> VaultAdmin pointers.
       // Reject unrelated ProtocolFeeController/Router/Authorizer facades.
       if(isBalancerV3TargetV1(implDeployment)||isBalancerV3TargetV1(facadeDeployment)){
-        const facadeName=String(facadeDeployment.qualifiedName??''),implName=String(implDeployment.qualifiedName??'');
-        const link=/\/Vault\.sol:Vault$/.test(facadeName)&&/VaultExtension\.sol:VaultExtension$/.test(implName)
-          ? 'getVaultExtension()'
-          : /VaultExtension\.sol:VaultExtension$/.test(facadeName)&&/VaultAdmin\.sol:VaultAdmin$/.test(implName)
-            ? 'getVaultAdmin()' : null;
-        if(!link)continue;
-        let linked=null;
-        try{
-          const c=new ethers.Contract(facadeDeployment.address,[`function ${link} view returns (address)`],provider);
-          linked=await c.getFunction(link).staticCall();
-        }catch{}
-        if(String(linked??'').toLowerCase()!==String(implDeployment.address).toLowerCase())continue;
-        addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'VERIFIED_VAULT_EXTENSION_POINTER'});
+        // Valid Balancer delegation was resolved through the real Vault chain.
+        // An extension linked to its admin is not itself a valid mutation facade.
         continue;
       }
       addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'ASSOCIATION_POINTS_TO_EXTENSION'});
