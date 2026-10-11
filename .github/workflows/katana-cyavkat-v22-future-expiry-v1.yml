@@ -147,6 +147,11 @@ jobs:
           cast call "$old_wm" 'activeRequestedShares()(uint256)' --rpc-url http://127.0.0.1:8545 | tee "$evidence/old_requests_after.txt"
           echo "::endgroup::"
           runphase P2_03_Cutover
+          echo "::group::Mandatory live Merkl preflight for both vault and RCM"
+          python3 scripts/merkl_preflight_v6.py --rpc-url http://127.0.0.1:8545 --out deployments/merkl-preflight-v6.json 2>&1 | tee "$evidence/phase-logs/merkl_preflight_v6.log"
+          export MERKL_PREFLIGHT_RECEIPT_PATH=deployments/merkl-preflight-v6.json
+          cp "$MERKL_PREFLIGHT_RECEIPT_PATH" "$evidence/merkl-preflight-v6.json"
+          echo "::endgroup::"
           runphase P2_04_RemoveV1Fuses
           runphase P3_03_DeployGovernanceCore
           runphase P3_04_ConfigureGate
