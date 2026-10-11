@@ -4,8 +4,8 @@ name: Lite Phase 0 Simulation Testing v1
 # call budgets before spending a full campaign simulation. Never publishes campaign evidence.
 on:
   push:
-    branches-ignore:
-      - main
+    # Trigger-file commits on main must exercise the merged production code.
+    # Branch-scoped smoke runs remain supported before integration.
     paths:
       - '.github/smoke-trigger/lite-phase0-simulation-testing-v1.json'
   issue_comment:
