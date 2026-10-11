@@ -1685,6 +1685,12 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
           stats.byContract[target.qualifiedName]=(stats.byContract[target.qualifiedName]??0)+1;
           const fk=`${target.qualifiedName}::${selected.signature}`,fnStats=stats.byFunction[fk]??{calls:0,callerResolution:callerResolutionForTargetV2(target)};fnStats.calls++;stats.byFunction[fk]=fnStats;
 
+          // Owner transfer/renounce are destructive to every subsequent call
+          // in an archive smoke. Test the *real source transaction* in its
+          // own fork snapshot, observe its receipt, then restore the exact
+          // pre-call state. Production telemetry is not affected.
+          const archiveDestructive=Boolean(target.archiveRoleCallers&&/^(?:renounceOwnership|transferOwnership)\(/.test(selected.signature));
+          const archiveActionSnapshot=archiveDestructive?await provider.send('evm_snapshot',[]):null;
           let args=null,argError=null;
           try{
             if(balancerAction.kind==='BLOCKED'){
@@ -1906,6 +1912,11 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
           }
           const observations=[...rec.observations.before,...rec.observations.after];stats.observationReads+=observations.length;stats.observationFailures+=observations.filter(x=>x.status!=='OK').length;
           if(['SIMULATION_INFRASTRUCTURE_ERROR','SUBMISSION_INFRASTRUCTURE_ERROR','SUBMITTED_OUTCOME_UNKNOWN','NOT_EXECUTED_ENCODING_OR_PLANNING'].includes(rec.executionOutcome))stats.errors++;
+          if(archiveActionSnapshot!==null){
+            const reverted=await provider.send('evm_revert',[archiveActionSnapshot]);
+            if(reverted!==true)throw new Error('Archive destructive-role test snapshot rollback failed');
+            rec.archiveIsolation={mode:'PER_CALL_DESTRUCTIVE_ROLE_SNAPSHOT',restored:true,reason:'PRESERVE_FOLLOWING_ROLE_LIFECYCLES'};
+          }
           terminalRows.push(rec);
           await h.write(JSON.stringify(rec)+'\n');
         }
