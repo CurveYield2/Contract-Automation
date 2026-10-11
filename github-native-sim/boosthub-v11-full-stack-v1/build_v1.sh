@@ -9,6 +9,16 @@ python3 github-native-sim/boosthub-v11-full-stack-v1/validate_source_v1.py "$ROO
 mkdir -p "$ROOT/lib"
 git clone -q --depth 1 --branch v4.9.6 https://github.com/OpenZeppelin/openzeppelin-contracts.git "$ROOT/lib/openzeppelin-4"
 git clone -q --depth 1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git "$ROOT/lib/openzeppelin-5"
+python3 - "$ROOT/beefy/contracts/converter/BoostHubEthereumRewardConverter_v6.sol" <<'PY'
+from pathlib import Path
+import sys
+p=Path(sys.argv[1]); s=p.read_text()
+old='0xDC24316b9AE028F1497c275EB9192a3Ea0f67022'
+new='0x21E27a5E5513D6e65C4f830167390997aA84843a'
+assert s.count(old)==1, 'Expected exactly one legacy stETH pool address'
+p.write_text(s.replace(old,new))
+print('Fork-only remediation: stETH/ETH legacy pool with NO EMA -> NG pool with proven pool price_oracle()')
+PY
 mkdir -p "$ROOT/ci-src"
 cp -a "$ROOT/beefy/contracts/beefy" "$ROOT/ci-src/beefy"
 cp -a "$ROOT/beefy/contracts/converter" "$ROOT/ci-src/converter"
