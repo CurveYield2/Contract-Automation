@@ -940,21 +940,22 @@ function qualifiedActionV2({target,selected,actors,rng}){
   }
   return null;
 }
-export function pickFn(target,rng,actionClass,feedback=new Map(),blocked=new Set()){
+export function pickFn(target,rng,actionClass,feedback=new Map(),blocked=new Set(),weightMultipliers=new Map()){
   const keyFor=x=>`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${x.signature}`;
   const available=list=>list.filter(x=>!blocked.has(keyFor(x)));
   const accounting=available(target.functions.filter(x=>x.accounting)),other=available(target.functions.filter(x=>!x.accounting));
   const requested=actionClass==='ACCOUNTING_STATE_CHANGE'?accounting:other;
   const alternate=actionClass==='ACCOUNTING_STATE_CHANGE'?other:accounting;
   const effective=requested.length?requested:alternate;
-  // If every admitted function for this target is explicitly blocked, return null so
-  // the caller can reroute to another qualified execution context. Never silently
-  // resurrect a blocked function.
   if(!effective.length)return null;
-  const weights=effective.map(x=>1+Math.min(8,Number(feedback.get(keyFor(x))??0)));
+  const weights=effective.map(x=>{
+    const key=keyFor(x),base=1+Math.min(8,Number(feedback.get(key)??0));
+    const multiplier=Math.max(0.01,Number(weightMultipliers.get(key)??1));
+    return base*multiplier;
+  });
   const total=weights.reduce((a,b)=>a+b,0);let cursor=rng()*total;
-  for(let i=0;i<effective.length;i++){cursor-=weights[i];if(cursor<=0)return{selected:effective[i],feedbackWeight:weights[i],selectionKey:keyFor(effective[i])};}
-  return{selected:effective.at(-1),feedbackWeight:weights.at(-1),selectionKey:keyFor(effective.at(-1))};
+  for(let i=0;i<effective.length;i++){cursor-=weights[i];if(cursor<=0)return{selected:effective[i],feedbackWeight:weights[i],selectionKey:keyFor(effective[i]),selectionWeightMultiplier:Number(weightMultipliers.get(keyFor(effective[i]))??1)};}
+  return{selected:effective.at(-1),feedbackWeight:weights.at(-1),selectionKey:keyFor(effective.at(-1)),selectionWeightMultiplier:Number(weightMultipliers.get(keyFor(effective.at(-1)))??1)};
 }
 export function buildBurstSchedule(targets,calls,rng){
   const out=[];
