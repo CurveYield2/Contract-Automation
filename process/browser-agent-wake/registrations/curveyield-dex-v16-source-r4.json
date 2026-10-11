@@ -61,10 +61,12 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-11T18:57:17Z",
-  "wakeDelivery": {
-    "milestoneId": "PHASE_1_WORK_PACKET",
-    "chatUrl": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac4013d-6ba4-83e8-b704-8cff2a4df8c8",
-    "deliveredAt": "2026-10-11T18:57:17Z"
+  "updatedAt": "2026-10-11T19:14:30Z",
+  "failedWakeEvidence": {
+    "runId": 38165777532,
+    "reason": "X11_FIXED_COORDINATE_OUTSIDE_CHROME_WINDOW",
+    "originalDeliveryVerified": false,
+    "diagnosticRunId": 38166889999,
+    "unverifiedAt": "2026-10-11T19:11:40Z"
   }
 }
