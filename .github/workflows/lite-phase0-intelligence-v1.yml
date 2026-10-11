@@ -101,11 +101,13 @@ jobs:
       - name: Generate useful Phase-0 machine intelligence
         env:
           AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PHASE0_PRIVATE_BUILD_CACHE_ENABLED: ${{ github.event_name != 'pull_request' }}
         shell: bash
         run: |
           set -euo pipefail
           rm -rf .phase0-intelligence-output
-          node packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs \
+          # External wall-clock guard: synchronous solc can block Node watchdog timers.
+          timeout -s TERM -k 30s 1500s node packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs \
             --request "${{ steps.request.outputs.path }}" \
             --output .phase0-intelligence-output
 
