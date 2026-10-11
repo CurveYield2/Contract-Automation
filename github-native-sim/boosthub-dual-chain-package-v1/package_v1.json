@@ -1,1 +1,0 @@
-{"name":"boosthub-dual-chain-package-v1","version":"1.0.0","private":true,"type":"module","dependencies":{"ethers":"6.15.0","esbuild":"0.25.10","solc":"0.8.28"}}
