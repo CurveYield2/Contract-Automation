@@ -1,4 +1,4 @@
-name: Build Ethereum BoostHub unified converter v1 # retrieve YB LP converter source 5
+name: Build Ethereum BoostHub unified converter v1 # recover exact YB converter source 6
 on:
   push:
     branches: [build-boosthub-ethereum-converter-v1]
@@ -17,15 +17,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install pinned read-only tools
-        working-directory: github-native-sim/boosthub-ethereum-converter-v1
-        run: npm install --no-audit --no-fund
-      - name: Inspect YB LP converter dependencies
-        working-directory: github-native-sim/boosthub-ethereum-converter-v1
-        run: node inspect_lp_v1.mjs
+      - name: Select configured private-source credential
+        env:
+          AUDIT_CONTROLLER_PROBE_REPOSITORY: CurveYield2/Audit-Controller
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Audit-Controller
+          ref: 93062463611e798ab26544a88c4e119f9620be9a
+          token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller
+          persist-credentials: false
+          sparse-checkout: campaigns/Boosthub Staking v2/source
+      - name: Extract versioned converter references
+        run: python3 github-native-sim/boosthub-ethereum-converter-v1/retrieve_reference_v1.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: boosthub-ethereum-converter-lp-inspection-v1
-          path: github-native-sim/boosthub-ethereum-converter-v1/lp_evidence_v1
+          name: boosthub-ethereum-converter-reference-v1
+          path: github-native-sim/boosthub-ethereum-converter-v1/reference_evidence_v1
           retention-days: 14
