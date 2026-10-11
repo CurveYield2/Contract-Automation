@@ -7,7 +7,7 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import solc from 'solc';
 import * as ethers from 'ethers';
-import {buildCompiledArtifactErrorSelectorIndexV1,decodeTelemetryRevertReasonV1,topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAmountV1,discoverCreatorCandidatesV1,buildCreatorArgumentsV1,executeCreatorSynthesisV1,bindCreatedContractV1} from '../src/phase0-fixture-synthesis-v1.mjs';
+import {buildCompiledArtifactErrorSelectorIndexV1,decodeTelemetryRevertReasonV1,topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAmountV1,discoverCreatorCandidatesV1,buildCreatorArgumentsV1,executeCreatorSynthesisV1,bindCreatedContractV1,refreshCreatedAssociationsV1,discoverActivationCandidatesV1,buildActivationArgumentsV1,executeActivationSynthesisV1} from '../src/phase0-fixture-synthesis-v1.mjs';
 import {renderMedusaRouterV2,buildMedusaConfigV2} from '../src/phase0-randomized-simulation-v1.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
@@ -444,7 +444,7 @@ test('Stage-2 runner executes creator synthesis before the shared Medusa/telemet
   assert.match(runner,/maxAttemptsPerCandidate:24,maxSuccessesPerCandidate:3/);
   assert.match(runner,/20-\(valuePool\.created\?\.length\?\?0\)/);
   assert.match(runner,/targets\.push\(target\)/);
-  assert.match(runner,/STAGE_2_CREATOR_DISCOVERY_AND_EXECUTION/);
+  assert.match(runner,/creatorRounds:stage2Rounds/);
   assert.match(runner,/createdSpenderApprovals/);
   assert.match(runner,/createdTokenFunding/);
 });
@@ -486,4 +486,251 @@ test('Stage-2 enforces the 24-attempt ceiling and retains decoded attempt eviden
     await provider.destroy();
     child.kill('SIGTERM');
   }
+});
+
+
+function compileStage3Contracts(){
+  const source=[
+    '// SPDX-License-Identifier: UNLICENSED',
+    'pragma solidity ^0.8.20;',
+    '',
+    'contract ActivationToken {',
+    '  mapping(address => uint256) private balances;',
+    '  mapping(address => mapping(address => uint256)) public allowance;',
+    '  uint8 public constant decimals = 18;',
+    '  uint256 public totalSupply = 1000000000 ether;',
+    '  function balanceOf(address account) external view returns (uint256) { return balances[account]; }',
+    '  function approve(address spender, uint256 amount) external returns (bool) { allowance[msg.sender][spender] = amount; return true; }',
+    '}',
+    '',
+    'contract CreatedPool {',
+    '  error UnauthorizedCaller();',
+    '  address public owner;',
+    '  address[] private listed;',
+    '  bool public initialized;',
+    '  uint256 public totalLiquidity;',
+    '  constructor(address first, address second, address owner_) { owner=owner_; listed.push(first); listed.push(second); }',
+    '  function tokens() external view returns (address[] memory) { return listed; }',
+    '  function initialize(uint256[] calldata amounts, uint256 minOut, uint256 deadline, bool flag, bytes calldata extra) external {',
+    '    if (msg.sender != owner) revert UnauthorizedCaller();',
+    '    require(!initialized, "ALREADY");',
+    '    require(amounts.length == listed.length, "AMOUNTS");',
+    '    require(minOut == 0, "MIN");',
+    '    require(deadline == type(uint256).max, "DEADLINE");',
+    '    require(!flag && extra.length == 0, "FLAGS");',
+    '    for (uint256 i=0;i<amounts.length;i++) totalLiquidity += amounts[i];',
+    '    initialized = true;',
+    '  }',
+    '}',
+    '',
+    'contract ActivationRegistry {',
+    '  mapping(address => bool) public active;',
+    '  function activate(address pool, address[] calldata tokens, uint256[] calldata amounts, uint256 minOut, uint256 deadline) external {',
+    '    require(tokens.length == amounts.length, "LENGTH");',
+    '    require(minOut == 0, "MIN");',
+    '    require(deadline == type(uint256).max, "DEADLINE");',
+    '    active[pool] = true;',
+    '  }',
+    '}',
+    '',
+    'contract AlwaysRevertPool {',
+    '  error NotInitialized(address dependency);',
+    '  function initialize(address dependency) external { revert NotInitialized(dependency); }',
+    '}',
+    '',
+    'interface InitializationState { function initialized() external view returns (bool); }',
+    'contract SimpleInitializable {',
+    '  bool public initialized;',
+    '  function initialize() external { initialized = true; }',
+    '}',
+    'contract DependentPool {',
+    '  error NotInitialized(address dependency);',
+    '  bool public active;',
+    '  function start(address dependency) external {',
+    '    if (!InitializationState(dependency).initialized()) revert NotInitialized(dependency);',
+    '    active = true;',
+    '  }',
+    '}'
+  ].join('\n');
+  const input={
+    language:'Solidity',
+    sources:{'Stage3.sol':{content:source}},
+    settings:{outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object','evm.deployedBytecode.linkReferences']}}}
+  };
+  const output=JSON.parse(solc.compile(JSON.stringify(input)));
+  const failures=(output.errors??[]).filter(x=>x.severity==='error');
+  assert.deepEqual(failures,[]);
+  return output.contracts['Stage3.sol'];
+}
+function stage3MutableTarget(address,sourceName,contractName,artifact){
+  const iface=new ethers.Interface(artifact.abi);
+  const functions=iface.fragments
+    .filter(fragment=>fragment.type==='function'&&!['view','pure'].includes(fragment.stateMutability))
+    .map(fragment=>({fragment,signature:fragment.format('sighash'),accounting:false,semanticFamily:'OTHER'}));
+  return{qualifiedName:sourceName+':'+contractName,address,artifact,functions};
+}
+
+test('Stage-3 re-harvests created associations and builds created-address, token-array, amount-array, min-out and deadline arguments',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage3Contracts();
+    const token1=await deployArtifact(provider,compiled.ActivationToken);
+    const token2=await deployArtifact(provider,compiled.ActivationToken);
+    const accounts=await provider.send('eth_accounts',[]);
+    const pool=await deployArtifact(provider,compiled.CreatedPool,[await token1.getAddress(),await token2.getAddress(),accounts[0]]);
+    const registry=await deployArtifact(provider,compiled.ActivationRegistry);
+    const artifacts=[
+      normalizedTestArtifact('Stage3.sol','ActivationToken',compiled.ActivationToken),
+      normalizedTestArtifact('Stage3.sol','CreatedPool',compiled.CreatedPool),
+      normalizedTestArtifact('Stage3.sol','ActivationRegistry',compiled.ActivationRegistry)
+    ];
+    const poolArtifact=artifacts.find(x=>x.contractName==='CreatedPool');
+    const registryArtifact=artifacts.find(x=>x.contractName==='ActivationRegistry');
+    const targets=[
+      stage3MutableTarget(await pool.getAddress(),'Stage3.sol','CreatedPool',poolArtifact),
+      stage3MutableTarget(await registry.getAddress(),'Stage3.sol','ActivationRegistry',registryArtifact)
+    ];
+    const valuePool={addresses:[await pool.getAddress()],tokens:[],associations:{},privileged:[ethers.getAddress(accounts[0])],created:[await pool.getAddress()],receipts:[],gaps:[]};
+    const harvest=await refreshCreatedAssociationsV1({
+      provider,ethers,createdAddresses:valuePool.created,targets,
+      bindings:[{address:await pool.getAddress(),qualifiedName:'Stage3.sol:CreatedPool'}],
+      artifacts,valuePool
+    });
+    const associations=[...valuePool.associations[ethers.getAddress(await pool.getAddress())]];
+    const token1Address=await token1.getAddress(),token2Address=await token2.getAddress();
+    assert.ok(associations.some(x=>x.toLowerCase()===token1Address.toLowerCase()));
+    assert.ok(associations.some(x=>x.toLowerCase()===token2Address.toLowerCase()));
+    assert.equal(harvest.newTokens.length,2);
+    const associationFunding=await fundActorsV1({
+      provider,ethers,tokens:harvest.newTokens,holders:[accounts[0],accounts[1]],
+      spenders:[await pool.getAddress(),await registry.getAddress()]
+    });
+    assert.equal(associationFunding.receiptCounts.gaps,0);
+
+    const candidates=discoverActivationCandidatesV1({targets,createdAddress:await pool.getAddress()});
+    assert.ok(candidates.some(x=>x.namedLocal&&x.selected.signature.startsWith('initialize(')));
+    const external=candidates.find(x=>x.selected.signature.startsWith('activate('));
+    assert.ok(external);
+    const built=buildActivationArgumentsV1({ethers,candidate:external,attempt:0,actor:accounts[1],valuePool});
+    assert.equal(String(built.args[0]).toLowerCase(),(await pool.getAddress()).toLowerCase());
+    assert.equal(built.args[1].length,2);
+    assert.deepEqual(built.args[2].map(String),[(10n**18n).toString(),(10n**18n).toString()]);
+    assert.equal(BigInt(built.args[3]),0n);
+    assert.equal(BigInt(built.args[4]),ethers.MaxUint256);
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-3 initializes a created pool with associated-token amounts and privileged sender retry on local Anvil',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage3Contracts();
+    const token1=await deployArtifact(provider,compiled.ActivationToken);
+    const token2=await deployArtifact(provider,compiled.ActivationToken);
+    const accounts=await provider.send('eth_accounts',[]);
+    const pool=await deployArtifact(provider,compiled.CreatedPool,[await token1.getAddress(),await token2.getAddress(),accounts[0]]);
+    const artifacts=[
+      normalizedTestArtifact('Stage3.sol','ActivationToken',compiled.ActivationToken),
+      normalizedTestArtifact('Stage3.sol','CreatedPool',compiled.CreatedPool)
+    ];
+    const poolArtifact=artifacts.find(x=>x.contractName==='CreatedPool');
+    const target=stage3MutableTarget(await pool.getAddress(),'Stage3.sol','CreatedPool',poolArtifact);
+    const valuePool={addresses:[await pool.getAddress()],tokens:[],associations:{},privileged:[ethers.getAddress(accounts[0])],created:[await pool.getAddress()],receipts:[],gaps:[]};
+    const harvest=await refreshCreatedAssociationsV1({
+      provider,ethers,createdAddresses:valuePool.created,targets:[target],
+      bindings:[{address:await pool.getAddress(),qualifiedName:'Stage3.sol:CreatedPool'}],
+      artifacts,valuePool
+    });
+    const associationFunding=await fundActorsV1({
+      provider,ethers,tokens:harvest.newTokens,holders:[accounts[0],accounts[1]],
+      spenders:[await pool.getAddress()]
+    });
+    assert.equal(associationFunding.receiptCounts.gaps,0);
+    const result=await executeActivationSynthesisV1({
+      provider,ethers,targets:[target],actors:[accounts[1]],valuePool,artifacts,
+      createdAddresses:valuePool.created,maxAttemptsPerCreated:30
+    });
+    const init=result.activations.find(row=>row.function.startsWith('initialize('));
+    assert.ok(init);
+    assert.equal(init.sender.toLowerCase(),accounts[0].toLowerCase());
+    assert.equal(await pool.initialized(),true);
+    assert.equal((await pool.totalLiquidity()).toString(),(2n*10n**18n).toString());
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-3 enforces the 30-attempt ceiling per created contract and preserves decoded dependency reverts',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage3Contracts();
+    const reverter=await deployArtifact(provider,compiled.AlwaysRevertPool);
+    const accounts=await provider.send('eth_accounts',[]);
+    const artifact=normalizedTestArtifact('Stage3.sol','AlwaysRevertPool',compiled.AlwaysRevertPool);
+    const target=stage3MutableTarget(await reverter.getAddress(),'Stage3.sol','AlwaysRevertPool',artifact);
+    const valuePool={addresses:[await reverter.getAddress()],tokens:[],associations:{},privileged:[],created:[await reverter.getAddress()],receipts:[],gaps:[]};
+    const result=await executeActivationSynthesisV1({
+      provider,ethers,targets:[target],actors:[accounts[0]],valuePool,artifacts:[artifact],
+      createdAddresses:valuePool.created,maxAttemptsPerCreated:30
+    });
+    assert.equal(result.activations.length,0);
+    assert.equal(result.activationGaps.length,1);
+    assert.equal(result.activationGaps[0].attemptCount,30);
+    assert.equal(result.activationGaps[0].attempts.length,30);
+    assert.ok(result.activationGaps[0].topDecodedRevertReasons.some(x=>x.reason==='NotInitialized(address)'&&x.count===30));
+    assert.ok(result.activationGaps[0].attempts.every(x=>x.dependency===true));
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-3 prioritizes a created dependency named by NotInitialized(address) before resuming the blocked object',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage3Contracts();
+    const dependency=await deployArtifact(provider,compiled.SimpleInitializable);
+    const blocked=await deployArtifact(provider,compiled.DependentPool);
+    const accounts=await provider.send('eth_accounts',[]);
+    const dependencyArtifact=normalizedTestArtifact('Stage3.sol','SimpleInitializable',compiled.SimpleInitializable);
+    const blockedArtifact=normalizedTestArtifact('Stage3.sol','DependentPool',compiled.DependentPool);
+    const dependencyAddress=await dependency.getAddress(),blockedAddress=await blocked.getAddress();
+    const targets=[
+      stage3MutableTarget(blockedAddress,'Stage3.sol','DependentPool',blockedArtifact),
+      stage3MutableTarget(dependencyAddress,'Stage3.sol','SimpleInitializable',dependencyArtifact)
+    ];
+    const valuePool={
+      addresses:[blockedAddress,dependencyAddress],tokens:[],
+      associations:{[ethers.getAddress(blockedAddress)]:new Set([ethers.getAddress(dependencyAddress)]),[ethers.getAddress(dependencyAddress)]:new Set()},
+      privileged:[],created:[blockedAddress,dependencyAddress],receipts:[],gaps:[]
+    };
+    const result=await executeActivationSynthesisV1({
+      provider,ethers,targets,actors:[accounts[0]],valuePool,artifacts:[blockedArtifact,dependencyArtifact],
+      createdAddresses:[blockedAddress,dependencyAddress],maxAttemptsPerCreated:30
+    });
+    assert.equal(await dependency.initialized(),true);
+    assert.equal(await blocked.active(),true);
+    const initIndex=result.activations.findIndex(row=>row.createdAddress.toLowerCase()===dependencyAddress.toLowerCase()&&row.function==='initialize()');
+    const startIndex=result.activations.findIndex(row=>row.createdAddress.toLowerCase()===blockedAddress.toLowerCase()&&row.function==='start(address)');
+    assert.ok(initIndex>=0&&startIndex>initIndex);
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-3 runner executes association refresh and activation before the shared Medusa/telemetry baseline',()=>{
+  const runner=fs.readFileSync(path.join(root,'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const harvestAt=runner.indexOf('refreshCreatedAssociationsV1({');
+  const activationAt=runner.indexOf('executeActivationSynthesisV1({');
+  const baselineAt=runner.indexOf('baselineSnapshot=await provider.send');
+  assert.ok(harvestAt>0&&activationAt>harvestAt&&baselineAt>activationAt);
+  assert.match(runner,/maxAttemptsPerCreated:30/);
+  assert.match(runner,/STAGE_3_INITIALIZATION_AND_ACTIVATION/);
+  assert.match(runner,/activations:stage3Activation\.activations/);
+  assert.match(runner,/activationGaps:stage3Activation\.activationGaps/);
+  assert.match(runner,/associationTokenFunding/);
 });

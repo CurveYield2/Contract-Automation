@@ -960,3 +960,302 @@ export async function approveFixtureSpendersV1({provider,ethers,tokens=[],holder
     }
   };
 }
+
+
+const ACTIVATION_NAME_RE_V1=/^(?:initialize|init|activate|start|seed|enable|open|setup)/i;
+const INITIALIZATION_DEPENDENCY_RE_V1=/(?:NotInitialized|NotRegistered|NotFound|DoesNotExist)/i;
+
+function addressLeafCountV1(param){
+  if(!param)return 0;
+  if(param.baseType==='array')return 0;
+  if(param.baseType==='tuple')return (param.components??[]).reduce((n,component)=>n+addressLeafCountV1(component),0);
+  return String(param.type??'')==='address'?1:0;
+}
+function associationRowsForV1(valuePool,address){
+  const needle=String(address??'').toLowerCase();
+  for(const [key,value] of Object.entries(valuePool?.associations??{})){
+    if(String(key).toLowerCase()!==needle)continue;
+    return uniqueStringsV1(value instanceof Set?[...value]:(Array.isArray(value)?value:[]));
+  }
+  return[];
+}
+function tokenByAddressV1(valuePool={}){
+  const out=new Map();
+  for(const token of valuePool.tokens??[]){
+    const address=String(token?.address??token);
+    if(/^0x[0-9a-fA-F]{40}$/.test(address))out.set(address.toLowerCase(),token);
+  }
+  return out;
+}
+function associatedTokensV1(valuePool,address){
+  const byAddress=tokenByAddressV1(valuePool);
+  return associationRowsForV1(valuePool,address)
+    .map(row=>byAddress.get(String(row).toLowerCase()))
+    .filter(token=>token&&token.fundedAmount!=null&&BigInt(token.fundedAmount)>0n);
+}
+function activationCandidateKeyV1(target,selected,createdAddress){
+  return functionKeyV1(target,selected)+'|created:'+String(createdAddress).toLowerCase();
+}
+export function discoverActivationCandidatesV1({targets=[],createdAddress}={}){
+  const created=String(createdAddress??'').toLowerCase(),rows=[];
+  for(const target of targets){
+    for(const selected of target?.functions??[]){
+      const fragment=selected?.fragment;
+      if(!fragment||['view','pure'].includes(fragment.stateMutability))continue;
+      const local=String(target?.address??'').toLowerCase()===created;
+      const namedLocal=local&&ACTIVATION_NAME_RE_V1.test(String(fragment.name??''));
+      const addressLeaves=(fragment.inputs??[]).reduce((n,param)=>n+addressLeafCountV1(param),0);
+      if(!namedLocal&&addressLeaves===0)continue;
+      rows.push({
+        target,selected,createdAddress,
+        key:activationCandidateKeyV1(target,selected,createdAddress),
+        namedLocal,addressLeaves,
+        priority:namedLocal?0:1,
+        basis:namedLocal?'LOCAL_INITIALIZER_NAME':'CREATED_ADDRESS_INPUT'
+      });
+    }
+  }
+  return rows.sort((a,b)=>a.priority-b.priority||String(a.key).localeCompare(String(b.key)));
+}
+function activationAmountUnitV1(token){
+  const decimals=Number(token?.decimals);
+  if(!Number.isInteger(decimals)||decimals<0||decimals>70)return 1n;
+  return 10n**BigInt(decimals);
+}
+function fixedOrDynamicLengthV1(param,dynamicLength){
+  if(Number.isInteger(param?.arrayLength)&&param.arrayLength>=0)return Math.min(8,param.arrayLength);
+  return Math.min(8,Math.max(0,dynamicLength));
+}
+function activationValueV1({ethers,param,ctx}){
+  if(param?.baseType==='array'){
+    if(param.arrayChildren?.baseType==='address'){
+      const source=(ctx.tokens.length?ctx.tokens.map(x=>x.address):ctx.associations);
+      const length=fixedOrDynamicLengthV1(param,source.length);
+      if(!source.length)return[];
+      return Array.from({length},(_,i)=>ethers.getAddress(source[i%source.length]));
+    }
+    if(/^uint(?:\d+)?$/.test(String(param.arrayChildren?.type??''))){
+      const length=fixedOrDynamicLengthV1(param,ctx.tokens.length),bits=uintBitsV1(param.arrayChildren);
+      if(!ctx.tokens.length)return[];
+      return Array.from({length},(_,i)=>capUintV1(activationAmountUnitV1(ctx.tokens[i%ctx.tokens.length]),bits));
+    }
+    const length=fixedOrDynamicLengthV1(param,ctx.associations.length);
+    return Array.from({length},()=>activationValueV1({ethers,param:param.arrayChildren,ctx}));
+  }
+  if(param?.baseType==='tuple')return (param.components??[]).map(component=>activationValueV1({ethers,param:component,ctx}));
+  const type=String(param?.type??'');
+  if(type==='address'){
+    const index=ctx.addressCounter++;
+    if(ctx.mustPlaceCreated&&index===ctx.createdSlot){ctx.placedCreated=true;return ctx.createdAddress;}
+    const source=ctx.associations.length?ctx.associations:[ctx.actor,ethers.ZeroAddress];
+    return ethers.getAddress(source[(index+ctx.attempt)%source.length]??ctx.actor);
+  }
+  if(type==='bool')return false;
+  if(type==='bytes')return '0x';
+  if(type==='string')return 'P0';
+  if(type==='bytes32')return ethers.ZeroHash;
+  if(/^bytes\d+$/.test(type))return ethers.zeroPadValue('0x',Number(type.slice(5)));
+  if(/^uint(?:\d+)?$/.test(type)){
+    const bits=uintBitsV1(param),name=String(param?.name??'').toLowerCase();
+    if(/deadline|expiry|expiration|validuntil|timestamp/.test(name))return capUintV1((1n<<256n)-1n,bits);
+    if(/min|minout|minimum|amountoutmin|limit/.test(name))return 0n;
+    if(/amount|liquidity|value|assets|shares/.test(name))return capUintV1(activationAmountUnitV1(ctx.tokens[0]),bits);
+    return 0n;
+  }
+  if(/^int(?:\d+)?$/.test(type))return 0;
+  return 0;
+}
+export function buildActivationArgumentsV1({ethers,candidate,attempt=0,actor,valuePool={}}){
+  const associations=associationRowsForV1(valuePool,candidate.createdAddress),tokens=associatedTokensV1(valuePool,candidate.createdAddress);
+  const addressLeaves=(candidate.selected?.fragment?.inputs??[]).reduce((n,param)=>n+addressLeafCountV1(param),0);
+  const ctx={
+    actor,attempt,associations,tokens,createdAddress:ethers.getAddress(candidate.createdAddress),
+    mustPlaceCreated:!candidate.namedLocal&&addressLeaves>0,createdSlot:addressLeaves?attempt%addressLeaves:0,addressCounter:0,placedCreated:false
+  };
+  const args=(candidate.selected?.fragment?.inputs??[]).map(param=>activationValueV1({ethers,param,ctx}));
+  return{args,associations,tokens:tokens.map(token=>token.address),createdPlaced:ctx.placedCreated,createdSlot:ctx.createdSlot};
+}
+function parseCustomErrorAddressesV1({ethers,error,artifacts=[]}){
+  const data=revertDataV1(error);
+  if(!data)return{name:null,signature:null,addresses:[]};
+  for(const artifact of artifacts){
+    let iface;try{iface=new ethers.Interface(abiRowsV1(artifact?.abi));}catch{continue;}
+    try{
+      const parsed=iface.parseError(data);
+      if(!parsed)continue;
+      return{name:parsed.name,signature:parsed.signature,addresses:[...collectAddressesV1(ethers,parsed.args)]};
+    }catch{}
+  }
+  return{name:null,signature:null,addresses:[]};
+}
+function activationDependencyHintV1({ethers,error,artifacts=[]}){
+  const decoded=decodedFailureV1({ethers,error,selectorIndex:buildCompiledArtifactErrorSelectorIndexV1({ethers,artifacts})});
+  const parsed=parseCustomErrorAddressesV1({ethers,error,artifacts});
+  const reason=parsed.signature??decoded.reason??'';
+  return{
+    dependency:INITIALIZATION_DEPENDENCY_RE_V1.test(String(reason)),
+    addresses:parsed.addresses,
+    decoded:{...decoded,errorName:parsed.name,errorSignature:parsed.signature}
+  };
+}
+async function attemptActivationCallV1({provider,ethers,candidate,sender,args,artifacts=[]}){
+  const snapshot=await provider.send('evm_snapshot',[]);
+  const iface=new ethers.Interface(abiRowsV1(candidate.target.artifact.abi));
+  const signature=candidate.selected.signature,data=iface.encodeFunctionData(signature,args),value=0n;
+  try{
+    await provider.call({from:sender,to:candidate.target.address,data,value});
+    const gas=await provider.estimateGas({from:sender,to:candidate.target.address,data,value});
+    const signer=await provider.getSigner(sender);
+    const tx=await signer.sendTransaction({to:candidate.target.address,data,value,gasLimit:gas+(gas/2n)+100000n});
+    const receipt=await tx.wait();
+    if(Number(receipt?.status)!==1)throw Object.assign(new Error('activation transaction reverted'),{receipt});
+    return{status:'PASS',snapshot,receipt,transactionHash:tx.hash};
+  }catch(error){
+    await provider.send('evm_revert',[snapshot]).catch(()=>{});
+    const hint=activationDependencyHintV1({ethers,error,artifacts});
+    return{status:'REVERTED',decoded:hint.decoded,dependency:hint.dependency,dependencyAddresses:hint.addresses,error:String(error?.shortMessage??error?.message??error).slice(0,1600)};
+  }
+}
+async function harvestTargetAssociationsV1({provider,ethers,address,abis=[]}){
+  const found=new Set(),receipts=[],gaps=[];
+  for(const abi of abis){
+    let iface,contract;
+    try{iface=new ethers.Interface(abiRowsV1(abi));contract=new ethers.Contract(address,abiRowsV1(abi),provider);}catch{continue;}
+    for(const fragment of iface.fragments.filter(x=>x?.type==='function'&&['view','pure'].includes(x.stateMutability)&&x.inputs.length===0&&(x.outputs??[]).some(outputContainsAddressV1))){
+      try{
+        const value=await callNoArgV1(contract,fragment),addresses=collectAddressesV1(ethers,value);
+        for(const row of addresses)found.add(row);
+        receipts.push({kind:'CREATED_ASSOCIATION_VIEW',target:address,function:fragment.format('sighash'),addresses:[...addresses],status:'PASS'});
+      }catch(error){
+        gaps.push({type:'CREATED_ASSOCIATION_VIEW_REVERTED',target:address,function:fragment.format('sighash'),message:String(error?.shortMessage??error?.message??error).slice(0,800)});
+      }
+    }
+  }
+  return{addresses:[...found],receipts,gaps};
+}
+export async function refreshCreatedAssociationsV1({provider,ethers,createdAddresses=[],targets=[],bindings=[],artifacts=[],valuePool={}}){
+  const receipts=[],gaps=[],newTokens=[];
+  const byQualified=new Map(artifacts.map(artifact=>[String(artifact.sourceName)+':'+String(artifact.contractName),artifact]));
+  for(const raw of uniqueAddressesV1(ethers,createdAddresses)){
+    const address=ethers.getAddress(raw),targetAbis=targets.filter(target=>String(target.address).toLowerCase()===address.toLowerCase()).map(target=>target.artifact?.abi).filter(Boolean);
+    for(const binding of bindings.filter(row=>String(row?.address??'').toLowerCase()===address.toLowerCase())){
+      const artifact=byQualified.get(binding.qualifiedName);
+      if(artifact)targetAbis.push(artifact.abi);
+    }
+    if(!targetAbis.length){gaps.push({type:'CREATED_ASSOCIATION_ABI_UNAVAILABLE',target:address});continue;}
+    const harvested=await harvestTargetAssociationsV1({provider,ethers,address,abis:targetAbis});
+    receipts.push(...harvested.receipts);gaps.push(...harvested.gaps);
+    const existing=valuePool.associations?.[address]??new Set();
+    const set=existing instanceof Set?existing:new Set(existing??[]);
+    valuePool.associations=valuePool.associations??{};
+    valuePool.associations[address]=set;
+    for(const associated of harvested.addresses){
+      set.add(associated);
+      if(!valuePool.addresses.some(x=>String(x).toLowerCase()===associated.toLowerCase()))valuePool.addresses.push(associated);
+      if((valuePool.tokens??[]).some(token=>String(token?.address??token).toLowerCase()===associated.toLowerCase()))continue;
+      try{
+        const shape=await probeErc20ShapeV1({provider,ethers,address:associated,probeHolder:address});
+        const token={symbol:null,address:associated,source:'CREATED_ASSOCIATION_ERC20_SHAPE',decimals:shape.decimals,totalSupply:shape.totalSupply};
+        valuePool.tokens.push(token);newTokens.push(token);
+        receipts.push({kind:'CREATED_ASSOCIATION_ERC20_PROBE',target:address,address:associated,decimals:shape.decimals,totalSupply:shape.totalSupply,status:'PASS'});
+      }catch{}
+    }
+  }
+  return{receipts,gaps,newTokens};
+}
+function topActivationRevertsV1(attempts,limit=10){
+  const counts=new Map();
+  for(const attempt of attempts.filter(row=>row.status==='REVERTED')){
+    const reason=attempt.decoded?.reason??'UNKNOWN_REVERT',key=String(attempt.decoded?.kind??'UNKNOWN')+'|'+String(attempt.decoded?.selector??'')+'|'+String(reason);
+    const current=counts.get(key)??{kind:attempt.decoded?.kind??'UNKNOWN_REVERT',selector:attempt.decoded?.selector??null,reason,count:0};
+    current.count++;counts.set(key,current);
+  }
+  return[...counts.values()].sort((a,b)=>b.count-a.count||String(a.reason).localeCompare(String(b.reason))).slice(0,limit);
+}
+export async function executeActivationSynthesisV1({provider,ethers,targets=[],actors=[],valuePool={},artifacts=[],createdAddresses=[],maxAttemptsPerCreated=30}){
+  const activations=[],activationGaps=[],actorRows=uniqueAddressesV1(ethers,actors),privileged=uniqueAddressesV1(ethers,valuePool.privileged??[]);
+  const created=uniqueAddressesV1(ethers,createdAddresses),createdSet=new Set(created.map(x=>x.toLowerCase())),queue=[...created],states=new Map(),completed=new Set();
+  const stateFor=createdAddress=>{
+    const key=createdAddress.toLowerCase();
+    if(states.has(key))return states.get(key);
+    const candidates=discoverActivationCandidatesV1({targets,createdAddress});
+    const state={createdAddress,candidates,successful:new Set(),attemptsByFunction:new Map(),dependencyPriorities:new Set(),totalAttempts:0,finalized:false};
+    states.set(key,state);return state;
+  };
+  const prioritizeCreated=address=>{
+    const normalized=ethers.getAddress(address),key=normalized.toLowerCase();
+    if(!createdSet.has(key)||completed.has(key))return;
+    for(let i=queue.length-1;i>=0;i--)if(String(queue[i]).toLowerCase()===key)queue.splice(i,1);
+    queue.unshift(normalized);
+  };
+  while(queue.length){
+    const createdAddress=ethers.getAddress(queue.shift()),createdKey=createdAddress.toLowerCase();
+    if(completed.has(createdKey))continue;
+    const state=stateFor(createdAddress);
+    let deferred=false;
+    while(state.totalAttempts<maxAttemptsPerCreated&&state.successful.size<state.candidates.length&&state.candidates.length){
+      const remaining=state.candidates.filter(candidate=>!state.successful.has(candidate.key));
+      const priorityRows=remaining.filter(candidate=>state.dependencyPriorities.has(candidate.key));
+      const selectionPool=priorityRows.length?priorityRows:remaining;
+      selectionPool.sort((a,b)=>{
+        const ac=(state.attemptsByFunction.get(a.key)??[]).length,bc=(state.attemptsByFunction.get(b.key)??[]).length;
+        return ac-bc||a.priority-b.priority||String(a.key).localeCompare(String(b.key));
+      });
+      const candidate=selectionPool[0],prior=state.attemptsByFunction.get(candidate.key)??[],attemptIndex=prior.length;
+      const actor=actorRows[deterministicIndexV1(ethers,candidate.key+':'+attemptIndex,actorRows.length)]??privileged[0]??ethers.ZeroAddress;
+      const built=buildActivationArgumentsV1({ethers,candidate,attempt:attemptIndex,actor,valuePool});
+      let result=await attemptActivationCallV1({provider,ethers,candidate,sender:actor,args:built.args,artifacts}),sender=actor;
+      const record=row=>({
+        attempt:++state.totalAttempts,sender:row.sender,argsSummary:normalizeEvidenceValueV1(built.args),status:row.result.status,
+        decoded:row.result.decoded??null,dependency:row.result.dependency??false,dependencyAddresses:row.result.dependencyAddresses??[],error:row.result.error??null,
+        authorizationRetry:row.authorizationRetry===true
+      });
+      prior.push(record({sender,result,authorizationRetry:false}));state.attemptsByFunction.set(candidate.key,prior);
+      if(result.status!=='PASS'&&authorizationLookingV1(result.decoded)){
+        for(const privilegedSender of privileged){
+          if(state.totalAttempts>=maxAttemptsPerCreated)break;
+          if(privilegedSender.toLowerCase()===actor.toLowerCase())continue;
+          const retry=await attemptActivationCallV1({provider,ethers,candidate,sender:privilegedSender,args:built.args,artifacts});
+          prior.push(record({sender:privilegedSender,result:retry,authorizationRetry:true}));
+          if(retry.status==='PASS'){result=retry;sender=privilegedSender;break;}
+        }
+      }
+      if(result.status==='PASS'){
+        state.successful.add(candidate.key);state.dependencyPriorities.delete(candidate.key);
+        activations.push({
+          createdAddress,functionKey:candidate.key,target:candidate.target.qualifiedName,address:candidate.target.address,
+          function:candidate.selected.signature,basis:candidate.basis,sender,argsSummary:normalizeEvidenceValueV1(built.args),
+          receipt:{transactionHash:result.transactionHash,blockNumber:result.receipt?.blockNumber??null,status:Number(result.receipt?.status??0),gasUsed:result.receipt?.gasUsed?.toString?.()??null}
+        });
+        continue;
+      }
+      if(result.dependency){
+        const hints=uniqueAddressesV1(ethers,result.dependencyAddresses??[]).filter(address=>createdSet.has(address.toLowerCase()));
+        const externalHints=hints.filter(address=>address.toLowerCase()!==createdKey&&!completed.has(address.toLowerCase()));
+        if(externalHints.length){
+          for(let i=externalHints.length-1;i>=0;i--)prioritizeCreated(externalHints[i]);
+          for(let i=queue.length-1;i>=0;i--)if(String(queue[i]).toLowerCase()===createdKey)queue.splice(i,1);
+          queue.splice(externalHints.length,0,createdAddress);
+          deferred=true;break;
+        }
+        for(const local of state.candidates.filter(row=>row.namedLocal))state.dependencyPriorities.add(local.key);
+      }
+    }
+    if(deferred)continue;
+    if(!state.finalized){
+      for(const candidate of state.candidates){
+        if(state.successful.has(candidate.key))continue;
+        const attempts=state.attemptsByFunction.get(candidate.key)??[];
+        activationGaps.push({
+          createdAddress,functionKey:candidate.key,target:candidate.target.qualifiedName,address:candidate.target.address,function:candidate.selected.signature,
+          status:attempts.length?'NO_SUCCESS':'UNEXERCISED_ATTEMPT_BUDGET',attemptCount:attempts.length,attempts,
+          topDecodedRevertReasons:topActivationRevertsV1(attempts)
+        });
+      }
+      if(!state.candidates.length)activationGaps.push({createdAddress,status:'NO_ACTIVATION_CANDIDATES',attemptCount:0,attempts:[],topDecodedRevertReasons:[]});
+      state.finalized=true;
+    }
+    completed.add(createdKey);
+  }
+  return{activations,activationGaps,createdContracts:created.length};
+}
