@@ -1341,7 +1341,7 @@ export async function resolveTelemetryCallerContextV2({
 export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,artifacts=[],valuePool=null,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
   const summaries=[],callerResolutionState=new Map(),contextWeightMultipliers=new Map();
   let snapshotId=baselineSnapshot;
-  const balancerDiscovery=await discoverBalancerV3PoolsV1({provider,ethers,targets,valuePool});
+  let balancerDiscovery=await discoverBalancerV3PoolsV1({provider,ethers,targets,valuePool,actors});
   if(balancerDiscovery.active){
     await fs.writeFile(path.join(outRoot,'PHASE0_BALANCER_V3_CALL_CONTEXT_v1.json'),JSON.stringify(balancerDiscovery,null,2)+'\n');
     console.log(`[phase0-balancer] vaults=${balancerDiscovery.vaults.length}; verified=${balancerDiscovery.vaults.filter(v=>v.verified).length}; registeredPools=${balancerDiscovery.pools.length}; initializedPools=${balancerDiscovery.pools.filter(p=>p.initialized).length}; status=${balancerDiscovery.status}`);
@@ -1359,6 +1359,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       const observedBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
       resetEvidence={required:true,...verifyBaselineResetV2({reverted,expectedDigestSha256:canonicalBaseline.digestSha256,observedDigestSha256:observedBaseline.digestSha256})};
       snapshotId=await provider.send('evm_snapshot',[]);
+      // A reverted run has no initialized pools created by the previous run.
+      balancerDiscovery=await discoverBalancerV3PoolsV1({provider,ethers,targets,valuePool,actors});
     }
     const runId=`${runPrefix}-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
     const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(repeatSameSeedAcrossRuns?seedSalt:`${runId}-${seedSalt}`);
@@ -1379,10 +1381,11 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
     const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),preflightRejections=new Map(),successfulFunctionContexts=new Map();
     // A Balancer router action is routable only if actual on-chain pool metadata
     // supplies the registered pool and exact Vault token order. Do not guess.
-    const balancerReadyActions=balancerDiscovery.active?targets.flatMap((t)=>t.functions.flatMap((fn)=>{
+    const refreshBalancerReadyActions=()=>balancerDiscovery.active?targets.flatMap((t)=>t.functions.flatMap((fn)=>{
       const plan=buildBalancerV3ActionV1({target:t,selected:fn,discovery:balancerDiscovery,valuePool,actors});
       return plan.kind==='READY'?[{target:t,selected:fn,plan}]:[];
     })):[];
+    let balancerReadyActions=refreshBalancerReadyActions();
 
     const telemetryStartedAt=Date.now();
     console.log(`[phase0-telemetry] ${runId} started; targetCalls=${callsPerRun}; lifecycle=v2; heartbeat every 30s`);
@@ -1448,6 +1451,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
           let args=null,argError=null;
           try{
             if(balancerAction.kind==='BLOCKED'){
+              rec.protocolPlan={kind:'BLOCKED',reason:balancerAction.reason};
               const error=new Error(balancerAction.reason);error.code='BALANCER_V3_PROTOCOL_LIFECYCLE_BLOCKED';throw error;
             }
             const argumentContext={actors,targets:targets.map(x=>x.address),valuePool,chosenAddresses:[]};
@@ -1455,7 +1459,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             rec.decodedInputs=normalize(args);
             rec.stages.ARG_GEN={status:'PASS',basis:qualifiedAction?.basis??'BOUNDED_RECURSIVE_ABI_GENERATION'};
             if(qualifiedAction)rec.recipeAction={basis:qualifiedAction.basis,...(qualifiedAction.pool?{pool:qualifiedAction.pool,protocol:'BALANCER_V3'}:{})};
-            if(balancerAction.kind==='BLOCKED')rec.protocolPlan={kind:'BLOCKED',reason:balancerAction.reason};
+            if(balancerAction.kind==='READY')rec.protocolPlan={kind:'READY',pool:balancerAction.pool,protocol:'BALANCER_V3'};
           }
           catch(error){argError=error;rec.stages.ARG_GEN={status:'FAILED',error:{code:error?.code??'ABI_ARGUMENT_GENERATION_LIMITATION',message:String(error?.message??error),limitation:error?.limitation??null}};}
           if(argError){
@@ -1539,6 +1543,22 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             if(preflightError)rec.error=resolved.errorDetails??errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
           }
 
+          // Router.initialize is a lifecycle transition: all subsequent Router
+          // arguments must use the pool's new initialized state, not run-start
+          // metadata. Never count a predicted initialization as confirmed.
+          if(rec.executionOutcome==='MINED_SUCCESS'&&balancerAction.kind==='READY'&&selected.signature==='initialize(address,address[],uint256[],uint256,bool,bytes)'){
+            const pool=balancerDiscovery.pools.find(row=>String(row.address).toLowerCase()===String(balancerAction.pool).toLowerCase());
+            if(pool){
+              pool.initialized=true;
+              try{
+                const bpt=new ethers.Contract(pool.address,['function balanceOf(address) view returns (uint256)'],provider);
+                const balance=await bpt.balanceOf(sender);
+                pool.bptHolders=BigInt(balance)>0n?[{actor:sender,amount:BigInt(balance).toString()}]:[];
+              }catch{pool.bptHolders=[];}
+              balancerReadyActions=refreshBalancerReadyActions();
+              stats.contextAdaptations.push({kind:'BALANCER_V3_POOL_INITIALIZED',pool:pool.address,atCallIndex:stats.calls});
+            }
+          }
           // Learn from actual preflight/mined execution rather than rewarding only
           // positive accounting deltas (which requires successful execution first).
           // Permanent stub functions are never repeatedly sampled.
