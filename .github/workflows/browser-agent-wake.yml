@@ -86,11 +86,6 @@ on:
         required: false
         default: COMPLETE,STOPPED_BY_HUMAN
         type: string
-      diagnostic_only:
-        description: Capture visible desktop screenshots without typing or sending
-        required: false
-        default: false
-        type: boolean
       runner_retry_attempt:
         description: Internal fresh-runner retry attempt counter
         required: false
@@ -123,7 +118,6 @@ jobs:
       CHATGPT_THINKING_EFFORT: ${{ inputs.thinking_effort }}
       WORKER_ROLE: ${{ inputs.worker_role }}
       WAKE_MODE: ${{ inputs.mode }}
-      WAKE_DIAGNOSTIC_ONLY: ${{ inputs.diagnostic_only }}
       CHAT_URL: ${{ inputs.chat_url }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
       BROWSER_HEADLESS: 'false'
@@ -309,6 +303,7 @@ jobs:
           ' /tmp/browser-context.json >/dev/null
 
           echo "WAKE_MESSAGE_PURPOSE=$message_purpose" >> "$GITHUB_ENV"
+          echo "WAKE_DIAGNOSTIC_ONLY=$(jq -r '.diagnosticOnly // false' /tmp/browser-context.json)" >> "$GITHUB_ENV"
 
           {
             echo "BROWSER_ROUTINE_ID=$(jq -r '.routineId // empty' /tmp/browser-context.json)"
