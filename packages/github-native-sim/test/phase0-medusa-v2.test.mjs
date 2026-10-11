@@ -177,3 +177,14 @@ test('Medusa shard aggregation unions call-chain variety, gates the total and re
   const missing=aggregateMedusaShardsV2({configs,minimumRequiredCalls:100,shards:[shard('s1','all-targets',100,70,['a->b','b->a'])]});
   assert.ok(missing.variety.failures.includes('SHARD_CONFIGURATION_NOT_EXECUTED'));
 });
+
+test('Medusa shard wall-clock budget cannot reset to 30 minutes with each new shard',async()=>{
+  const { medusaShardTimeoutBudgetV1 }=await import('../src/phase0-randomized-simulation-v1.mjs');
+  const startedAt=1_000_000;
+  assert.equal(medusaShardTimeoutBudgetV1({startedAt,now:startedAt}),300);
+  assert.equal(medusaShardTimeoutBudgetV1({startedAt,now:startedAt+500_000}),300);
+  assert.equal(medusaShardTimeoutBudgetV1({startedAt,now:startedAt+1_050_000}),150);
+  assert.equal(medusaShardTimeoutBudgetV1({startedAt,now:startedAt+1_175_000}),0);
+  assert.equal(medusaShardTimeoutBudgetV1({startedAt,now:startedAt+1_250_000}),0);
+  assert.equal(medusaShardTimeoutBudgetV1({startedAt,now:startedAt+10_000,maxSeconds:90,maxShardSeconds:300}),80);
+});
