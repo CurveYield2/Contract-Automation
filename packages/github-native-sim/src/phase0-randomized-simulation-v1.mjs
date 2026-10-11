@@ -603,13 +603,15 @@ export function accountingWitnessPlanV1({target,selected,protocolPlan,qualifiedA
   const native=BigInt(value??0)>0n||/^(?:depositETH|withdrawETH|wrapETH|unwrapETH|sendNative|receiveNative)\(/i.test(signature);
   const poolMatches=String(context?.poolAddress??'').toLowerCase()===String(protocolPlan?.pool??'').toLowerCase();
   if(protocolPlan?.kind==='READY'&&poolMatches&&context?.protocol==='BALANCER_V3'){
-    const operation=/^swapSingleToken/.test(signature)?'SWAP':/^addLiquidity/.test(signature)?'ADD_LIQUIDITY':/^removeLiquidity/.test(signature)?'REMOVE_LIQUIDITY':null;
+    const operation=/^swapSingleToken/.test(signature)?'SWAP':/^addLiquidity/.test(signature)?'ADD_LIQUIDITY':/^removeLiquidity/.test(signature)?'REMOVE_LIQUIDITY':/^(?:transfer|transferFrom)\\(/.test(signature)?'BPT_TRANSFER':null;
     if(operation){
       const registered=(context.tokens??[]).filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x)));
       const inputs=qualifiedAction?.args??[];
       const swaps=operation==='SWAP'?[inputs[1],inputs[2]]:[];
-      const tokens=operation==='SWAP'&&swaps.every(x=>registered.some(t=>String(t).toLowerCase()===String(x).toLowerCase()))?swaps:registered;
-      return{schemaVersion:'phase0-accounting-witness-v1',mode:'BALANCER_V3',operation,tokens:[...new Set(tokens.map(x=>String(x).toLowerCase()))],poolAddress:context.poolAddress,vaultAddress:context.vaultAddress,includeBpt:operation!=='SWAP',includeNative:native};
+      const tokens=operation==='BPT_TRANSFER'?[]:operation==='SWAP'&&swaps.every(x=>registered.some(t=>String(t).toLowerCase()===String(x).toLowerCase()))?swaps:registered;
+      const owner=operation==='BPT_TRANSFER'?(signature.startsWith('transferFrom(')?inputs[0]:qualifiedAction?.sender):null;
+      const recipient=operation==='BPT_TRANSFER'?(signature.startsWith('transferFrom(')?inputs[1]:inputs[0]):null;
+      return{schemaVersion:'phase0-accounting-witness-v1',mode:'BALANCER_V3',operation,tokens:[...new Set(tokens.map(x=>String(x).toLowerCase()))],poolAddress:context.poolAddress,vaultAddress:context.vaultAddress,includeBpt:operation!=='SWAP',includeNative:native,...(operation==='BPT_TRANSFER'?{owner,recipient}:{})};
     }
   }
   return{schemaVersion:'phase0-accounting-witness-v1',mode:'TARGET_LOCAL',includeNative:native,includeAllowance:/^(?:approve|increaseAllowance|decreaseAllowance|transferFrom)\(/.test(signature),includeSupply:/^(?:mint|burn|deposit|withdraw|redeem|stake|unstake|addLiquidity|removeLiquidity)\(/.test(signature)};
@@ -636,11 +638,19 @@ export async function snapshot({provider,ethers,target,sender,plan,systemTargets
       ...addresses.map(async address=>{
         const token=new ethers.Contract(address,tokenAbi,provider);
         const isBpt=address===String(witness.poolAddress).toLowerCase();
-        const [balanceSender,second]=await Promise.all([
-          read(token,'balanceOf(address)',[sender]),
-          isBpt?read(token,'totalSupply()'):read(token,'balanceOf(address)',[witness.vaultAddress])
-        ]);
-        out.related[address]=isBpt?{address,balanceSender,totalSupply:second}:{address,balanceSender,balanceVault:second};
+        if(isBpt&&witness.operation==='BPT_TRANSFER'){
+          const [balanceOwner,balanceRecipient]=await Promise.all([
+            read(token,'balanceOf(address)',[witness.owner]),
+            read(token,'balanceOf(address)',[witness.recipient])
+          ]);
+          out.related[address]={address,balanceOwner,balanceRecipient};
+        }else{
+          const [balanceSender,second]=await Promise.all([
+            read(token,'balanceOf(address)',[sender]),
+            isBpt?read(token,'totalSupply()'):read(token,'balanceOf(address)',[witness.vaultAddress])
+          ]);
+          out.related[address]=isBpt?{address,balanceSender,totalSupply:second}:{address,balanceSender,balanceVault:second};
+        }
       })
     ]);
     return out;
@@ -1416,6 +1426,22 @@ export async function resolveTelemetryCallerContextV2({
 
   return{...initial,resolution:callerResolutionForTargetV2(target),executionAddress:target.address,sender:defaultSender,adaptations,reused:false};
 }
+
+// Choose native Router economic actions with a balanced family cycle,
+// avoiding runaway ERC20/BPT transfer feedback. Every action is derived
+// from a verified Balancer pool and real initialized token order.
+export function balancedBalancerEconomicRouterActionV1(readyActions,selectionIndex=0){
+  const families=['ADD','SWAP','REMOVE','SWAP'];
+  const family=families[Math.abs(selectionIndex)%families.length];
+  const candidates=readyActions.filter(x=>{
+    if(x.plan?.kind!=='READY'||!x.plan.pool||x.selected?.semanticFamily!=='ECONOMIC')return false;
+    const sig=String(x.selected.signature??'');
+    return family==='ADD'?/^addLiquidity/.test(sig):family==='REMOVE'?/^removeLiquidity/.test(sig):/^swapSingleToken/.test(sig);
+  });
+  if(!candidates.length)return null;
+  return candidates[Math.floor(Math.abs(selectionIndex)/families.length)%candidates.length];
+}
+
 export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,artifacts=[],valuePool=null,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
   const summaries=[],callerResolutionState=new Map(),contextWeightMultipliers=new Map();
   let snapshotId=baselineSnapshot;
@@ -1474,7 +1500,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
     const protocolExcludedKeys=new Set(protocolPrerequisiteGaps.map(x=>`${String(x.address).toLowerCase()}|${x.target}|${x.signature}`));
     for(const key of protocolExcludedKeys)blockedContextFunctions.add(key);
     // Rotate across all registered, initialized pools at dispatch time.
-    let balancerPoolDispatchCursor=0;
+    let balancerPoolDispatchCursor=0,balancerEconomicSlot=0,balancerRouterDispatches=0;
     // A Balancer router action is routable only if actual on-chain pool metadata
     // supplies the registered pool and exact Vault token order. Do not guess.
     const refreshBalancerReadyActions=()=>balancerDiscovery.active?targets.flatMap((t)=>t.functions.flatMap((fn)=>{
@@ -1514,6 +1540,24 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
           }
           let selected=picked.selected;
+          // Spend four out of five non-calibration economic slots on a
+          // deterministic Router family cycle; preserve the fifth for other
+          // real mutable contract families, including BPT ERC20 operations.
+          // Otherwise a success-feedback loop can monopolize all 240
+          // economic slots with WeightedPool.transfer.
+          if(balancerDiscovery.active&&burst.actionClass==='ACCOUNTING_STATE_CHANGE'&&!burst.calibration){
+            const slot=balancerEconomicSlot++;
+            if(slot%5!==4){
+              const next=balancedBalancerEconomicRouterActionV1(balancerReadyActions,balancerRouterDispatches);
+              if(next){
+                balancerRouterDispatches++;
+                const previous=target;
+                target=next.target;selected=next.selected;
+                picked={...picked,selectionKey:`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${selected.signature}`,feedbackWeight:1,selectionWeightMultiplier:1};
+                stats.contextAdaptations.push({kind:'BALANCER_V3_ECONOMIC_FAMILY_CYCLE',fromTarget:previous.qualifiedName,toTarget:target.qualifiedName,signature:selected.signature,atCallIndex:stats.calls+1});
+              }
+            }
+          }
           // Do not silently downgrade reserved economic calls to nonce or
           // configuration calls merely because this target lacks such an ABI.
           if(burst.actionClass==='ACCOUNTING_STATE_CHANGE'&&selected.semanticFamily!=='ECONOMIC'&&!burst.calibration){
