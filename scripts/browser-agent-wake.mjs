@@ -468,15 +468,15 @@ async function runNormalChromeExistingSession(chromium) {
     // 820px wide while the old fixed-point composer click landed at x=1210.
     // Size the real OS window explicitly; this reads X11 metadata only.
     const windowMatches=await x11Capture(['search','--onlyvisible','--class','[Cc]hrome'],'x11-chrome-window-search');
-    const windowIds=windowMatches.stdout.split(/\\s+/).filter(Boolean);
+    const windowIds=windowMatches.stdout.split(/\s+/).filter(Boolean);
     const chromeWindow=windowIds.at(-1);
     if(!chromeWindow)throw new BrowserAgentError('X11_CHROME_WINDOW_MISSING','No visible Chrome desktop window',true);
     await x11Key(['windowsize','--sync',chromeWindow,'1920','1080'],'x11-chrome-full-screen-size');
     await x11Key(['windowmove','--sync',chromeWindow,'0','0'],'x11-chrome-top-left-position');
     await x11Key(['windowfocus','--sync',chromeWindow],'x11-chrome-focus');
     const geometryCheck=await x11Capture(['getwindowgeometry','--shell',chromeWindow],'x11-chrome-geometry');
-    console.log('[normal-chrome-watchdog] desktop-window-geometry='+JSON.stringify(geometryCheck.stdout.split('\\n').filter(x=>/^(WIDTH|HEIGHT|X|Y)=/.test(x))));
-    const sizeMatch=geometryCheck.stdout.match(/(?:^|\\n)WIDTH=(\\d+)/);
+    console.log('[normal-chrome-watchdog] desktop-window-geometry='+JSON.stringify(geometryCheck.stdout.split('\n').filter(x=>/^(WIDTH|HEIGHT|X|Y)=/.test(x))));
+    const sizeMatch=geometryCheck.stdout.match(/(?:^|\n)WIDTH=(\d+)/);
     if(!sizeMatch||Number(sizeMatch[1])<1600)throw new BrowserAgentError('CHROME_WINDOW_NOT_MAXIMIZED','OS Chrome window too narrow for safe composer coordinates',false);
     await page.waitForTimeout(randomDelayMs(650, 1100));
 
