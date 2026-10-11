@@ -825,7 +825,7 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
         let facadeIface;
         try{facadeIface=new ethers.Interface(normalizedAbi(facadeArtifact.abi??[]));}catch{continue;}
         const probeFunction=(extension.functions??[]).find(selected=>{
-          try{facadeIface.getFunction(selected.signature);return false;}catch{return true;}
+          try{return !facadeIface.getFunction(selected.signature);}catch{return true;}
         });
         if(!probeFunction)continue;
         probes++;
