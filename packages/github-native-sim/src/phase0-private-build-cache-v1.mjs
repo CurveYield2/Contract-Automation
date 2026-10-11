@@ -8,6 +8,7 @@ import { buildExecutionArtifactBundleV2 } from './phase0-execution-input-v2.mjs'
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const MAX_BYTES = 60 * 1024 * 1024;
+const PRIVATE_CACHE_BRANCH = 'phase0-verified-build-cache';
 const SHA = /^[0-9a-f]{64}$/;
 const identityParts = [
   'HEAD:packages/runner/src',
@@ -84,6 +85,24 @@ async function tryLoad({url,ref,token,identity,pseudo}) {
   return cache.build;
 }
 
+function ensurePrivateCacheBranch(token) {
+  const api='repos/CurveYield2/Audit-Controller';
+  const opts={env:ghEnv(token),maxBuffer:1024*1024,timeout:45000,stdio:['ignore','pipe','pipe']};
+  try { execFileSync('gh',['api',api+'/git/ref/heads/'+PRIVATE_CACHE_BRANCH],opts);return; }
+  catch {}
+  // Keep compilation cache commits off authoritative Audit-Controller/main:
+  // otherwise each successful cache write invalidates exact controller qualification.
+  const main=execFileSync('gh',['api',api+'/git/ref/heads/main','--jq','.object.sha'],{...opts,encoding:'utf8'}).trim();
+  if(!/^[0-9a-f]{40}$/.test(main))throw new Error('private cache branch source identity unavailable');
+  try {
+    execFileSync('gh',['api','--method','POST',api+'/git/refs','-f','ref=refs/heads/'+PRIVATE_CACHE_BRANCH,'-f','sha='+main],opts);
+    console.log('[phase0-build-cache] initialized dedicated private cache branch');
+  } catch(error) {
+    // Another run may have won the same branch creation race.
+    execFileSync('gh',['api',api+'/git/ref/heads/'+PRIVATE_CACHE_BRANCH],opts);
+  }
+}
+
 async function tryPublish({url,ref,token,identity,pseudo,build}) {
   const payload={schemaVersion:'curveyield-private-verified-compilation-cache-v1',
     key:identity.key,exact:identity.exact,buildSha256:digest(JSON.stringify(build)),build};
@@ -117,14 +136,14 @@ export async function compileWithPrivateCacheV1({request,pseudo,projectRoot,comp
     return compile();
   }
   try {
-    const build=await tryLoad({url,ref:request.destination.ref,token,identity,pseudo});
+    const build=await tryLoad({url,ref:PRIVATE_CACHE_BRANCH,token,identity,pseudo});
     console.log('[phase0-build-cache] verified private cache HIT, key='+identity.key.slice(0,16)+'; skipping Solidity recompilation');
     return build;
   } catch(error) {
     console.log('[phase0-build-cache] MISS or invalid, key='+identity.key.slice(0,16)+'; exact compilation required');
   }
   const build=await compile();
-  try {await tryPublish({url,ref:request.destination.ref,token,identity,pseudo,build});}
+  try {ensurePrivateCacheBranch(token);await tryPublish({url,ref:PRIVATE_CACHE_BRANCH,token,identity,pseudo,build});}
   catch(error){console.log('[phase0-build-cache] publish unavailable; compiled results retained for this run: '+String(error.message).slice(0,220));}
   return build;
 }
