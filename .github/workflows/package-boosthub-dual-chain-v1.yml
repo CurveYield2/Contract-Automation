@@ -19,20 +19,45 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
       - name: Install read-only tooling on GitHub
         working-directory: github-native-sim/boosthub-dual-chain-package-v1
         run: |
           cp package_v1.json package.json
           npm install --ignore-scripts
-      - name: Retrieve exact verified explorer sources on GitHub
-        run: python3 github-native-sim/boosthub-dual-chain-package-v1/harvest_verified_sources_v1.py
-      - name: Read both live deployments without submitting transactions
-        timeout-minutes: 5
+      - name: Select configured private-source credential
         env:
-          ETHEREUM_RPC: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
-        run: node github-native-sim/boosthub-dual-chain-package-v1/probe_live_stack_v1.mjs
-      - name: Inspect the live Fraxtal external dependency
-        run: python3 github-native-sim/boosthub-dual-chain-package-v1/diagnose_fraxtal_v1.py
+          AUDIT_CONTROLLER_PROBE_REPOSITORY: CurveYield2/Audit-Controller
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Audit-Controller
+          ref: d0db80e69bf968d5c20377fed1d344b08945ced6
+          token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller
+          persist-credentials: false
+          sparse-checkout: audits/functional-verification/boosthub-four-contracts-v1
+      - name: Install exact compilers and libraries only on GitHub
+        run: |
+          python3 -m pip install vyper==0.4.3
+          git clone --depth 1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git .controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts
+          test "$(git -C .controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts rev-parse HEAD)" = c64a1edb67b6e3f4a15cca8909c9482ad33a02b0
+      - name: Restore verified original dependencies and compile Vyper
+        run: python3 github-native-sim/boosthub-dual-chain-package-v1/prepare_build_v1.py
+      - name: Demonstrate missing Fraxtal compatibility before patching
+        working-directory: .controller/audits/functional-verification/boosthub-four-contracts-v1
+        run: |
+          cp "$GITHUB_WORKSPACE/github-native-sim/boosthub-dual-chain-package-v1/FraxtalCompatibility_v1.t.sol" test/FraxtalCompatibility_v1.t.sol
+          set -o pipefail
+          forge test --match-contract FraxtalCompatibilityTest -vv 2>&1 | tee "$GITHUB_WORKSPACE/github-native-sim/boosthub-dual-chain-package-v1/evidence/fraxtal_baseline_red_v1.txt"
       - name: Run deployment acceptance tests
         run: node --test github-native-sim/boosthub-dual-chain-package-v1/runner.test_v1.mjs
       - name: Publish retrieval evidence

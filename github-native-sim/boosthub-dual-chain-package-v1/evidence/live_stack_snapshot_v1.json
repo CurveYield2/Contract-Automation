@@ -1,0 +1,356 @@
+{
+  "ethereum": {
+    "chainId": 1,
+    "address": "0xFbEF8941Da53EA724385B44E91ae9672061D0263",
+    "blockNumber": 26166913,
+    "blockHash": "0x19af42e0f5f924e6a8beb545372223894ae58286ebd80f789f15cbb214bd1c51",
+    "universalProxyCode": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3",
+    "reads": {
+      "CONFIG_CHANGE_DELAY": "864000",
+      "arbitraryCallsLocked": true,
+      "owner": "0x11b78837cadC8E894F1c6e13fA9f3A085a75FA35",
+      "ownershipTransferDelayInitialized": false,
+      "ownershipTransferReadyAt": "0",
+      "paused": false,
+      "pendingOwner": "0x0000000000000000000000000000000000000000",
+      "pendingStakeDaoClaimExecutor": "0x0000000000000000000000000000000000000000",
+      "pendingStakeDaoClaimExecutorReadyAt": "0",
+      "poolLength": "3",
+      "snapshotVoteFormatApprovalLocked": false,
+      "snapshotVotingEnabled": true,
+      "stakeDaoClaimExecutor": "0xA8178Db076b46c9c5AB5cCf2fB667830C554cBcb",
+      "stakeDaoClaimExecutorDelayInitialized": true,
+      "vlBoost": "0xaB05ca46d1c78CAbB051efFE35099714Cad2AddA",
+      "vlsdtDelegated": "0"
+    },
+    "pools": [
+      {
+        "pid": 0,
+        "pendingPoolFeeConfig": {
+          "config": {
+            "platformFeeBps": "500",
+            "vlSdtReserveFeeBps": "200",
+            "platformFeeRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+            "vlSdtReserveRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49"
+          },
+          "readyAt": "1788570959",
+          "exists": true
+        },
+        "pendingPoolRetentionFeeConfig": {
+          "retentionFeeBps": "500",
+          "readyAt": "1788596639",
+          "exists": true
+        },
+        "poolCheckpointSelector": "0x4b820093",
+        "poolDepositor": "0x7F5bECDbBF224f59F4E434cDE5C0051c80F5BBBB",
+        "poolDepositorLocked": false,
+        "poolFeeConfig": {
+          "platformFeeBps": "500",
+          "vlSdtReserveFeeBps": "800",
+          "platformFeeRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+          "vlSdtReserveRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49"
+        },
+        "poolFeeConfigDelayInitialized": true,
+        "poolFeeConfigSet": true,
+        "poolInfo": {
+          "asset": "0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5",
+          "gauge": "0x7f50786A0b15723D741727882ee99a0BF34e3466",
+          "active": true,
+          "totalStaked": "3217188746935294623",
+          "rewardTokens": [
+            "0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5",
+            "0xD533a949740bb3306d119CC777fa900bA034cd52",
+            "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E",
+            "0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F",
+            "0x6c3F90f043a72FA612cbac8115EE7e52BDe6E490"
+          ]
+        },
+        "poolRetentionFeeBps": "500",
+        "poolRetentionFeeDelayInitialized": true,
+        "staking": {
+          "address": "0x7F5bECDbBF224f59F4E434cDE5C0051c80F5BBBB",
+          "reads": {
+            "admin": "0x11b78837cadC8E894F1c6e13fA9f3A085a75FA35",
+            "keeper": "0xde634a00A44240ae5742a459FE923d07261Fb96C",
+            "lp_token": "0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5",
+            "boost_hub": "0xFbEF8941Da53EA724385B44E91ae9672061D0263",
+            "pid": "0",
+            "reward_smoothing_units": "150",
+            "reward_count": "4"
+          },
+          "rewardTokens": [
+            {
+              "token": "0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5",
+              "reward_from_boosthub": true,
+              "reward_disabled": false
+            },
+            {
+              "token": "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E",
+              "reward_from_boosthub": true,
+              "reward_disabled": false
+            },
+            {
+              "token": "0xD533a949740bb3306d119CC777fa900bA034cd52",
+              "reward_from_boosthub": true,
+              "reward_disabled": false
+            },
+            {
+              "token": "0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b",
+              "reward_from_boosthub": false,
+              "reward_disabled": false
+            }
+          ]
+        }
+      },
+      {
+        "pid": 1,
+        "pendingPoolFeeConfig": {
+          "config": {
+            "platformFeeBps": "500",
+            "vlSdtReserveFeeBps": "200",
+            "platformFeeRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+            "vlSdtReserveRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49"
+          },
+          "readyAt": "1788570959",
+          "exists": true
+        },
+        "pendingPoolRetentionFeeConfig": {
+          "retentionFeeBps": "500",
+          "readyAt": "1788596639",
+          "exists": true
+        },
+        "poolCheckpointSelector": "0x4b820093",
+        "poolDepositor": "0x5Be0C9b4BFbAFFcC537b5a10E17Ae277C7e8A7A4",
+        "poolDepositorLocked": false,
+        "poolFeeConfig": {
+          "platformFeeBps": "500",
+          "vlSdtReserveFeeBps": "1200",
+          "platformFeeRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+          "vlSdtReserveRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49"
+        },
+        "poolFeeConfigDelayInitialized": true,
+        "poolFeeConfigSet": true,
+        "poolInfo": {
+          "asset": "0xe19d1c837B8A1C83A56cD9165b2c0256D39653aD",
+          "gauge": "0xbcfE5c47129253C6B8a9A00565B3358b488D42E0",
+          "active": true,
+          "totalStaked": "10013113476871701",
+          "rewardTokens": [
+            "0xe19d1c837B8A1C83A56cD9165b2c0256D39653aD",
+            "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0",
+            "0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F"
+          ]
+        },
+        "poolRetentionFeeBps": "500",
+        "poolRetentionFeeDelayInitialized": true,
+        "staking": {
+          "address": "0x5Be0C9b4BFbAFFcC537b5a10E17Ae277C7e8A7A4",
+          "reads": {
+            "admin": "0x11b78837cadC8E894F1c6e13fA9f3A085a75FA35",
+            "keeper": "0xde634a00A44240ae5742a459FE923d07261Fb96C",
+            "lp_token": "0xe19d1c837B8A1C83A56cD9165b2c0256D39653aD",
+            "boost_hub": "0xFbEF8941Da53EA724385B44E91ae9672061D0263",
+            "pid": "1",
+            "reward_smoothing_units": "150",
+            "reward_count": "3"
+          },
+          "rewardTokens": [
+            {
+              "token": "0xe19d1c837B8A1C83A56cD9165b2c0256D39653aD",
+              "reward_from_boosthub": true,
+              "reward_disabled": false
+            },
+            {
+              "token": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0",
+              "reward_from_boosthub": true,
+              "reward_disabled": false
+            },
+            {
+              "token": "0x83E70Fa4AAF0aaf7f5F13C2C8261F1fB444af22b",
+              "reward_from_boosthub": false,
+              "reward_disabled": false
+            }
+          ]
+        }
+      },
+      {
+        "pid": 2,
+        "pendingPoolFeeConfig": {
+          "config": {
+            "platformFeeBps": "0",
+            "vlSdtReserveFeeBps": "0",
+            "platformFeeRecipient": "0x0000000000000000000000000000000000000000",
+            "vlSdtReserveRecipient": "0x0000000000000000000000000000000000000000"
+          },
+          "readyAt": "0",
+          "exists": false
+        },
+        "pendingPoolRetentionFeeConfig": {
+          "retentionFeeBps": "0",
+          "readyAt": "0",
+          "exists": false
+        },
+        "poolCheckpointSelector": "0x00000000",
+        "poolDepositor": "0xD63819Fef90981fAc8CD6240EA1f2559CD835CBa",
+        "poolDepositorLocked": false,
+        "poolFeeConfig": {
+          "platformFeeBps": "500",
+          "vlSdtReserveFeeBps": "0",
+          "platformFeeRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+          "vlSdtReserveRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49"
+        },
+        "poolFeeConfigDelayInitialized": true,
+        "poolFeeConfigSet": true,
+        "poolInfo": {
+          "asset": "0x0c057598dcE1891688829581f890DD2a3685a43f",
+          "gauge": "0x28604Ff7B4aEAE28d4d9e54d14038c910844343a",
+          "active": true,
+          "totalStaked": "10000000000000000",
+          "rewardTokens": [
+            "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E",
+            "0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F",
+            "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
+            "0xe065Bc161b90C9C4Bba2de7F1E194b70A3267c47"
+          ]
+        },
+        "poolRetentionFeeBps": "500",
+        "poolRetentionFeeDelayInitialized": true,
+        "staking": {
+          "address": "0xD63819Fef90981fAc8CD6240EA1f2559CD835CBa",
+          "reads": {
+            "admin": "0x11b78837cadC8E894F1c6e13fA9f3A085a75FA35",
+            "fee_receiver": "0xFbEF8941Da53EA724385B44E91ae9672061D0263",
+            "lp_token": "0x0c057598dcE1891688829581f890DD2a3685a43f",
+            "boost_hub": "0xFbEF8941Da53EA724385B44E91ae9672061D0263",
+            "pid": "2"
+          },
+          "rewardTokens": [
+            {
+              "token": "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E"
+            }
+          ]
+        }
+      }
+    ],
+    "readErrors": {},
+    "dependencyCode": {
+      "vlBoost": {
+        "address": "0xaB05ca46d1c78CAbB051efFE35099714Cad2AddA",
+        "reads": {},
+        "runtimeBytes": 3936,
+        "runtimeSha256": "18dd23aa354a03257b1c12c46cfe41646703882c307e3315bd2d8c0a6350c3ea"
+      },
+      "stakeDaoClaimExecutor": {
+        "address": "0xA8178Db076b46c9c5AB5cCf2fB667830C554cBcb",
+        "reads": {
+          "merkleStash": "0x03E34b085C52985F6a5D27243F20C84bDdc01Db4"
+        },
+        "runtimeBytes": 7895,
+        "runtimeSha256": "d59b940ed78f3d18e871e8d7fa1b656c454af31fb807aa4f2e74775b8e03d3cb"
+      }
+    },
+    "runtimeSha256": "884f8fdcc71f031bfd187cb5696121ef6439050b02f48dbeba00b91f742eea92"
+  },
+  "fraxtal": {
+    "chainId": 252,
+    "address": "0xFbEF8941Da53EA724385B44E91ae9672061D0263",
+    "blockNumber": 42441678,
+    "blockHash": "0x414b1f77905fa80d0e0901c7556ddda6be7d29a7451323454129678da80d8477",
+    "universalProxyCode": "0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe03601600081602082378035828234f58015156039578182fd5b8082525050506014600cf3",
+    "reads": {
+      "CONFIG_CHANGE_DELAY": "864000",
+      "arbitraryCallsLocked": true,
+      "owner": "0x11b78837cadC8E894F1c6e13fA9f3A085a75FA35",
+      "ownershipTransferDelayInitialized": false,
+      "ownershipTransferReadyAt": "0",
+      "paused": false,
+      "pendingOwner": "0x0000000000000000000000000000000000000000",
+      "pendingStakeDaoClaimExecutor": "0x0000000000000000000000000000000000000000",
+      "pendingStakeDaoClaimExecutorReadyAt": "0",
+      "poolLength": "1",
+      "snapshotVoteFormatApprovalLocked": false,
+      "snapshotVotingEnabled": true,
+      "stakeDaoClaimExecutor": "0xaFCC5492e0217D540A4A73408eeb1AdF2902fA43",
+      "stakeDaoClaimExecutorDelayInitialized": true,
+      "vlBoost": "0xaFCC5492e0217D540A4A73408eeb1AdF2902fA43",
+      "vlsdtDelegated": "0"
+    },
+    "pools": [
+      {
+        "pid": 0,
+        "pendingPoolFeeConfig": {
+          "config": {
+            "platformFeeBps": "0",
+            "vlSdtReserveFeeBps": "0",
+            "platformFeeRecipient": "0x0000000000000000000000000000000000000000",
+            "vlSdtReserveRecipient": "0x0000000000000000000000000000000000000000"
+          },
+          "readyAt": "0",
+          "exists": false
+        },
+        "pendingPoolRetentionFeeConfig": {
+          "retentionFeeBps": "500",
+          "readyAt": "1784708845",
+          "exists": true
+        },
+        "poolCheckpointSelector": "0x00000000",
+        "poolDepositor": "0xa4BfFa7D08dC3c5a46bFC668C6dDa290BB3Cf183",
+        "poolDepositorLocked": false,
+        "poolFeeConfig": {
+          "platformFeeBps": "500",
+          "vlSdtReserveFeeBps": "1000",
+          "platformFeeRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49",
+          "vlSdtReserveRecipient": "0x47623C62f281807D615eeb4A2CEee9d97F9D3C49"
+        },
+        "poolFeeConfigDelayInitialized": true,
+        "poolFeeConfigSet": true,
+        "poolInfo": {
+          "asset": "0x1AEe2382e05Dc68BDfC472F1E46d570feCca5814",
+          "gauge": "0x12992595328E52267c95e45B1a97014D6Ddf8683",
+          "active": true,
+          "totalStaked": "3220327374253748",
+          "rewardTokens": [
+            "0x1AEe2382e05Dc68BDfC472F1E46d570feCca5814",
+            "0xFc00000000000000000000000000000000000002"
+          ]
+        },
+        "poolRetentionFeeBps": "500",
+        "poolRetentionFeeDelayInitialized": true,
+        "staking": {
+          "address": "0xa4BfFa7D08dC3c5a46bFC668C6dDa290BB3Cf183",
+          "reads": {
+            "admin": "0x11b78837cadC8E894F1c6e13fA9f3A085a75FA35",
+            "fee_receiver": "0xFbEF8941Da53EA724385B44E91ae9672061D0263",
+            "lp_token": "0x1AEe2382e05Dc68BDfC472F1E46d570feCca5814",
+            "boost_hub": "0xFbEF8941Da53EA724385B44E91ae9672061D0263",
+            "pid": "0"
+          },
+          "rewardTokens": [
+            {
+              "token": "0x1AEe2382e05Dc68BDfC472F1E46d570feCca5814"
+            },
+            {
+              "token": "0xFc00000000000000000000000000000000000002"
+            }
+          ]
+        }
+      }
+    ],
+    "readErrors": {},
+    "dependencyCode": {
+      "vlBoost": {
+        "address": "0xaFCC5492e0217D540A4A73408eeb1AdF2902fA43",
+        "reads": {},
+        "runtimeBytes": 6861,
+        "runtimeSha256": "744e135c02becd109396cd3597f6a32c4b571049cee5a249891a8a173ad02ce5"
+      },
+      "stakeDaoClaimExecutor": {
+        "address": "0xaFCC5492e0217D540A4A73408eeb1AdF2902fA43",
+        "reads": {},
+        "runtimeBytes": 6861,
+        "runtimeSha256": "744e135c02becd109396cd3597f6a32c4b571049cee5a249891a8a173ad02ce5"
+      }
+    },
+    "runtimeSha256": "884f8fdcc71f031bfd187cb5696121ef6439050b02f48dbeba00b91f742eea92"
+  }
+}

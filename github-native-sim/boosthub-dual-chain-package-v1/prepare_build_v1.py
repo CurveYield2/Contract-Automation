@@ -7,7 +7,7 @@ out=root/'release_v2'; out.mkdir(exist_ok=True)
 evidence=root/'evidence'; evidence.mkdir(exist_ok=True)
 source_data=json.loads((evidence/'verified_explorer_sources_v1.json').read_text())
 snapshot=json.loads((evidence/'live_stack_snapshot_v1.json').read_text())
-assert snapshot['ethereum']['code']==snapshot['fraxtal']['code'], 'Verified Fraxtal source must bind to identical Ethereum runtime'
+assert snapshot['ethereum']['runtimeSha256']==snapshot['fraxtal']['runtimeSha256'], 'Verified Fraxtal source must bind to identical Ethereum runtime'
 verified=source_data['fraxtal']['sources']
 records=[]
 for relative in ['interfaces/IStakeDaoGauge.sol','interfaces/IvlBoost.sol','libraries/BoostHubErrors.sol']:
@@ -40,7 +40,7 @@ assert (len(staking['deployedBytecode'])-2)//2<=24576
 (controller/'evidence/staking.bytecode').write_text(staking['bytecode'])
 provenance={'version':'v1','requestedEthereumExplorer':source_data['ethereum']['url'],'ethereumRetrievalError':source_data['ethereum'].get('error'),
  'verifiedSourceExplorer':source_data['fraxtal']['url'],'verifiedHtmlSha256':source_data['fraxtal']['htmlSha256'],
- 'runtimeEquivalence':{'equal':True,'sha256':hashlib.sha256(bytes.fromhex(snapshot['ethereum']['code'][2:])).hexdigest(),
+ 'runtimeEquivalence':{'equal':True,'sha256':snapshot['ethereum']['runtimeSha256'],
   'ethereumBlock':snapshot['ethereum']['blockNumber'],'ethereumBlockHash':snapshot['ethereum']['blockHash'],
   'fraxtalBlock':snapshot['fraxtal']['blockNumber'],'fraxtalBlockHash':snapshot['fraxtal']['blockHash']},
  'dependencies':records,'contractSourceSha256':expected,
