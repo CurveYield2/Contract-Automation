@@ -1238,7 +1238,7 @@ export async function resolveTelemetryCallerContextV2({
   return{...initial,resolution:callerResolutionForTargetV2(target),executionAddress:target.address,sender:defaultSender,adaptations,reused:false};
 }
 export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,artifacts=[],valuePool=null,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
-  const summaries=[];
+  const summaries=[],callerResolutionState=new Map(),contextWeightMultipliers=new Map();
   let snapshotId=baselineSnapshot;
   const canonicalBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
   for(let run=1;run<=telemetryRuns;run++){
@@ -1266,7 +1266,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
-    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),contextFailureCounts=new Map();
+    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set();
     const telemetryStartedAt=Date.now();
     console.log(`[phase0-telemetry] ${runId} started; targetCalls=${callsPerRun}; lifecycle=v2; heartbeat every 300s`);
     const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${callsPerRun}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),300000);
@@ -1275,17 +1275,17 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       for(const burst of schedule){
         let target=targets[burst.targetIndex];
         for(let k=0;k<burst.count;k++){
-          let picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions);
+          let picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers);
           if(!picked){
             const alternate=targets.find(candidate=>
               (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
               (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
-              pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions)
+              pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers)
             );
             if(alternate){
               stats.contextAdaptations.push({kind:'REROUTE_TO_QUALIFIED_CONTEXT',fromContext:target.contextType??'DIRECT',toContext:alternate.contextType??'DIRECT',logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,atCallIndex:stats.calls+1});
               target=alternate;
-              picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions);
+              picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers);
             }
           }
           if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
@@ -1301,13 +1301,13 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             stages:{ARG_GEN:null,PREFLIGHT:null,SUBMISSION:null,RECEIPT:null,OBSERVATION:null},
             decodedInputs:null,abiGenerated:true,rawRandomBytes:false,executionOutcome:null,
             observations:{before:[],after:[],deltas:[]},effectClassification:'NOT_EXECUTED',positiveTransition:false,
-            transaction:null,error:null,
-            selectionFeedback:{selectionKey:picked.selectionKey,weight:picked.feedbackWeight,adaptedContext:stats.contextAdaptations.at(-1)?.atCallIndex===stats.calls+1}
+            transaction:null,error:null,callerResolution:callerResolutionForTargetV2(target),executionAddress:target.address,
+            selectionFeedback:{selectionKey:picked.selectionKey,weight:picked.feedbackWeight,weightMultiplier:picked.selectionWeightMultiplier??1,adaptedContext:stats.contextAdaptations.at(-1)?.atCallIndex===stats.calls+1}
           };
           if(picked.feedbackWeight>1)stats.feedbackSelections++;
           stats.calls++; if(selected.semanticFamily==='ECONOMIC')stats.accountingActions++;else stats.otherActions++;
           stats.byContract[target.qualifiedName]=(stats.byContract[target.qualifiedName]??0)+1;
-          const fk=`${target.qualifiedName}::${selected.signature}`;stats.byFunction[fk]=(stats.byFunction[fk]??0)+1;
+          const fk=`${target.qualifiedName}::${selected.signature}`,fnStats=stats.byFunction[fk]??{calls:0,callerResolution:callerResolutionForTargetV2(target)};fnStats.calls++;stats.byFunction[fk]=fnStats;
 
           let args=null,argError=null;
           try{
@@ -1322,35 +1322,42 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             rec.executionOutcome=classifyExecutionOutcomeV2({argumentGeneration:{success:false}});
             rec.error=rec.stages.ARG_GEN.error;
           }else{
-            const before=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
-            rec.observations.before=observationRowsV2(before,target.recipe,'BEFORE');
-            const data=iface.encodeFunctionData(selected.signature,args);
+            const initialBefore=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
+            rec.observations.before=observationRowsV2(initialBefore,target.recipe,'BEFORE');
             const value=qualifiedAction?.value??(f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n);
-            let estimate=null,preflightError=null;
-            let callProbe;
-            try{
-              const rawReturn=await provider.call({from:sender,to:target.address,data,value});
-              let decodedReturn=null;
-              try{decodedReturn=normalize(iface.decodeFunctionResult(selected.signature,rawReturn));}catch{}
-              callProbe={status:'RETURNED',rawReturn,decodedReturn};
-            }catch(error){
-              callProbe={status:'REVERTED',error:errorInfo(error,iface)};
+            const resolved=await resolveTelemetryCallerContextV2({
+              provider,ethers,target,selected,iface,args,value,defaultSender:sender,targets,valuePool,
+              callerState:callerResolutionState,weightMultipliers:contextWeightMultipliers
+            });
+            sender=resolved.sender;
+            rec.sender=sender;
+            rec.callerResolution=resolved.resolution;
+            rec.executionAddress=resolved.executionAddress;
+            fnStats.callerResolution=resolved.resolution;
+            for(const adaptation of resolved.adaptations??[])stats.contextAdaptations.push({...adaptation,selectionKey:picked.selectionKey,atCallIndex:stats.calls});
+            if((resolved.adaptations??[]).length)rec.contextAdaptations=resolved.adaptations;
+            const executionTarget=resolved.executionAddress.toLowerCase()===String(target.address).toLowerCase()
+              ? target
+              : {...target,address:resolved.executionAddress,contextType:'FACADE',contextDisposition:'READY'};
+            if(sender.toLowerCase()!==String((qualifiedAction?.sender??rec.sender)).toLowerCase()||resolved.executionAddress.toLowerCase()!==String(target.address).toLowerCase()){
+              const contextualBefore=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
+              rec.observations.before=observationRowsV2(contextualBefore,executionTarget.recipe,'BEFORE');
             }
-            try{
-              estimate=await provider.estimateGas({from:sender,to:target.address,data,value});
-              rec.stages.PREFLIGHT={status:'PASS',estimateGas:estimate.toString(),callProbe};
-            }catch(error){
-              preflightError=error;
-              const kind=preflightKindV2(error);
-              rec.stages.PREFLIGHT={status:'FAILED',kind,error:errorInfo(error,iface),callProbe};
+            const estimate=resolved.estimate,preflightError=resolved.success?null:resolved.error,callProbe=resolved.callProbe,data=resolved.data;
+            if(resolved.success){
+              rec.stages.PREFLIGHT={status:'PASS',estimateGas:estimate.toString(),callProbe,callerResolution:resolved.resolution,executionAddress:resolved.executionAddress,reusedResolution:resolved.reused===true};
+            }else{
+              const kind=preflightKindV2(preflightError);
+              rec.stages.PREFLIGHT={status:'FAILED',kind,error:resolved.errorDetails??errorInfo(preflightError,iface),callProbe,callerResolution:resolved.resolution,executionAddress:resolved.executionAddress};
             }
             let tx=null,receipt=null,submissionError=null;
             if(!preflightError){
               try{
+                if(rec.callerResolution.startsWith('IMPERSONATED_CALLER:')||rec.callerResolution.startsWith('PRIVILEGED:'))await ensureImpersonatedSenderV2({provider,ethers,address:sender});
                 const signer=await provider.getSigner(sender);
                 const gasLimit=estimate+(estimate/2n)+100000n;
-                tx=await signer.sendTransaction({to:target.address,data,value,gasLimit});
-                rec.stages.SUBMISSION={status:'SUBMITTED',transactionHash:tx.hash,gasLimit:gasLimit.toString()};
+                tx=await signer.sendTransaction({to:resolved.executionAddress,data,value,gasLimit});
+                rec.stages.SUBMISSION={status:'SUBMITTED',transactionHash:tx.hash,gasLimit:gasLimit.toString(),callerResolution:rec.callerResolution,executionAddress:resolved.executionAddress};
                 try{
                   receipt=await tx.wait();
                   rec.stages.RECEIPT={status:'MINED',transactionHash:tx.hash,blockNumber:receipt?.blockNumber??null,receiptStatus:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,gasPrice:(receipt?.gasPrice??receipt?.effectiveGasPrice)?.toString?.()??null};
@@ -1361,7 +1368,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
                 }
               }catch(error){
                 submissionError=error;
-                rec.stages.SUBMISSION={status:'FAILED',error:errorInfo(error,iface)};
+                rec.stages.SUBMISSION={status:'FAILED',error:errorInfo(error,iface),callerResolution:rec.callerResolution,executionAddress:resolved.executionAddress};
               }
             }
             rec.executionOutcome=classifyExecutionOutcomeV2({
@@ -1370,8 +1377,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               submission:preflightError?null:(submissionError?{success:false}:{success:!!tx}),
               receipt
             });
-            const after=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
-            rec.observations.after=observationRowsV2(after,target.recipe,'AFTER');
+            const after=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
+            rec.observations.after=observationRowsV2(after,executionTarget.recipe,'AFTER');
             rec.observations.deltas=observationDeltasV2(rec.observations.before,rec.observations.after,{receipt,sender});
             rec.stages.OBSERVATION={
               status:rec.observations.after.some(x=>x.status!=='OK')?'PARTIAL':'COMPLETE',
@@ -1381,11 +1388,9 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             const knownNonzero=rec.observations.deltas.filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
             rec.positiveTransition=rec.executionOutcome==='MINED_SUCCESS'&&knownNonzero.length>0;
             rec.effectClassification=rec.positiveTransition?'OBSERVED_STATE_TRANSITION':(rec.executionOutcome==='MINED_SUCCESS'?'MINED_NO_OBSERVED_STATE_TRANSITION':'NO_MINED_SUCCESS');
-            rec.transaction=tx?{hash:tx.hash,blockNumber:receipt?.blockNumber??null,status:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,value:value.toString(),logs:(receipt?.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))}:null;
-            if(preflightError)rec.error=errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
-          }
-
-          stats.terminalActions++;
+            rec.transaction=tx?{hash:tx.hash,blockNumber:receipt?.blockNumber??null,status:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,value:value.toString(),to:resolved.executionAddress,logs:(receipt?.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))}:null;
+            if(preflightError)rec.error=resolved.errorDetails??errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
+          }          stats.terminalActions++;
           if(['MINED_SUCCESS','MINED_REVERT','SUBMITTED_OUTCOME_UNKNOWN'].includes(rec.executionOutcome))stats.submittedActions++;
           if(rec.executionOutcome==='MINED_SUCCESS'){stats.minedSuccess++;stats.successes++;}
           else if(rec.executionOutcome==='MINED_REVERT'){stats.minedRevert++;stats.reverts++;}
@@ -1400,22 +1405,6 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
             stats.feedbackUpdates++;
           }
-          if(rec.executionOutcome==='SIMULATED_REJECTION'){
-            const hasAlternateContext=targets.some(candidate=>
-              (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
-              (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
-              candidate.functions.some(fn=>fn.signature===selected.signature)
-            );
-            if(hasAlternateContext){
-              const failures=Number(contextFailureCounts.get(picked.selectionKey)??0)+1;
-              contextFailureCounts.set(picked.selectionKey,failures);
-              if(failures>=3&&!blockedContextFunctions.has(picked.selectionKey)){
-                blockedContextFunctions.add(picked.selectionKey);
-                const adaptation={kind:'BOUNDED_WRONG_CONTEXT_GAP',selectionKey:picked.selectionKey,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,signature:selected.signature,contextType:target.contextType??'DIRECT',failureCount:failures,atCallIndex:stats.calls};
-                stats.contextAdaptations.push(adaptation);rec.contextAdaptation=adaptation;
-              }
-            }
-          }else contextFailureCounts.delete(picked.selectionKey);
           const observations=[...rec.observations.before,...rec.observations.after];stats.observationReads+=observations.length;stats.observationFailures+=observations.filter(x=>x.status!=='OK').length;
           if(['SIMULATION_INFRASTRUCTURE_ERROR','SUBMISSION_INFRASTRUCTURE_ERROR','SUBMITTED_OUTCOME_UNKNOWN','NOT_EXECUTED_ENCODING_OR_PLANNING'].includes(rec.executionOutcome))stats.errors++;
           terminalRows.push(rec);
