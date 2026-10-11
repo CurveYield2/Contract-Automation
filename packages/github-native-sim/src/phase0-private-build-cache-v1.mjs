@@ -1,6 +1,7 @@
 // Private exact-source compilation cache shared by primary and No Telemetry Phase 0.
 // Never store ASTs or bytecode in the public Contract-Automation repository or Actions caches.
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import {createHash} from 'node:crypto';
@@ -9,6 +10,9 @@ import {execFileSync} from 'node:child_process';
 import {buildExecutionArtifactBundleV2} from './phase0-execution-input-v2.mjs';
 
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
+// Synchronous FD2 marker is visible to an independent watchdog even if native
+// synchronous solc blocks the JavaScript event loop before stdout can flush.
+const markCompilation=message=>fsSync.writeSync(2,'[phase0-build-cache] '+message+'\n');
 const PRIVATE_CACHE_ROOT = 'Phase0 Build Cache';
 const PRIVATE_CACHE_REF = 'main';
 const REPO='CurveYield2/Audit-Controller';
@@ -194,10 +198,10 @@ export async function compileWithPrivateCacheV1({request,pseudo,projectRoot,comp
   enabled=process.env.PHASE0_PRIVATE_BUILD_CACHE_ENABLED==='true'}){
   if(!enabled||!token){
     console.log('[phase0-build-cache] disabled (untrusted request or missing private credential); compiling');
-    console.log('[phase0-build-cache] COMPILATION_START cache_disabled=true');
+    markCompilation('COMPILATION_START cache_disabled=true');
     const start=Date.now();
     const build=await compile();
-    console.log('[phase0-build-cache] COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-start)/1000));
+    markCompilation('COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-start)/1000));
     return build;
   }
   let identity,url;
@@ -206,7 +210,7 @@ export async function compileWithPrivateCacheV1({request,pseudo,projectRoot,comp
     url=privateContentUrl({request,key:identity.key});
   }catch(error){
     console.log('[phase0-build-cache] cannot establish exact provenance; compiling: '+String(error.message).slice(0,200));
-    console.log('[phase0-build-cache] COMPILATION_START identity_unavailable=true');
+    markCompilation('COMPILATION_START identity_unavailable=true');
     const start=Date.now();
     const build=await compile();
     console.log('[phase0-build-cache] COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-start)/1000));
@@ -222,10 +226,10 @@ export async function compileWithPrivateCacheV1({request,pseudo,projectRoot,comp
     console.log('[phase0-build-cache] MISS key='+identity.key.slice(0,16)+' reason='+
       String(error?.message??error).replace(/\s+/g,' ').slice(0,240));
   }
-  console.log('[phase0-build-cache] COMPILATION_START key='+identity.key.slice(0,16));
+  markCompilation('COMPILATION_START key='+identity.key.slice(0,16));
   const started=Date.now();
   const build=await compile();
-  console.log('[phase0-build-cache] COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-started)/1000));
+  markCompilation('COMPILATION_DONE elapsed_seconds='+Math.floor((Date.now()-started)/1000));
   try{await tryPublish({url,ref:PRIVATE_CACHE_REF,token,identity,pseudo,build,request});}
   catch(error){console.log('[phase0-build-cache] PUBLISH_FAILED reason='+String(error.message).replace(/\s+/g,' ').slice(0,300));}
   return build;
