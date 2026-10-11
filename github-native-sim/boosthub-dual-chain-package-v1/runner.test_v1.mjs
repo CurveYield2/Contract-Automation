@@ -29,3 +29,14 @@ test('a pending transaction is rebroadcast with the same signed bytes when resum
   await submitStep({provider,signer,state,save:()=>{},confirmations:1,timeoutMs:1000},'x',{});
   assert.equal(sends,1);assert.equal(signed,0);assert.equal(state.steps.x.status,'confirmed');
 });
+test('Fraxtal configuration uses URD with no vlBoost and rejects a fake registry', async () => {
+  const {validateConfig,FRAXTAL_URD,FRAXTAL_SDFXS}=await import(path);
+  const owner='0x1000000000000000000000000000000000000001';
+  const c={version:'v1',deployer:owner,deploymentId:'validation',chains:{fraxtal:{chainId:252,owner,vlBoost:'0x0000000000000000000000000000000000000000',rewardDistributor:FRAXTAL_URD,claimMode:'urd',maxFeePerGasGwei:'1',priorityFeePerGasGwei:'0',pools:[{pid:0,asset:FRAXTAL_SDFXS,gauge:owner,stakingAdmin:owner,keeper:owner,stakingFeeReceiver:owner,platformFeeRecipient:owner,platformFeeBps:500,rewardSmoothingUnits:0,active:true,lockDepositor:false,checkpointSelector:'0x00000000',hubRewardTokens:[FRAXTAL_SDFXS],externalRewardTokens:[],disabledRewardTokens:[]}]}}};
+  assert.equal(validateConfig(c),c);c.chains.fraxtal.vlBoost=owner;
+  assert.throws(()=>validateConfig(c),/Fraxtal has no vlBoost/);
+});
+test('the signing account must be an explicitly configured EOA address', async () => {
+  const {validateConfig}=await import(path);
+  assert.throws(()=>validateConfig({version:'v1',deployer:'0x0000000000000000000000000000000000000000'}),/deployer/);
+});

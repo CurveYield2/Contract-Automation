@@ -67,7 +67,10 @@ contract FraxtalCompatibilityTest {
         require(hub.systemInfo().vlBoost==address(0)&&hub.systemInfo().vlsdtDelegated==0);
     }
     function testGaugeCheckpointStillRequiresConfiguredSelector()external {
-        configure(address(this),0,bytes4(0));require(failed(address(hub),abi.encodeCall(hub.checkpoint,(new uint256[](1)))));
+        BoostHub unconfigured=new BoostHub(address(this),address(0),address(helper));
+        address[]memory assets=new address[](1);assets[0]=TOKEN;address[]memory gauges=new address[](1);gauges[0]=address(gauge);
+        address[][]memory tokens=new address[][](1);tokens[0]=new address[](0);unconfigured.addPoolsBatch(assets,gauges,tokens);
+        require(failed(address(unconfigured),abi.encodeCall(unconfigured.checkpoint,(new uint256[](1)))));
     }
     function testClaimExecutorIsStillMandatory()external {
         try new BoostHub(address(this),address(0),address(0)) {revert("zero helper accepted");}catch{}
@@ -81,8 +84,8 @@ contract FraxtalCompatibilityTest {
         require(hub.positionInfo(0,address(this)).pendingRewards[0]==1500);
     }
     function testPlatformFeeUsesActualUrdDelta()external {
-        configure(address(this),500,0x4b820093);supply(1000);hub.claimStakeDaoRewards(0);
-        require(reward.balanceOf(RECEIVER)==50&&hub.positionInfo(0,address(this)).pendingRewards[0]==950);
+        configure(address(this),500,0x4b820093);supply(1000e18);hub.claimStakeDaoRewards(0);
+        require(reward.balanceOf(RECEIVER)==50e18&&hub.positionInfo(0,address(this)).pendingRewards[0]==950e18);
     }
     function testUrdStaleProofCanBeCleared()external {
         supply(1000);urd.configure(address(hub),TOKEN,1500);require(helper.clearStaleClaim()&&!claimExists());

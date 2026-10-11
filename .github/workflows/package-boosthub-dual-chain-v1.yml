@@ -50,6 +50,13 @@ jobs:
           python3 -m pip install vyper==0.4.3
           git clone --depth 1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git .controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts
           test "$(git -C .controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts rev-parse HEAD)" = c64a1edb67b6e3f4a15cca8909c9482ad33a02b0
+          mkdir -p github-native-sim/boosthub-dual-chain-package-v1/lib/solmate
+          git -C github-native-sim/boosthub-dual-chain-package-v1/lib/solmate init
+          git -C github-native-sim/boosthub-dual-chain-package-v1/lib/solmate remote add origin https://github.com/transmissions11/solmate.git
+          git -C github-native-sim/boosthub-dual-chain-package-v1/lib/solmate fetch --depth 1 origin 89365b880c4f3c786bdd453d4b8e8fe410344a69
+          git -C github-native-sim/boosthub-dual-chain-package-v1/lib/solmate checkout --detach FETCH_HEAD
+          test "$(git -C github-native-sim/boosthub-dual-chain-package-v1/lib/solmate rev-parse HEAD)" = 89365b880c4f3c786bdd453d4b8e8fe410344a69
+          ln -s "$GITHUB_WORKSPACE/.controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts" github-native-sim/boosthub-dual-chain-package-v1/lib/openzeppelin-contracts
       - name: Restore verified original dependencies and compile Vyper
         run: python3 github-native-sim/boosthub-dual-chain-package-v1/prepare_build_v1.py
       - name: Verify the updated Hub, both helpers and staking together
@@ -60,10 +67,58 @@ jobs:
           forge test -vv 2>&1 | tee "$GITHUB_WORKSPACE/github-native-sim/boosthub-dual-chain-package-v1/evidence/full_stack_green_v2.txt"
       - name: Run deployment acceptance tests
         run: node --test github-native-sim/boosthub-dual-chain-package-v1/runner.test_v1.mjs
+      - name: Compile the exact release and bundle the standalone runner
+        run: node github-native-sim/boosthub-dual-chain-package-v1/compile_release_v1.mjs
+      - name: Prepare editable operator configuration
+        run: node github-native-sim/boosthub-dual-chain-package-v1/build_config_v1.mjs
+      - name: Deploy and configure the release against live dependencies on local Anvil forks
+        run: node github-native-sim/boosthub-dual-chain-package-v1/fork_deployment_v1.mjs
+      - name: Assemble the versioned release
+        run: python3 github-native-sim/boosthub-dual-chain-package-v1/finalize_package_v1.py
+      - name: Stage package for Windows verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: boosthub-release-for-windows-v2
+          path: github-native-sim/boosthub-dual-chain-package-v1/BoostHub_Contract_Stack_v2.zip
+          retention-days: 7
       - name: Publish retrieval evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: boosthub-dual-chain-package-v1
           path: github-native-sim/boosthub-dual-chain-package-v1/evidence
+          retention-days: 30
+
+  windows-powershell:
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: boosthub-release-for-windows-v2
+          path: incoming_release
+      - name: Exercise extracted package under Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          Expand-Archive -LiteralPath incoming_release/BoostHub_Contract_Stack_v2.zip -DestinationPath windows_package
+          & ./github-native-sim/boosthub-dual-chain-package-v1/windows_check_v1.ps1 -PackageRoot "$PWD/windows_package" 2>&1 | Tee-Object -FilePath PowerShell_Compatibility_v1.txt
+          if (-not $?) { throw 'Windows PowerShell validation failed' }
+      - name: Attach Windows evidence and finalize ZIP
+        run: python github-native-sim/boosthub-dual-chain-package-v1/windows_finalize_v1.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BoostHub_Contract_Stack_v2
+          path: |
+            BoostHub_Contract_Stack_v2.zip
+            BoostHub_Contract_Stack_v2.sha256
           retention-days: 30

@@ -72,8 +72,6 @@ contract StakeDaoFraxtalSdFxsUrdClaimExecutor {
     error InvalidProof();
     error ClaimAlreadyCompleted(uint256 claimedAmount, uint256 cumulativeClaimable);
     error UnsafeRecipient(address recipient);
-    error ClaimNotSupplied();
-    error StaleClaim(bytes32 storedRoot, bytes32 liveRoot);
     error ZeroClaimDelta();
     error ClaimDeltaMismatch(uint256 returnedDelta, uint256 observedDelta);
 

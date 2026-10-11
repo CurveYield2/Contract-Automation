@@ -1,17 +1,15 @@
 #requires -Version 5.1
-<## Deploy/configure the compiled BoostHub stack on Ethereum and Fraxtal. Version v1. ##>
+<## Deploy/configure the compiled BoostHub stack with the selected chain's reward helper. Version v1. ##>
 [CmdletBinding()]
 param(
     [ValidateSet('Check','Deploy','Verify','AcceptRoles')][string]$Mode = 'Check',
-    [ValidateSet('Both','Ethereum','Fraxtal')][string]$Chain = 'Both',
+    [ValidateSet('Both','Ethereum','Fraxtal')][string]$Chain = 'Ethereum',
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'deployment_config_v1.json'),
     [string]$StateDirectory = (Join-Path $PSScriptRoot 'state_v1'),
     [string]$DeployerAddress,
     [string]$DeploymentId,
     [string]$EthereumRpcUrl,
-    [string]$FraxtalRpcUrl,
-    [string]$FraxtalVlBoost,
-    [string]$FraxtalMerkleStash
+    [string]$FraxtalRpcUrl
 )
 $ErrorActionPreference = 'Stop'
 $node = Get-Command node -ErrorAction Stop
@@ -21,7 +19,7 @@ $runner = Join-Path $PSScriptRoot 'deploy_runner_v1.cjs'
 if (-not (Test-Path -LiteralPath $runner -PathType Leaf)) { throw 'Keep the complete extracted ZIP together; the bundled deployment runner is missing.' }
 $config = (Resolve-Path -LiteralPath $ConfigPath).Path
 $request = @{
-    mode = $Mode; chain = $Chain; configPath = $config
+    mode = $Mode; chain = $Chain; configPath = $config; packageRoot = (Split-Path -Parent $PSScriptRoot)
     stateDirectory = [System.IO.Path]::GetFullPath($StateDirectory)
     rpcUrls = @{}; dependencyOverrides = @{}
 }
@@ -29,11 +27,6 @@ if ($DeployerAddress) { $request.deployerAddress = $DeployerAddress }
 if ($DeploymentId) { $request.deploymentId = $DeploymentId }
 if ($EthereumRpcUrl) { $request.rpcUrls.ethereum = $EthereumRpcUrl }
 if ($FraxtalRpcUrl) { $request.rpcUrls.fraxtal = $FraxtalRpcUrl }
-if ($FraxtalVlBoost -or $FraxtalMerkleStash) {
-    $request.dependencyOverrides.fraxtal = @{}
-    if ($FraxtalVlBoost) { $request.dependencyOverrides.fraxtal.vlBoost = $FraxtalVlBoost }
-    if ($FraxtalMerkleStash) { $request.dependencyOverrides.fraxtal.merkleStash = $FraxtalMerkleStash }
-}
 $secure = $null; $bstr = [IntPtr]::Zero; $plain = $null; $inputJson = $null
 try {
     if ($Mode -in @('Deploy','AcceptRoles')) {

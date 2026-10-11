@@ -4,7 +4,7 @@ import solc from 'solc';
 import {build} from 'esbuild';
 const root=path.dirname(new URL(import.meta.url).pathname),release=path.join(root,'release_v2');
 const sources={};
-for(const file of ['contracts/BoostHub.sol','contracts/interfaces/IBoostHub.sol','contracts/StakeDaoMerkleClaimExecutor.sol','contracts/BoostHubDeploymentFactory_v1.sol'])sources[file]={content:fs.readFileSync(path.join(release,file),'utf8')};
+for(const file of ['contracts/BoostHub.sol','contracts/interfaces/IBoostHub.sol','contracts/StakeDaoMerkleClaimExecutor.sol','contracts/StakeDaoFraxtalSdFxsUrdClaimExecutor_v5.sol','contracts/BoostHubDeploymentFactory_v1.sol'])sources[file]={content:fs.readFileSync(path.join(release,file),'utf8')};
 const settings={optimizer:{enabled:true,runs:200},viaIR:true,evmVersion:'cancun',outputSelection:{'*':{'*':['abi','evm.bytecode','evm.deployedBytecode','metadata']}}};
 function resolve(name){
   let file;
@@ -20,12 +20,18 @@ const input={language:'Solidity',sources,settings};
 output=JSON.parse(solc.compile(JSON.stringify(input)));
 if(output.errors?.some(e=>e.severity==='error'))throw Error(output.errors.filter(e=>e.severity==='error').map(e=>e.formattedMessage).join('\n'));
 fs.writeFileSync(path.join(release,'solidity_standard_input_v1.json'),JSON.stringify(input,null,2));
-for(const [key,file,name]of [['hub','contracts/BoostHub.sol','BoostHub'],['helper','contracts/StakeDaoMerkleClaimExecutor.sol','StakeDaoMerkleClaimExecutor'],['factory','contracts/BoostHubDeploymentFactory_v1.sol','BoostHubDeploymentFactory']]){
+for(const [key,file,name]of [['hub','contracts/BoostHub.sol','BoostHub'],['helper','contracts/StakeDaoMerkleClaimExecutor.sol','StakeDaoMerkleClaimExecutor'],['helperFraxtal','contracts/StakeDaoFraxtalSdFxsUrdClaimExecutor_v5.sol','StakeDaoFraxtalSdFxsUrdClaimExecutor'],['factory','contracts/BoostHubDeploymentFactory_v1.sol','BoostHubDeploymentFactory']]){
   const c=output.contracts[file][name];
   const a={contractName:name,compiler:solc.version(),evmVersion:'cancun',optimizerRuns:200,viaIR:true,abi:c.abi,bytecode:'0x'+c.evm.bytecode.object,deployedBytecode:'0x'+c.evm.deployedBytecode.object,immutableReferences:c.evm.deployedBytecode.immutableReferences};
   if((a.deployedBytecode.length-2)/2>24576)throw Error(name+' exceeds EIP-170');
   fs.writeFileSync(path.join(release,'artifacts_v1',key+'_v1.json'),JSON.stringify(a,null,2));
   console.log(name+' runtime bytes '+(a.deployedBytecode.length-2)/2);
+}
+for(const [project,label]of [['openzeppelin-contracts','OpenZeppelin'],['solmate','Solmate']]) {
+  for(const candidate of ['LICENSE','LICENSE.txt','COPYING']) {
+    const source=path.join(root,'lib',project,candidate);
+    if(fs.existsSync(source))fs.copyFileSync(source,path.join(release,'dependencies_v1',label+'_'+candidate));
+  }
 }
 await build({entryPoints:[path.join(root,'deployment/deploy_runner_v1.mjs')],outfile:path.join(release,'deployment/deploy_runner_v1.cjs'),bundle:true,platform:'node',format:'cjs',target:'node22',legalComments:'external'});
 for(const [name,obj]of Object.entries(sources)){

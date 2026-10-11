@@ -5,6 +5,8 @@ import { AbiCoder, Contract, ContractFactory, FetchRequest, JsonRpcProvider, Wal
   concat, getAddress, getCreate2Address, getCreateAddress, id, keccak256, parseUnits, toUtf8Bytes } from 'ethers';
 
 export const UNIVERSAL_PROXY = '0x4e59b44847b379578588920ca78fbf26c0b4956c';
+export const FRAXTAL_URD = '0xAeB87C92b2E7d3b21fA046Ae1E51E0ebF11A41Af';
+export const FRAXTAL_SDFXS = '0x1AEe2382e05Dc68BDfC472F1E46d570feCca5814';
 const PROXY_CREATION = '0x67363d3d37363d34f03d5260086018f3';
 const coder = AbiCoder.defaultAbiCoder();
 const eq = (a,b) => String(a).toLowerCase() === String(b).toLowerCase();
@@ -17,10 +19,19 @@ export function validateConfig(c) {
   requireThat(c.version==='v1','Configuration version must be v1');
   address(c.deployer,'deployer');
   requireThat(typeof c.deploymentId==='string'&&c.deploymentId.length>0,'deploymentId is required');
-  requireThat(c.chains&&Object.keys(c.chains).length===2,'Both chains must be configured');
-  for(const [name,expected] of [['ethereum',1],['fraxtal',252]]) {
+  requireThat(c.chains&&Object.keys(c.chains).length>0,'At least one chain must be configured');
+  for(const name of Object.keys(c.chains)) {
+    const expected={ethereum:1,fraxtal:252}[name];requireThat(expected,'Unsupported chain');
     const n=c.chains[name];requireThat(n?.chainId===expected,name+' chainId is incorrect');
-    for(const k of ['owner','vlBoost','merkleStash']) address(n[k],name+'.'+k);
+    for(const k of ['owner','rewardDistributor']) address(n[k],name+'.'+k);
+    if(name==='fraxtal') {
+      requireThat(eq(n.vlBoost,ZeroAddress),'Fraxtal has no vlBoost; set its address to zero');
+      requireThat(eq(n.rewardDistributor,FRAXTAL_URD),'Fraxtal helper v5 uses the approved Stake DAO URD');
+      requireThat(n.claimMode==='urd','Fraxtal requires the URD helper');
+    }else {
+      requireThat(n.claimMode==='stash','Ethereum requires the MultiMerkleStash helper');
+      if(!eq(n.vlBoost,ZeroAddress))address(n.vlBoost,name+'.vlBoost');
+    }
     requireThat(Array.isArray(n.pools)&&n.pools.length>0,name+' pools are required');
     requireThat(parseUnits(n.maxFeePerGasGwei,'gwei')>0n,name+' max gas fee must be positive');
     requireThat(parseUnits(n.priorityFeePerGasGwei,'gwei')>=0n,name+' priority fee must be nonnegative');
@@ -44,6 +55,7 @@ export function validateConfig(c) {
       requireThat(rewards.length<=8&&new Set(rewards.map(a=>a.toLowerCase())).size===rewards.length,'Staking supports eight unique rewards including its principal token');
       p.disabledRewardTokens.forEach(a=>requireThat(rewards.some(t=>eq(t,a)),'Disabled reward is unregistered'));
     });
+    if(name==='fraxtal')requireThat(eq(n.pools[0].asset,FRAXTAL_SDFXS)&&n.pools[0].hubRewardTokens.some(t=>eq(t,FRAXTAL_SDFXS)),'Fraxtal helper v5 requires sdFXS as registered PID-0 asset/reward');
   }
   return c;
 }
@@ -108,7 +120,7 @@ function loadArtifacts(root) {
     const full=path.resolve(root,relative);requireThat(full.startsWith(root+path.sep),'Invalid manifest path');
     requireThat(sha256(fs.readFileSync(full))===digest,'Package integrity mismatch: '+relative);
   }
-  const result={};for(const key of ['factory','hub','helper','staking']) result[key]=JSON.parse(fs.readFileSync(path.join(root,'artifacts_v1',key+'_v1.json')));
+  const result={};for(const key of ['factory','hub','helper','helperFraxtal','staking']) result[key]=JSON.parse(fs.readFileSync(path.join(root,'artifacts_v1',key+'_v1.json')));
   return result;
 }
 
@@ -116,18 +128,26 @@ export async function preflight(provider,network,prediction) {
   requireThat(Number(await provider.send('eth_chainId',[]))===network.chainId,'RPC connected to the wrong chain');
   const proxyCode=await provider.getCode(UNIVERSAL_PROXY);
   requireThat(proxyCode!=='0x'&&keccak256(proxyCode)===network.universalProxyCodeHash,'Canonical deterministic deployment proxy is missing or has different code');
-  for(const [label,a]of [['vlBoost',network.vlBoost],['merkleStash',network.merkleStash]]) {
+  const dependencies=[['rewardDistributor',network.rewardDistributor]];
+  if(!eq(network.vlBoost,ZeroAddress))dependencies.push(['vlBoost',network.vlBoost]);
+  for(const [label,a]of dependencies) {
     requireThat(await provider.getCode(a)!=='0x',label+' has no contract code on chain '+network.chainId+'; configure a real dependency before deployment');
   }
-  const vl=new Contract(network.vlBoost,['function delegatedIn(address) view returns(uint256)'],provider);
-  await vl.delegatedIn(prediction.hub);
-  const stash=new Contract(network.merkleStash,['function merkleRoot(address) view returns(bytes32)','function update(address) view returns(uint256)'],provider);
+  if(!eq(network.vlBoost,ZeroAddress)) {
+    const vl=new Contract(network.vlBoost,['function delegatedIn(address) view returns(uint256)'],provider);await vl.delegatedIn(prediction.hub);
+  }
+  const stash=network.claimMode==='stash'?new Contract(network.rewardDistributor,['function merkleRoot(address) view returns(bytes32)','function update(address) view returns(uint256)'],provider):null;
+  if(network.claimMode==='urd') {
+    const urd=new Contract(network.rewardDistributor,['function root() view returns(bytes32)','function claimed(address,address) view returns(uint256)','function recipients(address) view returns(address)'],provider);
+    await urd.root();await urd.claimed(prediction.hub,FRAXTAL_SDFXS);
+    const recipient=await urd.recipients(prediction.hub);requireThat(eq(recipient,ZeroAddress)||eq(recipient,prediction.hub),'URD recipient would redirect rewards away from the new Hub');
+  }
   for(const p of network.pools) {
     const gauge=new Contract(p.gauge,['function staking_token() view returns(address)'],provider);
     requireThat(eq(await gauge.staking_token(),p.asset),'Gauge asset does not match pool '+p.pid);
     const asset=new Contract(p.asset,['function totalSupply() view returns(uint256)'],provider);await asset.totalSupply();
     for(const token of [...p.hubRewardTokens,...p.externalRewardTokens]) requireThat(await provider.getCode(token)!=='0x','Reward token has no code: '+token);
-    if(p.hubRewardTokens.length){await stash.merkleRoot(p.hubRewardTokens[0]);await stash.update(p.hubRewardTokens[0]);}
+    if(stash&&p.hubRewardTokens.length){await stash.merkleRoot(p.hubRewardTokens[0]);await stash.update(p.hubRewardTokens[0]);}
     requireThat(!eq(p.stakingFeeReceiver,prediction.hub)&&!eq(p.stakingFeeReceiver,network.sourceHub),'Staking admin fees must have an external receiver; the revised Hub has no retained-token recovery');
   }
 }
@@ -150,6 +170,7 @@ async function transaction(ctx,label,request) {
 
 export async function deployAndConfigure(ctx,artifacts,prediction) {
   const {provider,network:n,deployer,deploymentId}=ctx;
+  for(const [label,step]of Object.entries(ctx.state.steps))if(step.status==='pending')await submitStep(ctx,label,{});
   const factory=new Contract(prediction.factory,artifacts.factory.abi,ctx.signer);
   const existingFactory=await provider.getCode(prediction.factory);
   if(existingFactory==='0x') await transaction(ctx,'factory',{to:UNIVERSAL_PROXY,data:concat([prediction.factorySalt,artifacts.factory.bytecode]),value:0});
@@ -163,9 +184,11 @@ export async function deployAndConfigure(ctx,artifacts,prediction) {
     requireThat(codeMatches(artifact,await provider.getCode(expected)),'Unexpected deployed runtime: '+label);
     return new Contract(expected,artifact.abi,ctx.signer);
   }
-  const helper=await deploy('helper',artifacts.helper,[deployer,n.merkleStash],prediction.helper);
+  const helperArtifact=n.claimMode==='urd'?artifacts.helperFraxtal:artifacts.helper;
+  const helperArgs=n.claimMode==='urd'?[deployer]:[deployer,n.rewardDistributor];
+  const helper=await deploy('helper',helperArtifact,helperArgs,prediction.helper);
   const hub=await deploy('hub',artifacts.hub,[deployer,n.vlBoost,prediction.helper],prediction.hub);
-  requireThat(eq(await helper.configurator(),deployer)&&eq(await helper.merkleStash(),n.merkleStash),'Helper constructor differs from this release');
+  requireThat(eq(await helper.configurator(),deployer)&&eq(n.claimMode==='urd'?await helper.urd():await helper.merkleStash(),n.rewardDistributor),'Helper constructor differs from this release');
   let bound=await helper.boostHub();
   if(eq(bound,ZeroAddress))await transaction(ctx,'bind/helper',await helper.setBoostHub.populateTransaction(prediction.hub));
   requireThat(eq(await helper.boostHub(),prediction.hub),'Helper is bound to a different Hub');
@@ -213,9 +236,10 @@ export async function deployAndConfigure(ctx,artifacts,prediction) {
 
 export async function verifyStack(ctx,artifacts,prediction) {
   const {provider,network:n}=ctx;const pendingRoles=[];
-  for(const [key,a]of [['factory',prediction.factory],['helper',prediction.helper],['hub',prediction.hub]])requireThat(codeMatches(artifacts[key],await provider.getCode(a)),'Runtime mismatch: '+key);
-  const hub=new Contract(prediction.hub,artifacts.hub.abi,provider),helper=new Contract(prediction.helper,artifacts.helper.abi,provider);
-  requireThat(eq(await helper.boostHub(),prediction.hub)&&eq(await helper.merkleStash(),n.merkleStash)&&eq(await helper.configurator(),ctx.deployer),'Helper configuration mismatch');
+  const helperArtifact=n.claimMode==='urd'?artifacts.helperFraxtal:artifacts.helper;
+  for(const [artifact,a,label]of [[artifacts.factory,prediction.factory,'factory'],[helperArtifact,prediction.helper,'helper'],[artifacts.hub,prediction.hub,'hub']])requireThat(codeMatches(artifact,await provider.getCode(a)),'Runtime mismatch: '+label);
+  const hub=new Contract(prediction.hub,artifacts.hub.abi,provider),helper=new Contract(prediction.helper,helperArtifact.abi,provider);
+  requireThat(eq(await helper.boostHub(),prediction.hub)&&eq(n.claimMode==='urd'?await helper.urd():await helper.merkleStash(),n.rewardDistributor)&&eq(await helper.configurator(),ctx.deployer),'Helper configuration mismatch');
   const system=await hub.systemInfo();requireThat(eq(system.vlBoost,n.vlBoost)&&eq(system.stakeDaoClaimExecutor,prediction.helper)&&Number(system.poolCount)===n.pools.length,'Hub system configuration mismatch');
   if(!eq(await hub.owner(),n.owner)) {
     requireThat(eq((await hub.pendingTransactions()).pendingOwner,n.owner),'Final Hub owner is not queued');
@@ -254,7 +278,7 @@ async function acceptRoles(ctx,artifacts,prediction) {
 }
 
 export async function main(payload) {
-  const root=path.resolve(path.dirname(payload.configPath),'..');
+  const root=path.resolve(payload.packageRoot||path.join(path.dirname(payload.configPath),'..'));
   const artifacts=loadArtifacts(root);
   const config=JSON.parse(fs.readFileSync(payload.configPath,'utf8'));
   if(payload.deployerAddress)config.deployer=payload.deployerAddress;
@@ -262,7 +286,7 @@ export async function main(payload) {
   for(const [name,overrides]of Object.entries(payload.dependencyOverrides||{})) Object.assign(config.chains[name],overrides);
   validateConfig(config);
   const prediction=predictAddresses(artifacts,config.deployer,config.deploymentId,Math.max(...Object.values(config.chains).map(n=>n.pools.length)));
-  console.log('Shared new BoostHub: '+prediction.hub+'\nShared claim helper: '+prediction.helper+'\nCREATE3 factory: '+prediction.factory);
+  console.log('New BoostHub: '+prediction.hub+'\nClaim helper: '+prediction.helper+'\nDeployment factory: '+prediction.factory);
   const mode=payload.mode||'Check';requireThat(['Check','Deploy','Verify','AcceptRoles'].includes(mode),'Unknown mode');
   let key=payload.privateKey,signer;
   if(['Deploy','AcceptRoles'].includes(mode)) {
@@ -274,11 +298,14 @@ export async function main(payload) {
   const selection=payload.chain==='Both'?['ethereum','fraxtal']:[(payload.chain||'ethereum').toLowerCase()];
   requireThat(selection.every(n=>n in config.chains),'Invalid chain selection');
   const contexts=[];
+  const providers=[];
+  try {
   for(const name of selection) {
     const network=config.chains[name],url=payload.rpcUrls?.[name]||network.rpcUrl;
     requireThat(/^https?:\/\//.test(url),'RPC URL is required for '+name);
     const request=new FetchRequest(url);request.timeout=30000;
-    const provider=new JsonRpcProvider(request,network.chainId,{staticNetwork:true,batchMaxCount:1});provider.pollingInterval=1000;
+    const provider=new JsonRpcProvider(request,network.chainId,{staticNetwork:true,batchMaxCount:1,cacheTimeout:-1});provider.pollingInterval=1000;
+    providers.push(provider);
     await preflight(provider,network,prediction);
     const stateDir=path.resolve(payload.stateDirectory);fs.mkdirSync(stateDir,{recursive:true});
     const statePath=path.join(stateDir,'deployment_'+name+'_v1.json');
@@ -290,14 +317,13 @@ export async function main(payload) {
       save:()=>{const temp=statePath+'.tmp';fs.writeFileSync(temp,json(state));fs.renameSync(temp,statePath);}};
     contexts.push(ctx);
   }
-  try {
     for(const ctx of contexts) {
       if(mode==='Check'){console.log(ctx.name+': preflight passed; '+ctx.network.pools.length+' pools');continue;}
       if(mode==='Deploy')await deployAndConfigure(ctx,artifacts,prediction);
       if(mode==='Verify')await verifyStack(ctx,artifacts,prediction);
       if(mode==='AcceptRoles')await acceptRoles(ctx,artifacts,prediction);
     }
-  }finally{for(const ctx of contexts)ctx.provider.destroy();}
+  }finally{for(const provider of providers)provider.destroy();}
 }
 
 if(process.env.BOOSTHUB_EXECUTE==='1') {
