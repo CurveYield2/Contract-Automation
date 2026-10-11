@@ -5,9 +5,9 @@ ETH_RPC="${RPC_ETHEREUM:?Missing configured RPC_ETHEREUM secret}"
 FRA_RPC="${RPC_FRAXTAL:-https://rpc.frax.com}"
 test "$(timeout 25s cast chain-id --rpc-url "$ETH_RPC")" = 1
 test "$(timeout 25s cast chain-id --rpc-url "$FRA_RPC")" = 252
-anvil --fork-url "$ETH_RPC" --chain-id 1 --port 8545 > boosthub-v11-anvil-ethereum-v1.log 2>&1 &
+anvil --fork-url "$ETH_RPC" --chain-id 1 --block-time 1 --port 8545 > boosthub-v11-anvil-ethereum-v1.log 2>&1 &
 echo $! > .boosthub-ethereum.pid
-anvil --fork-url "$FRA_RPC" --chain-id 252 --port 8546 > boosthub-v11-anvil-fraxtal-v1.log 2>&1 &
+anvil --fork-url "$FRA_RPC" --chain-id 252 --block-time 1 --port 8546 > boosthub-v11-anvil-fraxtal-v1.log 2>&1 &
 echo $! > .boosthub-fraxtal.pid
 for i in $(seq 1 45); do
   eth="$(timeout 5s cast chain-id --rpc-url http://127.0.0.1:8545 2>/dev/null || true)"
