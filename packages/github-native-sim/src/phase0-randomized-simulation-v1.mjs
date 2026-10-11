@@ -600,7 +600,7 @@ async function safeStatic(contract,f,args){try{return{ok:true,value:normalize(aw
 export function accountingWitnessPlanV1({target,selected,protocolPlan,qualifiedAction,value=0n}={}){
   const signature=String(selected?.signature??'');
   const context=target?.accountingContext;
-  const native=BigInt(value??0)>0n||/^(?:depositETH|withdrawETH|wrapETH|unwrapETH|sendNative|receiveNative)\\(/i.test(signature);
+  const native=BigInt(value??0)>0n||/^(?:depositETH|withdrawETH|wrapETH|unwrapETH|sendNative|receiveNative)\(/i.test(signature);
   const poolMatches=String(context?.poolAddress??'').toLowerCase()===String(protocolPlan?.pool??'').toLowerCase();
   if(protocolPlan?.kind==='READY'&&poolMatches&&context?.protocol==='BALANCER_V3'){
     const operation=/^swapSingleToken/.test(signature)?'SWAP':/^addLiquidity/.test(signature)?'ADD_LIQUIDITY':/^removeLiquidity/.test(signature)?'REMOVE_LIQUIDITY':null;
@@ -612,7 +612,7 @@ export function accountingWitnessPlanV1({target,selected,protocolPlan,qualifiedA
       return{schemaVersion:'phase0-accounting-witness-v1',mode:'BALANCER_V3',operation,tokens:[...new Set(tokens.map(x=>String(x).toLowerCase()))],poolAddress:context.poolAddress,vaultAddress:context.vaultAddress,includeBpt:operation!=='SWAP',includeNative:native};
     }
   }
-  return{schemaVersion:'phase0-accounting-witness-v1',mode:'TARGET_LOCAL',includeNative:native,includeAllowance:/^(?:approve|increaseAllowance|decreaseAllowance|transferFrom)\\(/.test(signature),includeSupply:/^(?:mint|burn|deposit|withdraw|redeem|stake|unstake|addLiquidity|removeLiquidity)\\(/.test(signature)};
+  return{schemaVersion:'phase0-accounting-witness-v1',mode:'TARGET_LOCAL',includeNative:native,includeAllowance:/^(?:approve|increaseAllowance|decreaseAllowance|transferFrom)\(/.test(signature),includeSupply:/^(?:mint|burn|deposit|withdraw|redeem|stake|unstake|addLiquidity|removeLiquidity)\(/.test(signature)};
 }
 export async function snapshot({provider,ethers,target,sender,plan,systemTargets,witness=null}){
   const out={native:{},views:{},systemNative:{},related:{}};
