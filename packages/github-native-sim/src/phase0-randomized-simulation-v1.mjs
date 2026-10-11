@@ -603,7 +603,7 @@ export function accountingWitnessPlanV1({target,selected,protocolPlan,qualifiedA
   const native=BigInt(value??0)>0n||/^(?:depositETH|withdrawETH|wrapETH|unwrapETH|sendNative|receiveNative)\(/i.test(signature);
   const poolMatches=String(context?.poolAddress??'').toLowerCase()===String(protocolPlan?.pool??'').toLowerCase();
   if(protocolPlan?.kind==='READY'&&poolMatches&&context?.protocol==='BALANCER_V3'){
-    const operation=/^swapSingleToken/.test(signature)?'SWAP':/^addLiquidity/.test(signature)?'ADD_LIQUIDITY':/^removeLiquidity/.test(signature)?'REMOVE_LIQUIDITY':/^(?:transfer|transferFrom)\\(/.test(signature)?'BPT_TRANSFER':null;
+    const operation=/^swapSingleToken/.test(signature)?'SWAP':/^addLiquidity/.test(signature)?'ADD_LIQUIDITY':/^removeLiquidity/.test(signature)?'REMOVE_LIQUIDITY':/^(?:transfer|transferFrom)\(/.test(signature)?'BPT_TRANSFER':null;
     if(operation){
       const registered=(context.tokens??[]).filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x)));
       const inputs=qualifiedAction?.args??[];
