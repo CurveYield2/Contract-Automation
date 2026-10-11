@@ -128,8 +128,7 @@ function phase7RpcEnv(simulation) {
 function phase7ForkUrl(simulation, environment = {}) {
   const rpcEnv = phase7RpcEnv(simulation);
   if (simulation.chain === V7_POLICY.mutableRpc.chain) {
-    if (!environment?.[rpcEnv]) throw new Error('Private Ethereum RPC is required: ETHEREUM_FORK_RPC_URL');
-    return environment[rpcEnv];
+    return environment?.[rpcEnv];
   }
   return environment?.[rpcEnv];
 }
