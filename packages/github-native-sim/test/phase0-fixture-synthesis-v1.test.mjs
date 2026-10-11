@@ -93,9 +93,9 @@ test('Phase 0 smoke now validates native source-package deploy/config evidence w
   const workflow=fs.readFileSync(path.join(root,'.github/workflows/lite-phase0-simulation-testing-v1.yml'),'utf8');
   const cli=fs.readFileSync(path.join(root,'scripts/run-phase0-fork-deploy-config-v1.mjs'),'utf8');
   assert.match(cli,/deploymentOnly:true/);
-  assert.match(workflow,/ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY/);
+  assert.match(workflow,/assertDeployGateEvidenceV2/);
   assert.match(workflow,/PHASE0_DEPLOY_CONFIG_EXECUTION_v1\.json/);
-  assert.match(workflow,/EXECUTED_PASS/);
+  assert.match(workflow,/reconcile-phase0-deploy-evidence-v1\\.mjs/);
   assert.doesNotMatch(workflow,/medusa_calls|telemetry_calls|PHASE0_FIXTURE_SYNTHESIS_v1\.json/);
 });
 
