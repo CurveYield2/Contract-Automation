@@ -382,13 +382,13 @@ async function verifyX11VisibleChatAddress(requested) {
   let actual,expected;
   try {actual=new URL(stdout.trim());expected=new URL(requested);}
   catch {throw new BrowserAgentError('VISIBLE_ADDRESS_UNREADABLE','Browser address bar could not be copied through OS keyboard',true);}
-  const current=actual.pathname.replace(/\\/$/,'');
-  const expectedPath=expected.pathname.replace(/\\/$/,'');
+  const current=actual.pathname.replace(/\/$/,'');
+  const expectedPath=expected.pathname.replace(/\/$/,'');
   if(actual.origin!=='https://chatgpt.com')throw new BrowserAgentError('WRONG_VISIBLE_ORIGIN','Chrome is not displaying ChatGPT',false);
-  if(/^\\/(?:auth|login|signup|register)(?:\\/|$)/i.test(current))
+  if(/^\/(?:auth|login|signup|register)(?:\/|$)/i.test(current))
     throw new BrowserAgentError('AUTH_REQUIRED','Visible Chrome window redirected to ChatGPT login; refresh browser session secret before sending',false);
-  const actualId=current.match(/\\/c\\/([^/]+)$/)?.[1]||'';
-  const requestedId=expectedPath.match(/\\/c\\/([^/]+)$/)?.[1]||'';
+  const actualId=current.match(/\/c\/([^/]+)$/)?.[1]||'';
+  const requestedId=expectedPath.match(/\/c\/([^/]+)$/)?.[1]||'';
   if(!requestedId||actualId!==requestedId)
     throw new BrowserAgentError('CHAT_UNAVAILABLE_OR_NOT_READY','Visible Chrome address bar is not the intended reviewer conversation',false);
   console.log('[normal-chrome-watchdog] verified-target-chat-via-visible-address-bar=true');
