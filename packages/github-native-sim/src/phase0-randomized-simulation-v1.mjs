@@ -764,6 +764,21 @@ export function shouldObserveAccountingCallV1({selected,target,valuePool=null,ex
   }
   return{observe:false,basis:'NON_ACCOUNTING_OR_REJECTED'};
 }
+function zeroAbiValueV2(ethers,param){
+  if(param?.baseType==='array'){
+    if(Number.isInteger(param.arrayLength)&&param.arrayLength>=0)return Array.from({length:param.arrayLength},()=>zeroAbiValueV2(ethers,param.arrayChildren));
+    return[];
+  }
+  if(param?.baseType==='tuple')return (param.components??[]).map(child=>zeroAbiValueV2(ethers,child));
+  const type=String(param?.type??'');
+  if(type==='address')return ethers.ZeroAddress;
+  if(type==='bool')return false;
+  if(type==='string')return '';
+  if(type==='bytes')return '0x';
+  if(/^bytes\d+$/.test(type))return ethers.zeroPadValue('0x',Number(type.slice(5)));
+  if(/^u?int(?:\d+)?$/.test(type))return 0n;
+  return 0;
+}
 function mutableFunctionsForArtifactV2({ethers,artifact,qualifiedName,sourceIntelligence={}}){
   const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,qualifiedName);
   const recipe=qualifyRecipeV2({qualifiedName,abi:artifact.abi,declaredStandards});
@@ -772,6 +787,23 @@ function mutableFunctionsForArtifactV2({ethers,artifact,qualifiedName,sourceInte
     return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
   });
   return{declaredStandards,recipe,functions};
+}
+function decodedErrorMatchesInterfaceV2(iface,error){
+  const data=error?.data??error?.info?.error?.data??null;
+  if(typeof data!=='string'||data==='0x')return false;
+  try{return Boolean(iface.parseError(data));}catch{return false;}
+}
+async function facadeAnswersSelectorV2({provider,ethers,facadeAddress,implArtifact,selected,from}){
+  let iface;
+  try{iface=new ethers.Interface(normalizedAbi(implArtifact.abi));}catch{return false;}
+  let data;
+  try{data=iface.encodeFunctionData(selected.signature,(selected.fragment.inputs??[]).map(param=>zeroAbiValueV2(ethers,param)));}catch{return false;}
+  try{
+    await provider.call({from,to:facadeAddress,data,value:0n});
+    return true;
+  }catch(error){
+    return decodedErrorMatchesInterfaceV2(iface,error);
+  }
 }
 async function eip1967ImplementationAddressV2({provider,ethers,address}){
   try{
@@ -783,7 +815,7 @@ async function eip1967ImplementationAddressV2({provider,ethers,address}){
     return code&&code!=='0x'?candidate:null;
   }catch{return null;}
 }
-export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={}}){
+export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={},probeSelectors=true}){
   const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
   const deployedByAddress=new Map(deployed.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
   const targetByAddress=new Map(targets.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
@@ -882,9 +914,37 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
   // EIP-1967 slot, or explicit Balancer Vault delegation pointer (above).
   // Do not invent facades from an arbitrary address association on ANY protocol.
 
-  // An arbitrary selector response (including a matching custom revert) does not
-  // establish an ABI delegation relationship. Do not synthesize facades via
-  // selector probing. Require an on-chain implementation pointer as above.
+  if(probeSelectors){
+    const accounts=await provider.send('eth_accounts',[]).catch(()=>[]);
+    const from=accounts[0]??ethers.ZeroAddress;
+    let probes=0;
+    const directExtensions=targets.filter(target=>(target.contextType??'DIRECT')==='DIRECT');
+    for(const extension of directExtensions){
+      if(probes>=96)break;
+      const implArtifact=extension.artifact,implDeployment=asDeployment(extension.address)??extension;
+      if(!implArtifact||!implDeployment?.qualifiedName)continue;
+      for(const facadeDeployment of deployed.filter(candidate=>String(candidate.address).toLowerCase()!==String(extension.address).toLowerCase())){
+        if(probes>=96)break;
+        const facadeArtifact=facadeDeployment?.qualifiedName?byQ.get(facadeDeployment.qualifiedName):null;
+        if(!facadeArtifact)continue;
+        // Selector-level probes on the wrong Balancer contract often respond
+        // with generic revert data and are NOT evidence of valid delegation.
+        if(isBalancerV3TargetV1(extension)||isBalancerV3TargetV1(facadeDeployment))continue;
+        let facadeIface;
+        try{facadeIface=new ethers.Interface(normalizedAbi(facadeArtifact.abi??[]));}catch{continue;}
+        const probeFunction=(extension.functions??[]).find(selected=>{
+          try{return !facadeIface.getFunction(selected.signature);}catch{return true;}
+        });
+        if(!probeFunction)continue;
+        probes++;
+        const answered=await facadeAnswersSelectorV2({provider,ethers,facadeAddress:facadeDeployment.address,implArtifact,selected:probeFunction,from});
+        if(!answered)continue;
+        const added=addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'SELECTOR_ANSWERED_BY_FACADE',evidence:{selectorProbe:probeFunction.signature}});
+        if(added)break;
+      }
+    }
+    contextEvidence.push({contextType:'FACADE_DISCOVERY',status:'COMPLETE',discoveryBasis:'SELECTOR_PROBE_BOUNDED',probeCount:probes,probeLimit:96});
+  }
 
   for(const target of out)if(!target.contextType){target.contextType='DIRECT';target.contextDisposition='READY';}
   return{targets:out,contextEvidence};
