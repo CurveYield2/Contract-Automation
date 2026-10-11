@@ -273,20 +273,67 @@ jobs:
           fi
           message_purpose="$(jq -r '.messagePurpose // "standard"' /tmp/browser-context.json)"
 
-          # Current audit browser automation is resume-existing only.
-          # The tailored initial wake is used once; all later watchdog messages are
-          # exactly GET BACK TO WORK.
-          if [ "$message_purpose" = "initial_wake" ] && [ "${INITIAL_WAKE_DEDUPED:-false}" != "true" ]; then
-            printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
-            test -s /tmp/wake-message.txt
-          elif [ "$message_purpose" = "repair_notice" ] || [ "$message_purpose" = "repair_verification" ]; then
-            printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
-            test -s /tmp/wake-message.txt
-          else
+          # Preserve caller-authored reviewer, phase-continuation, master-review
+          # and rework messages. Only explicit watchdog messages use the fixed poke.
+          if [ "$message_purpose" = "watchdog_poke" ] || { [ "$message_purpose" = "initial_wake" ] && [ "${INITIAL_WAKE_DEDUPED:-false}" = "true" ]; }; then
             printf '%s\n' 'GET BACK TO WORK' > /tmp/wake-message.txt
+          else
+            printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
+            test -s /tmp/wake-message.txt
           fi
           printf '%s\n' 'GET BACK TO WORK' > /tmp/watchdog-message.txt
 
+          # The check-in applies ONLY to a new reviewer's initial instruction
+          # wake. Continuation, rework, technical callbacks and watchdog pokes
+          # retain their exact messages and never demand an acknowledgement.
+          echo 'WAKE_ACK_PATH=' >> "$GITHUB_ENV"
+          echo 'WAKE_ACK_ID=' >> "$GITHUB_ENV"
+          if [ "$message_purpose" = 'initial_wake' ] \
+            && [ "${INITIAL_WAKE_DEDUPED:-false}" != 'true' ] \
+            && [ "${{ inputs.gate_mode }}" = 'LITE' ] \
+            && [ "${{ inputs.worker_role }}" = 'reviewer' ] \
+            && [ "${{ inputs.gate_repository }}" = 'CurveYield2/Audit-Controller' ]; then
+            token="${AUDIT_CONTROLLER_GITHUB_TOKEN:-}"
+            gate_path="${{ inputs.gate_state_path }}"
+            gate_ref="${{ inputs.gate_ref }}"
+            if [ -n "$token" ] && [[ "$gate_path" == "Audit Campaign Directory/campaigns/"*.json ]]; then
+              encoded_gate="${gate_path// /%20}"
+              encoded="$(GH_TOKEN="$token" gh api "repos/CurveYield2/Audit-Controller/contents/$encoded_gate?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+              workspace="$(printf '%s' "$encoded" | base64 -d 2>/dev/null | jq -r '.workspacePath // empty' 2>/dev/null || true)"
+              reviewer="$(jq -r '.chatName // empty' /tmp/browser-context.json)"
+              if [ -z "$reviewer" ]; then
+                reviewer="$(printf '%s' "$encoded" | base64 -d 2>/dev/null | jq -r '.currentAssignment.reviewer // empty' 2>/dev/null || true)"
+              fi
+              if [[ "$workspace" == campaigns/* ]] && [[ "$reviewer" =~ ^(reviewer-[1234]|reviewer-3L|master-reviewer)$ ]]; then
+                ack_file="$workspace/work/browser/WAKE_ACK_${reviewer}_v1.json"
+                ack_id="$WAKE_ID/$GITHUB_RUN_ID"
+                ack_payload="$(jq -cn --arg id "$ack_id" --arg wake "$WAKE_ID" --arg run "$GITHUB_RUN_ID" --arg phase "$PHASE_ID" --arg reviewer "$reviewer" \
+                  '{schemaVersion:"curveyield-browser-wake-ack-v1",ackId:$id,wakeId:$wake,runId:$run,phaseId:$phase,reviewer:$reviewer}')"
+                {
+                  echo 'DO THIS FIRST, RIGHT NOW, BEFORE ANY OTHER TASK OR INSTRUCTION.'
+                  echo 'MANDATORY INITIAL-WAKE RECEIPT: Your very first action must be to use the GitHub connector to create or update ONE acknowledgement file.'
+                  echo 'Repository: CurveYield2/Audit-Controller'
+                  echo "Branch: $gate_ref"
+                  echo "Exact campaign file: $ack_file"
+                  echo 'Write the following JSON as the entire file, preserving the values exactly:'
+                  printf '%s\n' "$ack_payload"
+                  echo 'Do not read the audit skill, analyze contracts, edit work forms, or perform any other action until the GitHub write succeeds. This is only a delivery check-in, not audit bookkeeping. After the write, immediately follow the complete audit instructions below. Do not ask for confirmation.'
+                  echo
+                  cat /tmp/wake-message.txt
+                } > /tmp/initial-wake-message.txt
+                mv /tmp/initial-wake-message.txt /tmp/wake-message.txt
+                echo "WAKE_ACK_PATH=$ack_file" >> "$GITHUB_ENV"
+                echo "WAKE_ACK_ID=$ack_id" >> "$GITHUB_ENV"
+                echo "WAKE_ACK_REVIEWER=$reviewer" >> "$GITHUB_ENV"
+              else
+                echo '::error::Initial reviewer wake could not resolve its campaign workspace or reviewer identity; refusing to send an unverified initial wake.'
+                exit 1
+              fi
+            else
+              echo '::error::Initial reviewer wake requires an accessible Audit-Controller campaign directory and token.'
+              exit 1
+            fi
+          fi
           jq -e '
             type=="object"
             and ((.routineId // "")|type=="string")
@@ -295,7 +342,7 @@ jobs:
             and ((.chatName // "")|type=="string")
             and ((.repair // {})|type=="object")
             and ((.requestedModel // "PRESERVE")=="PRESERVE" or (.requestedModel // "PRESERVE")=="MASTER" or (.requestedModel // "PRESERVE")=="SOL")
-            and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="repair_notice" or (.messagePurpose // "standard")=="repair_verification" or (.messagePurpose // "standard")=="initial_wake")
+            and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="watchdog_poke" or (.messagePurpose // "standard")=="repair_notice" or (.messagePurpose // "standard")=="repair_verification" or (.messagePurpose // "standard")=="initial_wake")
             and (((.routineId // "") | test("[\\r\\n]")) | not)
             and (((.projectName // "") | test("[\\r\\n]")) | not)
             and (((.projectUrl // "") | test("[\\r\\n]")) | not)
@@ -303,6 +350,11 @@ jobs:
           ' /tmp/browser-context.json >/dev/null
 
           echo "WAKE_MESSAGE_PURPOSE=$message_purpose" >> "$GITHUB_ENV"
+          if [ "$(cat /tmp/wake-message.txt)" = 'GET BACK TO WORK' ]; then
+            echo 'WAKE_IS_POKE=true' >> "$GITHUB_ENV"
+          else
+            echo 'WAKE_IS_POKE=false' >> "$GITHUB_ENV"
+          fi
           echo "WAKE_DIAGNOSTIC_ONLY=$(jq -r '.diagnosticOnly // false' /tmp/browser-context.json)" >> "$GITHUB_ENV"
 
           {
@@ -337,6 +389,7 @@ jobs:
           retryable="$(jq -r '[.failures[]? | select(.retryable==true)] | length > 0' "$WAKE_RESULT_PATH")"
           retry_code="$(jq -r '[.failures[]? | select(.retryable==true) | .code][0] // empty' "$WAKE_RESULT_PATH")"
           echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "send_attempted=$(jq -r '.sendAttempted // false' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "retryable=$retryable" >> "$GITHUB_OUTPUT"
           echo "retry_code=$retry_code" >> "$GITHUB_OUTPUT"
           echo "chat_url=$(jq -r '.chatUrl // .after.url // .url // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
@@ -344,8 +397,10 @@ jobs:
           echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
 
-          if [ "$ok" = true ] && [ "$(jq -r '.delivery.persisted // false' "$WAKE_RESULT_PATH")" != true ]; then
-            echo "::error::Browser result claimed success without proven durable message delivery"
+          # A visible send is an attempted submission. Durable delivery is
+          # separately established by the agent's GitHub acknowledgement.
+          if [ "$ok" = true ] && [ "$(jq -r '.sendAttempted // false' "$WAKE_RESULT_PATH")" != true ]; then
+            echo "::error::Browser result claimed an X11 send without input evidence"
             echo 'ok=false' >> "$GITHUB_OUTPUT"
             ok=false
           fi
@@ -361,9 +416,36 @@ jobs:
           timeout -k 5s 20s sudo tailscale set --exit-node=""
           echo "Home exit-node routing disabled for post-browser workflow steps."
 
+      - name: Await first-action reviewer check-in
+        id: receipt
+        if: env.WAKE_ACK_PATH != '' && (steps.deliver.outputs.ok == 'true' || steps.deliver.outputs.send_attempted == 'true')
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'verified=false' >> "$GITHUB_OUTPUT"
+          ack_url="repos/CurveYield2/Audit-Controller/contents/${WAKE_ACK_PATH// /%20}?ref=${{ inputs.gate_ref }}"
+          for i in $(seq 0 10); do
+            encoded="$(gh api "$ack_url" --jq '.content' 2>/dev/null || true)"
+            if [ -n "$encoded" ] && printf '%s' "$encoded" | base64 -d 2>/dev/null \
+              | jq -e --arg id "$WAKE_ACK_ID" --arg wake "$WAKE_ID" \
+                  --arg run "$GITHUB_RUN_ID" --arg phase "$PHASE_ID" --arg reviewer "$WAKE_ACK_REVIEWER" \
+                 '.schemaVersion=="curveyield-browser-wake-ack-v1"
+                  and .ackId==$id and .wakeId==$wake and .runId==$run
+                  and .phaseId==$phase and .reviewer==$reviewer' >/dev/null 2>&1; then
+              echo 'verified=true' >> "$GITHUB_OUTPUT"
+              echo "Initial reviewer wake $WAKE_ID independently confirmed by matching GitHub check-in." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [ "$i" -lt 10 ]; then sleep 30; fi
+          done
+          echo "::warning::No matching agent check-in within 5 minutes (11 checks, 30-second interval). Delivery remains UNCONFIRMED; no duplicate initial wake is dispatched."
+          echo 'Initial reviewer wake unconfirmed after 5 minutes; browser visual send evidence is not proof of reception.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Dispatch fresh-runner retry for retryable pre-post failure
         id: fresh-runner-retry
-        if: steps.deliver.outputs.ok != 'true' && steps.deliver.outputs.retryable == 'true'
+        if: steps.deliver.outputs.ok != 'true' && steps.deliver.outputs.retryable == 'true' && steps.deliver.outputs.send_attempted != 'true' && steps.receipt.outputs.verified != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RETRY_INPUTS_JSON: ${{ toJSON(inputs) }}
@@ -393,7 +475,7 @@ jobs:
           echo "Fresh-runner retry $next/$max dispatched for $WAKE_ID after ${{ steps.deliver.outputs.retry_code }}." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail terminal browser wake
-        if: steps.deliver.outputs.ok != 'true' && steps.fresh-runner-retry.outputs.dispatched != 'true'
+        if: steps.deliver.outputs.ok != 'true' && steps.deliver.outputs.send_attempted != 'true' && steps.receipt.outputs.verified != 'true' && steps.fresh-runner-retry.outputs.dispatched != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -401,7 +483,7 @@ jobs:
           exit 1
 
       - name: Create watchdog state
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           CHAT_URL_RESOLVED: ${{ steps.deliver.outputs.chat_url }}
           PROVIDER: ${{ steps.deliver.outputs.provider }}
@@ -423,6 +505,10 @@ jobs:
           REPAIR_ENABLED: ${{ env.REPAIR_ENABLED }}
           REPAIR_IDLE_POKE_THRESHOLD: ${{ env.REPAIR_IDLE_POKE_THRESHOLD }}
           REPAIR_UNVIEWABLE_THRESHOLD: ${{ env.REPAIR_UNVIEWABLE_THRESHOLD }}
+          WAKE_ACK_PATH: ${{ env.WAKE_ACK_PATH }}
+          WAKE_ACK_ID: ${{ env.WAKE_ACK_ID }}
+          WAKE_ACK_REVIEWER: ${{ env.WAKE_ACK_REVIEWER }}
+          ACKNOWLEDGEMENT_VERIFIED: ${{ steps.receipt.outputs.verified }}
         shell: bash
         run: |
           set -euo pipefail
@@ -454,10 +540,14 @@ jobs:
             --arg repairIdlePokeThreshold "$REPAIR_IDLE_POKE_THRESHOLD" \
             --arg repairUnviewableThreshold "$REPAIR_UNVIEWABLE_THRESHOLD" \
             --arg lastHash "$LAST_HASH" \
+            --arg ackPath "$WAKE_ACK_PATH" \
+            --arg ackId "$WAKE_ACK_ID" \
+            --arg acknowledgementVerified "$ACKNOWLEDGEMENT_VERIFIED" \
             --argjson assistantCount "${ASSISTANT_COUNT:-0}" \
             '{
               schemaVersion:$schemaVersion,wakeId:$wakeId,campaignId:$campaignId,phaseId:$phaseId,workerRole:$workerRole,
               status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,pokeIntervalMinutes:20,
+              deliveryConfirmed:($acknowledgementVerified=="true"),ackPath:$ackPath,ackId:$ackId,
               idleMessage:$idleMessage,
               observation:{assistantCount:$assistantCount,lastAssistantHash:$lastHash,observedAt:$armedAt},
               gate:{
@@ -489,7 +579,7 @@ jobs:
           echo "WATCHDOG_SAFE_ID=$safe_id" >> "$GITHUB_ENV"
 
       - name: Persist watchdog state
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -505,7 +595,7 @@ jobs:
           fi
 
       - name: Persist existing-chat reviewer wake into campaign registration
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.mode == 'resume_existing' && inputs.worker_role == 'reviewer' }}
+        if: ${{ inputs.mode == 'resume_existing' && inputs.worker_role == 'reviewer' && env.WAKE_IS_POKE != 'true' && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           GH_TOKEN: ${{ github.token }}
           RESOLVED_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}
@@ -518,6 +608,8 @@ jobs:
           CURRENT_GATE_REF: ${{ inputs.gate_ref }}
           CURRENT_GATE_STATE_PATH: ${{ inputs.gate_state_path }}
           CURRENT_GATE_POINTER_PATH: ${{ inputs.gate_active_pointer_path }}
+          WAKE_ACK_ID: ${{ env.WAKE_ACK_ID }}
+          ACKNOWLEDGEMENT_VERIFIED: ${{ steps.receipt.outputs.verified }}
         shell: bash
         run: |
           set -euo pipefail
@@ -525,6 +617,9 @@ jobs:
           api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
           gh api "$api?ref=main" --jq '.content' | base64 -d > /tmp/existing-chat-registration.json
           delivered_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -z "$CURRENT_REVIEWER" ]; then
+            CURRENT_REVIEWER="$(jq -r '.activeChat.name // .activeAssignment.reviewer // empty' /tmp/existing-chat-registration.json)"
+          fi
 
           jq \
             --arg url "$RESOLVED_CHAT_URL" \
@@ -541,6 +636,8 @@ jobs:
             --arg gateStatePath "$CURRENT_GATE_STATE_PATH" \
             --arg gatePointerPath "$CURRENT_GATE_POINTER_PATH" \
             --arg deliveredAt "$delivered_at" \
+            --arg ackId "$WAKE_ACK_ID" \
+            --arg ackVerified "$ACKNOWLEDGEMENT_VERIFIED" \
             '.mode="resume_existing"
              | .chatUrl=$url
              | .browserRoutine=""
@@ -549,7 +646,11 @@ jobs:
              | .wakeMessage=$wakeMessage
              | .thinkingEffort=$thinkingEffort
              | .activeAssignment={phaseId:$phaseId,milestoneId:$milestoneId,workerRole:$workerRole,reviewer:$reviewer,thinkingEffort:$thinkingEffort}
-             | .wakeDelivery={milestoneId:$milestoneId,chatUrl:$url,deliveredAt:$deliveredAt}
+             | if $ackVerified=="true" then
+                 .wakeDelivery={milestoneId:$milestoneId,chatUrl:$url,deliveredAt:$deliveredAt,verification:"REVIEWER_GITHUB_CHECK_IN",ackId:$ackId}
+               else
+                 .lastWakeAttempt={milestoneId:$milestoneId,chatUrl:$url,attemptedAt:$deliveredAt,verification:"X11_VISUAL_SEND_ATTEMPT"}
+               end
              | .watchdog=((.watchdog // {}) + {idleMessage:$idleMessage})
              | .watchdog.gate=((.watchdog.gate // {}) + {mode:$gateMode,repository:$gateRepository,ref:$gateRef,statePath:$gateStatePath,expectedPhaseId:$phaseId,expectedMilestoneId:$milestoneId,activePointerPath:$gatePointerPath})
              | .updatedAt=(now|todate)' \
@@ -562,7 +663,7 @@ jobs:
             -f content="$content" -f sha="$sha" -f branch=main >/dev/null
 
       - name: Activate prepared Lite receipt successor
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.worker_role == 'reviewer' && inputs.gate_mode == 'LITE' }}
+        if: ${{ inputs.worker_role == 'reviewer' && inputs.gate_mode == 'LITE' && env.WAKE_IS_POKE != 'true' && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           DIRECTORY_PATH: ${{ inputs.gate_state_path }}
@@ -645,7 +746,7 @@ jobs:
           fi
 
       - name: Arm immediate watchdog observation
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

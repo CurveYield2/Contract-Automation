@@ -395,14 +395,15 @@ async function verifyX11VisibleChatAddress(requested) {
   return true;
 }
 
-async function captureX11VisualEvidence(label) {
+async function captureX11VisualEvidence(label, cropRegion = '') {
   const root = '/tmp/browser-wake-evidence-v1';
   await fs.mkdir(root, {recursive:true});
   const name=String(label).replace(/[^a-z0-9_-]/gi,'_').slice(0,60);
   const target=path.join(root,name+'.png');
   // Normal desktop screenshot, identical to a person viewing X11/VNC.
   // Never inspect ChatGPT DOM, network responses, or accessibility trees.
-  await runCapture('scrot',['-o',target],{env:{DISPLAY:env.DISPLAY||':99'}});
+  const args = cropRegion ? ['-o','-a',cropRegion,target] : ['-o',target];
+  await runCapture('scrot',args,{env:{DISPLAY:env.DISPLAY||':99'}});
   const file=await fs.stat(target);
   if(file.size<3000)throw new BrowserAgentError('X11_SCREENSHOT_EMPTY','Unable to capture visible desktop before declaring delivery',true);
   console.log('[normal-chrome-watchdog] saved-desktop-visual='+name+' bytes='+file.size);
@@ -572,6 +573,7 @@ async function runNormalChromeExistingSession(chromium) {
     }
 
     // Proven Phase-1 wake interaction. Do not machine-read the composer,
+    // phase1-fixed-x11-submit-no-chatgpt-page-read: X11-only ChatGPT input.
     // DOM focus, bounding box, or active element. The visible ChatGPT composer
     // occupies this stable point in the fixed 1920x1080 X11 Chrome display.
     const geometry = await x11Capture(['getdisplaygeometry'], 'x11-display-geometry');
@@ -590,25 +592,52 @@ async function runNormalChromeExistingSession(chromium) {
     await page.waitForTimeout(randomDelayMs(250, 450));
     await captureX11VisualEvidence('02_after_composer_click');
 
+    // Read only OS desktop screenshots; never inspect ChatGPT DOM, network,
+    // browser accessibility, composer text or focus. The cropped visible region
+    // provides a conservative interaction signal without machine browser reads.
+    const cropX = Math.round(width * 0.43);
+    const cropY = Math.max(0, height - 220);
+    const cropWidth = Math.min(width - cropX, Math.round(width * 0.55));
+    const cropHeight = Math.min(height - cropY, 200);
+    const crop = [cropX, cropY, cropWidth, cropHeight].join(',');
+    const beforeInput = await captureX11VisualEvidence('composer_before_input', crop);
+
     console.log('[normal-chrome-watchdog] wake-entry=OS-X11-skilled-typist phase1-proven-fixed-point');
     await humanX11TypeText(page, wakeMessage);
     await captureX11VisualEvidence('03_after_text_entry');
+    const afterInput = await captureX11VisualEvidence('composer_after_input', crop);
+    const inputChanged = !(await fs.readFile(beforeInput)).equals(await fs.readFile(afterInput));
+    if (!inputChanged) {
+      throw new BrowserAgentError('CHAT_COMPOSER_NOT_RESPONSIVE',
+        'Visible composer region did not change after X11 typing; no Enter was sent. See desktop screenshots.',
+        false);
+    }
+
     await page.waitForTimeout(randomDelayMs(350, 700));
     console.log('[normal-chrome-watchdog] send=OS-X11-Return');
     await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-send-return');
     await page.waitForTimeout(5000);
     await captureX11VisualEvidence('04_after_return_key');
+    let afterReturn = await captureX11VisualEvidence('composer_after_return', crop);
+    let sendChanged = !(await fs.readFile(afterInput)).equals(await fs.readFile(afterReturn));
+    if (!sendChanged) {
+      await page.waitForTimeout(3000);
+      afterReturn = await captureX11VisualEvidence('composer_after_return_recheck', crop);
+      sendChanged = !(await fs.readFile(afterInput)).equals(await fs.readFile(afterReturn));
+    }
 
-    // Pressing Return is not evidence that ChatGPT received a message.
-    // Without approved visual review, never record wakeDelivery, activate the reviewer,
-    // or arm the watchdog for an unverified wake.
-    const result={
-      ok:false, provider:'normal-system-chrome-x11-phase1-visual-evidence',
-      action,wakeId,posted:false,persisted:false,chatUrl:requestedUrl,
-      verification:'VISUAL_REVIEW_REQUIRED_X11_SCREENSHOTS',
-      failures:[{provider:'normal-system-chrome-x11',code:'WAKE_NOT_VERIFIED',
-        retryable:false,error:'OS keyboard input finished, but actual ChatGPT message delivery remains unverified; see desktop screenshot artifact.'}],
-      delivery:{persisted:false,verification:'OS_DESKTOP_CAPTURE_ONLY'}
+    // This is an OS-visible submission transition, NOT proof that ChatGPT
+    // durably stored the message. Never call it persisted or delivered.
+    const status = sendChanged ? 'SEND_ATTEMPTED_VISUAL_TRANSITION' : 'SEND_UNVERIFIED_NO_VISUAL_TRANSITION';
+    const result = {
+      ok: sendChanged, provider:'normal-system-chrome-x11-phase1-visual-evidence',
+      action, wakeId, posted: sendChanged, sendAttempted: true, persisted:false,
+      chatUrl:requestedUrl,
+      verification:'X11_VISIBLE_COMPOSER_TRANSITION_ONLY',
+      ...(!sendChanged ? {failures:[{provider:'normal-system-chrome-x11',
+        code:'SEND_UNVERIFIED_NO_VISUAL_TRANSITION',retryable:false,
+        error:'X11 Enter was pressed but the composer region did not visibly change; inspect screenshots before retrying.'}]} : {}),
+      delivery:{status,persisted:false,verification:'X11_VISIBLE_COMPOSER_TRANSITION_ONLY'}
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n', 'utf8');
     return result;
@@ -1300,7 +1329,7 @@ if (mode === 'resume_existing' && action === 'wake') {
   try {
     const result = await runNormalChromeExistingSession(chromium);
     console.log(JSON.stringify(result));
-    process.exit(0);
+    process.exit(result.ok === true ? 0 : 1);
   } catch (error) {
     const failure = {
       provider: 'normal-system-chrome-x11',
