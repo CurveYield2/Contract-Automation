@@ -322,6 +322,42 @@ async function mapLimitV1(items,limit,worker){
   return out;
 }
 
+const PERMIT2_ALLOWANCE_VIEW_ABI_V1=['function allowance(address owner,address token,address spender) view returns (uint160 amount,uint48 expiration,uint48 nonce)'];
+const MAX_UINT160_V1=(1n<<160n)-1n,MAX_UINT48_V1=(1n<<48n)-1n;
+function nestedMappingKeyV1(ethers,keys,slot,layout){
+  return keys.reduce((current,key)=>storageKeyV1(ethers,key,BigInt(current),layout),slot);
+}
+// Anvil-only fast path: prove the exact allowance mapping through its real getter, restore the
+// probe word even on failed reads, and use ordinary approve transactions if verification fails.
+async function probeVerifiedAllowanceMappingV1({provider,ethers,address,keys,read,probeWord,matches}){
+  for(let slot=0;slot<=50;slot++)for(const layout of ['SOLIDITY','VYPER']){
+    const key=nestedMappingKeyV1(ethers,keys,slot,layout);
+    let original,match=false;
+    try{
+      original=await storageAtV1(provider,address,key);
+      await provider.send('anvil_setStorageAt',[address,key,ethersWordV1(probeWord)]);
+      match=matches(await read());
+    }catch{}
+    finally{
+      if(original!==undefined)await provider.send('anvil_setStorageAt',[address,key,original]);
+    }
+    if(match)return{slot,layout};
+  }
+  return null;
+}
+async function writeVerifiedAllowanceV1({provider,ethers,address,keys,slot,read,matches,makeWord}){
+  const key=nestedMappingKeyV1(ethers,keys,slot.slot,slot.layout);
+  const original=await storageAtV1(provider,address,key);
+  const desired=ethersWordV1(makeWord(BigInt(original)));
+  let verified=false;
+  try{
+    if(BigInt(original)!==BigInt(desired))await provider.send('anvil_setStorageAt',[address,key,desired]);
+    verified=matches(await read());
+  }catch{}
+  if(!verified)await provider.send('anvil_setStorageAt',[address,key,original]);
+  return verified;
+}
+
 export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spenders=[]}){
   const holderAddresses=uniqueAddressesV1(ethers,holders),spenderAddresses=uniqueAddressesV1(ethers,spenders);
   const gaps=[],rpcMutations=[],transactionReceipts=[],slotResults=[];
@@ -368,24 +404,48 @@ export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spender
       tokenRecord.balanceSlot=slot.slot;tokenRecord.balanceLayout=slot.layout;
     }
     slotResults.push({token,status:'FOUND',slot:slot.slot,layout:slot.layout,decimals,fundedAmount:verified===holderAddresses.length?amount.toString():null,plannedFundedAmount:amount.toString(),holdersWritten:writes,holdersVerified:verified});
-    console.log(`[phase0-fixture] balance slot ${slotResults.length}/${tokens.length}; ${token}; verified=${verified}`);
   }
 
-  console.log('[phase0-fixture] ERC20 approvals started');
-  let approvalsComplete=0;
+  const allowanceSlots=new Map();
+  for(const row of tokens){
+    const token=normalizedAddressV1(ethers,row?.address??row);
+    if(!token||!holderAddresses.length||!spenderAddresses.length)continue;
+    const owner=holderAddresses[0],spender=spenderAddresses[0];
+    const view=new ethers.Contract(token,ERC20_APPROVE_ABI_V1,provider);
+    const probe=0x13579bdf2468acen;
+    try{
+      const slot=await probeVerifiedAllowanceMappingV1({
+        provider,ethers,address:token,keys:[owner,spender],probeWord:probe,
+        read:()=>view.getFunction('allowance(address,address)').staticCall(owner,spender),
+        matches:value=>BigInt(value)===probe
+      });
+      if(slot)allowanceSlots.set(token.toLowerCase(),slot);
+    }catch(error){gaps.push({type:'ERC20_ALLOWANCE_SLOT_PROBE_FAILED',token,message:String(error?.message??error).slice(0,800)});}
+  }
+  console.log(`[phase0-fixture] balances ready; allowance slots verified=${allowanceSlots.size}/${tokens.length}`);
   await mapLimitV1(holderAddresses,6,async holder=>{
-    for(const tokenRecord of tokens){
-      const token=normalizedAddressV1(ethers,tokenRecord?.address??tokenRecord);if(!token)continue;
+    for(const row of tokens){
+      const token=normalizedAddressV1(ethers,row?.address??row);if(!token)continue;
+      const view=new ethers.Contract(token,ERC20_APPROVE_ABI_V1,provider);
       for(const spender of spenderAddresses){
         try{
+          const slot=allowanceSlots.get(token.toLowerCase());
+          const direct=slot&&await writeVerifiedAllowanceV1({
+            provider,ethers,address:token,keys:[holder,spender],slot,makeWord:()=>ethers.MaxUint256,
+            read:()=>view.getFunction('allowance(address,address)').staticCall(holder,spender),
+            matches:value=>BigInt(value)===ethers.MaxUint256
+          });
+          if(direct){
+            rpcMutations.push({kind:'ERC20_APPROVAL_STORAGE',token,holder,spender,slot:slot.slot,layout:slot.layout,status:'PASS'});
+            continue;
+          }
           const receipt=await sendEncodedV1({provider,ethers,from:holder,to:token,iface:erc20Iface,signature:'approve(address,uint256)',args:[spender,ethers.MaxUint256]});
           transactionReceipts.push(receiptRowV1('ERC20_APPROVAL',receipt,{token,holder,spender,amount:ethers.MaxUint256.toString()}));
         }catch(error){gaps.push({type:'ERC20_APPROVAL_FAILED',token,holder,spender,message:String(error?.shortMessage??error?.message??error).slice(0,1000)});}
       }
     }
-    approvalsComplete++;
-    console.log(`[phase0-fixture] ERC20 approvals ${approvalsComplete}/${holderAddresses.length} holders`);
   });
+  console.log(`[phase0-fixture] direct approvals done; storage=${rpcMutations.filter(x=>x.kind==='ERC20_APPROVAL_STORAGE').length}; transactions=${transactionReceipts.filter(x=>x.kind==='ERC20_APPROVAL').length}`);
 
   let permit2={address:ethers.getAddress(PHASE0_PERMIT2_ADDRESS_V1),codePresent:false,status:'SKIPPED_NO_CODE'};
   try{
@@ -393,29 +453,63 @@ export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spender
     permit2.codePresent=Boolean(code&&code!=='0x');
     if(permit2.codePresent){
       permit2.status='PASS';
-      console.log('[phase0-fixture] Permit2 approvals started');
-      let permit2Complete=0;
+      const permit2View=new ethers.Contract(permit2.address,PERMIT2_ALLOWANCE_VIEW_ABI_V1,provider);
+      let permit2Slot=null;
+      if(holderAddresses.length&&tokens.length&&spenderAddresses.length){
+        const holder=holderAddresses[0],token=normalizedAddressV1(ethers,tokens[0]?.address??tokens[0]),spender=spenderAddresses[0];
+        if(token)try{
+          const existing=await permit2View.getFunction('allowance(address,address,address)').staticCall(holder,token,spender);
+          const probeAmount=0x13579bdf2468acen,probeExpiration=MAX_UINT48_V1;
+          permit2Slot=await probeVerifiedAllowanceMappingV1({
+            provider,ethers,address:permit2.address,keys:[holder,token,spender],
+            probeWord:(BigInt(existing[2])<<208n)|(probeExpiration<<160n)|probeAmount,
+            read:()=>permit2View.getFunction('allowance(address,address,address)').staticCall(holder,token,spender),
+            matches:value=>BigInt(value[0])===probeAmount&&BigInt(value[1])===probeExpiration&&BigInt(value[2])===BigInt(existing[2])
+          });
+        }catch(error){gaps.push({type:'PERMIT2_ALLOWANCE_SLOT_PROBE_FAILED',message:String(error?.message??error).slice(0,800)});}
+      }
+      console.log(`[phase0-fixture] Permit2 allowance slot ${permit2Slot?'verified':'unavailable (using transactions)'}`);
       await mapLimitV1(holderAddresses,6,async holder=>{
-        for(const tokenRecord of tokens){
-          const token=normalizedAddressV1(ethers,tokenRecord?.address??tokenRecord);if(!token)continue;
+        for(const row of tokens){
+          const token=normalizedAddressV1(ethers,row?.address??row);if(!token)continue;
           try{
-            const receipt=await sendEncodedV1({provider,ethers,from:holder,to:token,iface:erc20Iface,signature:'approve(address,uint256)',args:[permit2.address,ethers.MaxUint256]});
-            transactionReceipts.push(receiptRowV1('ERC20_APPROVAL_TO_PERMIT2',receipt,{token,holder,spender:permit2.address,amount:ethers.MaxUint256.toString()}));
+            const view=new ethers.Contract(token,ERC20_APPROVE_ABI_V1,provider);
+            const slot=allowanceSlots.get(token.toLowerCase());
+            const direct=slot&&await writeVerifiedAllowanceV1({
+              provider,ethers,address:token,keys:[holder,permit2.address],slot,
+              makeWord:()=>ethers.MaxUint256,
+              read:()=>view.getFunction('allowance(address,address)').staticCall(holder,permit2.address),
+              matches:value=>BigInt(value)===ethers.MaxUint256
+            });
+            if(direct)rpcMutations.push({kind:'ERC20_APPROVAL_TO_PERMIT2_STORAGE',token,holder,spender:permit2.address,slot:slot.slot,layout:slot.layout,status:'PASS'});
+            else{
+              const receipt=await sendEncodedV1({provider,ethers,from:holder,to:token,iface:erc20Iface,signature:'approve(address,uint256)',args:[permit2.address,ethers.MaxUint256]});
+              transactionReceipts.push(receiptRowV1('ERC20_APPROVAL_TO_PERMIT2',receipt,{token,holder,spender:permit2.address,amount:ethers.MaxUint256.toString()}));
+            }
           }catch(error){
             gaps.push({type:'PERMIT2_TOKEN_APPROVAL_FAILED',token,holder,spender:permit2.address,message:String(error?.shortMessage??error?.message??error).slice(0,1000)});continue;
           }
           for(const spender of spenderAddresses){
             try{
-              const receipt=await sendEncodedV1({provider,ethers,from:holder,to:permit2.address,iface:permit2Iface,signature:'approve(address,address,uint160,uint48)',args:[token,spender,(1n<<160n)-1n,(1n<<48n)-1n]});
-              transactionReceipts.push(receiptRowV1('PERMIT2_ALLOWANCE',receipt,{token,holder,spender,amount:((1n<<160n)-1n).toString(),expiration:((1n<<48n)-1n).toString()}));
+              const direct=permit2Slot&&await writeVerifiedAllowanceV1({
+                provider,ethers,address:permit2.address,keys:[holder,token,spender],slot:permit2Slot,
+                makeWord:previous=>(previous&~((1n<<208n)-1n))|(MAX_UINT48_V1<<160n)|MAX_UINT160_V1,
+                read:()=>permit2View.getFunction('allowance(address,address,address)').staticCall(holder,token,spender),
+                matches:value=>BigInt(value[0])===MAX_UINT160_V1&&BigInt(value[1])===MAX_UINT48_V1
+              });
+              if(direct){
+                rpcMutations.push({kind:'PERMIT2_ALLOWANCE_STORAGE',token,holder,spender,slot:permit2Slot.slot,layout:permit2Slot.layout,status:'PASS'});
+                continue;
+              }
+              const receipt=await sendEncodedV1({provider,ethers,from:holder,to:permit2.address,iface:permit2Iface,signature:'approve(address,address,uint160,uint48)',args:[token,spender,MAX_UINT160_V1,MAX_UINT48_V1]});
+              transactionReceipts.push(receiptRowV1('PERMIT2_ALLOWANCE',receipt,{token,holder,spender,amount:MAX_UINT160_V1.toString(),expiration:MAX_UINT48_V1.toString()}));
             }catch(error){gaps.push({type:'PERMIT2_ALLOWANCE_FAILED',token,holder,spender,message:String(error?.shortMessage??error?.message??error).slice(0,1000)});}
           }
         }
-        permit2Complete++;
-        console.log(`[phase0-fixture] Permit2 approvals ${permit2Complete}/${holderAddresses.length} holders`);
       });
     }
   }catch(error){permit2={...permit2,status:'CODE_READ_FAILED'};gaps.push({type:'PERMIT2_CODE_READ_FAILED',address:permit2.address,message:String(error?.message??error).slice(0,800)});}
+  console.log(`[phase0-fixture] Permit2 approvals complete; storage mutations=${rpcMutations.filter(x=>x.kind.includes('APPROVAL')||x.kind==='PERMIT2_ALLOWANCE_STORAGE').length}; mined receipts=${transactionReceipts.length}`);
 
   // Approval transactions consume native gas; restore the specified fixture ETH balance as the final actor state.
   for(const holder of holderAddresses){
@@ -429,8 +523,11 @@ export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spender
     ethBalanceWrites:rpcMutations.filter(x=>x.kind==='ETH_BALANCE_SET'||x.kind==='ETH_BALANCE_RESET_AFTER_APPROVALS').length,
     tokenBalanceWrites:rpcMutations.filter(x=>x.kind==='TOKEN_BALANCE_SET').length,
     erc20Approvals:transactionReceipts.filter(x=>x.kind==='ERC20_APPROVAL').length,
+    erc20StorageApprovals:rpcMutations.filter(x=>x.kind==='ERC20_APPROVAL_STORAGE').length,
     permit2TokenApprovals:transactionReceipts.filter(x=>x.kind==='ERC20_APPROVAL_TO_PERMIT2').length,
+    permit2TokenStorageApprovals:rpcMutations.filter(x=>x.kind==='ERC20_APPROVAL_TO_PERMIT2_STORAGE').length,
     permit2Allowances:transactionReceipts.filter(x=>x.kind==='PERMIT2_ALLOWANCE').length,
+    permit2StorageAllowances:rpcMutations.filter(x=>x.kind==='PERMIT2_ALLOWANCE_STORAGE').length,
     transactionReceipts:transactionReceipts.length,
     gaps:gaps.length
   };

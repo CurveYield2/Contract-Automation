@@ -8,7 +8,7 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import solc from 'solc';
 import * as ethers from 'ethers';
-import {buildCompiledArtifactErrorSelectorIndexV1,decodeTelemetryRevertReasonV1,topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAmountV1,discoverCreatorCandidatesV1,buildCreatorArgumentsV1,executeCreatorSynthesisV1,bindCreatedContractV1,refreshCreatedAssociationsV1,discoverActivationCandidatesV1,buildActivationArgumentsV1,executeActivationSynthesisV1} from '../src/phase0-fixture-synthesis-v1.mjs';
+import {buildCompiledArtifactErrorSelectorIndexV1,decodeTelemetryRevertReasonV1,topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,PHASE0_PERMIT2_ADDRESS_V1,weightedFixtureAddressSeedV1,chooseFixtureAmountV1,discoverCreatorCandidatesV1,buildCreatorArgumentsV1,executeCreatorSynthesisV1,bindCreatedContractV1,refreshCreatedAssociationsV1,discoverActivationCandidatesV1,buildActivationArgumentsV1,executeActivationSynthesisV1} from '../src/phase0-fixture-synthesis-v1.mjs';
 import {renderMedusaRouterV2,buildMedusaConfigV2,targetObjects,augmentDelegateProxyContextsV2,resolveTelemetryCallerContextV2,pickFn,runTelemetry,shouldObserveAccountingCallV1} from '../src/phase0-randomized-simulation-v1.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
@@ -141,6 +141,19 @@ contract VyperShapeToken {
   }
 }
 
+contract MockPermit2 {
+  struct PackedAllowance { uint160 amount; uint48 expiration; uint48 nonce; }
+  mapping(address => mapping(address => mapping(address => PackedAllowance))) public allowance;
+  function approve(address token, address spender, uint160 amount, uint48 expiration) external {
+    PackedAllowance storage stored = allowance[msg.sender][token][spender];
+    stored.amount = amount;
+    stored.expiration = expiration;
+  }
+  function setNonce(address owner, address token, address spender, uint48 nonce) external {
+    allowance[owner][token][spender].nonce = nonce;
+  }
+}
+
 contract Registry {
   struct Pair { address first; address second; }
   address public owner;
@@ -180,7 +193,11 @@ test('Stage-1 discovers associations and privileged actors, funds Solidity and V
     const slotToken=await deployArtifact(provider,compiled.SlotToken);
     const vyperToken=await deployArtifact(provider,compiled.VyperShapeToken);
     const registry=await deployArtifact(provider,compiled.Registry,[await slotToken.getAddress(),await vyperToken.getAddress()]);
+    const permit2Impl=await deployArtifact(provider,compiled.MockPermit2);
+    await provider.send('anvil_setCode',[PHASE0_PERMIT2_ADDRESS_V1,await provider.getCode(await permit2Impl.getAddress())]);
+    const permit2=new ethers.Contract(PHASE0_PERMIT2_ADDRESS_V1,compiled.MockPermit2.abi,provider);
     const accounts=await provider.send('eth_accounts',[]);
+    await (await permit2.connect(await provider.getSigner(0)).setNonce(accounts[0],await slotToken.getAddress(),await registry.getAddress(),7)).wait();
     const targets=[
       {qualifiedName:'Stage1.sol:SlotToken',address:await slotToken.getAddress(),artifact:{abi:compiled.SlotToken.abi}},
       {qualifiedName:'Stage1.sol:VyperShapeToken',address:await vyperToken.getAddress(),artifact:{abi:compiled.VyperShapeToken.abi}},
@@ -206,7 +223,13 @@ test('Stage-1 discovers associations and privileged actors, funds Solidity and V
     assert.equal(slotRow.layout,'SOLIDITY');
     assert.equal(vyperRow.status,'FOUND');
     assert.equal(vyperRow.layout,'VYPER');
-    assert.equal(funding.receiptCounts.erc20Approvals,holders.length*pool.tokens.length);
+    assert.equal(funding.receiptCounts.erc20Approvals+funding.receiptCounts.erc20StorageApprovals,holders.length*pool.tokens.length);
+    assert.equal(funding.receiptCounts.erc20StorageApprovals,holders.length*pool.tokens.length);
+    assert.equal(funding.receiptCounts.permit2TokenStorageApprovals,holders.length*pool.tokens.length);
+    assert.equal(funding.receiptCounts.permit2StorageAllowances,holders.length*pool.tokens.length);
+    assert.equal(funding.receiptCounts.permit2Allowances,0);
+    assert.equal(funding.receiptCounts.permit2TokenApprovals,0);
+    assert.ok(funding.rpcMutations.filter(x=>x.kind==='ERC20_APPROVAL_STORAGE').every(x=>x.status==='PASS'));
     assert.equal(funding.receiptCounts.gaps,0);
 
     for(const holder of holders){
@@ -214,6 +237,15 @@ test('Stage-1 discovers associations and privileged actors, funds Solidity and V
       assert.equal((await vyperToken.balanceOf(holder)).toString(),vyperRow.fundedAmount);
       assert.equal((await slotToken.allowance(holder,registryAddress)).toString(),ethers.MaxUint256.toString());
       assert.equal((await vyperToken.allowance(holder,registryAddress)).toString(),ethers.MaxUint256.toString());
+      for(const token of [slotTokenAddress,vyperTokenAddress]){
+        const values=await permit2.getFunction('allowance(address,address,address)').staticCall(holder,token,registryAddress);
+        assert.equal(BigInt(values[0]),(1n<<160n)-1n);
+        assert.equal(BigInt(values[1]),(1n<<48n)-1n);
+        const expectedNonce=holder.toLowerCase()===accounts[0].toLowerCase()&&token.toLowerCase()===slotTokenAddress.toLowerCase()?7n:0n;
+        assert.equal(BigInt(values[2]),expectedNonce);
+      }
+      assert.equal((await slotToken.allowance(holder,PHASE0_PERMIT2_ADDRESS_V1)).toString(),ethers.MaxUint256.toString());
+      assert.equal((await vyperToken.allowance(holder,PHASE0_PERMIT2_ADDRESS_V1)).toString(),ethers.MaxUint256.toString());
       assert.equal((await provider.getBalance(holder)).toString(),(10n**24n).toString());
     }
   }finally{
