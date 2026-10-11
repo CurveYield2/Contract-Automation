@@ -243,6 +243,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if { [ "${{ steps.request.outputs.review_kind }}" = phase ] && [ "${{ steps.request.outputs.phase_sequence }}" = 5 ]; } ||
+             { [ "${{ steps.request.outputs.review_kind }}" = master ] && [ "${{ steps.request.outputs.segment_id }}" = reviewer-2-phases-02-05 ]; }; then
+            test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::RPC_ETHEREUM secret missing for Phase-5 V7 fork preflight"; exit 1; }
+          fi
           args=(--controller-root .audit-controller --campaign-id "${{ steps.request.outputs.campaign_id }}" --campaign-path "${{ steps.routing.outputs.campaign_path }}" --campaign-directory-path "${{ steps.routing.outputs.campaign_directory_path }}" --review-kind "${{ steps.request.outputs.review_kind }}" --audit-controller-ref "${{ steps.request.outputs.audit_controller_ref }}")
           if [ "${{ steps.request.outputs.review_kind }}" = master ]; then
             args+=(--segment-id "${{ steps.request.outputs.segment_id }}" --master-outcome "${{ steps.request.outputs.master_outcome }}")
