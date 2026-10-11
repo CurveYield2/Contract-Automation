@@ -12,7 +12,7 @@ import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
-import {topDecodedTelemetryRevertsV1} from './phase0-fixture-synthesis-v1.mjs';
+import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1} from './phase0-fixture-synthesis-v1.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
 export const PHASE0_MEDUSA_MIN_CALLS_V1=100001;
@@ -525,8 +525,19 @@ function intValue(param,rng){
   const max=signed?(1n<<BigInt(bits-1))-1n:(1n<<BigInt(bits))-1n;if(v>max)v=max;if(signed&&rng()<0.15)v=-v;return v;
 }
 function randomValue(param,rng,ctx){
+  const chosenAddresses=ctx.chosenAddresses??(ctx.chosenAddresses=[]);
+  if(String(param?.type??'')==='address'&&ctx.valuePool){
+    const address=chooseFixtureAddressV1({rng,valuePool:ctx.valuePool,actors:ctx.actors,targets:ctx.targets,chosenAddresses});
+    if(address){recordChosenAddressesV1(address,chosenAddresses);return address;}
+  }
+  if(ctx.valuePool&&/^uint(?:\d+)?$/.test(String(param?.type??''))&&rng()<0.75){
+    const amount=chooseFixtureAmountV1({rng,param,valuePool:ctx.valuePool,chosenAddresses});
+    if(amount!==null)return amount;
+  }
   const generated=generateTypedValueV2(param,rng,{
-    addresses:[...(ctx.actors??[]),...(ctx.targets??[])],
+    addresses:ctx.valuePool
+      ? weightedFixtureAddressSeedV1({valuePool:ctx.valuePool,actors:ctx.actors,targets:ctx.targets,chosenAddresses})
+      : [...(ctx.actors??[]),...(ctx.targets??[])],
     limits:{maxDynamicArrayLength:3,maxDepth:8,maxTotalElements:96,maxDynamicBytes:32,maxStringBytes:64}
   });
   if(generated.limitation){
@@ -535,6 +546,7 @@ function randomValue(param,rng,ctx){
     error.limitation=generated.limitation;
     throw error;
   }
+  recordChosenAddressesV1(generated.value,chosenAddresses);
   return generated.value;
 }
 function simpleView(f){return (f.outputs??[]).length>0&&(f.outputs??[]).every(x=>/^(?:u?int\d*|address|bool|bytes\d*|string)$/.test(x.type));}
@@ -954,7 +966,7 @@ function preflightKindV2(error){
   const text=String(error?.shortMessage??error?.message??error??'');
   return error?.code==='CALL_EXCEPTION'||/revert|execution reverted|panic/i.test(text)?'PROTOCOL_REJECTION':'INFRASTRUCTURE';
 }
-export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,artifacts=[],telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
+export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,artifacts=[],valuePool=null,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
   const summaries=[];
   let snapshotId=baselineSnapshot;
   const canonicalBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
@@ -1028,7 +1040,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
 
           let args=null,argError=null;
           try{
-            args=qualifiedAction?.args??f.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));
+            const argumentContext={actors,targets:targets.map(x=>x.address),valuePool,chosenAddresses:[]};
+            args=qualifiedAction?.args??f.inputs.map(p=>randomValue(p,rng,argumentContext));
             rec.decodedInputs=normalize(args);
             rec.stages.ARG_GEN={status:'PASS',basis:qualifiedAction?.basis??'BOUNDED_RECURSIVE_ABI_GENERATION'};
             if(qualifiedAction)rec.recipeAction={basis:qualifiedAction.basis};
@@ -1243,7 +1256,7 @@ function medusaParamDynamicV2(param){
   if(param?.baseType==='tuple')return (param.components??[]).some(medusaParamDynamicV2);
   return param?.type==='string'||param?.type==='bytes';
 }
-export function renderMedusaRouterV2(ethers,targets){
+export function renderMedusaRouterV2(ethers,targets,valuePool=null){
   const plan=medusaWrappers(ethers,targets),state={nextStruct:0,structs:[]},body=[];
   for(const x of plan.rows){
     // Bundle all target arguments into ONE calldata struct: the wrapper then holds a single stack slot regardless of
@@ -1262,6 +1275,11 @@ export function renderMedusaRouterV2(ethers,targets){
     }
     x.wrapperSignature=`Phase0MedusaRouterV1.${x.wrapperName}(${x.canonicalInputTypes.join(',')})`;
     body.push(`  function ${x.wrapperName}(${params}) external${payable} { CHEATS.prank(msg.sender); (bool ok, bytes memory data)=address(${targetAddress}).call{value:${value}}(${forwarded}); if(ok){successfulTargetCalls++;} emit Phase0Call(address(${targetAddress}),bytes4(${selector}),msg.sender,ok,data); }`);
+  }
+  const seedAddresses=[...new Set((valuePool?.addresses??[]).map(x=>String(x).toLowerCase()))].filter(x=>/^0x[0-9a-f]{40}$/.test(x));
+  if(seedAddresses.length){
+    const assignments=seedAddresses.map((address,index)=>`out[${index}]=address(${ethers.getAddress(address)});`).join(' ');
+    body.push(`  function p0_seed_addresses() external pure returns (address[${seedAddresses.length}] memory out) { ${assignments} }`);
   }
   const properties=explicitTargetPropertiesV2(ethers,targets);
   for(const property of properties){
@@ -1394,7 +1412,7 @@ async function readTargetPropertyV2({provider,ethers,property,from}){
     return{status:'OK',value:Boolean(iface.decodeFunctionResult(property.targetSignature,raw)[0])};
   }catch(error){return{status:'FAILED',value:null,error:String(error?.shortMessage??error?.message??error).slice(0,1200)};}
 }
-async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
+async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties,valuePool=null}){
   if(!properties.length)return[];
   const provider=new ethers.JsonRpcProvider(anvilUrl,1,{staticNetwork:true,cacheTimeout:-1});
   const actors=await provider.send('eth_accounts',[]);
@@ -1427,7 +1445,8 @@ async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
           const rng=seeded(`property-witness-v2:${property.propertyId}:${selected.signature}`);
           const qualified=qualifiedActionV2({target,selected,actors,rng});
           const actor=qualified?.sender??defaultActor;
-          const args=qualified?.args??selected.fragment.inputs.map(p=>randomValue(p,rng,{actors,targets:targets.map(x=>x.address)}));
+          const argumentContext={actors,targets:targets.map(x=>x.address),valuePool,chosenAddresses:[]};
+          const args=qualified?.args??selected.fragment.inputs.map(p=>randomValue(p,rng,argumentContext));
           const iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
           const data=iface.encodeFunctionData(selected.signature,args),value=qualified?.value??(selected.fragment.stateMutability==='payable'?1n:0n);
           const before=await snapshot({provider,ethers,target,sender:actor,plan:target.plan,systemTargets:targets});
@@ -1460,9 +1479,9 @@ async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties}){
   }finally{await provider.destroy();}
   return out;
 }
-export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,runId='medusa-anvil-fork-001',routerProjectDir=null,stopAtPlateau=false}){
+export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,valuePool=null,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,runId='medusa-anvil-fork-001',routerProjectDir=null,stopAtPlateau=false}){
   const dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
-  const router=renderMedusaRouterV2(ethers,targets);
+  const router=renderMedusaRouterV2(ethers,targets,valuePool);
   if(!router.rows.length){
     const s={schemaVersion:'curveyield-phase0-medusa-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,runId:runId,mode:'DISCOVERY_WITH_ORACLE_GAPS',executionStatus:'NOT_EXECUTED',coverageStatus:'NO_ROUTABLE_FUNCTIONS',checkStatus:'ORACLE_GAP',reachabilityStatus:'UNKNOWN',observationStatus:'UNAVAILABLE',status:'BLOCKED_NO_ROUTABLE_ABI_FUNCTIONS',configuredCallLimit:callLimit,observedCalls:0,limitations:router.omitted};
     await fs.writeFile(path.join(dir,'RUN_SUMMARY_v1.json'),JSON.stringify(s,null,2)+'\n');return s;
@@ -1478,7 +1497,7 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
   const cfgPath=path.join(medusaProject,'medusa.json');await fs.writeFile(cfgPath,JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_CONFIG_v1.json'),JSON.stringify(cfg,null,2)+'\n');
   await fs.writeFile(path.join(dir,'MEDUSA_ROUTER_v1.sol'),router.source);
-  const witnessRows=await collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties:router.properties});
+  const witnessRows=await collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties:router.properties,valuePool});
   await fs.writeFile(path.join(dir,'PROPERTY_WITNESSES_v2.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-property-witnesses-v2',properties:witnessRows},null,2)+'\n');
 
   const medusaStartedAt=Date.now();
@@ -1642,13 +1661,13 @@ export function aggregateMedusaShardsV2({shards,minimumRequiredCalls,configs}){
     }
   };
 }
-export async function runMedusaShardsV2({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,shardCallLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,maxShards=40,maxSeconds=1800}){
+export async function runMedusaShardsV2({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,valuePool=null,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,shardCallLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,maxShards=40,maxSeconds=1800}){
   const configs=medusaShardConfigurationsV2(targets),shards=[],started=Date.now();
   for(let i=0;i<maxShards;i++){
     const config=configs[i%configs.length];
     const runId=`medusa-anvil-fork-${String(i+1).padStart(3,'0')}`;
     console.log(`[phase0-medusa] shard ${i+1}: ${config.configId} (${config.targets.length} contracts)`);
-    const shard=await runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets:config.targets,outRoot,callLimit:shardCallLimit,minimumRequiredCalls:1,runId,routerProjectDir:path.join(outRoot,'runs',`router-${config.configId}`),stopAtPlateau:true});
+    const shard=await runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets:config.targets,outRoot,valuePool,callLimit:shardCallLimit,minimumRequiredCalls:1,runId,routerProjectDir:path.join(outRoot,'runs',`router-${config.configId}`),stopAtPlateau:true});
     const sets=shard.varietySets;
     Object.assign(shard,{configId:config.configId,cluster:config.cluster});
     Object.defineProperty(shard,'varietySets',{value:sets,enumerable:false});
@@ -1765,6 +1784,39 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       await provider.destroy();
       throw error;
     }
+    // Fixture synthesis is best effort: a failure is recorded as a typed gap and never aborts the simulation.
+    let valuePool,fixtureFunding;
+    try{valuePool=await discoverValuePoolV1({provider,ethers,targets,actors});}
+    catch(error){valuePool={addresses:[],tokens:[],associations:{},privileged:[],created:[],receipts:[],gaps:[{type:'VALUE_POOL_DISCOVERY_FAILED',message:String(error?.message??error).slice(0,1200)}]};}
+    try{
+      fixtureFunding=await fundActorsV1({
+        provider,ethers,tokens:valuePool.tokens,
+        holders:[...actors,...PHASE0_MEDUSA_SENDERS_V1],
+        spenders:targets.map(x=>x.address)
+      });
+    }catch(error){fixtureFunding={holders:[],spenders:[],slotResults:[],rpcMutations:[],transactionReceipts:[],receiptCounts:{},permit2:null,gaps:[{type:'ACTOR_FUNDING_FAILED',message:String(error?.message??error).slice(0,1200)}]};}
+    const serializedValuePool=serializeValuePoolV1(valuePool);
+    const fixtureEvidence={
+      schemaVersion:'curveyield-phase0-fixture-synthesis-v1',
+      stage:'STAGE_1_VALUE_POOL_AND_ACTOR_FUNDING',
+      valuePool:serializedValuePool,
+      funding:fixtureFunding
+    };
+    await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
+    const fixtureSynthesis={
+      schemaVersion:fixtureEvidence.schemaVersion,
+      stage:fixtureEvidence.stage,
+      evidenceRef:'runs/PHASE0_FIXTURE_SYNTHESIS_v1.json',
+      valuePool:serializedValuePool,
+      funding:{
+        holders:fixtureFunding.holders,
+        spenders:fixtureFunding.spenders,
+        slotResults:fixtureFunding.slotResults,
+        receiptCounts:fixtureFunding.receiptCounts,
+        permit2:fixtureFunding.permit2,
+        gaps:fixtureFunding.gaps
+      }
+    };
     const baselineBlock=Number(await provider.getBlockNumber()),baselineHash=(await provider.getBlock(baselineBlock))?.hash??null,baselineSnapshot=await provider.send('evm_snapshot',[]);
     const deploymentComplete=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;
     let medusa;
@@ -1779,7 +1831,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         }catch(error){stateSource={mode:'LIVE_FORK_ANVIL',snapshotFailure:String(error?.message??error).slice(0,1200)};}
         console.log(`[phase0-medusa] state source: ${JSON.stringify(stateSource)}`);
         try{
-          medusa=await runMedusaShardsV2({projectRoot:staged.projectRoot,anvilUrl:medusaNode?.url??anvil.url,blockNumber:medusaNode?.blockNumber??baselineBlock,ethers,targets,outRoot:outputRoot,...(medusaSmoke?{minimumRequiredCalls:medusaSmokeCalls,shardCallLimit:Math.max(medusaSmokeCalls,1000)}:{})});
+          medusa=await runMedusaShardsV2({projectRoot:staged.projectRoot,anvilUrl:medusaNode?.url??anvil.url,blockNumber:medusaNode?.blockNumber??baselineBlock,ethers,targets,outRoot:outputRoot,valuePool,...(medusaSmoke?{minimumRequiredCalls:medusaSmokeCalls,shardCallLimit:Math.max(medusaSmokeCalls,1000)}:{})});
           medusa.stateSource=stateSource;
         }finally{if(medusaNode)await medusaNode.close();}
       }catch(error){
@@ -1797,7 +1849,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const shouldRunTelemetry=targets.length&&(!medusaSmoke||telemetrySmoke);
     if(shouldRunTelemetry){
       try{
-        telemetry=await runTelemetry({provider,ethers,targets,actors,outRoot:outputRoot,baselineSnapshot,artifacts,...(telemetrySmoke?{telemetryRuns:1,callsPerRun:telemetrySmokeCalls}:{})});
+        telemetry=await runTelemetry({provider,ethers,targets,actors,outRoot:outputRoot,baselineSnapshot,artifacts,valuePool,...(telemetrySmoke?{telemetryRuns:1,callsPerRun:telemetrySmokeCalls}:{})});
       }catch(error){
         telemetryExecutionFailure={type:'ABI_TELEMETRY_EXECUTION_FAILURE',code:error?.code??null,message:String(error?.message??error).slice(0,3000)};
         console.log(`[phase0-telemetry] failed but workflow will continue to evidence finalization: ${telemetryExecutionFailure.message}`);
@@ -1813,7 +1865,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const telemetryComplete=telemetry.length===expectedTelemetryRuns&&telemetry.every(x=>x.status==='PASS');
     const medusaComplete=!medusaRequired||medusa.status==='PASS';
     const executionMode=telemetrySmoke?(medusaSmoke?'MEDUSA_AND_TELEMETRY_SMOKE':'TELEMETRY_SMOKE'):(medusaSmoke?'MEDUSA_SMOKE':'ALL_PHASE0_STAGES');
-    const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode,status:medusaComplete&&telemetryComplete?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:medusaComplete&&telemetryComplete?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.length&&telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,lifecycleFamilies:x.lifecycleFamilies,observationReads:x.observationReads,observationFailures:x.observationFailures,decodedRevertReasons:x.decodedRevertReasons,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
+    const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode,status:medusaComplete&&telemetryComplete?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:medusaComplete&&telemetryComplete?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.length&&telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),fixtureSynthesis,medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,lifecycleFamilies:x.lifecycleFamilies,observationReads:x.observationReads,observationFailures:x.observationFailures,decodedRevertReasons:x.decodedRevertReasons,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
     const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',packageDependencyInstall,fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,scriptDispositions:deploymentCombined.scriptDispositions,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deployEvidence,null,2)+'\n');await provider.destroy();
