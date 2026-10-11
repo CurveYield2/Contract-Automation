@@ -32,7 +32,7 @@ permissions:
 
 concurrency:
   group: lite-phase0-simulation-testing-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   simulation-testing:
@@ -118,8 +118,8 @@ jobs:
         run: |
           set -euo pipefail
           CAMPAIGN_PATH="$SMOKE_CAMPAIGN_PATH"
-          MEDUSA_CALLS="$SMOKE_MEDUSA_CALLS"
-          TELEMETRY_CALLS="$SMOKE_TELEMETRY_CALLS"
+          MEDUSA_CALLS="${SMOKE_MEDUSA_CALLS:-0}"
+          TELEMETRY_CALLS="${SMOKE_TELEMETRY_CALLS:-0}"
           [[ "$MEDUSA_CALLS" =~ ^[0-9]{1,6}$ ]] || { echo "::error::medusa_calls must be an integer from 0 to 999999"; exit 1; }
           [[ "$TELEMETRY_CALLS" =~ ^[0-9]{1,6}$ ]] || { echo "::error::telemetry_calls must be an integer from 0 to 999999"; exit 1; }
           (( MEDUSA_CALLS > 0 || TELEMETRY_CALLS > 0 )) || { echo "::error::at least one smoke call budget must be greater than zero"; exit 1; }
