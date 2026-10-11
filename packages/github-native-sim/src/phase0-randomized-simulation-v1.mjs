@@ -679,6 +679,26 @@ function associationHoldsV2(associations,holder,callee){
   }
   return false;
 }
+function valuePoolAssociationValuesV2(valuePool,address){
+  const needle=String(address??'').toLowerCase();
+  for(const [key,value] of Object.entries(valuePool?.associations??{})){
+    if(String(key).toLowerCase()===needle)return associationValuesV2(value);
+  }
+  return[];
+}
+export function shouldObserveAccountingCallV1({selected,target,valuePool=null,executionAddress=null}={}){
+  if(selected?.semanticFamily==='ECONOMIC')return{observe:true,basis:'ECONOMIC'};
+  const created=new Set((valuePool?.created??[]).map(address=>String(address).toLowerCase()));
+  const tokenAddresses=new Set((valuePool?.tokens??[]).map(token=>String(token?.address??token).toLowerCase()));
+  const candidates=[target?.address,executionAddress].filter(Boolean).map(address=>String(address).toLowerCase());
+  for(const address of candidates){
+    if(!created.has(address))continue;
+    if(tokenAddresses.has(address))return{observe:true,basis:'CREATED_TOKEN_LIKE'};
+    const associations=valuePoolAssociationValuesV2(valuePool,address);
+    if(associations.some(row=>tokenAddresses.has(String(row).toLowerCase())))return{observe:true,basis:'CREATED_TOKEN_ASSOCIATION'};
+  }
+  return{observe:false,basis:'NON_ACCOUNTING_OR_REJECTED'};
+}
 function zeroAbiValueV2(ethers,param){
   if(param?.baseType==='array'){
     if(Number.isInteger(param.arrayLength)&&param.arrayLength>=0)return Array.from({length:param.arrayLength},()=>zeroAbiValueV2(ethers,param.arrayChildren));
@@ -1264,7 +1284,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       successes:0,reverts:0,errors:0,minedSuccess:0,minedRevert:0,simulatedRejection:0,
       simulationInfrastructureError:0,submissionInfrastructureError:0,submittedOutcomeUnknown:0,
       notExecutedEncodingOrPlanning:0,positiveTransitions:0,positiveEconomicTransitions:0,
-      observationFailures:0,observationReads:0,byContract:{},byFunction:{},
+      observationFailures:0,observationReads:0,accountingObservationCalls:0,skippedObservationCalls:0,byContract:{},byFunction:{},
       feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
@@ -1302,6 +1322,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             actionClass:selected.semanticFamily==='ECONOMIC'?'ECONOMIC_STATE_CHANGE':'OTHER_STATE_CHANGE',
             stages:{ARG_GEN:null,PREFLIGHT:null,SUBMISSION:null,RECEIPT:null,OBSERVATION:null},
             decodedInputs:null,abiGenerated:true,rawRandomBytes:false,executionOutcome:null,
+            observation:'SKIPPED_NON_ACCOUNTING_OR_REJECTED',
             observations:{before:[],after:[],deltas:[]},effectClassification:'NOT_EXECUTED',positiveTransition:false,
             transaction:null,error:null,callerResolution:callerResolutionForTargetV2(target),executionAddress:target.address,
             selectionFeedback:{selectionKey:picked.selectionKey,weight:picked.feedbackWeight,weightMultiplier:picked.selectionWeightMultiplier??1,adaptedContext:stats.contextAdaptations.at(-1)?.atCallIndex===stats.calls+1}
@@ -1325,8 +1346,6 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             rec.error=rec.stages.ARG_GEN.error;
           }else{
             const initialSender=sender;
-            const initialBefore=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
-            rec.observations.before=observationRowsV2(initialBefore,target.recipe,'BEFORE');
             const value=qualifiedAction?.value??(f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n);
             const resolved=await resolveTelemetryCallerContextV2({
               provider,ethers,target,selected,iface,args,value,defaultSender:sender,targets,valuePool,
@@ -1342,11 +1361,19 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             const executionTarget=resolved.executionAddress.toLowerCase()===String(target.address).toLowerCase()
               ? target
               : {...target,address:resolved.executionAddress,contextType:'FACADE',contextDisposition:'READY'};
-            if(sender.toLowerCase()!==String(initialSender).toLowerCase()||resolved.executionAddress.toLowerCase()!==String(target.address).toLowerCase()){
-              const contextualBefore=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
-              rec.observations.before=observationRowsV2(contextualBefore,executionTarget.recipe,'BEFORE');
-            }
             const estimate=resolved.estimate,preflightError=resolved.success?null:resolved.error,callProbe=resolved.callProbe,data=resolved.data;
+            const observationPolicy=shouldObserveAccountingCallV1({selected,target,valuePool,executionAddress:resolved.executionAddress});
+            const shouldObserve=!preflightError&&observationPolicy.observe===true;
+            if(shouldObserve){
+              const before=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
+              rec.observations.before=observationRowsV2(before,executionTarget.recipe,'BEFORE');
+              rec.observation='ACCOUNTING_BEFORE_AFTER';
+              rec.observationBasis=observationPolicy.basis;
+              stats.accountingObservationCalls++;
+            }else{
+              rec.stages.OBSERVATION={status:'SKIPPED',reason:'SKIPPED_NON_ACCOUNTING_OR_REJECTED',reads:0,failedReads:0};
+              stats.skippedObservationCalls++;
+            }
             if(resolved.success){
               rec.stages.PREFLIGHT={status:'PASS',estimateGas:estimate.toString(),callProbe,callerResolution:resolved.resolution,executionAddress:resolved.executionAddress,reusedResolution:resolved.reused===true};
             }else{
@@ -1380,14 +1407,16 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               submission:preflightError?null:(submissionError?{success:false}:{success:!!tx}),
               receipt
             });
-            const after=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
-            rec.observations.after=observationRowsV2(after,executionTarget.recipe,'AFTER');
-            rec.observations.deltas=observationDeltasV2(rec.observations.before,rec.observations.after,{receipt,sender});
-            rec.stages.OBSERVATION={
-              status:rec.observations.after.some(x=>x.status!=='OK')?'PARTIAL':'COMPLETE',
-              reads:rec.observations.after.length,
-              failedReads:rec.observations.after.filter(x=>x.status!=='OK').length
-            };
+            if(shouldObserve){
+              const after=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
+              rec.observations.after=observationRowsV2(after,executionTarget.recipe,'AFTER');
+              rec.observations.deltas=observationDeltasV2(rec.observations.before,rec.observations.after,{receipt,sender});
+              rec.stages.OBSERVATION={
+                status:rec.observations.after.some(x=>x.status!=='OK')?'PARTIAL':'COMPLETE',
+                reads:rec.observations.before.length+rec.observations.after.length,
+                failedReads:[...rec.observations.before,...rec.observations.after].filter(x=>x.status!=='OK').length
+              };
+            }
             const knownNonzero=rec.observations.deltas.filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
             rec.positiveTransition=rec.executionOutcome==='MINED_SUCCESS'&&knownNonzero.length>0;
             rec.effectClassification=rec.positiveTransition?'OBSERVED_STATE_TRANSITION':(rec.executionOutcome==='MINED_SUCCESS'?'MINED_NO_OBSERVED_STATE_TRANSITION':'NO_MINED_SUCCESS');
@@ -1420,7 +1449,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
     const reconciliation=validateTelemetryCountersV2(stats,terminalRows);
     const lifecycleFamilies=lifecycleReachabilityV2(targets,terminalRows);
     const positiveRequired=lifecycleFamilies.filter(x=>x.requiresPositive);
-    const observationStatus=stats.observationReads===0?'UNAVAILABLE':(stats.observationFailures===0?'COMPLETE':'PARTIAL');
+    const observationStatus=stats.accountingObservationCalls===0?'UNAVAILABLE':(stats.observationFailures===0?'COMPLETE':'PARTIAL');
     const reachabilityStatus=positiveRequired.length===0?'NO_QUALIFIED_LIFECYCLES':(positiveRequired.every(x=>x.status==='POSITIVE_WITNESS')?'REACHABLE':positiveRequired.some(x=>x.status==='POSITIVE_WITNESS')?'PARTIAL':'REACHABILITY_GAP');
     console.log(`[phase0-telemetry] ${runId} completed; calls=${stats.calls}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; positiveTransitions=${stats.positiveTransitions}`);
     const actionSequenceDigestSha256=sha256(Buffer.from(JSON.stringify(terminalRows.map(row=>({target:row.target,sender:row.sender,functionSignature:row.functionSignature,decodedInputs:row.decodedInputs,actionClass:row.actionClass})))));
@@ -1430,6 +1459,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       schemaVersion:'curveyield-phase0-abi-telemetry-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
       runId,purpose:'AUTOMATED_LIFECYCLE_TELEMETRY_WITH_TYPED_OUTCOMES_AND_ACCOUNTING_OBSERVATIONS',...stats,
       accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,
+      observationReadsPerAccountingCall:stats.accountingObservationCalls?stats.observationReads/stats.accountingObservationCalls:0,
       interleavedCrossContractBursts:true,executionStatus:'COMPLETED',coverageStatus:stats.calls===callsPerRun?'COMPLETE':'INCOMPLETE',
       checkStatus:'NOT_APPLICABLE',reachabilityStatus,observationStatus,reconciliation,lifecycleFamilies,resetEvidence,
       feedbackStatus:stats.feedbackUpdates>0&&stats.feedbackSelections>0?'ACTIVE':'NO_FEEDBACK_WITNESS',decodedRevertReasons,
