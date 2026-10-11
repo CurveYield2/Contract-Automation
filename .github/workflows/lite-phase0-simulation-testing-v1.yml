@@ -69,7 +69,7 @@ jobs:
         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
       - name: Resolve smoke invocation
         id: invocation
@@ -180,7 +180,9 @@ jobs:
           args=(scripts/run-phase0-randomized-simulation-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --output .phase0-medusa-smoke --fork-url "$ETHEREUM_FORK_RPC_URL")
           if (( MEDUSA_CALLS > 0 )); then args+=(--medusa-smoke-calls "$MEDUSA_CALLS"); fi
           if (( TELEMETRY_CALLS > 0 )); then args+=(--telemetry-smoke-calls "$TELEMETRY_CALLS"); fi
-          node "${args[@]}"
+          # Keep enough job budget to print the failed stage and retain partial evidence.
+          # A smoke must not silently spend a full campaign-length wall clock.
+          timeout -s TERM -k 30s 900s node "${args[@]}" 2>&1 | tee .phase0-smoke-run.log
 
       - name: Report and require requested smoke results
         if: ${{ always() }}
@@ -191,7 +193,16 @@ jobs:
         run: |
           set -euo pipefail
           summary=.phase0-medusa-smoke/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
-          test -f "$summary" || { echo "::error::No simulation summary was produced"; exit 1; }
+          if [ ! -f "$summary" ]; then
+            echo "::error::No simulation summary was produced; inspect retained smoke log and partial evidence"
+            if [ -f .phase0-smoke-run.log ]; then
+              echo "---- Last stage progress markers ----"
+              grep -E '\\[phase0-(smoke-progress|fixture|telemetry|medusa)\\]' .phase0-smoke-run.log | tail -n 40 || true
+              echo "---- Last 60 log lines ----"
+              tail -n 60 .phase0-smoke-run.log
+            fi
+            exit 1
+          fi
           echo "---- Deployment coverage ----"
           jq '.deployment.coverage // {}' "$summary"
 
@@ -202,7 +213,7 @@ jobs:
             jq -r '[.telemetry[]?.decodedRevertReasons[]?] | group_by(.reason) | map({reason:.[0].reason,kind:.[0].kind,selector:.[0].selector,count:(map(.count)|add)}) | sort_by(-.count, .reason) | .[:15] | ("COUNT\tKIND\tSELECTOR\tREASON"), (.[] | [.count,.kind,(.selector // ""),.reason] | @tsv)' "$summary"
           fi
 
-          fixture=.phase0-medusa-smoke/PHASE0_FIXTURE_SYNTHESIS_v1.json
+          fixture=.phase0-medusa-smoke/runs/PHASE0_FIXTURE_SYNTHESIS_v1.json
           if [ -f "$fixture" ]; then
             echo "---- Fixture synthesis evidence ----"
             jq '.' "$fixture"
@@ -219,5 +230,25 @@ jobs:
             jq -e --argjson n "$MEDUSA_CALLS" '(.medusa.status=="PASS" or .medusa.status=="COMPLETE_WITH_ORACLE_GAPS") and (.medusa.observedCalls|tonumber)>=$n' "$summary" >/dev/null
           fi
           if (( TELEMETRY_CALLS > 0 )); then
-            jq -e --argjson n "$TELEMETRY_CALLS" '(.telemetry|length)==1 and (.telemetry[0].status=="PASS") and (.telemetry[0].calls|tonumber)==$n' "$summary" >/dev/null
+            jq -e --argjson n "$TELEMETRY_CALLS" '(.telemetry|length)==1
+              and .telemetry[0].status=="PASS"
+              and (.telemetry[0].calls|tonumber)==$n
+              and .fixtureSynthesis.stage=="STAGE_5_ACCOUNTING_READS_ONLY"
+              and .fixtureSynthesis.accountingObservationPolicy.policy=="PREFLIGHT_PASS_AND_ECONOMIC_OR_CREATED_TOKEN_CONTEXT_ONLY"
+              and ((.telemetry[0].accountingObservationCalls|tonumber)+(.telemetry[0].skippedObservationCalls|tonumber))==$n' "$summary" >/dev/null
           fi
+
+      - name: Retain smoke diagnostics and raw telemetry
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase0-telemetry-smoke-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .phase0-smoke-run.log
+            .phase0-medusa-smoke/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
+            .phase0-medusa-smoke/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
+            .phase0-medusa-smoke/runs/PHASE0_FIXTURE_SYNTHESIS_v1.json
+            .phase0-medusa-smoke/runs/**/RAW_SIMULATION_TRANSCRIPT_v1.jsonl
+            .phase0-medusa-smoke/runs/**/MEDUSA_RAW_OUTPUT_v1.log
+          if-no-files-found: warn
+          retention-days: 7
