@@ -537,7 +537,7 @@ function compileStage3Contracts(){
     '  error NotInitialized(address dependency);',
     '  function initialize(address dependency) external { revert NotInitialized(dependency); }',
     '}'
-  ].join('\\n');
+  ].join('\n');
   const input={
     language:'Solidity',
     sources:{'Stage3.sol':{content:source}},
