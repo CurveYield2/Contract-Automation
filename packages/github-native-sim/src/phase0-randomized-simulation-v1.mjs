@@ -12,7 +12,7 @@ import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
-import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1} from './phase0-fixture-synthesis-v1.mjs';
+import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1,executeCreatorSynthesisV1,approveFixtureSpendersV1} from './phase0-fixture-synthesis-v1.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
 export const PHASE0_MEDUSA_MIN_CALLS_V1=100001;
@@ -1795,12 +1795,81 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         spenders:targets.map(x=>x.address)
       });
     }catch(error){fixtureFunding={holders:[],spenders:[],slotResults:[],rpcMutations:[],transactionReceipts:[],receiptCounts:{},permit2:null,gaps:[{type:'ACTOR_FUNDING_FAILED',message:String(error?.message??error).slice(0,1200)}]};}
+    const stage2Holders=[...actors,...PHASE0_MEDUSA_SENDERS_V1];
+    const stage2Creations=[],stage2CreationGaps=[],stage2Approvals=[],stage2CreatedTokenFunding=[],stage2Rounds=[];
+    let pendingCreatorTargets=[...targets],stage2Round=0;
+    while(pendingCreatorTargets.length&&(valuePool.created?.length??0)<20&&stage2Round<20){
+      stage2Round++;
+      let creatorRound;
+      try{
+        creatorRound=await executeCreatorSynthesisV1({
+          provider,ethers,targets:pendingCreatorTargets,actors,valuePool,artifacts,
+          maxAttemptsPerCandidate:24,maxSuccessesPerCandidate:3,
+          maxCreatedContracts:Math.max(0,20-(valuePool.created?.length??0))
+        });
+      }catch(error){
+        stage2CreationGaps.push({type:'CREATOR_SYNTHESIS_EXECUTION_FAILED',round:stage2Round,message:String(error?.message??error).slice(0,1600)});
+        break;
+      }
+      stage2Creations.push(...creatorRound.creations);
+      stage2CreationGaps.push(...creatorRound.creationGaps);
+      for(const synthetic of creatorRound.syntheticArtifacts){
+        const q=`${synthetic.sourceName}:${synthetic.contractName}`;
+        if(!artifacts.some(a=>`${a.sourceName}:${a.contractName}`===q))artifacts.push(synthetic);
+      }
+      const createdAddresses=[...new Set(creatorRound.creations.flatMap(row=>row.createdAddresses??[]).map(x=>String(x).toLowerCase()))];
+      const existingTokens=valuePool.tokens.filter(token=>!creatorRound.createdTokens.some(created=>String(created.address).toLowerCase()===String(token?.address??token).toLowerCase()));
+      if(createdAddresses.length){
+        try{
+          const approval=await approveFixtureSpendersV1({provider,ethers,tokens:existingTokens,holders:stage2Holders,spenders:createdAddresses});
+          stage2Approvals.push({round:stage2Round,...approval});
+        }catch(error){stage2Approvals.push({round:stage2Round,holders:stage2Holders,spenders:createdAddresses,transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_SPENDER_APPROVALS_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
+      }
+      if(creatorRound.createdTokens.length){
+        try{
+          const funding=await fundActorsV1({
+            provider,ethers,tokens:creatorRound.createdTokens,holders:stage2Holders,
+            spenders:[...targets.map(x=>x.address),...createdAddresses]
+          });
+          stage2CreatedTokenFunding.push({round:stage2Round,...funding});
+        }catch(error){stage2CreatedTokenFunding.push({round:stage2Round,holders:stage2Holders,spenders:createdAddresses,slotResults:[],transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_TOKEN_FUNDING_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
+      }
+      const boundRows=creatorRound.createdDeployments.filter(row=>row?.qualifiedName);
+      let newTargets=targetObjects(ethers,artifacts,boundRows,sourceIntelligence);
+      if(newTargets.length){
+        try{
+          const prepared=await prepareQualifiedRuntimeV2({provider,ethers,targets:newTargets,actors});
+          newTargets=prepared.targets;
+          runtimePreparation.setupReceipts.push(...(prepared.setupReceipts??[]));
+        }catch(error){
+          stage2CreationGaps.push({type:'CREATED_TARGET_RUNTIME_PREPARATION_FAILED',round:stage2Round,message:String(error?.message??error).slice(0,1200)});
+        }
+      }
+      const existingTargetKeys=new Set(targets.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}`));
+      const admitted=[];
+      for(const target of newTargets){
+        const key=`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}`;
+        if(existingTargetKeys.has(key))continue;
+        existingTargetKeys.add(key);targets.push(target);admitted.push(target);
+      }
+      stage2Rounds.push({
+        round:stage2Round,candidates:creatorRound.candidates,successfulCreations:creatorRound.creations.length,
+        createdContracts:creatorRound.createdContracts,boundTargets:admitted.length,createdAddresses
+      });
+      pendingCreatorTargets=admitted;
+      if(!creatorRound.creations.length&&!admitted.length)break;
+    }
     const serializedValuePool=serializeValuePoolV1(valuePool);
     const fixtureEvidence={
       schemaVersion:'curveyield-phase0-fixture-synthesis-v1',
-      stage:'STAGE_1_VALUE_POOL_AND_ACTOR_FUNDING',
+      stage:'STAGE_2_CREATOR_DISCOVERY_AND_EXECUTION',
       valuePool:serializedValuePool,
-      funding:fixtureFunding
+      funding:fixtureFunding,
+      creations:stage2Creations,
+      creationGaps:stage2CreationGaps,
+      creatorRounds:stage2Rounds,
+      createdSpenderApprovals:stage2Approvals,
+      createdTokenFunding:stage2CreatedTokenFunding
     };
     await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
     const fixtureSynthesis={
@@ -1815,7 +1884,12 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         receiptCounts:fixtureFunding.receiptCounts,
         permit2:fixtureFunding.permit2,
         gaps:fixtureFunding.gaps
-      }
+      },
+      creations:stage2Creations,
+      creationGaps:stage2CreationGaps,
+      creatorRounds:stage2Rounds,
+      createdSpenderApprovals:stage2Approvals.map(row=>({round:row.round,spenders:row.spenders,receiptCounts:row.receiptCounts,gaps:row.gaps})),
+      createdTokenFunding:stage2CreatedTokenFunding.map(row=>({round:row.round,slotResults:row.slotResults,receiptCounts:row.receiptCounts,gaps:row.gaps}))
     };
     const baselineBlock=Number(await provider.getBlockNumber()),baselineHash=(await provider.getBlock(baselineBlock))?.hash??null,baselineSnapshot=await provider.send('evm_snapshot',[]);
     const deploymentComplete=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;

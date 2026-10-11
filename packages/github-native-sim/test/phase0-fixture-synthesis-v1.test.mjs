@@ -7,7 +7,7 @@ import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import solc from 'solc';
 import * as ethers from 'ethers';
-import {buildCompiledArtifactErrorSelectorIndexV1,decodeTelemetryRevertReasonV1,topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAmountV1} from '../src/phase0-fixture-synthesis-v1.mjs';
+import {buildCompiledArtifactErrorSelectorIndexV1,decodeTelemetryRevertReasonV1,topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAmountV1,discoverCreatorCandidatesV1,buildCreatorArgumentsV1,executeCreatorSynthesisV1,bindCreatedContractV1} from '../src/phase0-fixture-synthesis-v1.mjs';
 import {renderMedusaRouterV2,buildMedusaConfigV2} from '../src/phase0-randomized-simulation-v1.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
@@ -274,4 +274,216 @@ test('Stage-1 Medusa router embeds value-pool address constants without targetin
   assert.match(router.source,/0x0000000000000000000000000000000000000022/i);
   const cfg=buildMedusaConfigV2({anvilUrl:'http://127.0.0.1:1',blockNumber:1,routerRows:router.rows,checked:false,callLimit:10});
   assert.ok(cfg.fuzzing.testing.targetFunctionSignatures.every(x=>!x.includes('p0_seed_addresses')));
+});
+
+
+function compileStage2Contracts(){
+  const input={
+    language:'Solidity',
+    sources:{'Stage2.sol':{content:`// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.20;
+
+contract GenericToken {
+  mapping(address => uint256) private balances;
+  mapping(address => mapping(address => uint256)) public allowance;
+  uint8 public constant decimals = 18;
+  uint256 public totalSupply = 1000000000 ether;
+  function balanceOf(address account) external view returns (uint256) { return balances[account]; }
+  function approve(address spender, uint256 amount) external returns (bool) {
+    allowance[msg.sender][spender] = amount;
+    return true;
+  }
+}
+
+contract GenericChild {
+  address public first;
+  address public second;
+  constructor(address first_, address second_) {
+    first = first_;
+    second = second_;
+  }
+}
+
+contract AlwaysRevertCreator {
+  error Nope();
+  function create(address[] calldata tokens) external returns (address) {
+    if (tokens.length >= 0) revert Nope();
+    return address(0);
+  }
+}
+
+contract GenericFactory {
+  error UnauthorizedCaller();
+  address public owner;
+  event Created(address indexed child, address indexed first, address second);
+  constructor() { owner = msg.sender; }
+
+  function create(
+    address[] calldata tokens,
+    uint256[] calldata weights,
+    uint256 fee,
+    address hook,
+    string calldata label,
+    bytes32 salt,
+    bytes calldata extra
+  ) external returns (address child) {
+    if (msg.sender != owner) revert UnauthorizedCaller();
+    require(tokens.length >= 2, "TOKENS");
+    require(weights.length == tokens.length, "WEIGHTS");
+    require(bytes(label).length > 0, "LABEL");
+    require(extra.length == 0, "EXTRA");
+    require(fee <= 1e17, "FEE");
+    if (hook != address(0) && salt == bytes32(0)) revert("HOOK_SALT");
+    child = address(new GenericChild(tokens[0], tokens[1]));
+    emit Created(child, tokens[0], tokens[1]);
+  }
+}`}},
+    settings:{outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object','evm.deployedBytecode.linkReferences']}}}
+  };
+  const output=JSON.parse(solc.compile(JSON.stringify(input)));
+  const failures=(output.errors??[]).filter(x=>x.severity==='error');
+  assert.deepEqual(failures,[]);
+  return output.contracts['Stage2.sol'];
+}
+function normalizedTestArtifact(sourceName,contractName,artifact){
+  return{
+    sourceName,contractName,abi:artifact.abi,
+    bytecode:'0x'+artifact.evm.bytecode.object,
+    deployedBytecode:'0x'+artifact.evm.deployedBytecode.object,
+    deployedLinkReferences:artifact.evm.deployedBytecode.linkReferences??{}
+  };
+}
+function stage2Target(address,artifact){
+  const iface=new ethers.Interface(artifact.abi);
+  const fragment=iface.getFunction('create(address[],uint256[],uint256,address,string,bytes32,bytes)');
+  return{
+    qualifiedName:'Stage2.sol:GenericFactory',
+    address,
+    artifact,
+    functions:[{fragment,signature:fragment.format('sighash'),accounting:false,semanticFamily:'OTHER'}]
+  };
+}
+
+test('Stage-2 creator candidate discovery and structured arguments cover token arrays, parallel arrays, and bounded fee values',()=>{
+  const compiled=compileStage2Contracts();
+  const target=stage2Target('0x0000000000000000000000000000000000000100',{abi:compiled.GenericFactory.abi});
+  const candidates=discoverCreatorCandidatesV1({targets:[target]});
+  assert.equal(candidates.length,1);
+  const tokenA='0x0000000000000000000000000000000000000001';
+  const tokenB='0x0000000000000000000000000000000000000002';
+  const pool={
+    tokens:[
+      {address:tokenB,decimals:18,fundedAmount:'1000000000000000000000000'},
+      {address:tokenA,decimals:18,fundedAmount:'1000000000000000000000000'}
+    ],
+    addresses:[tokenA,tokenB],created:[],privileged:[],associations:{}
+  };
+  const built=buildCreatorArgumentsV1({
+    ethers,candidate:candidates[0],attempt:0,
+    actor:'0x00000000000000000000000000000000000000aa',
+    valuePool:pool,targets:[target]
+  });
+  assert.deepEqual(built.args[0],[ethers.getAddress(tokenA),ethers.getAddress(tokenB)]);
+  assert.equal(built.args[1].length,built.args[0].length);
+  assert.equal(built.args[1].reduce((a,b)=>a+BigInt(b),0n),10n**18n);
+  assert.ok(BigInt(built.args[2])<=10n**17n);
+  assert.equal(built.args[4],'P0');
+  assert.equal(built.args[6],'0x');
+});
+
+test('Stage-2 executes a creator through privileged retry, detects the child, and binds it by runtime bytecode on local Anvil',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage2Contracts();
+    const token1=await deployArtifact(provider,compiled.GenericToken);
+    const token2=await deployArtifact(provider,compiled.GenericToken);
+    const factory=await deployArtifact(provider,compiled.GenericFactory);
+    const accounts=await provider.send('eth_accounts',[]);
+    const artifacts=[
+      normalizedTestArtifact('Stage2.sol','GenericToken',compiled.GenericToken),
+      normalizedTestArtifact('Stage2.sol','GenericChild',compiled.GenericChild),
+      normalizedTestArtifact('Stage2.sol','GenericFactory',compiled.GenericFactory)
+    ];
+    const factoryArtifact=artifacts.find(x=>x.contractName==='GenericFactory');
+    const target=stage2Target(await factory.getAddress(),factoryArtifact);
+    const pool={
+      addresses:[await factory.getAddress(),await token1.getAddress(),await token2.getAddress()],
+      tokens:[
+        {address:await token1.getAddress(),decimals:18,fundedAmount:(10n**24n).toString()},
+        {address:await token2.getAddress(),decimals:18,fundedAmount:(10n**24n).toString()}
+      ],
+      associations:{},privileged:[ethers.getAddress(accounts[0])],created:[],receipts:[],gaps:[]
+    };
+    const result=await executeCreatorSynthesisV1({
+      provider,ethers,targets:[target],actors:[accounts[1]],valuePool:pool,artifacts,
+      maxAttemptsPerCandidate:24,maxSuccessesPerCandidate:1,maxCreatedContracts:3
+    });
+    assert.equal(result.candidates,1);
+    assert.equal(result.creations.length,1);
+    assert.equal(result.creations[0].sender.toLowerCase(),accounts[0].toLowerCase());
+    assert.ok(result.creationGaps[0].topDecodedRevertReasons.some(x=>x.reason==='UnauthorizedCaller()'));
+    assert.equal(result.createdDeployments.length,1);
+    assert.equal(result.createdDeployments[0].qualifiedName,'Stage2.sol:GenericChild');
+    assert.equal(result.createdDeployments[0].mappingStatus,'MATCHED_RUNTIME_BYTECODE');
+    assert.equal(pool.created.length,1);
+    assert.ok(result.creations[0].createdAddresses.includes(pool.created[0]));
+
+    const rebound=await bindCreatedContractV1({provider,ethers,address:pool.created[0],artifacts,probeHolder:accounts[0]});
+    assert.equal(rebound.deployment.qualifiedName,'Stage2.sol:GenericChild');
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-2 runner executes creator synthesis before the shared Medusa/telemetry baseline and carries created targets forward',()=>{
+  const runner=fs.readFileSync(path.join(root,'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const creatorAt=runner.indexOf('executeCreatorSynthesisV1({');
+  const baselineAt=runner.indexOf('baselineSnapshot=await provider.send');
+  assert.ok(creatorAt>0&&baselineAt>creatorAt);
+  assert.match(runner,/maxAttemptsPerCandidate:24,maxSuccessesPerCandidate:3/);
+  assert.match(runner,/20-\(valuePool\.created\?\.length\?\?0\)/);
+  assert.match(runner,/targets\.push\(target\)/);
+  assert.match(runner,/STAGE_2_CREATOR_DISCOVERY_AND_EXECUTION/);
+  assert.match(runner,/createdSpenderApprovals/);
+  assert.match(runner,/createdTokenFunding/);
+});
+
+
+test('Stage-2 enforces the 24-attempt ceiling and retains decoded attempt evidence for a creator that never succeeds',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage2Contracts();
+    const token1=await deployArtifact(provider,compiled.GenericToken);
+    const token2=await deployArtifact(provider,compiled.GenericToken);
+    const reverter=await deployArtifact(provider,compiled.AlwaysRevertCreator);
+    const accounts=await provider.send('eth_accounts',[]);
+    const artifact=normalizedTestArtifact('Stage2.sol','AlwaysRevertCreator',compiled.AlwaysRevertCreator);
+    const iface=new ethers.Interface(artifact.abi),fragment=iface.getFunction('create(address[])');
+    const target={
+      qualifiedName:'Stage2.sol:AlwaysRevertCreator',address:await reverter.getAddress(),artifact,
+      functions:[{fragment,signature:fragment.format('sighash'),accounting:false,semanticFamily:'OTHER'}]
+    };
+    const pool={
+      addresses:[await reverter.getAddress(),await token1.getAddress(),await token2.getAddress()],
+      tokens:[
+        {address:await token1.getAddress(),decimals:18,fundedAmount:(10n**24n).toString()},
+        {address:await token2.getAddress(),decimals:18,fundedAmount:(10n**24n).toString()}
+      ],
+      associations:{},privileged:[],created:[],receipts:[],gaps:[]
+    };
+    const result=await executeCreatorSynthesisV1({
+      provider,ethers,targets:[target],actors:[accounts[0]],valuePool:pool,artifacts:[artifact],
+      maxAttemptsPerCandidate:24,maxSuccessesPerCandidate:3,maxCreatedContracts:20
+    });
+    assert.equal(result.creations.length,0);
+    assert.equal(result.creationGaps.length,1);
+    assert.equal(result.creationGaps[0].attemptCount,24);
+    assert.equal(result.creationGaps[0].attempts.length,24);
+    assert.equal(result.creationGaps[0].successes,0);
+    assert.ok(result.creationGaps[0].topDecodedRevertReasons.some(x=>x.reason==='Nope()'&&x.count===24));
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
 });
