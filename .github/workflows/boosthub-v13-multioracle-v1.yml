@@ -30,6 +30,7 @@ jobs:
           # Match the corrected Fraxtal v2 source in the forthcoming v13 release.
           sed -i 's/function isSupportedPair(address tokenIn, address tokenOut) public pure returns (bool)/function isSupportedPair(address tokenIn, address tokenOut) public view returns (bool)/' .boosthub-multioracle/beefy/contracts/converter/BoostHubFraxtalRewardConverter_v2.sol
           sed -i 's/function _checkPair(address tokenIn, address tokenOut) internal pure/function _checkPair(address tokenIn, address tokenOut) internal view/' .boosthub-multioracle/beefy/contracts/converter/BoostHubFraxtalRewardConverter_v2.sol
+          cp github-native-sim/boosthub-multi-oracle-v1/BoostHubMultiOracleRoutes_v1.t.sol .boosthub-multioracle/beefy/tests/BoostHubMultiOracleRoutes_v1.t.sol
           cd .boosthub-multioracle
           mkdir -p lib
           git clone -q --depth 1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git lib/openzeppelin-contracts
