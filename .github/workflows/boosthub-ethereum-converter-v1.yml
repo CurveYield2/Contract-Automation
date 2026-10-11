@@ -1,15 +1,16 @@
-name: Build Ethereum BoostHub unified converter v1 # first integrated build and fork test 8
+name: Build Ethereum BoostHub unified converter v1 # release, legacy staking wiring, and Windows runner 9
 on:
   push:
     branches: [build-boosthub-ethereum-converter-v1]
     paths: [.github/workflows/boosthub-ethereum-converter-v1.yml]
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: boosthub-ethereum-converter-v1
   cancel-in-progress: false
 jobs:
-  trace:
+  package:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -29,6 +30,36 @@ jobs:
       - name: Run the complete converter suite and Ethereum fork checks
         working-directory: github-native-sim/boosthub-ethereum-converter-v1
         run: npm test
+      - uses: actions/download-artifact@v4
+        with:
+          name: boosthub-ethereum-converter-trace-v1
+          run-id: 38117128186
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: github-native-sim/boosthub-ethereum-converter-v1/evidence_inputs_v1/trace
+      - uses: actions/download-artifact@v4
+        with:
+          name: boosthub-ethereum-converter-source-bindings-v1
+          run-id: 38117733580
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: github-native-sim/boosthub-ethereum-converter-v1/evidence_inputs_v1/bindings
+      - name: Bundle the dependency-free Windows deployment runner and release inputs
+        working-directory: github-native-sim/boosthub-ethereum-converter-v1
+        run: node prepare_release_v1.mjs
+      - name: Test deployment simulation, guarded broadcasting, and idempotent resumption on Anvil
+        working-directory: github-native-sim/boosthub-ethereum-converter-v1
+        run: |
+          set -o pipefail
+          node --test deployment_runner_v1.test.mjs 2>&1 | tee test_evidence_v1/deployment_runner_v1.txt
+      - name: Assemble the versioned standalone release
+        working-directory: github-native-sim/boosthub-ethereum-converter-v1
+        run: python3 finalize_release_v1.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BoostHub_Ethereum_Converter_v1
+          path: |
+            github-native-sim/boosthub-ethereum-converter-v1/BoostHub_Ethereum_Converter_v1.zip
+            github-native-sim/boosthub-ethereum-converter-v1/BoostHub_Ethereum_Converter_v1.sha256
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -38,3 +69,30 @@ jobs:
             github-native-sim/boosthub-ethereum-converter-v1/test_evidence_v1
             github-native-sim/boosthub-ethereum-converter-v1/package-lock.json
           retention-days: 14
+
+  windows-powershell:
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: BoostHub_Ethereum_Converter_v1
+          path: incoming_release
+      - name: Validate the extracted package in Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          Expand-Archive -LiteralPath incoming_release/BoostHub_Ethereum_Converter_v1.zip -DestinationPath 'windows converter package'
+          & ./github-native-sim/boosthub-ethereum-converter-v1/windows_check_v1.ps1 -PackageRoot "$PWD/windows converter package" 2>&1 | Tee-Object -FilePath PowerShell_Compatibility_v1.txt
+          if (-not $?) { throw 'Windows validation failed' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BoostHub_Ethereum_Converter_Windows_v1
+          path: PowerShell_Compatibility_v1.txt
+          retention-days: 30
