@@ -27,6 +27,8 @@ jobs:
           sha256sum github-native-sim/boosthub-multi-oracle-v1/BoostHub_multi_oracle_sources_v1.tar.xz
           echo '7096577d09e0cbfbb557a7963b8b7577071495bd90c19ac91947e39ee8de8bec  github-native-sim/boosthub-multi-oracle-v1/BoostHub_multi_oracle_sources_v1.tar.xz' | sha256sum -c
           tar -xJf github-native-sim/boosthub-multi-oracle-v1/BoostHub_multi_oracle_sources_v1.tar.xz -C .boosthub-multioracle
+          # Match the corrected Fraxtal v2 source in the forthcoming v13 release.
+          sed -i 's/function isSupportedPair(address tokenIn, address tokenOut) public pure returns (bool)/function isSupportedPair(address tokenIn, address tokenOut) public view returns (bool)/' .boosthub-multioracle/beefy/contracts/converter/BoostHubFraxtalRewardConverter_v2.sol
           cd .boosthub-multioracle
           mkdir -p lib
           git clone -q --depth 1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git lib/openzeppelin-contracts
