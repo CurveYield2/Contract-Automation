@@ -95,7 +95,7 @@ test('Phase 0 smoke now validates native source-package deploy/config evidence w
   assert.match(cli,/deploymentOnly:true/);
   assert.match(workflow,/assertDeployGateEvidenceV2/);
   assert.match(workflow,/PHASE0_DEPLOY_CONFIG_EXECUTION_v1\.json/);
-  assert.match(workflow,/reconcile-phase0-deploy-evidence-v1\\.mjs/);
+  assert.match(workflow,/reconcile-phase0-deploy-evidence-v1\.mjs/);
   assert.doesNotMatch(workflow,/medusa_calls|telemetry_calls|PHASE0_FIXTURE_SYNTHESIS_v1\.json/);
 });
 
