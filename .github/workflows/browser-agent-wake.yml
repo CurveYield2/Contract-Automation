@@ -283,6 +283,41 @@ jobs:
           fi
           printf '%s\n' 'GET BACK TO WORK' > /tmp/watchdog-message.txt
 
+          # One mutable acknowledgement per campaign, stored alongside its audit
+          # evidence. This is written by the receiving agent, never by the sender.
+          echo 'WAKE_ACK_PATH=' >> "$GITHUB_ENV"
+          echo 'WAKE_ACK_ID=' >> "$GITHUB_ENV"
+          if [ "${{ inputs.gate_mode }}" = 'LITE' ] \
+            && [ "${{ inputs.worker_role }}" = 'reviewer' ] \
+            && [ "$(cat /tmp/wake-message.txt)" != 'GET BACK TO WORK' ]; then
+            token="${AUDIT_CONTROLLER_GITHUB_TOKEN:-}"
+            gate_path="${{ inputs.gate_state_path }}"
+            gate_ref="${{ inputs.gate_ref }}"
+            if [ -n "$token" ] && [[ "$gate_path" == "Audit Campaign Directory/campaigns/"*.json ]]; then
+              encoded_gate="${gate_path// /%20}"
+              encoded="$(GH_TOKEN="$token" gh api "repos/CurveYield2/Audit-Controller/contents/$encoded_gate?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
+              workspace="$(printf '%s' "$encoded" | base64 -d 2>/dev/null | jq -r '.workspacePath // empty' 2>/dev/null || true)"
+              if [[ "$workspace" == campaigns/* ]]; then
+                ack_file="$workspace/work/browser/WAKE_ACK_v1.json"
+                ack_id="$WAKE_ID/$GITHUB_RUN_ID"
+                {
+                  echo
+                  echo 'WAKE RECEPTION CHECK-IN — FIRST ACTION (before the audit instructions):'
+                  echo "Use the GitHub connector to create or update `$ack_file` on CurveYield2/Audit-Controller/main."
+                  echo 'Write the following exact JSON object as the entire file:'
+                  printf '{"schemaVersion":"curveyield-browser-wake-ack-v1","ackId":"%s","wakeId":"%s","runId":"%s","phaseId":"%s"}\n' "$ack_id" "$WAKE_ID" "$GITHUB_RUN_ID" "$PHASE_ID"
+                  echo 'This one-file check-in confirms that you received this message. Do not change any phase work form, sealed receipt, or campaign controller data for the check-in. Immediately continue with the substantive instructions above.'
+                } >> /tmp/wake-message.txt
+                echo "WAKE_ACK_PATH=$ack_file" >> "$GITHUB_ENV"
+                echo "WAKE_ACK_ID=$ack_id" >> "$GITHUB_ENV"
+              else
+                echo '::warning::Audit campaign workspace could not be resolved; custom wake is preserved but lacks GitHub acknowledgement.'
+              fi
+            else
+              echo '::warning::Audit acknowledgement setup unavailable; sending exact custom wake without check-in.'
+            fi
+          fi
+
           jq -e '
             type=="object"
             and ((.routineId // "")|type=="string")
@@ -358,6 +393,30 @@ jobs:
           set +e
           timeout -k 5s 20s sudo tailscale set --exit-node=""
           echo "Home exit-node routing disabled for post-browser workflow steps."
+
+      - name: Await first-action reviewer check-in
+        id: receipt
+        if: steps.deliver.outputs.ok == 'true' && env.WAKE_ACK_PATH != ''
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'verified=false' >> "$GITHUB_OUTPUT"
+          ack_url="repos/CurveYield2/Audit-Controller/contents/${WAKE_ACK_PATH// /%20}?ref=${{ inputs.gate_ref }}"
+          for i in $(seq 1 24); do
+            encoded="$(gh api "$ack_url" --jq '.content' 2>/dev/null || true)"
+            if [ -n "$encoded" ] && printf '%s' "$encoded" | base64 -d 2>/dev/null \
+              | jq -e --arg id "$WAKE_ACK_ID" \
+                 '.schemaVersion=="curveyield-browser-wake-ack-v1" and .ackId==$id' >/dev/null 2>&1; then
+              echo 'verified=true' >> "$GITHUB_OUTPUT"
+              echo 'Delivery independently confirmed by receiving reviewer GitHub check-in.' >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::warning::X11 send attempted; reviewer has not yet checked in. Delivery remains UNCONFIRMED, not FAILED."
+          echo 'Delivery awaiting reviewer GitHub acknowledgement; do not claim persistent delivery or automatically retry the message.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Dispatch fresh-runner retry for retryable pre-post failure
         id: fresh-runner-retry
