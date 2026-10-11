@@ -209,7 +209,9 @@ jobs:
           if (( TELEMETRY_CALLS > 0 )); then
             echo "---- Telemetry smoke summary ----"
             jq '.telemetry[] | {runId,minedSuccess,minedRevert,simulatedRejection,positiveTransitions,positiveEconomicTransitions,accountingActionShare,observationReads,accountingObservationCalls,skippedObservationCalls,observationReadsPerAccountingCall,accountingEvidence}' "$summary"
-            echo "---- Balancer v3 protocol-aware dispatch ----"
+            echo "---- Balancer v3 registered-pool initialization ----"
+          jq '.balancerBootstrap | {status,discoveryStatus,initializedPoolCount,verifiedInitializedPools,attempts}' "$summary"
+          echo "---- Balancer v3 protocol-aware dispatch ----"
           jq '.telemetry[] | {balancerV3Context,protocolPlanningFailures,protocolAwareCalls}' "$summary"
           echo "---- Top 15 decoded telemetry revert reasons ----"
             jq -r '[.telemetry[]?.decodedRevertReasons[]?] | group_by(.reason) | map({reason:.[0].reason,kind:.[0].kind,selector:.[0].selector,count:(map(.count)|add)}) | sort_by(-.count, .reason) | .[:15] | ("COUNT\tKIND\tSELECTOR\tREASON"), (.[] | [.count,.kind,(.selector // ""),.reason] | @tsv)' "$summary"
@@ -267,6 +269,7 @@ jobs:
             .phase0-medusa-smoke/PHASE0_ACCOUNTING_BASELINE_v1.json
             .phase0-medusa-smoke/PHASE0_FORK_TOKEN_ACCOUNTING_WITNESS_v1.json
             .phase0-medusa-smoke/PHASE0_BALANCER_V3_CALL_CONTEXT_v1.json
+            .phase0-medusa-smoke/PHASE0_BALANCER_V3_BOOTSTRAP_v1.json
             .phase0-medusa-smoke/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
             .phase0-medusa-smoke/runs/PHASE0_FIXTURE_SYNTHESIS_v1.json
             .phase0-medusa-smoke/runs/**/RAW_SIMULATION_TRANSCRIPT_v1.jsonl
