@@ -13,7 +13,7 @@ import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
 import {isBalancerV3TargetV1,discoverBalancerV3PoolsV1,buildBalancerV3ActionV1,bootstrapBalancerV3PoolsV1} from './phase0-balancer-v3-planner-v1.mjs';
-import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1,executeForkTokenAccountingWitnessV1,executeCreatorSynthesisV1,approveFixtureSpendersV1,refreshCreatedAssociationsV1,executeActivationSynthesisV1} from './phase0-fixture-synthesis-v1.mjs';
+import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1,executeForkTokenAccountingWitnessV1,executeCreatorSynthesisV1,balancerCreatedPoolAddressesV1,approveFixtureSpendersV1,refreshCreatedAssociationsV1,executeActivationSynthesisV1} from './phase0-fixture-synthesis-v1.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
 export const PHASE0_MEDUSA_MIN_CALLS_V1=100001;
@@ -2377,9 +2377,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       // Balancer pool BPT contracts are NOT token spenders. Router/Permit2
       // were already approved in Stage 1. Hundreds of unnecessary ERC20 and
       // Permit2 approve transactions here caused the post-creation timeout.
-      const newBptAddresses=new Set(creatorRound.creations
-        .filter(row=>/CURVEYIELD_WRAPPER_ALLOWLIST|BALANCER_V3_FACTORY/.test(String(row.recipeBasis??'')) || /CurveYieldPoolFactoryWrapper\.sol:CurveYieldPoolFactoryWrapper$/.test(String(row.target??'')))
-        .flatMap(row=>row.createdAddresses??[]).map(x=>String(x).toLowerCase()));
+      const newBptAddresses=balancerCreatedPoolAddressesV1(creatorRound.creations);
       const spendableChildren=createdAddresses.filter(x=>!newBptAddresses.has(x));
       const existingTokens=valuePool.tokens.filter(token=>!creatorRound.createdTokens.some(created=>String(created.address).toLowerCase()===String(token?.address??token).toLowerCase()));
       console.log(`[phase0-fixture] Stage2 round=${stage2Round} created=${createdAddresses.length} pools=${newBptAddresses.size} approvedSpenders=${spendableChildren.length}`);
