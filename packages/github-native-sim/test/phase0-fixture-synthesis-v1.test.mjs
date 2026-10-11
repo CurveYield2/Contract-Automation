@@ -1171,5 +1171,5 @@ test('Stage-5 runner persists accounting observation policy evidence and top-lev
   assert.match(runner,/STAGE_5_ACCOUNTING_READS_ONLY/);
   assert.match(runner,/SKIPPED_NON_ACCOUNTING_OR_REJECTED/);
   assert.match(runner,/observationReadsPerAccountingCall/);
-  assert.match(runner,/fixtureEvidence\\.accountingObservationPolicy=accountingObservationPolicy/);
+  assert.match(runner,/fixtureEvidence\.accountingObservationPolicy=accountingObservationPolicy/);
 });
