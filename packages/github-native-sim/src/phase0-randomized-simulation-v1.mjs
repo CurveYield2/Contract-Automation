@@ -12,7 +12,7 @@ import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
-import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1} from './phase0-fixture-synthesis-v1.mjs';
+import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1,executeCreatorSynthesisV1,approveFixtureSpendersV1,refreshCreatedAssociationsV1,executeActivationSynthesisV1} from './phase0-fixture-synthesis-v1.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
 export const PHASE0_MEDUSA_MIN_CALLS_V1=100001;
@@ -664,15 +664,130 @@ export function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
     return{...d,artifact,functions,plan:probePlan(ethers,artifact),declaredStandards,recipe};
   }).filter(t=>t.functions.length);
 }
-export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={}}){
+const EIP1967_IMPLEMENTATION_SLOT_V2='0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
+
+function associationValuesV2(value){
+  if(value instanceof Set)return [...value];
+  if(Array.isArray(value))return value;
+  return[];
+}
+function associationHoldsV2(associations,holder,callee){
+  const h=String(holder??'').toLowerCase(),c=String(callee??'').toLowerCase();
+  for(const [key,value] of Object.entries(associations??{})){
+    if(String(key).toLowerCase()!==h)continue;
+    return associationValuesV2(value).some(row=>String(row).toLowerCase()===c);
+  }
+  return false;
+}
+function valuePoolAssociationValuesV2(valuePool,address){
+  const needle=String(address??'').toLowerCase();
+  for(const [key,value] of Object.entries(valuePool?.associations??{})){
+    if(String(key).toLowerCase()===needle)return associationValuesV2(value);
+  }
+  return[];
+}
+export function shouldObserveAccountingCallV1({selected,target,valuePool=null,executionAddress=null}={}){
+  if(selected?.semanticFamily==='ECONOMIC')return{observe:true,basis:'ECONOMIC'};
+  const created=new Set((valuePool?.created??[]).map(address=>String(address).toLowerCase()));
+  const tokenAddresses=new Set((valuePool?.tokens??[]).map(token=>String(token?.address??token).toLowerCase()));
+  const candidates=[target?.address,executionAddress].filter(Boolean).map(address=>String(address).toLowerCase());
+  for(const address of candidates){
+    if(!created.has(address))continue;
+    if(tokenAddresses.has(address))return{observe:true,basis:'CREATED_TOKEN_LIKE'};
+    const associations=valuePoolAssociationValuesV2(valuePool,address);
+    if(associations.some(row=>tokenAddresses.has(String(row).toLowerCase())))return{observe:true,basis:'CREATED_TOKEN_ASSOCIATION'};
+  }
+  return{observe:false,basis:'NON_ACCOUNTING_OR_REJECTED'};
+}
+function zeroAbiValueV2(ethers,param){
+  if(param?.baseType==='array'){
+    if(Number.isInteger(param.arrayLength)&&param.arrayLength>=0)return Array.from({length:param.arrayLength},()=>zeroAbiValueV2(ethers,param.arrayChildren));
+    return[];
+  }
+  if(param?.baseType==='tuple')return (param.components??[]).map(child=>zeroAbiValueV2(ethers,child));
+  const type=String(param?.type??'');
+  if(type==='address')return ethers.ZeroAddress;
+  if(type==='bool')return false;
+  if(type==='string')return '';
+  if(type==='bytes')return '0x';
+  if(/^bytes\d+$/.test(type))return ethers.zeroPadValue('0x',Number(type.slice(5)));
+  if(/^u?int(?:\d+)?$/.test(type))return 0n;
+  return 0;
+}
+function mutableFunctionsForArtifactV2({ethers,artifact,qualifiedName,sourceIntelligence={}}){
+  const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,qualifiedName);
+  const recipe=qualifyRecipeV2({qualifiedName,abi:artifact.abi,declaredStandards});
+  const functions=mutableFunctions(ethers,artifact).map(x=>{
+    const semantic=classifySemanticFamilyV2({signature:x.signature,stateMutability:x.fragment.stateMutability,recipe:recipe.status==='QUALIFIED'?recipe:null});
+    return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
+  });
+  return{declaredStandards,recipe,functions};
+}
+function decodedErrorMatchesInterfaceV2(iface,error){
+  const data=error?.data??error?.info?.error?.data??null;
+  if(typeof data!=='string'||data==='0x')return false;
+  try{return Boolean(iface.parseError(data));}catch{return false;}
+}
+async function facadeAnswersSelectorV2({provider,ethers,facadeAddress,implArtifact,selected,from}){
+  let iface;
+  try{iface=new ethers.Interface(normalizedAbi(implArtifact.abi));}catch{return false;}
+  let data;
+  try{data=iface.encodeFunctionData(selected.signature,(selected.fragment.inputs??[]).map(param=>zeroAbiValueV2(ethers,param)));}catch{return false;}
+  try{
+    await provider.call({from,to:facadeAddress,data,value:0n});
+    return true;
+  }catch(error){
+    return decodedErrorMatchesInterfaceV2(iface,error);
+  }
+}
+async function eip1967ImplementationAddressV2({provider,ethers,address}){
+  try{
+    const word=await provider.send('eth_getStorageAt',[address,EIP1967_IMPLEMENTATION_SLOT_V2,'latest']);
+    if(!/^0x[0-9a-fA-F]{64}$/.test(String(word??'')))return null;
+    const candidate=ethers.getAddress('0x'+String(word).slice(-40));
+    if(candidate===ethers.ZeroAddress)return null;
+    const code=await provider.getCode(candidate);
+    return code&&code!=='0x'?candidate:null;
+  }catch{return null;}
+}
+export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={},associations={},probeSelectors=true}){
   const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
   const deployedByAddress=new Map(deployed.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
+  const targetByAddress=new Map(targets.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
   const out=[...targets],contextEvidence=[];
-  for(const proxyDeployment of deployed){
-    const proxyArtifact=proxyDeployment?.qualifiedName?byQ.get(proxyDeployment.qualifiedName):null;
-    if(!proxyArtifact)continue;
+  const variantKeys=new Set(out.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
+  const asDeployment=address=>deployedByAddress.get(String(address).toLowerCase())??targetByAddress.get(String(address).toLowerCase())??null;
+  const addVariant=({facadeDeployment,implDeployment,implArtifact,contextType,basis,evidence={}})=>{
+    if(!facadeDeployment?.address||!implDeployment?.qualifiedName||!implArtifact)return false;
+    const built=mutableFunctionsForArtifactV2({ethers,artifact:implArtifact,qualifiedName:implDeployment.qualifiedName,sourceIntelligence});
+    if(!built.functions.length)return false;
+    const key=`${String(facadeDeployment.address).toLowerCase()}|${implDeployment.qualifiedName}|${contextType}`;
+    if(variantKeys.has(key))return false;
+    variantKeys.add(key);
+    out.push({
+      ...facadeDeployment,
+      qualifiedName:facadeDeployment.qualifiedName??`FACADE:${facadeDeployment.address}`,
+      logicalQualifiedName:implDeployment.qualifiedName,
+      artifact:implArtifact,
+      functions:built.functions,
+      plan:probePlan(ethers,implArtifact),
+      declaredStandards:built.declaredStandards,recipe:built.recipe,
+      contextType,contextDisposition:'READY',
+      contextEvidence:{facadeAddress:facadeDeployment.address,implementationAddress:implDeployment.address??null,discoveryBasis:basis,...evidence}
+    });
+    contextEvidence.push({
+      contextType,facadeQualifiedName:facadeDeployment.qualifiedName??null,logicalQualifiedName:implDeployment.qualifiedName,
+      status:'READY',facadeAddress:facadeDeployment.address,implementationAddress:implDeployment.address??null,
+      discoveryBasis:basis,...evidence
+    });
+    return true;
+  };
+
+  for(const facadeDeployment of deployed){
+    const facadeArtifact=facadeDeployment?.qualifiedName?byQ.get(facadeDeployment.qualifiedName):null;
+    if(!facadeArtifact)continue;
     let iface;
-    try{iface=new ethers.Interface(normalizedAbi(proxyArtifact.abi));}catch{continue;}
+    try{iface=new ethers.Interface(normalizedAbi(facadeArtifact.abi));}catch{continue;}
     let getter=null;
     for(const candidate of ['implementation()','getImplementation()']){
       try{if(iface.getFunction(candidate)){getter=candidate;break;}}catch{}
@@ -680,39 +795,67 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
     if(!getter)continue;
     let implementationAddress;
     try{
-      const c=new ethers.Contract(proxyDeployment.address,normalizedAbi(proxyArtifact.abi),provider);
+      const c=new ethers.Contract(facadeDeployment.address,normalizedAbi(facadeArtifact.abi),provider);
       implementationAddress=await c.getFunction(getter).staticCall();
     }catch(error){
-      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,status:'CONTEXT_REQUIRED',reason:'IMPLEMENTATION_READ_FAILED',message:String(error?.shortMessage??error?.message??error).slice(0,1200)});
+      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:facadeDeployment.qualifiedName,status:'CONTEXT_REQUIRED',reason:'IMPLEMENTATION_READ_FAILED',message:String(error?.shortMessage??error?.message??error).slice(0,1200)});
       continue;
     }
-    const implDeployment=deployedByAddress.get(String(implementationAddress).toLowerCase());
+    const implDeployment=asDeployment(implementationAddress);
     const implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
     if(!implDeployment||!implArtifact){
-      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,status:'FIXTURE_GAP',implementationAddress:String(implementationAddress),reason:'IMPLEMENTATION_NOT_IN_DEPLOYED_ADMITTED_INVENTORY'});
+      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:facadeDeployment.qualifiedName,status:'FIXTURE_GAP',implementationAddress:String(implementationAddress),reason:'IMPLEMENTATION_NOT_IN_DEPLOYED_ADMITTED_INVENTORY'});
       continue;
     }
-    const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,implDeployment.qualifiedName);
-    const recipe=qualifyRecipeV2({qualifiedName:implDeployment.qualifiedName,abi:implArtifact.abi,declaredStandards});
-    const functions=mutableFunctions(ethers,implArtifact).map(x=>{
-      const semantic=classifySemanticFamilyV2({signature:x.signature,stateMutability:x.fragment.stateMutability,recipe:recipe.status==='QUALIFIED'?recipe:null});
-      return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
-    });
-    if(!functions.length)continue;
-    const variant={
-      ...proxyDeployment,
-      qualifiedName:proxyDeployment.qualifiedName,
-      logicalQualifiedName:implDeployment.qualifiedName,
-      artifact:implArtifact,
-      functions,
-      plan:probePlan(ethers,implArtifact),
-      declaredStandards,recipe,
-      contextType:'DELEGATE_PROXY',
-      contextDisposition:'READY',
-      contextEvidence:{facadeAddress:proxyDeployment.address,implementationAddress:String(implementationAddress),implementationGetter:getter}
-    };
-    out.push(variant);
-    contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,logicalQualifiedName:implDeployment.qualifiedName,status:'READY',facadeAddress:proxyDeployment.address,implementationAddress:String(implementationAddress),implementationGetter:getter});
+    addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'DELEGATE_PROXY',basis:'IMPLEMENTATION_GETTER',evidence:{implementationGetter:getter}});
+  }
+
+  for(const facadeDeployment of deployed){
+    if(!facadeDeployment?.address)continue;
+    const implementationAddress=await eip1967ImplementationAddressV2({provider,ethers,address:facadeDeployment.address});
+    if(!implementationAddress)continue;
+    const implDeployment=asDeployment(implementationAddress),implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
+    if(!implDeployment||!implArtifact)continue;
+    addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'EIP1967_IMPLEMENTATION_SLOT'});
+  }
+
+  for(const [holderRaw,value] of Object.entries(associations??{})){
+    const facadeDeployment=asDeployment(holderRaw);
+    if(!facadeDeployment?.address)continue;
+    for(const calleeRaw of associationValuesV2(value)){
+      const implDeployment=asDeployment(calleeRaw),implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
+      if(!implDeployment||!implArtifact||String(implDeployment.address).toLowerCase()===String(facadeDeployment.address).toLowerCase())continue;
+      addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'ASSOCIATION_POINTS_TO_EXTENSION'});
+    }
+  }
+
+  if(probeSelectors){
+    const accounts=await provider.send('eth_accounts',[]).catch(()=>[]);
+    const from=accounts[0]??ethers.ZeroAddress;
+    let probes=0;
+    const directExtensions=targets.filter(target=>(target.contextType??'DIRECT')==='DIRECT');
+    for(const extension of directExtensions){
+      if(probes>=96)break;
+      const implArtifact=extension.artifact,implDeployment=asDeployment(extension.address)??extension;
+      if(!implArtifact||!implDeployment?.qualifiedName)continue;
+      for(const facadeDeployment of deployed.filter(candidate=>String(candidate.address).toLowerCase()!==String(extension.address).toLowerCase())){
+        if(probes>=96)break;
+        const facadeArtifact=facadeDeployment?.qualifiedName?byQ.get(facadeDeployment.qualifiedName):null;
+        if(!facadeArtifact)continue;
+        let facadeIface;
+        try{facadeIface=new ethers.Interface(normalizedAbi(facadeArtifact.abi??[]));}catch{continue;}
+        const probeFunction=(extension.functions??[]).find(selected=>{
+          try{return !facadeIface.getFunction(selected.signature);}catch{return true;}
+        });
+        if(!probeFunction)continue;
+        probes++;
+        const answered=await facadeAnswersSelectorV2({provider,ethers,facadeAddress:facadeDeployment.address,implArtifact,selected:probeFunction,from});
+        if(!answered)continue;
+        const added=addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'SELECTOR_ANSWERED_BY_FACADE',evidence:{selectorProbe:probeFunction.signature}});
+        if(added)break;
+      }
+    }
+    contextEvidence.push({contextType:'FACADE_DISCOVERY',status:'COMPLETE',discoveryBasis:'SELECTOR_PROBE_BOUNDED',probeCount:probes,probeLimit:96});
   }
   for(const target of out)if(!target.contextType){target.contextType='DIRECT';target.contextDisposition='READY';}
   return{targets:out,contextEvidence};
@@ -819,21 +962,22 @@ function qualifiedActionV2({target,selected,actors,rng}){
   }
   return null;
 }
-export function pickFn(target,rng,actionClass,feedback=new Map(),blocked=new Set()){
+export function pickFn(target,rng,actionClass,feedback=new Map(),blocked=new Set(),weightMultipliers=new Map()){
   const keyFor=x=>`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${x.signature}`;
   const available=list=>list.filter(x=>!blocked.has(keyFor(x)));
   const accounting=available(target.functions.filter(x=>x.accounting)),other=available(target.functions.filter(x=>!x.accounting));
   const requested=actionClass==='ACCOUNTING_STATE_CHANGE'?accounting:other;
   const alternate=actionClass==='ACCOUNTING_STATE_CHANGE'?other:accounting;
   const effective=requested.length?requested:alternate;
-  // If every admitted function for this target is explicitly blocked, return null so
-  // the caller can reroute to another qualified execution context. Never silently
-  // resurrect a blocked function.
   if(!effective.length)return null;
-  const weights=effective.map(x=>1+Math.min(8,Number(feedback.get(keyFor(x))??0)));
+  const weights=effective.map(x=>{
+    const key=keyFor(x),base=1+Math.min(8,Number(feedback.get(key)??0));
+    const multiplier=Math.max(0.01,Number(weightMultipliers.get(key)??1));
+    return base*multiplier;
+  });
   const total=weights.reduce((a,b)=>a+b,0);let cursor=rng()*total;
-  for(let i=0;i<effective.length;i++){cursor-=weights[i];if(cursor<=0)return{selected:effective[i],feedbackWeight:weights[i],selectionKey:keyFor(effective[i])};}
-  return{selected:effective.at(-1),feedbackWeight:weights.at(-1),selectionKey:keyFor(effective.at(-1))};
+  for(let i=0;i<effective.length;i++){cursor-=weights[i];if(cursor<=0)return{selected:effective[i],feedbackWeight:weights[i],selectionKey:keyFor(effective[i]),selectionWeightMultiplier:Number(weightMultipliers.get(keyFor(effective[i]))??1)};}
+  return{selected:effective.at(-1),feedbackWeight:weights.at(-1),selectionKey:keyFor(effective.at(-1)),selectionWeightMultiplier:Number(weightMultipliers.get(keyFor(effective.at(-1)))??1)};
 }
 export function buildBurstSchedule(targets,calls,rng){
   const out=[];
@@ -966,8 +1110,157 @@ function preflightKindV2(error){
   const text=String(error?.shortMessage??error?.message??error??'');
   return error?.code==='CALL_EXCEPTION'||/revert|execution reverted|panic/i.test(text)?'PROTOCOL_REJECTION':'INFRASTRUCTURE';
 }
+const CONTEXT_REQUIRED_RE_V2=/(?:SenderIsNot|NotVault|OnlyVault|CallerIsNot|NotDelegateCall|onlyVault|only[A-Z]\w+)/;
+const AUTH_LOOKING_RE_V2=/(?:NotOwner|Unauthorized|owner|auth|admin|allowed|permission|role|onlyOwner|onlyAdmin)/i;
+
+function collectAddressStringsV2(value,out=[]){
+  if(typeof value==='string'&&/^0x[0-9a-fA-F]{40}$/.test(value)){out.push(value);return out;}
+  if(Array.isArray(value)){for(const child of value)collectAddressStringsV2(child,out);return out;}
+  if(value&&typeof value==='object')for(const child of Object.values(value))collectAddressStringsV2(child,out);
+  return out;
+}
+function contextErrorTextV2(info={}){
+  return [
+    info?.decodedCustomError?.name,
+    info?.decodedCustomError?.signature,
+    info?.reason,info?.shortMessage,info?.message
+  ].filter(Boolean).join(' | ');
+}
+function associationCallerCandidatesV2({ethers,valuePool,targetAddress,targets=[]}){
+  const out=[];
+  for(const target of targets){
+    if(!target?.address)continue;
+    if(associationHoldsV2(valuePool?.associations??{},target.address,targetAddress))out.push(target.address);
+  }
+  return [...new Set(out.map(address=>ethers.getAddress(address)))];
+}
+function alternateFacadeTargetsV2({target,selected,targets=[]}){
+  const logical=target.logicalQualifiedName??target.qualifiedName;
+  return targets.filter(candidate=>
+    String(candidate.address).toLowerCase()!==String(target.address).toLowerCase()&&
+    ['FACADE','DELEGATE_PROXY'].includes(candidate.contextType??'DIRECT')&&
+    (candidate.logicalQualifiedName??candidate.qualifiedName)===logical&&
+    (candidate.functions??[]).some(fn=>fn.signature===selected.signature)
+  );
+}
+async function ensureImpersonatedSenderV2({provider,ethers,address}){
+  const sender=ethers.getAddress(address);
+  try{await provider.send('anvil_impersonateAccount',[sender]);}catch{}
+  try{
+    const balance=BigInt(await provider.send('eth_getBalance',[sender,'latest']));
+    if(balance<ethers.parseEther('1'))await provider.send('anvil_setBalance',[sender,ethers.toQuantity(ethers.parseEther('100'))]);
+  }catch{}
+  return sender;
+}
+async function telemetryPreflightAttemptV2({provider,iface,signature,args,sender,to,value}){
+  const data=iface.encodeFunctionData(signature,args);
+  let callProbe;
+  try{
+    const rawReturn=await provider.call({from:sender,to,data,value});
+    let decodedReturn=null;
+    try{decodedReturn=normalize(iface.decodeFunctionResult(signature,rawReturn));}catch{}
+    callProbe={status:'RETURNED',rawReturn,decodedReturn};
+  }catch(error){
+    callProbe={status:'REVERTED',error:errorInfo(error,iface)};
+  }
+  try{
+    const estimate=await provider.estimateGas({from:sender,to,data,value});
+    return{success:true,estimate,callProbe,error:null,errorDetails:null,to,sender,data};
+  }catch(error){
+    return{success:false,estimate:null,callProbe,error,errorDetails:errorInfo(error,iface),to,sender,data};
+  }
+}
+function callerResolutionForTargetV2(target){
+  return ['FACADE','DELEGATE_PROXY'].includes(target.contextType??'DIRECT')?`FACADE:${target.address}`:'DEFAULT';
+}
+function selectionCallerStateKeyV2(target,selected){
+  return `${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${selected.signature}`;
+}
+export async function resolveTelemetryCallerContextV2({
+  provider,ethers,target,selected,iface,args,value,defaultSender,targets=[],valuePool=null,callerState=new Map(),weightMultipliers=new Map()
+}){
+  const key=selectionCallerStateKeyV2(target,selected),saved=callerState.get(key);
+  const adaptations=[];
+  if(saved&&saved.resolution!=='UNRESOLVED'){
+    const sender=saved.sender?await ensureImpersonatedSenderV2({provider,ethers,address:saved.sender}):defaultSender;
+    const to=saved.executionAddress??target.address;
+    const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender,to,value});
+    if(attempt.success)return{...attempt,resolution:saved.resolution,executionAddress:to,sender,adaptations,reused:true};
+  }
+
+  const initial=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender:defaultSender,to:target.address,value});
+  if(initial.success){
+    const resolution=callerResolutionForTargetV2(target);
+    if(resolution!=='DEFAULT')callerState.set(key,{resolution,executionAddress:target.address,sender:null});
+    weightMultipliers.set(key,1);
+    return{...initial,resolution,executionAddress:target.address,sender:defaultSender,adaptations,reused:false};
+  }
+
+  const info=initial.errorDetails??{},text=contextErrorTextV2(info);
+  const delegateRequired=/DelegateCall/i.test(text);
+  const contextRequired=delegateRequired||CONTEXT_REQUIRED_RE_V2.test(text);
+  const authRequired=AUTH_LOOKING_RE_V2.test(text);
+  const namedAddresses=[...new Set(collectAddressStringsV2(info?.decodedCustomError?.args??[]).map(address=>ethers.getAddress(address)))];
+
+  if(delegateRequired){
+    for(const facade of alternateFacadeTargetsV2({target,selected,targets})){
+      const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender:defaultSender,to:facade.address,value});
+      adaptations.push({kind:'FACADE_RETRY',fromAddress:target.address,toAddress:facade.address,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,signature:selected.signature,status:attempt.success?'PASS':'REVERTED'});
+      if(attempt.success){
+        const resolution=`FACADE:${facade.address}`;
+        callerState.set(key,{resolution,executionAddress:facade.address,sender:null});
+        weightMultipliers.set(key,1);
+        return{...attempt,resolution,executionAddress:facade.address,sender:defaultSender,adaptations,reused:false};
+      }
+    }
+  }
+
+  if(contextRequired&&!delegateRequired){
+    const candidates=namedAddresses.length
+      ? namedAddresses.slice(0,1)
+      : associationCallerCandidatesV2({ethers,valuePool,targetAddress:target.address,targets});
+    for(const candidate of candidates){
+      if(String(candidate).toLowerCase()===String(defaultSender).toLowerCase())continue;
+      const sender=await ensureImpersonatedSenderV2({provider,ethers,address:candidate});
+      const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender,to:target.address,value});
+      adaptations.push({kind:'IMPERSONATED_CALLER_RETRY',fromSender:defaultSender,toSender:sender,targetAddress:target.address,signature:selected.signature,status:attempt.success?'PASS':'REVERTED'});
+      if(attempt.success){
+        const resolution=`IMPERSONATED_CALLER:${sender}`;
+        callerState.set(key,{resolution,executionAddress:target.address,sender});
+        weightMultipliers.set(key,1);
+        return{...attempt,resolution,executionAddress:target.address,sender,adaptations,reused:false};
+      }
+    }
+  }
+
+  if(authRequired){
+    for(const raw of valuePool?.privileged??[]){
+      let privileged;
+      try{privileged=ethers.getAddress(raw);}catch{continue;}
+      if(privileged.toLowerCase()===String(defaultSender).toLowerCase())continue;
+      const sender=await ensureImpersonatedSenderV2({provider,ethers,address:privileged});
+      const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender,to:target.address,value});
+      adaptations.push({kind:'PRIVILEGED_CALLER_RETRY',fromSender:defaultSender,toSender:sender,targetAddress:target.address,signature:selected.signature,status:attempt.success?'PASS':'REVERTED'});
+      if(attempt.success){
+        const resolution=`PRIVILEGED:${sender}`;
+        callerState.set(key,{resolution,executionAddress:target.address,sender});
+        weightMultipliers.set(key,1);
+        return{...attempt,resolution,executionAddress:target.address,sender,adaptations,reused:false};
+      }
+    }
+  }
+
+  if(contextRequired||authRequired){
+    callerState.set(key,{resolution:'UNRESOLVED',executionAddress:target.address,sender:null});
+    weightMultipliers.set(key,0.1);
+    adaptations.push({kind:'CALLER_CONTEXT_UNRESOLVED',targetAddress:target.address,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,signature:selected.signature,reason:text.slice(0,1000),selectionWeightMultiplier:0.1});
+    return{...initial,resolution:'UNRESOLVED',executionAddress:target.address,sender:defaultSender,adaptations,reused:false,contextRequired:true};
+  }
+
+  return{...initial,resolution:callerResolutionForTargetV2(target),executionAddress:target.address,sender:defaultSender,adaptations,reused:false};
+}
 export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,artifacts=[],valuePool=null,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
-  const summaries=[];
+  const summaries=[],callerResolutionState=new Map(),contextWeightMultipliers=new Map();
   let snapshotId=baselineSnapshot;
   const canonicalBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
   for(let run=1;run<=telemetryRuns;run++){
@@ -991,11 +1284,11 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       successes:0,reverts:0,errors:0,minedSuccess:0,minedRevert:0,simulatedRejection:0,
       simulationInfrastructureError:0,submissionInfrastructureError:0,submittedOutcomeUnknown:0,
       notExecutedEncodingOrPlanning:0,positiveTransitions:0,positiveEconomicTransitions:0,
-      observationFailures:0,observationReads:0,byContract:{},byFunction:{},
+      observationFailures:0,observationReads:0,accountingObservationCalls:0,skippedObservationCalls:0,byContract:{},byFunction:{},
       feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
-    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),contextFailureCounts=new Map();
+    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set();
     const telemetryStartedAt=Date.now();
     console.log(`[phase0-telemetry] ${runId} started; targetCalls=${callsPerRun}; lifecycle=v2; heartbeat every 300s`);
     const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${callsPerRun}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),300000);
@@ -1004,17 +1297,17 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       for(const burst of schedule){
         let target=targets[burst.targetIndex];
         for(let k=0;k<burst.count;k++){
-          let picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions);
+          let picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers);
           if(!picked){
             const alternate=targets.find(candidate=>
               (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
               (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
-              pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions)
+              pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers)
             );
             if(alternate){
               stats.contextAdaptations.push({kind:'REROUTE_TO_QUALIFIED_CONTEXT',fromContext:target.contextType??'DIRECT',toContext:alternate.contextType??'DIRECT',logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,atCallIndex:stats.calls+1});
               target=alternate;
-              picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions);
+              picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers);
             }
           }
           if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
@@ -1029,14 +1322,15 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             actionClass:selected.semanticFamily==='ECONOMIC'?'ECONOMIC_STATE_CHANGE':'OTHER_STATE_CHANGE',
             stages:{ARG_GEN:null,PREFLIGHT:null,SUBMISSION:null,RECEIPT:null,OBSERVATION:null},
             decodedInputs:null,abiGenerated:true,rawRandomBytes:false,executionOutcome:null,
+            observation:'SKIPPED_NON_ACCOUNTING_OR_REJECTED',
             observations:{before:[],after:[],deltas:[]},effectClassification:'NOT_EXECUTED',positiveTransition:false,
-            transaction:null,error:null,
-            selectionFeedback:{selectionKey:picked.selectionKey,weight:picked.feedbackWeight,adaptedContext:stats.contextAdaptations.at(-1)?.atCallIndex===stats.calls+1}
+            transaction:null,error:null,callerResolution:callerResolutionForTargetV2(target),executionAddress:target.address,
+            selectionFeedback:{selectionKey:picked.selectionKey,weight:picked.feedbackWeight,weightMultiplier:picked.selectionWeightMultiplier??1,adaptedContext:stats.contextAdaptations.at(-1)?.atCallIndex===stats.calls+1}
           };
           if(picked.feedbackWeight>1)stats.feedbackSelections++;
           stats.calls++; if(selected.semanticFamily==='ECONOMIC')stats.accountingActions++;else stats.otherActions++;
           stats.byContract[target.qualifiedName]=(stats.byContract[target.qualifiedName]??0)+1;
-          const fk=`${target.qualifiedName}::${selected.signature}`;stats.byFunction[fk]=(stats.byFunction[fk]??0)+1;
+          const fk=`${target.qualifiedName}::${selected.signature}`,fnStats=stats.byFunction[fk]??{calls:0,callerResolution:callerResolutionForTargetV2(target)};fnStats.calls++;stats.byFunction[fk]=fnStats;
 
           let args=null,argError=null;
           try{
@@ -1051,35 +1345,47 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             rec.executionOutcome=classifyExecutionOutcomeV2({argumentGeneration:{success:false}});
             rec.error=rec.stages.ARG_GEN.error;
           }else{
-            const before=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
-            rec.observations.before=observationRowsV2(before,target.recipe,'BEFORE');
-            const data=iface.encodeFunctionData(selected.signature,args);
             const value=qualifiedAction?.value??(f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n);
-            let estimate=null,preflightError=null;
-            let callProbe;
-            try{
-              const rawReturn=await provider.call({from:sender,to:target.address,data,value});
-              let decodedReturn=null;
-              try{decodedReturn=normalize(iface.decodeFunctionResult(selected.signature,rawReturn));}catch{}
-              callProbe={status:'RETURNED',rawReturn,decodedReturn};
-            }catch(error){
-              callProbe={status:'REVERTED',error:errorInfo(error,iface)};
+            const resolved=await resolveTelemetryCallerContextV2({
+              provider,ethers,target,selected,iface,args,value,defaultSender:sender,targets,valuePool,
+              callerState:callerResolutionState,weightMultipliers:contextWeightMultipliers
+            });
+            sender=resolved.sender;
+            rec.sender=sender;
+            rec.callerResolution=resolved.resolution;
+            rec.executionAddress=resolved.executionAddress;
+            fnStats.callerResolution=resolved.resolution;
+            for(const adaptation of resolved.adaptations??[])stats.contextAdaptations.push({...adaptation,selectionKey:picked.selectionKey,atCallIndex:stats.calls});
+            if((resolved.adaptations??[]).length)rec.contextAdaptations=resolved.adaptations;
+            const executionTarget=resolved.executionAddress.toLowerCase()===String(target.address).toLowerCase()
+              ? target
+              : {...target,address:resolved.executionAddress,contextType:'FACADE',contextDisposition:'READY'};
+            const estimate=resolved.estimate,preflightError=resolved.success?null:resolved.error,callProbe=resolved.callProbe,data=resolved.data;
+            const observationPolicy=shouldObserveAccountingCallV1({selected,target,valuePool,executionAddress:resolved.executionAddress});
+            const shouldObserve=!preflightError&&observationPolicy.observe===true;
+            if(shouldObserve){
+              const before=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
+              rec.observations.before=observationRowsV2(before,executionTarget.recipe,'BEFORE');
+              rec.observation='ACCOUNTING_BEFORE_AFTER';
+              rec.observationBasis=observationPolicy.basis;
+              stats.accountingObservationCalls++;
+            }else{
+              rec.stages.OBSERVATION={status:'SKIPPED',reason:'SKIPPED_NON_ACCOUNTING_OR_REJECTED',reads:0,failedReads:0};
             }
-            try{
-              estimate=await provider.estimateGas({from:sender,to:target.address,data,value});
-              rec.stages.PREFLIGHT={status:'PASS',estimateGas:estimate.toString(),callProbe};
-            }catch(error){
-              preflightError=error;
-              const kind=preflightKindV2(error);
-              rec.stages.PREFLIGHT={status:'FAILED',kind,error:errorInfo(error,iface),callProbe};
+            if(resolved.success){
+              rec.stages.PREFLIGHT={status:'PASS',estimateGas:estimate.toString(),callProbe,callerResolution:resolved.resolution,executionAddress:resolved.executionAddress,reusedResolution:resolved.reused===true};
+            }else{
+              const kind=preflightKindV2(preflightError);
+              rec.stages.PREFLIGHT={status:'FAILED',kind,error:resolved.errorDetails??errorInfo(preflightError,iface),callProbe,callerResolution:resolved.resolution,executionAddress:resolved.executionAddress};
             }
             let tx=null,receipt=null,submissionError=null;
             if(!preflightError){
               try{
+                if(rec.callerResolution.startsWith('IMPERSONATED_CALLER:')||rec.callerResolution.startsWith('PRIVILEGED:'))await ensureImpersonatedSenderV2({provider,ethers,address:sender});
                 const signer=await provider.getSigner(sender);
                 const gasLimit=estimate+(estimate/2n)+100000n;
-                tx=await signer.sendTransaction({to:target.address,data,value,gasLimit});
-                rec.stages.SUBMISSION={status:'SUBMITTED',transactionHash:tx.hash,gasLimit:gasLimit.toString()};
+                tx=await signer.sendTransaction({to:resolved.executionAddress,data,value,gasLimit});
+                rec.stages.SUBMISSION={status:'SUBMITTED',transactionHash:tx.hash,gasLimit:gasLimit.toString(),callerResolution:rec.callerResolution,executionAddress:resolved.executionAddress};
                 try{
                   receipt=await tx.wait();
                   rec.stages.RECEIPT={status:'MINED',transactionHash:tx.hash,blockNumber:receipt?.blockNumber??null,receiptStatus:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,gasPrice:(receipt?.gasPrice??receipt?.effectiveGasPrice)?.toString?.()??null};
@@ -1090,7 +1396,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
                 }
               }catch(error){
                 submissionError=error;
-                rec.stages.SUBMISSION={status:'FAILED',error:errorInfo(error,iface)};
+                rec.stages.SUBMISSION={status:'FAILED',error:errorInfo(error,iface),callerResolution:rec.callerResolution,executionAddress:resolved.executionAddress};
               }
             }
             rec.executionOutcome=classifyExecutionOutcomeV2({
@@ -1099,19 +1405,21 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               submission:preflightError?null:(submissionError?{success:false}:{success:!!tx}),
               receipt
             });
-            const after=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
-            rec.observations.after=observationRowsV2(after,target.recipe,'AFTER');
-            rec.observations.deltas=observationDeltasV2(rec.observations.before,rec.observations.after,{receipt,sender});
-            rec.stages.OBSERVATION={
-              status:rec.observations.after.some(x=>x.status!=='OK')?'PARTIAL':'COMPLETE',
-              reads:rec.observations.after.length,
-              failedReads:rec.observations.after.filter(x=>x.status!=='OK').length
-            };
+            if(shouldObserve){
+              const after=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
+              rec.observations.after=observationRowsV2(after,executionTarget.recipe,'AFTER');
+              rec.observations.deltas=observationDeltasV2(rec.observations.before,rec.observations.after,{receipt,sender});
+              rec.stages.OBSERVATION={
+                status:rec.observations.after.some(x=>x.status!=='OK')?'PARTIAL':'COMPLETE',
+                reads:rec.observations.before.length+rec.observations.after.length,
+                failedReads:[...rec.observations.before,...rec.observations.after].filter(x=>x.status!=='OK').length
+              };
+            }
             const knownNonzero=rec.observations.deltas.filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
             rec.positiveTransition=rec.executionOutcome==='MINED_SUCCESS'&&knownNonzero.length>0;
             rec.effectClassification=rec.positiveTransition?'OBSERVED_STATE_TRANSITION':(rec.executionOutcome==='MINED_SUCCESS'?'MINED_NO_OBSERVED_STATE_TRANSITION':'NO_MINED_SUCCESS');
-            rec.transaction=tx?{hash:tx.hash,blockNumber:receipt?.blockNumber??null,status:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,value:value.toString(),logs:(receipt?.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))}:null;
-            if(preflightError)rec.error=errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
+            rec.transaction=tx?{hash:tx.hash,blockNumber:receipt?.blockNumber??null,status:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,value:value.toString(),to:resolved.executionAddress,logs:(receipt?.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))}:null;
+            if(preflightError)rec.error=resolved.errorDetails??errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
           }
 
           stats.terminalActions++;
@@ -1129,22 +1437,10 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
             stats.feedbackUpdates++;
           }
-          if(rec.executionOutcome==='SIMULATED_REJECTION'){
-            const hasAlternateContext=targets.some(candidate=>
-              (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
-              (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
-              candidate.functions.some(fn=>fn.signature===selected.signature)
-            );
-            if(hasAlternateContext){
-              const failures=Number(contextFailureCounts.get(picked.selectionKey)??0)+1;
-              contextFailureCounts.set(picked.selectionKey,failures);
-              if(failures>=3&&!blockedContextFunctions.has(picked.selectionKey)){
-                blockedContextFunctions.add(picked.selectionKey);
-                const adaptation={kind:'BOUNDED_WRONG_CONTEXT_GAP',selectionKey:picked.selectionKey,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,signature:selected.signature,contextType:target.contextType??'DIRECT',failureCount:failures,atCallIndex:stats.calls};
-                stats.contextAdaptations.push(adaptation);rec.contextAdaptation=adaptation;
-              }
-            }
-          }else contextFailureCounts.delete(picked.selectionKey);
+          if(rec.observation==='SKIPPED_NON_ACCOUNTING_OR_REJECTED'){
+            if(!rec.stages.OBSERVATION)rec.stages.OBSERVATION={status:'SKIPPED',reason:'SKIPPED_NON_ACCOUNTING_OR_REJECTED',reads:0,failedReads:0};
+            stats.skippedObservationCalls++;
+          }
           const observations=[...rec.observations.before,...rec.observations.after];stats.observationReads+=observations.length;stats.observationFailures+=observations.filter(x=>x.status!=='OK').length;
           if(['SIMULATION_INFRASTRUCTURE_ERROR','SUBMISSION_INFRASTRUCTURE_ERROR','SUBMITTED_OUTCOME_UNKNOWN','NOT_EXECUTED_ENCODING_OR_PLANNING'].includes(rec.executionOutcome))stats.errors++;
           terminalRows.push(rec);
@@ -1155,7 +1451,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
     const reconciliation=validateTelemetryCountersV2(stats,terminalRows);
     const lifecycleFamilies=lifecycleReachabilityV2(targets,terminalRows);
     const positiveRequired=lifecycleFamilies.filter(x=>x.requiresPositive);
-    const observationStatus=stats.observationReads===0?'UNAVAILABLE':(stats.observationFailures===0?'COMPLETE':'PARTIAL');
+    const observationStatus=stats.accountingObservationCalls===0?'UNAVAILABLE':(stats.observationFailures===0?'COMPLETE':'PARTIAL');
     const reachabilityStatus=positiveRequired.length===0?'NO_QUALIFIED_LIFECYCLES':(positiveRequired.every(x=>x.status==='POSITIVE_WITNESS')?'REACHABLE':positiveRequired.some(x=>x.status==='POSITIVE_WITNESS')?'PARTIAL':'REACHABILITY_GAP');
     console.log(`[phase0-telemetry] ${runId} completed; calls=${stats.calls}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; positiveTransitions=${stats.positiveTransitions}`);
     const actionSequenceDigestSha256=sha256(Buffer.from(JSON.stringify(terminalRows.map(row=>({target:row.target,sender:row.sender,functionSignature:row.functionSignature,decodedInputs:row.decodedInputs,actionClass:row.actionClass})))));
@@ -1165,6 +1461,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       schemaVersion:'curveyield-phase0-abi-telemetry-run-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,
       runId,purpose:'AUTOMATED_LIFECYCLE_TELEMETRY_WITH_TYPED_OUTCOMES_AND_ACCOUNTING_OBSERVATIONS',...stats,
       accountingActionShare:stats.calls?stats.accountingActions/stats.calls:0,requiredAccountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,
+      observationReadsPerAccountingCall:stats.accountingObservationCalls?stats.observationReads/stats.accountingObservationCalls:0,
       interleavedCrossContractBursts:true,executionStatus:'COMPLETED',coverageStatus:stats.calls===callsPerRun?'COMPLETE':'INCOMPLETE',
       checkStatus:'NOT_APPLICABLE',reachabilityStatus,observationStatus,reconciliation,lifecycleFamilies,resetEvidence,
       feedbackStatus:stats.feedbackUpdates>0&&stats.feedbackSelections>0?'ACTIVE':'NO_FEEDBACK_WITNESS',decodedRevertReasons,
@@ -1753,7 +2050,9 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const artifacts=[...artifactByQualified.values()];
     anvil=await startAnvil({forkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
     const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true,cacheTimeout:-1}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
+    console.log('[phase0-smoke-progress] START native deployment scripts');
     const deployment=await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],localSigner:anvil.localSigner,detected});
+    console.log(`[phase0-smoke-progress] END native deployment scripts; attempts=${deployment.attempts.length}; failed=${deployment.attempts.filter(x=>x.status==='FAILED').length}`);
     const scriptEnd=Number(await provider.getBlockNumber());
     const discoveredScriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
     const reported=await reportedPackageDeployments({projectRoot:staged.projectRoot,attempts:deployment.attempts,artifacts});
@@ -1763,12 +2062,15 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const expectedNativeNames=new Set(build.deploymentOrder??[]);
     const observedNativeNames=new Set(scriptDeployments.map(x=>x.contractName).filter(Boolean));
     const nativeScriptComplete=deployment.status==='PASS'&&[...expectedNativeNames].every(name=>observedNativeNames.has(name));
+    console.log('[phase0-smoke-progress] START source-known deployment plan');
     const sourcePlan=nativeScriptComplete
       ? {status:'SKIPPED_PACKAGE_DEPLOYMENT_SCRIPT_COMPLETE',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0}
       : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
+    console.log(`[phase0-smoke-progress] END source-known deployment plan; deployed=${sourcePlan.rows.length}; unresolved=${sourcePlan.unresolvedSteps}`);
     const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows];
+    console.log(`[phase0-smoke-progress] END fallback deployment; deployed=${deployed.length}`);
     let targets=targetObjects(ethers,artifacts,deployed,sourceIntelligence);
-    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence});
+    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence,probeSelectors:false});
     targets=delegateContexts.targets;
     const runtimePreparation=await prepareQualifiedRuntimeV2({provider,ethers,targets,actors});
     runtimePreparation.contextEvidence=delegateContexts.contextEvidence;
@@ -1784,6 +2086,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       await provider.destroy();
       throw error;
     }
+    console.log('[phase0-smoke-progress] START Stage 1 value-pool discovery and actor funding');
     // Fixture synthesis is best effort: a failure is recorded as a typed gap and never aborts the simulation.
     let valuePool,fixtureFunding;
     try{valuePool=await discoverValuePoolV1({provider,ethers,targets,actors});}
@@ -1795,12 +2098,155 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         spenders:targets.map(x=>x.address)
       });
     }catch(error){fixtureFunding={holders:[],spenders:[],slotResults:[],rpcMutations:[],transactionReceipts:[],receiptCounts:{},permit2:null,gaps:[{type:'ACTOR_FUNDING_FAILED',message:String(error?.message??error).slice(0,1200)}]};}
+    console.log(`[phase0-smoke-progress] END Stage 1 funding; tokens=${valuePool.tokens?.length??0}`);
+    const stage2Holders=[...actors,...PHASE0_MEDUSA_SENDERS_V1];
+    const stage2Creations=[],stage2CreationGaps=[],stage2Approvals=[],stage2CreatedTokenFunding=[],stage2Rounds=[],stage2CreatedDeployments=[];
+    let pendingCreatorTargets=[...targets],stage2Round=0;
+    while(pendingCreatorTargets.length&&(valuePool.created?.length??0)<20&&stage2Round<20){
+      stage2Round++;
+      let creatorRound;
+      try{
+        creatorRound=await executeCreatorSynthesisV1({
+          provider,ethers,targets:pendingCreatorTargets,actors,valuePool,artifacts,
+          maxAttemptsPerCandidate:24,maxSuccessesPerCandidate:3,
+          maxCreatedContracts:Math.max(0,20-(valuePool.created?.length??0))
+        });
+      }catch(error){
+        stage2CreationGaps.push({type:'CREATOR_SYNTHESIS_EXECUTION_FAILED',round:stage2Round,message:String(error?.message??error).slice(0,1600)});
+        break;
+      }
+      stage2Creations.push(...creatorRound.creations);
+      stage2CreationGaps.push(...creatorRound.creationGaps);
+      stage2CreatedDeployments.push(...creatorRound.createdDeployments);
+      for(const synthetic of creatorRound.syntheticArtifacts){
+        const q=`${synthetic.sourceName}:${synthetic.contractName}`;
+        if(!artifacts.some(a=>`${a.sourceName}:${a.contractName}`===q))artifacts.push(synthetic);
+      }
+      const createdAddresses=[...new Set(creatorRound.creations.flatMap(row=>row.createdAddresses??[]).map(x=>String(x).toLowerCase()))];
+      const existingTokens=valuePool.tokens.filter(token=>!creatorRound.createdTokens.some(created=>String(created.address).toLowerCase()===String(token?.address??token).toLowerCase()));
+      if(createdAddresses.length){
+        try{
+          const approval=await approveFixtureSpendersV1({provider,ethers,tokens:existingTokens,holders:stage2Holders,spenders:createdAddresses});
+          stage2Approvals.push({round:stage2Round,...approval});
+        }catch(error){stage2Approvals.push({round:stage2Round,holders:stage2Holders,spenders:createdAddresses,transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_SPENDER_APPROVALS_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
+      }
+      if(creatorRound.createdTokens.length){
+        try{
+          const funding=await fundActorsV1({
+            provider,ethers,tokens:creatorRound.createdTokens,holders:stage2Holders,
+            spenders:[...targets.map(x=>x.address),...createdAddresses]
+          });
+          stage2CreatedTokenFunding.push({round:stage2Round,...funding});
+        }catch(error){stage2CreatedTokenFunding.push({round:stage2Round,holders:stage2Holders,spenders:createdAddresses,slotResults:[],transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_TOKEN_FUNDING_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
+      }
+      const boundRows=creatorRound.createdDeployments.filter(row=>row?.qualifiedName);
+      let newTargets=targetObjects(ethers,artifacts,boundRows,sourceIntelligence);
+      if(newTargets.length){
+        try{
+          const prepared=await prepareQualifiedRuntimeV2({provider,ethers,targets:newTargets,actors});
+          newTargets=prepared.targets;
+          runtimePreparation.setupReceipts.push(...(prepared.setupReceipts??[]));
+        }catch(error){
+          stage2CreationGaps.push({type:'CREATED_TARGET_RUNTIME_PREPARATION_FAILED',round:stage2Round,message:String(error?.message??error).slice(0,1200)});
+        }
+      }
+      const existingTargetKeys=new Set(targets.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}`));
+      const admitted=[];
+      for(const target of newTargets){
+        const key=`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}`;
+        if(existingTargetKeys.has(key))continue;
+        existingTargetKeys.add(key);targets.push(target);admitted.push(target);
+      }
+      stage2Rounds.push({
+        round:stage2Round,candidates:creatorRound.candidates,successfulCreations:creatorRound.creations.length,
+        createdContracts:creatorRound.createdContracts,boundTargets:admitted.length,createdAddresses
+      });
+      pendingCreatorTargets=admitted;
+      if(!creatorRound.creations.length&&!admitted.length)break;
+    }
+    console.log(`[phase0-smoke-progress] END Stage 2 creators; rounds=${stage2Rounds.length}; created=${valuePool.created?.length??0}`);
+    let stage3AssociationHarvest={receipts:[],gaps:[],newTokens:[]},stage3AssociationTokenFunding=null,stage3Activation={activations:[],activationGaps:[],createdContracts:valuePool.created?.length??0};
+    if((valuePool.created?.length??0)>0){
+      try{
+        stage3AssociationHarvest=await refreshCreatedAssociationsV1({
+          provider,ethers,createdAddresses:valuePool.created,targets,
+          bindings:stage2CreatedDeployments,artifacts,valuePool
+        });
+      }catch(error){
+        stage3AssociationHarvest={receipts:[],gaps:[{type:'CREATED_ASSOCIATION_REFRESH_FAILED',message:String(error?.message??error).slice(0,1600)}],newTokens:[]};
+      }
+      if(stage3AssociationHarvest.newTokens.length){
+        try{
+          stage3AssociationTokenFunding=await fundActorsV1({
+            provider,ethers,tokens:stage3AssociationHarvest.newTokens,holders:stage2Holders,
+            spenders:targets.map(target=>target.address)
+          });
+        }catch(error){
+          stage3AssociationTokenFunding={holders:stage2Holders,spenders:targets.map(target=>target.address),slotResults:[],rpcMutations:[],transactionReceipts:[],receiptCounts:{},permit2:null,gaps:[{type:'STAGE3_ASSOCIATION_TOKEN_FUNDING_FAILED',message:String(error?.message??error).slice(0,1600)}]};
+        }
+      }
+      try{
+        stage3Activation=await executeActivationSynthesisV1({
+          provider,ethers,targets,actors,valuePool,artifacts,createdAddresses:valuePool.created,maxAttemptsPerCreated:30
+        });
+      }catch(error){
+        stage3Activation={activations:[],activationGaps:[{type:'ACTIVATION_SYNTHESIS_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1600)}],createdContracts:valuePool.created.length};
+      }
+    }
+    console.log('[phase0-smoke-progress] END Stage 3 association and activation');
+    let stage4ContextPreparation={contextEvidence:[],addedTargets:[],gaps:[]};
+    try{
+      const existingContextKeys=new Set(targets.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
+      const contextDiscovery=await augmentDelegateProxyContextsV2({
+        provider,ethers,targets,artifacts,deployed:[...deployed,...stage2CreatedDeployments],
+        sourceIntelligence,associations:valuePool.associations,probeSelectors:true
+      });
+      let addedTargets=contextDiscovery.targets.filter(target=>!existingContextKeys.has(`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
+      if(addedTargets.length){
+        const prepared=await prepareQualifiedRuntimeV2({provider,ethers,targets:addedTargets,actors});
+        addedTargets=prepared.targets;
+        runtimePreparation.setupReceipts.push(...(prepared.setupReceipts??[]));
+        const admittedKeys=new Set(targets.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
+        for(const target of addedTargets){
+          const key=`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`;
+          if(!admittedKeys.has(key)){admittedKeys.add(key);targets.push(target);}
+        }
+      }
+      runtimePreparation.contextEvidence.push(...(contextDiscovery.contextEvidence??[]));
+      stage4ContextPreparation={
+        contextEvidence:contextDiscovery.contextEvidence??[],
+        addedTargets:addedTargets.map(target=>({
+          qualifiedName:target.qualifiedName,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,
+          address:target.address,contextType:target.contextType??'DIRECT',
+          discoveryBasis:target.contextEvidence?.discoveryBasis??null
+        })),
+        gaps:[]
+      };
+    }catch(error){
+      stage4ContextPreparation={contextEvidence:[],addedTargets:[],gaps:[{type:'STAGE4_CONTEXT_PREPARATION_FAILED',message:String(error?.message??error).slice(0,1600)}]};
+    }
+    console.log('[phase0-smoke-progress] END Stage 4 context preparation');
     const serializedValuePool=serializeValuePoolV1(valuePool);
     const fixtureEvidence={
       schemaVersion:'curveyield-phase0-fixture-synthesis-v1',
-      stage:'STAGE_1_VALUE_POOL_AND_ACTOR_FUNDING',
+      stage:'STAGE_4_CONTEXT_CORRECT_CALLERS',
       valuePool:serializedValuePool,
-      funding:fixtureFunding
+      funding:fixtureFunding,
+      creations:stage2Creations,
+      creationGaps:stage2CreationGaps,
+      creatorRounds:stage2Rounds,
+      createdSpenderApprovals:stage2Approvals,
+      createdTokenFunding:stage2CreatedTokenFunding,
+      associationHarvest:{
+        receipts:stage3AssociationHarvest.receipts,
+        gaps:stage3AssociationHarvest.gaps,
+        newTokens:stage3AssociationHarvest.newTokens
+      },
+      associationTokenFunding:stage3AssociationTokenFunding,
+      activations:stage3Activation.activations,
+      activationGaps:stage3Activation.activationGaps,
+      contextCallerPreparation:stage4ContextPreparation,
+      callerResolutions:[]
     };
     await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
     const fixtureSynthesis={
@@ -1815,7 +2261,26 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         receiptCounts:fixtureFunding.receiptCounts,
         permit2:fixtureFunding.permit2,
         gaps:fixtureFunding.gaps
-      }
+      },
+      creations:stage2Creations,
+      creationGaps:stage2CreationGaps,
+      creatorRounds:stage2Rounds,
+      createdSpenderApprovals:stage2Approvals.map(row=>({round:row.round,spenders:row.spenders,receiptCounts:row.receiptCounts,gaps:row.gaps})),
+      createdTokenFunding:stage2CreatedTokenFunding.map(row=>({round:row.round,slotResults:row.slotResults,receiptCounts:row.receiptCounts,gaps:row.gaps})),
+      associationHarvest:{
+        receiptCount:stage3AssociationHarvest.receipts.length,
+        gaps:stage3AssociationHarvest.gaps,
+        newTokens:stage3AssociationHarvest.newTokens
+      },
+      associationTokenFunding:stage3AssociationTokenFunding?{
+        slotResults:stage3AssociationTokenFunding.slotResults,
+        receiptCounts:stage3AssociationTokenFunding.receiptCounts,
+        gaps:stage3AssociationTokenFunding.gaps
+      }:null,
+      activations:stage3Activation.activations,
+      activationGaps:stage3Activation.activationGaps,
+      contextCallerPreparation:stage4ContextPreparation,
+      callerResolutions:[]
     };
     const baselineBlock=Number(await provider.getBlockNumber()),baselineHash=(await provider.getBlock(baselineBlock))?.hash??null,baselineSnapshot=await provider.send('evm_snapshot',[]);
     const deploymentComplete=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;
@@ -1847,6 +2312,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     let telemetry=[];
     let telemetryExecutionFailure=null;
     const shouldRunTelemetry=targets.length&&(!medusaSmoke||telemetrySmoke);
+    console.log(`[phase0-smoke-progress] START Stage 5 telemetry; enabled=${Boolean(shouldRunTelemetry)}; targets=${targets.length}`);
     if(shouldRunTelemetry){
       try{
         telemetry=await runTelemetry({provider,ethers,targets,actors,outRoot:outputRoot,baselineSnapshot,artifacts,valuePool,...(telemetrySmoke?{telemetryRuns:1,callsPerRun:telemetrySmokeCalls}:{})});
@@ -1855,6 +2321,35 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         console.log(`[phase0-telemetry] failed but workflow will continue to evidence finalization: ${telemetryExecutionFailure.message}`);
       }
     }
+    console.log(`[phase0-smoke-progress] END Stage 5 telemetry; runs=${telemetry.length}; failure=${telemetryExecutionFailure?.message??'none'}`);
+    const callerResolutionEvidence=[];
+    for(const run of telemetry){
+      for(const [functionKey,row] of Object.entries(run.byFunction??{})){
+        callerResolutionEvidence.push({
+          runId:run.runId,functionKey,
+          calls:row&&typeof row==='object'?Number(row.calls??0):Number(row??0),
+          callerResolution:row&&typeof row==='object'?(row.callerResolution??'DEFAULT'):'DEFAULT'
+        });
+      }
+    }
+    fixtureEvidence.callerResolutions=callerResolutionEvidence;
+    fixtureSynthesis.callerResolutions=callerResolutionEvidence;
+    const accountingObservationPolicy={
+      policy:'PREFLIGHT_PASS_AND_ECONOMIC_OR_CREATED_TOKEN_CONTEXT_ONLY',
+      skippedObservation:'SKIPPED_NON_ACCOUNTING_OR_REJECTED',
+      runs:telemetry.map(run=>({
+        runId:run.runId,
+        observationReads:run.observationReads,
+        accountingObservationCalls:run.accountingObservationCalls,
+        skippedObservationCalls:run.skippedObservationCalls,
+        observationReadsPerAccountingCall:run.observationReadsPerAccountingCall
+      }))
+    };
+    fixtureEvidence.stage='STAGE_5_ACCOUNTING_READS_ONLY';
+    fixtureSynthesis.stage='STAGE_5_ACCOUNTING_READS_ONLY';
+    fixtureEvidence.accountingObservationPolicy=accountingObservationPolicy;
+    fixtureSynthesis.accountingObservationPolicy=accountingObservationPolicy;
+    await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
     const runIndex={schemaVersion:'curveyield-phase0-simulation-run-index-v1',purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',sourceIdentity:{campaignId:receipt.campaign.campaignId,sourceSha256:receipt.source.sha256},targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash,upstreamRpcExposed:false,identityNormalized:anvil.identityNormalized===true,observedUpstreamChainId:anvil.upstreamChainId},deployment:deploymentCombined,policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},runs:[{runId:medusa.runId,type:'MEDUSA_ANVIL_FORK',status:medusa.status,summaryRef:medusa.shards?'runs/MEDUSA_SHARDS_SUMMARY_v1.json':'runs/medusa-anvil-fork-001/RUN_SUMMARY_v1.json',shards:(medusa.shards??[]).map(x=>({runId:x.runId,configId:x.configId,status:x.status,summaryRef:x.summaryRef}))},...telemetry.map(x=>({runId:x.runId,type:'ABI_ACCOUNTING_TELEMETRY',status:x.status,summaryRef:`runs/${x.runId}/RUN_SUMMARY_v1.json`,rawTranscriptRef:x.rawTranscriptRef}))]};
     const simulationLimitations=[...deploymentCombined.limitations,...(telemetry.filter(x=>x.weightingLimitation).map(x=>({type:x.weightingLimitation,runId:x.runId})))];
     if(medusaExecutionFailure)simulationLimitations.push(medusaExecutionFailure);
@@ -1865,7 +2360,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const telemetryComplete=telemetry.length===expectedTelemetryRuns&&telemetry.every(x=>x.status==='PASS');
     const medusaComplete=!medusaRequired||medusa.status==='PASS';
     const executionMode=telemetrySmoke?(medusaSmoke?'MEDUSA_AND_TELEMETRY_SMOKE':'TELEMETRY_SMOKE'):(medusaSmoke?'MEDUSA_SMOKE':'ALL_PHASE0_STAGES');
-    const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode,status:medusaComplete&&telemetryComplete?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:medusaComplete&&telemetryComplete?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.length&&telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),fixtureSynthesis,medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,lifecycleFamilies:x.lifecycleFamilies,observationReads:x.observationReads,observationFailures:x.observationFailures,decodedRevertReasons:x.decodedRevertReasons,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
+    const summary={schemaVersion:'curveyield-phase0-randomized-simulation-summary-v2',capabilityContractVersion:CAPABILITY_CONTRACT_VERSION_V2,campaignId:receipt.campaign.campaignId,targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},executionMode,status:medusaComplete&&telemetryComplete?'PASS':'COMPLETE_WITH_TYPED_LIMITATIONS',executionStatus:medusaComplete&&telemetryComplete?'COMPLETED':'PARTIAL',checkStatus:medusa.checkStatus??'UNKNOWN',reachabilityStatus:telemetry.some(x=>x.reachabilityStatus==='REACHABLE')?'REACHABLE':'REACHABILITY_GAP',observationStatus:telemetry.length&&telemetry.every(x=>x.observationStatus==='COMPLETE')?'COMPLETE':(telemetry.some(x=>x.observationStatus==='PARTIAL')?'PARTIAL':'UNAVAILABLE'),fixtureSynthesis,medusa,telemetry:telemetry.map(x=>({runId:x.runId,status:x.status,calls:x.calls,plannedActions:x.plannedActions,terminalActions:x.terminalActions,submittedActions:x.submittedActions,accountingActions:x.accountingActions,accountingActionShare:x.accountingActionShare,accountingFunctionCount:x.accountingFunctionCount,otherFunctionCount:x.otherFunctionCount,weightingLimitation:x.weightingLimitation,minedSuccess:x.minedSuccess,minedRevert:x.minedRevert,simulatedRejection:x.simulatedRejection,simulationInfrastructureError:x.simulationInfrastructureError,submissionInfrastructureError:x.submissionInfrastructureError,submittedOutcomeUnknown:x.submittedOutcomeUnknown,notExecutedEncodingOrPlanning:x.notExecutedEncodingOrPlanning,positiveTransitions:x.positiveTransitions,positiveEconomicTransitions:x.positiveEconomicTransitions,lifecycleFamilies:x.lifecycleFamilies,observationReads:x.observationReads,observationFailures:x.observationFailures,accountingObservationCalls:x.accountingObservationCalls,skippedObservationCalls:x.skippedObservationCalls,observationReadsPerAccountingCall:x.observationReadsPerAccountingCall,decodedRevertReasons:x.decodedRevertReasons,executionStatus:x.executionStatus,coverageStatus:x.coverageStatus,reachabilityStatus:x.reachabilityStatus,observationStatus:x.observationStatus,feedbackStatus:x.feedbackStatus,feedbackUpdates:x.feedbackUpdates,feedbackSelections:x.feedbackSelections,contextAdaptations:x.contextAdaptations,reconciliation:x.reconciliation,byContract:x.byContract,byFunction:x.byFunction,resetEvidence:x.resetEvidence,actionSequenceDigestSha256:x.actionSequenceDigestSha256,outcomeSequenceDigestSha256:x.outcomeSequenceDigestSha256,successes:x.successes,reverts:x.reverts,errors:x.errors,rawTranscriptRef:x.rawTranscriptRef,rawTranscriptSha256:x.rawTranscriptSha256,rawTranscriptBytes:x.rawTranscriptBytes,burstSchedule:x.burstSchedule})),deployment:deploymentCombined,baselineTargetDispositions:baselineTargetRows({medusa,telemetry}),limitations:simulationLimitations};
     await fs.writeFile(path.join(outputRoot,'PHASE0_SIMULATION_RUN_INDEX_v1.json'),JSON.stringify(runIndex,null,2)+'\n');await fs.writeFile(path.join(outputRoot,'PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json'),JSON.stringify(summary,null,2)+'\n');
     const deployEvidence={schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v2',policy:'ANVIL_ONLY_FRAMEWORK_NATIVE_SCRIPT_ADAPTERS_NO_SOURCE_MUTATION_NO_PRODUCTION_SECRETS',packageDependencyInstall,fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash},attempts:deploymentCombined.attempts,scriptDispositions:deploymentCombined.scriptDispositions,deployedContracts:deployed,gaps:deploymentCombined.limitations,sourceKnownCompilation:deploymentCombined.sourceKnownCompilation,sourceKnownPlan:deploymentCombined.sourceKnownPlan,coverage:deploymentCombined.coverage,status:deploymentCombined.status};
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deployEvidence,null,2)+'\n');await provider.destroy();
