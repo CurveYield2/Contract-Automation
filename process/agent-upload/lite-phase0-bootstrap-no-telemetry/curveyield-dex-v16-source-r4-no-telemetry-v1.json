@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "curveyield-lite-phase0-bootstrap-recovery-v1",
+  "campaign_id": "curveyield-dex-v16-source-r4",
+  "campaign_path": "campaigns/CurveYield DEX v16 Source r4",
+  "audit_controller_ref": "main",
+  "resume_from_finalize": false,
+  "source_telemetry_run_id": 38126544342,
+  "workflow": "lite-phase0-bootstrap-no-telemetry-v1.yml",
+  "request_version": "v1"
+}
