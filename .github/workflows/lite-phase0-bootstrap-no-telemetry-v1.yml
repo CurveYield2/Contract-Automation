@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   qualification:
-    uses: ./.github/workflows/v7-execution-infrastructure-qualification.yml
+    uses: ./.github/workflows/v7-execution-infrastructure-qualification-no-telemetry-v1.yml
     with:
       controller_ref: ${{ inputs.audit_controller_ref }}
       qualification_lane: FULL
@@ -76,13 +76,8 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install trusted runner dependencies
-        run: npm ci --force
+      - name: Restore pinned Node dependencies No Telemetry
+        uses: ./.github/actions/setup-no-telemetry-node-cache
 
       - name: Select Audit-Controller credential
         env:
