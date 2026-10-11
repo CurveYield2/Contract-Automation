@@ -211,6 +211,8 @@ jobs:
             jq '.telemetry[] | {runId,minedSuccess,minedRevert,simulatedRejection,positiveTransitions,positiveEconomicTransitions,accountingActionShare,observationReads,accountingObservationCalls,skippedObservationCalls,observationReadsPerAccountingCall,accountingEvidence}' "$summary"
             echo "---- Balancer v3 registered-pool initialization ----"
           jq '.balancerBootstrap | {status,discoveryStatus,initializedPoolCount,verifiedInitializedPools,attempts}' "$summary"
+          echo "---- Balancer v3 per-pool economic coverage ----"
+          jq '.telemetry[] | {accountingActionShare,balancerPoolOperationCoverage}' "$summary"
           echo "---- Balancer v3 protocol-aware dispatch ----"
           jq '.telemetry[] | {balancerV3Context,protocolPlanningFailures,protocolAwareCalls}' "$summary"
           echo "---- Top 15 decoded telemetry revert reasons ----"
@@ -255,6 +257,11 @@ jobs:
                 or ((.telemetry[0].balancerV3Context.initializedPools|tonumber)>0
                   and (.telemetry[0].positiveEconomicTransitions|tonumber)>0
                   and (.telemetry[0].accountingObservationCalls|tonumber)>0))
+              and (.telemetry[0].accountingActionShare|tonumber)>=0.70
+              and ((.telemetry[0].balancerV3Context // null)==null
+                or (([.telemetry[0].balancerPoolOperationCoverage[]? | select(.swap.success>0 and .addLiquidity.success>0)] | length)
+                    >= (.telemetry[0].balancerV3Context.initializedPools|tonumber)
+                    and ([.telemetry[0].balancerPoolOperationCoverage[]?.removeLiquidity.success] | add // 0)>0))
               and ((.telemetry[0].accountingObservationCalls|tonumber)+(.telemetry[0].skippedObservationCalls|tonumber))==$n' "$summary" >/dev/null
           fi
 
