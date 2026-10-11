@@ -127,6 +127,45 @@ export async function discoverBalancerV3PoolsV1({provider,ethers,targets=[],valu
   evidence.status=!evidence.vaults.some(v=>v.verified)?'NO_VERIFIED_VAULT':!evidence.pools.length?'NO_REGISTERED_POOLS':evidence.pools.some(p=>p.initialized)?'INITIALIZED_POOL_AVAILABLE':'REGISTERED_POOLS_REQUIRE_INITIALIZATION';
   return evidence;
 }
+// Stage 3 protocol lifecycle: initialize registered Balancer pools before
+// sampling random economic actions. Calling Router.initialize is the real
+// external entrypoint; Vault.unlock and pool hooks cannot be called directly.
+export async function bootstrapBalancerV3PoolsV1({provider,ethers,targets=[],valuePool={},actors=[]}={}){
+  const discovery=await discoverBalancerV3PoolsV1({provider,ethers,targets,valuePool,actors});
+  const report={schemaVersion:'curveyield-phase0-balancer-v3-bootstrap-v1',protocol:'BALANCER_V3',discoveryStatus:discovery.status,attempts:[],initializedPoolCount:0,verifiedInitializedPools:discovery.pools.filter(p=>p.initialized).length,limitations:[]};
+  if(!discovery.active){report.status='NOT_APPLICABLE';return report;}
+  const router=targets.find(t=>/\/Router\.sol:Router$/.test(nameOf(t))&&(t.contextType??'DIRECT')==='DIRECT');
+  if(!router){report.status='NO_ROUTER_DEPLOYMENT';return report;}
+  const selected=router.functions?.find(f=>f.signature==='initialize(address,address[],uint256[],uint256,bool,bytes)');
+  if(!selected){report.status='ROUTER_INITIALIZE_ABI_UNAVAILABLE';return report;}
+  const contract=new ethers.Contract(router.address,['function initialize(address,address[],uint256[],uint256,bool,bytes) payable returns (uint256)'],provider);
+  const vaultRead=['function isPoolInitialized(address) view returns (bool)','function getPoolTokens(address) view returns (address[])'];
+  for(const pool of discovery.pools.filter(p=>p.registered&&!p.initialized).slice(0,6)){
+    const plan=buildBalancerV3ActionV1({ethers,target:router,selected,discovery:{...discovery,pools:[pool]},valuePool,actors});
+    const row={pool:pool.address,vault:pool.vault,status:'NOT_EXECUTED',tokens:pool.tokens};
+    report.attempts.push(row);
+    if(plan.kind!=='READY'){row.status='PROTOCOL_INPUTS_UNAVAILABLE';row.reason=plan.reason;continue;}
+    const iface=new ethers.Interface(contract.interface.fragments),data=iface.encodeFunctionData(selected.signature,plan.args);
+    try{
+      const from=plan.sender,txArgs={from,to:router.address,data,value:0n};
+      await provider.call(txArgs);
+      const gas=await provider.estimateGas(txArgs);
+      const transaction=await (await provider.getSigner(from)).sendTransaction({to:router.address,data,value:0n,gasLimit:gas+gas/2n+100000n});
+      const receipt=await transaction.wait();
+      const vault=new ethers.Contract(pool.vault,vaultRead,provider);
+      const onChain=await vault.isPoolInitialized(pool.address);
+      row.transactionHash=transaction.hash;row.blockNumber=receipt.blockNumber;row.receiptStatus=receipt.status;
+      row.status=Number(receipt.status)===1&&onChain===true?'INITIALIZED_ONCHAIN':'INITIALIZATION_NOT_CONFIRMED';
+      if(row.status==='INITIALIZED_ONCHAIN')report.initializedPoolCount++;
+    }catch(error){
+      row.status='ROUTER_INITIALIZATION_REVERTED';
+      row.error=String(error?.shortMessage??error?.message??error).slice(0,900);
+    }
+  }
+  report.verifiedInitializedPools+=report.initializedPoolCount;
+  report.status=report.verifiedInitializedPools>0?'INITIALIZED_POOL_AVAILABLE':discovery.pools.length?'INITIALIZATION_FAILED':'NO_REGISTERED_POOLS';
+  return report;
+}
 function ethersMaxUint256V1(){return(1n<<256n)-1n;}
 function amountForTokenV1(token,valuePool){
   const row=(valuePool?.tokens??[]).find(t=>lower(t.address??t)===lower(token));
