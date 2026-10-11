@@ -48,12 +48,13 @@ test('primary and No Telemetry only use private cache through exact intelligence
   }
 });
 
-test('compilation outputs are stored only on the private cache branch, never authoritative main',()=>{
+test('compilation outputs live only in an isolated folder on private Audit-Controller main',()=>{
   const source=fs.readFileSync(new URL('../src/phase0-private-build-cache-v1.mjs',import.meta.url),'utf8');
-  assert.match(source,/PRIVATE_CACHE_BRANCH = 'phase0-verified-build-cache'/);
-  assert.match(source,/ensurePrivateCacheBranch\(token\);await tryPublish/);
-  assert.match(source,/ref:PRIVATE_CACHE_BRANCH/);
+  assert.match(source,/PRIVATE_CACHE_ROOT = 'Phase0 Build Cache'/);
+  assert.match(source,/PRIVATE_CACHE_REF = 'main'/);
+  assert.match(source,/ref:PRIVATE_CACHE_REF/);
   assert.match(source,/repos\/CurveYield2\/Audit-Controller\/contents/);
+  assert.doesNotMatch(source,/phase0-verified-build-cache/);
   assert.doesNotMatch(source,/actions\/cache@/);
 });
 
