@@ -539,7 +539,7 @@ export function discoverCreatorCandidatesV1({targets=[]}={}){
 }
 function fundedTokensV1(valuePool={}){
   return (valuePool.tokens??[])
-    .filter(token=>normalizedAddressV1({getAddress:v=>v},token?.address??token)&&token?.fundedAmount!=null&&BigInt(token.fundedAmount)>0n)
+    .filter(token=>/^0x[0-9a-fA-F]{40}$/.test(String(token?.address??token))&&token?.fundedAmount!=null&&BigInt(token.fundedAmount)>0n)
     .map(token=>({...token,address:String(token.address)}))
     .sort((a,b)=>String(a.address).toLowerCase().localeCompare(String(b.address).toLowerCase()));
 }
@@ -786,15 +786,16 @@ export async function bindCreatedContractV1({provider,ethers,address,artifacts=[
   if(!createdAddress)return{address,status:'INVALID_ADDRESS',deployment:null,artifact:null,syntheticArtifact:null,token:null};
   const code=await provider.getCode(createdAddress);
   if(!code||code==='0x')return{address:createdAddress,status:'NO_CODE',deployment:null,artifact:null,syntheticArtifact:null,token:null};
-  let implementationAddress=null,mappingStatus='MATCHED_RUNTIME_BYTECODE',artifact=matchedRuntimeArtifactV1({code,artifacts});
-  if(!artifact){
-    implementationAddress=eip1167ImplementationV1(ethers,code)??await eip1967ImplementationV1({provider,ethers,address:createdAddress});
-    if(implementationAddress){
-      const implementationCode=await provider.getCode(implementationAddress);
-      artifact=matchedRuntimeArtifactV1({code:implementationCode,artifacts});
-      if(artifact)mappingStatus=eip1167ImplementationV1(ethers,code)?'EIP1167_IMPLEMENTATION_RUNTIME_MATCH':'EIP1967_IMPLEMENTATION_RUNTIME_MATCH';
-    }
+  const eip1167Implementation=eip1167ImplementationV1(ethers,code);
+  const eip1967Implementation=eip1167Implementation?null:await eip1967ImplementationV1({provider,ethers,address:createdAddress});
+  let implementationAddress=eip1167Implementation??eip1967Implementation;
+  let mappingStatus='MATCHED_RUNTIME_BYTECODE',artifact=null;
+  if(implementationAddress){
+    const implementationCode=await provider.getCode(implementationAddress);
+    artifact=matchedRuntimeArtifactV1({code:implementationCode,artifacts});
+    if(artifact)mappingStatus=eip1167Implementation?'EIP1167_IMPLEMENTATION_RUNTIME_MATCH':'EIP1967_IMPLEMENTATION_RUNTIME_MATCH';
   }
+  if(!artifact)artifact=matchedRuntimeArtifactV1({code,artifacts});
   let syntheticArtifact=null,token=null;
   if(!artifact){
     try{
