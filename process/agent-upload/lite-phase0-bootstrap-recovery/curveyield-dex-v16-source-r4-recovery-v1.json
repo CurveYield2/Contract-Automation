@@ -4,5 +4,5 @@
   "campaign_path": "campaigns/CurveYield DEX v16 Source r4",
   "audit_controller_ref": "main",
   "completed_stages_manifest": "",
-  "retry_revision": 2
+  "retry_revision": 3
 }
