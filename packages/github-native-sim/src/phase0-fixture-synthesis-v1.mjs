@@ -1239,7 +1239,7 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
       }
       creations.push({
         functionKey:candidate.key,target:candidate.target.qualifiedName,address:candidate.target.address,
-        function:candidate.selected.signature,basis:candidate.basis,strategy,sender,
+        function:candidate.selected.signature,basis:candidate.basis,recipeBasis:built.basis??null,strategy,sender,
         argsSummary:normalizeEvidenceValueV1(built.args),valueWei:String(built.value??0n),
         receipt:{transactionHash:result.transactionHash,blockNumber:result.receipt?.blockNumber??null,status:Number(result.receipt?.status??0),gasUsed:result.receipt?.gasUsed?.toString?.()??null},
         createdAddresses:newAddresses,boundArtifacts:bound
