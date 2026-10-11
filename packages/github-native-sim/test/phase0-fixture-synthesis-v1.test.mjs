@@ -304,6 +304,14 @@ contract GenericChild {
   }
 }
 
+contract AlwaysRevertCreator {
+  error Nope();
+  function create(address[] calldata tokens) external pure returns (address) {
+    if (tokens.length >= 0) revert Nope();
+    return address(0);
+  }
+}
+
 contract GenericFactory {
   error UnauthorizedCaller();
   address public owner;
@@ -439,4 +447,43 @@ test('Stage-2 runner executes creator synthesis before the shared Medusa/telemet
   assert.match(runner,/STAGE_2_CREATOR_DISCOVERY_AND_EXECUTION/);
   assert.match(runner,/createdSpenderApprovals/);
   assert.match(runner,/createdTokenFunding/);
+});
+
+
+test('Stage-2 enforces the 24-attempt ceiling and retains decoded attempt evidence for a creator that never succeeds',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage2Contracts();
+    const token1=await deployArtifact(provider,compiled.GenericToken);
+    const token2=await deployArtifact(provider,compiled.GenericToken);
+    const reverter=await deployArtifact(provider,compiled.AlwaysRevertCreator);
+    const accounts=await provider.send('eth_accounts',[]);
+    const artifact=normalizedTestArtifact('Stage2.sol','AlwaysRevertCreator',compiled.AlwaysRevertCreator);
+    const iface=new ethers.Interface(artifact.abi),fragment=iface.getFunction('create(address[])');
+    const target={
+      qualifiedName:'Stage2.sol:AlwaysRevertCreator',address:await reverter.getAddress(),artifact,
+      functions:[{fragment,signature:fragment.format('sighash'),accounting:false,semanticFamily:'OTHER'}]
+    };
+    const pool={
+      addresses:[await reverter.getAddress(),await token1.getAddress(),await token2.getAddress()],
+      tokens:[
+        {address:await token1.getAddress(),decimals:18,fundedAmount:(10n**24n).toString()},
+        {address:await token2.getAddress(),decimals:18,fundedAmount:(10n**24n).toString()}
+      ],
+      associations:{},privileged:[],created:[],receipts:[],gaps:[]
+    };
+    const result=await executeCreatorSynthesisV1({
+      provider,ethers,targets:[target],actors:[accounts[0]],valuePool:pool,artifacts:[artifact],
+      maxAttemptsPerCandidate:24,maxSuccessesPerCandidate:3,maxCreatedContracts:20
+    });
+    assert.equal(result.creations.length,0);
+    assert.equal(result.creationGaps.length,1);
+    assert.equal(result.creationGaps[0].attemptCount,24);
+    assert.equal(result.creationGaps[0].attempts.length,24);
+    assert.equal(result.creationGaps[0].successes,0);
+    assert.ok(result.creationGaps[0].topDecodedRevertReasons.some(x=>x.reason==='Nope()'&&x.count===24));
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
 });
