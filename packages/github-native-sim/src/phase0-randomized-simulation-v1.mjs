@@ -1132,7 +1132,7 @@ function qualifiedActionV2({target,selected,actors,rng}){
     const primary=archive.holder,spender=archive.spender,receiver=archive.receiver;
     if(sig==='transfer(address,uint256)')return{sender:primary,args:[receiver,1n],value:0n,basis:'ARCHIVE_VERIFIED_FUNDED_TOKEN_TRANSFER'};
     if(sig==='transferFrom(address,address,uint256)')return{sender:spender,args:[primary,receiver,1n],value:0n,basis:'ARCHIVE_VERIFIED_FUNDED_TOKEN_ALLOWANCE'};
-    if(sig==='approve(address,uint256)')return{sender:primary,args:[spender,ethers.MaxUint256],value:0n,basis:'ARCHIVE_TOKEN_ALLOWANCE'};
+    if(sig==='approve(address,uint256)')return{sender:primary,args:[spender,(1n<<256n)-1n],value:0n,basis:'ARCHIVE_TOKEN_ALLOWANCE'};
   }
   if(recipeId==='erc20-standard-v1'&&runtime.primaryActor){
     const primary=runtime.primaryActor,spender=runtime.spenderActor??actors[1]??actors[0],receiver=actors.find(x=>x.toLowerCase()!==primary.toLowerCase()&&x.toLowerCase()!==spender.toLowerCase())??spender;
