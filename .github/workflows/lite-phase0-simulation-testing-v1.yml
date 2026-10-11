@@ -3,6 +3,11 @@ name: Lite Phase 0 Simulation Testing v1
 # Proves production Phase-0 Medusa and/or ABI telemetry end to end on a local ephemeral Anvil fork with reduced
 # call budgets before spending a full campaign simulation. Never publishes campaign evidence.
 on:
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - '.github/smoke-trigger/lite-phase0-simulation-testing-v1.json'
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -52,7 +57,7 @@ permissions:
 
 concurrency:
   group: lite-phase0-simulation-testing-${{ github.event.issue.number || inputs.campaign_id || github.run_id }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   simulation-testing:
@@ -64,7 +69,7 @@ jobs:
         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - name: Resolve smoke invocation
         id: invocation
@@ -80,7 +85,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "issue_comment" ]; then
+          if [ "$EVENT_NAME" = "push" ]; then
+            trigger_path=.github/smoke-trigger/lite-phase0-simulation-testing-v1.json
+            trigger_json="$(gh api "repos/$GITHUB_REPOSITORY/contents/$trigger_path?ref=$GITHUB_SHA" --jq '.content' | base64 -d)"
+            campaign_id="$(jq -er '.campaign_id | select(type=="string" and length>0)' <<<"$trigger_json")"
+            campaign_path="$(jq -er '.campaign_path | select(type=="string" and length>0)' <<<"$trigger_json")"
+            audit_controller_ref="$(jq -er '.audit_controller_ref // "main" | select(type=="string" and length>0)' <<<"$trigger_json")"
+            medusa_calls="$(jq -er '.medusa_calls | tostring | select(test("^[0-9]{1,6}$"))' <<<"$trigger_json")"
+            telemetry_calls="$(jq -er '.telemetry_calls | tostring | select(test("^[0-9]{1,6}$"))' <<<"$trigger_json")"
+            {
+              echo "target_ref=$GITHUB_SHA"
+              echo "campaign_id=$campaign_id"
+              echo "campaign_path=$campaign_path"
+              echo "audit_controller_ref=$audit_controller_ref"
+              echo "medusa_calls=$medusa_calls"
+              echo "telemetry_calls=$telemetry_calls"
+            } >> "$GITHUB_OUTPUT"
+          elif [ "$EVENT_NAME" = "issue_comment" ]; then
             pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
             head_repo="$(jq -r '.head.repo.full_name // empty' <<<"$pr_json")"
             head_sha="$(jq -r '.head.sha // empty' <<<"$pr_json")"
