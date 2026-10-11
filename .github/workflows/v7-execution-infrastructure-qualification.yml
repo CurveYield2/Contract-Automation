@@ -38,6 +38,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/v7-execution-infrastructure-qualification.yml'
+      - '.github/workflows/audit-controller-execution.yml'
+      - 'scripts/classify-v7-qualification-change.mjs'
       - '.github/workflows/lite-phase0-bootstrap-v1.yml'
       - '.github/workflows/lite-phase0-intelligence-v1.yml'
       - '.github/workflows/lite-phase0-randomized-simulation-v1.yml'
