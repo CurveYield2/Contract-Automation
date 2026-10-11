@@ -712,6 +712,10 @@ export function discoverCreatorCandidatesV1({targets=[]}={}){
       const namedCreator=CREATOR_NAME_RE_V1.test(String(fragment.name??''))&&(fragment.inputs??[]).some(paramContainsAddressV1);
       if(!returnsAddress&&!namedCreator)continue;
       const q=String(target.logicalQualifiedName??target.qualifiedName??'');
+      // Balancer Routers and BatchRouters return TokenAmount tuples containing
+      // address fields, but these are NOT factory creators. Never infer
+      // contract creation solely from an address nested in a swap result.
+      if(/(?:^|\/)(?:Router|BatchRouter|CompositeLiquidityRouter)\.sol:(?:Router|BatchRouter|CompositeLiquidityRouter)$/.test(q))continue;
       // CurveYield factories explicitly restrict create() to the deployed
       // PoolFactoryWrapper. Users cannot invoke them directly, irrespective
       // of allowances, impersonated owners, or random parameter retries.
@@ -1142,10 +1146,17 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
   const known=knownAddressSetV1({valuePool,targets}),creations=[],creationGaps=[],createdDeployments=[],syntheticArtifacts=[],createdTokens=[];
   const privileged=uniqueAddressesV1(ethers,valuePool.privileged??[]),actorRows=uniqueAddressesV1(ethers,actors);
   let createdCount=0;
-  for(const candidate of candidates){
+  for(const [candidateIndex,candidate] of candidates.entries()){
     if(createdCount>=maxCreatedContracts)break;
     const attempts=[];let successes=0;
-    for(let strategy=0;strategy<maxAttemptsPerCandidate&&attempts.length<maxAttemptsPerCandidate&&successes<maxSuccessesPerCandidate&&createdCount<maxCreatedContracts;strategy++){
+    const isCurveYieldWrapper=/CurveYieldPoolFactoryWrapper\.sol:/.test(String(candidate.target.logicalQualifiedName??candidate.target.qualifiedName??''))
+      &&/^create(?:Weighted|Stable|StableSurge)Pool$/.test(String(candidate.selected.fragment?.name??''));
+    // Pool inputs cycle through the available adjacent funded token pairs.
+    // Trying 24 different salts against the same invalid pair is not useful.
+    const attemptBudget=isCurveYieldWrapper?Math.min(maxAttemptsPerCandidate,Math.max(2,fundedTokensV1(valuePool).length)):maxAttemptsPerCandidate;
+    const successBudget=isCurveYieldWrapper?1:maxSuccessesPerCandidate;
+    console.log(`[phase0-fixture] Stage2 creator ${candidateIndex+1}/${candidates.length}: ${candidate.selected.signature}; maxAttempts=${attemptBudget}`);
+    for(let strategy=0;strategy<attemptBudget&&attempts.length<attemptBudget&&successes<successBudget&&createdCount<maxCreatedContracts;strategy++){
       const actor=actorRows[deterministicIndexV1(ethers,`${candidate.key}:${strategy}`,actorRows.length)]??privileged[0]??ethers.ZeroAddress;
       const wrapper=await buildCurveYieldWrapperCreationV1({provider,ethers,candidate,attempt:strategy,actor,valuePool});
       const built=wrapper===null?buildCreatorArgumentsV1({ethers,candidate,attempt:strategy,actor,valuePool,targets}):wrapper;
@@ -1160,7 +1171,7 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
       let result=base,sender=actor;
       if(base.status!=='PASS'&&authorizationLookingV1(base.decoded)){
         for(const privilegedSender of privileged){
-          if(attempts.length>=maxAttemptsPerCandidate)break;
+          if(attempts.length>=attemptBudget)break;
           if(privilegedSender.toLowerCase()===actor.toLowerCase())continue;
           const retry=await attemptCreatorCallV1({provider,ethers,candidate,sender:privilegedSender,args:built.args,selectorIndex,value:built.value??0n});
           attempts.push({attempt:attempts.length+1,strategy,sender:privilegedSender,args:normalizeEvidenceValueV1(built.args),tokenSet:built.tokenSet,status:retry.status,decoded:retry.decoded??null,error:retry.error??null,authorizationRetry:true});
