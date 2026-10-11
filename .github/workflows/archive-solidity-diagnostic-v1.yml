@@ -62,4 +62,5 @@ jobs:
         with:
           name: archive-solidity-diag-${{ matrix.label }}-${{ github.run_id }}
           path: .diagnostic/
+          include-hidden-files: true
           retention-days: 3
