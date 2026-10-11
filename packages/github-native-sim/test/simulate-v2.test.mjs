@@ -239,28 +239,21 @@ test('Phase 7 uses the same accepted build for gas evidence and a full pinned-fo
   assert.equal(result.simulation.deployments.vault.contractName, 'Vault');
 });
 
-test('Phase 7 defaults to dRPC when no private Ethereum RPC is configured', async () => {
+test('Phase 7 fails closed when the private Ethereum RPC secret is missing', async () => {
   const calls = [];
   const artifacts = [{ sourceName: 'contracts/Vault.sol', contractName: 'Vault', abi: [], bytecode: '0x6000', gasEstimates: null }];
   const result = await runGitHubNativeJob(phase7Request(), {
-    workspaceRoot: '/tmp/v7-phase7-default-rpc',
+    workspaceRoot: '/tmp/v7-phase7-missing-private-rpc',
     checkoutSource: checkout(calls),
     buildProject: build(calls, artifacts),
     environment: {},
-    startSimulationEngine: async (input) => {
-      calls.push('start-fork');
-      assert.equal(input.forkUrl, 'https://eth.drpc.org/');
-      return { engine: 'anvil', runtime: {}, aliases: {}, async close() { calls.push('close-fork'); } };
-    },
-    executeSimulationWorkflow: async () => {
-      calls.push('lifecycle');
-      return { steps: [], context: { deployments: {} } };
-    }
+    startSimulationEngine: async () => { calls.push('start-fork'); throw Error('must not run'); },
+    executeSimulationWorkflow: async () => { calls.push('lifecycle'); throw Error('must not run'); }
   });
-  assert.deepEqual(calls, ['checkout', 'build', 'start-fork', 'lifecycle', 'close-fork']);
-  assert.equal(result.status, 'completed');
-  assert.equal(result.simulation.status, 'completed');
-  assert.equal(result.simulation.engine, 'anvil');
+  assert.deepEqual(calls, ['checkout', 'build']);
+  assert.equal(result.status, 'failed');
+  assert.match(result.error.message, /RPC profile ETHEREUM_FORK_RPC_URL is not configured/);
+  assert.equal(result.simulation.status, 'failed');
 });
 
 test('Phase 7 captures workflow failures as typed lifecycle evidence and closes the fork engine', async () => {
