@@ -238,6 +238,8 @@ jobs:
 
       - name: Generate packet/report, validate semantic work, then bookkeep after PASS
         id: controller
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
         shell: bash
         run: |
           set -euo pipefail
