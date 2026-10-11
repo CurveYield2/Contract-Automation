@@ -283,13 +283,16 @@ jobs:
           fi
           printf '%s\n' 'GET BACK TO WORK' > /tmp/watchdog-message.txt
 
-          # One mutable acknowledgement per campaign, stored alongside its audit
-          # evidence. This is written by the receiving agent, never by the sender.
+          # The check-in applies ONLY to a new reviewer's initial instruction
+          # wake. Continuation, rework, technical callbacks and watchdog pokes
+          # retain their exact messages and never demand an acknowledgement.
           echo 'WAKE_ACK_PATH=' >> "$GITHUB_ENV"
           echo 'WAKE_ACK_ID=' >> "$GITHUB_ENV"
-          if [ "${{ inputs.gate_mode }}" = 'LITE' ] \
+          if [ "$message_purpose" = 'initial_wake' ] \
+            && [ "${INITIAL_WAKE_DEDUPED:-false}" != 'true' ] \
+            && [ "${{ inputs.gate_mode }}" = 'LITE' ] \
             && [ "${{ inputs.worker_role }}" = 'reviewer' ] \
-            && [ "$(cat /tmp/wake-message.txt)" != 'GET BACK TO WORK' ]; then
+            && [ "${{ inputs.gate_repository }}" = 'CurveYield2/Audit-Controller' ]; then
             token="${AUDIT_CONTROLLER_GITHUB_TOKEN:-}"
             gate_path="${{ inputs.gate_state_path }}"
             gate_ref="${{ inputs.gate_ref }}"
@@ -297,27 +300,40 @@ jobs:
               encoded_gate="${gate_path// /%20}"
               encoded="$(GH_TOKEN="$token" gh api "repos/CurveYield2/Audit-Controller/contents/$encoded_gate?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
               workspace="$(printf '%s' "$encoded" | base64 -d 2>/dev/null | jq -r '.workspacePath // empty' 2>/dev/null || true)"
-              if [[ "$workspace" == campaigns/* ]]; then
-                ack_file="$workspace/work/browser/WAKE_ACK_v1.json"
+              reviewer="$(jq -r '.chatName // empty' /tmp/browser-context.json)"
+              if [ -z "$reviewer" ]; then
+                reviewer="$(printf '%s' "$encoded" | base64 -d 2>/dev/null | jq -r '.currentAssignment.reviewer // empty' 2>/dev/null || true)"
+              fi
+              if [[ "$workspace" == campaigns/* ]] && [[ "$reviewer" =~ ^(reviewer-[1234]|reviewer-3L|master-reviewer)$ ]]; then
+                ack_file="$workspace/work/browser/WAKE_ACK_${reviewer}_v1.json"
                 ack_id="$WAKE_ID/$GITHUB_RUN_ID"
+                ack_payload="$(jq -cn --arg id "$ack_id" --arg wake "$WAKE_ID" --arg run "$GITHUB_RUN_ID" --arg phase "$PHASE_ID" --arg reviewer "$reviewer" \
+                  '{schemaVersion:"curveyield-browser-wake-ack-v1",ackId:$id,wakeId:$wake,runId:$run,phaseId:$phase,reviewer:$reviewer}')"
                 {
+                  echo 'DO THIS FIRST, RIGHT NOW, BEFORE ANY OTHER TASK OR INSTRUCTION.'
+                  echo 'MANDATORY INITIAL-WAKE RECEIPT: Your very first action must be to use the GitHub connector to create or update ONE acknowledgement file.'
+                  echo 'Repository: CurveYield2/Audit-Controller'
+                  echo "Branch: $gate_ref"
+                  echo "Exact campaign file: $ack_file"
+                  echo 'Write the following JSON as the entire file, preserving the values exactly:'
+                  printf '%s\n' "$ack_payload"
+                  echo 'Do not read the audit skill, analyze contracts, edit work forms, or perform any other action until the GitHub write succeeds. This is only a delivery check-in, not audit bookkeeping. After the write, immediately follow the complete audit instructions below. Do not ask for confirmation.'
                   echo
-                  echo 'WAKE RECEPTION CHECK-IN — FIRST ACTION (before the audit instructions):'
-                  echo "Use the GitHub connector to create or update `$ack_file` on CurveYield2/Audit-Controller/main."
-                  echo 'Write the following exact JSON object as the entire file:'
-                  printf '{"schemaVersion":"curveyield-browser-wake-ack-v1","ackId":"%s","wakeId":"%s","runId":"%s","phaseId":"%s"}\n' "$ack_id" "$WAKE_ID" "$GITHUB_RUN_ID" "$PHASE_ID"
-                  echo 'This one-file check-in confirms that you received this message. Do not change any phase work form, sealed receipt, or campaign controller data for the check-in. Immediately continue with the substantive instructions above.'
-                } >> /tmp/wake-message.txt
+                  cat /tmp/wake-message.txt
+                } > /tmp/initial-wake-message.txt
+                mv /tmp/initial-wake-message.txt /tmp/wake-message.txt
                 echo "WAKE_ACK_PATH=$ack_file" >> "$GITHUB_ENV"
                 echo "WAKE_ACK_ID=$ack_id" >> "$GITHUB_ENV"
+                echo "WAKE_ACK_REVIEWER=$reviewer" >> "$GITHUB_ENV"
               else
-                echo '::warning::Audit campaign workspace could not be resolved; custom wake is preserved but lacks GitHub acknowledgement.'
+                echo '::error::Initial reviewer wake could not resolve its campaign workspace or reviewer identity; refusing to send an unverified initial wake.'
+                exit 1
               fi
             else
-              echo '::warning::Audit acknowledgement setup unavailable; sending exact custom wake without check-in.'
+              echo '::error::Initial reviewer wake requires an accessible Audit-Controller campaign directory and token.'
+              exit 1
             fi
           fi
-
           jq -e '
             type=="object"
             and ((.routineId // "")|type=="string")
@@ -404,19 +420,22 @@ jobs:
           set -euo pipefail
           echo 'verified=false' >> "$GITHUB_OUTPUT"
           ack_url="repos/CurveYield2/Audit-Controller/contents/${WAKE_ACK_PATH// /%20}?ref=${{ inputs.gate_ref }}"
-          for i in $(seq 1 24); do
+          for i in $(seq 0 10); do
             encoded="$(gh api "$ack_url" --jq '.content' 2>/dev/null || true)"
             if [ -n "$encoded" ] && printf '%s' "$encoded" | base64 -d 2>/dev/null \
-              | jq -e --arg id "$WAKE_ACK_ID" \
-                 '.schemaVersion=="curveyield-browser-wake-ack-v1" and .ackId==$id' >/dev/null 2>&1; then
+              | jq -e --arg id "$WAKE_ACK_ID" --arg wake "$WAKE_ID" \
+                  --arg run "$GITHUB_RUN_ID" --arg phase "$PHASE_ID" --arg reviewer "$WAKE_ACK_REVIEWER" \
+                 '.schemaVersion=="curveyield-browser-wake-ack-v1"
+                  and .ackId==$id and .wakeId==$wake and .runId==$run
+                  and .phaseId==$phase and .reviewer==$reviewer' >/dev/null 2>&1; then
               echo 'verified=true' >> "$GITHUB_OUTPUT"
-              echo 'Delivery independently confirmed by receiving reviewer GitHub check-in.' >> "$GITHUB_STEP_SUMMARY"
+              echo "Initial reviewer wake $WAKE_ID independently confirmed by matching GitHub check-in." >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            sleep 10
+            if [ "$i" -lt 10 ]; then sleep 30; fi
           done
-          echo "::warning::X11 send attempted; reviewer has not yet checked in. Delivery remains UNCONFIRMED, not FAILED."
-          echo 'Delivery awaiting reviewer GitHub acknowledgement; do not claim persistent delivery or automatically retry the message.' >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning::No matching agent check-in within 5 minutes (11 checks, 30-second interval). Delivery remains UNCONFIRMED; no duplicate initial wake is dispatched."
+          echo 'Initial reviewer wake unconfirmed after 5 minutes; browser visual send evidence is not proof of reception.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Dispatch fresh-runner retry for retryable pre-post failure
         id: fresh-runner-retry
@@ -482,6 +501,7 @@ jobs:
           REPAIR_UNVIEWABLE_THRESHOLD: ${{ env.REPAIR_UNVIEWABLE_THRESHOLD }}
           WAKE_ACK_PATH: ${{ env.WAKE_ACK_PATH }}
           WAKE_ACK_ID: ${{ env.WAKE_ACK_ID }}
+          WAKE_ACK_REVIEWER: ${{ env.WAKE_ACK_REVIEWER }}
           ACKNOWLEDGEMENT_VERIFIED: ${{ steps.receipt.outputs.verified }}
         shell: bash
         run: |
