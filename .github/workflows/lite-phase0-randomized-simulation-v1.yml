@@ -1,5 +1,4 @@
-name: Lite Phase 0 Randomized Simulation v1
-
+name: Lite Phase 0 Forked Deployment and Configuration v2
 on:
   workflow_call:
     inputs:
@@ -23,9 +22,9 @@ permissions:
   actions: read
 
 jobs:
-  phase0-randomized-simulation:
+  phase0-deploy-config:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 50
     steps:
       - name: Checkout trusted Contract-Automation
         uses: actions/checkout@v4
@@ -34,12 +33,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Restore pinned Node dependencies (shared Phase 0 cache)
+      - name: Restore pinned Node dependencies
         uses: ./.github/actions/setup-phase0-node-cache
 
-      - name: Install retained audit toolchain
-        if: inputs.completed_stages_manifest == ''
-        uses: ./.github/actions/setup-v7-toolchain-cached
+      - name: Enable Forge for package deployment scripts only
+        uses: ./.github/actions/setup-phase0-deployment-only-toolchain-v1
 
       - name: Select Audit-Controller credential
         env:
@@ -49,7 +47,7 @@ jobs:
         shell: bash
         run: bash scripts/select-audit-controller-token.sh
 
-      - name: Checkout exact campaign
+      - name: Checkout exact campaign source
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
@@ -58,114 +56,62 @@ jobs:
           set -euo pipefail
           bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF"
 
-      - name: Import verified completed simulation stages without rerunning them
-        if: inputs.completed_stages_manifest != ''
+      - name: Run package deployment and configuration scripts on isolated Ethereum Anvil fork
         env:
-          GH_TOKEN: ${{ github.token }}
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
           COMPLETED_STAGES_MANIFEST: ${{ inputs.completed_stages_manifest }}
           CAMPAIGN_PATH: ${{ inputs.campaign_path }}
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/run-phase0-randomized-simulation-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --output .phase0-randomized-output --completed-stages-manifest "$COMPLETED_STAGES_MANIFEST" | tee /tmp/phase0-randomized.json
-
-      - name: Run Anvil baseline, deployment simulation, Medusa and ABI telemetry
-        if: inputs.completed_stages_manifest == ''
-        env:
-          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
-        shell: bash
-        run: |
-          set -euo pipefail
+          test -z "$COMPLETED_STAGES_MANIFEST" || { echo "::error::Randomized stage reuse manifests are retired"; exit 1; }
           test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::RPC_ETHEREUM secret is missing"; exit 1; }
           chain_id="$(curl -fsS --max-time 15 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
-          test "$chain_id" = "0x1" || { echo "::error::Ethereum fork source did not report chain ID 1"; exit 1; }
-          historical_code="$(curl -fsS --max-time 30 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_getCode","params":["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2","0x112a880"]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
-          test -n "$historical_code" && test "$historical_code" != "0x" || { echo "::error::Ethereum fork source did not return historical WETH code at block 18000000"; exit 1; }
-          rm -rf .phase0-randomized-output
-          # Reserve time for always()-run telemetry analysis and artifact upload when RPC or harness execution stalls.
-          # 21-minute wall-clock watchdog (50% of prior 42 minutes); the 100,001 Medusa / 4,800 ABI gates remain unchanged.
-          timeout -s TERM -k 30s 1260s node scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --output .phase0-randomized-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-randomized.json
+          test "$chain_id" = "0x1" || { echo "::error::Fork source must report Ethereum chain ID 1"; exit 1; }
+          rm -rf .phase0-deploy-output
+          timeout -s TERM -k 30s 2400s node scripts/run-phase0-fork-deploy-config-v1.mjs \
+            --controller-root .audit-controller \
+            --campaign-path "$CAMPAIGN_PATH" \
+            --output .phase0-deploy-output \
+            --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-deploy-result.json
 
-      - name: Analyze raw ABI telemetry, decoded reverts and observation gaps
-        if: ${{ always() }}
-        shell: bash
-        run: |
-          node scripts/phase0-telemetry-analysis-v1.mjs .phase0-randomized-output
-
-      - name: Report randomized simulation diagnostics
-        if: ${{ always() }}
-        shell: bash
-        run: |
-          summary=.phase0-randomized-output/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
-          if [ ! -f "$summary" ]; then
-            echo "::warning::Phase-0 randomized simulation summary was not produced"
-            exit 0
-          fi
-          echo "---- deployment coverage ----"
-          jq '.deployment.coverage // {}' "$summary" || true
-          echo "---- deployment failures / limitations ----"
-          jq '[.deployment.limitations[]? | select(.type | test("SOURCE_PLAN_(DEPLOYMENT_FAILED|CONSTRUCTOR_ARGUMENT_UNRESOLVED|ARTIFACT_RESOLUTION_FAILED)"))] | .[:40]' "$summary" || true
-          echo "---- failed deployment attempts ----"
-          jq '[.deployment.attempts[]? | select(.status != "PASS")] | .[:40]' "$summary" || true
-          echo "---- Medusa ----"
-          jq '.medusa // {}' "$summary" || true
-          medusa_raw="$(find .phase0-randomized-output -name MEDUSA_RAW_OUTPUT_v1.log -print -quit 2>/dev/null || true)"
-          if ! jq -e '.medusa.status=="PASS" or .medusa.status=="COMPLETE_WITH_ORACLE_GAPS"' "$summary" >/dev/null && [ -n "$medusa_raw" ]; then
-            echo "---- Medusa raw output (tail) ----"
-            tail -n 80 "$medusa_raw" | sed -E 's#https?://[^ ]+#[URL]#g' || true
-          fi
-
-      - name: Retain raw randomized simulation output
+      - name: Retain deployment/configuration evidence even on failure
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: phase0-randomized-${{ inputs.campaign_id }}-${{ github.run_id }}
-          path: .phase0-randomized-output
+          name: phase0-deploy-config-${{ inputs.campaign_id }}-${{ github.run_id }}
+          path: .phase0-deploy-output
           if-no-files-found: warn
           retention-days: 14
-          include-hidden-files: true
 
-      - name: Require complete randomized simulation evidence
+      - name: Require source package deployment/configuration completion
         shell: bash
         run: |
           set -euo pipefail
-          summary=.phase0-randomized-output/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
-          index=.phase0-randomized-output/PHASE0_SIMULATION_RUN_INDEX_v1.json
-          analysis=.phase0-randomized-output/PHASE0_TELEMETRY_ANALYSIS_v1.json
-          test -s "$analysis" || { echo "::error::Missing retained telemetry analysis"; exit 1; }
-          jq -e '.schemaVersion=="curveyield-phase0-telemetry-analysis-v1"' "$analysis" >/dev/null
+          evidence=.phase0-deploy-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
+          test -s "$evidence"
           jq -e '
-            .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE" and
-            ((.deployment.coverage.sourcePlanUnresolved // 0)|tonumber)==0 and
-            ((.deployment.coverage.sourceKnownMissingTargets // 0)|tonumber)==0 and
-            (
-              (((.deployment.coverage.mutableTargets // 0)|tonumber)>0 and
-               (.medusa.status=="PASS" or .medusa.status=="COMPLETE_WITH_ORACLE_GAPS") and
-               (.medusa.observedCalls|tonumber)>=100001 and
-               .medusa.variety.status=="PASS" and
-               (.telemetry|length)==4 and
-               all(.telemetry[]; .status=="PASS" and (.calls|tonumber)==1200 and (.errors|tonumber)==0))
-              or
-              (((.deployment.coverage.mutableTargets // 0)|tonumber)==0 and
-               ((.deployment.coverage.sourcePlanPlanned // 0)|tonumber)==0 and
-               ((.deployment.coverage.zeroArgFallbackCandidates // 0)|tonumber)==0)
-            )
-          ' "$summary" >/dev/null
-          jq -e '
-            .policy.realAbiCallsOnly==true and
-            .policy.rawRandomBytes==false and
-            .policy.crossContractBursts==true and
-            (.policy.accountingActionWeight|tonumber)>=0.8 and
-            .executionNormalization.policy=="ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE"
-          ' "$index" >/dev/null
+            .schemaVersion=="curveyield-lite-phase0-deploy-config-execution-v3"
+            and .executionMode=="ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY"
+            and .fork.engine=="anvil" and .fork.chainId==1
+            and ((.status=="PASS" and (.coverage.executedScripts|tonumber)>0
+              and (.coverage.failedOrUnsupportedScripts|tonumber)==0
+              and all(.scriptDispositions[]; .disposition=="EXECUTED_PASS")
+              and all(.attempts[]; .status=="PASS" and .exitCode==0))
+              or (.status=="NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT"
+                and (.scriptDispositions|length)==0 and (.attempts|length)==0))
+          ' "$evidence" >/dev/null
 
-      - name: Project outputs into exact later-phase formats
+      - name: Publish deployment evidence and Phase 6 matrix without fuzz baselines
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/write-phase0-simulation-outputs-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --simulation-output .phase0-randomized-output
+          node scripts/write-phase0-fork-deploy-outputs-v1.mjs \
+            --controller-root .audit-controller \
+            --campaign-path "${{ inputs.campaign_path }}" \
+            --simulation-output .phase0-deploy-output
 
-      - name: Publish Phase-0 simulation evidence
+      - name: Publish to exact Audit-Controller campaign ref
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
@@ -174,25 +120,20 @@ jobs:
         run: |
           set -euo pipefail
           cd .audit-controller
-          git config user.name 'CurveYield Phase0 Simulation Automation'
-          git config user.email 'phase0-simulation@users.noreply.github.com'
-          git add -- "$CAMPAIGN_PATH/evidence/phase0" "$CAMPAIGN_PATH/derived/phase-0" "$CAMPAIGN_PATH/work/phase-06"
+          git config user.name 'CurveYield Phase0 Deployment Automation'
+          git config user.email 'phase0-deployment@users.noreply.github.com'
+          git add -A -- "$CAMPAIGN_PATH/evidence/phase0" "$CAMPAIGN_PATH/derived/phase-0" "$CAMPAIGN_PATH/work/phase-06"
           if git diff --cached --quiet; then
-            echo "::error::Phase-0 randomized simulation produced no durable outputs"
+            echo "::error::Phase-0 deployment evidence produced no durable changes"
             exit 1
           fi
-          git commit -m "audit(phase0): add randomized simulation baseline ${{ inputs.campaign_id }}"
+          git commit -m "audit(phase0): retain only forked package deploy/config evidence ${{ inputs.campaign_id }}"
           git push origin "HEAD:$AUDIT_CONTROLLER_REF"
 
       - name: Summarize
         shell: bash
         run: |
-          {
-            echo "## Phase-0 randomized simulation"
-            echo "- State engine: Anvil Ethereum fork"
-            echo "- Deployment scripts: framework-native Anvil adapters only; no source mutation"
-            echo "- Medusa: Anvil-forked baseline, >100K call requirement"
-            echo "- ABI telemetry: real ABI calls, randomized cross-contract bursts, 80% accounting/state-change action target"
-            echo "- Raw telemetry: one JSONL transcript per ABI shard"
-            echo "- Later consumers: Phase 5 design + Phase 6 interpretation"
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo "## Phase 0 forked deploy/config only" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Native package deploy/configuration scripts on isolated Anvil fork" >> "$GITHUB_STEP_SUMMARY"
+          echo "- No randomized Medusa calls, ABI telemetry, or required baseline simulation inputs" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Script failures and unsafe adapters remain hard gate failures" >> "$GITHUB_STEP_SUMMARY"
