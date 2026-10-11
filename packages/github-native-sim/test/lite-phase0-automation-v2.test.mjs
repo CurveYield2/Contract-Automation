@@ -68,21 +68,12 @@ test('Phase-0, smoke, and rebind require the private Ethereum RPC secret and nev
   for(const name of ['lite-phase0-randomized-simulation-v1.yml','lite-phase0-simulation-testing-v1.yml','lite-phase0-simulation-rebind-v1.yml']){
     const workflow=read('.github/workflows/'+name);
     const secretName=name==='lite-phase0-randomized-simulation-v1.yml'?'RPC_ETHEREUM':'ETHEREUM_RPC';
-    assert.ok(workflow.includes('ETHEREUM_FORK_RPC_URL: 
+    assert.ok(workflow.includes('ETHEREUM_FORK_RPC_URL: ${{ secrets.'+secretName+' }}'),name);
     assert.doesNotMatch(workflow,/secrets\.SD_ETH_RPC_URL/);
     assert.match(workflow,/--fork-url "\$ETHEREUM_FORK_RPC_URL"/);
   }
   const source=read('packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs');
   assert.match(source,/startRpcIdentityProxy\(\{upstreamUrl:forkUrl,chainId:1\}\)/);
-  assert.match(source,/--fork-url',identityProxy\.url/);
-  assert.match(source,/spawn\(process\.execPath,args/);
-});
-+'{{ secrets.'+secretName+' }}'),name);
-    assert.doesNotMatch(workflow,/secrets\.SD_ETH_RPC_URL/);
-    assert.match(workflow,/--fork-url "\$ETHEREUM_FORK_RPC_URL"/);
-  }
-  const source=read('packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs');
-  assert.match(source,/startRpcIdentityProxy\(\{upstreamUrl:forkUrl,chainId:1\}\)/);
-  assert.match(source,/--fork-url',identityProxy\.url/);
+  assert.match(source,/'--fork-url',identityProxy\.url/);
   assert.match(source,/spawn\(process\.execPath,args/);
 });
