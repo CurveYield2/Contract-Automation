@@ -209,12 +209,16 @@ export function buildBalancerV3ActionV1({ethers,target,selected,discovery,valueP
   if((isRemove||isRemoveSingle)&&!bpt)return{kind:'BLOCKED',reason:'NO_FUNDED_BALANCER_POOL_SHARE_HOLDER',pool:pool.address};
   // Router unlocks Vault and settles internal transient token deltas atomically.
   // Amounts follow the Vault's registered token order.
-  const amountIn=amounts[0],amountOut=amounts[1];
+  // Swapping the entire funded amount would exhaust the newly initialized
+  // pool's reserves and revert; start with a bounded 0.1% of one token unit.
+  const smallSwapIn=amounts[0]>1000n?amounts[0]/1000n:1n;
+  const smallSwapOut=amounts[1]>1000n?amounts[1]/1000n:1n;
+  const maxSwapIn=amounts[0]>100n?amounts[0]/100n:1n;
   const args=isInit?[pool.address,pool.tokens,amounts,0n,false,'0x']
     :isUnbalanced?[pool.address,amounts,0n,false,'0x']
     :isProportional?[pool.address,amounts,1n,false,'0x']
-    :isSwapIn?[pool.address,pool.tokens[0],pool.tokens[1],amountIn,1n,ethersMaxUint256V1(),false,'0x']
-    :isSwapOut?[pool.address,pool.tokens[0],pool.tokens[1],amountOut,amountIn,ethersMaxUint256V1(),false,'0x']
+    :isSwapIn?[pool.address,pool.tokens[0],pool.tokens[1],smallSwapIn,1n,ethersMaxUint256V1(),false,'0x']
+    :isSwapOut?[pool.address,pool.tokens[0],pool.tokens[1],smallSwapOut,maxSwapIn,ethersMaxUint256V1(),false,'0x']
     :isRemove?[pool.address,1n,pool.tokens.map(()=>0n),false,'0x']
     :[pool.address,1n,pool.tokens[0],1n,false,'0x'];
   return{kind:'READY',sender:(isRemove||isRemoveSingle)?bpt.actor:actors[0],args,value:0n,pool:pool.address,protocol:'BALANCER_V3',basis:'VERIFIED_VAULT_POOL_STATE_ROUTER_ARGUMENTS',poolInitialized:pool.initialized};
