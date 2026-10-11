@@ -9,6 +9,7 @@ import { runSlitherAnalysis } from './analysis.mjs';
 import { generateBuildSbomV1 } from './sbom-v1.mjs';
 import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligence-technical-v1.mjs';
 import { buildExecutionArtifactBundleV2 } from './phase0-execution-input-v2.mjs';
+import { compileWithPrivateCacheV1 } from './phase0-private-build-cache-v1.mjs';
 
 function parseArgs(argv){const o={};for(let i=0;i<argv.length;i++){const t=argv[i];if(!t.startsWith('--'))continue;const k=t.slice(2);const n=argv[i+1];if(n!==undefined&&!n.startsWith('--')){o[k]=n;i++;}else o[k]=true;}return o;}
 function sha256(bytes){return createHash('sha256').update(bytes).digest('hex');}
@@ -644,7 +645,7 @@ async function main(){
     configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],analysis:{slither:{version:'0.11.6'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
   };
 
-  const build=await buildProject({projectRoot:detected.absolute,request:pseudo});
+  const build=await compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})});
   const executionBuildArtifacts=buildExecutionArtifactBundleV2({request:pseudo,build});
   const effectiveCfg={...cfg,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
   const slither=await slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit});

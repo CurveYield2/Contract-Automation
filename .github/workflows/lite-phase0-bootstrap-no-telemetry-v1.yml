@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   qualification:
-    uses: ./.github/workflows/v7-execution-infrastructure-qualification-no-telemetry-v1.yml
+    uses: ./.github/workflows/v7-execution-infrastructure-qualification.yml
     with:
       controller_ref: ${{ inputs.audit_controller_ref }}
       qualification_lane: FULL

@@ -31,45 +31,35 @@ on:
         options:
           - FULL
           - CONTROLLER_ONLY
+  # Automatic main-branch qualification is reserved for changes to executable audit code.
+  # Routine control-plane edits are checked by the PR lane/dedicated workflows;
+  # they must not repeatedly preempt FULL Phase-0 qualification.
   push:
     branches: [main]
     paths:
       - '.github/workflows/v7-execution-infrastructure-qualification.yml'
       - '.github/workflows/audit-controller-execution.yml'
-      - '.github/workflows/audit-source-initialization-v1.yml'
+      - 'scripts/classify-v7-qualification-change.mjs'
       - '.github/workflows/lite-phase0-bootstrap-v1.yml'
       - '.github/workflows/lite-phase0-intelligence-v1.yml'
-      - '.github/workflows/lite-audit-browser-orchestrator-v1.yml'
-      - 'scripts/audit-source-initialization/**'
-      - 'scripts/lite-phase0-finalize-v1.mjs'
-      - 'scripts/lite-phase-packet-controller-v1.mjs'
-      - 'scripts/lib/lite-phase-work-v1.mjs'
-      - 'scripts/lib/lite-phase-prefill-v1.mjs'
-      - '.github/workflows/lite-phase-work-packet-controller-v1.yml'
-      - 'scripts/lite-phase-packet-controller-v1.mjs'
-      - 'scripts/lib/lite-phase-work-v1.mjs'
-      - 'packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs'
-      - 'packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs'
-      - 'packages/github-native-sim/src/lite-phase0-skill-outputs-v1.mjs'
-      - 'packages/github-native-sim/test/lite-boundary-artifacts-v1.test.mjs'
-      - '.github/workflows/lite-phase-work-packet-controller-v1.yml'
-      - 'scripts/sync-lite-authority-zip-v1.py'
-      - '.github/workflows/browser-agent-wake.yml'
-      - '.github/workflows/browser-agent-watchdog.yml'
-      - '.github/workflows/agent-zip-import-v1.yml'
-      - '.github/workflows/v7-agent-qualification-bridge.yml'
-      - 'scripts/browser-agent-wake.mjs'
-      - 'scripts/select-audit-controller-token.sh'
-      - 'process/browser-agent-wake/**'
-      - 'protocol/schemas/curveyield-lite-interphase-*.schema.json'
+      - '.github/workflows/lite-phase0-randomized-simulation-v1.yml'
+      - '.github/workflows/lite-phase0-bootstrap-no-telemetry-v1.yml'
+      - '.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml'
+      - '.github/workflows/lite-phase0-randomized-simulation-no-telemetry-v1.yml'
+      - '.github/workflows/v7-execution-infrastructure-qualification-no-telemetry-v1.yml'
       - '.github/actions/setup-v7-toolchain/**'
+      - '.github/actions/setup-v7-toolchain-cached/**'
+      - '.github/actions/setup-phase0-node-cache/**'
+      - '.github/actions/setup-no-telemetry-node-cache/**'
+      - '.github/actions/setup-no-telemetry-v7-toolchain/**'
       - 'packages/github-native-sim/src/**'
-      - 'packages/github-native-sim/scripts/**'
       - 'packages/github-native-sim/test/**'
       - 'packages/runner/src/**'
       - 'packages/runner/test/**'
       - 'packages/protocol/src/**'
       - 'process/RUNNER_MANIFEST.json'
+      - 'scripts/lite-phase0-finalize-v1.mjs'
+      - 'scripts/lite-phase0-finalize-no-telemetry-v1.mjs'
       - 'package.json'
       - 'package-lock.json'
   pull_request:
@@ -81,6 +71,15 @@ on:
       - '.github/workflows/audit-source-initialization-v1.yml'
       - '.github/workflows/lite-phase0-bootstrap-v1.yml'
       - '.github/workflows/lite-phase0-intelligence-v1.yml'
+      - '.github/workflows/lite-phase0-randomized-simulation-v1.yml'
+      - '.github/workflows/lite-phase0-bootstrap-no-telemetry-v1.yml'
+      - '.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml'
+      - '.github/workflows/lite-phase0-randomized-simulation-no-telemetry-v1.yml'
+      - '.github/workflows/v7-execution-infrastructure-qualification-no-telemetry-v1.yml'
+      - '.github/actions/setup-v7-toolchain-cached/**'
+      - '.github/actions/setup-phase0-node-cache/**'
+      - '.github/actions/setup-no-telemetry-node-cache/**'
+      - '.github/actions/setup-no-telemetry-v7-toolchain/**'
       - '.github/workflows/lite-audit-browser-orchestrator-v1.yml'
       - 'scripts/audit-source-initialization/**'
       - 'scripts/lite-phase0-finalize-v1.mjs'
@@ -256,8 +255,39 @@ jobs:
           git checkout --detach "$expected_controller_commit"
           test "$(git rev-parse HEAD)" = "$expected_controller_commit"
 
+      - name: Reuse exact successful V7 qualification when runner and private controller are unchanged
+        if: env.V7_QUALIFICATION_LANE == 'FULL' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A mismatched or unavailable proof is always a cache MISS, never a PASS.
+          status_path="$(mktemp)"
+          if ! gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d > "$status_path"; then
+            echo "V7 qualification cache MISS: no canonical status"
+            exit 0
+          fi
+          controller_commit="$(git -C .controller-under-test rev-parse HEAD)"
+          qualified_run="$(jq -r '.workflowRunId // empty' "$status_path")"
+          if ! [[ "$qualified_run" =~ ^[0-9]+$ ]] ||
+             ! jq -e --arg runner "$GITHUB_SHA" --arg controller "$controller_commit"                '.status=="PASS" and .qualifiedCommit==$runner and .controllerQualification.status=="PASS" and .controllerQualification.controllerCommit==$controller and .phase6.status=="PASS" and .phase7.status=="PASS"' "$status_path" >/dev/null; then
+            echo "V7 qualification cache MISS: runner, private controller, or FULL proof changed"
+            exit 0
+          fi
+          run_path="$(mktemp)"
+          if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs/$qualified_run" > "$run_path" ||
+             ! jq -e --arg sha "$GITHUB_SHA" '.status=="completed" and .conclusion=="success" and .head_sha==$sha' "$run_path" >/dev/null; then
+            echo "V7 qualification cache MISS: qualifying run no longer verifies"
+            exit 0
+          fi
+          echo "V7_QUALIFICATION_LANE=REUSE_EXACT" >> "$GITHUB_ENV"
+          echo "V7_REUSED_FROM_RUN=$qualified_run" >> "$GITHUB_ENV"
+          jq -n --arg runner "$GITHUB_SHA" --arg controller "$controller_commit" --arg run "$qualified_run"             '{status:"PASS",reusePolicy:"EXACT_RUNNER_AND_PRIVATE_CONTROLLER_IDENTITY_ONLY",qualifiedCommit:$runner,controllerCommit:$controller,reusedRunId:$run}'             > .audit-evidence/v7-infrastructure-qualification/exact-reuse.json
+          echo "V7 exact qualification reuse: runner=$GITHUB_SHA controller=$controller_commit run=$qualified_run" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Verify private Audit-Controller v26 suite
-        if: env.CONTROLLER_REF_TO_TEST != ''
+        if: env.CONTROLLER_REF_TO_TEST != '' && env.V7_QUALIFICATION_LANE != 'REUSE_EXACT'
         working-directory: .controller-under-test
         shell: bash
         run: |
@@ -266,7 +296,7 @@ jobs:
           npm run check
 
       - name: Record private Audit-Controller qualification evidence
-        if: env.CONTROLLER_REF_TO_TEST != ''
+        if: env.CONTROLLER_REF_TO_TEST != '' && env.V7_QUALIFICATION_LANE != 'REUSE_EXACT'
         env:
           CONTROLLER_REF_TO_TEST: ${{ env.CONTROLLER_REF_TO_TEST }}
         shell: bash

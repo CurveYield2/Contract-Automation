@@ -95,6 +95,7 @@ jobs:
       - name: Generate useful Phase-0 machine intelligence No Telemetry (stage diagnostics and bounded commands)
         env:
           AUDIT_CONTROLLER_GITHUB_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PHASE0_PRIVATE_BUILD_CACHE_ENABLED: ${{ github.event_name != 'pull_request' }}
         shell: bash
         run: |
           set -euo pipefail
