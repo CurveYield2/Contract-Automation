@@ -182,20 +182,20 @@ test('Phase-0 canonicalizes enum ABI parameters before ethers Interface parsing'
   assert.match(source,/rows\.map\(canonicalAbiFragment\)/);
 });
 
-test('Phase-0 Medusa execution emits a heartbeat at least every five minutes',()=>{
+test('Phase-0 Medusa execution emits a heartbeat every thirty seconds',()=>{
   const here=path.dirname(fileURLToPath(import.meta.url));
   const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  assert.match(source,/progress heartbeat every 300s/);
-  assert.match(source,/setInterval\([\s\S]*?,300000\)/);
+  assert.match(source,/progress heartbeat every 30s/);
+  assert.match(source,/setInterval\([\s\S]*?,30000\)/);
   assert.match(source,/\[phase0-medusa\] heartbeat:/);
   assert.match(source,/clearInterval\(heartbeat\)/);
 });
 
 
-test('Phase-0 telemetry emits five-minute progress heartbeats with live call counters',()=>{
+test('Phase-0 telemetry emits thirty-second progress heartbeats with live call counters',()=>{
   const here=path.dirname(fileURLToPath(import.meta.url));
   const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
-  assert.match(source,/\[phase0-telemetry\].*heartbeat every 300s/);
+  assert.match(source,/\[phase0-telemetry\].*heartbeat every 30s/);
   assert.match(source,/\[phase0-telemetry\] heartbeat: run=/);
   assert.match(source,/calls=\$\{stats\.calls\}\/\$\{callsPerRun\}/);
   assert.match(source,/clearInterval\(telemetryHeartbeat\)/);
