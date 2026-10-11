@@ -326,6 +326,7 @@ export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spender
   const holderAddresses=uniqueAddressesV1(ethers,holders),spenderAddresses=uniqueAddressesV1(ethers,spenders);
   const gaps=[],rpcMutations=[],transactionReceipts=[],slotResults=[];
   const ethBalance=10n**24n,erc20Iface=new ethers.Interface(ERC20_APPROVE_ABI_V1),permit2Iface=new ethers.Interface(PERMIT2_APPROVE_ABI_V1);
+  console.log(`[phase0-fixture] funding start; holders=${holderAddresses.length}; tokens=${tokens.length}; spenders=${spenderAddresses.length}`);
   for(const holder of holderAddresses){
     try{
       await provider.send('anvil_setBalance',[holder,ethers.toQuantity(ethBalance)]);
@@ -367,8 +368,11 @@ export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spender
       tokenRecord.balanceSlot=slot.slot;tokenRecord.balanceLayout=slot.layout;
     }
     slotResults.push({token,status:'FOUND',slot:slot.slot,layout:slot.layout,decimals,fundedAmount:verified===holderAddresses.length?amount.toString():null,plannedFundedAmount:amount.toString(),holdersWritten:writes,holdersVerified:verified});
+    console.log(`[phase0-fixture] balance slot ${slotResults.length}/${tokens.length}; ${token}; verified=${verified}`);
   }
 
+  console.log('[phase0-fixture] ERC20 approvals started');
+  let approvalsComplete=0;
   await mapLimitV1(holderAddresses,6,async holder=>{
     for(const tokenRecord of tokens){
       const token=normalizedAddressV1(ethers,tokenRecord?.address??tokenRecord);if(!token)continue;
@@ -379,6 +383,8 @@ export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spender
         }catch(error){gaps.push({type:'ERC20_APPROVAL_FAILED',token,holder,spender,message:String(error?.shortMessage??error?.message??error).slice(0,1000)});}
       }
     }
+    approvalsComplete++;
+    console.log(`[phase0-fixture] ERC20 approvals ${approvalsComplete}/${holderAddresses.length} holders`);
   });
 
   let permit2={address:ethers.getAddress(PHASE0_PERMIT2_ADDRESS_V1),codePresent:false,status:'SKIPPED_NO_CODE'};
@@ -387,6 +393,8 @@ export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spender
     permit2.codePresent=Boolean(code&&code!=='0x');
     if(permit2.codePresent){
       permit2.status='PASS';
+      console.log('[phase0-fixture] Permit2 approvals started');
+      let permit2Complete=0;
       await mapLimitV1(holderAddresses,6,async holder=>{
         for(const tokenRecord of tokens){
           const token=normalizedAddressV1(ethers,tokenRecord?.address??tokenRecord);if(!token)continue;
@@ -403,6 +411,8 @@ export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spender
             }catch(error){gaps.push({type:'PERMIT2_ALLOWANCE_FAILED',token,holder,spender,message:String(error?.shortMessage??error?.message??error).slice(0,1000)});}
           }
         }
+        permit2Complete++;
+        console.log(`[phase0-fixture] Permit2 approvals ${permit2Complete}/${holderAddresses.length} holders`);
       });
     }
   }catch(error){permit2={...permit2,status:'CODE_READ_FAILED'};gaps.push({type:'PERMIT2_CODE_READ_FAILED',address:permit2.address,message:String(error?.message??error).slice(0,800)});}
