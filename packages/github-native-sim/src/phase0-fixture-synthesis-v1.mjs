@@ -720,6 +720,11 @@ export function discoverCreatorCandidatesV1({targets=[]}={}){
       // PoolFactoryWrapper. Users cannot invoke them directly, irrespective
       // of allowances, impersonated owners, or random parameter retries.
       if(/contracts\/factories\/CurveYield\w+PoolFactory\.sol:/.test(q)&&fragment.name==='create')continue;
+      // Gyro E-CLP requires correlated parameter bounds and ReCLAMM has an
+      // explicitly unsupported BPT settlement path in this deployment.
+      // The generic ABI generator cannot configure either correctly.
+      if(/CurveYieldPoolFactoryWrapper\.sol:/.test(q)&&
+        ['createGyroECLPPool','createReClammPool'].includes(fragment.name))continue;
       rows.push({target,selected,key:functionKeyV1(target,selected),basis:returnsAddress?'RETURNS_ADDRESS':'CREATOR_NAME_WITH_ADDRESS_INPUT'});
     }
   }
