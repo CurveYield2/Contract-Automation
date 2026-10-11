@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "curveyield-lite-phase0-smoke-trigger-v1",
+  "campaign_id": "curveyield-dex-v16-source-r4",
+  "campaign_path": "campaigns/CurveYield DEX v16 Source r4",
+  "audit_controller_ref": "main",
+  "medusa_calls": 0,
+  "telemetry_calls": 300,
+  "trigger_nonce": "stage5-smoke-github-connector-r3"
+}
