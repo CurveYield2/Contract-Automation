@@ -13,8 +13,11 @@ class Pres(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.active = None
         self.items = {}
+        self.sources = {}
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
+        if 'data-cname' in attrs and 'data-csource' in attrs:
+            self.sources[attrs['data-cname']] = attrs['data-csource']
         if tag == 'pre':
             self.active = attrs.get('id', 'pre-' + str(len(self.items)))
             self.items[self.active] = ''
@@ -27,12 +30,20 @@ result = {}
 for chain, host in [('ethereum', 'etherscan.io'), ('fraxtal', 'fraxscan.com')]:
     url = f'https://{host}/address/{ADDRESS}#code'
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html'})
-        raw = urllib.request.urlopen(req, timeout=45).read()
+        errors = []
+        candidates = [url]
+        if chain == 'ethereum':
+            candidates += [f'https://{host}/address/{ADDRESS.lower()}?output=1', f'https://{host}/address/{ADDRESS}?output=1']
+        for candidate in candidates:
+            try:
+                req = urllib.request.Request(candidate, headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html'})
+                raw = urllib.request.urlopen(req, timeout=15).read(); url = candidate; break
+            except Exception as exc: errors.append(type(exc).__name__)
+        else: raise RuntimeError('Explorer HTML unavailable: ' + ','.join(errors))
         (OUT / f'{chain}_explorer_v1.html').write_bytes(raw)
         html = raw.decode()
         p = Pres(); p.feed(html)
-        sources = {}
+        sources = {name: {'content': content, 'sha256': hashlib.sha256(content.encode()).hexdigest()} for name, content in p.sources.items()}
         names = re.findall(r'File\s+\d+\s+of\s+\d+\s*:\s*([^<]+)', html)
         editors = [(key, val) for key, val in p.items.items() if key.startswith('editor')]
         for i, (key, content) in enumerate(editors):
