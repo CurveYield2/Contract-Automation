@@ -1,23 +1,21 @@
-name: Sync Lite Authority ZIP v1
+name: Sync Lite Authority ZIP v2
 
 on:
-  workflow_run:
-    workflows: ["V7 Execution Infrastructure Qualification"]
-    types: [completed]
+  # Broad V7 workflow_run completions generated hundreds of skipped sync runs.
+  # Check the external authority at most once daily; manual dispatch stays available.
   workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * *'
 
 permissions:
   contents: read
 
 concurrency:
-  group: sync-lite-authority-zip-v1
+  group: sync-lite-authority-zip-v2
   cancel-in-progress: false
 
 jobs:
   sync:
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
