@@ -4,8 +4,6 @@ import { V7_POLICY } from './v7-policy.mjs';
 export const PHASE6_MUTABLE_RPC_ENV = V7_POLICY.mutableRpc.ethereumProfile;
 export const PHASE6_MUTABLE_RPC_CHAIN = V7_POLICY.mutableRpc.chain;
 export const PHASE6_MUTABLE_RPC_CHAIN_ID = V7_POLICY.mutableRpc.chainId;
-export const DEFAULT_ETHEREUM_FORK_RPC_URL = 'https://eth.drpc.org/';
-const LEGACY_PHASE6_MUTABLE_RPC_ENV = 'SIM_ARCHIVE_PRIMARY_ETHEREUM_01';
 
 function hexQuantity(value, label) {
   if (typeof value !== 'string' || !/^0x[0-9a-fA-F]+$/.test(value)) throw new Error(`${label} must be a hex quantity`);
@@ -53,9 +51,7 @@ async function probeNormalizedRpc(url, fetchImpl, { frozenBlockNumber = null, fr
 }
 
 export function resolvePhase6MutableRpcUrl(environment = process.env) {
-  const url = environment?.[PHASE6_MUTABLE_RPC_ENV]
-    || environment?.[LEGACY_PHASE6_MUTABLE_RPC_ENV]
-    || DEFAULT_ETHEREUM_FORK_RPC_URL;
+  const url = environment?.[PHASE6_MUTABLE_RPC_ENV];
   if (typeof url !== 'string' || url.length === 0) throw new Error('Ethereum fork RPC URL is required for Phase 6 local-Anvil execution');
   return url;
 }
