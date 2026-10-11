@@ -113,7 +113,7 @@ jobs:
 
       - name: Deploy on Anvil and run requested smoke stages
         env:
-          ETHEREUM_FORK_RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          ETHEREUM_FORK_RPC_URL: https://eth.drpc.org/
         shell: bash
         run: |
           set -euo pipefail
