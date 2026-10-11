@@ -592,8 +592,59 @@ function probePlan(ethers,abi,qualifiedName=''){
   return{zero,address,addressPair};
 }
 async function safeStatic(contract,f,args){try{return{ok:true,value:normalize(await contract.getFunction(f.format('sighash')).staticCall(...args))};}catch(e){return{ok:false,error:String(e?.shortMessage??e?.message??e).slice(0,800)};}}
-export async function snapshot({provider,ethers,target,sender,plan,systemTargets}){
+// Select a stable set of before/after witnesses from the action being sent.
+// Balancer swaps need user+Vault input/output balances; liquidity operations
+// additionally need user BPT balance and pool BPT supply. Baseline and
+// non-Balancer telemetry retain target-local numeric ABI probes, but never
+// sweep native balances from unrelated contracts.
+export function accountingWitnessPlanV1({target,selected,protocolPlan,qualifiedAction,value=0n}={}){
+  const signature=String(selected?.signature??'');
+  const context=target?.accountingContext;
+  const native=BigInt(value??0)>0n||/^(?:depositETH|withdrawETH|wrapETH|unwrapETH|sendNative|receiveNative)\\(/i.test(signature);
+  const poolMatches=String(context?.poolAddress??'').toLowerCase()===String(protocolPlan?.pool??'').toLowerCase();
+  if(protocolPlan?.kind==='READY'&&poolMatches&&context?.protocol==='BALANCER_V3'){
+    const operation=/^swapSingleToken/.test(signature)?'SWAP':/^addLiquidity/.test(signature)?'ADD_LIQUIDITY':/^removeLiquidity/.test(signature)?'REMOVE_LIQUIDITY':null;
+    if(operation){
+      const registered=(context.tokens??[]).filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x)));
+      const inputs=qualifiedAction?.args??[];
+      const swaps=operation==='SWAP'?[inputs[1],inputs[2]]:[];
+      const tokens=operation==='SWAP'&&swaps.every(x=>registered.some(t=>String(t).toLowerCase()===String(x).toLowerCase()))?swaps:registered;
+      return{schemaVersion:'phase0-accounting-witness-v1',mode:'BALANCER_V3',operation,tokens:[...new Set(tokens.map(x=>String(x).toLowerCase()))],poolAddress:context.poolAddress,vaultAddress:context.vaultAddress,includeBpt:operation!=='SWAP',includeNative:native};
+    }
+  }
+  return{schemaVersion:'phase0-accounting-witness-v1',mode:'TARGET_LOCAL',includeNative:native,includeAllowance:/^(?:approve|increaseAllowance|decreaseAllowance|transferFrom)\\(/.test(signature),includeSupply:/^(?:mint|burn|deposit|withdraw|redeem|stake|unstake|addLiquidity|removeLiquidity)\\(/.test(signature)};
+}
+export async function snapshot({provider,ethers,target,sender,plan,systemTargets,witness=null}){
   const out={native:{},views:{},systemNative:{},related:{}};
+  const mode=witness?.mode??'BASELINE';
+  const tokenAbi=[
+    'function balanceOf(address) view returns (uint256)',
+    'function allowance(address,address) view returns (uint256)',
+    'function totalSupply() view returns (uint256)'
+  ];
+  const read=async(contract,fn,args=[])=>{try{return{ok:true,value:normalize(await contract.getFunction(fn).staticCall(...args))};}catch(error){return{ok:false,error:String(error?.shortMessage??error?.message??error).slice(0,800)};}};
+  if(mode==='BALANCER_V3'){
+    // Balancer v3 stores pooled ERC20 assets in the Vault, not the pool/BPT
+    // token contract. BPT user balance/supply changes only on join/exit.
+    const addresses=[...new Set((witness.tokens??[]).map(x=>String(x).toLowerCase()))];
+    if(witness.includeBpt)addresses.push(String(witness.poolAddress).toLowerCase());
+    await Promise.all([
+      ...(witness.includeNative?[
+        (async()=>{out.native.sender=(await provider.getBalance(sender)).toString();})(),
+        (async()=>{out.native.target=(await provider.getBalance(target.address)).toString();})()
+      ]:[]),
+      ...addresses.map(async address=>{
+        const token=new ethers.Contract(address,tokenAbi,provider);
+        const isBpt=address===String(witness.poolAddress).toLowerCase();
+        const [balanceSender,second]=await Promise.all([
+          read(token,'balanceOf(address)',[sender]),
+          isBpt?read(token,'totalSupply()'):read(token,'balanceOf(address)',[witness.vaultAddress])
+        ]);
+        out.related[address]=isBpt?{address,balanceSender,totalSupply:second}:{address,balanceSender,balanceVault:second};
+      })
+    ]);
+    return out;
+  }
   const c=new ethers.Contract(target.address,normalizedAbi(target.artifact.abi),provider);
   const accountingContext=target.accountingContext??null;
   const relatedAddresses=[...new Set([
@@ -601,35 +652,33 @@ export async function snapshot({provider,ethers,target,sender,plan,systemTargets
     target.recipeRuntime?.tokenAddress,
     ...(accountingContext?.tokens??[]),
     accountingContext?.poolAddress
-  ].filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x))))].slice(0,12);
-  const erc20ViewAbi=[
-    'function balanceOf(address) view returns (uint256)',
-    'function allowance(address,address) view returns (uint256)',
-    'function totalSupply() view returns (uint256)'
-  ];
-  // These reads share one stable pre/post state; batching preserves all observations without serial RPC latency.
+  ].filter(x=>/^0x[0-9a-fA-F]{40}$/.test(String(x))).map(x=>String(x).toLowerCase()))].slice(0,12);
+  const includeNative=mode==='BASELINE'||witness?.includeNative===true;
+  const includeAllowance=mode==='BASELINE'||witness?.includeAllowance===true;
+  const includeSupply=mode==='BASELINE'||witness?.includeSupply===true;
+  const probes=plan??{zero:[],address:[],addressPair:[]};
   await Promise.all([
-    (async()=>{out.native.sender=(await provider.getBalance(sender)).toString();})(),
-    (async()=>{out.native.target=(await provider.getBalance(target.address)).toString();})(),
-    ...systemTargets.map(async t=>{out.systemNative[t.address]=(await provider.getBalance(t.address)).toString();}),
-    ...plan.zero.map(async f=>{out.views[f.format('sighash')]=await safeStatic(c,f,[]);}),
-    ...plan.address.flatMap(f=>{const sig=f.format('sighash');return[
+    ...(includeNative?[
+      (async()=>{out.native.sender=(await provider.getBalance(sender)).toString();})(),
+      (async()=>{out.native.target=(await provider.getBalance(target.address)).toString();})()
+    ]:[]),
+    ...(probes.zero??[]).map(async f=>{out.views[f.format('sighash')]=await safeStatic(c,f,[]);}),
+    ...(probes.address??[]).flatMap(f=>{const sig=f.format('sighash');return[
       (async()=>{out.views[`${sig}::sender`]=await safeStatic(c,f,[sender]);})(),
       (async()=>{out.views[`${sig}::target`]=await safeStatic(c,f,[target.address]);})()
     ];}),
-    ...(plan.addressPair??[]).map(async f=>{const sig=f.format('sighash');out.views[`${sig}::sender::target`]=await safeStatic(c,f,[sender,target.address]);}),
+    ...(probes.addressPair??[]).map(async f=>{const sig=f.format('sighash');out.views[`${sig}::sender::target`]=await safeStatic(c,f,[sender,target.address]);}),
     ...relatedAddresses.map(async address=>{
-      const token=new ethers.Contract(address,erc20ViewAbi,provider),key=address.toLowerCase();
-      const read=async(fn,args=[])=>{try{return{ok:true,value:normalize(await token.getFunction(fn).staticCall(...args))};}catch(error){return{ok:false,error:String(error?.shortMessage??error?.message??error).slice(0,800)};}};
-      out.related[key]={
-        address,
-        balanceSender:await read('balanceOf(address)',[sender]),
-        balanceTarget:await read('balanceOf(address)',[target.address]),
-        ...(accountingContext?.vaultAddress?{balanceVault:await read('balanceOf(address)',[accountingContext.vaultAddress])}:{}),
-        ...(accountingContext?.poolAddress?{balancePool:await read('balanceOf(address)',[accountingContext.poolAddress])}:{}),
-        allowanceSenderTarget:await read('allowance(address,address)',[sender,target.address]),
-        totalSupply:await read('totalSupply()',[])
-      };
+      const token=new ethers.Contract(address,tokenAbi,provider);
+      const [balanceSender,balanceTarget,balanceVault,balancePool,allowance,totalSupply]=await Promise.all([
+        read(token,'balanceOf(address)',[sender]),
+        read(token,'balanceOf(address)',[target.address]),
+        ...(accountingContext?.vaultAddress?[read(token,'balanceOf(address)',[accountingContext.vaultAddress])]:[Promise.resolve(null)]),
+        ...(accountingContext?.poolAddress?[read(token,'balanceOf(address)',[accountingContext.poolAddress])]:[Promise.resolve(null)]),
+        includeAllowance?read(token,'allowance(address,address)',[sender,target.address]):Promise.resolve(null),
+        includeSupply?read(token,'totalSupply()'):Promise.resolve(null)
+      ]);
+      out.related[address]={address,balanceSender,balanceTarget,...(balanceVault?{balanceVault}:{}),...(balancePool?{balancePool}:{}),...(allowance?{allowanceSenderTarget:allowance}:{}),...(totalSupply?{totalSupply}:{})};
     })
   ]);
   return out;
@@ -1543,14 +1592,16 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               }
             }
             const estimate=resolved.estimate,preflightError=resolved.success?null:resolved.error,callProbe=resolved.callProbe,data=resolved.data;
+            const witness=accountingWitnessPlanV1({target:executionTarget,selected,protocolPlan:balancerAction,qualifiedAction,value});
             const observationPolicy=shouldObserveAccountingCallV1({selected,target,valuePool,executionAddress:resolved.executionAddress});
             const shouldObserve=!preflightError&&observationPolicy.observe===true;
             if(shouldObserve){
               if(executionTarget.accountingContext)rec.accountingContext=executionTarget.accountingContext;
-              const before=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
+              const before=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,witness});
               rec.observations.before=observationRowsV2(before,executionTarget.recipe,'BEFORE');
               rec.observation='ACCOUNTING_BEFORE_AFTER';
               rec.observationBasis=observationPolicy.basis;
+               rec.accountingWitnessPlan=witness;
               stats.accountingObservationCalls++;
             }else{
               rec.stages.OBSERVATION={status:'SKIPPED',reason:'SKIPPED_NON_ACCOUNTING_OR_REJECTED',reads:0,failedReads:0};
@@ -1589,7 +1640,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               receipt
             });
             if(shouldObserve){
-              const after=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
+              const after=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,witness});
               rec.observations.after=observationRowsV2(after,executionTarget.recipe,'AFTER');
               rec.observations.deltas=observationDeltasV2(rec.observations.before,rec.observations.after,{receipt,sender});
               rec.stages.OBSERVATION={
