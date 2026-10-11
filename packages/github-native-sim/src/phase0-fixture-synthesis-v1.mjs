@@ -733,10 +733,21 @@ function linkReferenceRangesV1(artifact){
   }
   return ranges;
 }
+function runtimeWildcardRangesV1(expectedHex,artifact){
+  const ranges=linkReferenceRangesV1(artifact),expected=String(expectedHex??'');
+  // Solc emits zero placeholders for immutable PUSH32 values in normalized deployed bytecode.
+  // Treat only those 32-byte immediates as deployment-specific while keeping opcode bytes exact.
+  for(let byte=0;byte+33<=expected.length/2;byte++){
+    if(expected.slice(byte*2,byte*2+2)!=='7f')continue;
+    const immediate=expected.slice((byte+1)*2,(byte+33)*2);
+    if(/^0{64}$/.test(immediate))ranges.push({start:byte+1,length:32});
+  }
+  return ranges;
+}
 function artifactRuntimeMatchesV1(actualHex,artifact){
-  let actual=stripMetadataV1(actualHex),expected=stripMetadataV1(artifact?.deployedBytecode??'');
+  const actual=stripMetadataV1(actualHex),expected=stripMetadataV1(artifact?.deployedBytecode??'');
   if(!actual||!expected||actual.length!==expected.length)return false;
-  const ranges=linkReferenceRangesV1(artifact);
+  const ranges=runtimeWildcardRangesV1(expected,artifact);
   for(let byte=0;byte<actual.length/2;byte++){
     if(ranges.some(range=>byte>=range.start&&byte<range.start+range.length))continue;
     const e=expected.slice(byte*2,byte*2+2),a=actual.slice(byte*2,byte*2+2);
