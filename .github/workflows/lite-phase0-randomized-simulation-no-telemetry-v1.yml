@@ -12,10 +12,6 @@ on:
         required: false
         default: main
         type: string
-      completed_stages_manifest:
-        required: false
-        default: ''
-        type: string
 
 permissions:
   contents: write
@@ -59,12 +55,10 @@ jobs:
       - name: Run package deployment and configuration scripts on isolated Ethereum Anvil fork
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
-          COMPLETED_STAGES_MANIFEST: ${{ inputs.completed_stages_manifest }}
           CAMPAIGN_PATH: ${{ inputs.campaign_path }}
         shell: bash
         run: |
           set -euo pipefail
-          test -z "$COMPLETED_STAGES_MANIFEST" || { echo "::error::Randomized stage reuse manifests are retired"; exit 1; }
           test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::RPC_ETHEREUM secret is missing"; exit 1; }
           chain_id="$(curl -fsS --max-time 15 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
           test "$chain_id" = "0x1" || { echo "::error::Fork source must report Ethereum chain ID 1"; exit 1; }
@@ -123,7 +117,8 @@ jobs:
           cd .audit-controller
           git config user.name 'CurveYield Phase0 Deployment Automation'
           git config user.email 'phase0-deployment@users.noreply.github.com'
-          git add -A -- "$CAMPAIGN_PATH/evidence/phase0" "$CAMPAIGN_PATH/derived/phase-0" "$CAMPAIGN_PATH/work/phase-06"
+          # Stage the exact campaign, including deletions of retired Phase-0 derived baseline files.
+          git add -A -- "$CAMPAIGN_PATH"
           if git diff --cached --quiet; then
             echo "::error::Phase-0 deployment evidence produced no durable changes"
             exit 1
