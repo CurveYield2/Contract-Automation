@@ -78,17 +78,17 @@ Lifecycle:
 
 A successor wake must not overlap the predecessor watchdog.
 
-## Initial reviewer wake check-in (v1)
+## Audit reviewer wake check-in (v1)
 
-Initial reviewer and initial master-reviewer wakes only (`messagePurpose=initial_wake`) prepend **DO THIS FIRST, RIGHT NOW** to the existing custom wake instructions. Before reading the audit skill or performing any other task, the receiving reviewer must use the GitHub connector to create or update exactly one acknowledgement file in its Audit-Controller campaign workspace:
+**Every substantive Lite audit reviewer and master-reviewer wake** prepends **DO THIS FIRST, RIGHT NOW** to its custom instructions, including first assignment, later phase-continuation messages, subsequent master-review handoffs, controller rework feedback, and repair notices. Before any other task, the receiving agent must use the GitHub connector to fetch the exact acknowledgement file in its Audit-Controller campaign folder, replace its entire contents using the fetched SHA if it exists, or create the same file only on HTTP 404. Any other lookup error stops the write:
 
 `campaigns/<campaign name>/work/browser/WAKE_ACK_<reviewer>_v1.json`
 
 The message supplies the exact path and exact JSON object containing `schemaVersion`, `ackId`, `wakeId`, `runId`, `phaseId`, and `reviewer`. The acknowledgement is a one-file mutable check-in per reviewer, not a phase receipt, controller transition, or test artifact.
 
-After a visible X11 send attempt, the wake workflow checks that exact file **immediately and every 30 seconds up to five minutes** (11 checks at t=0,30,...,300 seconds). Only a matching acknowledgement constitutes verified initial-wake reception; absence is **UNCONFIRMED**, not proof of failure, and does not trigger a duplicate initial message. A valid check-in can independently verify delivery even when an OS screenshot transition is inconclusive.
+After a visible X11 send attempt, the wake workflow checks that exact file **immediately and every 30 seconds up to five minutes** (11 checks at t=0,30,...,300 seconds). Only a matching acknowledgement constitutes verified reception of the current reviewer instruction; absence is **UNCONFIRMED**, not proof of failure, and does not trigger a duplicate message. A valid check-in can independently verify delivery even when an OS screenshot transition is inconclusive.
 
-Follow-up phase-continuation messages, rework notices, technical callbacks, and watchdog pokes are not given check-in instructions and do not run the five-minute loop. They preserve their exact caller-authored payload, except that watchdog pokes always send the literal `GET BACK TO WORK`.
+**Only** a literal `GET BACK TO WORK` poke is excluded from the check-in instruction and five-minute verification. This includes watchdog and routine technical callback pokes. All other Lite reviewer/master-reviewer messages retain their custom caller-authored payload after the mandatory check-in header. The reviewer identity is resolved from the exact bound ChatGPT chat URL in the campaign registration, so master-reviewer acknowledgements cannot be misattributed to the phase reviewer.
 
 This mechanism never machine-reads ChatGPT. The browser uses only visible system Chrome with human-style X11 interactions and OS screenshots. The GitHub acknowledgement is read via ordinary GitHub repository API operations, not ChatGPT browser inspection.
 
