@@ -46,7 +46,7 @@ contract BoostHubFraxtalRewardConverter is Ownable, ReentrancyGuard {
         if (IBoostHubFraxtalCurvePool(CURVE_POOL).coins(0) != FXS ||
             IBoostHubFraxtalCurvePool(CURVE_POOL).coins(1) != SDFXS) revert InvalidPoolCoins();
         _setSlippageBps(initialSlippageBps);
-        _poolOracle();
+        _poolOracle(); // Reject mismatched or absent pool EMA at deployment.
     }
 
     function setSlippageBps(uint256 value) external onlyOwner { _setSlippageBps(value); }
@@ -75,6 +75,7 @@ contract BoostHubFraxtalRewardConverter is Ownable, ReentrancyGuard {
         if (!isSupportedPair(tokenIn, tokenOut)) revert UnsupportedPair();
     }
 
+    /** Curve EMA: price of coin1 (sdFXS) expressed in coin0 (FXS), 1e18 scaled. */
     function _poolOracle() internal view returns (uint256 price) {
         (bool ok, bytes memory result) = CURVE_POOL.staticcall(abi.encodeWithSignature("price_oracle()"));
         if (!ok || result.length != 32) {
@@ -90,6 +91,7 @@ contract BoostHubFraxtalRewardConverter is Ownable, ReentrancyGuard {
     function getAmountOut(address tokenIn, address tokenOut, uint256 amountIn) public view returns (uint256) {
         _checkPair(tokenIn, tokenOut);
         if (amountIn == 0) return 0;
+        // Both underlying ERC20 tokens have 18 decimals; verify on chain in runner preflight.
         return Math.mulDiv(amountIn, 1e18, _poolOracle());
     }
 
@@ -108,6 +110,7 @@ contract BoostHubFraxtalRewardConverter is Ownable, ReentrancyGuard {
     function _swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 callerMinimum) internal returns (uint256 received) {
         _checkPair(tokenIn, tokenOut);
         if (amountIn == 0) revert ZeroAmount();
+        // Never use pool spot get_dy or a same-block read as the slippage floor.
         uint256 oracleMinimum = Math.mulDiv(getAmountOut(tokenIn, tokenOut, amountIn), FEE_DENOMINATOR - slippageBps, FEE_DENOMINATOR);
         uint256 minimum = callerMinimum > oracleMinimum ? callerMinimum : oracleMinimum;
         if (minimum == 0) revert InvalidOracle();
