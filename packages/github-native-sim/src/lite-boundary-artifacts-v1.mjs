@@ -168,6 +168,106 @@ Rules:
 `;
 }
 
+// Completion of every material Phase-5 target is a mandatory seal precondition.
+// A structurally valid request is not machine evidence, and "no target" cannot
+// discharge a retained material candidate.
+export function validatePhase5TargetCoverageV1({targetDesigns=[],materialCandidateKeys=[]}={}){
+  const failures=[];
+  const required=[...new Set(arr(materialCandidateKeys).filter(x=>typeof x==='string'&&x&&x!=='NONE_IDENTIFIED'))];
+  const seen=new Set();
+  const targets=arr(targetDesigns);
+  for(const [i,target] of targets.entries()){
+    if(target==='NONE_IDENTIFIED'){
+      if(required.length||targets.length!==1) failures.push('Phase 5 NONE_IDENTIFIED is invalid while material candidates exist or other targets are listed');
+      continue;
+    }
+    if(!target||typeof target!=='object'||Array.isArray(target)){
+      failures.push('Phase 5 target index '+i+' has no executable design');
+      continue;
+    }
+    const key=String(target.candidateKey??'').trim();
+    if(!key||key==='NONE_IDENTIFIED'){failures.push('Phase 5 target index '+i+' has no material candidateKey');continue;}
+    if(seen.has(key))failures.push('Phase 5 duplicate candidate target '+key);
+    seen.add(key);
+    if(required.includes(key)&&target.executionMethod==='NOT_APPLICABLE') failures.push('Phase 5 material candidate '+key+' cannot be NOT_APPLICABLE');
+  }
+  for(const key of required)if(!seen.has(key))failures.push('Phase 5 mandatory material candidate '+key+' has no targeted machine execution');
+  if(!targets.length) failures.push('Phase 5 targetDesigns missing; explicit NONE_IDENTIFIED is allowed only when no material candidates exist');
+  return failures;
+}
+
+export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath,targetDesigns=[],executionResults={},materialCandidateKeys=[],expectedSourceSha256=null}={}){
+  const failures=validatePhase5TargetCoverageV1({targetDesigns,materialCandidateKeys});
+  for(const target of arr(targetDesigns)){
+    if(!target||typeof target!=='object'||Array.isArray(target))continue;
+    const key=String(target.candidateKey??'').trim();
+    if(!key||key==='NONE_IDENTIFIED')continue;
+    if(target.executionMethod==='NOT_APPLICABLE'){
+      if(materialCandidateKeys.includes(key))failures.push('Phase 5 required '+key+' was marked NOT_APPLICABLE');
+      continue;
+    }
+    const result=executionResults?.[key];
+    if(!result||result.status!=='PASS'||result.exitCode!==0){
+      failures.push('Phase 5 mandatory '+key+' machine execution did not PASS (status='+String(result?.status??'MISSING')+', exitCode='+String(result?.exitCode??'MISSING')+'); blocked, inconclusive and missing simulations prohibit seal');
+      continue;
+    }
+    if(!String(result.requestBindingStatus??'').startsWith('PASS_')){
+      failures.push('Phase 5 mandatory '+key+' request binding did not PASS');
+      continue;
+    }
+    const raw=result.rawResult;
+    if(!raw||typeof raw!=='object'||Array.isArray(raw)){
+      failures.push('Phase 5 mandatory '+key+' missing parsed raw machine result');
+      continue;
+    }
+    const rel=result.evidenceRef;
+    const expectedPrefix=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key))+'/';
+    const rawFile=typeof rel==='string'&&safeRel(rel)&&controllerRoot?
+      path.join(controllerRoot,...rel.split('/')):null;
+    if(!rawFile||!rel.startsWith(expectedPrefix)||!rel.endsWith('/raw-result.json')||
+       !fs.existsSync(rawFile)){
+      failures.push('Phase 5 mandatory '+key+' missing exact persisted raw-result.json evidence');
+    }else{
+      try{
+        const persisted=JSON.parse(fs.readFileSync(rawFile,'utf8'));
+        if(stableJson(persisted)!==stableJson(raw)){
+          failures.push('Phase 5 mandatory '+key+' raw machine result does not match persisted artifact');
+        }
+      }catch(e){failures.push('Phase 5 mandatory '+key+' raw evidence is unreadable: '+String(e.message||e));}
+    }
+    const requestId=typeof rel==='string'?rel.split('/').at(-2):'';
+    if(!/^dar-[0-9a-f]{32}$/.test(requestId)||raw.requestId!==requestId){
+      failures.push('Phase 5 mandatory '+key+' raw request identity differs from bound execution');
+    }
+    if(raw.status!=='completed'||raw.blocking===true||raw.preflight?.status!=='PASS'){
+      failures.push('Phase 5 mandatory '+key+' did not complete a successful V7 preflight and execution');
+    }
+    if(expectedSourceSha256&&raw.source?.archiveSha256!==expectedSourceSha256){
+      failures.push('Phase 5 mandatory '+key+' raw execution source identity differs from campaign source');
+    }
+    const reproduction=raw.reproduction;
+    if(!reproduction||reproduction.candidateId!==key||
+       reproduction.status!=='REPRODUCED'||reproduction.observedPredicate?.matched!==true||
+       reproduction.observedPredicate?.observed==null){
+      failures.push('Phase 5 mandatory '+key+' has no matching executed reproduction oracle (not a confirmed security conclusion)');
+    }
+    const type=String(target.reproductionType??'');
+    const component=type==='FOUNDRY_TEST'?raw.analysis?.nativeFuzz:
+                    type==='MEDUSA_PROPERTY'?raw.analysis?.medusa:null;
+    if(type==='FOUNDRY_TEST'||type==='MEDUSA_PROPERTY'){
+      if(!component||component.toolInvoked===false||
+         !['COMPLETED','COMPLETED_WITH_FAILURES'].includes(component.componentStatus)){
+        failures.push('Phase 5 mandatory '+key+' required '+type+' component never completed its execution');
+      }
+    }else if(type==='ANVIL_WORKFLOW'){
+      if(!Array.isArray(raw.simulation?.steps)||raw.simulation.steps.length===0){
+        failures.push('Phase 5 mandatory '+key+' has no executed Anvil simulation steps');
+      }
+    }else failures.push('Phase 5 mandatory '+key+' has unsupported reproductionType');
+  }
+  return failures;
+}
+
 export async function executePhase5TargetsV1({controllerRoot,campaignPath,targetDesigns=[],expectedCampaignId=null,expectedSourceSha256=null}={}){
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
   const executionResults={};
@@ -209,13 +309,18 @@ export async function executePhase5TargetsV1({controllerRoot,campaignPath,target
       cwd:process.cwd(),
       env:process.env
     });
-    const rawPath=path.join(evAbs,'raw-result.json');
+    // V7 CLI nests evidence under the request ID; the parent directory has no
+    // raw-result.json. Never issue PASS for a missing or unparsable raw result.
+    const request=JSON.parse(fs.readFileSync(requestAbs,'utf8'));
+    const requestId=request.requestId;
+    const validId=typeof requestId==='string'&&/^dar-[0-9a-f]{32}$/.test(requestId);
+    const rawPath=validId?path.join(evAbs,requestId,'raw-result.json'):null;
     let rawResult=null;
-    try{rawResult=JSON.parse(fs.readFileSync(rawPath,'utf8'));}catch{}
+    try{if(rawPath)rawResult=JSON.parse(fs.readFileSync(rawPath,'utf8'));}catch{}
     executionResults[key]={
-      status:result.exitCode===0?'PASS':(rawResult?.blocking?'BLOCKED':'INCONCLUSIVE'),
+      status:result.exitCode===0&&rawResult?'PASS':(rawResult?.blocking?'BLOCKED':'INCONCLUSIVE'),
       exitCode:result.exitCode,
-      evidenceRef:path.posix.join(evRel,'raw-result.json'),
+      evidenceRef:validId?path.posix.join(evRel,requestId,'raw-result.json'):'NO_MACHINE_EVIDENCE',
       requestBindingStatus:binding.status,
       requestBindingEvidenceRef:binding.requestRef,
       requestBindingReasons:binding.reasons,
