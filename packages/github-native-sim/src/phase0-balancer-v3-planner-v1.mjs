@@ -165,6 +165,48 @@ export async function bootstrapBalancerV3PoolsV1({provider,ethers,targets=[],val
       row.error=String(error?.shortMessage??error?.message??error).slice(0,900);
     }
   }
+  // Balancer v3 Router burns the BPT held by the liquidity provider on exit.
+  // Its spender is the Router (NOT a pool contract, and not Permit2).
+  // Bootstrap approvals on the actual freshly minted BPT using standard ERC20
+  // transactions, then read back allowance to prove they took effect.
+  report.bptRouterApprovals=[];
+  const bptAbi=[
+    'function balanceOf(address) view returns (uint256)',
+    'function allowance(address,address) view returns (uint256)',
+    'function approve(address,uint256) returns (bool)'
+  ];
+  for(const pool of discovery.pools.slice(0,6)){
+    const vault=new ethers.Contract(pool.vault,['function isPoolInitialized(address) view returns (bool)'],provider);
+    if(!(await vault.isPoolInitialized(pool.address).catch(()=>false)))continue;
+    const bpt=new ethers.Contract(pool.address,bptAbi,provider);
+    for(const actor of addresses(ethers,actors).slice(0,8)){
+      const row={pool:pool.address,actor,spender:router.address,status:'NOT_REQUIRED'};
+      let held=0n;
+      try{held=BigInt(await bpt.balanceOf(actor));}
+      catch(error){row.status='BPT_BALANCE_UNAVAILABLE';row.error=String(error?.shortMessage??error?.message??error).slice(0,300);report.bptRouterApprovals.push(row);continue;}
+      if(held<=0n)continue;
+      row.heldBpt=held.toString();
+      report.bptRouterApprovals.push(row);
+      try{
+        const current=BigInt(await bpt.allowance(actor,router.address));
+        if(current<held){
+          const tx=await bpt.connect(await provider.getSigner(actor)).approve(router.address,ethersMaxUint256V1());
+          const receipt=await tx.wait();
+          row.transactionHash=tx.hash;
+          row.blockNumber=receipt?.blockNumber??null;
+          if(Number(receipt?.status)!==1)throw Error('BPT approval receipt status was not success');
+        }
+        const confirmed=BigInt(await bpt.allowance(actor,router.address));
+        row.confirmedAllowance=confirmed.toString();
+        row.status=confirmed>=held?'VERIFIED_ROUTER_ALLOWANCE':'BPT_ROUTER_ALLOWANCE_INSUFFICIENT';
+      }catch(error){
+        row.status='BPT_ROUTER_APPROVAL_FAILED';
+        row.error=String(error?.shortMessage??error?.message??error).slice(0,600);
+        report.limitations.push({type:row.status,pool:pool.address,actor,message:row.error});
+      }
+    }
+  }
+  console.log(`[phase0-balancer] Stage3 BPT Router allowances; required=${report.bptRouterApprovals.length} verified=${report.bptRouterApprovals.filter(x=>x.status==='VERIFIED_ROUTER_ALLOWANCE').length}`);
   report.verifiedInitializedPools+=report.initializedPoolCount;
   report.status=report.verifiedInitializedPools>0?'INITIALIZED_POOL_AVAILABLE':discovery.pools.length?'INITIALIZATION_FAILED':'NO_REGISTERED_POOLS';
   return report;
@@ -235,6 +277,6 @@ export function buildBalancerV3ActionV1({ethers,target,selected,discovery,valueP
     :isSwapIn?[pool.address,pool.tokens[0],pool.tokens[1],smallSwapIn,1n,ethersMaxUint256V1(),false,'0x']
     :isSwapOut?[pool.address,pool.tokens[0],pool.tokens[1],smallSwapOut,maxSwapIn,ethersMaxUint256V1(),false,'0x']
     :isRemove?[pool.address,bptIn,pool.tokens.map(()=>0n),false,'0x']
-    :[pool.address,bptIn,pool.tokens[0],0n,false,'0x'];
+    :[pool.address,bptIn,pool.tokens[0],1n,false,'0x'];
   return{kind:'READY',sender:(isRemove||isRemoveSingle)?bpt.actor:actors[0],args,value:0n,pool:pool.address,protocol:'BALANCER_V3',basis:'VERIFIED_VAULT_POOL_STATE_ROUTER_ARGUMENTS',poolInitialized:pool.initialized,...((isRemove||isRemoveSingle)?{verifiedBptBalance:bpt.amount,bptInput:bptIn.toString()}:{} )};
 }
