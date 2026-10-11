@@ -5,8 +5,8 @@ on:
     paths:
       - 'process/agent-upload/lite-phase0-evidence-resume/*.json'
 permissions:
-  contents: read
-  actions: read
+  contents: write
+  actions: write
 concurrency:
   group: lite-phase0-evidence-resume-${{ github.ref }}
   cancel-in-progress: false
