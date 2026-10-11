@@ -48,6 +48,15 @@ test('primary and No Telemetry only use private cache through exact intelligence
   }
 });
 
+test('compilation outputs are stored only on the private cache branch, never authoritative main',()=>{
+  const source=fs.readFileSync(new URL('../src/phase0-private-build-cache-v1.mjs',import.meta.url),'utf8');
+  assert.match(source,/PRIVATE_CACHE_BRANCH = 'phase0-verified-build-cache'/);
+  assert.match(source,/ensurePrivateCacheBranch\(token\);await tryPublish/);
+  assert.match(source,/ref:PRIVATE_CACHE_BRANCH/);
+  assert.match(source,/repos\/CurveYield2\/Audit-Controller\/contents/);
+  assert.doesNotMatch(source,/actions\/cache@/);
+});
+
 test('V7 exact reuse requires matching immutable runner, private controller and proven successful run',()=>{
   const workflow=fs.readFileSync(new URL('../../../.github/workflows/v7-execution-infrastructure-qualification.yml',import.meta.url),'utf8');
   assert.match(workflow,/qualifiedCommit==\$runner/);
