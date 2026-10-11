@@ -32,17 +32,16 @@ K={
 "merklClaimFuse":"0xc6d024E53204CADa27a3c60C77dA4de2e7eb5166",
 "questBaseWrapper":"0x0a9eA25C827Ec0C6B2619C231B7566846619B365"}
 def rpc(method,params):
-    payload=json.dumps({"jsonrpc":"2.0","id":1,"method":method,"params":params}).encode()
     last=""
     for url in RPCS:
         try:
-            req=urllib.request.Request(url,data=payload,headers={"Content-Type":"application/json"})
-            with urllib.request.urlopen(req,timeout=20) as r:
-                o=json.load(r)
-            if "error" in o: raise ValueError(o["error"])
-            return o["result"]
+            argv=["cast","rpc",method,*[json.dumps(x,separators=(",",":")) if isinstance(x,(dict,list)) else str(x) for x in params],"--rpc-url",url]
+            raw=subprocess.check_output(argv,stderr=subprocess.PIPE,text=True,timeout=25).strip()
+            try:return json.loads(raw)
+            except json.JSONDecodeError:return raw
         except Exception as e:last=str(e)
     raise RuntimeError(last)
+
 def compare(a,chain):
     data=a.get("deployedBytecode",{})
     raw=data.get("object","")
