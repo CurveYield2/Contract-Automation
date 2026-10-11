@@ -1403,7 +1403,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       successes:0,reverts:0,errors:0,minedSuccess:0,minedRevert:0,simulatedRejection:0,
       simulationInfrastructureError:0,submissionInfrastructureError:0,submittedOutcomeUnknown:0,
       notExecutedEncodingOrPlanning:0,positiveTransitions:0,positiveEconomicTransitions:0,
-      observationFailures:0,observationReads:0,accountingObservationCalls:0,skippedObservationCalls:0,byContract:{},byFunction:{},
+      observationFailures:0,observationReads:0,accountingObservationCalls:0,skippedObservationCalls:0,byContract:{},byFunction:{},balancerPoolOperationCoverage:{},
       feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],protocolPlanningFailures:{},protocolAwareCalls:0,
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
@@ -1601,6 +1601,26 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             const knownNonzero=rec.observations.deltas.filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
             rec.positiveTransition=rec.executionOutcome==='MINED_SUCCESS'&&knownNonzero.length>0;
             rec.effectClassification=rec.positiveTransition?'OBSERVED_STATE_TRANSITION':(rec.executionOutcome==='MINED_SUCCESS'?'MINED_NO_OBSERVED_STATE_TRANSITION':'NO_MINED_SUCCESS');
+            if(balancerAction.kind==='READY'&&balancerAction.pool){
+              const key=String(balancerAction.pool).toLowerCase();
+              const p=balancerDiscovery.pools.find(x=>String(x.address).toLowerCase()===key);
+              const op=/^swapSingleToken/.test(selected.signature)?'swap':/^addLiquidity/.test(selected.signature)?'addLiquidity':/^removeLiquidity/.test(selected.signature)?'removeLiquidity':'other';
+              const coverage=stats.balancerPoolOperationCoverage[key]??{poolType:p?.poolType??'UNKNOWN',swap:{attempts:0,success:0,economicTransitions:0},addLiquidity:{attempts:0,success:0,economicTransitions:0},removeLiquidity:{attempts:0,success:0,economicTransitions:0},other:{attempts:0,success:0,economicTransitions:0}};
+              const entry=coverage[op];entry.attempts++;
+              if(rec.executionOutcome==='MINED_SUCCESS')entry.success++;
+              if(rec.positiveTransition)entry.economicTransitions++;
+              stats.balancerPoolOperationCoverage[key]=coverage;
+              // BPT supply and holder balances change on adds and exits.
+              if(rec.executionOutcome==='MINED_SUCCESS'&&(op==='addLiquidity'||op==='removeLiquidity')&&p){
+                const bpt=new ethers.Contract(p.address,['function balanceOf(address) view returns (uint256)'],provider);
+                const holders=new Set([sender,...(p.bptHolders??[]).map(x=>x.actor)]),next=[];
+                for(const actor of holders){
+                  try{const amount=BigInt(await bpt.balanceOf(actor));if(amount>0n)next.push({actor,amount:amount.toString()});}
+                  catch(error){stats.contextAdaptations.push({kind:'BPT_BALANCE_REFRESH_FAILED',pool:p.address,actor,message:String(error?.shortMessage??error?.message??error).slice(0,180),atCallIndex:stats.calls});}
+                }
+                p.bptHolders=next;
+              }
+            }
             rec.transaction=tx?{hash:tx.hash,blockNumber:receipt?.blockNumber??null,status:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,value:value.toString(),to:resolved.executionAddress,logs:(receipt?.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))}:null;
             if(preflightError)rec.error=resolved.errorDetails??errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
           }
@@ -1650,9 +1670,16 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             }
           }else if(rec.executionOutcome==='MINED_SUCCESS'){
             preflightRejections.delete(picked.selectionKey);
-            contextWeightMultipliers.set(picked.selectionKey,Math.min(12,2+(feedback.get(picked.selectionKey)??0)));
             successfulFunctionContexts.set(picked.selectionKey,{target:target.qualifiedName,signature:selected.signature});
-            feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
+            if(rec.positiveTransition){
+              // Reward observed economic deltas, not nonce/admin no-ops.
+              contextWeightMultipliers.set(picked.selectionKey,Math.min(8,2+(feedback.get(picked.selectionKey)??0)));
+              feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
+            }else{
+              const key=picked.selectionKey+'|NO_EFFECT',noEffect=1+(preflightRejections.get(key)??0);
+              preflightRejections.set(key,noEffect);
+              contextWeightMultipliers.set(picked.selectionKey,Math.max(0.05,0.45/(noEffect+1)));
+            }
           }
           stats.terminalActions++;
           if(['MINED_SUCCESS','MINED_REVERT','SUBMITTED_OUTCOME_UNKNOWN'].includes(rec.executionOutcome))stats.submittedActions++;
@@ -1711,7 +1738,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
         status:stats.positiveEconomicTransitions>0?'ECONOMIC_TRANSITION_WITNESSED':'ECONOMIC_REACHABILITY_GAP',
         baselineIsNotTransitionEvidence:true
       },
-      adaptiveDispatch:{blacklistedStubFunctions:[...blockedContextFunctions].sort(),rejectionSamples:[...preflightRejections.entries()].map(([functionKey,failures])=>({functionKey,failures})),successfulFunctionContexts:[...successfulFunctionContexts.values()],policy:'PRELIGHT_FAILURE_PENALTY_MINED_SUCCESS_REWARD_PERMANENT_STUB_PRUNING'},
+      adaptiveDispatch:{blacklistedStubFunctions:[...blockedContextFunctions].sort(),rejectionSamples:[...preflightRejections.entries()].map(([functionKey,failures])=>({functionKey,failures})),successfulFunctionContexts:[...successfulFunctionContexts.values()],policy:'PREFLIGHT_REJECTION_PENALTY_POSITIVE_STATE_CHANGE_REWARD_NO_EFFECT_DOWNWEIGHT'},
       feedbackStatus:successfulFunctionContexts.size>0?'ACTIVE_MINED_EXECUTION_LEARNING':'NO_EXECUTABLE_FUNCTION_WITNESS',decodedRevertReasons,
       actionSequenceDigestSha256,outcomeSequenceDigestSha256,
       rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,
