@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as ethers from 'ethers';
-import {isBalancerV3TargetV1,balancerV3ActionRequirementsV1,buildBalancerV3ActionV1,choosePoolV1,bptWithdrawalAmountV1} from '../src/phase0-balancer-v3-planner-v1.mjs';
+import {isBalancerV3TargetV1,balancerV3ActionRequirementsV1,buildBalancerV3ActionV1,balancerV3BptTransferRecipeV1,choosePoolV1,bptWithdrawalAmountV1} from '../src/phase0-balancer-v3-planner-v1.mjs';
 import {buildBalancerV3CreatorArgumentsV1} from '../src/phase0-fixture-synthesis-v1.mjs';
 
 const vault={qualifiedName:'@balancer-labs/v3-vault/contracts/Vault.sol:Vault',contextType:'DIRECT'};
@@ -65,4 +65,21 @@ test('Balancer withdrawal uses current verified BPT balance and zero minimum out
   assert.equal(bptWithdrawalAmountV1('1'),0n);
   assert.equal(bptWithdrawalAmountV1('50'),1n);
   assert.equal(bptWithdrawalAmountV1('1000000'),10000n);
+});
+
+test('real Balancer BPT transfer recipes use funded holder and distinct recipient, not random actors',()=>{
+  const tokenPool={address:pool,initialized:true,registered:true,tokens:[usdc,weth],bptHolders:[{actor:actors[0],amount:'1000000'}]};
+  const fundedActors=[...actors,'0x0000000000000000000000000000000000002000','0x0000000000000000000000000000000000003000'];
+  const base={target:{qualifiedName:'@balancer-labs/v3-pool-weighted/contracts/WeightedPool.sol:WeightedPool',address:pool},discovery:{pools:[tokenPool]},actors:fundedActors};
+  const transfer=balancerV3BptTransferRecipeV1({...base,selected:{signature:'transfer(address,uint256)'}});
+  assert.equal(transfer.kind,'READY');
+  assert.equal(transfer.sender,actors[0]);
+  assert.deepEqual(transfer.args,[fundedActors[1],10000n]);
+  const transferFrom=balancerV3BptTransferRecipeV1({...base,selected:{signature:'transferFrom(address,address,uint256)'}});
+  assert.equal(transferFrom.kind,'READY');
+  assert.deepEqual(transferFrom.args,[actors[0],fundedActors[1],10000n]);
+  assert.equal(transferFrom.spender,fundedActors[2]);
+  assert.equal(transferFrom.transferFrom,true);
+  assert.equal(balancerV3BptTransferRecipeV1({...base,selected:{signature:'incrementNonce()'}}),null);
+  assert.equal(balancerV3BptTransferRecipeV1({...base,discovery:{pools:[{...tokenPool,bptHolders:[]}]},selected:{signature:'transfer(address,uint256)'}}).reason,'BALANCER_BPT_REQUIRES_VERIFIED_FUNDED_HOLDER');
 });
