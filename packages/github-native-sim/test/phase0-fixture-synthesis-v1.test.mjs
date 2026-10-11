@@ -914,3 +914,73 @@ test('Stage-4 unresolved context is kept at ten-percent selection weight instead
     child.kill('SIGTERM');
   }
 });
+
+
+test('Stage-4 discovers a fallback-only facade by selector response and routes delegate-only calls through it',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage4Contracts(),extension=await deployArtifact(provider,compiled.DelegateExtension);
+    const facade=await deployArtifact(provider,compiled.FallbackFacade,[await extension.getAddress()]);
+    const accounts=await provider.send('eth_accounts',[]);
+    const artifacts=[stage4Artifact('DelegateExtension',compiled),stage4Artifact('FallbackFacade',compiled)];
+    const deployed=[stage4Deployment('DelegateExtension',await extension.getAddress()),stage4Deployment('FallbackFacade',await facade.getAddress())];
+    const direct=targetObjects(ethers,artifacts,deployed,{});
+    assert.equal(direct.some(row=>row.qualifiedName==='Stage4.sol:FallbackFacade'),false);
+    const augmented=await augmentDelegateProxyContextsV2({provider,ethers,targets:direct,artifacts,deployed,sourceIntelligence:{},associations:{},probeSelectors:true});
+    const facadeTarget=augmented.targets.find(row=>row.contextType==='FACADE'&&row.logicalQualifiedName==='Stage4.sol:DelegateExtension');
+    assert.ok(facadeTarget);
+    assert.equal(facadeTarget.address.toLowerCase(),(await facade.getAddress()).toLowerCase());
+    assert.ok(augmented.contextEvidence.some(row=>row.discoveryBasis==='SELECTOR_ANSWERED_BY_FACADE'));
+
+    const directTarget=augmented.targets.find(row=>(row.contextType??'DIRECT')==='DIRECT'&&row.qualifiedName==='Stage4.sol:DelegateExtension');
+    const selected=directTarget.functions.find(row=>row.signature==='doThing(uint256)'),iface=new ethers.Interface(directTarget.artifact.abi);
+    const resolved=await resolveTelemetryCallerContextV2({
+      provider,ethers,target:directTarget,selected,iface,args:[1n],value:0n,defaultSender:accounts[0],targets:augmented.targets,
+      valuePool:{associations:{},privileged:[]},callerState:new Map(),weightMultipliers:new Map()
+    });
+    assert.equal(resolved.success,true);
+    assert.equal(resolved.resolution,'FACADE:'+ethers.getAddress(await facade.getAddress()));
+    assert.equal(resolved.executionAddress.toLowerCase(),(await facade.getAddress()).toLowerCase());
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-4 telemetry emits per-function callerResolution evidence and reuses a learned privileged caller',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  const outRoot=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-stage4-'));
+  try{
+    const compiled=compileStage4Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const ownerOnly=await deployArtifact(provider,compiled.OwnerOnly,[accounts[0]]);
+    const artifact=stage4Artifact('OwnerOnly',compiled),targets=targetObjects(ethers,[artifact],[stage4Deployment('OwnerOnly',await ownerOnly.getAddress())],{});
+    const baselineSnapshot=await provider.send('evm_snapshot',[]);
+    const runs=await runTelemetry({
+      provider,ethers,targets,actors:[accounts[1]],outRoot,baselineSnapshot,artifacts:[artifact],
+      valuePool:{addresses:[await ownerOnly.getAddress()],tokens:[],associations:{},privileged:[accounts[0]],created:[]},
+      telemetryRuns:1,callsPerRun:3,seedSalt:'stage4-owner-resolution'
+    });
+    assert.equal(runs.length,1);
+    const row=runs[0].byFunction['Stage4.sol:OwnerOnly::ownerOnly()'];
+    assert.ok(row);
+    assert.equal(row.calls,3);
+    assert.equal(row.callerResolution,'PRIVILEGED:'+ethers.getAddress(accounts[0]));
+    assert.equal(runs[0].minedSuccess,3);
+  }finally{
+    fs.rmSync(outRoot,{recursive:true,force:true});
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-4 runner prepares contexts before baseline and persists learned caller resolutions into fixture evidence',()=>{
+  const runner=fs.readFileSync(path.join(root,'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const preparationAt=runner.indexOf('stage4ContextPreparation=');
+  const baselineAt=runner.indexOf('baselineSnapshot=await provider.send');
+  const telemetryAt=runner.indexOf('telemetry=await runTelemetry');
+  const rewriteAt=runner.indexOf('fixtureEvidence.callerResolutions=callerResolutionEvidence');
+  assert.ok(preparationAt>0&&baselineAt>preparationAt&&telemetryAt>baselineAt&&rewriteAt>telemetryAt);
+  assert.match(runner,/STAGE_4_CONTEXT_CORRECT_CALLERS/);
+  assert.match(runner,/contextCallerPreparation:stage4ContextPreparation/);
+  assert.match(runner,/callerResolutions=callerResolutionEvidence/);
+});
