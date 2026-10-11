@@ -89,7 +89,11 @@ function deploymentScriptKeyV2(item){
   return [framework,identity].join(':');
 }
 async function rpc(url,method,params=[]){
-  const res=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})});
+  // RPC requests can hang without a deadline even after the upstream preflight succeeds.
+  // State export is larger than ordinary JSON-RPC reads and receives a separate allowance.
+  const deadlineMs=method==='anvil_dumpState'?120000:60000;
+  const res=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(deadlineMs)});
+  if(!res.ok)throw new Error(`RPC ${method}: HTTP ${res.status}`);
   const body=await res.json();
   if(body.error)throw new Error(`RPC ${method}: ${body.error.message??JSON.stringify(body.error)}`);
   return body.result;
@@ -1290,8 +1294,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
     };
     const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set();
     const telemetryStartedAt=Date.now();
-    console.log(`[phase0-telemetry] ${runId} started; targetCalls=${callsPerRun}; lifecycle=v2; heartbeat every 300s`);
-    const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${callsPerRun}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),300000);
+    console.log(`[phase0-telemetry] ${runId} started; targetCalls=${callsPerRun}; lifecycle=v2; heartbeat every 30s`);
+    const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${callsPerRun}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),30000);
     telemetryHeartbeat.unref?.();
     try{
       for(const burst of schedule){
