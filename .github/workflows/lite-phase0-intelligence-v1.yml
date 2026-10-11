@@ -124,11 +124,27 @@ jobs:
           campaign_path="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.destination.campaignPath)")"
           request_id="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.requestId)")"
 
-          rm -rf .audit-controller-output
-          gh repo clone "$destination_repo" .audit-controller-output -- --filter=blob:none --no-checkout
+          # The intelligence engine already performed a verified exact-commit
+          # private source checkout. Reuse its Git object store and fetch only
+          # the destination ref rather than cloning the same repository twice.
+          source_repo="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.source.repository)")"
+          source_commit="$(node -e "const r=require('./'+process.env.REQUEST_PATH);process.stdout.write(r.source.commit)")"
+          verified_checkout=.phase0-intelligence-output/work/source-repo
+          test "$(git -C "$verified_checkout" rev-parse HEAD)" = "$source_commit"
+          if [ "$source_repo" = "$destination_repo" ]; then
+            mv "$verified_checkout" .audit-controller-output
+            git -C .audit-controller-output fetch --no-tags --depth=1 --filter=blob:none origin "$destination_ref"
+            expected_destination="$(git -C .audit-controller-output rev-parse FETCH_HEAD)"
+            git -C .audit-controller-output checkout -B "$destination_ref" FETCH_HEAD
+            test "$(git -C .audit-controller-output rev-parse HEAD)" = "$expected_destination"
+            echo 'Reused verified private source checkout; fetched destination once'
+          else
+            # Preserve prior behavior for a source-to-destination repository handoff.
+            gh repo clone "$destination_repo" .audit-controller-output -- --filter=blob:none --no-checkout
+            git -C .audit-controller-output fetch --no-tags --depth=1 origin "$destination_ref"
+            git -C .audit-controller-output checkout -B "$destination_ref" FETCH_HEAD
+          fi
           cd .audit-controller-output
-          git fetch origin "$destination_ref"
-          git checkout -B "$destination_ref" "origin/$destination_ref"
 
           authority_folder="Audit Skill - Current Authority"
           mapfile -t authority_packages < <(find "$authority_folder" -mindepth 1 -maxdepth 1 -type d -exec test -f '{}/SKILL.md' ';' -print | sort)
