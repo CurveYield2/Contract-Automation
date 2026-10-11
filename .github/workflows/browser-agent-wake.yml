@@ -384,6 +384,7 @@ jobs:
           retryable="$(jq -r '[.failures[]? | select(.retryable==true)] | length > 0' "$WAKE_RESULT_PATH")"
           retry_code="$(jq -r '[.failures[]? | select(.retryable==true) | .code][0] // empty' "$WAKE_RESULT_PATH")"
           echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "send_attempted=$(jq -r '.sendAttempted // false' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "retryable=$retryable" >> "$GITHUB_OUTPUT"
           echo "retry_code=$retry_code" >> "$GITHUB_OUTPUT"
           echo "chat_url=$(jq -r '.chatUrl // .after.url // .url // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
@@ -412,7 +413,7 @@ jobs:
 
       - name: Await first-action reviewer check-in
         id: receipt
-        if: steps.deliver.outputs.ok == 'true' && env.WAKE_ACK_PATH != ''
+        if: env.WAKE_ACK_PATH != '' && (steps.deliver.outputs.ok == 'true' || steps.deliver.outputs.send_attempted == 'true')
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
@@ -439,7 +440,7 @@ jobs:
 
       - name: Dispatch fresh-runner retry for retryable pre-post failure
         id: fresh-runner-retry
-        if: steps.deliver.outputs.ok != 'true' && steps.deliver.outputs.retryable == 'true'
+        if: steps.deliver.outputs.ok != 'true' && steps.deliver.outputs.retryable == 'true' && steps.deliver.outputs.send_attempted != 'true' && steps.receipt.outputs.verified != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           RETRY_INPUTS_JSON: ${{ toJSON(inputs) }}
@@ -469,7 +470,7 @@ jobs:
           echo "Fresh-runner retry $next/$max dispatched for $WAKE_ID after ${{ steps.deliver.outputs.retry_code }}." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail terminal browser wake
-        if: steps.deliver.outputs.ok != 'true' && steps.fresh-runner-retry.outputs.dispatched != 'true'
+        if: steps.deliver.outputs.ok != 'true' && steps.deliver.outputs.send_attempted != 'true' && steps.receipt.outputs.verified != 'true' && steps.fresh-runner-retry.outputs.dispatched != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -477,7 +478,7 @@ jobs:
           exit 1
 
       - name: Create watchdog state
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           CHAT_URL_RESOLVED: ${{ steps.deliver.outputs.chat_url }}
           PROVIDER: ${{ steps.deliver.outputs.provider }}
@@ -573,7 +574,7 @@ jobs:
           echo "WATCHDOG_SAFE_ID=$safe_id" >> "$GITHUB_ENV"
 
       - name: Persist watchdog state
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -589,7 +590,7 @@ jobs:
           fi
 
       - name: Persist existing-chat reviewer wake into campaign registration
-        if: ${{ steps.deliver.outputs.ok == 'true' && steps.receipt.outputs.verified == 'true' && inputs.mode == 'resume_existing' && inputs.worker_role == 'reviewer' }}
+        if: ${{ inputs.mode == 'resume_existing' && inputs.worker_role == 'reviewer' && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           GH_TOKEN: ${{ github.token }}
           RESOLVED_CHAT_URL: ${{ steps.deliver.outputs.chat_url }}
@@ -649,7 +650,7 @@ jobs:
             -f content="$content" -f sha="$sha" -f branch=main >/dev/null
 
       - name: Activate prepared Lite receipt successor
-        if: ${{ steps.deliver.outputs.ok == 'true' && steps.receipt.outputs.verified == 'true' && inputs.worker_role == 'reviewer' && inputs.gate_mode == 'LITE' }}
+        if: ${{ inputs.worker_role == 'reviewer' && inputs.gate_mode == 'LITE' && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           DIRECTORY_PATH: ${{ inputs.gate_state_path }}
@@ -732,7 +733,7 @@ jobs:
           fi
 
       - name: Arm immediate watchdog observation
-        if: ${{ steps.deliver.outputs.ok == 'true' && inputs.watchdog_enabled }}
+        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
