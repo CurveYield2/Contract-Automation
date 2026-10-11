@@ -371,6 +371,20 @@ async function x11Capture(args, label = 'x11-command') {
   }
 }
 
+async function captureX11VisualEvidence(label) {
+  const root = '/tmp/browser-wake-evidence-v1';
+  await fs.mkdir(root, {recursive:true});
+  const name=String(label).replace(/[^a-z0-9_-]/gi,'_').slice(0,60);
+  const target=path.join(root,name+'.png');
+  // Normal desktop screenshot, identical to a person viewing X11/VNC.
+  // Never inspect ChatGPT DOM, network responses, or accessibility trees.
+  await runCapture('scrot',['-o',target],{env:{DISPLAY:env.DISPLAY||':99'}});
+  const file=await fs.stat(target);
+  if(file.size<3000)throw new BrowserAgentError('X11_SCREENSHOT_EMPTY','Unable to capture visible desktop before declaring delivery',true);
+  console.log('[normal-chrome-watchdog] saved-desktop-visual='+name+' bytes='+file.size);
+  return target;
+}
+
 async function humanX11TypeText(page, text) {
   const value = String(text);
   for (const char of value) {
@@ -456,6 +470,18 @@ async function runNormalChromeExistingSession(chromium) {
     await humanX11TypeText(page, requestedUrl);
     await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-navigate');
     await page.waitForTimeout(15000);
+    await captureX11VisualEvidence('01_after_chat_navigation');
+    if (bool(env.WAKE_DIAGNOSTIC_ONLY)) {
+      const diagnostic={
+        ok:false, posted:false, persisted:false, wakeId,
+        provider:'normal-system-chrome-x11',
+        failures:[{code:'DIAGNOSTIC_ONLY_NO_SEND',provider:'normal-system-chrome-x11',retryable:false,
+          error:'Captured desktop navigation screenshot; intentionally did not type or send'}],
+        verification:'OS_X11_SCREENSHOT_FOR_VISUAL_INSPECTION_ONLY'
+      };
+      await fs.writeFile(statePath,JSON.stringify(diagnostic,null,2)+'\n','utf8');
+      return diagnostic;
+    }
 
     if (action === 'observe') {
       const webdriver = await page.evaluate(() => navigator.webdriver).catch(() => 'unavailable');
@@ -508,34 +534,27 @@ async function runNormalChromeExistingSession(chromium) {
     await page.waitForTimeout(randomDelayMs(180, 360));
     await x11Key(['click', '1'], 'x11-composer-click');
     await page.waitForTimeout(randomDelayMs(250, 450));
+    await captureX11VisualEvidence('02_after_composer_click');
 
     console.log('[normal-chrome-watchdog] wake-entry=OS-X11-skilled-typist phase1-proven-fixed-point');
     await humanX11TypeText(page, wakeMessage);
-
+    await captureX11VisualEvidence('03_after_text_entry');
     await page.waitForTimeout(randomDelayMs(350, 700));
     console.log('[normal-chrome-watchdog] send=OS-X11-Return');
     await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-send-return');
     await page.waitForTimeout(5000);
+    await captureX11VisualEvidence('04_after_return_key');
 
-    // Audit wake invariant: after navigation there are no ChatGPT page/DOM reads.
-    // Success means the proven Phase-1 X11 input sequence completed without an
-    // OS/browser-process error. Durable campaign progression is independently
-    // gated by controller state and the watchdog.
-    const result = {
-      ok: true,
-      provider: 'normal-system-chrome-x11-phase1-fixed-point',
-      action,
-      wakeId,
-      posted: true,
-      persisted: false,
-      chatUrl: requestedUrl,
-      sessionStatePersisted: false,
-      verification: 'phase1-fixed-x11-submit-no-chatgpt-page-read',
-      delivery: {
-        persisted: false,
-        verification: 'phase1-fixed-x11-submit-no-chatgpt-page-read',
-        verificationMethod: 'x11-human-input-only'
-      }
+    // Pressing Return is not evidence that ChatGPT received a message.
+    // Without approved visual review, never record wakeDelivery, activate the reviewer,
+    // or arm the watchdog for an unverified wake.
+    const result={
+      ok:false, provider:'normal-system-chrome-x11-phase1-visual-evidence',
+      action,wakeId,posted:false,persisted:false,chatUrl:requestedUrl,
+      verification:'VISUAL_REVIEW_REQUIRED_X11_SCREENSHOTS',
+      failures:[{provider:'normal-system-chrome-x11',code:'WAKE_NOT_VERIFIED',
+        retryable:false,error:'OS keyboard input finished, but actual ChatGPT message delivery remains unverified; see desktop screenshot artifact.'}],
+      delivery:{persisted:false,verification:'OS_DESKTOP_CAPTURE_ONLY'}
     };
     await fs.writeFile(statePath, JSON.stringify(result, null, 2) + '\n', 'utf8');
     return result;
