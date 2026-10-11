@@ -664,15 +664,110 @@ export function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
     return{...d,artifact,functions,plan:probePlan(ethers,artifact),declaredStandards,recipe};
   }).filter(t=>t.functions.length);
 }
-export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={}}){
+const EIP1967_IMPLEMENTATION_SLOT_V2='0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
+
+function associationValuesV2(value){
+  if(value instanceof Set)return [...value];
+  if(Array.isArray(value))return value;
+  return[];
+}
+function associationHoldsV2(associations,holder,callee){
+  const h=String(holder??'').toLowerCase(),c=String(callee??'').toLowerCase();
+  for(const [key,value] of Object.entries(associations??{})){
+    if(String(key).toLowerCase()!==h)continue;
+    return associationValuesV2(value).some(row=>String(row).toLowerCase()===c);
+  }
+  return false;
+}
+function zeroAbiValueV2(ethers,param){
+  if(param?.baseType==='array'){
+    if(Number.isInteger(param.arrayLength)&&param.arrayLength>=0)return Array.from({length:param.arrayLength},()=>zeroAbiValueV2(ethers,param.arrayChildren));
+    return[];
+  }
+  if(param?.baseType==='tuple')return (param.components??[]).map(child=>zeroAbiValueV2(ethers,child));
+  const type=String(param?.type??'');
+  if(type==='address')return ethers.ZeroAddress;
+  if(type==='bool')return false;
+  if(type==='string')return '';
+  if(type==='bytes')return '0x';
+  if(/^bytes\d+$/.test(type))return ethers.zeroPadValue('0x',Number(type.slice(5)));
+  if(/^u?int(?:\d+)?$/.test(type))return 0n;
+  return 0;
+}
+function mutableFunctionsForArtifactV2({ethers,artifact,qualifiedName,sourceIntelligence={}}){
+  const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,qualifiedName);
+  const recipe=qualifyRecipeV2({qualifiedName,abi:artifact.abi,declaredStandards});
+  const functions=mutableFunctions(ethers,artifact).map(x=>{
+    const semantic=classifySemanticFamilyV2({signature:x.signature,stateMutability:x.fragment.stateMutability,recipe:recipe.status==='QUALIFIED'?recipe:null});
+    return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
+  });
+  return{declaredStandards,recipe,functions};
+}
+function decodedErrorMatchesInterfaceV2(iface,error){
+  const data=error?.data??error?.info?.error?.data??null;
+  if(typeof data!=='string'||data==='0x')return false;
+  try{return Boolean(iface.parseError(data));}catch{return false;}
+}
+async function facadeAnswersSelectorV2({provider,ethers,facadeAddress,implArtifact,selected,from}){
+  let iface;
+  try{iface=new ethers.Interface(normalizedAbi(implArtifact.abi));}catch{return false;}
+  let data;
+  try{data=iface.encodeFunctionData(selected.signature,(selected.fragment.inputs??[]).map(param=>zeroAbiValueV2(ethers,param)));}catch{return false;}
+  try{
+    await provider.call({from,to:facadeAddress,data,value:0n});
+    return true;
+  }catch(error){
+    return decodedErrorMatchesInterfaceV2(iface,error);
+  }
+}
+async function eip1967ImplementationAddressV2({provider,ethers,address}){
+  try{
+    const word=await provider.send('eth_getStorageAt',[address,EIP1967_IMPLEMENTATION_SLOT_V2,'latest']);
+    if(!/^0x[0-9a-fA-F]{64}$/.test(String(word??'')))return null;
+    const candidate=ethers.getAddress('0x'+String(word).slice(-40));
+    if(candidate===ethers.ZeroAddress)return null;
+    const code=await provider.getCode(candidate);
+    return code&&code!=='0x'?candidate:null;
+  }catch{return null;}
+}
+export async function augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence={},associations={},probeSelectors=true}){
   const byQ=new Map(artifacts.map(a=>[`${a.sourceName}:${a.contractName}`,a]));
   const deployedByAddress=new Map(deployed.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
+  const targetByAddress=new Map(targets.filter(x=>x?.address).map(x=>[String(x.address).toLowerCase(),x]));
   const out=[...targets],contextEvidence=[];
-  for(const proxyDeployment of deployed){
-    const proxyArtifact=proxyDeployment?.qualifiedName?byQ.get(proxyDeployment.qualifiedName):null;
-    if(!proxyArtifact)continue;
+  const variantKeys=new Set(out.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
+  const asDeployment=address=>deployedByAddress.get(String(address).toLowerCase())??targetByAddress.get(String(address).toLowerCase())??null;
+  const addVariant=({facadeDeployment,implDeployment,implArtifact,contextType,basis,evidence={}})=>{
+    if(!facadeDeployment?.address||!implDeployment?.qualifiedName||!implArtifact)return false;
+    const built=mutableFunctionsForArtifactV2({ethers,artifact:implArtifact,qualifiedName:implDeployment.qualifiedName,sourceIntelligence});
+    if(!built.functions.length)return false;
+    const key=`${String(facadeDeployment.address).toLowerCase()}|${implDeployment.qualifiedName}|${contextType}`;
+    if(variantKeys.has(key))return false;
+    variantKeys.add(key);
+    out.push({
+      ...facadeDeployment,
+      qualifiedName:facadeDeployment.qualifiedName??`FACADE:${facadeDeployment.address}`,
+      logicalQualifiedName:implDeployment.qualifiedName,
+      artifact:implArtifact,
+      functions:built.functions,
+      plan:probePlan(ethers,implArtifact),
+      declaredStandards:built.declaredStandards,recipe:built.recipe,
+      contextType,contextDisposition:'READY',
+      contextEvidence:{facadeAddress:facadeDeployment.address,implementationAddress:implDeployment.address??null,discoveryBasis:basis,...evidence}
+    });
+    contextEvidence.push({
+      contextType,facadeQualifiedName:facadeDeployment.qualifiedName??null,logicalQualifiedName:implDeployment.qualifiedName,
+      status:'READY',facadeAddress:facadeDeployment.address,implementationAddress:implDeployment.address??null,
+      discoveryBasis:basis,...evidence
+    });
+    return true;
+  };
+
+  for(const facadeDeployment of deployed){
+    const facadeArtifact=facadeDeployment?.qualifiedName?byQ.get(facadeDeployment.qualifiedName):null;
+    if(!facadeArtifact)continue;
     let iface;
-    try{iface=new ethers.Interface(normalizedAbi(proxyArtifact.abi));}catch{continue;}
+    try{iface=new ethers.Interface(normalizedAbi(facadeArtifact.abi));}catch{continue;}
     let getter=null;
     for(const candidate of ['implementation()','getImplementation()']){
       try{if(iface.getFunction(candidate)){getter=candidate;break;}}catch{}
@@ -680,39 +775,67 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
     if(!getter)continue;
     let implementationAddress;
     try{
-      const c=new ethers.Contract(proxyDeployment.address,normalizedAbi(proxyArtifact.abi),provider);
+      const c=new ethers.Contract(facadeDeployment.address,normalizedAbi(facadeArtifact.abi),provider);
       implementationAddress=await c.getFunction(getter).staticCall();
     }catch(error){
-      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,status:'CONTEXT_REQUIRED',reason:'IMPLEMENTATION_READ_FAILED',message:String(error?.shortMessage??error?.message??error).slice(0,1200)});
+      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:facadeDeployment.qualifiedName,status:'CONTEXT_REQUIRED',reason:'IMPLEMENTATION_READ_FAILED',message:String(error?.shortMessage??error?.message??error).slice(0,1200)});
       continue;
     }
-    const implDeployment=deployedByAddress.get(String(implementationAddress).toLowerCase());
+    const implDeployment=asDeployment(implementationAddress);
     const implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
     if(!implDeployment||!implArtifact){
-      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,status:'FIXTURE_GAP',implementationAddress:String(implementationAddress),reason:'IMPLEMENTATION_NOT_IN_DEPLOYED_ADMITTED_INVENTORY'});
+      contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:facadeDeployment.qualifiedName,status:'FIXTURE_GAP',implementationAddress:String(implementationAddress),reason:'IMPLEMENTATION_NOT_IN_DEPLOYED_ADMITTED_INVENTORY'});
       continue;
     }
-    const declaredStandards=sourceDeclaredStandardsV2(sourceIntelligence,implDeployment.qualifiedName);
-    const recipe=qualifyRecipeV2({qualifiedName:implDeployment.qualifiedName,abi:implArtifact.abi,declaredStandards});
-    const functions=mutableFunctions(ethers,implArtifact).map(x=>{
-      const semantic=classifySemanticFamilyV2({signature:x.signature,stateMutability:x.fragment.stateMutability,recipe:recipe.status==='QUALIFIED'?recipe:null});
-      return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
-    });
-    if(!functions.length)continue;
-    const variant={
-      ...proxyDeployment,
-      qualifiedName:proxyDeployment.qualifiedName,
-      logicalQualifiedName:implDeployment.qualifiedName,
-      artifact:implArtifact,
-      functions,
-      plan:probePlan(ethers,implArtifact),
-      declaredStandards,recipe,
-      contextType:'DELEGATE_PROXY',
-      contextDisposition:'READY',
-      contextEvidence:{facadeAddress:proxyDeployment.address,implementationAddress:String(implementationAddress),implementationGetter:getter}
-    };
-    out.push(variant);
-    contextEvidence.push({contextType:'DELEGATE_PROXY',facadeQualifiedName:proxyDeployment.qualifiedName,logicalQualifiedName:implDeployment.qualifiedName,status:'READY',facadeAddress:proxyDeployment.address,implementationAddress:String(implementationAddress),implementationGetter:getter});
+    addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'DELEGATE_PROXY',basis:'IMPLEMENTATION_GETTER',evidence:{implementationGetter:getter}});
+  }
+
+  for(const facadeDeployment of deployed){
+    if(!facadeDeployment?.address)continue;
+    const implementationAddress=await eip1967ImplementationAddressV2({provider,ethers,address:facadeDeployment.address});
+    if(!implementationAddress)continue;
+    const implDeployment=asDeployment(implementationAddress),implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
+    if(!implDeployment||!implArtifact)continue;
+    addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'EIP1967_IMPLEMENTATION_SLOT'});
+  }
+
+  for(const [holderRaw,value] of Object.entries(associations??{})){
+    const facadeDeployment=asDeployment(holderRaw);
+    if(!facadeDeployment?.address)continue;
+    for(const calleeRaw of associationValuesV2(value)){
+      const implDeployment=asDeployment(calleeRaw),implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
+      if(!implDeployment||!implArtifact||String(implDeployment.address).toLowerCase()===String(facadeDeployment.address).toLowerCase())continue;
+      addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'ASSOCIATION_POINTS_TO_EXTENSION'});
+    }
+  }
+
+  if(probeSelectors){
+    const accounts=await provider.send('eth_accounts',[]).catch(()=>[]);
+    const from=accounts[0]??ethers.ZeroAddress;
+    let probes=0;
+    const directExtensions=targets.filter(target=>(target.contextType??'DIRECT')==='DIRECT');
+    for(const extension of directExtensions){
+      if(probes>=96)break;
+      const implArtifact=extension.artifact,implDeployment=asDeployment(extension.address)??extension;
+      if(!implArtifact||!implDeployment?.qualifiedName)continue;
+      for(const facadeDeployment of deployed.filter(candidate=>String(candidate.address).toLowerCase()!==String(extension.address).toLowerCase())){
+        if(probes>=96)break;
+        const facadeArtifact=facadeDeployment?.qualifiedName?byQ.get(facadeDeployment.qualifiedName):null;
+        if(!facadeArtifact)continue;
+        let facadeIface;
+        try{facadeIface=new ethers.Interface(normalizedAbi(facadeArtifact.abi??[]));}catch{continue;}
+        const probeFunction=(extension.functions??[]).find(selected=>{
+          try{return !facadeIface.getFunction(selected.signature);}catch{return true;}
+        });
+        if(!probeFunction)continue;
+        probes++;
+        const answered=await facadeAnswersSelectorV2({provider,ethers,facadeAddress:facadeDeployment.address,implArtifact,selected:probeFunction,from});
+        if(!answered)continue;
+        const added=addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'SELECTOR_ANSWERED_BY_FACADE',evidence:{selectorProbe:probeFunction.signature}});
+        if(added)break;
+      }
+    }
+    contextEvidence.push({contextType:'FACADE_DISCOVERY',status:'COMPLETE',discoveryBasis:'SELECTOR_PROBE_BOUNDED',probeCount:probes,probeLimit:96});
   }
   for(const target of out)if(!target.contextType){target.contextType='DIRECT';target.contextDisposition='READY';}
   return{targets:out,contextEvidence};
@@ -819,21 +942,22 @@ function qualifiedActionV2({target,selected,actors,rng}){
   }
   return null;
 }
-export function pickFn(target,rng,actionClass,feedback=new Map(),blocked=new Set()){
+export function pickFn(target,rng,actionClass,feedback=new Map(),blocked=new Set(),weightMultipliers=new Map()){
   const keyFor=x=>`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${x.signature}`;
   const available=list=>list.filter(x=>!blocked.has(keyFor(x)));
   const accounting=available(target.functions.filter(x=>x.accounting)),other=available(target.functions.filter(x=>!x.accounting));
   const requested=actionClass==='ACCOUNTING_STATE_CHANGE'?accounting:other;
   const alternate=actionClass==='ACCOUNTING_STATE_CHANGE'?other:accounting;
   const effective=requested.length?requested:alternate;
-  // If every admitted function for this target is explicitly blocked, return null so
-  // the caller can reroute to another qualified execution context. Never silently
-  // resurrect a blocked function.
   if(!effective.length)return null;
-  const weights=effective.map(x=>1+Math.min(8,Number(feedback.get(keyFor(x))??0)));
+  const weights=effective.map(x=>{
+    const key=keyFor(x),base=1+Math.min(8,Number(feedback.get(key)??0));
+    const multiplier=Math.max(0.01,Number(weightMultipliers.get(key)??1));
+    return base*multiplier;
+  });
   const total=weights.reduce((a,b)=>a+b,0);let cursor=rng()*total;
-  for(let i=0;i<effective.length;i++){cursor-=weights[i];if(cursor<=0)return{selected:effective[i],feedbackWeight:weights[i],selectionKey:keyFor(effective[i])};}
-  return{selected:effective.at(-1),feedbackWeight:weights.at(-1),selectionKey:keyFor(effective.at(-1))};
+  for(let i=0;i<effective.length;i++){cursor-=weights[i];if(cursor<=0)return{selected:effective[i],feedbackWeight:weights[i],selectionKey:keyFor(effective[i]),selectionWeightMultiplier:Number(weightMultipliers.get(keyFor(effective[i]))??1)};}
+  return{selected:effective.at(-1),feedbackWeight:weights.at(-1),selectionKey:keyFor(effective.at(-1)),selectionWeightMultiplier:Number(weightMultipliers.get(keyFor(effective.at(-1)))??1)};
 }
 export function buildBurstSchedule(targets,calls,rng){
   const out=[];
@@ -966,8 +1090,157 @@ function preflightKindV2(error){
   const text=String(error?.shortMessage??error?.message??error??'');
   return error?.code==='CALL_EXCEPTION'||/revert|execution reverted|panic/i.test(text)?'PROTOCOL_REJECTION':'INFRASTRUCTURE';
 }
+const CONTEXT_REQUIRED_RE_V2=/(?:SenderIsNot|NotVault|OnlyVault|CallerIsNot|NotDelegateCall|onlyVault|only[A-Z]\w+)/;
+const AUTH_LOOKING_RE_V2=/(?:NotOwner|Unauthorized|owner|auth|admin|allowed|permission|role|onlyOwner|onlyAdmin)/i;
+
+function collectAddressStringsV2(value,out=[]){
+  if(typeof value==='string'&&/^0x[0-9a-fA-F]{40}$/.test(value)){out.push(value);return out;}
+  if(Array.isArray(value)){for(const child of value)collectAddressStringsV2(child,out);return out;}
+  if(value&&typeof value==='object')for(const child of Object.values(value))collectAddressStringsV2(child,out);
+  return out;
+}
+function contextErrorTextV2(info={}){
+  return [
+    info?.decodedCustomError?.name,
+    info?.decodedCustomError?.signature,
+    info?.reason,info?.shortMessage,info?.message
+  ].filter(Boolean).join(' | ');
+}
+function associationCallerCandidatesV2({ethers,valuePool,targetAddress,targets=[]}){
+  const out=[];
+  for(const target of targets){
+    if(!target?.address)continue;
+    if(associationHoldsV2(valuePool?.associations??{},target.address,targetAddress))out.push(target.address);
+  }
+  return [...new Set(out.map(address=>ethers.getAddress(address)))];
+}
+function alternateFacadeTargetsV2({target,selected,targets=[]}){
+  const logical=target.logicalQualifiedName??target.qualifiedName;
+  return targets.filter(candidate=>
+    String(candidate.address).toLowerCase()!==String(target.address).toLowerCase()&&
+    ['FACADE','DELEGATE_PROXY'].includes(candidate.contextType??'DIRECT')&&
+    (candidate.logicalQualifiedName??candidate.qualifiedName)===logical&&
+    (candidate.functions??[]).some(fn=>fn.signature===selected.signature)
+  );
+}
+async function ensureImpersonatedSenderV2({provider,ethers,address}){
+  const sender=ethers.getAddress(address);
+  try{await provider.send('anvil_impersonateAccount',[sender]);}catch{}
+  try{
+    const balance=BigInt(await provider.send('eth_getBalance',[sender,'latest']));
+    if(balance<ethers.parseEther('1'))await provider.send('anvil_setBalance',[sender,ethers.toQuantity(ethers.parseEther('100'))]);
+  }catch{}
+  return sender;
+}
+async function telemetryPreflightAttemptV2({provider,iface,signature,args,sender,to,value}){
+  const data=iface.encodeFunctionData(signature,args);
+  let callProbe;
+  try{
+    const rawReturn=await provider.call({from:sender,to,data,value});
+    let decodedReturn=null;
+    try{decodedReturn=normalize(iface.decodeFunctionResult(signature,rawReturn));}catch{}
+    callProbe={status:'RETURNED',rawReturn,decodedReturn};
+  }catch(error){
+    callProbe={status:'REVERTED',error:errorInfo(error,iface)};
+  }
+  try{
+    const estimate=await provider.estimateGas({from:sender,to,data,value});
+    return{success:true,estimate,callProbe,error:null,errorDetails:null,to,sender,data};
+  }catch(error){
+    return{success:false,estimate:null,callProbe,error,errorDetails:errorInfo(error,iface),to,sender,data};
+  }
+}
+function callerResolutionForTargetV2(target){
+  return ['FACADE','DELEGATE_PROXY'].includes(target.contextType??'DIRECT')?`FACADE:${target.address}`:'DEFAULT';
+}
+function selectionCallerStateKeyV2(target,selected){
+  return `${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${selected.signature}`;
+}
+export async function resolveTelemetryCallerContextV2({
+  provider,ethers,target,selected,iface,args,value,defaultSender,targets=[],valuePool=null,callerState=new Map(),weightMultipliers=new Map()
+}){
+  const key=selectionCallerStateKeyV2(target,selected),saved=callerState.get(key);
+  const adaptations=[];
+  if(saved&&saved.resolution!=='UNRESOLVED'){
+    const sender=saved.sender?await ensureImpersonatedSenderV2({provider,ethers,address:saved.sender}):defaultSender;
+    const to=saved.executionAddress??target.address;
+    const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender,to,value});
+    if(attempt.success)return{...attempt,resolution:saved.resolution,executionAddress:to,sender,adaptations,reused:true};
+  }
+
+  const initial=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender:defaultSender,to:target.address,value});
+  if(initial.success){
+    const resolution=callerResolutionForTargetV2(target);
+    if(resolution!=='DEFAULT')callerState.set(key,{resolution,executionAddress:target.address,sender:null});
+    weightMultipliers.set(key,1);
+    return{...initial,resolution,executionAddress:target.address,sender:defaultSender,adaptations,reused:false};
+  }
+
+  const info=initial.errorDetails??{},text=contextErrorTextV2(info);
+  const delegateRequired=/DelegateCall/i.test(text);
+  const contextRequired=delegateRequired||CONTEXT_REQUIRED_RE_V2.test(text);
+  const authRequired=AUTH_LOOKING_RE_V2.test(text);
+  const namedAddresses=[...new Set(collectAddressStringsV2(info?.decodedCustomError?.args??[]).map(address=>ethers.getAddress(address)))];
+
+  if(delegateRequired){
+    for(const facade of alternateFacadeTargetsV2({target,selected,targets})){
+      const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender:defaultSender,to:facade.address,value});
+      adaptations.push({kind:'FACADE_RETRY',fromAddress:target.address,toAddress:facade.address,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,signature:selected.signature,status:attempt.success?'PASS':'REVERTED'});
+      if(attempt.success){
+        const resolution=`FACADE:${facade.address}`;
+        callerState.set(key,{resolution,executionAddress:facade.address,sender:null});
+        weightMultipliers.set(key,1);
+        return{...attempt,resolution,executionAddress:facade.address,sender:defaultSender,adaptations,reused:false};
+      }
+    }
+  }
+
+  if(contextRequired&&!delegateRequired){
+    const candidates=namedAddresses.length
+      ? namedAddresses.slice(0,1)
+      : associationCallerCandidatesV2({ethers,valuePool,targetAddress:target.address,targets});
+    for(const candidate of candidates){
+      if(String(candidate).toLowerCase()===String(defaultSender).toLowerCase())continue;
+      const sender=await ensureImpersonatedSenderV2({provider,ethers,address:candidate});
+      const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender,to:target.address,value});
+      adaptations.push({kind:'IMPERSONATED_CALLER_RETRY',fromSender:defaultSender,toSender:sender,targetAddress:target.address,signature:selected.signature,status:attempt.success?'PASS':'REVERTED'});
+      if(attempt.success){
+        const resolution=`IMPERSONATED_CALLER:${sender}`;
+        callerState.set(key,{resolution,executionAddress:target.address,sender});
+        weightMultipliers.set(key,1);
+        return{...attempt,resolution,executionAddress:target.address,sender,adaptations,reused:false};
+      }
+    }
+  }
+
+  if(authRequired){
+    for(const raw of valuePool?.privileged??[]){
+      let privileged;
+      try{privileged=ethers.getAddress(raw);}catch{continue;}
+      if(privileged.toLowerCase()===String(defaultSender).toLowerCase())continue;
+      const sender=await ensureImpersonatedSenderV2({provider,ethers,address:privileged});
+      const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender,to:target.address,value});
+      adaptations.push({kind:'PRIVILEGED_CALLER_RETRY',fromSender:defaultSender,toSender:sender,targetAddress:target.address,signature:selected.signature,status:attempt.success?'PASS':'REVERTED'});
+      if(attempt.success){
+        const resolution=`PRIVILEGED:${sender}`;
+        callerState.set(key,{resolution,executionAddress:target.address,sender});
+        weightMultipliers.set(key,1);
+        return{...attempt,resolution,executionAddress:target.address,sender,adaptations,reused:false};
+      }
+    }
+  }
+
+  if(contextRequired||authRequired){
+    callerState.set(key,{resolution:'UNRESOLVED',executionAddress:target.address,sender:null});
+    weightMultipliers.set(key,0.1);
+    adaptations.push({kind:'CALLER_CONTEXT_UNRESOLVED',targetAddress:target.address,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,signature:selected.signature,reason:text.slice(0,1000),selectionWeightMultiplier:0.1});
+    return{...initial,resolution:'UNRESOLVED',executionAddress:target.address,sender:defaultSender,adaptations,reused:false,contextRequired:true};
+  }
+
+  return{...initial,resolution:callerResolutionForTargetV2(target),executionAddress:target.address,sender:defaultSender,adaptations,reused:false};
+}
 export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,artifacts=[],valuePool=null,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
-  const summaries=[];
+  const summaries=[],callerResolutionState=new Map(),contextWeightMultipliers=new Map();
   let snapshotId=baselineSnapshot;
   const canonicalBaseline=await baselineSentinelV2({provider,ethers,targets,actors});
   for(let run=1;run<=telemetryRuns;run++){
@@ -995,7 +1268,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
-    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),contextFailureCounts=new Map();
+    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set();
     const telemetryStartedAt=Date.now();
     console.log(`[phase0-telemetry] ${runId} started; targetCalls=${callsPerRun}; lifecycle=v2; heartbeat every 300s`);
     const telemetryHeartbeat=setInterval(()=>console.log(`[phase0-telemetry] heartbeat: run=${runId}; calls=${stats.calls}/${callsPerRun}; minedSuccess=${stats.minedSuccess}; simulatedRejection=${stats.simulatedRejection}; errors=${stats.errors}`),300000);
@@ -1004,17 +1277,17 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       for(const burst of schedule){
         let target=targets[burst.targetIndex];
         for(let k=0;k<burst.count;k++){
-          let picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions);
+          let picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers);
           if(!picked){
             const alternate=targets.find(candidate=>
               (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
               (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
-              pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions)
+              pickFn(candidate,()=>0.5,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers)
             );
             if(alternate){
               stats.contextAdaptations.push({kind:'REROUTE_TO_QUALIFIED_CONTEXT',fromContext:target.contextType??'DIRECT',toContext:alternate.contextType??'DIRECT',logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,atCallIndex:stats.calls+1});
               target=alternate;
-              picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions);
+              picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers);
             }
           }
           if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
@@ -1030,13 +1303,13 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             stages:{ARG_GEN:null,PREFLIGHT:null,SUBMISSION:null,RECEIPT:null,OBSERVATION:null},
             decodedInputs:null,abiGenerated:true,rawRandomBytes:false,executionOutcome:null,
             observations:{before:[],after:[],deltas:[]},effectClassification:'NOT_EXECUTED',positiveTransition:false,
-            transaction:null,error:null,
-            selectionFeedback:{selectionKey:picked.selectionKey,weight:picked.feedbackWeight,adaptedContext:stats.contextAdaptations.at(-1)?.atCallIndex===stats.calls+1}
+            transaction:null,error:null,callerResolution:callerResolutionForTargetV2(target),executionAddress:target.address,
+            selectionFeedback:{selectionKey:picked.selectionKey,weight:picked.feedbackWeight,weightMultiplier:picked.selectionWeightMultiplier??1,adaptedContext:stats.contextAdaptations.at(-1)?.atCallIndex===stats.calls+1}
           };
           if(picked.feedbackWeight>1)stats.feedbackSelections++;
           stats.calls++; if(selected.semanticFamily==='ECONOMIC')stats.accountingActions++;else stats.otherActions++;
           stats.byContract[target.qualifiedName]=(stats.byContract[target.qualifiedName]??0)+1;
-          const fk=`${target.qualifiedName}::${selected.signature}`;stats.byFunction[fk]=(stats.byFunction[fk]??0)+1;
+          const fk=`${target.qualifiedName}::${selected.signature}`,fnStats=stats.byFunction[fk]??{calls:0,callerResolution:callerResolutionForTargetV2(target)};fnStats.calls++;stats.byFunction[fk]=fnStats;
 
           let args=null,argError=null;
           try{
@@ -1051,35 +1324,43 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             rec.executionOutcome=classifyExecutionOutcomeV2({argumentGeneration:{success:false}});
             rec.error=rec.stages.ARG_GEN.error;
           }else{
-            const before=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
-            rec.observations.before=observationRowsV2(before,target.recipe,'BEFORE');
-            const data=iface.encodeFunctionData(selected.signature,args);
+            const initialSender=sender;
+            const initialBefore=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
+            rec.observations.before=observationRowsV2(initialBefore,target.recipe,'BEFORE');
             const value=qualifiedAction?.value??(f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n);
-            let estimate=null,preflightError=null;
-            let callProbe;
-            try{
-              const rawReturn=await provider.call({from:sender,to:target.address,data,value});
-              let decodedReturn=null;
-              try{decodedReturn=normalize(iface.decodeFunctionResult(selected.signature,rawReturn));}catch{}
-              callProbe={status:'RETURNED',rawReturn,decodedReturn};
-            }catch(error){
-              callProbe={status:'REVERTED',error:errorInfo(error,iface)};
+            const resolved=await resolveTelemetryCallerContextV2({
+              provider,ethers,target,selected,iface,args,value,defaultSender:sender,targets,valuePool,
+              callerState:callerResolutionState,weightMultipliers:contextWeightMultipliers
+            });
+            sender=resolved.sender;
+            rec.sender=sender;
+            rec.callerResolution=resolved.resolution;
+            rec.executionAddress=resolved.executionAddress;
+            fnStats.callerResolution=resolved.resolution;
+            for(const adaptation of resolved.adaptations??[])stats.contextAdaptations.push({...adaptation,selectionKey:picked.selectionKey,atCallIndex:stats.calls});
+            if((resolved.adaptations??[]).length)rec.contextAdaptations=resolved.adaptations;
+            const executionTarget=resolved.executionAddress.toLowerCase()===String(target.address).toLowerCase()
+              ? target
+              : {...target,address:resolved.executionAddress,contextType:'FACADE',contextDisposition:'READY'};
+            if(sender.toLowerCase()!==String(initialSender).toLowerCase()||resolved.executionAddress.toLowerCase()!==String(target.address).toLowerCase()){
+              const contextualBefore=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
+              rec.observations.before=observationRowsV2(contextualBefore,executionTarget.recipe,'BEFORE');
             }
-            try{
-              estimate=await provider.estimateGas({from:sender,to:target.address,data,value});
-              rec.stages.PREFLIGHT={status:'PASS',estimateGas:estimate.toString(),callProbe};
-            }catch(error){
-              preflightError=error;
-              const kind=preflightKindV2(error);
-              rec.stages.PREFLIGHT={status:'FAILED',kind,error:errorInfo(error,iface),callProbe};
+            const estimate=resolved.estimate,preflightError=resolved.success?null:resolved.error,callProbe=resolved.callProbe,data=resolved.data;
+            if(resolved.success){
+              rec.stages.PREFLIGHT={status:'PASS',estimateGas:estimate.toString(),callProbe,callerResolution:resolved.resolution,executionAddress:resolved.executionAddress,reusedResolution:resolved.reused===true};
+            }else{
+              const kind=preflightKindV2(preflightError);
+              rec.stages.PREFLIGHT={status:'FAILED',kind,error:resolved.errorDetails??errorInfo(preflightError,iface),callProbe,callerResolution:resolved.resolution,executionAddress:resolved.executionAddress};
             }
             let tx=null,receipt=null,submissionError=null;
             if(!preflightError){
               try{
+                if(rec.callerResolution.startsWith('IMPERSONATED_CALLER:')||rec.callerResolution.startsWith('PRIVILEGED:'))await ensureImpersonatedSenderV2({provider,ethers,address:sender});
                 const signer=await provider.getSigner(sender);
                 const gasLimit=estimate+(estimate/2n)+100000n;
-                tx=await signer.sendTransaction({to:target.address,data,value,gasLimit});
-                rec.stages.SUBMISSION={status:'SUBMITTED',transactionHash:tx.hash,gasLimit:gasLimit.toString()};
+                tx=await signer.sendTransaction({to:resolved.executionAddress,data,value,gasLimit});
+                rec.stages.SUBMISSION={status:'SUBMITTED',transactionHash:tx.hash,gasLimit:gasLimit.toString(),callerResolution:rec.callerResolution,executionAddress:resolved.executionAddress};
                 try{
                   receipt=await tx.wait();
                   rec.stages.RECEIPT={status:'MINED',transactionHash:tx.hash,blockNumber:receipt?.blockNumber??null,receiptStatus:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,gasPrice:(receipt?.gasPrice??receipt?.effectiveGasPrice)?.toString?.()??null};
@@ -1090,7 +1371,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
                 }
               }catch(error){
                 submissionError=error;
-                rec.stages.SUBMISSION={status:'FAILED',error:errorInfo(error,iface)};
+                rec.stages.SUBMISSION={status:'FAILED',error:errorInfo(error,iface),callerResolution:rec.callerResolution,executionAddress:resolved.executionAddress};
               }
             }
             rec.executionOutcome=classifyExecutionOutcomeV2({
@@ -1099,8 +1380,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               submission:preflightError?null:(submissionError?{success:false}:{success:!!tx}),
               receipt
             });
-            const after=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
-            rec.observations.after=observationRowsV2(after,target.recipe,'AFTER');
+            const after=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
+            rec.observations.after=observationRowsV2(after,executionTarget.recipe,'AFTER');
             rec.observations.deltas=observationDeltasV2(rec.observations.before,rec.observations.after,{receipt,sender});
             rec.stages.OBSERVATION={
               status:rec.observations.after.some(x=>x.status!=='OK')?'PARTIAL':'COMPLETE',
@@ -1110,8 +1391,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             const knownNonzero=rec.observations.deltas.filter(x=>x.status==='KNOWN'&&x.value!=='0'&&x.quantityId!=='native:sender');
             rec.positiveTransition=rec.executionOutcome==='MINED_SUCCESS'&&knownNonzero.length>0;
             rec.effectClassification=rec.positiveTransition?'OBSERVED_STATE_TRANSITION':(rec.executionOutcome==='MINED_SUCCESS'?'MINED_NO_OBSERVED_STATE_TRANSITION':'NO_MINED_SUCCESS');
-            rec.transaction=tx?{hash:tx.hash,blockNumber:receipt?.blockNumber??null,status:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,value:value.toString(),logs:(receipt?.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))}:null;
-            if(preflightError)rec.error=errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
+            rec.transaction=tx?{hash:tx.hash,blockNumber:receipt?.blockNumber??null,status:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,value:value.toString(),to:resolved.executionAddress,logs:(receipt?.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))}:null;
+            if(preflightError)rec.error=resolved.errorDetails??errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
           }
 
           stats.terminalActions++;
@@ -1129,22 +1410,6 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
             stats.feedbackUpdates++;
           }
-          if(rec.executionOutcome==='SIMULATED_REJECTION'){
-            const hasAlternateContext=targets.some(candidate=>
-              (candidate.logicalQualifiedName??candidate.qualifiedName)===(target.logicalQualifiedName??target.qualifiedName)&&
-              (candidate.contextType??'DIRECT')!==(target.contextType??'DIRECT')&&
-              candidate.functions.some(fn=>fn.signature===selected.signature)
-            );
-            if(hasAlternateContext){
-              const failures=Number(contextFailureCounts.get(picked.selectionKey)??0)+1;
-              contextFailureCounts.set(picked.selectionKey,failures);
-              if(failures>=3&&!blockedContextFunctions.has(picked.selectionKey)){
-                blockedContextFunctions.add(picked.selectionKey);
-                const adaptation={kind:'BOUNDED_WRONG_CONTEXT_GAP',selectionKey:picked.selectionKey,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,signature:selected.signature,contextType:target.contextType??'DIRECT',failureCount:failures,atCallIndex:stats.calls};
-                stats.contextAdaptations.push(adaptation);rec.contextAdaptation=adaptation;
-              }
-            }
-          }else contextFailureCounts.delete(picked.selectionKey);
           const observations=[...rec.observations.before,...rec.observations.after];stats.observationReads+=observations.length;stats.observationFailures+=observations.filter(x=>x.status!=='OK').length;
           if(['SIMULATION_INFRASTRUCTURE_ERROR','SUBMISSION_INFRASTRUCTURE_ERROR','SUBMITTED_OUTCOME_UNKNOWN','NOT_EXECUTED_ENCODING_OR_PLANNING'].includes(rec.executionOutcome))stats.errors++;
           terminalRows.push(rec);
@@ -1768,7 +2033,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
     const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows];
     let targets=targetObjects(ethers,artifacts,deployed,sourceIntelligence);
-    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence});
+    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence,probeSelectors:false});
     targets=delegateContexts.targets;
     const runtimePreparation=await prepareQualifiedRuntimeV2({provider,ethers,targets,actors});
     runtimePreparation.contextEvidence=delegateContexts.contextEvidence;
@@ -1888,10 +2153,41 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         stage3Activation={activations:[],activationGaps:[{type:'ACTIVATION_SYNTHESIS_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1600)}],createdContracts:valuePool.created.length};
       }
     }
+    let stage4ContextPreparation={contextEvidence:[],addedTargets:[],gaps:[]};
+    try{
+      const existingContextKeys=new Set(targets.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
+      const contextDiscovery=await augmentDelegateProxyContextsV2({
+        provider,ethers,targets,artifacts,deployed:[...deployed,...stage2CreatedDeployments],
+        sourceIntelligence,associations:valuePool.associations,probeSelectors:true
+      });
+      let addedTargets=contextDiscovery.targets.filter(target=>!existingContextKeys.has(`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
+      if(addedTargets.length){
+        const prepared=await prepareQualifiedRuntimeV2({provider,ethers,targets:addedTargets,actors});
+        addedTargets=prepared.targets;
+        runtimePreparation.setupReceipts.push(...(prepared.setupReceipts??[]));
+        const admittedKeys=new Set(targets.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
+        for(const target of addedTargets){
+          const key=`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`;
+          if(!admittedKeys.has(key)){admittedKeys.add(key);targets.push(target);}
+        }
+      }
+      runtimePreparation.contextEvidence.push(...(contextDiscovery.contextEvidence??[]));
+      stage4ContextPreparation={
+        contextEvidence:contextDiscovery.contextEvidence??[],
+        addedTargets:addedTargets.map(target=>({
+          qualifiedName:target.qualifiedName,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,
+          address:target.address,contextType:target.contextType??'DIRECT',
+          discoveryBasis:target.contextEvidence?.discoveryBasis??null
+        })),
+        gaps:[]
+      };
+    }catch(error){
+      stage4ContextPreparation={contextEvidence:[],addedTargets:[],gaps:[{type:'STAGE4_CONTEXT_PREPARATION_FAILED',message:String(error?.message??error).slice(0,1600)}]};
+    }
     const serializedValuePool=serializeValuePoolV1(valuePool);
     const fixtureEvidence={
       schemaVersion:'curveyield-phase0-fixture-synthesis-v1',
-      stage:'STAGE_3_INITIALIZATION_AND_ACTIVATION',
+      stage:'STAGE_4_CONTEXT_CORRECT_CALLERS',
       valuePool:serializedValuePool,
       funding:fixtureFunding,
       creations:stage2Creations,
@@ -1906,7 +2202,9 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       },
       associationTokenFunding:stage3AssociationTokenFunding,
       activations:stage3Activation.activations,
-      activationGaps:stage3Activation.activationGaps
+      activationGaps:stage3Activation.activationGaps,
+      contextCallerPreparation:stage4ContextPreparation,
+      callerResolutions:[]
     };
     await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
     const fixtureSynthesis={
@@ -1938,7 +2236,9 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         gaps:stage3AssociationTokenFunding.gaps
       }:null,
       activations:stage3Activation.activations,
-      activationGaps:stage3Activation.activationGaps
+      activationGaps:stage3Activation.activationGaps,
+      contextCallerPreparation:stage4ContextPreparation,
+      callerResolutions:[]
     };
     const baselineBlock=Number(await provider.getBlockNumber()),baselineHash=(await provider.getBlock(baselineBlock))?.hash??null,baselineSnapshot=await provider.send('evm_snapshot',[]);
     const deploymentComplete=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;
@@ -1978,6 +2278,19 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         console.log(`[phase0-telemetry] failed but workflow will continue to evidence finalization: ${telemetryExecutionFailure.message}`);
       }
     }
+    const callerResolutionEvidence=[];
+    for(const run of telemetry){
+      for(const [functionKey,row] of Object.entries(run.byFunction??{})){
+        callerResolutionEvidence.push({
+          runId:run.runId,functionKey,
+          calls:row&&typeof row==='object'?Number(row.calls??0):Number(row??0),
+          callerResolution:row&&typeof row==='object'?(row.callerResolution??'DEFAULT'):'DEFAULT'
+        });
+      }
+    }
+    fixtureEvidence.callerResolutions=callerResolutionEvidence;
+    fixtureSynthesis.callerResolutions=callerResolutionEvidence;
+    await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
     const runIndex={schemaVersion:'curveyield-phase0-simulation-run-index-v1',purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',sourceIdentity:{campaignId:receipt.campaign.campaignId,sourceSha256:receipt.source.sha256},targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash,upstreamRpcExposed:false,identityNormalized:anvil.identityNormalized===true,observedUpstreamChainId:anvil.upstreamChainId},deployment:deploymentCombined,policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},runs:[{runId:medusa.runId,type:'MEDUSA_ANVIL_FORK',status:medusa.status,summaryRef:medusa.shards?'runs/MEDUSA_SHARDS_SUMMARY_v1.json':'runs/medusa-anvil-fork-001/RUN_SUMMARY_v1.json',shards:(medusa.shards??[]).map(x=>({runId:x.runId,configId:x.configId,status:x.status,summaryRef:x.summaryRef}))},...telemetry.map(x=>({runId:x.runId,type:'ABI_ACCOUNTING_TELEMETRY',status:x.status,summaryRef:`runs/${x.runId}/RUN_SUMMARY_v1.json`,rawTranscriptRef:x.rawTranscriptRef}))]};
     const simulationLimitations=[...deploymentCombined.limitations,...(telemetry.filter(x=>x.weightingLimitation).map(x=>({type:x.weightingLimitation,runId:x.runId})))];
     if(medusaExecutionFailure)simulationLimitations.push(medusaExecutionFailure);

@@ -301,8 +301,12 @@ export function validateTelemetryCountersV2(summary={},rows=[]){
     if(summary[key]!==undefined&&Number(summary[key])!==value)throw new Error(`telemetry counter mismatch ${key}: expected ${value} observed ${summary[key]}`);
   }
   const sameMap=(a,b)=>JSON.stringify(Object.fromEntries(Object.entries(a??{}).sort()))===JSON.stringify(Object.fromEntries(Object.entries(b??{}).sort()));
+  const byFunctionCounts=Object.fromEntries(Object.entries(summary.byFunction??{}).map(([key,value])=>[
+    key,
+    value&&typeof value==='object'?Number(value.calls??value.attempts??0):Number(value)
+  ]));
   if(summary.byContract&&!sameMap(summary.byContract,byContract))throw new Error('telemetry byContract reconciliation mismatch');
-  if(summary.byFunction&&!sameMap(summary.byFunction,byFunction))throw new Error('telemetry byFunction reconciliation mismatch');
+  if(summary.byFunction&&!sameMap(byFunctionCounts,byFunction))throw new Error('telemetry byFunction reconciliation mismatch');
   return{status:'PASS',counts,expected,byContract,byFunction};
 }
 
