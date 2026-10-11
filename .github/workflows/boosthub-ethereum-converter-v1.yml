@@ -1,4 +1,4 @@
-name: Build Ethereum BoostHub unified converter v1 # recover exact YB converter source 6
+name: Build Ethereum BoostHub unified converter v1 # bind source runtime and route red test 7
 on:
   push:
     branches: [build-boosthub-ethereum-converter-v1]
@@ -34,9 +34,25 @@ jobs:
           sparse-checkout: campaigns/Boosthub Staking v2/source
       - name: Extract versioned converter references
         run: python3 github-native-sim/boosthub-ethereum-converter-v1/retrieve_reference_v1.py
+      - name: Install pinned compilation tools on GitHub
+        working-directory: github-native-sim/boosthub-ethereum-converter-v1
+        run: npm install --no-audit --no-fund
+      - name: Bind converter source to deployed executable runtime
+        working-directory: github-native-sim/boosthub-ethereum-converter-v1
+        run: node bind_sources_v1.mjs
+      - name: Verify combined-route regression fails for an existing single-route converter
+        working-directory: github-native-sim/boosthub-ethereum-converter-v1
+        run: |
+          set +e
+          node --test combined_routes_v1.test.mjs > binding_evidence_v1/combined_routes_red_v1.txt 2>&1
+          status=$?
+          cat binding_evidence_v1/combined_routes_red_v1.txt
+          test "$status" -ne 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: boosthub-ethereum-converter-reference-v1
-          path: github-native-sim/boosthub-ethereum-converter-v1/reference_evidence_v1
+          name: boosthub-ethereum-converter-source-bindings-v1
+          path: |
+            github-native-sim/boosthub-ethereum-converter-v1/binding_evidence_v1
+            github-native-sim/boosthub-ethereum-converter-v1/reference_evidence_v1
           retention-days: 14

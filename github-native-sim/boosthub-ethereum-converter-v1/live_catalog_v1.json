@@ -1,0 +1,159 @@
+{
+  "blockNumber": 26167322,
+  "blockHash": "0x9c9f00657c37b28114b90eca8fb8ddba0e98f1ebc19bd80e8d7eb89eb7497411",
+  "routes": [
+    {
+      "from": "0xD533a949740bb3306d119CC777fa900bA034cd52",
+      "to": "0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5",
+      "converter": "0x63B6e49A7EC0b5596576bc10470c846e46b8aF99",
+      "route": [
+        "0xD533a949740bb3306d119CC777fa900bA034cd52",
+        "0xCA0253A98D16e9C1e3614caFDA19318EE69772D0",
+        "0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000"
+      ],
+      "params": [
+        [
+          "0",
+          "1",
+          "1"
+        ],
+        [
+          "0",
+          "0",
+          "0"
+        ],
+        [
+          "0",
+          "0",
+          "0"
+        ],
+        [
+          "0",
+          "0",
+          "0"
+        ]
+      ],
+      "sources": [
+        "@openzeppelin/contracts/interfaces/IERC1363.sol",
+        "@openzeppelin/contracts/interfaces/IERC165.sol",
+        "@openzeppelin/contracts/interfaces/IERC20.sol",
+        "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol",
+        "@openzeppelin/contracts/token/ERC20/IERC20.sol",
+        "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol",
+        "@openzeppelin/contracts/utils/introspection/IERC165.sol",
+        "@openzeppelin/contracts/utils/math/Math.sol",
+        "@openzeppelin/contracts/utils/math/SafeCast.sol",
+        "@openzeppelin/contracts/utils/Panic.sol",
+        "@openzeppelin/contracts/utils/ReentrancyGuard.sol",
+        "contracts/boosthub/converters/CurveRouterRewardConverter-v1.sol"
+      ]
+    },
+    {
+      "from": "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E",
+      "to": "0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5",
+      "converter": "0x8F746707ed9b44a0c13dDd6dE78F8786e8EabAdD",
+      "route": [
+        "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E",
+        "0x4eBdF703948ddCEA3B11f675B4D1Fba9d2414A14",
+        "0xD533a949740bb3306d119CC777fa900bA034cd52",
+        "0xCA0253A98D16e9C1e3614caFDA19318EE69772D0",
+        "0xD1b5651E55D4CeeD36251c61c50C889B36F6abB5",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000"
+      ],
+      "params": [
+        [
+          "0",
+          "2",
+          "3"
+        ],
+        [
+          "0",
+          "1",
+          "1"
+        ],
+        [
+          "0",
+          "0",
+          "0"
+        ],
+        [
+          "0",
+          "0",
+          "0"
+        ]
+      ],
+      "sources": [
+        "contracts/boosthub/converters/CysdCrvCrvUsdRewardConverterV1-flattened-v3.sol"
+      ]
+    },
+    {
+      "from": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0",
+      "to": "0xe19d1c837B8A1C83A56cD9165b2c0256D39653aD",
+      "converter": "0x94a72979b8b38e69CeE8DD64D29F6712524e9958",
+      "route": [
+        "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84",
+        "0xDC24316b9AE028F1497c275EB9192a3Ea0f67022",
+        "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+        "0xC15F285679a1Ef2d25F53D4CbD0265E1D02F2A92",
+        "0x365AccFCa291e7D3914637ABf1F7635dB165Bb09",
+        "0x28Ca243dc0aC075dD012fCf9375C25D18A844d96",
+        "0xe19d1c837B8A1C83A56cD9165b2c0256D39653aD",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000"
+      ],
+      "params": [
+        [
+          "1",
+          "0",
+          "1"
+        ],
+        [
+          "0",
+          "1",
+          "3"
+        ],
+        [
+          "0",
+          "1",
+          "1"
+        ],
+        [
+          "0",
+          "0",
+          "0"
+        ]
+      ],
+      "sources": [
+        "@openzeppelin/contracts/interfaces/IERC1363.sol",
+        "@openzeppelin/contracts/interfaces/IERC165.sol",
+        "@openzeppelin/contracts/interfaces/IERC20.sol",
+        "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol",
+        "@openzeppelin/contracts/token/ERC20/IERC20.sol",
+        "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol",
+        "@openzeppelin/contracts/utils/introspection/IERC165.sol",
+        "@openzeppelin/contracts/utils/math/Math.sol",
+        "@openzeppelin/contracts/utils/math/SafeCast.sol",
+        "@openzeppelin/contracts/utils/Panic.sol",
+        "@openzeppelin/contracts/utils/ReentrancyGuard.sol",
+        "contracts/boosthub/converters/WstEthCurveRouterRewardConverter-v1.sol"
+      ]
+    },
+    {
+      "from": "0xf939E0A03FB07F59A73314E73794Be0E57ac1b4E",
+      "to": "0x0c057598dcE1891688829581f890DD2a3685a43f",
+      "converter": "0x10dF0e197bc1FEF44D1D1a648C2874c9cdC34692",
+      "route": null,
+      "params": null,
+      "sources": []
+    }
+  ]
+}
