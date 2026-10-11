@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {accountingWitnessPlanV1,snapshot} from '../src/phase0-randomized-simulation-v1.mjs';
+import {accountingWitnessPlanV1,snapshot,balancedBalancerEconomicRouterActionV1} from '../src/phase0-randomized-simulation-v1.mjs';
 
 const sender='0x0000000000000000000000000000000000000001';
 const vault='0x0000000000000000000000000000000000000002';
@@ -84,4 +84,38 @@ test('generic transaction witness excludes native and allowance calls unless rel
   const approval=accountingWitnessPlanV1({target:{},selected:{signature:'approve(address,uint256)'},value:0n});
   assert.equal(approval.includeAllowance,true);
   assert.equal(accountingWitnessPlanV1({target:{},selected:{signature:'sendNative(address,uint256)'},value:0n}).includeNative,true);
+});
+
+test('BPT transfer witness follows holder and recipient balances rather than global ABI probes',async()=>{
+  reads=[];
+  const recipient=tokenA;
+  const witness=accountingWitnessPlanV1({
+    target,selected:{signature:'transferFrom(address,address,uint256)'},
+    protocolPlan:{kind:'READY',pool},
+    qualifiedAction:{sender, args:[sender,recipient,100n]}
+  });
+  assert.equal(witness.mode,'BALANCER_V3');
+  assert.equal(witness.operation,'BPT_TRANSFER');
+  assert.deepEqual(witness.tokens,[]);
+  assert.equal(witness.owner,sender);
+  assert.equal(witness.recipient,recipient);
+  const result=await snapshot({provider,ethers,target,sender,witness,plan,systemTargets:targets});
+  assert.deepEqual(Object.keys(result.related[pool.toLowerCase()]).sort(),['address','balanceOwner','balanceRecipient'].sort());
+  assert.equal(reads.length,2);
+  assert.ok(reads.every(x=>x.signature==='balanceOf(address)'));
+  assert.deepEqual(result.systemNative,{});
+});
+
+test('Balancer Router economic family cycle covers joins, swaps and exits instead of repeating BPT transfers',()=>{
+  const actions=[
+    ['addLiquidityUnbalanced(address,uint256[],uint256,bool,bytes)','ADD'],
+    ['swapSingleTokenExactOut(address,address,address,uint256,uint256,uint256,bool,bytes)','SWAP'],
+    ['removeLiquidityProportional(address,uint256,uint256[],bool,bytes)','REMOVE'],
+    ['transfer(address,uint256)','BPT']
+  ].map(([signature,family])=>({selected:{signature,semanticFamily:'ECONOMIC'},plan:{kind:'READY',pool},family}));
+  const chosen=Array.from({length:12},(_,i)=>balancedBalancerEconomicRouterActionV1(actions,i));
+  assert.deepEqual(chosen.slice(0,4).map(x=>x.family),['ADD','SWAP','REMOVE','SWAP']);
+  assert.equal(chosen.filter(x=>x.family==='BPT').length,0);
+  assert.equal(chosen.filter(x=>x.family==='ADD').length,3);
+  assert.equal(chosen.filter(x=>x.family==='REMOVE').length,3);
 });
