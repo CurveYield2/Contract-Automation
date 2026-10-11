@@ -1776,7 +1776,7 @@ async function collectPropertyWitnessesV2({anvilUrl,ethers,targets,properties,va
   }finally{await provider.destroy();}
   return out;
 }
-export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,valuePool=null,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,runId='medusa-anvil-fork-001',routerProjectDir=null,stopAtPlateau=false}){
+export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,valuePool=null,callLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,runId='medusa-anvil-fork-001',routerProjectDir=null,stopAtPlateau=false,timeoutSeconds=300}){
   const dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
   const router=renderMedusaRouterV2(ethers,targets,valuePool);
   if(!router.rows.length){
@@ -1798,13 +1798,14 @@ export async function runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets
   await fs.writeFile(path.join(dir,'PROPERTY_WITNESSES_v2.json'),JSON.stringify({schemaVersion:'curveyield-phase0-medusa-property-witnesses-v2',properties:witnessRows},null,2)+'\n');
 
   const medusaStartedAt=Date.now();
-  console.log(`[phase0-medusa] started; mode=${mode}; timeout=1800s; configuredCallLimit=${callLimit}; progress heartbeat every 300s`);
-  const heartbeat=setInterval(()=>console.log(`[phase0-medusa] heartbeat: mode=${mode}; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; configuredCallLimit=${callLimit}`),300000);
-  heartbeat.unref?.();
+  const boundedTimeout=Math.max(30,Math.floor(timeoutSeconds));
+  console.log(`[phase0-medusa] started; mode=${mode}; timeout=${boundedTimeout}s; configuredCallLimit=${callLimit}; progress heartbeat every 30s`);
   let r,stoppedAtPlateau=false;
   const plateau=medusaPlateauMonitorV2();
+  const heartbeat=setInterval(()=>console.log(`[phase0-medusa] heartbeat: mode=${mode}; elapsed=${Math.floor((Date.now()-medusaStartedAt)/1000)}s; calls=${plateau.state().lastCalls}; configuredCallLimit=${callLimit}`),30000);
+  heartbeat.unref?.();
   const onStdout=(text,child)=>{if(plateau.push(text)&&stopAtPlateau&&!stoppedAtPlateau){stoppedAtPlateau=true;child.kill('SIGINT');}};
-  try{r=await runProcess({command:'timeout',args:['-s','INT','-k','120s','1800s','medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv(),onStdout});}
+  try{r=await runProcess({command:'timeout',args:['-s','INT','-k','20s',`${boundedTimeout}s`,'medusa','fuzz','--config',cfgPath],cwd:medusaProject,env:scrubbedEnv(),onStdout});}
   finally{clearInterval(heartbeat);}
   const engineCompleted=r.exitCode===0||(stoppedAtPlateau&&maxMedusaCalls(r.stdout)>0);
   const raw=`${r.stdout??''}\n${r.stderr??''}`;await fs.writeFile(path.join(dir,'MEDUSA_RAW_OUTPUT_v1.log'),raw);
@@ -1958,13 +1959,21 @@ export function aggregateMedusaShardsV2({shards,minimumRequiredCalls,configs}){
     }
   };
 }
-export async function runMedusaShardsV2({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,valuePool=null,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,shardCallLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,maxShards=40,maxSeconds=1800}){
+// Enforce the Medusa wall-clock ceiling *before* starting each shard. Previously maxSeconds
+// was checked only after a shard ended, even though a single shard could consume 1800 seconds.
+export function medusaShardTimeoutBudgetV1({startedAt,now=Date.now(),maxSeconds=1200,maxShardSeconds=300}){
+  const remaining=Math.floor(maxSeconds-(now-startedAt)/1000);
+  return remaining>=30?Math.min(maxShardSeconds,remaining):0;
+}
+export async function runMedusaShardsV2({projectRoot,anvilUrl,blockNumber,ethers,targets,outRoot,valuePool=null,minimumRequiredCalls=PHASE0_MEDUSA_MIN_CALLS_V1,shardCallLimit=PHASE0_MEDUSA_CALL_LIMIT_V1,maxShards=40,maxSeconds=1200,maxShardSeconds=300}){
   const configs=medusaShardConfigurationsV2(targets),shards=[],started=Date.now();
   for(let i=0;i<maxShards;i++){
+    const timeoutSeconds=medusaShardTimeoutBudgetV1({startedAt:started,maxSeconds,maxShardSeconds});
+    if(timeoutSeconds===0){console.log(`[phase0-medusa] wall-clock budget exhausted; shards=${shards.length}; totalCalls=${shards.reduce((n,x)=>n+Number(x.observedCalls??0),0)}`);break;}
     const config=configs[i%configs.length];
     const runId=`medusa-anvil-fork-${String(i+1).padStart(3,'0')}`;
     console.log(`[phase0-medusa] shard ${i+1}: ${config.configId} (${config.targets.length} contracts)`);
-    const shard=await runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets:config.targets,outRoot,valuePool,callLimit:shardCallLimit,minimumRequiredCalls:1,runId,routerProjectDir:path.join(outRoot,'runs',`router-${config.configId}`),stopAtPlateau:true});
+    const shard=await runMedusa({projectRoot,anvilUrl,blockNumber,ethers,targets:config.targets,outRoot,valuePool,callLimit:shardCallLimit,minimumRequiredCalls:1,runId,routerProjectDir:path.join(outRoot,'runs',`router-${config.configId}`),stopAtPlateau:true,timeoutSeconds});
     const sets=shard.varietySets;
     Object.assign(shard,{configId:config.configId,cluster:config.cluster});
     Object.defineProperty(shard,'varietySets',{value:sets,enumerable:false});
