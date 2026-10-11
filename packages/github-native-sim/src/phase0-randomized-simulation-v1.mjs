@@ -1322,6 +1322,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             rec.executionOutcome=classifyExecutionOutcomeV2({argumentGeneration:{success:false}});
             rec.error=rec.stages.ARG_GEN.error;
           }else{
+            const initialSender=sender;
             const initialBefore=await snapshot({provider,ethers,target,sender,plan:target.plan,systemTargets:targets});
             rec.observations.before=observationRowsV2(initialBefore,target.recipe,'BEFORE');
             const value=qualifiedAction?.value??(f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n);
@@ -1339,7 +1340,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             const executionTarget=resolved.executionAddress.toLowerCase()===String(target.address).toLowerCase()
               ? target
               : {...target,address:resolved.executionAddress,contextType:'FACADE',contextDisposition:'READY'};
-            if(sender.toLowerCase()!==String((qualifiedAction?.sender??rec.sender)).toLowerCase()||resolved.executionAddress.toLowerCase()!==String(target.address).toLowerCase()){
+            if(sender.toLowerCase()!==String(initialSender).toLowerCase()||resolved.executionAddress.toLowerCase()!==String(target.address).toLowerCase()){
               const contextualBefore=await snapshot({provider,ethers,target:executionTarget,sender,plan:executionTarget.plan,systemTargets:targets});
               rec.observations.before=observationRowsV2(contextualBefore,executionTarget.recipe,'BEFORE');
             }
@@ -1390,7 +1391,9 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             rec.effectClassification=rec.positiveTransition?'OBSERVED_STATE_TRANSITION':(rec.executionOutcome==='MINED_SUCCESS'?'MINED_NO_OBSERVED_STATE_TRANSITION':'NO_MINED_SUCCESS');
             rec.transaction=tx?{hash:tx.hash,blockNumber:receipt?.blockNumber??null,status:receipt?.status??null,gasUsed:receipt?.gasUsed?.toString()??null,value:value.toString(),to:resolved.executionAddress,logs:(receipt?.logs??[]).map(l=>({address:l.address,topics:[...l.topics],data:l.data,index:l.index}))}:null;
             if(preflightError)rec.error=resolved.errorDetails??errorInfo(preflightError,iface);else if(submissionError)rec.error=errorInfo(submissionError,iface);
-          }          stats.terminalActions++;
+          }
+
+          stats.terminalActions++;
           if(['MINED_SUCCESS','MINED_REVERT','SUBMITTED_OUTCOME_UNKNOWN'].includes(rec.executionOutcome))stats.submittedActions++;
           if(rec.executionOutcome==='MINED_SUCCESS'){stats.minedSuccess++;stats.successes++;}
           else if(rec.executionOutcome==='MINED_REVERT'){stats.minedRevert++;stats.reverts++;}
