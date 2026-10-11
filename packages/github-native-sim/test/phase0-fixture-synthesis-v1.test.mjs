@@ -206,7 +206,9 @@ test('Stage-1 discovers associations and privileged actors, funds Solidity and V
     assert.equal(slotRow.layout,'SOLIDITY');
     assert.equal(vyperRow.status,'FOUND');
     assert.equal(vyperRow.layout,'VYPER');
-    assert.equal(funding.receiptCounts.erc20Approvals,holders.length*pool.tokens.length);
+    assert.equal(funding.receiptCounts.erc20Approvals+funding.receiptCounts.erc20StorageApprovals,holders.length*pool.tokens.length);
+    assert.equal(funding.receiptCounts.erc20StorageApprovals,holders.length*pool.tokens.length);
+    assert.ok(funding.rpcMutations.filter(x=>x.kind==='ERC20_APPROVAL_STORAGE').every(x=>x.status==='PASS'));
     assert.equal(funding.receiptCounts.gaps,0);
 
     for(const holder of holders){
