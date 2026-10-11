@@ -912,7 +912,7 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
       creations.push({
         functionKey:candidate.key,target:candidate.target.qualifiedName,address:candidate.target.address,
         function:candidate.selected.signature,basis:candidate.basis,strategy,sender,
-        args:normalizeEvidenceValueV1(built.args),
+        argsSummary:normalizeEvidenceValueV1(built.args),
         receipt:{transactionHash:result.transactionHash,blockNumber:result.receipt?.blockNumber??null,status:Number(result.receipt?.status??0),gasUsed:result.receipt?.gasUsed?.toString?.()??null},
         createdAddresses:newAddresses,boundArtifacts:bound
       });
@@ -921,7 +921,7 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
     if(failedAttempts.length||successes<maxSuccessesPerCandidate){
       creationGaps.push({
         functionKey:candidate.key,target:candidate.target.qualifiedName,address:candidate.target.address,function:candidate.selected.signature,
-        attempts:attempts.length,successes,status:successes===0?'NO_SUCCESS':(successes<maxSuccessesPerCandidate?'PARTIAL_SUCCESS':'PASS_WITH_RETRIES'),
+        attemptCount:attempts.length,attempts,successes,status:successes===0?'NO_SUCCESS':(successes<maxSuccessesPerCandidate?'PARTIAL_SUCCESS':'PASS_WITH_RETRIES'),
         topDecodedRevertReasons:topCreationRevertsV1(attempts)
       });
     }
