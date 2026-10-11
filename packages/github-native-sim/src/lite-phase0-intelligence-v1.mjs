@@ -11,6 +11,24 @@ import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligen
 import { buildExecutionArtifactBundleV2 } from './phase0-execution-input-v2.mjs';
 import { compileWithPrivateCacheV1 } from './phase0-private-build-cache-v1.mjs';
 
+// The outer workflow owns the hard wall-clock timeout. This helper reports
+// per-stage progress without changing compilation or evidence semantics.
+const PHASE0_LOG_PREFIX='[phase0-intelligence-primary]';
+async function withProgressStage(name,operation){
+  const started=Date.now();
+  console.error(`${PHASE0_LOG_PREFIX} START ${name}`);
+  const heartbeat=setInterval(()=>console.error(`${PHASE0_LOG_PREFIX} ACTIVE ${name} elapsed_seconds=${Math.floor((Date.now()-started)/1000)}`),20000);
+  heartbeat.unref?.();
+  try{
+    const result=await operation();
+    console.error(`${PHASE0_LOG_PREFIX} DONE ${name} elapsed_seconds=${Math.floor((Date.now()-started)/1000)}`);
+    return result;
+  }catch(error){
+    console.error(`${PHASE0_LOG_PREFIX} FAILED ${name} elapsed_seconds=${Math.floor((Date.now()-started)/1000)} reason=${String(error?.message??error).slice(0,220)}`);
+    throw error;
+  }finally{clearInterval(heartbeat);}
+}
+
 function parseArgs(argv){const o={};for(let i=0;i<argv.length;i++){const t=argv[i];if(!t.startsWith('--'))continue;const k=t.slice(2);const n=argv[i+1];if(n!==undefined&&!n.startsWith('--')){o[k]=n;i++;}else o[k]=true;}return o;}
 function sha256(bytes){return createHash('sha256').update(bytes).digest('hex');}
 function safeRel(v,label){if(typeof v!=='string'||!v||v.startsWith('/')||v.includes('\\')||v.split('/').some(p=>!p||p==='.'||p==='..'))throw new Error(`${label} must be a safe repository-relative path`);return v;}
@@ -631,12 +649,12 @@ async function main(){
 
   const out=path.resolve(args.output), work=path.join(out,'work'); await fs.rm(out,{recursive:true,force:true}); await fs.mkdir(work,{recursive:true});
   const checkoutRoot=path.join(work,'source-repo');
-  const checkout=await checkoutExactSource({repository:request.source.repository,commit:request.source.commit,destination:checkoutRoot},{environment:process.env});
+  const checkout=await withProgressStage('exact-source-checkout',()=>checkoutExactSource({repository:request.source.repository,commit:request.source.commit,destination:checkoutRoot},{environment:process.env}));
   const archiveAbs=path.join(checkoutRoot,...request.source.archivePath.split('/'));
   const archiveBytes=await fs.readFile(archiveAbs); const observed=sha256(archiveBytes);
   if(observed!==request.source.archiveSha256)throw new Error(`source archive SHA mismatch expected ${request.source.archiveSha256} observed ${observed}`);
-  const extractionRoot=path.join(work,'archive'); const extraction=await extractArchive(archiveAbs,extractionRoot);
-  const detected=await detectProjectRoot(extractionRoot); const cfg=await detectBuildConfig(detected.absolute);
+  const extractionRoot=path.join(work,'archive'); const extraction=await withProgressStage('extract-verified-archive',()=>extractArchive(archiveAbs,extractionRoot));
+  const detected=await withProgressStage('detect-project-root',()=>detectProjectRoot(extractionRoot)); const cfg=await withProgressStage('detect-build-config',()=>detectBuildConfig(detected.absolute));
 
   const pseudo={
     requestId:request.requestId,requestDigest:request.requestDigest??sha256(Buffer.from(JSON.stringify(request))),
@@ -645,14 +663,14 @@ async function main(){
     configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],analysis:{slither:{version:'0.11.6'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
   };
 
-  const build=await compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})});
+  const build=await withProgressStage('compile-exact-build',()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
   const executionBuildArtifacts=buildExecutionArtifactBundleV2({request:pseudo,build});
   const effectiveCfg={...cfg,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
-  const slither=await slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit});
-  const sbom=await generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build});
-  const sourceIntelligence=await generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}});
-  const projectReadiness=await scanProjectReadiness({projectRoot:detected.absolute,build,cfg:effectiveCfg});
-  const deployConfigExecution=await executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness});
+  const slither=await withProgressStage('slither-static-analysis',()=>slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit}));
+  const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
+  const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}}));
+  const projectReadiness=await withProgressStage('scan-project-readiness',()=>scanProjectReadiness({projectRoot:detected.absolute,build,cfg:effectiveCfg}));
+  const deployConfigExecution=await withProgressStage('execute-local-deployment-inventory',()=>executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness}));
 
   if(!slitherSucceeded(slither))throw new Error('Slither terminal result is not successful');
   if(sourceIntelligence?.completion?.semanticReviewRequired!==true)throw new Error('Source Intelligence completion contract mismatch');
@@ -676,7 +694,7 @@ async function main(){
     ['PROJECT_READINESS_AUTOMATED_v1.json',projectReadiness],
     ['PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json',deployConfigExecution]
   ];
-  for(const [name,obj] of files)await fs.writeFile(path.join(out,name),JSON.stringify(obj,null,2)+'\n');
+  await withProgressStage('write-machine-evidence',async()=>{for(const [name,obj] of files)await fs.writeFile(path.join(out,name),JSON.stringify(obj,null,2)+'\n');});
   process.stdout.write(JSON.stringify({status:'PASS',projectPath:detected.relativePath,compiler:cfg,build:{system:build.system,sourceFiles:build.sourceInventoryFiles,artifacts:build.artifacts?.length??0},slither:{status:slither.status,findings:slither.findingCount??0,repairs:slither.repairAttempts?.length??0},sourceIntelligence:{contracts:sourceIntelligence.contracts?.length??0,functions:sourceIntelligence.functions?.length??0,storage:sourceIntelligence.storageLayout?.length??0,callGraph:sourceIntelligence.callGraph?.length??0,externalInterfaces:sourceIntelligence.externalInterfaces?.length??0,valueFlows:sourceIntelligence.valueFlowCandidates?.length??0,dependencyEdges:sourceIntelligence.protocolTopology?.dependencyEdges?.length??0},projectReadiness:{deploymentFiles:projectReadiness.deploymentAndConfiguration.deploymentFiles.length,testFiles:projectReadiness.testingAndToolingReadiness.testFiles.length,harnessFiles:projectReadiness.testingAndToolingReadiness.harnessFiles.length,deployabilityRisks:projectReadiness.bytecodeAndGasEvidence.deployabilityRisks.length},deployConfigExecution:{status:deployConfigExecution.status,attempts:deployConfigExecution.attempts.length,gaps:deployConfigExecution.gaps.length},outputs:files.map(([name])=>name)},null,2)+'\n');
 }
 
