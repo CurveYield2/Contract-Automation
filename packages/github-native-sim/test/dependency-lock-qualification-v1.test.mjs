@@ -19,7 +19,15 @@ test('repository carries the canonical root dependency lock', () => {
 test('FULL qualification requires the committed lock and never manufactures one', () => {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
   assert.match(workflow, /test -s package-lock\.json/);
-  assert.match(workflow, /npm ci --force/);
+  // The primary workflow now delegates installs to an exact-lock cache action.
+  // The action must install via npm ci on a cache miss, never synthesize a lock.
+  assert.match(workflow, /uses: \.\/\.github\/actions\/setup-phase0-node-cache/);
+  const cacheAction = fs.readFileSync(path.join(root, '.github/actions/setup-phase0-node-cache/action.yml'), 'utf8');
+  assert.match(cacheAction, /hashFiles\('package-lock\.json', 'package\.json', 'packages\/\*\/package\.json'\)/);
+  assert.match(cacheAction, /if: steps\.locked-modules\.outputs\.cache-hit != 'true'/);
+  assert.match(cacheAction, /npm ci --force/);
+  assert.match(cacheAction, /npm ls --depth=0/);
+
   assert.match(workflow, /V7_DEPENDENCY_LOCKED=true/);
   assert.match(workflow, /dependencyLockPresent:process\.env\.V7_DEPENDENCY_LOCKED==='true' && fs\.existsSync\('package-lock\.json'\)/);
   assert.doesNotMatch(workflow, /npm install --package-lock-only/);
