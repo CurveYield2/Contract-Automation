@@ -1,4 +1,4 @@
-name: Build Ethereum BoostHub unified converter v1 # inspect actual rewardRoute struct and red gate 4
+name: Build Ethereum BoostHub unified converter v1 # retrieve YB LP converter source 5
 on:
   push:
     branches: [build-boosthub-ethereum-converter-v1]
@@ -20,20 +20,12 @@ jobs:
       - name: Install pinned read-only tools
         working-directory: github-native-sim/boosthub-ethereum-converter-v1
         run: npm install --no-audit --no-fund
-      - name: Trace live Ethereum contracts
+      - name: Inspect YB LP converter dependencies
         working-directory: github-native-sim/boosthub-ethereum-converter-v1
-        run: node trace_v1.mjs
-      - name: Record expected missing-converter test failure
-        working-directory: github-native-sim/boosthub-ethereum-converter-v1
-        run: |
-          set +e
-          node --test release_requirement_v1.test.mjs > trace_evidence_v1/tdd_red_v1.txt 2>&1
-          status=$?
-          cat trace_evidence_v1/tdd_red_v1.txt
-          test "$status" -ne 0
+        run: node inspect_lp_v1.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: boosthub-ethereum-converter-trace-v1
-          path: github-native-sim/boosthub-ethereum-converter-v1/trace_evidence_v1
+          name: boosthub-ethereum-converter-lp-inspection-v1
+          path: github-native-sim/boosthub-ethereum-converter-v1/lp_evidence_v1
           retention-days: 14
