@@ -1,5 +1,6 @@
 name: Package BoostHub stack and Fraxtal helper v2
 # Release scope: dedicated Fraxtal helper v5; no boost dependency on Fraxtal.
+# Windows input accepts the UTF-8 byte-order mark emitted by PowerShell 5.1.
 on:
   push:
     branches: ['package-boosthub-dual-chain-v1']

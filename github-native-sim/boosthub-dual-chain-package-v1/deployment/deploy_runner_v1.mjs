@@ -13,6 +13,7 @@ const eq = (a,b) => String(a).toLowerCase() === String(b).toLowerCase();
 const requireThat = (b,m) => { if(!b) throw new Error(m); };
 const json = x => JSON.stringify(x,(_,v)=>typeof v==='bigint'?v.toString():v,2);
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+export function parseJson(text) { return JSON.parse(String(text).replace(/^\uFEFF/,'')); }
 function address(a,label) { try { const v=getAddress(a);requireThat(v!==ZeroAddress,label+' cannot be zero');return v; } catch {throw new Error(label+' must be a nonzero EVM address');} }
 
 export function validateConfig(c) {
@@ -115,12 +116,12 @@ function codeMatches(artifact,actual) {
 }
 
 function loadArtifacts(root) {
-  const manifest=JSON.parse(fs.readFileSync(path.join(root,'package_manifest_v1.json')));
+  const manifest=parseJson(fs.readFileSync(path.join(root,'package_manifest_v1.json'),'utf8'));
   for(const [relative,digest] of Object.entries(manifest.sha256)) {
     const full=path.resolve(root,relative);requireThat(full.startsWith(root+path.sep),'Invalid manifest path');
     requireThat(sha256(fs.readFileSync(full))===digest,'Package integrity mismatch: '+relative);
   }
-  const result={};for(const key of ['factory','hub','helper','helperFraxtal','staking']) result[key]=JSON.parse(fs.readFileSync(path.join(root,'artifacts_v1',key+'_v1.json')));
+  const result={};for(const key of ['factory','hub','helper','helperFraxtal','staking']) result[key]=parseJson(fs.readFileSync(path.join(root,'artifacts_v1',key+'_v1.json'),'utf8'));
   return result;
 }
 
@@ -280,7 +281,7 @@ async function acceptRoles(ctx,artifacts,prediction) {
 export async function main(payload) {
   const root=path.resolve(payload.packageRoot||path.join(path.dirname(payload.configPath),'..'));
   const artifacts=loadArtifacts(root);
-  const config=JSON.parse(fs.readFileSync(payload.configPath,'utf8'));
+  const config=parseJson(fs.readFileSync(payload.configPath,'utf8'));
   if(payload.deployerAddress)config.deployer=payload.deployerAddress;
   if(payload.deploymentId)config.deploymentId=payload.deploymentId;
   for(const [name,overrides]of Object.entries(payload.dependencyOverrides||{})) Object.assign(config.chains[name],overrides);
@@ -310,7 +311,7 @@ export async function main(payload) {
     const stateDir=path.resolve(payload.stateDirectory);fs.mkdirSync(stateDir,{recursive:true});
     const statePath=path.join(stateDir,'deployment_'+name+'_v1.json');
     const configDigest=sha256(json({deployer:config.deployer,deploymentId:config.deploymentId,network:{...network,rpcUrl:undefined},artifacts:Object.fromEntries(Object.entries(artifacts).map(([k,a])=>[k,sha256(json(a))]))}));
-    const state=fs.existsSync(statePath)?JSON.parse(fs.readFileSync(statePath)):{version:'v1',chainId:network.chainId,configDigest,steps:{},status:'INITIALIZED'};
+    const state=fs.existsSync(statePath)?parseJson(fs.readFileSync(statePath,'utf8')):{version:'v1',chainId:network.chainId,configDigest,steps:{},status:'INITIALIZED'};
     requireThat(state.configDigest===configDigest,'State belongs to different configuration/artifacts; restore its exact inputs');
     const ctx={name,provider,network,state,deployer:config.deployer,deploymentId:config.deploymentId,
       signer:signer?.connect(provider),confirmations:network.confirmations||1,timeoutMs:600000,
@@ -327,7 +328,10 @@ export async function main(payload) {
 }
 
 if(process.env.BOOSTHUB_EXECUTE==='1') {
-  main(JSON.parse(fs.readFileSync(0,'utf8'))).catch(e=>{
+  let payload;
+  try { payload=parseJson(fs.readFileSync(0,'utf8')); }
+  catch { console.error('Stopped: invalid input JSON; rerun through the PowerShell wrapper.');process.exitCode=1; }
+  if(payload)main(payload).catch(e=>{
     const message=String(e.shortMessage||e.reason||e.message||e.code||'Unknown error').replace(/https?:\/\/[^\s"']+/g,'[RPC endpoint]');
     console.error('Stopped: '+message);process.exitCode=1;
   });

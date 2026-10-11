@@ -40,3 +40,12 @@ test('the signing account must be an explicitly configured EOA address', async (
   const {validateConfig}=await import(path);
   assert.throws(()=>validateConfig({version:'v1',deployer:'0x0000000000000000000000000000000000000000'}),/deployer/);
 });
+test('JSON from Windows PowerShell accepts a UTF-8 byte-order mark', async () => {
+  const {parseJson}=await import(path);
+  assert.deepEqual(parseJson('\ufeff{"mode":"Check"}'),{mode:'Check'});
+});
+test('malformed stdin fails without echoing potentially sensitive input', async () => {
+  const {spawnSync}=await import('node:child_process');
+  const r=spawnSync(process.execPath,[path.pathname],{input:'{"privateKey":"fixture-do-not-echo",',encoding:'utf8',env:{...process.env,BOOSTHUB_EXECUTE:'1'}});
+  assert.equal(r.status,1);assert.match(r.stderr,/invalid input JSON/);assert.equal(r.stderr.includes('fixture-do-not-echo'),false);
+});
