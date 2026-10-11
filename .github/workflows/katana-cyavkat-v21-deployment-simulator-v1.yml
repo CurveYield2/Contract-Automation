@@ -68,7 +68,7 @@ jobs:
             sleep 2
           done
           test "$(cast chain-id --rpc-url http://127.0.0.1:8545)" = 747474
-          cast rpc anvil_setBalance "[\"$DEPLOYER\",\"0x3635c9adc5dea00000\"]" --rpc-url http://127.0.0.1:8545 >/dev/null
+          cast rpc anvil_setBalance "$DEPLOYER" "0x3635c9adc5dea00000" --rpc-url http://127.0.0.1:8545 >/dev/null
           echo "Only a local Anvil fork is used; no live Katana transactions."
       - name: Deploy Quest-signing compatibility, V4 gate, then Phase 2 on same fork
         working-directory: cyavKAT/upgrade
