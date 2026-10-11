@@ -3,20 +3,21 @@ set -euo pipefail
 ROOT="$GITHUB_WORKSPACE/.boosthub-v11-full"
 ETH_RPC="${RPC_ETHEREUM:?Missing configured RPC_ETHEREUM secret}"
 FRA_RPC="${RPC_FRAXTAL:-https://rpc.frax.com}"
-test "$(cast chain-id --rpc-url "$ETH_RPC")" = 1
-test "$(cast chain-id --rpc-url "$FRA_RPC")" = 252
+test "$(timeout 25s cast chain-id --rpc-url "$ETH_RPC")" = 1
+test "$(timeout 25s cast chain-id --rpc-url "$FRA_RPC")" = 252
 anvil --fork-url "$ETH_RPC" --chain-id 1 --port 8545 > boosthub-v11-anvil-ethereum-v1.log 2>&1 &
 echo $! > .boosthub-ethereum.pid
 anvil --fork-url "$FRA_RPC" --chain-id 252 --port 8546 > boosthub-v11-anvil-fraxtal-v1.log 2>&1 &
 echo $! > .boosthub-fraxtal.pid
-for i in $(seq 1 60); do
-  eth="$(cast chain-id --rpc-url http://127.0.0.1:8545 2>/dev/null || true)"
-  fra="$(cast chain-id --rpc-url http://127.0.0.1:8546 2>/dev/null || true)"
+for i in $(seq 1 45); do
+  eth="$(timeout 5s cast chain-id --rpc-url http://127.0.0.1:8545 2>/dev/null || true)"
+  fra="$(timeout 5s cast chain-id --rpc-url http://127.0.0.1:8546 2>/dev/null || true)"
   if [ "$eth" = 1 ] && [ "$fra" = 252 ]; then break; fi
   sleep 2
 done
 test "${eth:-}" = 1
 test "${fra:-}" = 252
+echo "[full-v11] Both forks are ready; entering deployment"
 # Only the temporary publicly documented Anvil development account is used.
 export ANVIL_TEST_KEY="$(sed -n '/Private Keys/,$p' boosthub-v11-anvil-ethereum-v1.log | grep -Eo '0x[0-9a-fA-F]{64}' | head -n1)"
 test -n "$ANVIL_TEST_KEY"
@@ -55,7 +56,7 @@ await main({
 });
 EOF
 set +e
-timeout -s TERM -k 10s 1500s node .boosthub-v11-run-v1.mjs 2>&1 | tee boosthub-v11-full-deploy-v1.log
+timeout -s TERM -k 10s 720s node .boosthub-v11-run-v1.mjs 2>&1 | tee boosthub-v11-full-deploy-v1.log
 status=${PIPESTATUS[0]}
 set -e
 if [ "$status" -ne 0 ] && grep -q 'Fee timelock is still active' boosthub-v11-full-deploy-v1.log; then
@@ -64,7 +65,7 @@ if [ "$status" -ne 0 ] && grep -q 'Fee timelock is still active' boosthub-v11-fu
     cast rpc anvil_increaseTime 864000 --rpc-url "http://127.0.0.1:$port" >/dev/null
     cast rpc anvil_mine 1 --rpc-url "http://127.0.0.1:$port" >/dev/null
   done
-  timeout -s TERM -k 10s 1500s node .boosthub-v11-run-v1.mjs 2>&1 | tee -a boosthub-v11-full-deploy-v1.log
+  timeout -s TERM -k 10s 720s node .boosthub-v11-run-v1.mjs 2>&1 | tee -a boosthub-v11-full-deploy-v1.log
 else
   test "$status" -eq 0
 fi
