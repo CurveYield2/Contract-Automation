@@ -306,7 +306,7 @@ contract GenericChild {
 
 contract AlwaysRevertCreator {
   error Nope();
-  function create(address[] calldata tokens) external pure returns (address) {
+  function create(address[] calldata tokens) external returns (address) {
     if (tokens.length >= 0) revert Nope();
     return address(0);
   }
