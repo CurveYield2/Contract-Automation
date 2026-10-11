@@ -1,4 +1,4 @@
-name: Build Ethereum BoostHub unified converter v1 # extend historical vault discovery 3
+name: Build Ethereum BoostHub unified converter v1 # inspect actual rewardRoute struct and red gate 4
 on:
   push:
     branches: [build-boosthub-ethereum-converter-v1]
@@ -23,6 +23,14 @@ jobs:
       - name: Trace live Ethereum contracts
         working-directory: github-native-sim/boosthub-ethereum-converter-v1
         run: node trace_v1.mjs
+      - name: Record expected missing-converter test failure
+        working-directory: github-native-sim/boosthub-ethereum-converter-v1
+        run: |
+          set +e
+          node --test release_requirement_v1.test.mjs > trace_evidence_v1/tdd_red_v1.txt 2>&1
+          status=$?
+          cat trace_evidence_v1/tdd_red_v1.txt
+          test "$status" -ne 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:

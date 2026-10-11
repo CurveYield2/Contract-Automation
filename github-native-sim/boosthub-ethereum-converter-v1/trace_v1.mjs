@@ -34,7 +34,7 @@ const hub=new Contract(hubAddress,['function poolLength() view returns(uint256)'
 await views(hubAddress,hub.interface.fragments);
 const n=Number(await hub.poolLength({blockTag}));
 const stakingFallback=['function lp_token() view returns(address)','function boost_hub() view returns(address)','function pid() view returns(uint256)','function reward_count() view returns(uint256)','function vault() view returns(address)','function strategy() view returns(address)','function fee_conversion_converter() view returns(address)','function governance_reward_token() view returns(address)','function reward_tokens(uint256) view returns(address)','function converters(address) view returns(address)','function reward_converter(address) view returns(address)','function reward_converters(address) view returns(address)'];
-const strategyFallback=['function staking() view returns(address)','function vault() view returns(address)','function want() view returns(address)','function swapper() view returns(address)','function maxSlippageBps() view returns(uint256)','function rewards(uint256) view returns(address)','function rewardConverter(address) view returns(address)'];
+const strategyFallback=['function staking() view returns(address)','function vault() view returns(address)','function want() view returns(address)','function swapper() view returns(address)','function maxSlippageBps() view returns(uint256)','function rewards(uint256) view returns(address)','function rewardConverter(address) view returns(address)','function rewardRoute(address) view returns((address token,address converter,uint256 minAmount,bool enabled))'];
 for(let pid=0;pid<n;pid++){
  const info=await hub.poolInfo(pid,{blockTag}),staking=await hub.poolDepositor(pid,{blockTag});const p={pid,asset:info.asset,gauge:info.gauge,active:info.active,rewardTokens:Array.from(info.rewardTokens),staking,strategies:[],converterLinks:[]};trace.pools.push(p);const s=await views(staking,stakingFallback);
  const sc=new Contract(staking,s.abi||stakingFallback,provider);p.stakingRewards=[];
@@ -68,9 +68,13 @@ for(let i=0;i<strategyCandidates.length;i+=8)await Promise.allSettled(strategyCa
  if(trace.vaultStrategies.some(x=>x.address.toLowerCase()===address.toLowerCase()))return;const vault=rec.reads.vault,vr=vault?await views(vault,['function strategy() view returns(address)']):null;
  const row={address,staking,pid,currentHubDepositor:pool.staking,stakingMatchesCurrentDepositor:staking.toLowerCase()===pool.staking.toLowerCase(),vault,reciprocalVaultStrategy:vr?.reads.strategy?.toLowerCase()===address.toLowerCase(),want:rec.reads.want,rewards:[],converterLinks:[]};trace.vaultStrategies.push(row);const sc=new Contract(address,rec.abi||strategyFallback,provider);
  for(let r=0;r<16;r++)try{const t=await sc.rewards(r,{blockTag});if(t===ZeroAddress)break;row.rewards.push(t);}catch{break;}
- for(const t of [...new Set([...pool.rewardTokens,...row.rewards])])try{const cv=await sc.rewardConverter(t,{blockTag});if(cv!==ZeroAddress)row.converterLinks.push({consumer:address,method:'rewardConverter',token:t,converter:cv});}catch{}
+ for(const t of [...new Set([...pool.rewardTokens,...row.rewards])]){
+  try{const cv=await sc.rewardConverter(t,{blockTag});if(cv!==ZeroAddress)row.converterLinks.push({consumer:address,method:'rewardConverter',token:t,converter:cv});}catch{}
+  try{const rr=await sc.rewardRoute(t,{blockTag});if(rr.token!==ZeroAddress){row.rewards.push(rr.token);if(rr.converter!==ZeroAddress)row.converterLinks.push({consumer:address,method:'rewardRoute',token:rr.token,converter:rr.converter,minAmount:rr.minAmount,enabled:rr.enabled});}}catch{}
+ }
  if(rec.reads.swapper&&rec.reads.swapper!==ZeroAddress)row.converterLinks.push({consumer:address,method:'swapper',converter:rec.reads.swapper});
  await Promise.allSettled([...new Set(row.converterLinks.map(x=>x.converter))].map(address=>views(address,['function route() view returns(address[9])','function swapParams() view returns(uint256[3][4])','function pools() view returns(address[])','function tokenIn() view returns(address)','function tokenOut() view returns(address)','function router() view returns(address)'])));
  console.log('Vault strategy',address,'PID',pid,'current depositor',row.stakingMatchesCurrentDepositor,'converters',row.converterLinks.length);
 }catch(e){trace.errors.push({stage:'vault-discovery',address,code:e.code||e.name});}}));
+trace.vaultStrategies=Array.from(new Map(trace.vaultStrategies.map(s=>[s.address.toLowerCase(),s])).values());
 save('live_ethereum_flow_v1.json',trace);console.log('Pinned block',blockTag,block.hash,'contracts',Object.keys(trace.contracts).length);provider.destroy();
