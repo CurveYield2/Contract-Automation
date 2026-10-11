@@ -255,14 +255,14 @@ jobs:
           git checkout --detach "$expected_controller_commit"
           test "$(git rev-parse HEAD)" = "$expected_controller_commit"
 
-      - name: Reuse exact successful V7 qualification when runner and private controller are unchanged
-        if: env.V7_QUALIFICATION_LANE == 'FULL' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      - name: Reuse successful V7 qualification with cache-only private main changes
+        if: env.V7_QUALIFICATION_LANE == 'FULL' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && env.CONTROLLER_REF_TO_TEST == 'main'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          # A mismatched or unavailable proof is always a cache MISS, never a PASS.
+          # Fail closed for any change outside the private data-only cache folder.
           status_path="$(mktemp)"
           if ! gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d > "$status_path"; then
             echo "V7 qualification cache MISS: no canonical status"
@@ -270,21 +270,42 @@ jobs:
           fi
           controller_commit="$(git -C .controller-under-test rev-parse HEAD)"
           qualified_run="$(jq -r '.workflowRunId // empty' "$status_path")"
+          prior_controller_commit="$(jq -r '.controllerQualification.controllerCommit // empty' "$status_path")"
           if ! [[ "$qualified_run" =~ ^[0-9]+$ ]] ||
-             ! jq -e --arg runner "$GITHUB_SHA" --arg controller "$controller_commit"                '.status=="PASS" and .qualifiedCommit==$runner and .controllerQualification.status=="PASS" and .controllerQualification.controllerCommit==$controller and .phase6.status=="PASS" and .phase7.status=="PASS"' "$status_path" >/dev/null; then
-            echo "V7 qualification cache MISS: runner, private controller, or FULL proof changed"
+             ! [[ "$prior_controller_commit" =~ ^[0-9a-fA-F]{40}$ ]] ||
+             ! jq -e --arg runner "$GITHUB_SHA" \
+                '.status=="PASS" and .qualifiedCommit==$runner and .controllerQualification.status=="PASS" and .phase6.status=="PASS" and .phase7.status=="PASS"' "$status_path" >/dev/null; then
+            echo "V7 qualification cache MISS: runner or FULL proof changed"
             exit 0
           fi
           run_path="$(mktemp)"
           if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs/$qualified_run" > "$run_path" ||
-             ! jq -e --arg sha "$GITHUB_SHA" '.status=="completed" and .conclusion=="success" and .head_sha==$sha' "$run_path" >/dev/null; then
-            echo "V7 qualification cache MISS: qualifying run no longer verifies"
+             ! jq -e --arg sha "$GITHUB_SHA" '.status=="completed" and .conclusion=="success" and .head_sha==$sha and .path==".github/workflows/v7-execution-infrastructure-qualification.yml"' "$run_path" >/dev/null; then
+            echo "V7 qualification cache MISS: qualifying run is unverified"
             exit 0
+          fi
+
+          # Cache files reside on private Audit-Controller/main. Check the exact
+          # Git tree delta from the previously qualified controller commit:
+          # no executable controller change may borrow an old qualification.
+          if [ "$controller_commit" != "$prior_controller_commit" ]; then
+            if ! git -C .controller-under-test fetch --no-tags --depth=1 origin "$prior_controller_commit" >/dev/null 2>&1; then
+              echo "V7 qualification cache MISS: could not verify prior private controller tree"
+              exit 0
+            fi
+            if ! git -C .controller-under-test diff --name-only -z "$prior_controller_commit" "$controller_commit" |
+               python3 -c 'import sys; data=sys.stdin.buffer.read(); files=[p for p in data.split(b"\0") if p]; sys.exit(0 if all(p.startswith(b"Phase0 Build Cache/") for p in files) else 1)'; then
+              echo "V7 qualification cache MISS: private controller contains non-cache changes"
+              exit 0
+            fi
+            echo "V7 controller changes confined to non-executable Phase0 Build Cache folder"
           fi
           echo "V7_QUALIFICATION_LANE=REUSE_EXACT" >> "$GITHUB_ENV"
           echo "V7_REUSED_FROM_RUN=$qualified_run" >> "$GITHUB_ENV"
-          jq -n --arg runner "$GITHUB_SHA" --arg controller "$controller_commit" --arg run "$qualified_run"             '{status:"PASS",reusePolicy:"EXACT_RUNNER_AND_PRIVATE_CONTROLLER_IDENTITY_ONLY",qualifiedCommit:$runner,controllerCommit:$controller,reusedRunId:$run}'             > .audit-evidence/v7-infrastructure-qualification/exact-reuse.json
-          echo "V7 exact qualification reuse: runner=$GITHUB_SHA controller=$controller_commit run=$qualified_run" >> "$GITHUB_STEP_SUMMARY"
+          jq -n --arg runner "$GITHUB_SHA" --arg controller "$controller_commit" --arg previouslyQualified "$prior_controller_commit" --arg run "$qualified_run" \
+            '{status:"PASS",reusePolicy:"EXACT_RUNNER_AND_CACHE_ONLY_PRIVATE_CONTROLLER_DELTA",qualifiedCommit:$runner,controllerCommit:$controller,originalQualifiedControllerCommit:$previouslyQualified,reusedRunId:$run}' \
+            > .audit-evidence/v7-infrastructure-qualification/exact-reuse.json
+          echo "V7 qualification reused: exact runner=$GITHUB_SHA controller=$controller_commit previousController=$prior_controller_commit run=$qualified_run" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify private Audit-Controller v26 suite
         if: env.CONTROLLER_REF_TO_TEST != '' && env.V7_QUALIFICATION_LANE != 'REUSE_EXACT'
