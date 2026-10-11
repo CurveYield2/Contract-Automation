@@ -1,0 +1,76 @@
+name: Verify BoostHub yield-token removal v1 (baseline red)
+on:
+  push:
+    branches: ['verify-boosthub-four-contracts-v1']
+    paths:
+      - '.github/workflows/verify-boosthub-four-contracts-v1.yml'
+permissions:
+  contents: read
+concurrency:
+  group: verify-boosthub-four-contracts-v1
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install compiler only on GitHub
+        run: python3 -m pip install vyper==0.4.3
+      - name: Select configured source-read credential
+        env:
+          AUDIT_CONTROLLER_PROBE_REPOSITORY: CurveYield2/Audit-Controller
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Read pinned original supporting interfaces
+        uses: actions/checkout@v4
+        with:
+          repository: CurveYield2/Audit-Controller
+          ref: ea5fc8915e1fc50d27975cad8a453e132faf76fb
+          token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          path: .controller
+          persist-credentials: false
+          sparse-checkout: |
+            campaigns/Boosthub Staking v2/source
+            campaigns/cyvlSDT v30 Audit v29/source
+            campaigns/CurveYield DEX v16 Source r4/source
+            campaigns/CurveYield_DEX_Fresh_Audit_Package_2026-08-16.zip
+            audits/functional-verification/boosthub-four-contracts-v1
+      - name: Install pinned OpenZeppelin only on GitHub
+        run: |
+          git clone --depth 1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git .controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts
+          git -C .controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts rev-parse HEAD
+      - name: Verify exact uploaded bytes and compile Vyper
+        run: python3 .controller/audits/functional-verification/boosthub-four-contracts-v1/prepare_remote_v2.py
+      - name: Compile Solidity and execute unit and compatibility checks
+        working-directory: .controller/audits/functional-verification/boosthub-four-contracts-v1
+        shell: bash
+        run: |
+          set -o pipefail
+          forge --version
+          vyper --version
+          forge test -vvv 2>&1 | tee evidence/yield_token_removal_baseline_v1.txt
+      - name: Capture ABI and production contract sizes
+        if: always()
+        run: python3 .controller/audits/functional-verification/boosthub-four-contracts-v1/summarize_remote_v2.py
+      - name: Upload exact verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boosthub-yield-token-removal-baseline-v1
+          path: |
+            .controller/audits/functional-verification/boosthub-four-contracts-v1/evidence
+            .controller/audits/functional-verification/boosthub-four-contracts-v1/contracts/interfaces/IStakeDaoGauge.sol
+            .controller/audits/functional-verification/boosthub-four-contracts-v1/contracts/interfaces/IvlBoost.sol
+            .controller/audits/functional-verification/boosthub-four-contracts-v1/contracts/libraries/BoostHubErrors.sol
+          retention-days: 30
