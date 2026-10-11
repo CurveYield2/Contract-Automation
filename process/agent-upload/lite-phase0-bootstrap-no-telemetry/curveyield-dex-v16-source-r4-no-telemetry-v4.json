@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "curveyield-lite-phase0-bootstrap-recovery-v1",
+  "campaign_id": "curveyield-dex-v16-source-r4",
+  "campaign_path": "campaigns/CurveYield DEX v16 Source r4",
+  "audit_controller_ref": "main",
+  "resume_from_finalize": false,
+  "source_telemetry_run_id": 38126544342,
+  "prior_no_telemetry_run_id": 38147934338,
+  "workflow": "lite-phase0-bootstrap-no-telemetry-v1.yml",
+  "request_version": "v4",
+  "recovery_reason": "Rerun exact prior CurveYield DEX v16 r4 No Telemetry settings using merged Phase 0 v2 forked package deployment/configuration only; no randomized telemetry or Medusa",
+  "runner_commit": "08900c615e431740c243c7e58b50fe5fe3c01171"
+}
