@@ -222,18 +222,10 @@ test('Phase-0 incomplete deployment is preserved and blocks randomized execution
   assert.match(source.slice(start,end),/throw error/);
 });
 
-test('Phase-0 rebind workflow assesses completeness non-fatally and enforces only after evidence publication',()=>{
-  const here=path.dirname(fileURLToPath(import.meta.url));
+test('legacy Phase-0 randomized rebind is disabled after deployment-only migration',()=>{
   const workflow=fs.readFileSync(path.resolve(here,'../../../.github/workflows/lite-phase0-simulation-rebind-v1.yml'),'utf8');
-  const assess=workflow.indexOf('Assess corrected simulation completeness without stopping remaining work');
-  const write=workflow.indexOf('Write supplemental rebind evidence without touching sealed Phase-0 outputs');
-  const publish=workflow.indexOf('Publish supplemental evidence');
-  const enforce=workflow.indexOf('Enforce rebind completion after all executable stages');
-  assert.ok(assess>=0);
-  assert.ok(write>assess);
-  assert.ok(publish>write);
-  assert.ok(enforce>publish);
-  assert.match(workflow,/echo "complete=\$complete" >> "\$GITHUB_OUTPUT"/);
+  assert.match(workflow,/Retired Phase 0 Randomized Simulation Rebind v2/);
+  assert.doesNotMatch(workflow,/run-phase0-randomized-simulation-v1\.mjs|phase0-simulation-rebind\/\*\.json/);
 });
 
 

@@ -36,7 +36,7 @@ for(const [mode,file] of [
     assert.match(source,/SIMULATION_TESTING_PACKAGE_DEPENDENCY_INSTALL_FAILED/);
     assert.match(source,/packageDependencyInstall,policy:/);
     assert.match(source,/PHASE0_EXECUTION_BUILD_ARTIFACTS_v2.json/);
-    assert.match(source,/runMedusaShardsV2/);
+    assert.match(source,/executeDeploymentScripts/);
   });
 }
 
