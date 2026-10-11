@@ -91,7 +91,9 @@ jobs:
           historical_code="$(curl -fsS --max-time 30 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_getCode","params":["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2","0x112a880"]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
           test -n "$historical_code" && test "$historical_code" != "0x" || { echo "::error::Ethereum fork source did not return historical WETH code at block 18000000"; exit 1; }
           rm -rf .phase0-randomized-output
-          node scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --output .phase0-randomized-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-randomized.json
+          # Reserve time for always()-run diagnostics/artifact upload when RPC or harness execution stalls.
+          # This is a wall-clock watchdog, not a reduction of the 100,001 Medusa / 4,800 ABI call gates.
+          timeout -s TERM -k 30s 2520s node scripts/run-phase0-randomized-simulation-v1.mjs             --controller-root .audit-controller             --campaign-path "${{ inputs.campaign_path }}"             --output .phase0-randomized-output             --fork-url "$ETHEREUM_FORK_RPC_URL" | tee /tmp/phase0-randomized.json
 
       - name: Report randomized simulation diagnostics
         if: ${{ always() }}

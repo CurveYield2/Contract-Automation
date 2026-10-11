@@ -180,9 +180,10 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
   }
   const deployer=normalizedAddressV1(ethers,actors[0]);
   if(deployer)privileged.add(deployer);
-  for(const target of targets){
+  let discoveredTargets=0;
+  await mapLimitV1(targets,6,async target=>{
     const targetAddress=normalizedAddressV1(ethers,target?.address);
-    if(!targetAddress)continue;
+    if(!targetAddress)return;
     addressSet.add(targetAddress);
     const related=associations[targetAddress]??new Set();
     associations[targetAddress]=related;
@@ -192,7 +193,7 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
       contract=new ethers.Contract(targetAddress,abiRowsV1(target?.artifact?.abi),provider);
     }catch(error){
       gaps.push({type:'ASSOCIATION_ABI_UNAVAILABLE',target:targetAddress,message:String(error?.message??error).slice(0,800)});
-      continue;
+      return;
     }
     for(const fragment of iface.fragments.filter(x=>x?.type==='function'&&['view','pure'].includes(x.stateMutability)&&x.inputs.length===0&&(x.outputs??[]).some(outputContainsAddressV1))){
       try{
@@ -205,7 +206,10 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
         gaps.push({type:'ASSOCIATION_VIEW_REVERTED',target:targetAddress,function:fragment.format('sighash'),message:String(error?.shortMessage??error?.message??error).slice(0,800)});
       }
     }
-  }
+    discoveredTargets++;
+    if(discoveredTargets%5===0||discoveredTargets===targets.length)console.log(`[phase0-fixture] association discovery ${discoveredTargets}/${targets.length} targets`);
+  });
+  console.log('[phase0-fixture] association discovery complete; canonical token probes started');
   for(const row of PHASE0_CANONICAL_MAINNET_TOKENS_V1){
     const address=ethers.getAddress(row.address);
     let code='0x';
@@ -221,16 +225,18 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
     const token={symbol:row.symbol,address,source:'CANONICAL_MAINNET',decimals:shape?.decimals??null,totalSupply:shape?.totalSupply??null};
     tokens.push(token);tokenByAddress.set(address.toLowerCase(),token);addressSet.add(address);
   }
-  for(const target of targets){
+  console.log('[phase0-fixture] canonical token probes complete; deployed target token probes started');
+  await mapLimitV1(targets,6,async target=>{
     const address=normalizedAddressV1(ethers,target?.address);
-    if(!address||tokenByAddress.has(address.toLowerCase()))continue;
+    if(!address||tokenByAddress.has(address.toLowerCase()))return;
     try{
       const shape=await probeErc20ShapeV1({provider,ethers,address,probeHolder:deployer??ethers.ZeroAddress});
       const token={symbol:null,address,source:'DISCOVERED_ERC20_SHAPE',qualifiedName:target?.qualifiedName??null,decimals:shape.decimals,totalSupply:shape.totalSupply};
       tokens.push(token);tokenByAddress.set(address.toLowerCase(),token);addressSet.add(address);
       receipts.push({kind:'TARGET_ERC20_SHAPE_PROBE',address,qualifiedName:target?.qualifiedName??null,decimals:shape.decimals,totalSupply:shape.totalSupply,status:'PASS'});
     }catch{}
-  }
+  });
+  console.log(`[phase0-fixture] token discovery complete; discovered=${tokens.length}; gaps=${gaps.length}`);
   for(const address of privileged)addressSet.add(address);
   return{
     addresses:[...addressSet],
@@ -356,6 +362,7 @@ export async function fundActorsV1({provider,ethers,tokens=[],holders=[],spender
   const holderAddresses=uniqueAddressesV1(ethers,holders),spenderAddresses=uniqueAddressesV1(ethers,spenders);
   const gaps=[],rpcMutations=[],transactionReceipts=[],slotResults=[];
   const ethBalance=10n**24n,erc20Iface=new ethers.Interface(ERC20_APPROVE_ABI_V1),permit2Iface=new ethers.Interface(PERMIT2_APPROVE_ABI_V1);
+  console.log(`[phase0-fixture] funding start; holders=${holderAddresses.length}; tokens=${tokens.length}; spenders=${spenderAddresses.length}`);
   for(const holder of holderAddresses){
     try{
       await provider.send('anvil_setBalance',[holder,ethers.toQuantity(ethBalance)]);
