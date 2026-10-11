@@ -1174,70 +1174,88 @@ function topActivationRevertsV1(attempts,limit=10){
 }
 export async function executeActivationSynthesisV1({provider,ethers,targets=[],actors=[],valuePool={},artifacts=[],createdAddresses=[],maxAttemptsPerCreated=30}){
   const activations=[],activationGaps=[],actorRows=uniqueAddressesV1(ethers,actors),privileged=uniqueAddressesV1(ethers,valuePool.privileged??[]);
-  const created=uniqueAddressesV1(ethers,createdAddresses),createdSet=new Set(created.map(x=>x.toLowerCase())),queue=[...created],processed=new Set();
-  while(queue.length){
-    const createdAddress=queue.shift(),createdKey=createdAddress.toLowerCase();
-    if(processed.has(createdKey))continue;
-    processed.add(createdKey);
+  const created=uniqueAddressesV1(ethers,createdAddresses),createdSet=new Set(created.map(x=>x.toLowerCase())),queue=[...created],states=new Map(),completed=new Set();
+  const stateFor=createdAddress=>{
+    const key=createdAddress.toLowerCase();
+    if(states.has(key))return states.get(key);
     const candidates=discoverActivationCandidatesV1({targets,createdAddress});
-    const successful=new Set(),attemptsByFunction=new Map(),dependencyPriorities=new Set();
-    let totalAttempts=0;
-    while(totalAttempts<maxAttemptsPerCreated&&successful.size<candidates.length&&candidates.length){
-      const remaining=candidates.filter(candidate=>!successful.has(candidate.key));
-      remaining.sort((a,b)=>{
-        const ap=dependencyPriorities.has(a.key)?-1:a.priority,bp=dependencyPriorities.has(b.key)?-1:b.priority;
-        return ap-bp||String(a.key).localeCompare(String(b.key));
+    const state={createdAddress,candidates,successful:new Set(),attemptsByFunction:new Map(),dependencyPriorities:new Set(),totalAttempts:0,finalized:false};
+    states.set(key,state);return state;
+  };
+  const prioritizeCreated=address=>{
+    const normalized=ethers.getAddress(address),key=normalized.toLowerCase();
+    if(!createdSet.has(key)||completed.has(key))return;
+    for(let i=queue.length-1;i>=0;i--)if(String(queue[i]).toLowerCase()===key)queue.splice(i,1);
+    queue.unshift(normalized);
+  };
+  while(queue.length){
+    const createdAddress=ethers.getAddress(queue.shift()),createdKey=createdAddress.toLowerCase();
+    if(completed.has(createdKey))continue;
+    const state=stateFor(createdAddress);
+    let deferred=false;
+    while(state.totalAttempts<maxAttemptsPerCreated&&state.successful.size<state.candidates.length&&state.candidates.length){
+      const remaining=state.candidates.filter(candidate=>!state.successful.has(candidate.key));
+      const priorityRows=remaining.filter(candidate=>state.dependencyPriorities.has(candidate.key));
+      const selectionPool=priorityRows.length?priorityRows:remaining;
+      selectionPool.sort((a,b)=>{
+        const ac=(state.attemptsByFunction.get(a.key)??[]).length,bc=(state.attemptsByFunction.get(b.key)??[]).length;
+        return ac-bc||a.priority-b.priority||String(a.key).localeCompare(String(b.key));
       });
-      const candidate=remaining[totalAttempts%remaining.length];
-      const prior=attemptsByFunction.get(candidate.key)??[];
-      const attemptIndex=prior.length;
+      const candidate=selectionPool[0],prior=state.attemptsByFunction.get(candidate.key)??[],attemptIndex=prior.length;
       const actor=actorRows[deterministicIndexV1(ethers,candidate.key+':'+attemptIndex,actorRows.length)]??privileged[0]??ethers.ZeroAddress;
       const built=buildActivationArgumentsV1({ethers,candidate,attempt:attemptIndex,actor,valuePool});
       let result=await attemptActivationCallV1({provider,ethers,candidate,sender:actor,args:built.args,artifacts}),sender=actor;
       const record=row=>({
-        attempt:++totalAttempts,sender:row.sender,argsSummary:normalizeEvidenceValueV1(built.args),status:row.result.status,
+        attempt:++state.totalAttempts,sender:row.sender,argsSummary:normalizeEvidenceValueV1(built.args),status:row.result.status,
         decoded:row.result.decoded??null,dependency:row.result.dependency??false,dependencyAddresses:row.result.dependencyAddresses??[],error:row.result.error??null,
         authorizationRetry:row.authorizationRetry===true
       });
-      let attemptRow=record({sender,result,authorizationRetry:false});prior.push(attemptRow);attemptsByFunction.set(candidate.key,prior);
+      prior.push(record({sender,result,authorizationRetry:false}));state.attemptsByFunction.set(candidate.key,prior);
       if(result.status!=='PASS'&&authorizationLookingV1(result.decoded)){
         for(const privilegedSender of privileged){
-          if(totalAttempts>=maxAttemptsPerCreated)break;
+          if(state.totalAttempts>=maxAttemptsPerCreated)break;
           if(privilegedSender.toLowerCase()===actor.toLowerCase())continue;
           const retry=await attemptActivationCallV1({provider,ethers,candidate,sender:privilegedSender,args:built.args,artifacts});
-          const retryRow=record({sender:privilegedSender,result:retry,authorizationRetry:true});prior.push(retryRow);
+          prior.push(record({sender:privilegedSender,result:retry,authorizationRetry:true}));
           if(retry.status==='PASS'){result=retry;sender=privilegedSender;break;}
         }
       }
       if(result.status==='PASS'){
-        successful.add(candidate.key);dependencyPriorities.delete(candidate.key);
+        state.successful.add(candidate.key);state.dependencyPriorities.delete(candidate.key);
         activations.push({
           createdAddress,functionKey:candidate.key,target:candidate.target.qualifiedName,address:candidate.target.address,
           function:candidate.selected.signature,basis:candidate.basis,sender,argsSummary:normalizeEvidenceValueV1(built.args),
           receipt:{transactionHash:result.transactionHash,blockNumber:result.receipt?.blockNumber??null,status:Number(result.receipt?.status??0),gasUsed:result.receipt?.gasUsed?.toString?.()??null}
         });
-      }else if(result.dependency){
-        const hints=(result.dependencyAddresses??[]).filter(address=>createdSet.has(String(address).toLowerCase()));
-        for(const hinted of hints){
-          if(!processed.has(String(hinted).toLowerCase())){
-            const index=queue.findIndex(row=>String(row).toLowerCase()===String(hinted).toLowerCase());
-            if(index>=0)queue.splice(index,1);
-            queue.unshift(ethers.getAddress(hinted));
-          }
+        continue;
+      }
+      if(result.dependency){
+        const hints=uniqueAddressesV1(ethers,result.dependencyAddresses??[]).filter(address=>createdSet.has(address.toLowerCase()));
+        const externalHints=hints.filter(address=>address.toLowerCase()!==createdKey&&!completed.has(address.toLowerCase()));
+        if(externalHints.length){
+          for(let i=externalHints.length-1;i>=0;i--)prioritizeCreated(externalHints[i]);
+          for(let i=queue.length-1;i>=0;i--)if(String(queue[i]).toLowerCase()===createdKey)queue.splice(i,1);
+          queue.splice(externalHints.length,0,createdAddress);
+          deferred=true;break;
         }
-        for(const local of candidates.filter(row=>row.namedLocal))dependencyPriorities.add(local.key);
+        for(const local of state.candidates.filter(row=>row.namedLocal))state.dependencyPriorities.add(local.key);
       }
     }
-    for(const candidate of candidates){
-      if(successful.has(candidate.key))continue;
-      const attempts=attemptsByFunction.get(candidate.key)??[];
-      activationGaps.push({
-        createdAddress,functionKey:candidate.key,target:candidate.target.qualifiedName,address:candidate.target.address,function:candidate.selected.signature,
-        status:attempts.length?'NO_SUCCESS':'UNEXERCISED_ATTEMPT_BUDGET',attemptCount:attempts.length,attempts,
-        topDecodedRevertReasons:topActivationRevertsV1(attempts)
-      });
+    if(deferred)continue;
+    if(!state.finalized){
+      for(const candidate of state.candidates){
+        if(state.successful.has(candidate.key))continue;
+        const attempts=state.attemptsByFunction.get(candidate.key)??[];
+        activationGaps.push({
+          createdAddress,functionKey:candidate.key,target:candidate.target.qualifiedName,address:candidate.target.address,function:candidate.selected.signature,
+          status:attempts.length?'NO_SUCCESS':'UNEXERCISED_ATTEMPT_BUDGET',attemptCount:attempts.length,attempts,
+          topDecodedRevertReasons:topActivationRevertsV1(attempts)
+        });
+      }
+      if(!state.candidates.length)activationGaps.push({createdAddress,status:'NO_ACTIVATION_CANDIDATES',attemptCount:0,attempts:[],topDecodedRevertReasons:[]});
+      state.finalized=true;
     }
-    if(!candidates.length)activationGaps.push({createdAddress,status:'NO_ACTIVATION_CANDIDATES',attemptCount:0,attempts:[],topDecodedRevertReasons:[]});
+    completed.add(createdKey);
   }
   return{activations,activationGaps,createdContracts:created.length};
 }
