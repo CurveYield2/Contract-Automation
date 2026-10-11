@@ -730,7 +730,7 @@ test('Stage-3 runner executes association refresh and activation before the shar
   assert.ok(harvestAt>0&&activationAt>harvestAt&&baselineAt>activationAt);
   assert.match(runner,/maxAttemptsPerCreated:30/);
   assert.match(runner,/STAGE_3_INITIALIZATION_AND_ACTIVATION/);
-  assert.match(runner,/activations:stage3Activation\\.activations/);
-  assert.match(runner,/activationGaps:stage3Activation\\.activationGaps/);
+  assert.match(runner,/activations:stage3Activation\.activations/);
+  assert.match(runner,/activationGaps:stage3Activation\.activationGaps/);
   assert.match(runner,/associationTokenFunding/);
 });
