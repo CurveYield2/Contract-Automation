@@ -770,9 +770,11 @@ if(sequence===5){
     deficiencies.push('Phase 5 mandatory machine execution failed: '+String(e.message||e));
   }
   const matrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
+  // No Phase-0 fuzz/telemetry is imported as target evidence.
+  const baselineRows=[];
   fs.mkdirSync(path.dirname(repoFile(root,matrixRel)),{recursive:true});
   fs.writeFileSync(repoFile(root,matrixRel),renderTargetedTestMatrixV1({
-    targetDesigns,executionResults:phase5MachineResults??{},baselineRows:[]
+    targetDesigns,executionResults:phase5MachineResults??{},baselineRows
   }));
   if(deficiencies.length){
     // Evidence and diagnostic matrix may persist; receipt and graph cannot.
