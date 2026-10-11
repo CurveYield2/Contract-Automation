@@ -1,4 +1,4 @@
-name: Verify BoostHub yield-token removal v1 (all-token baseline red)
+name: Verify BoostHub retained-token removal and all-reward ramp v1
 on:
   push:
     branches: ['verify-boosthub-four-contracts-v1']
@@ -36,7 +36,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CurveYield2/Audit-Controller
-          ref: a25f0288cc2dcb9614fe7b6f9f605ab03d2ff6e1
+          ref: fb458af0b6d57d5be97bfd7cd8b95c6176ec793b
           token: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           path: .controller
           persist-credentials: false
@@ -51,7 +51,7 @@ jobs:
           git clone --depth 1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git .controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts
           git -C .controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts rev-parse HEAD
       - name: Verify exact uploaded bytes and compile Vyper
-        run: python3 .controller/audits/functional-verification/boosthub-four-contracts-v1/prepare_remote_v2.py
+        run: python3 .controller/audits/functional-verification/boosthub-four-contracts-v1/prepare_remote_v3.py
       - name: Compile Solidity and execute unit and compatibility checks
         working-directory: .controller/audits/functional-verification/boosthub-four-contracts-v1
         shell: bash
@@ -59,15 +59,15 @@ jobs:
           set -o pipefail
           forge --version
           vyper --version
-          forge test -vvv 2>&1 | tee evidence/yield_token_removal_baseline_v1.txt
+          forge test -vvv --gas-report 2>&1 | tee evidence/yield_token_removal_foundry_results_v1.txt
       - name: Capture ABI and production contract sizes
         if: always()
-        run: python3 .controller/audits/functional-verification/boosthub-four-contracts-v1/summarize_remote_v2.py
+        run: python3 .controller/audits/functional-verification/boosthub-four-contracts-v1/summarize_remote_v3.py
       - name: Upload exact verification evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boosthub-yield-token-removal-baseline-v1
+          name: boosthub-yield-token-removal-v1
           path: |
             .controller/audits/functional-verification/boosthub-four-contracts-v1/evidence
             .controller/audits/functional-verification/boosthub-four-contracts-v1/contracts/interfaces/IStakeDaoGauge.sol
