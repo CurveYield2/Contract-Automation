@@ -371,6 +371,30 @@ async function x11Capture(args, label = 'x11-command') {
   }
 }
 
+async function verifyX11VisibleChatAddress(requested) {
+  // Same interaction as a person copying the browser address bar.
+  // This deliberately does NOT inspect ChatGPT DOM, fetch, CDP page state, or endpoints.
+  await x11Key(['key','--clearmodifiers','ctrl+l'],'x11-select-visible-address-bar');
+  await new Promise(resolve=>setTimeout(resolve,250));
+  await x11Key(['key','--clearmodifiers','ctrl+c'],'x11-copy-visible-address-bar');
+  const {stdout}=await runCapture('xclip',['-selection','clipboard','-o']);
+  await x11Key(['key','--clearmodifiers','Escape'],'x11-close-visible-address-bar');
+  let actual,expected;
+  try {actual=new URL(stdout.trim());expected=new URL(requested);}
+  catch {throw new BrowserAgentError('VISIBLE_ADDRESS_UNREADABLE','Browser address bar could not be copied through OS keyboard',true);}
+  const current=actual.pathname.replace(/\\/$/,'');
+  const expectedPath=expected.pathname.replace(/\\/$/,'');
+  if(actual.origin!=='https://chatgpt.com')throw new BrowserAgentError('WRONG_VISIBLE_ORIGIN','Chrome is not displaying ChatGPT',false);
+  if(/^\\/(?:auth|login|signup|register)(?:\\/|$)/i.test(current))
+    throw new BrowserAgentError('AUTH_REQUIRED','Visible Chrome window redirected to ChatGPT login; refresh browser session secret before sending',false);
+  const actualId=current.match(/\\/c\\/([^/]+)$/)?.[1]||'';
+  const requestedId=expectedPath.match(/\\/c\\/([^/]+)$/)?.[1]||'';
+  if(!requestedId||actualId!==requestedId)
+    throw new BrowserAgentError('CHAT_UNAVAILABLE_OR_NOT_READY','Visible Chrome address bar is not the intended reviewer conversation',false);
+  console.log('[normal-chrome-watchdog] verified-target-chat-via-visible-address-bar=true');
+  return true;
+}
+
 async function captureX11VisualEvidence(label) {
   const root = '/tmp/browser-wake-evidence-v1';
   await fs.mkdir(root, {recursive:true});
@@ -492,6 +516,11 @@ async function runNormalChromeExistingSession(chromium) {
     await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-navigate');
     await page.waitForTimeout(15000);
     await captureX11VisualEvidence('01_after_chat_navigation');
+    if (!bool(env.WAKE_DIAGNOSTIC_ONLY)) {
+      await page.waitForTimeout(25000);
+      await captureX11VisualEvidence('02_after_40s_navigation');
+      await verifyX11VisibleChatAddress(requestedUrl);
+    }
     if (bool(env.WAKE_DIAGNOSTIC_ONLY)) {
       await page.waitForTimeout(25000);
       await captureX11VisualEvidence('02_after_40s_navigation');
