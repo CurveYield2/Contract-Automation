@@ -908,23 +908,11 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
     }
   }
 
-  for(const [holderRaw,value] of Object.entries(associations??{})){
-    const facadeDeployment=asDeployment(holderRaw);
-    if(!facadeDeployment?.address)continue;
-    for(const calleeRaw of associationValuesV2(value)){
-      const implDeployment=asDeployment(calleeRaw),implArtifact=implDeployment?.qualifiedName?byQ.get(implDeployment.qualifiedName):null;
-      if(!implDeployment||!implArtifact||String(implDeployment.address).toLowerCase()===String(facadeDeployment.address).toLowerCase())continue;
-      // Association alone is NOT a delegate relationship. Balancer v3 delegates
-      // through explicit Vault -> VaultExtension -> VaultAdmin pointers.
-      // Reject unrelated ProtocolFeeController/Router/Authorizer facades.
-      if(isBalancerV3TargetV1(implDeployment)||isBalancerV3TargetV1(facadeDeployment)){
-        // Valid Balancer delegation was resolved through the real Vault chain.
-        // An extension linked to its admin is not itself a valid mutation facade.
-        continue;
-      }
-      addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'ASSOCIATION_POINTS_TO_EXTENSION'});
-    }
-  }
+  // Associations can identify connected contracts and candidate callers, but
+  // they never prove that one contract executes another contract's ABI.
+  // Only mount an implementation ABI on a verified proxy implementation getter,
+  // EIP-1967 slot, or explicit Balancer Vault delegation pointer (above).
+  // Do not invent facades from an arbitrary address association on ANY protocol.
 
   if(probeSelectors){
     const accounts=await provider.send('eth_accounts',[]).catch(()=>[]);
