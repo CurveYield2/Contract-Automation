@@ -2433,13 +2433,29 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
           stage3AssociationTokenFunding={holders:stage2Holders,spenders:targets.map(target=>target.address),slotResults:[],rpcMutations:[],transactionReceipts:[],receiptCounts:{},permit2:null,gaps:[{type:'STAGE3_ASSOCIATION_TOKEN_FUNDING_FAILED',message:String(error?.message??error).slice(0,1600)}]};
         }
       }
+      // Registered Balancer pools are not generic contracts needing ABI-random
+      // "activation": only the real Router.initialize can mint their first
+      // BPT and establish valid Vault balances. Avoid 30 unproductive calls
+      // per pool before the protocol-aware lifecycle bootstrap below.
+      let registeredBalancerPools=new Set();
       try{
-        stage3Activation=await executeActivationSynthesisV1({
-          provider,ethers,targets,actors,valuePool,artifacts,createdAddresses:valuePool.created,maxAttemptsPerCreated:30
-        });
+        const observed=await discoverBalancerV3PoolsV1({provider,ethers,targets,valuePool,actors});
+        registeredBalancerPools=new Set((observed.pools??[]).map(row=>String(row.address).toLowerCase()));
       }catch(error){
-        stage3Activation={activations:[],activationGaps:[{type:'ACTIVATION_SYNTHESIS_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1600)}],createdContracts:valuePool.created.length};
+        console.log(`[phase0-balancer] Stage3 pool discovery unavailable: ${String(error?.message??error).slice(0,250)}`);
       }
+      const activationAddresses=(valuePool.created??[]).filter(address=>!registeredBalancerPools.has(String(address).toLowerCase()));
+      console.log(`[phase0-balancer] Stage3 registered pools bypass generic activation; pools=${registeredBalancerPools.size} remainingCreatorChildren=${activationAddresses.length}`);
+      if(activationAddresses.length){
+        try{
+          stage3Activation=await executeActivationSynthesisV1({
+            provider,ethers,targets,actors,valuePool,artifacts,createdAddresses:activationAddresses,maxAttemptsPerCreated:30
+          });
+        }catch(error){
+          stage3Activation={activations:[],activationGaps:[{type:'ACTIVATION_SYNTHESIS_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1600)}],createdContracts:valuePool.created.length};
+        }
+      }
+      stage3Activation.balancerRegisteredPoolsExcluded=[...registeredBalancerPools];
     }
     // The Balancer v3 Vault must register AND initialize pools before Router
     // swaps / addLiquidity have valid context. This setup is a real on-chain
