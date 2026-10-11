@@ -1146,6 +1146,16 @@ function topCreationRevertsV1(attempts,limit=10){
   }
   return[...counts.values()].sort((a,b)=>b.count-a.count||String(a.reason).localeCompare(String(b.reason))).slice(0,limit);
 }
+// PoolFactoryWrapper's own compute*PoolAddress and _finishPoolCreated
+// provide stronger provenance than parsing unrelated Balancer log ABIs.
+export async function verifiedPredictedCurveYieldPoolV1({provider,ethers,expectedPool}={}){
+  if(!/^0x[0-9a-fA-F]{40}$/.test(String(expectedPool??'')))return[];
+  const address=ethers.getAddress(expectedPool);
+  return await provider.getCode(address)!=='0x'?[address]:[];
+}
+export function creatorAttemptBudgetV1({isCurveYieldWrapper=false,maxAttemptsPerCandidate=24}={}){
+  return isCurveYieldWrapper?Math.min(maxAttemptsPerCandidate,2):maxAttemptsPerCandidate;
+}
 export async function executeCreatorSynthesisV1({provider,ethers,targets=[],actors=[],valuePool={},artifacts=[],maxAttemptsPerCandidate=24,maxSuccessesPerCandidate=3,maxCreatedContracts=20}){
   const selectorIndex=buildCompiledArtifactErrorSelectorIndexV1({ethers,artifacts}),candidates=discoverCreatorCandidatesV1({targets});
   const known=knownAddressSetV1({valuePool,targets}),creations=[],creationGaps=[],createdDeployments=[],syntheticArtifacts=[],createdTokens=[];
@@ -1161,7 +1171,7 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
     // One verified wrapper recipe per adjacent token pair. Replaying the same
     // pair under six salts does not fix a failed Balancer permission or config.
     // Bound candidate work so Stage 2 cannot consume the telemetry smoke budget.
-    const attemptBudget=isCurveYieldWrapper?Math.min(maxAttemptsPerCandidate,2):maxAttemptsPerCandidate;
+    const attemptBudget=creatorAttemptBudgetV1({isCurveYieldWrapper,maxAttemptsPerCandidate});
     const successBudget=isCurveYieldWrapper?1:maxSuccessesPerCandidate;
     console.log(`[phase0-fixture] Stage2 creator ${candidateIndex+1}/${candidates.length}: ${candidate.selected.signature}; maxAttempts=${attemptBudget}`);
     for(let strategy=0;strategy<attemptBudget&&attempts.length<attemptBudget&&successes<successBudget&&createdCount<maxCreatedContracts;strategy++){
@@ -1199,8 +1209,7 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
       // enums and a full compiled-artifact inventory).
       let newAddresses;
       if(isCurveYieldWrapper&&built.expectedPool){
-        const expectedCode=await provider.getCode(built.expectedPool);
-        newAddresses=expectedCode!=='0x'?[ethers.getAddress(built.expectedPool)]:[];
+        newAddresses=await verifiedPredictedCurveYieldPoolV1({provider,ethers,expectedPool:built.expectedPool});
         console.log(`[phase0-fixture] Stage2 wrapper verified predictedPool=${built.expectedPool} deployed=${newAddresses.length===1}`);
       }else{
         newAddresses=await receiptAddressCandidatesV1({provider,ethers,receipt:result.receipt,artifacts,returnedValue:result.returnedValue,known});
