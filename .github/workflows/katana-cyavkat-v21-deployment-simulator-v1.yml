@@ -75,7 +75,6 @@ jobs:
         shell: bash
         env:
           KATANA_RPC_URL: http://127.0.0.1:8545
-          FOUNDRY_BROADCAST: 'true'
         run: |
           set -euo pipefail
           bcast() {
