@@ -183,7 +183,7 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
   let discoveredTargets=0;
   await mapLimitV1(targets,6,async target=>{
     const targetAddress=normalizedAddressV1(ethers,target?.address);
-    if(!targetAddress)continue;
+    if(!targetAddress)return;
     addressSet.add(targetAddress);
     const related=associations[targetAddress]??new Set();
     associations[targetAddress]=related;
@@ -193,7 +193,7 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
       contract=new ethers.Contract(targetAddress,abiRowsV1(target?.artifact?.abi),provider);
     }catch(error){
       gaps.push({type:'ASSOCIATION_ABI_UNAVAILABLE',target:targetAddress,message:String(error?.message??error).slice(0,800)});
-      continue;
+      return;
     }
     for(const fragment of iface.fragments.filter(x=>x?.type==='function'&&['view','pure'].includes(x.stateMutability)&&x.inputs.length===0&&(x.outputs??[]).some(outputContainsAddressV1))){
       try{
@@ -228,7 +228,7 @@ export async function discoverValuePoolV1({provider,ethers,targets=[],actors=[]}
   console.log('[phase0-fixture] canonical token probes complete; deployed target token probes started');
   await mapLimitV1(targets,6,async target=>{
     const address=normalizedAddressV1(ethers,target?.address);
-    if(!address||tokenByAddress.has(address.toLowerCase()))continue;
+    if(!address||tokenByAddress.has(address.toLowerCase()))return;
     try{
       const shape=await probeErc20ShapeV1({provider,ethers,address,probeHolder:deployer??ethers.ZeroAddress});
       const token={symbol:null,address,source:'DISCOVERED_ERC20_SHAPE',qualifiedName:target?.qualifiedName??null,decimals:shape.decimals,totalSupply:shape.totalSupply};
