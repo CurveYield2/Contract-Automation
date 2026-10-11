@@ -1407,7 +1407,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],protocolPlanningFailures:{},protocolAwareCalls:0,
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
-    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),preflightRejections=new Map(),successfulFunctionContexts=new Map();
+    const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),preflightRejections=new Map(),noEffectCounts=new Map(),successfulFunctionContexts=new Map();
     // Rotate across all registered, initialized pools at dispatch time.
     let balancerPoolDispatchCursor=0;
     // A Balancer router action is routable only if actual on-chain pool metadata
@@ -1676,8 +1676,8 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               contextWeightMultipliers.set(picked.selectionKey,Math.min(8,2+(feedback.get(picked.selectionKey)??0)));
               feedback.set(picked.selectionKey,Number(feedback.get(picked.selectionKey)??0)+1);
             }else{
-              const key=picked.selectionKey+'|NO_EFFECT',noEffect=1+(preflightRejections.get(key)??0);
-              preflightRejections.set(key,noEffect);
+              const key=picked.selectionKey,noEffect=1+(noEffectCounts.get(key)??0);
+              noEffectCounts.set(key,noEffect);
               contextWeightMultipliers.set(picked.selectionKey,Math.max(0.05,0.45/(noEffect+1)));
             }
           }
@@ -1738,7 +1738,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
         status:stats.positiveEconomicTransitions>0?'ECONOMIC_TRANSITION_WITNESSED':'ECONOMIC_REACHABILITY_GAP',
         baselineIsNotTransitionEvidence:true
       },
-      adaptiveDispatch:{blacklistedStubFunctions:[...blockedContextFunctions].sort(),rejectionSamples:[...preflightRejections.entries()].map(([functionKey,failures])=>({functionKey,failures})),successfulFunctionContexts:[...successfulFunctionContexts.values()],policy:'PREFLIGHT_REJECTION_PENALTY_POSITIVE_STATE_CHANGE_REWARD_NO_EFFECT_DOWNWEIGHT'},
+      adaptiveDispatch:{blacklistedStubFunctions:[...blockedContextFunctions].sort(),rejectionSamples:[...preflightRejections.entries()].map(([functionKey,failures])=>({functionKey,failures})),noEffectSamples:[...noEffectCounts.entries()].map(([functionKey,minedWithoutObservedTransition])=>({functionKey,minedWithoutObservedTransition})),successfulFunctionContexts:[...successfulFunctionContexts.values()],policy:'PREFLIGHT_REJECTION_PENALTY_POSITIVE_STATE_CHANGE_REWARD_NO_EFFECT_DOWNWEIGHT'},
       feedbackStatus:successfulFunctionContexts.size>0?'ACTIVE_MINED_EXECUTION_LEARNING':'NO_EXECUTABLE_FUNCTION_WITNESS',decodedRevertReasons,
       actionSequenceDigestSha256,outcomeSequenceDigestSha256,
       rawTranscriptRef:`runs/${runId}/RAW_SIMULATION_TRANSCRIPT_v1.jsonl`,rawTranscriptSha256:sha256(bytes),rawTranscriptBytes:bytes.length,
