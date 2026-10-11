@@ -358,6 +358,31 @@ function overlayReviewerOutputs(schema,fresh,saved){
   }
   return fresh;
 }
+// A master amendment replays earlier sealed phases against a ledger that still
+// includes dispositions from later sealed phases. Re-deriving historical due IDs
+// from that final-state ledger can incorrectly turn a nonempty prefill into [].
+// Reuse the due-ID set sealed with this phase; reviewer-owned disposition rows
+// must still match it exactly under validatePhaseScaffold.
+function retainSealedDueObligationPrefill(fresh,sealed,phase){
+  const sealedIds=sealed?.automationInputs?.expectedDueObligationIds;
+  if(sealedIds===undefined)return fresh;
+  if(!Array.isArray(sealedIds)||!Array.isArray(fresh?.automationInputs?.expectedDueObligationIds))
+    throw new Error('master amendment refresh Phase '+phase+' has malformed due-obligation prefills');
+  const actual=[];
+  for(const action of Object.values(sealed.actions??{})){
+    if(!Array.isArray(action?.outputs?.obligationDispositions))continue;
+    for(const row of action.outputs.obligationDispositions){
+      if(row&&typeof row==='object'&&!Array.isArray(row)&&row.obligationId)actual.push(String(row.obligationId));
+    }
+  }
+  const sorted=(ids)=>[...ids].map(String).sort();
+  if(JSON.stringify(sorted(sealedIds))!==JSON.stringify(sorted(actual)))
+    throw new Error('master amendment refresh Phase '+phase+' sealed due-obligation IDs do not match its disposition rows');
+  if(new Set(sealedIds).size!==sealedIds.length)
+    throw new Error('master amendment refresh Phase '+phase+' sealed due-obligation IDs contain duplicates');
+  fresh.automationInputs.expectedDueObligationIds=structuredClone(sealedIds);
+  return fresh;
+}
 function copyAuthorityForShadow(root,shadowRoot,authorityRoot){
   const logical=repoFile(root,authorityRoot);
   if(fs.existsSync(logical)){
@@ -426,7 +451,10 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
         predecessorReceiptPath=generated.predecessorReceiptPath;
         derivedInputPaths=generated.derivedInputPaths??[];
         const fresh=readJson(requiredFile(shadowRoot,generated.workFormPath,'refreshed Phase '+phase+' scaffold'));
-        form=overlayReviewerOutputs(schema,fresh,originalForms.get(phase));
+        form=retainSealedDueObligationPrefill(
+          overlayReviewerOutputs(schema,fresh,originalForms.get(phase)),
+          originalForms.get(phase),phase
+        );
       }
       if(!predecessorReceiptPath)throw new Error('master amendment refresh lacks predecessor receipt for Phase '+phase);
       form.automationInputs={...(form.automationInputs??{}),predecessorReceiptPath,derivedInputPaths:[...derivedInputPaths]};
