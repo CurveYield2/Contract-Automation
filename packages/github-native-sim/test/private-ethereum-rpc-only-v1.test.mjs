@@ -37,7 +37,17 @@ test('canonical Phase 0, qualification and execution workflows use the private s
     'v7-execution-infrastructure-qualification.yml'
   ]){
     const content=fs.readFileSync(path.join(root,'.github/workflows',name),'utf8');
-    assert.ok(content.includes('ETHEREUM_FORK_RPC_URL: $'+'{{ secrets.ETHEREUM_RPC }}'),name);
+    const secretName=['lite-phase0-randomized-simulation-v1.yml','v7-execution-infrastructure-qualification.yml'].includes(name)?'RPC_ETHEREUM':'ETHEREUM_RPC';
+    assert.ok(content.includes('ETHEREUM_FORK_RPC_URL: 
+  }
+});
+test('Phase 6 and Phase 7 have no implicit public or legacy RPC fallback',()=>{
+  for(const name of ['phase6-mutable-rpc-v1.mjs','phase7-fork-preflight-v1.mjs','run-job-file.mjs']){
+    const content=fs.readFileSync(path.join(root,'packages/github-native-sim/src',name),'utf8');
+    assert.doesNotMatch(content,/DEFAULT_ETHEREUM_FORK_RPC_URL|LEGACY_ETHEREUM_FORK_RPC_ENV|LEGACY_PHASE6_MUTABLE_RPC_ENV|LEGACY_ETHEREUM_ARCHIVE_RPC_ENV/);
+  }
+});
++'{{ secrets.'+secretName+' }}'),name);
   }
 });
 test('Phase 6 and Phase 7 have no implicit public or legacy RPC fallback',()=>{
