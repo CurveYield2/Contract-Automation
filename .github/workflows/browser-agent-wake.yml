@@ -273,17 +273,13 @@ jobs:
           fi
           message_purpose="$(jq -r '.messagePurpose // "standard"' /tmp/browser-context.json)"
 
-          # Current audit browser automation is resume-existing only.
-          # The tailored initial wake is used once; all later watchdog messages are
-          # exactly GET BACK TO WORK.
-          if [ "$message_purpose" = "initial_wake" ] && [ "${INITIAL_WAKE_DEDUPED:-false}" != "true" ]; then
-            printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
-            test -s /tmp/wake-message.txt
-          elif [ "$message_purpose" = "repair_notice" ] || [ "$message_purpose" = "repair_verification" ]; then
-            printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
-            test -s /tmp/wake-message.txt
-          else
+          # Preserve caller-authored reviewer, phase-continuation, master-review
+          # and rework messages. Only explicit watchdog messages use the fixed poke.
+          if [ "$message_purpose" = "watchdog_poke" ] || { [ "$message_purpose" = "initial_wake" ] && [ "${INITIAL_WAKE_DEDUPED:-false}" = "true" ]; }; then
             printf '%s\n' 'GET BACK TO WORK' > /tmp/wake-message.txt
+          else
+            printf '%s' "$WAKE_MESSAGE_B64" | base64 -d > /tmp/wake-message.txt
+            test -s /tmp/wake-message.txt
           fi
           printf '%s\n' 'GET BACK TO WORK' > /tmp/watchdog-message.txt
 
@@ -295,7 +291,7 @@ jobs:
             and ((.chatName // "")|type=="string")
             and ((.repair // {})|type=="object")
             and ((.requestedModel // "PRESERVE")=="PRESERVE" or (.requestedModel // "PRESERVE")=="MASTER" or (.requestedModel // "PRESERVE")=="SOL")
-            and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="repair_notice" or (.messagePurpose // "standard")=="repair_verification" or (.messagePurpose // "standard")=="initial_wake")
+            and ((.messagePurpose // "standard")=="standard" or (.messagePurpose // "standard")=="watchdog_poke" or (.messagePurpose // "standard")=="repair_notice" or (.messagePurpose // "standard")=="repair_verification" or (.messagePurpose // "standard")=="initial_wake")
             and (((.routineId // "") | test("[\\r\\n]")) | not)
             and (((.projectName // "") | test("[\\r\\n]")) | not)
             and (((.projectUrl // "") | test("[\\r\\n]")) | not)
@@ -344,8 +340,10 @@ jobs:
           echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
 
-          if [ "$ok" = true ] && [ "$(jq -r '.delivery.persisted // false' "$WAKE_RESULT_PATH")" != true ]; then
-            echo "::error::Browser result claimed success without proven durable message delivery"
+          # A visible send is an attempted submission. Durable delivery is
+          # separately established by the agent's GitHub acknowledgement.
+          if [ "$ok" = true ] && [ "$(jq -r '.sendAttempted // false' "$WAKE_RESULT_PATH")" != true ]; then
+            echo "::error::Browser result claimed an X11 send without input evidence"
             echo 'ok=false' >> "$GITHUB_OUTPUT"
             ok=false
           fi
