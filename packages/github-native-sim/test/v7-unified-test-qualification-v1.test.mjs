@@ -53,7 +53,7 @@ for(const p of workflows){
 test('primary intelligence logs all stages with an external wall clock watchdog',()=>{
   const src=fs.readFileSync(path.join(root,'packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs'),'utf8');
   const wf=workflow('.github/workflows/lite-phase0-intelligence-v1.yml');
-  assert.match(wf,/timeout -s TERM -k 30s 1500s node packages\/github-native-sim\/src\/lite-phase0-intelligence-v1\.mjs/);
+  assert.match(wf,/timeout -s TERM -k 30s 3000s node scripts\/phase0-compile-watchdog-v1\.mjs primary -- node packages\/github-native-sim\/src\/lite-phase0-intelligence-v1\.mjs/);
   for(const stage of [
     'exact-source-checkout','extract-verified-archive','detect-project-root','detect-build-config',
     'compile-exact-build','slither-static-analysis','generate-sbom','generate-source-intelligence',
@@ -65,5 +65,5 @@ test('primary intelligence logs all stages with an external wall clock watchdog'
   assert.match(src,/clearInterval\(heartbeat\)/);
   assert.match(src,/compileWithPrivateCacheV1/);
   const lite=workflow('.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml');
-  assert.match(lite,/timeout -s TERM -k 30s 900s node/);
+  assert.match(lite,/timeout -s TERM -k 30s 3000s node scripts\/phase0-compile-watchdog-v1\.mjs no-telemetry -- node/);
 });
