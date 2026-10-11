@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { JsonRpcProvider, Contract } from 'ethers';
+import { JsonRpcProvider, Contract, FetchRequest } from 'ethers';
 const root = new URL('.', import.meta.url).pathname;
 const data = JSON.parse(fs.readFileSync(root + 'evidence/verified_explorer_sources_v1.json'));
 const hubAddress = '0xFbEF8941Da53EA724385B44E91ae9672061D0263';
@@ -17,7 +17,8 @@ for (const [chain, chainId, urls] of [
   let provider;
   for (const url of urls) {
     try {
-      const p = new JsonRpcProvider(url, chainId, { staticNetwork: true, batchMaxCount: 1 });
+      const request = new FetchRequest(url); request.timeout = 10000;
+      const p = new JsonRpcProvider(request, chainId, { staticNetwork: true, batchMaxCount: 1 });
       const reported = Number(await p.send('eth_chainId', []));
       if (reported !== chainId) throw new Error('wrong chain');
       await p.getBlockNumber(); provider = p; break;
