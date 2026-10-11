@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {BoostHubFraxtalRewardConverter} from "../BoostHubFraxtalRewardConverter_v1.sol";
+import {BoostHubFraxtalRewardConverter} from "../src/BoostHubFraxtalRewardConverter_v1.sol";
 
 interface IFraxtalCurveV11 {
     function coins(uint256 i) external view returns (address);
