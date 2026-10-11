@@ -86,6 +86,11 @@ on:
         required: false
         default: COMPLETE,STOPPED_BY_HUMAN
         type: string
+      diagnostic_only:
+        description: Capture visible desktop screenshots without typing or sending
+        required: false
+        default: false
+        type: boolean
       runner_retry_attempt:
         description: Internal fresh-runner retry attempt counter
         required: false
@@ -118,6 +123,7 @@ jobs:
       CHATGPT_THINKING_EFFORT: ${{ inputs.thinking_effort }}
       WORKER_ROLE: ${{ inputs.worker_role }}
       WAKE_MODE: ${{ inputs.mode }}
+      WAKE_DIAGNOSTIC_ONLY: ${{ inputs.diagnostic_only }}
       CHAT_URL: ${{ inputs.chat_url }}
       CHATGPT_STORAGE_STATE_B64: ${{ secrets.CHATGPT_STORAGE_STATE_B64 }}
       BROWSER_HEADLESS: 'false'
@@ -205,7 +211,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y x11vnc xclip xdotool
+          sudo apt-get install -y x11vnc xclip xdotool scrot
 
       - name: Record runner egress before home exit node
         shell: bash
@@ -343,6 +349,11 @@ jobs:
           echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
 
+          if [ "$ok" = true ] && [ "$(jq -r '.delivery.persisted // false' "$WAKE_RESULT_PATH")" != true ]; then
+            echo "::error::Browser result claimed success without proven durable message delivery"
+            echo 'ok=false' >> "$GITHUB_OUTPUT"
+            ok=false
+          fi
           if [ "$ok" != true ]; then
             echo "::warning::Browser wake did not complete on this runner (retryable=$retryable code=$retry_code rc=$rc)."
           fi
@@ -653,8 +664,9 @@ jobs:
         with:
           name: browser-agent-wake-evidence-${{ github.run_id }}
           path: /tmp/browser-wake-evidence-v1/
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 7
+          include-hidden-files: true
 
       - name: Cleanup browser display
         if: always()
