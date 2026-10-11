@@ -154,7 +154,7 @@ export function renderTargetedTestMatrixV1({targetDesigns=[],executionResults={}
   if(!rows.length) rows.push('| NO_TARGET | NO_CANDIDATE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NOT_APPLICABLE | NO_CANDIDATE | NO_MACHINE_EVIDENCE |');
   return `# Lite Candidate Target Matrix
 
-> **CONTROLLER-POPULATED:** Seeded with Phase-0 broad randomized baseline evidence, then extended from accepted Phase-2–5 canonical data and finalized from Phase-5 boundary machine execution. The Phase-6 reviewer consumes the completed matrix and records only semantic interpretation/disposition in the Phase-6 work form. Phase-0 baseline rows are investigative context, not pre-decided findings. Do not duplicate campaign identity or controller bookkeeping here.
+> **CONTROLLER-POPULATED:** Seeded from accepted Phase-2–5 candidate-specific target designs and finalized from Phase-5 boundary machine execution. Phase 0 supplies forked deploy/configuration evidence, not randomized simulation or telemetry. The Phase-6 reviewer consumes the completed matrix and records only semantic interpretation/disposition in the Phase-6 work form. Phase-0 baseline rows are investigative context, not pre-decided findings. Do not duplicate campaign identity or controller bookkeeping here.
 
 | Target ID | Candidate / property / hypothesis | Exact setup and attacker/actor | AI-guided attacker/exploit sequence | Expected secure outcome | Exploit/failure oracle | Request/target structural binding | Attacker/exploit simulation result | AI-guided targeted fuzz variables/bounds | Result | Evidence |
 |---|---|---|---|---|---|---|---|---|---|---|
