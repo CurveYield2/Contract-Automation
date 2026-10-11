@@ -88,8 +88,13 @@ jobs:
           max=115792089237316195423570985008687907853269984665640564039457584007913129639935
           market="$(cast call "$addr" 'MARKET_ID()(uint256)' --rpc-url http://127.0.0.1:8545)"
           value="$(cast call "$addr" 'balanceOf()(uint256)' --rpc-url http://127.0.0.1:8545)"
-          test "$market" = "$max"
-          test "$value" = 0
+          echo "Observed decoded market: $market ; zero-balance output: $value"
+          python3 - "$market" "$value" <<'PY'
+          import sys
+          def parse(s):return int(s.split()[0],0)
+          assert parse(sys.argv[1]) == 2**256-1, "wrong market identifier"
+          assert parse(sys.argv[2]) == 0, "balanceOf not zero"
+          PY
           test "$(cast code "$addr" --rpc-url http://127.0.0.1:8545)" != 0x
           printf '{"existingZeroBalanceFuse":"%s","marketId":"%s","balanceOf":0,"contractCodeVerified":true}\n' "$addr" "$market" >katana-cyavkat-v21-evidence/reuse_preflight_v1.json
           cat katana-cyavkat-v21-evidence/reuse_preflight_v1.json
