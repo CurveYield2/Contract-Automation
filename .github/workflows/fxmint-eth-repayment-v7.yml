@@ -103,7 +103,7 @@ jobs:
         run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
       - name: Discover position and verify repayment (live uses proven route only)
         env:
-          ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          ETH_RPC_URL: ${{ secrets.ETHEREUM_RPC }}
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: ${{ inputs.mode == 'collect-only' && 'collect-only' || 'simulate-only' }}
           FXMINT_ROUTE_MODE: ${{ (github.event_name == 'push' || inputs.mode == 'live-broadcast') && 'proven-only' || 'compare' }}
@@ -142,7 +142,7 @@ jobs:
         run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
       - name: Verify the single proven route then perform manually requested broadcast
         env:
-          ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          ETH_RPC_URL: ${{ secrets.ETHEREUM_RPC }}
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: live-broadcast
           FXMINT_ROUTE_MODE: proven-only
