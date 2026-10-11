@@ -711,10 +711,20 @@ export function discoverCreatorCandidatesV1({targets=[]}={}){
       const returnsAddress=(fragment.outputs??[]).some(outputContainsAddressV1);
       const namedCreator=CREATOR_NAME_RE_V1.test(String(fragment.name??''))&&(fragment.inputs??[]).some(paramContainsAddressV1);
       if(!returnsAddress&&!namedCreator)continue;
+      const q=String(target.logicalQualifiedName??target.qualifiedName??'');
+      // CurveYield factories explicitly restrict create() to the deployed
+      // PoolFactoryWrapper. Users cannot invoke them directly, irrespective
+      // of allowances, impersonated owners, or random parameter retries.
+      if(/contracts\/factories\/CurveYield\w+PoolFactory\.sol:/.test(q)&&fragment.name==='create')continue;
       rows.push({target,selected,key:functionKeyV1(target,selected),basis:returnsAddress?'RETURNS_ADDRESS':'CREATOR_NAME_WITH_ADDRESS_INPUT'});
     }
   }
-  return rows;
+  // A wrapper is the intended public entrypoint for pool creation; attempt
+  // it before generic vendor/administrative creator candidates.
+  return rows.sort((a,b)=>{
+    const preferred=x=>/CurveYieldPoolFactoryWrapper\.sol:/.test(String(x.target?.qualifiedName??''))&&/^create(?:Weighted|Stable|StableSurge)Pool$/.test(x.selected?.fragment?.name??'')?0:1;
+    return preferred(a)-preferred(b)||a.key.localeCompare(b.key);
+  });
 }
 function fundedTokensV1(valuePool={}){
   return (valuePool.tokens??[])
@@ -837,6 +847,57 @@ function creatorParamValueV1({ethers,param,attempt,actor,tokenSet,valuePool,targ
   if(/^int(?:\d+)?$/.test(type))return 0;
   if(/^bytes\d+$/.test(type))return ethers.zeroPadValue('0x',Number(type.slice(5)));
   return 0;
+}
+// CurveYield DEX v16: all Balancer factories are allowlisted for the
+// CurveYieldPoolFactoryWrapper, not direct EOAs. The wrapper requires a
+// predicted address and exact payable fee, so call its actual view functions.
+export async function buildCurveYieldWrapperCreationV1({provider,ethers,candidate,attempt=0,actor,valuePool={}}={}){
+  const source=String(candidate?.target?.logicalQualifiedName??candidate?.target?.qualifiedName??'');
+  const name=candidate?.selected?.fragment?.name??'';
+  if(!/CurveYieldPoolFactoryWrapper\.sol:CurveYieldPoolFactoryWrapper$/.test(source)||
+     !['createWeightedPool','createStablePool','createStableSurgePool'].includes(name))return null;
+  const tokens=fundedTokensV1(valuePool).filter(row=>Number(row.decimals)>=0&&Number(row.decimals)<=18);
+  if(tokens.length<2)return{status:'NOT_READY',reason:'NEED_TWO_FUNDED_ERC20_TOKENS'};
+  const i=attempt%Math.max(1,tokens.length-1);
+  const selected=tokens.slice(i,i+2).sort((a,b)=>String(a.address).toLowerCase().localeCompare(String(b.address).toLowerCase()));
+  const tokenConfigs=selected.map(row=>[ethers.getAddress(row.address),0,ethers.ZeroAddress,false]);
+  const salt=ethers.id('phase0-curveyield-pool-v1:'+name+':'+attempt+':'+candidate.target.address);
+  const inputName='Phase0 CurveYield Pool '+String(attempt+1),symbol='P0BPT';
+  const managers=[actor,actor],fee=10000000000000000n;
+  const input=name==='createWeightedPool'
+    ? [inputName,symbol,tokenConfigs,[500000000000000000n,500000000000000000n],managers,fee,ethers.ZeroAddress,false,false,salt]
+    :name==='createStablePool'
+      ? [inputName,symbol,tokenConfigs,200n,managers,fee,ethers.ZeroAddress,false,false,salt]
+      :[inputName,symbol,tokenConfigs,200n,managers,fee,false,salt];
+  const factoryWrapper=new ethers.Contract(candidate.target.address,abiRowsV1(candidate.target.artifact.abi),provider);
+  const predict=name==='createWeightedPool'?'computeWeightedPoolAddress':name==='createStablePool'?'computeStablePoolAddress':'computeStableSurgePoolAddress';
+  let expectedPool,poolCreationFeeWei;
+  try{
+    [expectedPool,poolCreationFeeWei]=await Promise.all([
+      factoryWrapper.getFunction(predict).staticCall(input),
+      factoryWrapper.getFunction('poolCreationFeeWei()').staticCall()
+    ]);
+  }catch(error){
+    return{status:'NOT_READY',reason:'WRAPPER_POOL_ADDRESS_PREDICTION_FAILED',error:String(error?.shortMessage??error?.message??error).slice(0,450)};
+  }
+  if(!/^0x[0-9a-fA-F]{40}$/.test(String(expectedPool))||expectedPool===ethers.ZeroAddress){
+    return{status:'NOT_READY',reason:'PREDICTED_POOL_ADDRESS_INVALID'};
+  }
+  const policy=[
+    actor,                    // creatorController
+    actor,                    // creatorPayoutReceiver
+    ethers.getAddress(selected[0].address), // creatorPayoutToken: registered constituent token
+    ethers.ZeroAddress,       // creatorPartnerRevenueReceiver (no partner revenue)
+    expectedPool,             // required exact predicted pool address
+    ethers.id('phase0-curveyield-splitter-v1:'+name+':'+attempt+':'+candidate.target.address),
+    [0,0,0]                  // zero creator fees are valid and omit dependency on liquidity lots
+  ];
+  // The constructor's supplied fixed ABI, not a hand-generated signature,
+  // encodes the two nested tuple arguments.
+  try{new ethers.Interface(abiRowsV1(candidate.target.artifact.abi)).encodeFunctionData(candidate.selected.signature,[input,policy]);}
+  catch(error){return{status:'NOT_READY',reason:'WRAPPER_TUPLE_ABI_MISMATCH',error:String(error?.message??error).slice(0,400)};}
+  return{status:'READY',args:[input,policy],value:BigInt(poolCreationFeeWei),tokenSet:selected.map(x=>x.address),
+    basis:'CURVEYIELD_WRAPPER_ALLOWLIST_EXACT_POOL_PREDICTION_FEE_AND_TOKEN_CONFIG',expectedPool,predictor:predict};
 }
 // Balancer v3 factories require sorted TokenConfig tuples and exact pool math
 // parameters. Generic address/uint generation cannot produce valid pools.
@@ -1048,10 +1109,10 @@ function decodedFailureV1({ethers,error,selectorIndex}){
   const decoded=decodeTelemetryRevertReasonV1({ethers,error,selectorIndex});
   return{kind:decoded.kind,selector:decoded.selector,reason:decoded.reason};
 }
-async function attemptCreatorCallV1({provider,ethers,candidate,sender,args,selectorIndex}){
+async function attemptCreatorCallV1({provider,ethers,candidate,sender,args,selectorIndex,value=0n}){
   const snapshot=await provider.send('evm_snapshot',[]);
   const iface=new ethers.Interface(abiRowsV1(candidate.target.artifact.abi));
-  const signature=candidate.selected.signature,data=iface.encodeFunctionData(signature,args),value=0n;
+  const signature=candidate.selected.signature,data=iface.encodeFunctionData(signature,args);
   let returnedValue=null;
   try{
     const raw=await provider.call({from:sender,to:candidate.target.address,data,value});
@@ -1086,15 +1147,22 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
     const attempts=[];let successes=0;
     for(let strategy=0;strategy<maxAttemptsPerCandidate&&attempts.length<maxAttemptsPerCandidate&&successes<maxSuccessesPerCandidate&&createdCount<maxCreatedContracts;strategy++){
       const actor=actorRows[deterministicIndexV1(ethers,`${candidate.key}:${strategy}`,actorRows.length)]??privileged[0]??ethers.ZeroAddress;
-      const built=buildCreatorArgumentsV1({ethers,candidate,attempt:strategy,actor,valuePool,targets});
-      const senders=[actor],base=await attemptCreatorCallV1({provider,ethers,candidate,sender:actor,args:built.args,selectorIndex});
+      const wrapper=await buildCurveYieldWrapperCreationV1({provider,ethers,candidate,attempt:strategy,actor,valuePool});
+      const built=wrapper===null?buildCreatorArgumentsV1({ethers,candidate,attempt:strategy,actor,valuePool,targets}):wrapper;
+      if(built.status==='NOT_READY'){
+        attempts.push({attempt:attempts.length+1,strategy,sender:actor,status:'PROTOCOL_INPUTS_UNAVAILABLE',reason:built.reason,error:built.error??null});
+        // Don't spend all 24 attempts on a structural missing dependency.
+        if(/PREDICTION_FAILED|NEED_TWO|TUPLE_ABI_MISMATCH/.test(built.reason))break;
+        continue;
+      }
+      const senders=[actor],base=await attemptCreatorCallV1({provider,ethers,candidate,sender:actor,args:built.args,selectorIndex,value:built.value??0n});
       attempts.push({attempt:attempts.length+1,strategy,sender:actor,args:normalizeEvidenceValueV1(built.args),tokenSet:built.tokenSet,status:base.status,decoded:base.decoded??null,error:base.error??null});
       let result=base,sender=actor;
       if(base.status!=='PASS'&&authorizationLookingV1(base.decoded)){
         for(const privilegedSender of privileged){
           if(attempts.length>=maxAttemptsPerCandidate)break;
           if(privilegedSender.toLowerCase()===actor.toLowerCase())continue;
-          const retry=await attemptCreatorCallV1({provider,ethers,candidate,sender:privilegedSender,args:built.args,selectorIndex});
+          const retry=await attemptCreatorCallV1({provider,ethers,candidate,sender:privilegedSender,args:built.args,selectorIndex,value:built.value??0n});
           attempts.push({attempt:attempts.length+1,strategy,sender:privilegedSender,args:normalizeEvidenceValueV1(built.args),tokenSet:built.tokenSet,status:retry.status,decoded:retry.decoded??null,error:retry.error??null,authorizationRetry:true});
           if(retry.status==='PASS'){result=retry;sender=privilegedSender;break;}
         }
@@ -1126,7 +1194,7 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
       creations.push({
         functionKey:candidate.key,target:candidate.target.qualifiedName,address:candidate.target.address,
         function:candidate.selected.signature,basis:candidate.basis,strategy,sender,
-        argsSummary:normalizeEvidenceValueV1(built.args),
+        argsSummary:normalizeEvidenceValueV1(built.args),valueWei:String(built.value??0n),
         receipt:{transactionHash:result.transactionHash,blockNumber:result.receipt?.blockNumber??null,status:Number(result.receipt?.status??0),gasUsed:result.receipt?.gasUsed?.toString?.()??null},
         createdAddresses:newAddresses,boundArtifacts:bound
       });
