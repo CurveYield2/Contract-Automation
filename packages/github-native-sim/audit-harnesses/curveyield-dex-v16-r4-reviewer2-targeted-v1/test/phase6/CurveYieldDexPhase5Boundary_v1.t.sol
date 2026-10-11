@@ -104,13 +104,6 @@ contract CurveYieldDexPhase5BoundaryV1 {
         require(token.balanceOf(STORAGE)==fee,"P4-CAND-001: FALLBACK_CUSTODY");
         require(token.balanceOf(address(router))==0,"P4-CAND-001: RESIDUE");
     }
-    function testFuzz_P4Cand001_BothArbitraryCallers(uint96 raw) public {
-        uint256 fee=uint256(raw)%1e22+1;
-        (,,AuditTokenV1 ignoreToken)=_settlementFixture(fee);
-        // The actual contract has no caller modifier, so externally-originated
-        // calls from any actor relay as address(keeper).
-        ignoreToken; // Avoid declaring an unneeded out-of-fixture mock balance.
-    }
     function _lotFixture(uint256 amount) internal returns(PermanentLiquidityVaultV2 pol) {
         RouteRegistry routes=new RouteRegistry(address(this));
         AuditTokenV1 bpt=new AuditTokenV1();
