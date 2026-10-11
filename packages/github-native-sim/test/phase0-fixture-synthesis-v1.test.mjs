@@ -816,3 +816,102 @@ function stage4Artifact(name,compiled){
 function stage4Deployment(name,address){
   return{qualifiedName:'Stage4.sol:'+name,contractName:name,sourceName:'Stage4.sol',address};
 }
+
+
+test('Stage-4 resolves callback-only callers from a decoded address and remembers the sender',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage4Contracts(),vault=await deployArtifact(provider,compiled.VaultMarker);
+    const callback=await deployArtifact(provider,compiled.CallbackOnly,[await vault.getAddress()]);
+    const accounts=await provider.send('eth_accounts',[]);
+    const artifact=stage4Artifact('CallbackOnly',compiled);
+    const target=targetObjects(ethers,[artifact],[stage4Deployment('CallbackOnly',await callback.getAddress())],{})[0];
+    const selected=target.functions.find(row=>row.signature==='callback(uint256)');
+    const iface=new ethers.Interface(artifact.abi),callerState=new Map(),weights=new Map();
+    const first=await resolveTelemetryCallerContextV2({
+      provider,ethers,target,selected,iface,args:[1n],value:0n,defaultSender:accounts[1],
+      targets:[target],valuePool:{associations:{},privileged:[]},callerState,weightMultipliers:weights
+    });
+    assert.equal(first.success,true);
+    assert.equal(first.resolution,'IMPERSONATED_CALLER:'+ethers.getAddress(await vault.getAddress()));
+    const second=await resolveTelemetryCallerContextV2({
+      provider,ethers,target,selected,iface,args:[2n],value:0n,defaultSender:accounts[2],
+      targets:[target],valuePool:{associations:{},privileged:[]},callerState,weightMultipliers:weights
+    });
+    assert.equal(second.success,true);
+    assert.equal(second.reused,true);
+    assert.equal(second.sender.toLowerCase(),(await vault.getAddress()).toLowerCase());
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-4 uses a target association as callback caller when the revert has no address argument',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage4Contracts(),known=await deployArtifact(provider,compiled.KnownCaller);
+    const gate=await deployArtifact(provider,compiled.AssociationGate,[await known.getAddress()]);
+    const accounts=await provider.send('eth_accounts',[]);
+    const artifacts=[stage4Artifact('KnownCaller',compiled),stage4Artifact('AssociationGate',compiled)];
+    const deployed=[stage4Deployment('KnownCaller',await known.getAddress()),stage4Deployment('AssociationGate',await gate.getAddress())];
+    const targets=targetObjects(ethers,artifacts,deployed,{});
+    const target=targets.find(row=>row.qualifiedName==='Stage4.sol:AssociationGate');
+    const selected=target.functions.find(row=>row.signature==='callback()'),iface=new ethers.Interface(target.artifact.abi);
+    const knownAddress=ethers.getAddress(await known.getAddress()),gateAddress=ethers.getAddress(await gate.getAddress());
+    const result=await resolveTelemetryCallerContextV2({
+      provider,ethers,target,selected,iface,args:[],value:0n,defaultSender:accounts[1],targets,
+      valuePool:{associations:{[knownAddress]:new Set([gateAddress])},privileged:[]},
+      callerState:new Map(),weightMultipliers:new Map()
+    });
+    assert.equal(result.success,true);
+    assert.equal(result.resolution,'IMPERSONATED_CALLER:'+knownAddress);
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-4 retries auth-gated functions with privileged callers',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage4Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const ownerOnly=await deployArtifact(provider,compiled.OwnerOnly,[accounts[0]]);
+    const artifact=stage4Artifact('OwnerOnly',compiled),target=targetObjects(ethers,[artifact],[stage4Deployment('OwnerOnly',await ownerOnly.getAddress())],{})[0];
+    const selected=target.functions.find(row=>row.signature==='ownerOnly()'),iface=new ethers.Interface(artifact.abi);
+    const result=await resolveTelemetryCallerContextV2({
+      provider,ethers,target,selected,iface,args:[],value:0n,defaultSender:accounts[1],targets:[target],
+      valuePool:{associations:{},privileged:[accounts[0]]},callerState:new Map(),weightMultipliers:new Map()
+    });
+    assert.equal(result.success,true);
+    assert.equal(result.resolution,'PRIVILEGED:'+ethers.getAddress(accounts[0]));
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-4 unresolved context is kept at ten-percent selection weight instead of excluded',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage4Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const gate=await deployArtifact(provider,compiled.UnresolvedGate);
+    const artifact=stage4Artifact('UnresolvedGate',compiled),target=targetObjects(ethers,[artifact],[stage4Deployment('UnresolvedGate',await gate.getAddress())],{})[0];
+    const selected=target.functions.find(row=>row.signature==='callback()'),iface=new ethers.Interface(artifact.abi),weights=new Map();
+    const result=await resolveTelemetryCallerContextV2({
+      provider,ethers,target,selected,iface,args:[],value:0n,defaultSender:accounts[1],targets:[target],
+      valuePool:{associations:{},privileged:[]},callerState:new Map(),weightMultipliers:weights
+    });
+    const key=`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${selected.signature}`;
+    assert.equal(result.success,false);
+    assert.equal(result.resolution,'UNRESOLVED');
+    assert.equal(weights.get(key),0.1);
+    const picked=pickFn(target,()=>0,'OTHER_STATE_CHANGE',new Map(),new Set(),weights);
+    assert.equal(picked.selectionKey,key);
+    assert.equal(picked.selectionWeightMultiplier,0.1);
+    assert.equal(picked.feedbackWeight,0.1);
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
