@@ -115,10 +115,15 @@ jobs:
           set -euo pipefail
           cd "$PROJECT_DIR"
           npx --no-install hardhat compile --config "$SOURCE_CONFIG" 2>&1 | tee "$GITHUB_WORKSPACE/.source-zip-smoke/compile.log"
-          test -d artifacts || { echo "::error::No Hardhat artifacts produced"; exit 1; }
+          # Respect paths.artifacts in each archived project's Hardhat config.
+          # Hardhat can compile successfully into a nonstandard build directory.
+          SOURCE_ARTIFACT_DIR="$(HARDHAT_CONFIG="$SOURCE_CONFIG" node -e 'process.stdout.write(require("hardhat").config.paths.artifacts)')"
+          export SOURCE_ARTIFACT_DIR
+          test -d "$SOURCE_ARTIFACT_DIR" || { echo "::error::Hardhat artifact directory is missing: $SOURCE_ARTIFACT_DIR"; exit 1; }
+          echo "Hardhat artifact directory: $SOURCE_ARTIFACT_DIR"
           python3 - <<'PY'
           import json, pathlib, os
-          root=pathlib.Path("artifacts")
+          root=pathlib.Path(os.environ["SOURCE_ARTIFACT_DIR"])
           contracts=[]
           for f in root.rglob("*.json"):
               try:
@@ -156,3 +161,4 @@ jobs:
           name: source-zip-smoke-${{ matrix.label }}-${{ github.run_id }}
           path: .source-zip-smoke/
           if-no-files-found: warn
+          include-hidden-files: true
