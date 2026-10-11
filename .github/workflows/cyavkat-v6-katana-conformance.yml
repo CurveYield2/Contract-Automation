@@ -1,0 +1,106 @@
+name: cyavKAT V6 Katana Anvil Conformance
+on:
+  push:
+    branches:
+      - sim/cyavkat-v6-conformance-v1
+    paths:
+      - .github/workflows/cyavkat-v6-katana-conformance.yml
+      - packages/github-native-sim/audit-harnesses/cyavkat-v6/inputs/cyavKAT_signing_layer_v6.zip
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cyavkat-v6-katana-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cyavkat-v6:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout exact test branch
+        uses: actions/checkout@v4
+      - name: Verify and unpack exact V6 archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT=packages/github-native-sim/audit-harnesses/cyavkat-v6/inputs/cyavKAT_signing_layer_v6.zip
+          echo "de2daba0e1395e38f5bc3b8e914392c7fd5de0588be28d9b66316a8acab40aa0  $INPUT" | sha256sum -c -
+          mkdir -p .cyavkat-v6
+          unzip -q "$INPUT" -d .cyavkat-v6
+          test -f .cyavkat-v6/cyavKAT/upgrade/foundry.toml
+          test -f .cyavkat-v6/cyavKAT/upgrade/test/fork/ConformanceFork.t.sol
+          test -f .cyavkat-v6/cyavKAT/upgrade/src/katana/CurveYieldQuestSignerConfigFuse.sol
+          echo "Source: V6 SHA256 de2daba0e1395e38f5bc3b8e914392c7fd5de0588be28d9b66316a8acab40aa0" >> "$GITHUB_STEP_SUMMARY"
+      - name: Install Foundry in GitHub-hosted environment
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Run source conformance and Merkl regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .cyavkat-test-results
+          python3 .cyavkat-v6/cyavKAT/upgrade/scripts/check_conformance_source_v6.py 2>&1 | tee .cyavkat-test-results/static.log
+          python3 -m unittest discover -s .cyavkat-v6/cyavKAT/upgrade/scripts -p 'test_merkl_preflight_v6.py' -v 2>&1 | tee .cyavkat-test-results/merkl.log
+      - name: Start local ephemeral Katana Anvil fork
+        shell: bash
+        run: |
+          set -euo pipefail
+          UPSTREAM=https://katana.drpc.org/
+          HEIGHT=$(cast block-number --rpc-url "$UPSTREAM")
+          test "$HEIGHT" -gt 100
+          PIN=$((HEIGHT-30))
+          echo "Pinned Katana block $PIN from upstream height $HEIGHT"
+          nohup anvil --fork-url "$UPSTREAM" --fork-block-number "$PIN" --chain-id 747474 --host 127.0.0.1 --port 8545 > .cyavkat-test-results/anvil.log 2>&1 < /dev/null &
+          echo $! > .cyavkat-test-results/anvil.pid
+          for attempt in $(seq 1 50); do
+            if cast block-number --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          cast block-number --rpc-url http://127.0.0.1:8545
+          echo "KATANA_RPC_URL=http://127.0.0.1:8545" >> "$GITHUB_ENV"
+          echo "FORK_BLOCK=$PIN" >> "$GITHUB_ENV"
+          echo "Local Anvil fork: Katana block $PIN" >> "$GITHUB_STEP_SUMMARY"
+      - name: Compile exact V6 source with Forge
+        id: build
+        shell: bash
+        working-directory: .cyavkat-v6/cyavKAT/upgrade
+        run: |
+          set -o pipefail
+          forge build --sizes 2>&1 | tee "$GITHUB_WORKSPACE/.cyavkat-test-results/build.log"
+      - name: Run all V6 unit and integration tests
+        id: unit
+        if: steps.build.outcome == 'success'
+        shell: bash
+        working-directory: .cyavkat-v6/cyavKAT/upgrade
+        run: |
+          set -o pipefail
+          forge test --no-match-path 'test/fork/*' -vv 2>&1 | tee "$GITHUB_WORKSPACE/.cyavkat-test-results/unit.log"
+      - name: Run V6 Katana fork conformance tests
+        id: fork
+        if: steps.build.outcome == 'success'
+        shell: bash
+        working-directory: .cyavkat-v6/cyavKAT/upgrade
+        run: |
+          set -o pipefail
+          forge test --match-path 'test/fork/*' -vv 2>&1 | tee "$GITHUB_WORKSPACE/.cyavkat-test-results/fork.log"
+      - name: Save complete source-level and fork test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyavkat-v6-katana-tests
+          path: .cyavkat-test-results/
+          retention-days: 14
+      - name: Report outcomes
+        if: always()
+        shell: bash
+        env:
+          BUILD: ${{ steps.build.outcome }}
+          UNIT: ${{ steps.unit.outcome }}
+          FORK: ${{ steps.fork.outcome }}
+        run: |
+          echo "Forge build: $BUILD; unit and integration: $UNIT; fork: $FORK" | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$BUILD" = "success" && test "$UNIT" = "success" && test "$FORK" = "success"
