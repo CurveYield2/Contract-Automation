@@ -297,7 +297,7 @@ jobs:
             [ -n "$gate_ref" ] || gate_ref=main
             safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
             registration_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json?ref=main"
-            registration_b64="$(GH_TOKEN="$GITHUB_TOKEN" gh api "$registration_api" --jq '.content' 2>/dev/null || true)"
+            registration_b64="$(GH_TOKEN="${{ github.token }}" gh api "$registration_api" --jq '.content' 2>/dev/null || true)"
             registration_json="$(printf '%s' "$registration_b64" | base64 -d 2>/dev/null || true)"
             reviewer="$(printf '%s' "$registration_json" | jq -r --arg chat "$CHAT_URL" '.agentChats // {} | to_entries[] | select(.value==$chat) | .key' 2>/dev/null || true)"
             gate_path="${{ inputs.gate_state_path }}"
@@ -615,6 +615,7 @@ jobs:
           CURRENT_GATE_STATE_PATH: ${{ inputs.gate_state_path }}
           CURRENT_GATE_POINTER_PATH: ${{ inputs.gate_active_pointer_path }}
           WAKE_ACK_ID: ${{ env.WAKE_ACK_ID }}
+          WAKE_ACK_REVIEWER: ${{ env.WAKE_ACK_REVIEWER }}
           ACKNOWLEDGEMENT_VERIFIED: ${{ steps.receipt.outputs.verified }}
         shell: bash
         run: |
@@ -623,7 +624,9 @@ jobs:
           api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
           gh api "$api?ref=main" --jq '.content' | base64 -d > /tmp/existing-chat-registration.json
           delivered_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          if [ -z "$CURRENT_REVIEWER" ]; then
+          if [ -n "$WAKE_ACK_REVIEWER" ]; then
+            CURRENT_REVIEWER="$WAKE_ACK_REVIEWER"
+          elif [ -z "$CURRENT_REVIEWER" ]; then
             CURRENT_REVIEWER="$(jq -r '.activeChat.name // .activeAssignment.reviewer // empty' /tmp/existing-chat-registration.json)"
           fi
 
