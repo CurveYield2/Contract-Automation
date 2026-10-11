@@ -1,0 +1,55 @@
+name: Phase 0 Deployment Only Regression v1
+on:
+  push:
+    branches: [phase0-deployment-only-v1-20261011, main]
+    paths:
+      - '.github/workflows/phase0-deploy-only-regression-v1.yml'
+      - '.github/workflows/lite-phase0-*.yml'
+      - '.github/actions/setup-phase0-deployment-only-toolchain-v1/**'
+      - 'scripts/lite-phase0-*.mjs'
+      - 'scripts/run-phase0-fork-deploy-config-v1.mjs'
+      - 'scripts/write-phase0-fork-deploy-outputs-v1.mjs'
+      - 'scripts/lib/lite-phase-prefill-v1.mjs'
+      - 'scripts/lite-phase-packet-controller-v1.mjs'
+      - 'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'
+      - 'packages/github-native-sim/test/phase0-*.test.mjs'
+      - 'packages/github-native-sim/test/lite-phase0-*.test.mjs'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/lite-phase0-*.yml'
+      - 'scripts/lite-phase0-*.mjs'
+      - 'packages/github-native-sim/test/phase0-*.test.mjs'
+permissions:
+  contents: read
+jobs:
+  verify-deploy-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned dependencies inside GitHub runner
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check changed JS module syntax
+        run: |
+          node --check packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs
+          node --check scripts/run-phase0-fork-deploy-config-v1.mjs
+          node --check scripts/write-phase0-fork-deploy-outputs-v1.mjs
+          node --check scripts/lite-phase0-finalize-v1.mjs
+          node --check scripts/lite-phase0-finalize-no-telemetry-v1.mjs
+          node --check scripts/lib/lite-phase-prefill-v1.mjs
+      - name: Run Phase 0 deploy/config migration regression tests
+        run: |
+          node --test \
+            packages/github-native-sim/test/lite-phase0-automation-v2.test.mjs \
+            packages/github-native-sim/test/phase0-v2-consumers.test.mjs \
+            packages/github-native-sim/test/phase0-v2-wiring.test.mjs \
+            packages/github-native-sim/test/phase0-telemetry-smoke-guardrails-v1.test.mjs \
+            packages/github-native-sim/test/phase0-no-telemetry-active-watchdog-v1.test.mjs \
+            packages/github-native-sim/test/phase0-optimization4-v1.test.mjs \
+            packages/github-native-sim/test/phase0-randomized-simulation-v1.test.mjs \
+            packages/github-native-sim/test/lite-phase-packet-controller-integration-v1.test.mjs
