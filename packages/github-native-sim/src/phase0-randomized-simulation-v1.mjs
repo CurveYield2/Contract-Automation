@@ -12,7 +12,7 @@ import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
-import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1,executeCreatorSynthesisV1,approveFixtureSpendersV1} from './phase0-fixture-synthesis-v1.mjs';
+import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1,executeCreatorSynthesisV1,approveFixtureSpendersV1,refreshCreatedAssociationsV1,executeActivationSynthesisV1} from './phase0-fixture-synthesis-v1.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
 export const PHASE0_MEDUSA_MIN_CALLS_V1=100001;
@@ -1796,7 +1796,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       });
     }catch(error){fixtureFunding={holders:[],spenders:[],slotResults:[],rpcMutations:[],transactionReceipts:[],receiptCounts:{},permit2:null,gaps:[{type:'ACTOR_FUNDING_FAILED',message:String(error?.message??error).slice(0,1200)}]};}
     const stage2Holders=[...actors,...PHASE0_MEDUSA_SENDERS_V1];
-    const stage2Creations=[],stage2CreationGaps=[],stage2Approvals=[],stage2CreatedTokenFunding=[],stage2Rounds=[];
+    const stage2Creations=[],stage2CreationGaps=[],stage2Approvals=[],stage2CreatedTokenFunding=[],stage2Rounds=[],stage2CreatedDeployments=[];
     let pendingCreatorTargets=[...targets],stage2Round=0;
     while(pendingCreatorTargets.length&&(valuePool.created?.length??0)<20&&stage2Round<20){
       stage2Round++;
@@ -1813,6 +1813,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       }
       stage2Creations.push(...creatorRound.creations);
       stage2CreationGaps.push(...creatorRound.creationGaps);
+      stage2CreatedDeployments.push(...creatorRound.createdDeployments);
       for(const synthetic of creatorRound.syntheticArtifacts){
         const q=`${synthetic.sourceName}:${synthetic.contractName}`;
         if(!artifacts.some(a=>`${a.sourceName}:${a.contractName}`===q))artifacts.push(synthetic);
@@ -1859,17 +1860,53 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       pendingCreatorTargets=admitted;
       if(!creatorRound.creations.length&&!admitted.length)break;
     }
+    let stage3AssociationHarvest={receipts:[],gaps:[],newTokens:[]},stage3AssociationTokenFunding=null,stage3Activation={activations:[],activationGaps:[],createdContracts:valuePool.created?.length??0};
+    if((valuePool.created?.length??0)>0){
+      try{
+        stage3AssociationHarvest=await refreshCreatedAssociationsV1({
+          provider,ethers,createdAddresses:valuePool.created,targets,
+          bindings:stage2CreatedDeployments,artifacts,valuePool
+        });
+      }catch(error){
+        stage3AssociationHarvest={receipts:[],gaps:[{type:'CREATED_ASSOCIATION_REFRESH_FAILED',message:String(error?.message??error).slice(0,1600)}],newTokens:[]};
+      }
+      if(stage3AssociationHarvest.newTokens.length){
+        try{
+          stage3AssociationTokenFunding=await fundActorsV1({
+            provider,ethers,tokens:stage3AssociationHarvest.newTokens,holders:stage2Holders,
+            spenders:targets.map(target=>target.address)
+          });
+        }catch(error){
+          stage3AssociationTokenFunding={holders:stage2Holders,spenders:targets.map(target=>target.address),slotResults:[],rpcMutations:[],transactionReceipts:[],receiptCounts:{},permit2:null,gaps:[{type:'STAGE3_ASSOCIATION_TOKEN_FUNDING_FAILED',message:String(error?.message??error).slice(0,1600)}]};
+        }
+      }
+      try{
+        stage3Activation=await executeActivationSynthesisV1({
+          provider,ethers,targets,actors,valuePool,artifacts,createdAddresses:valuePool.created,maxAttemptsPerCreated:30
+        });
+      }catch(error){
+        stage3Activation={activations:[],activationGaps:[{type:'ACTIVATION_SYNTHESIS_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1600)}],createdContracts:valuePool.created.length};
+      }
+    }
     const serializedValuePool=serializeValuePoolV1(valuePool);
     const fixtureEvidence={
       schemaVersion:'curveyield-phase0-fixture-synthesis-v1',
-      stage:'STAGE_2_CREATOR_DISCOVERY_AND_EXECUTION',
+      stage:'STAGE_3_INITIALIZATION_AND_ACTIVATION',
       valuePool:serializedValuePool,
       funding:fixtureFunding,
       creations:stage2Creations,
       creationGaps:stage2CreationGaps,
       creatorRounds:stage2Rounds,
       createdSpenderApprovals:stage2Approvals,
-      createdTokenFunding:stage2CreatedTokenFunding
+      createdTokenFunding:stage2CreatedTokenFunding,
+      associationHarvest:{
+        receipts:stage3AssociationHarvest.receipts,
+        gaps:stage3AssociationHarvest.gaps,
+        newTokens:stage3AssociationHarvest.newTokens
+      },
+      associationTokenFunding:stage3AssociationTokenFunding,
+      activations:stage3Activation.activations,
+      activationGaps:stage3Activation.activationGaps
     };
     await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
     const fixtureSynthesis={
@@ -1889,7 +1926,19 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       creationGaps:stage2CreationGaps,
       creatorRounds:stage2Rounds,
       createdSpenderApprovals:stage2Approvals.map(row=>({round:row.round,spenders:row.spenders,receiptCounts:row.receiptCounts,gaps:row.gaps})),
-      createdTokenFunding:stage2CreatedTokenFunding.map(row=>({round:row.round,slotResults:row.slotResults,receiptCounts:row.receiptCounts,gaps:row.gaps}))
+      createdTokenFunding:stage2CreatedTokenFunding.map(row=>({round:row.round,slotResults:row.slotResults,receiptCounts:row.receiptCounts,gaps:row.gaps})),
+      associationHarvest:{
+        receiptCount:stage3AssociationHarvest.receipts.length,
+        gaps:stage3AssociationHarvest.gaps,
+        newTokens:stage3AssociationHarvest.newTokens
+      },
+      associationTokenFunding:stage3AssociationTokenFunding?{
+        slotResults:stage3AssociationTokenFunding.slotResults,
+        receiptCounts:stage3AssociationTokenFunding.receiptCounts,
+        gaps:stage3AssociationTokenFunding.gaps
+      }:null,
+      activations:stage3Activation.activations,
+      activationGaps:stage3Activation.activationGaps
     };
     const baselineBlock=Number(await provider.getBlockNumber()),baselineHash=(await provider.getBlock(baselineBlock))?.hash??null,baselineSnapshot=await provider.send('evm_snapshot',[]);
     const deploymentComplete=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;
