@@ -129,6 +129,7 @@ jobs:
           fi
           bcast P0_00_DeployGateConfig
           bcast P2_01_Deploy
+          bcast P2_02_ConfigureVault
           echo "FORK_DEPLOYMENT_SUCCESS=true" >>"$GITHUB_ENV"
       - name: Verify reused address and excluded unsafe candidates
         shell: bash
@@ -140,6 +141,12 @@ jobs:
           jq -e '.zeroBalanceFlash != .zeroBalanceUtility' "$p"
           jq -e '.burnRequestFeeFuse != "0x44D368e85f419C59aC01b7270D234d8BF19Df36e"' "$p"
           jq -e '.lendSupplyFuse == "0x1af82A748cd81958f419F7aCD0D12Ec2372BEa98"' "$p"
+          vault=0xEd83daf48429cfb2C650Fd721b9241e180fd4548
+          market=115792089237316195423570985008687907853269984665640564039457584007913129639935
+          fuse=0xE3E28F04499470bAc1dAc842aEe424a185d14D42
+          supported="$(cast call "$vault" 'isBalanceFuseSupported(uint256,address)(bool)' "$market" "$fuse" --rpc-url http://127.0.0.1:8545)"
+          echo "Existing max-market fuse registered: $supported"
+          test "$supported" = true
           cp "$p" katana-cyavkat-v21-evidence/reuse_test_phase2_deployments.json
           echo "PASS: reused market-max zero balance fuse and preexisting MorphoSupplyFuse on Katana Anvil"
       - name: Write per-contract receipts and ETH deployment costs
