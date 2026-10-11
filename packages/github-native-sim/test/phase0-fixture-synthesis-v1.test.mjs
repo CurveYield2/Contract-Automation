@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import os from 'node:os';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import solc from 'solc';
 import * as ethers from 'ethers';
 import {buildCompiledArtifactErrorSelectorIndexV1,decodeTelemetryRevertReasonV1,topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAmountV1,discoverCreatorCandidatesV1,buildCreatorArgumentsV1,executeCreatorSynthesisV1,bindCreatedContractV1,refreshCreatedAssociationsV1,discoverActivationCandidatesV1,buildActivationArgumentsV1,executeActivationSynthesisV1} from '../src/phase0-fixture-synthesis-v1.mjs';
-import {renderMedusaRouterV2,buildMedusaConfigV2} from '../src/phase0-randomized-simulation-v1.mjs';
+import {renderMedusaRouterV2,buildMedusaConfigV2,targetObjects,augmentDelegateProxyContextsV2,resolveTelemetryCallerContextV2,pickFn,runTelemetry} from '../src/phase0-randomized-simulation-v1.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 
