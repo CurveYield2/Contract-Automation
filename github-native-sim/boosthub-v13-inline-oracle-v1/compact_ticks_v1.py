@@ -3,10 +3,10 @@ import sys,re
 p=Path(sys.argv[1])
 s=p.read_text()
 assert 'library BHTickMath {' in s
-first=re.search(r'absTick & (0x[0-9a-f]+) != 0 \\? (0x[0-9a-f]+) : (0x[0-9a-f]+)',s)
+first=re.search(r'absTick & (0x[0-9a-f]+) != 0 \? (0x[0-9a-f]+) : (0x[0-9a-f]+)',s)
 assert first and first.group(1)=='0x1'
 values=[first.group(2)]
-values+=re.findall(r'if \\(absTick & 0x[0-9a-f]+ != 0\\) ratio = \\(ratio \\* (0x[0-9a-f]+)\\)',s)
+values+=re.findall(r'if \(absTick & 0x[0-9a-f]+ != 0\) ratio = \(ratio \* (0x[0-9a-f]+)\)',s)
 assert len(values)==20
 literal=''.join(x[2:].zfill(32) for x in values)
 assert len(literal)==640
