@@ -1,4 +1,4 @@
-name: Package BoostHub dual-chain deployment v1
+name: Package BoostHub stack and Fraxtal helper v2
 on:
   push:
     branches: ['package-boosthub-dual-chain-v1']
@@ -52,12 +52,12 @@ jobs:
           test "$(git -C .controller/audits/functional-verification/boosthub-four-contracts-v1/lib/openzeppelin-contracts rev-parse HEAD)" = c64a1edb67b6e3f4a15cca8909c9482ad33a02b0
       - name: Restore verified original dependencies and compile Vyper
         run: python3 github-native-sim/boosthub-dual-chain-package-v1/prepare_build_v1.py
-      - name: Demonstrate missing Fraxtal compatibility before patching
+      - name: Verify the updated Hub, both helpers and staking together
         working-directory: .controller/audits/functional-verification/boosthub-four-contracts-v1
         run: |
           cp "$GITHUB_WORKSPACE/github-native-sim/boosthub-dual-chain-package-v1/FraxtalCompatibility_v1.t.sol" test/FraxtalCompatibility_v1.t.sol
           set -o pipefail
-          forge test --match-contract FraxtalCompatibilityTest -vv 2>&1 | tee "$GITHUB_WORKSPACE/github-native-sim/boosthub-dual-chain-package-v1/evidence/fraxtal_baseline_red_v1.txt"
+          forge test -vv 2>&1 | tee "$GITHUB_WORKSPACE/github-native-sim/boosthub-dual-chain-package-v1/evidence/full_stack_green_v2.txt"
       - name: Run deployment acceptance tests
         run: node --test github-native-sim/boosthub-dual-chain-package-v1/runner.test_v1.mjs
       - name: Publish retrieval evidence

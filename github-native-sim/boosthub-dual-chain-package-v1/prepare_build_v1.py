@@ -25,6 +25,9 @@ expected={
 for relative,digest in expected.items():
     p=controller/relative;assert hashlib.sha256(p.read_bytes()).hexdigest()==digest
     target=out/relative;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(p,target)
+for source,target in [('BoostHub_v12.sol','BoostHub.sol'),('StakeDaoFraxtalSdFxsUrdClaimExecutor_v5.sol','StakeDaoFraxtalSdFxsUrdClaimExecutor_v5.sol')]:
+    for directory in [controller/'contracts',out/'contracts']:
+        shutil.copyfile(root/'contracts'/source,directory/target)
 shutil.copyfile(root/'contracts/BoostHubDeploymentFactory_v1.sol',out/'contracts/BoostHubDeploymentFactory_v1.sol')
 shutil.copytree(root/'deployment',out/'deployment',dirs_exist_ok=True)
 (out/'artifacts_v1').mkdir(exist_ok=True)
@@ -46,7 +49,9 @@ provenance={'version':'v1','requestedEthereumExplorer':source_data['ethereum']['
  'dependencies':records,'contractSourceSha256':expected,
  'openzeppelin':{'version':'5.4.0','commit':'c64a1edb67b6e3f4a15cca8909c9482ad33a02b0'},
  'solmate':{'commit':'89365b880c4f3c786bdd453d4b8e8fe410344a69'},
- 'sourceVersions':{'BoostHub':'v11','IBoostHub':'v5','StakeDaoMerkleClaimExecutor':'v8','BoostHubStaking':'v20','BoostHubDeploymentFactory':'v1'}}
+ 'baseContractSourceSha256':expected,
+ 'sourceVersions':{'BoostHub':'v12','IBoostHub':'v5','StakeDaoMerkleClaimExecutor':'v8','StakeDaoFraxtalSdFxsUrdClaimExecutor':'v5','BoostHubStaking':'v20','BoostHubDeploymentFactory':'v1'}}
+provenance['contractSourceSha256']={str(p.relative_to(out)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (out/'contracts').rglob('*') if p.is_file()}
 (out/'dependency_provenance_v1.json').write_text(json.dumps(provenance,indent=2))
 (out/'live_stack_snapshot_v1.json').write_text(json.dumps(snapshot,indent=2))
-print('Original dependencies recovered; four delivered sources preserved byte-for-byte; Vyper compiled')
+print('Verified original dependencies restored; Hub v12 and Fraxtal helper v5 added; Vyper compiled')
