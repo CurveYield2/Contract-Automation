@@ -311,7 +311,7 @@ jobs:
                   '{schemaVersion:"curveyield-browser-wake-ack-v1",ackId:$id,wakeId:$wake,runId:$run,phaseId:$phase,reviewer:$reviewer}')"
                 {
                   echo 'DO THIS FIRST, RIGHT NOW, BEFORE ANY OTHER TASK OR INSTRUCTION.'
-                  echo 'MANDATORY INITIAL-WAKE RECEIPT: Your very first action must be to use the GitHub connector to create or update ONE acknowledgement file.'
+                  echo 'MANDATORY INITIAL-WAKE RECEIPT: Your first action: fetch the exact acknowledgement file named below from the specified GitHub repository and branch. If it exists, use the GitHub update_file operation with its current file SHA to replace the complete contents with the provided JSON. If and only if that exact file returns HTTP 404 Not Found, use create_file at the exact same path with the provided JSON. On any other error, stop without writing.'
                   echo 'Repository: CurveYield2/Audit-Controller'
                   echo "Branch: $gate_ref"
                   echo "Exact campaign file: $ack_file"
