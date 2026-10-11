@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import os from 'node:os';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import solc from 'solc';
 import * as ethers from 'ethers';
-import {buildCompiledArtifactErrorSelectorIndexV1,decodeTelemetryRevertReasonV1,topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAmountV1,discoverCreatorCandidatesV1,buildCreatorArgumentsV1,executeCreatorSynthesisV1,bindCreatedContractV1} from '../src/phase0-fixture-synthesis-v1.mjs';
-import {renderMedusaRouterV2,buildMedusaConfigV2} from '../src/phase0-randomized-simulation-v1.mjs';
+import {buildCompiledArtifactErrorSelectorIndexV1,decodeTelemetryRevertReasonV1,topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAmountV1,discoverCreatorCandidatesV1,buildCreatorArgumentsV1,executeCreatorSynthesisV1,bindCreatedContractV1,refreshCreatedAssociationsV1,discoverActivationCandidatesV1,buildActivationArgumentsV1,executeActivationSynthesisV1} from '../src/phase0-fixture-synthesis-v1.mjs';
+import {renderMedusaRouterV2,buildMedusaConfigV2,targetObjects,augmentDelegateProxyContextsV2,resolveTelemetryCallerContextV2,pickFn,runTelemetry,shouldObserveAccountingCallV1} from '../src/phase0-randomized-simulation-v1.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 
@@ -444,7 +445,7 @@ test('Stage-2 runner executes creator synthesis before the shared Medusa/telemet
   assert.match(runner,/maxAttemptsPerCandidate:24,maxSuccessesPerCandidate:3/);
   assert.match(runner,/20-\(valuePool\.created\?\.length\?\?0\)/);
   assert.match(runner,/targets\.push\(target\)/);
-  assert.match(runner,/STAGE_2_CREATOR_DISCOVERY_AND_EXECUTION/);
+  assert.match(runner,/creatorRounds:stage2Rounds/);
   assert.match(runner,/createdSpenderApprovals/);
   assert.match(runner,/createdTokenFunding/);
 });
@@ -486,4 +487,689 @@ test('Stage-2 enforces the 24-attempt ceiling and retains decoded attempt eviden
     await provider.destroy();
     child.kill('SIGTERM');
   }
+});
+
+
+function compileStage3Contracts(){
+  const source=[
+    '// SPDX-License-Identifier: UNLICENSED',
+    'pragma solidity ^0.8.20;',
+    '',
+    'contract ActivationToken {',
+    '  mapping(address => uint256) private balances;',
+    '  mapping(address => mapping(address => uint256)) public allowance;',
+    '  uint8 public constant decimals = 18;',
+    '  uint256 public totalSupply = 1000000000 ether;',
+    '  function balanceOf(address account) external view returns (uint256) { return balances[account]; }',
+    '  function approve(address spender, uint256 amount) external returns (bool) { allowance[msg.sender][spender] = amount; return true; }',
+    '}',
+    '',
+    'contract CreatedPool {',
+    '  error UnauthorizedCaller();',
+    '  address public owner;',
+    '  address[] private listed;',
+    '  bool public initialized;',
+    '  uint256 public totalLiquidity;',
+    '  constructor(address first, address second, address owner_) { owner=owner_; listed.push(first); listed.push(second); }',
+    '  function tokens() external view returns (address[] memory) { return listed; }',
+    '  function initialize(uint256[] calldata amounts, uint256 minOut, uint256 deadline, bool flag, bytes calldata extra) external {',
+    '    if (msg.sender != owner) revert UnauthorizedCaller();',
+    '    require(!initialized, "ALREADY");',
+    '    require(amounts.length == listed.length, "AMOUNTS");',
+    '    require(minOut == 0, "MIN");',
+    '    require(deadline == type(uint256).max, "DEADLINE");',
+    '    require(!flag && extra.length == 0, "FLAGS");',
+    '    for (uint256 i=0;i<amounts.length;i++) totalLiquidity += amounts[i];',
+    '    initialized = true;',
+    '  }',
+    '}',
+    '',
+    'contract ActivationRegistry {',
+    '  mapping(address => bool) public active;',
+    '  function activate(address pool, address[] calldata tokens, uint256[] calldata amounts, uint256 minOut, uint256 deadline) external {',
+    '    require(tokens.length == amounts.length, "LENGTH");',
+    '    require(minOut == 0, "MIN");',
+    '    require(deadline == type(uint256).max, "DEADLINE");',
+    '    active[pool] = true;',
+    '  }',
+    '}',
+    '',
+    'contract AlwaysRevertPool {',
+    '  error NotInitialized(address dependency);',
+    '  function initialize(address dependency) external { revert NotInitialized(dependency); }',
+    '}',
+    '',
+    'interface InitializationState { function initialized() external view returns (bool); }',
+    'contract SimpleInitializable {',
+    '  bool public initialized;',
+    '  function initialize() external { initialized = true; }',
+    '}',
+    'contract DependentPool {',
+    '  error NotInitialized(address dependency);',
+    '  bool public active;',
+    '  function start(address dependency) external {',
+    '    if (!InitializationState(dependency).initialized()) revert NotInitialized(dependency);',
+    '    active = true;',
+    '  }',
+    '}'
+  ].join('\n');
+  const input={
+    language:'Solidity',
+    sources:{'Stage3.sol':{content:source}},
+    settings:{outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object','evm.deployedBytecode.linkReferences']}}}
+  };
+  const output=JSON.parse(solc.compile(JSON.stringify(input)));
+  const failures=(output.errors??[]).filter(x=>x.severity==='error');
+  assert.deepEqual(failures,[]);
+  return output.contracts['Stage3.sol'];
+}
+function stage3MutableTarget(address,sourceName,contractName,artifact){
+  const iface=new ethers.Interface(artifact.abi);
+  const functions=iface.fragments
+    .filter(fragment=>fragment.type==='function'&&!['view','pure'].includes(fragment.stateMutability))
+    .map(fragment=>({fragment,signature:fragment.format('sighash'),accounting:false,semanticFamily:'OTHER'}));
+  return{qualifiedName:sourceName+':'+contractName,address,artifact,functions};
+}
+
+test('Stage-3 re-harvests created associations and builds created-address, token-array, amount-array, min-out and deadline arguments',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage3Contracts();
+    const token1=await deployArtifact(provider,compiled.ActivationToken);
+    const token2=await deployArtifact(provider,compiled.ActivationToken);
+    const accounts=await provider.send('eth_accounts',[]);
+    const pool=await deployArtifact(provider,compiled.CreatedPool,[await token1.getAddress(),await token2.getAddress(),accounts[0]]);
+    const registry=await deployArtifact(provider,compiled.ActivationRegistry);
+    const artifacts=[
+      normalizedTestArtifact('Stage3.sol','ActivationToken',compiled.ActivationToken),
+      normalizedTestArtifact('Stage3.sol','CreatedPool',compiled.CreatedPool),
+      normalizedTestArtifact('Stage3.sol','ActivationRegistry',compiled.ActivationRegistry)
+    ];
+    const poolArtifact=artifacts.find(x=>x.contractName==='CreatedPool');
+    const registryArtifact=artifacts.find(x=>x.contractName==='ActivationRegistry');
+    const targets=[
+      stage3MutableTarget(await pool.getAddress(),'Stage3.sol','CreatedPool',poolArtifact),
+      stage3MutableTarget(await registry.getAddress(),'Stage3.sol','ActivationRegistry',registryArtifact)
+    ];
+    const valuePool={addresses:[await pool.getAddress()],tokens:[],associations:{},privileged:[ethers.getAddress(accounts[0])],created:[await pool.getAddress()],receipts:[],gaps:[]};
+    const harvest=await refreshCreatedAssociationsV1({
+      provider,ethers,createdAddresses:valuePool.created,targets,
+      bindings:[{address:await pool.getAddress(),qualifiedName:'Stage3.sol:CreatedPool'}],
+      artifacts,valuePool
+    });
+    const associations=[...valuePool.associations[ethers.getAddress(await pool.getAddress())]];
+    const token1Address=await token1.getAddress(),token2Address=await token2.getAddress();
+    assert.ok(associations.some(x=>x.toLowerCase()===token1Address.toLowerCase()));
+    assert.ok(associations.some(x=>x.toLowerCase()===token2Address.toLowerCase()));
+    assert.equal(harvest.newTokens.length,2);
+    const associationFunding=await fundActorsV1({
+      provider,ethers,tokens:harvest.newTokens,holders:[accounts[0],accounts[1]],
+      spenders:[await pool.getAddress(),await registry.getAddress()]
+    });
+    assert.equal(associationFunding.receiptCounts.gaps,0);
+
+    const candidates=discoverActivationCandidatesV1({targets,createdAddress:await pool.getAddress()});
+    assert.ok(candidates.some(x=>x.namedLocal&&x.selected.signature.startsWith('initialize(')));
+    const external=candidates.find(x=>x.selected.signature.startsWith('activate('));
+    assert.ok(external);
+    const built=buildActivationArgumentsV1({ethers,candidate:external,attempt:0,actor:accounts[1],valuePool});
+    assert.equal(String(built.args[0]).toLowerCase(),(await pool.getAddress()).toLowerCase());
+    assert.equal(built.args[1].length,2);
+    assert.deepEqual(built.args[2].map(String),[(10n**18n).toString(),(10n**18n).toString()]);
+    assert.equal(BigInt(built.args[3]),0n);
+    assert.equal(BigInt(built.args[4]),ethers.MaxUint256);
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-3 initializes a created pool with associated-token amounts and privileged sender retry on local Anvil',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage3Contracts();
+    const token1=await deployArtifact(provider,compiled.ActivationToken);
+    const token2=await deployArtifact(provider,compiled.ActivationToken);
+    const accounts=await provider.send('eth_accounts',[]);
+    const pool=await deployArtifact(provider,compiled.CreatedPool,[await token1.getAddress(),await token2.getAddress(),accounts[0]]);
+    const artifacts=[
+      normalizedTestArtifact('Stage3.sol','ActivationToken',compiled.ActivationToken),
+      normalizedTestArtifact('Stage3.sol','CreatedPool',compiled.CreatedPool)
+    ];
+    const poolArtifact=artifacts.find(x=>x.contractName==='CreatedPool');
+    const target=stage3MutableTarget(await pool.getAddress(),'Stage3.sol','CreatedPool',poolArtifact);
+    const valuePool={addresses:[await pool.getAddress()],tokens:[],associations:{},privileged:[ethers.getAddress(accounts[0])],created:[await pool.getAddress()],receipts:[],gaps:[]};
+    const harvest=await refreshCreatedAssociationsV1({
+      provider,ethers,createdAddresses:valuePool.created,targets:[target],
+      bindings:[{address:await pool.getAddress(),qualifiedName:'Stage3.sol:CreatedPool'}],
+      artifacts,valuePool
+    });
+    const associationFunding=await fundActorsV1({
+      provider,ethers,tokens:harvest.newTokens,holders:[accounts[0],accounts[1]],
+      spenders:[await pool.getAddress()]
+    });
+    assert.equal(associationFunding.receiptCounts.gaps,0);
+    const result=await executeActivationSynthesisV1({
+      provider,ethers,targets:[target],actors:[accounts[1]],valuePool,artifacts,
+      createdAddresses:valuePool.created,maxAttemptsPerCreated:30
+    });
+    const init=result.activations.find(row=>row.function.startsWith('initialize('));
+    assert.ok(init);
+    assert.equal(init.sender.toLowerCase(),accounts[0].toLowerCase());
+    assert.equal(await pool.initialized(),true);
+    assert.equal((await pool.totalLiquidity()).toString(),(2n*10n**18n).toString());
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-3 enforces the 30-attempt ceiling per created contract and preserves decoded dependency reverts',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage3Contracts();
+    const reverter=await deployArtifact(provider,compiled.AlwaysRevertPool);
+    const accounts=await provider.send('eth_accounts',[]);
+    const artifact=normalizedTestArtifact('Stage3.sol','AlwaysRevertPool',compiled.AlwaysRevertPool);
+    const target=stage3MutableTarget(await reverter.getAddress(),'Stage3.sol','AlwaysRevertPool',artifact);
+    const valuePool={addresses:[await reverter.getAddress()],tokens:[],associations:{},privileged:[],created:[await reverter.getAddress()],receipts:[],gaps:[]};
+    const result=await executeActivationSynthesisV1({
+      provider,ethers,targets:[target],actors:[accounts[0]],valuePool,artifacts:[artifact],
+      createdAddresses:valuePool.created,maxAttemptsPerCreated:30
+    });
+    assert.equal(result.activations.length,0);
+    assert.equal(result.activationGaps.length,1);
+    assert.equal(result.activationGaps[0].attemptCount,30);
+    assert.equal(result.activationGaps[0].attempts.length,30);
+    assert.ok(result.activationGaps[0].topDecodedRevertReasons.some(x=>x.reason==='NotInitialized(address)'&&x.count===30));
+    assert.ok(result.activationGaps[0].attempts.every(x=>x.dependency===true));
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-3 prioritizes a created dependency named by NotInitialized(address) before resuming the blocked object',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage3Contracts();
+    const dependency=await deployArtifact(provider,compiled.SimpleInitializable);
+    const blocked=await deployArtifact(provider,compiled.DependentPool);
+    const accounts=await provider.send('eth_accounts',[]);
+    const dependencyArtifact=normalizedTestArtifact('Stage3.sol','SimpleInitializable',compiled.SimpleInitializable);
+    const blockedArtifact=normalizedTestArtifact('Stage3.sol','DependentPool',compiled.DependentPool);
+    const dependencyAddress=await dependency.getAddress(),blockedAddress=await blocked.getAddress();
+    const targets=[
+      stage3MutableTarget(blockedAddress,'Stage3.sol','DependentPool',blockedArtifact),
+      stage3MutableTarget(dependencyAddress,'Stage3.sol','SimpleInitializable',dependencyArtifact)
+    ];
+    const valuePool={
+      addresses:[blockedAddress,dependencyAddress],tokens:[],
+      associations:{[ethers.getAddress(blockedAddress)]:new Set([ethers.getAddress(dependencyAddress)]),[ethers.getAddress(dependencyAddress)]:new Set()},
+      privileged:[],created:[blockedAddress,dependencyAddress],receipts:[],gaps:[]
+    };
+    const result=await executeActivationSynthesisV1({
+      provider,ethers,targets,actors:[accounts[0]],valuePool,artifacts:[blockedArtifact,dependencyArtifact],
+      createdAddresses:[blockedAddress,dependencyAddress],maxAttemptsPerCreated:30
+    });
+    assert.equal(await dependency.initialized(),true);
+    assert.equal(await blocked.active(),true);
+    const initIndex=result.activations.findIndex(row=>row.createdAddress.toLowerCase()===dependencyAddress.toLowerCase()&&row.function==='initialize()');
+    const startIndex=result.activations.findIndex(row=>row.createdAddress.toLowerCase()===blockedAddress.toLowerCase()&&row.function==='start(address)');
+    assert.ok(initIndex>=0&&startIndex>initIndex);
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-3 runner executes association refresh and activation before the shared Medusa/telemetry baseline',()=>{
+  const runner=fs.readFileSync(path.join(root,'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const harvestAt=runner.indexOf('refreshCreatedAssociationsV1({');
+  const activationAt=runner.indexOf('executeActivationSynthesisV1({');
+  const baselineAt=runner.indexOf('baselineSnapshot=await provider.send');
+  assert.ok(harvestAt>0&&activationAt>harvestAt&&baselineAt>activationAt);
+  assert.match(runner,/maxAttemptsPerCreated:30/);
+  assert.match(runner,/activations:stage3Activation\.activations/);
+  assert.match(runner,/activationGaps:stage3Activation\.activationGaps/);
+  assert.match(runner,/associationTokenFunding/);
+});
+
+
+function compileStage4Contracts(){
+  const source=[
+    '// SPDX-License-Identifier: UNLICENSED',
+    'pragma solidity ^0.8.20;',
+    '',
+    'contract VaultMarker {}',
+    '',
+    'contract CallbackOnly {',
+    '  error SenderIsNotVault(address expected);',
+    '  address public immutable vault;',
+    '  uint256 public calls;',
+    '  constructor(address vault_) { vault = vault_; }',
+    '  function callback(uint256 value) external {',
+    '    if (msg.sender != vault) revert SenderIsNotVault(vault);',
+    '    calls += value + 1;',
+    '  }',
+    '}',
+    '',
+    'contract KnownCaller {',
+    '  uint256 public pings;',
+    '  function ping() external { pings++; }',
+    '}',
+    '',
+    'contract AssociationGate {',
+    '  error OnlyVault();',
+    '  address public immutable allowed;',
+    '  constructor(address allowed_) { allowed = allowed_; }',
+    '  function callback() external { if (msg.sender != allowed) revert OnlyVault(); }',
+    '}',
+    '',
+    'contract OwnerOnly {',
+    '  error NotOwner();',
+    '  address public owner;',
+    '  uint256 public calls;',
+    '  constructor(address owner_) { owner = owner_; }',
+    '  function ownerOnly() external { if (msg.sender != owner) revert NotOwner(); calls++; }',
+    '}',
+    '',
+    'contract UnresolvedGate {',
+    '  error OnlyVault();',
+    '  function callback() external { revert OnlyVault(); }',
+    '}',
+    '',
+    'contract DelegateExtension {',
+    '  error NotDelegateCall();',
+    '  address private immutable SELF;',
+    '  uint256 public counter;',
+    '  constructor() { SELF = address(this); }',
+    '  function doThing(uint256 value) external {',
+    '    if (address(this) == SELF) revert NotDelegateCall();',
+    '    counter += value + 1;',
+    '  }',
+    '}',
+    '',
+    'contract FallbackFacade {',
+    '  address private immutable impl;',
+    '  constructor(address impl_) { impl = impl_; }',
+    '  fallback() external payable {',
+    '    (bool ok,) = impl.delegatecall(msg.data);',
+    '    require(ok, "DELEGATE_FAILED");',
+    '  }',
+    '}'
+  ].join('\n');
+  const input={
+    language:'Solidity',
+    sources:{'Stage4.sol':{content:source}},
+    settings:{outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object','evm.deployedBytecode.linkReferences']}}}
+  };
+  const output=JSON.parse(solc.compile(JSON.stringify(input)));
+  const failures=(output.errors??[]).filter(row=>row.severity==='error');
+  assert.deepEqual(failures,[]);
+  return output.contracts['Stage4.sol'];
+}
+function stage4Artifact(name,compiled){
+  return normalizedTestArtifact('Stage4.sol',name,compiled[name]);
+}
+function stage4Deployment(name,address){
+  return{qualifiedName:'Stage4.sol:'+name,contractName:name,sourceName:'Stage4.sol',address};
+}
+
+
+test('Stage-4 resolves callback-only callers from a decoded address and remembers the sender',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage4Contracts(),vault=await deployArtifact(provider,compiled.VaultMarker);
+    const callback=await deployArtifact(provider,compiled.CallbackOnly,[await vault.getAddress()]);
+    const accounts=await provider.send('eth_accounts',[]);
+    const artifact=stage4Artifact('CallbackOnly',compiled);
+    const target=targetObjects(ethers,[artifact],[stage4Deployment('CallbackOnly',await callback.getAddress())],{})[0];
+    const selected=target.functions.find(row=>row.signature==='callback(uint256)');
+    const iface=new ethers.Interface(artifact.abi),callerState=new Map(),weights=new Map();
+    const first=await resolveTelemetryCallerContextV2({
+      provider,ethers,target,selected,iface,args:[1n],value:0n,defaultSender:accounts[1],
+      targets:[target],valuePool:{associations:{},privileged:[]},callerState,weightMultipliers:weights
+    });
+    assert.equal(first.success,true);
+    assert.equal(first.resolution,'IMPERSONATED_CALLER:'+ethers.getAddress(await vault.getAddress()));
+    const second=await resolveTelemetryCallerContextV2({
+      provider,ethers,target,selected,iface,args:[2n],value:0n,defaultSender:accounts[2],
+      targets:[target],valuePool:{associations:{},privileged:[]},callerState,weightMultipliers:weights
+    });
+    assert.equal(second.success,true);
+    assert.equal(second.reused,true);
+    assert.equal(second.sender.toLowerCase(),(await vault.getAddress()).toLowerCase());
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-4 uses a target association as callback caller when the revert has no address argument',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage4Contracts(),known=await deployArtifact(provider,compiled.KnownCaller);
+    const gate=await deployArtifact(provider,compiled.AssociationGate,[await known.getAddress()]);
+    const accounts=await provider.send('eth_accounts',[]);
+    const artifacts=[stage4Artifact('KnownCaller',compiled),stage4Artifact('AssociationGate',compiled)];
+    const deployed=[stage4Deployment('KnownCaller',await known.getAddress()),stage4Deployment('AssociationGate',await gate.getAddress())];
+    const targets=targetObjects(ethers,artifacts,deployed,{});
+    const target=targets.find(row=>row.qualifiedName==='Stage4.sol:AssociationGate');
+    const selected=target.functions.find(row=>row.signature==='callback()'),iface=new ethers.Interface(target.artifact.abi);
+    const knownAddress=ethers.getAddress(await known.getAddress()),gateAddress=ethers.getAddress(await gate.getAddress());
+    const result=await resolveTelemetryCallerContextV2({
+      provider,ethers,target,selected,iface,args:[],value:0n,defaultSender:accounts[1],targets,
+      valuePool:{associations:{[knownAddress]:new Set([gateAddress])},privileged:[]},
+      callerState:new Map(),weightMultipliers:new Map()
+    });
+    assert.equal(result.success,true);
+    assert.equal(result.resolution,'IMPERSONATED_CALLER:'+knownAddress);
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-4 retries auth-gated functions with privileged callers',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage4Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const ownerOnly=await deployArtifact(provider,compiled.OwnerOnly,[accounts[0]]);
+    const artifact=stage4Artifact('OwnerOnly',compiled),target=targetObjects(ethers,[artifact],[stage4Deployment('OwnerOnly',await ownerOnly.getAddress())],{})[0];
+    const selected=target.functions.find(row=>row.signature==='ownerOnly()'),iface=new ethers.Interface(artifact.abi);
+    const result=await resolveTelemetryCallerContextV2({
+      provider,ethers,target,selected,iface,args:[],value:0n,defaultSender:accounts[1],targets:[target],
+      valuePool:{associations:{},privileged:[accounts[0]]},callerState:new Map(),weightMultipliers:new Map()
+    });
+    assert.equal(result.success,true);
+    assert.equal(result.resolution,'PRIVILEGED:'+ethers.getAddress(accounts[0]));
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-4 unresolved context is kept at ten-percent selection weight instead of excluded',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage4Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const gate=await deployArtifact(provider,compiled.UnresolvedGate);
+    const artifact=stage4Artifact('UnresolvedGate',compiled),target=targetObjects(ethers,[artifact],[stage4Deployment('UnresolvedGate',await gate.getAddress())],{})[0];
+    const selected=target.functions.find(row=>row.signature==='callback()'),iface=new ethers.Interface(artifact.abi),weights=new Map();
+    const result=await resolveTelemetryCallerContextV2({
+      provider,ethers,target,selected,iface,args:[],value:0n,defaultSender:accounts[1],targets:[target],
+      valuePool:{associations:{},privileged:[]},callerState:new Map(),weightMultipliers:weights
+    });
+    const key=`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${selected.signature}`;
+    assert.equal(result.success,false);
+    assert.equal(result.resolution,'UNRESOLVED');
+    assert.equal(weights.get(key),0.1);
+    const picked=pickFn(target,()=>0,'OTHER_STATE_CHANGE',new Map(),new Set(),weights);
+    assert.equal(picked.selectionKey,key);
+    assert.equal(picked.selectionWeightMultiplier,0.1);
+    assert.equal(picked.feedbackWeight,0.1);
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+
+test('Stage-4 discovers a fallback-only facade by selector response and routes delegate-only calls through it',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  try{
+    const compiled=compileStage4Contracts(),extension=await deployArtifact(provider,compiled.DelegateExtension);
+    const facade=await deployArtifact(provider,compiled.FallbackFacade,[await extension.getAddress()]);
+    const accounts=await provider.send('eth_accounts',[]);
+    const artifacts=[stage4Artifact('DelegateExtension',compiled),stage4Artifact('FallbackFacade',compiled)];
+    const deployed=[stage4Deployment('DelegateExtension',await extension.getAddress()),stage4Deployment('FallbackFacade',await facade.getAddress())];
+    const direct=targetObjects(ethers,artifacts,deployed,{});
+    assert.equal(direct.some(row=>row.qualifiedName==='Stage4.sol:FallbackFacade'),false);
+    const augmented=await augmentDelegateProxyContextsV2({provider,ethers,targets:direct,artifacts,deployed,sourceIntelligence:{},associations:{},probeSelectors:true});
+    const facadeTarget=augmented.targets.find(row=>row.contextType==='FACADE'&&row.logicalQualifiedName==='Stage4.sol:DelegateExtension');
+    assert.ok(facadeTarget);
+    assert.equal(facadeTarget.address.toLowerCase(),(await facade.getAddress()).toLowerCase());
+    assert.ok(augmented.contextEvidence.some(row=>row.discoveryBasis==='SELECTOR_ANSWERED_BY_FACADE'));
+
+    const directTarget=augmented.targets.find(row=>(row.contextType??'DIRECT')==='DIRECT'&&row.qualifiedName==='Stage4.sol:DelegateExtension');
+    const selected=directTarget.functions.find(row=>row.signature==='doThing(uint256)'),iface=new ethers.Interface(directTarget.artifact.abi);
+    const resolved=await resolveTelemetryCallerContextV2({
+      provider,ethers,target:directTarget,selected,iface,args:[1n],value:0n,defaultSender:accounts[0],targets:augmented.targets,
+      valuePool:{associations:{},privileged:[]},callerState:new Map(),weightMultipliers:new Map()
+    });
+    assert.equal(resolved.success,true);
+    assert.equal(resolved.resolution,'FACADE:'+ethers.getAddress(await facade.getAddress()));
+    assert.equal(resolved.executionAddress.toLowerCase(),(await facade.getAddress()).toLowerCase());
+  }finally{
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-4 telemetry emits per-function callerResolution evidence and reuses a learned privileged caller',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  const outRoot=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-stage4-'));
+  try{
+    const compiled=compileStage4Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const ownerOnly=await deployArtifact(provider,compiled.OwnerOnly,[accounts[0]]);
+    const artifact=stage4Artifact('OwnerOnly',compiled),targets=targetObjects(ethers,[artifact],[stage4Deployment('OwnerOnly',await ownerOnly.getAddress())],{});
+    const baselineSnapshot=await provider.send('evm_snapshot',[]);
+    const runs=await runTelemetry({
+      provider,ethers,targets,actors:[accounts[1]],outRoot,baselineSnapshot,artifacts:[artifact],
+      valuePool:{addresses:[await ownerOnly.getAddress()],tokens:[],associations:{},privileged:[accounts[0]],created:[]},
+      telemetryRuns:1,callsPerRun:3,seedSalt:'stage4-owner-resolution'
+    });
+    assert.equal(runs.length,1);
+    const row=runs[0].byFunction['Stage4.sol:OwnerOnly::ownerOnly()'];
+    assert.ok(row);
+    assert.equal(row.calls,3);
+    assert.equal(row.callerResolution,'PRIVILEGED:'+ethers.getAddress(accounts[0]));
+    assert.equal(runs[0].minedSuccess,3);
+  }finally{
+    fs.rmSync(outRoot,{recursive:true,force:true});
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-4 runner prepares contexts before baseline and persists learned caller resolutions into fixture evidence',()=>{
+  const runner=fs.readFileSync(path.join(root,'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const preparationAt=runner.indexOf('stage4ContextPreparation=');
+  const baselineAt=runner.indexOf('baselineSnapshot=await provider.send');
+  const telemetryAt=runner.indexOf('telemetry=await runTelemetry');
+  const rewriteAt=runner.indexOf('fixtureEvidence.callerResolutions=callerResolutionEvidence');
+  assert.ok(preparationAt>0&&baselineAt>preparationAt&&telemetryAt>baselineAt&&rewriteAt>telemetryAt);
+  assert.match(runner,/STAGE_4_CONTEXT_CORRECT_CALLERS/);
+  assert.match(runner,/contextCallerPreparation:stage4ContextPreparation/);
+  assert.match(runner,/callerResolutions=callerResolutionEvidence/);
+});
+
+
+function compileStage5Contracts(){
+  const source=[
+    '// SPDX-License-Identifier: UNLICENSED',
+    'pragma solidity ^0.8.20;',
+    '',
+    'contract AccountingProbe {',
+    '  uint256 public value;',
+    '  bool public flag;',
+    '  function deposit(uint256 amount) external { value = amount; }',
+    '  function depositFail(uint256) external { revert("ACCOUNTING_REJECTED"); }',
+    '  function poke() external { flag = !flag; }',
+    '}',
+    '',
+    'contract CreatedTokenLike {',
+    '  uint256 public totalSupply = 1000 ether;',
+    '  mapping(address => uint256) public balanceOf;',
+    '  bool public touched;',
+    '  constructor() { balanceOf[msg.sender] = totalSupply; }',
+    '  function poke() external { touched = !touched; }',
+    '}'
+  ].join('\n');
+  const input={
+    language:'Solidity',
+    sources:{'Stage5.sol':{content:source}},
+    settings:{outputSelection:{'*':{'*':['abi','evm.bytecode.object','evm.deployedBytecode.object','evm.deployedBytecode.linkReferences']}}}
+  };
+  const output=JSON.parse(solc.compile(JSON.stringify(input)));
+  const failures=(output.errors??[]).filter(row=>row.severity==='error');
+  assert.deepEqual(failures,[]);
+  return output.contracts['Stage5.sol'];
+}
+function stage5Artifact(name,compiled){
+  return normalizedTestArtifact('Stage5.sol',name,compiled[name]);
+}
+function stage5Deployment(name,address){
+  return{qualifiedName:'Stage5.sol:'+name,contractName:name,sourceName:'Stage5.sol',address};
+}
+function onlyStage5Function(target,signature){
+  return{...target,functions:target.functions.filter(row=>row.signature===signature)};
+}
+async function readTelemetryRows(outRoot,runId='stage5-001'){
+  const file=path.join(outRoot,'runs',runId,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl');
+  return fs.readFileSync(file,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
+}
+
+test('Stage-5 observation policy admits economic calls and eligible created token contexts only',()=>{
+  const target={address:'0x0000000000000000000000000000000000000011'};
+  const economic={semanticFamily:'ECONOMIC'},other={semanticFamily:'UNKNOWN'};
+  assert.deepEqual(shouldObserveAccountingCallV1({selected:economic,target,valuePool:null}),{observe:true,basis:'ECONOMIC'});
+  assert.deepEqual(
+    shouldObserveAccountingCallV1({
+      selected:other,target,
+      valuePool:{created:[target.address],tokens:[{address:target.address}],associations:{}}
+    }),
+    {observe:true,basis:'CREATED_TOKEN_LIKE'}
+  );
+  const token='0x0000000000000000000000000000000000000022';
+  assert.deepEqual(
+    shouldObserveAccountingCallV1({
+      selected:other,target,
+      valuePool:{created:[target.address],tokens:[{address:token}],associations:{[target.address]:new Set([token])}}
+    }),
+    {observe:true,basis:'CREATED_TOKEN_ASSOCIATION'}
+  );
+  assert.deepEqual(
+    shouldObserveAccountingCallV1({selected:other,target,valuePool:{created:[],tokens:[],associations:{}}}),
+    {observe:false,basis:'NON_ACCOUNTING_OR_REJECTED'}
+  );
+});
+
+test('Stage-5 observes successful economic calls only after preflight and reports reads per accounting call on local Anvil',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  const outRoot=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-stage5-economic-'));
+  try{
+    const compiled=compileStage5Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const probe=await deployArtifact(provider,compiled.AccountingProbe);
+    const artifact=stage5Artifact('AccountingProbe',compiled);
+    let target=targetObjects(ethers,[artifact],[stage5Deployment('AccountingProbe',await probe.getAddress())],{})[0];
+    target=onlyStage5Function(target,'deposit(uint256)');
+    const baselineSnapshot=await provider.send('evm_snapshot',[]);
+    const runs=await runTelemetry({
+      provider,ethers,targets:[target],actors:[accounts[0]],outRoot,baselineSnapshot,artifacts:[artifact],
+      valuePool:{addresses:[await probe.getAddress()],tokens:[],associations:{},privileged:[],created:[]},
+      telemetryRuns:1,callsPerRun:3,seedSalt:'stage5-economic',runPrefix:'stage5'
+    });
+    const run=runs[0],rows=await readTelemetryRows(outRoot);
+    assert.equal(run.minedSuccess,3);
+    assert.equal(run.accountingObservationCalls,3);
+    assert.equal(run.skippedObservationCalls,0);
+    assert.ok(run.observationReads>0);
+    assert.equal(run.observationReadsPerAccountingCall,run.observationReads/3);
+    assert.ok(rows.every(row=>row.stages.PREFLIGHT.status==='PASS'));
+    assert.ok(rows.every(row=>row.observation==='ACCOUNTING_BEFORE_AFTER'));
+    assert.ok(rows.every(row=>row.observations.before.length>0&&row.observations.after.length>0));
+  }finally{
+    fs.rmSync(outRoot,{recursive:true,force:true});
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-5 skips all snapshots for successful non-accounting calls and rejected economic calls on local Anvil',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  const outRootA=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-stage5-other-'));
+  const outRootB=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-stage5-rejected-'));
+  try{
+    const compiled=compileStage5Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const probe=await deployArtifact(provider,compiled.AccountingProbe);
+    const artifact=stage5Artifact('AccountingProbe',compiled);
+    const baseTarget=targetObjects(ethers,[artifact],[stage5Deployment('AccountingProbe',await probe.getAddress())],{})[0];
+
+    let baselineSnapshot=await provider.send('evm_snapshot',[]);
+    const otherRuns=await runTelemetry({
+      provider,ethers,targets:[onlyStage5Function(baseTarget,'poke()')],actors:[accounts[0]],outRoot:outRootA,baselineSnapshot,artifacts:[artifact],
+      valuePool:{addresses:[await probe.getAddress()],tokens:[],associations:{},privileged:[],created:[]},
+      telemetryRuns:1,callsPerRun:3,seedSalt:'stage5-other',runPrefix:'stage5'
+    });
+    const otherRows=await readTelemetryRows(outRootA);
+    assert.equal(otherRuns[0].minedSuccess,3);
+    assert.equal(otherRuns[0].observationReads,0);
+    assert.equal(otherRuns[0].accountingObservationCalls,0);
+    assert.equal(otherRuns[0].skippedObservationCalls,3);
+    assert.equal(otherRuns[0].observationReadsPerAccountingCall,0);
+    assert.ok(otherRows.every(row=>row.observation==='SKIPPED_NON_ACCOUNTING_OR_REJECTED'));
+    assert.ok(otherRows.every(row=>row.stages.OBSERVATION.status==='SKIPPED'));
+    assert.ok(otherRows.every(row=>row.observations.before.length===0&&row.observations.after.length===0));
+
+    baselineSnapshot=await provider.send('evm_snapshot',[]);
+    const rejectedRuns=await runTelemetry({
+      provider,ethers,targets:[onlyStage5Function(baseTarget,'depositFail(uint256)')],actors:[accounts[0]],outRoot:outRootB,baselineSnapshot,artifacts:[artifact],
+      valuePool:{addresses:[await probe.getAddress()],tokens:[],associations:{},privileged:[],created:[]},
+      telemetryRuns:1,callsPerRun:3,seedSalt:'stage5-rejected',runPrefix:'stage5'
+    });
+    const rejectedRows=await readTelemetryRows(outRootB);
+    assert.equal(rejectedRuns[0].simulatedRejection,3);
+    assert.equal(rejectedRuns[0].observationReads,0);
+    assert.equal(rejectedRuns[0].accountingObservationCalls,0);
+    assert.equal(rejectedRuns[0].skippedObservationCalls,3);
+    assert.ok(rejectedRows.every(row=>row.stages.PREFLIGHT.status==='FAILED'));
+    assert.ok(rejectedRows.every(row=>row.observation==='SKIPPED_NON_ACCOUNTING_OR_REJECTED'));
+  }finally{
+    fs.rmSync(outRootA,{recursive:true,force:true});
+    fs.rmSync(outRootB,{recursive:true,force:true});
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-5 observes non-economic calls on a created token-like contract on local Anvil',async()=>{
+  const {child,provider}=await startLocalAnvil();
+  const outRoot=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-stage5-created-token-'));
+  try{
+    const compiled=compileStage5Contracts(),accounts=await provider.send('eth_accounts',[]);
+    const token=await deployArtifact(provider,compiled.CreatedTokenLike);
+    const address=await token.getAddress(),artifact=stage5Artifact('CreatedTokenLike',compiled);
+    let target=targetObjects(ethers,[artifact],[stage5Deployment('CreatedTokenLike',address)],{})[0];
+    target=onlyStage5Function(target,'poke()');
+    assert.notEqual(target.functions[0].semanticFamily,'ECONOMIC');
+    const baselineSnapshot=await provider.send('evm_snapshot',[]);
+    const runs=await runTelemetry({
+      provider,ethers,targets:[target],actors:[accounts[0]],outRoot,baselineSnapshot,artifacts:[artifact],
+      valuePool:{addresses:[address],tokens:[{address,decimals:18,fundedAmount:(10n**18n).toString()}],associations:{},privileged:[],created:[address]},
+      telemetryRuns:1,callsPerRun:2,seedSalt:'stage5-created-token',runPrefix:'stage5'
+    });
+    const rows=await readTelemetryRows(outRoot);
+    assert.equal(runs[0].minedSuccess,2);
+    assert.equal(runs[0].accountingActions,0);
+    assert.equal(runs[0].accountingObservationCalls,2);
+    assert.ok(runs[0].observationReads>0);
+    assert.ok(rows.every(row=>row.observation==='ACCOUNTING_BEFORE_AFTER'&&row.observationBasis==='CREATED_TOKEN_LIKE'));
+  }finally{
+    fs.rmSync(outRoot,{recursive:true,force:true});
+    await provider.destroy();
+    child.kill('SIGTERM');
+  }
+});
+
+test('Stage-5 runner persists accounting observation policy evidence and top-level telemetry metrics',()=>{
+  const runner=fs.readFileSync(path.join(root,'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'),'utf8');
+  const telemetryAt=runner.indexOf('telemetry=await runTelemetry');
+  const policyAt=runner.indexOf('const accountingObservationPolicy=');
+  assert.ok(telemetryAt>0&&policyAt>telemetryAt);
+  assert.match(runner,/STAGE_5_ACCOUNTING_READS_ONLY/);
+  assert.match(runner,/SKIPPED_NON_ACCOUNTING_OR_REJECTED/);
+  assert.match(runner,/observationReadsPerAccountingCall/);
+  assert.match(runner,/fixtureEvidence\.accountingObservationPolicy=accountingObservationPolicy/);
 });
