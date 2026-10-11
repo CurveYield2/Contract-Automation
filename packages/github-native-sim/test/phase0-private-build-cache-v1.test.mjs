@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {privateBuildCacheIdentityV1,compileWithPrivateCacheV1} from '../src/phase0-private-build-cache-v1.mjs';
+import {privateBuildCacheIdentityV1,compileWithPrivateCacheV1,splitPrivateCompilationCacheV1} from '../src/phase0-private-build-cache-v1.mjs';
 
 const sourceSha='a'.repeat(64),sourceCommit='b'.repeat(40),toolIdentity='c'.repeat(64);
 const request={
@@ -12,7 +12,7 @@ const request={
 const pseudo={source:{projectPath:'contracts',archiveSha256:sourceSha},
   configuration:{compilers:[{language:'solidity',version:'0.8.28'}],optimizer:{enabled:true,runs:200},evmVersion:'cancun',viaIR:false}};
 
-test('private build cache key pins exact source, profile, runner tools and project root',()=>{
+test('private build cache key pins exact source, profile and compiler tools but not runner-specific absolute paths',()=>{
   const a=privateBuildCacheIdentityV1({request,pseudo,projectRoot:'/runner/source',toolIdentity});
   const same=privateBuildCacheIdentityV1({request,pseudo,projectRoot:'/runner/source',toolIdentity});
   assert.equal(a.key,same.key);
@@ -20,7 +20,7 @@ test('private build cache key pins exact source, profile, runner tools and proje
   assert.notEqual(a.key,privateBuildCacheIdentityV1({request:{...request,source:{...request.source,archiveSha256:'d'.repeat(64)}},pseudo,projectRoot:'/runner/source',toolIdentity}).key);
   assert.notEqual(a.key,privateBuildCacheIdentityV1({request,pseudo:{...pseudo,configuration:{...pseudo.configuration,viaIR:true}},projectRoot:'/runner/source',toolIdentity}).key);
   assert.notEqual(a.key,privateBuildCacheIdentityV1({request,pseudo,projectRoot:'/runner/source',toolIdentity:'d'.repeat(64)}).key);
-  assert.notEqual(a.key,privateBuildCacheIdentityV1({request,pseudo,projectRoot:'/other/runner',toolIdentity}).key);
+  assert.equal(a.key,privateBuildCacheIdentityV1({request,pseudo,projectRoot:'/other/runner',toolIdentity}).key);
 });
 
 test('refuses missing exact source or build tool identity',()=>{
@@ -53,7 +53,15 @@ test('compilation outputs live only in an isolated folder on private Audit-Contr
   assert.match(source,/PRIVATE_CACHE_ROOT = 'Phase0 Build Cache'/);
   assert.match(source,/PRIVATE_CACHE_REF = 'main'/);
   assert.match(source,/ref:PRIVATE_CACHE_REF/);
-  assert.match(source,/repos\/CurveYield2\/Audit-Controller\/contents/);
+  assert.match(source,/PRIVATE_CACHE_ROOT/);
+  assert.match(source,/const REPO='CurveYield2\/Audit-Controller'/);
+  assert.match(source,/git\/trees/);
+  assert.match(source,/git\/blobs/);
+  assert.match(source,/git\/refs\/heads/);
+  assert.match(source,/force:false/);
+  assert.match(source,/gzipSha256/);
+  assert.match(source,/jsonSha256/);
+  assert.doesNotMatch(source,/compressed compilation exceeds private cache size cap; skip storing/);
   assert.doesNotMatch(source,/phase0-verified-build-cache/);
   assert.doesNotMatch(source,/actions\/cache@/);
 });
@@ -69,4 +77,20 @@ test('V7 reuse requires an exact runner, previously qualified controller tree, a
   assert.match(workflow,/V7_QUALIFICATION_LANE=REUSE_EXACT/);
   assert.match(workflow,/V7_QUALIFICATION_LANE != 'REUSE_EXACT'/);
   assert.match(workflow,/V7_QUALIFICATION_LANE == 'FULL'/);
+});
+
+test('private cache shards arbitrarily large gzip bytes without losing payload',()=>{
+  const original=Buffer.from('0123456789abcdef'.repeat(29));
+  const pieces=splitPrivateCompilationCacheV1(original,37);
+  assert.ok(pieces.length>3);
+  assert.ok(pieces.every(x=>x.length<=37));
+  assert.deepEqual(Buffer.concat(pieces),original);
+});
+test('compiler identity fingerprints hermetic compiler and exact runtime but not unrelated telemetry source trees',()=>{
+  const code=fs.readFileSync(new URL('../src/phase0-private-build-cache-v1.mjs',import.meta.url),'utf8');
+  assert.match(code,/HEAD:packages\/runner\/src\/hermetic-standard-json\.mjs/);
+  assert.match(code,/HEAD:packages\/github-native-sim\/src\/execution\.mjs/);
+  assert.doesNotMatch(code,/HEAD:packages\/runner\/src',/);
+  assert.match(code,/COMPILATION_START/);
+  assert.match(code,/COMPILATION_DONE/);
 });

@@ -23,7 +23,8 @@ concurrency:
 jobs:
   phase0-intelligence:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 30m solc compile plus static intelligence, source analyses and private evidence publication.
+    timeout-minutes: 60
     steps:
       - name: Checkout trusted Contract-Automation base
         uses: actions/checkout@v4
@@ -101,7 +102,7 @@ jobs:
           set -euo pipefail
           rm -rf .phase0-intelligence-output
           # External watchdog is required: a CPU-blocked Solidity compiler can block Node's own timers.
-          timeout -s TERM -k 30s 900s node packages/github-native-sim/src/lite-phase0-intelligence-no-telemetry-v1.mjs \
+          timeout -s TERM -k 30s 3000s node scripts/phase0-compile-watchdog-v1.mjs no-telemetry -- node packages/github-native-sim/src/lite-phase0-intelligence-no-telemetry-v1.mjs \
             --request "${{ steps.request.outputs.path }}" \
             --output .phase0-intelligence-output
 

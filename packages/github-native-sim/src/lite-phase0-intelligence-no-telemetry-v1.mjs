@@ -680,7 +680,7 @@ async function main(){
     configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],analysis:{slither:{version:'0.11.6'}},optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}
   };
 
-  const build=await withStage('compile-exact-build',480000,()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
+  const build=await withStage('compile-exact-build',2100000,()=>compileWithPrivateCacheV1({request,pseudo,projectRoot:detected.absolute,compile:()=>buildProject({projectRoot:detected.absolute,request:pseudo})}));
   const executionBuildArtifacts=buildExecutionArtifactBundleV2({request:pseudo,build});
   const effectiveCfg={...cfg,buildSystem:build.system,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[]};
   const slither=await withStage('slither-static-analysis',480000,()=>slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit}));
