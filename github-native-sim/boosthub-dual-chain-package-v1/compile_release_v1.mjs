@@ -28,6 +28,7 @@ for(const [key,file,name]of [['hub','contracts/BoostHub.sol','BoostHub'],['helpe
   console.log(name+' runtime bytes '+(a.deployedBytecode.length-2)/2);
 }
 for(const [project,label]of [['openzeppelin-contracts','OpenZeppelin'],['solmate','Solmate']]) {
+  fs.mkdirSync(path.join(release,'dependencies_v1'),{recursive:true});
   for(const candidate of ['LICENSE','LICENSE.txt','COPYING']) {
     const source=path.join(root,'lib',project,candidate);
     if(fs.existsSync(source))fs.copyFileSync(source,path.join(release,'dependencies_v1',label+'_'+candidate));

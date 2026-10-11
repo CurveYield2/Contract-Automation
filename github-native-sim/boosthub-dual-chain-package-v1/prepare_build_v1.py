@@ -52,6 +52,7 @@ provenance={'version':'v1','requestedEthereumExplorer':source_data['ethereum']['
  'baseContractSourceSha256':expected,
  'sourceVersions':{'BoostHub':'v12','IBoostHub':'v5','StakeDaoMerkleClaimExecutor':'v8','StakeDaoFraxtalSdFxsUrdClaimExecutor':'v5','BoostHubStaking':'v20','BoostHubDeploymentFactory':'v1'}}
 provenance['contractSourceSha256']={str(p.relative_to(out)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (out/'contracts').rglob('*') if p.is_file()}
+provenance['fraxtalHelperReference']=json.loads((evidence/'fraxtal_helper_source_identity_v1.json').read_text())
 (out/'dependency_provenance_v1.json').write_text(json.dumps(provenance,indent=2))
 (out/'live_stack_snapshot_v1.json').write_text(json.dumps(snapshot,indent=2))
 print('Verified original dependencies restored; Hub v12 and Fraxtal helper v5 added; Vyper compiled')

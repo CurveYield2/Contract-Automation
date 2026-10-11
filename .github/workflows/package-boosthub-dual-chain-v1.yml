@@ -1,4 +1,5 @@
 name: Package BoostHub stack and Fraxtal helper v2
+# Release scope: dedicated Fraxtal helper v5; no boost dependency on Fraxtal.
 on:
   push:
     branches: ['package-boosthub-dual-chain-v1']
@@ -86,7 +87,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: boosthub-dual-chain-package-v1
-          path: github-native-sim/boosthub-dual-chain-package-v1/evidence
+          path: |
+            github-native-sim/boosthub-dual-chain-package-v1/evidence
+            github-native-sim/boosthub-dual-chain-package-v1/release_v2
           retention-days: 30
 
   windows-powershell:
