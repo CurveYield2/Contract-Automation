@@ -1153,6 +1153,15 @@ export async function verifiedPredictedCurveYieldPoolV1({provider,ethers,expecte
   const address=ethers.getAddress(expectedPool);
   return await provider.getCode(address)!=='0x'?[address]:[];
 }
+// Only actual protocol pool-creation recipes produce Balancer BPT. A
+// function selected because it RETURNS_ADDRESS is not by itself a pool.
+export function balancerCreatedPoolAddressesV1(creations=[]){
+  return new Set(creations
+    .filter(row=>/CURVEYIELD_WRAPPER_ALLOWLIST|BALANCER_V3_FACTORY/.test(String(row.recipeBasis??'')) ||
+      /CurveYieldPoolFactoryWrapper\.sol:CurveYieldPoolFactoryWrapper$/.test(String(row.target??'')))
+    .flatMap(row=>row.createdAddresses??[])
+    .map(x=>String(x).toLowerCase()));
+}
 export function creatorAttemptBudgetV1({isCurveYieldWrapper=false,maxAttemptsPerCandidate=24}={}){
   return isCurveYieldWrapper?Math.min(maxAttemptsPerCandidate,2):maxAttemptsPerCandidate;
 }
