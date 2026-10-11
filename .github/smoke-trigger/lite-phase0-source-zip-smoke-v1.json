@@ -16,5 +16,5 @@
       "archive": "CurveYield-cyvlSDT-Deployment-Package-v30.zip"
     }
   ],
-  "triggerNonce": "boosthub-two-variants-and-cyvlsdt-source-build-smoke-v1"
+  "triggerNonce": "boosthub-two-variants-cyvlsdt-custom-hardhat-artifacts-v2"
 }
