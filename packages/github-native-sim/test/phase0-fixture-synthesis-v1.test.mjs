@@ -597,8 +597,9 @@ test('Stage-3 re-harvests created associations and builds created-address, token
       artifacts,valuePool
     });
     const associations=[...valuePool.associations[ethers.getAddress(await pool.getAddress())]];
-    assert.ok(associations.some(x=>x.toLowerCase()===(await token1.getAddress()).toLowerCase()));
-    assert.ok(associations.some(x=>x.toLowerCase()===(await token2.getAddress()).toLowerCase()));
+    const token1Address=await token1.getAddress(),token2Address=await token2.getAddress();
+    assert.ok(associations.some(x=>x.toLowerCase()===token1Address.toLowerCase()));
+    assert.ok(associations.some(x=>x.toLowerCase()===token2Address.toLowerCase()));
     assert.equal(harvest.newTokens.length,2);
     const associationFunding=await fundActorsV1({
       provider,ethers,tokens:harvest.newTokens,holders:[accounts[0],accounts[1]],
