@@ -47,7 +47,23 @@ export async function discoverBalancerV3PoolsV1({provider,ethers,targets=[],valu
   // Only the main Vault owns registration state. A standalone VaultExtension or
   // ProtocolFeeController is never a substitute for it.
   const vaults=systemTargets.filter(t=>/\/Vault\.sol:Vault$/.test(nameOf(t))&&(t.contextType??'DIRECT')==='DIRECT');
+  const factoryPools=[];
+  const factories=systemTargets.filter(t=>
+    /Factory/.test(nameOf(t))&&
+    (t.contextType??'DIRECT')==='DIRECT'&&
+    (t.artifact?.abi??[]).some(f=>f?.name==='getPools'&&f?.type==='function')
+  );
+  for(const factory of factories.slice(0,8)){
+    try{
+      const c=new ethers.Contract(factory.address,['function getPools() view returns (address[])'],provider);
+      const poolList=await c.getPools();
+      if(Array.isArray(poolList))factoryPools.push(...poolList.slice(0,50));
+    }catch(error){
+      evidence.limitations.push({type:'FACTORY_POOL_ENUMERATION_FAILED',factory:factory.address,message:String(error?.shortMessage??error?.message??error).slice(0,300)});
+    }
+  }
   const registeredCandidates=addresses(ethers,[
+    ...factoryPools,
     ...(valuePool.created??[]),
     ...targets.filter(t=>/Pool(?:\.sol:|$)/.test(nameOf(t))&&!/Factory|Router|Controller|Vault/.test(nameOf(t))).map(t=>t.address),
     ...(valuePool.pools??[]),
