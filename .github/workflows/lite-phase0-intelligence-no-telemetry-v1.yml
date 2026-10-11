@@ -99,7 +99,8 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf .phase0-intelligence-output
-          node packages/github-native-sim/src/lite-phase0-intelligence-no-telemetry-v1.mjs \
+          # External watchdog is required: a CPU-blocked Solidity compiler can block Node's own timers.
+          timeout -s TERM -k 30s 900s node packages/github-native-sim/src/lite-phase0-intelligence-no-telemetry-v1.mjs \
             --request "${{ steps.request.outputs.path }}" \
             --output .phase0-intelligence-output
 
