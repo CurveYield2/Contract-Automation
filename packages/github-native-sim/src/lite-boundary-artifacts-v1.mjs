@@ -222,9 +222,22 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
     }
     const rel=result.evidenceRef;
     const expectedPrefix=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key))+'/';
-    if(typeof rel!=='string'||!rel.startsWith(expectedPrefix)||!rel.endsWith('/raw-result.json')||
-       !safeRel(rel)||!controllerRoot||!fs.existsSync(path.join(controllerRoot,...rel.split('/')))){
+    const rawFile=typeof rel==='string'&&safeRel(rel)&&controllerRoot?
+      path.join(controllerRoot,...rel.split('/')):null;
+    if(!rawFile||!rel.startsWith(expectedPrefix)||!rel.endsWith('/raw-result.json')||
+       !fs.existsSync(rawFile)){
       failures.push('Phase 5 mandatory '+key+' missing exact persisted raw-result.json evidence');
+    }else{
+      try{
+        const persisted=JSON.parse(fs.readFileSync(rawFile,'utf8'));
+        if(stableJson(persisted)!==stableJson(raw)){
+          failures.push('Phase 5 mandatory '+key+' raw machine result does not match persisted artifact');
+        }
+      }catch(e){failures.push('Phase 5 mandatory '+key+' raw evidence is unreadable: '+String(e.message||e));}
+    }
+    const requestId=typeof rel==='string'?rel.split('/').at(-2):'';
+    if(!/^dar-[0-9a-f]{32}$/.test(requestId)||raw.requestId!==requestId){
+      failures.push('Phase 5 mandatory '+key+' raw request identity differs from bound execution');
     }
     if(raw.status!=='completed'||raw.blocking===true||raw.preflight?.status!=='PASS'){
       failures.push('Phase 5 mandatory '+key+' did not complete a successful V7 preflight and execution');
