@@ -2151,10 +2151,41 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         stage3Activation={activations:[],activationGaps:[{type:'ACTIVATION_SYNTHESIS_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1600)}],createdContracts:valuePool.created.length};
       }
     }
+    let stage4ContextPreparation={contextEvidence:[],addedTargets:[],gaps:[]};
+    try{
+      const existingContextKeys=new Set(targets.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
+      const contextDiscovery=await augmentDelegateProxyContextsV2({
+        provider,ethers,targets,artifacts,deployed:[...deployed,...stage2CreatedDeployments],
+        sourceIntelligence,associations:valuePool.associations,probeSelectors:true
+      });
+      let addedTargets=contextDiscovery.targets.filter(target=>!existingContextKeys.has(`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
+      if(addedTargets.length){
+        const prepared=await prepareQualifiedRuntimeV2({provider,ethers,targets:addedTargets,actors});
+        addedTargets=prepared.targets;
+        runtimePreparation.setupReceipts.push(...(prepared.setupReceipts??[]));
+        const admittedKeys=new Set(targets.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
+        for(const target of addedTargets){
+          const key=`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`;
+          if(!admittedKeys.has(key)){admittedKeys.add(key);targets.push(target);}
+        }
+      }
+      runtimePreparation.contextEvidence.push(...(contextDiscovery.contextEvidence??[]));
+      stage4ContextPreparation={
+        contextEvidence:contextDiscovery.contextEvidence??[],
+        addedTargets:addedTargets.map(target=>({
+          qualifiedName:target.qualifiedName,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,
+          address:target.address,contextType:target.contextType??'DIRECT',
+          discoveryBasis:target.contextEvidence?.discoveryBasis??null
+        })),
+        gaps:[]
+      };
+    }catch(error){
+      stage4ContextPreparation={contextEvidence:[],addedTargets:[],gaps:[{type:'STAGE4_CONTEXT_PREPARATION_FAILED',message:String(error?.message??error).slice(0,1600)}]};
+    }
     const serializedValuePool=serializeValuePoolV1(valuePool);
     const fixtureEvidence={
       schemaVersion:'curveyield-phase0-fixture-synthesis-v1',
-      stage:'STAGE_3_INITIALIZATION_AND_ACTIVATION',
+      stage:'STAGE_4_CONTEXT_CORRECT_CALLERS',
       valuePool:serializedValuePool,
       funding:fixtureFunding,
       creations:stage2Creations,
@@ -2169,7 +2200,9 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       },
       associationTokenFunding:stage3AssociationTokenFunding,
       activations:stage3Activation.activations,
-      activationGaps:stage3Activation.activationGaps
+      activationGaps:stage3Activation.activationGaps,
+      contextCallerPreparation:stage4ContextPreparation,
+      callerResolutions:[]
     };
     await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
     const fixtureSynthesis={
@@ -2201,7 +2234,9 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         gaps:stage3AssociationTokenFunding.gaps
       }:null,
       activations:stage3Activation.activations,
-      activationGaps:stage3Activation.activationGaps
+      activationGaps:stage3Activation.activationGaps,
+      contextCallerPreparation:stage4ContextPreparation,
+      callerResolutions:[]
     };
     const baselineBlock=Number(await provider.getBlockNumber()),baselineHash=(await provider.getBlock(baselineBlock))?.hash??null,baselineSnapshot=await provider.send('evm_snapshot',[]);
     const deploymentComplete=(nativeScriptComplete||sourcePlan.unresolvedSteps===0)&&(sourceKnownCompilation.missingTargets?.length??0)===0;
@@ -2241,6 +2276,19 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         console.log(`[phase0-telemetry] failed but workflow will continue to evidence finalization: ${telemetryExecutionFailure.message}`);
       }
     }
+    const callerResolutionEvidence=[];
+    for(const run of telemetry){
+      for(const [functionKey,row] of Object.entries(run.byFunction??{})){
+        callerResolutionEvidence.push({
+          runId:run.runId,functionKey,
+          calls:row&&typeof row==='object'?Number(row.calls??0):Number(row??0),
+          callerResolution:row&&typeof row==='object'?(row.callerResolution??'DEFAULT'):'DEFAULT'
+        });
+      }
+    }
+    fixtureEvidence.callerResolutions=callerResolutionEvidence;
+    fixtureSynthesis.callerResolutions=callerResolutionEvidence;
+    await fs.writeFile(path.join(outputRoot,'runs','PHASE0_FIXTURE_SYNTHESIS_v1.json'),JSON.stringify(fixtureEvidence,null,2)+'\n');
     const runIndex={schemaVersion:'curveyield-phase0-simulation-run-index-v1',purpose:'LATER_REVIEWER_INVESTIGATION_AND_TARGET_DESIGN',sourceIdentity:{campaignId:receipt.campaign.campaignId,sourceSha256:receipt.source.sha256},targetEvmChainIds:targetChainIds,executionNormalization:{policy:'ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE',chain:'ethereum',chainId:1},fork:{engine:'anvil',chain:'ethereum',chainId:1,baselineBlock,baselineBlockHash:baselineHash,upstreamRpcExposed:false,identityNormalized:anvil.identityNormalized===true,observedUpstreamChainId:anvil.upstreamChainId},deployment:deploymentCombined,policy:{realAbiCallsOnly:true,rawRandomBytes:false,accountingActionWeight:PHASE0_ACCOUNTING_ACTION_WEIGHT_V1,crossContractBursts:true,medusaMinimumCalls:PHASE0_MEDUSA_MIN_CALLS_V1},runs:[{runId:medusa.runId,type:'MEDUSA_ANVIL_FORK',status:medusa.status,summaryRef:medusa.shards?'runs/MEDUSA_SHARDS_SUMMARY_v1.json':'runs/medusa-anvil-fork-001/RUN_SUMMARY_v1.json',shards:(medusa.shards??[]).map(x=>({runId:x.runId,configId:x.configId,status:x.status,summaryRef:x.summaryRef}))},...telemetry.map(x=>({runId:x.runId,type:'ABI_ACCOUNTING_TELEMETRY',status:x.status,summaryRef:`runs/${x.runId}/RUN_SUMMARY_v1.json`,rawTranscriptRef:x.rawTranscriptRef}))]};
     const simulationLimitations=[...deploymentCombined.limitations,...(telemetry.filter(x=>x.weightingLimitation).map(x=>({type:x.weightingLimitation,runId:x.runId})))];
     if(medusaExecutionFailure)simulationLimitations.push(medusaExecutionFailure);
