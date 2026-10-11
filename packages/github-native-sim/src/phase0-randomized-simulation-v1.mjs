@@ -2513,7 +2513,7 @@ function baselineTargetRows({medusa,telemetry}){
     {candidateKey:'PHASE0-BASELINE-ABI-TELEMETRY',executionEvidenceRefs:refs,oracleOutcome:'INVESTIGATIVE_BASELINE_TELEMETRY_GENERATED',reproductionStatus:telemetry.every(x=>x.status==='PASS')?'PASS':'INCOMPLETE',requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',requestBindingEvidenceRef:'evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.json'}
   ];
 }
-export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl,medusaSmokeCalls=null,telemetrySmokeCalls=null}){
+export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl,medusaSmokeCalls=null,telemetrySmokeCalls=null,deploymentOnly=false}){
   // Smoke budgets are independent and never produce campaign evidence. Medusa-only preserves the prior smoke behavior.
   const medusaSmoke=Number.isInteger(medusaSmokeCalls)&&medusaSmokeCalls>0;
   const telemetrySmoke=Number.isInteger(telemetrySmokeCalls)&&telemetrySmokeCalls>0;
@@ -2573,6 +2573,33 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const scriptEnd=Number(await provider.getBlockNumber());
     const discoveredScriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
     const reported=await reportedPackageDeployments({projectRoot:staged.projectRoot,attempts:deployment.attempts,artifacts});
+    if(deploymentOnly){
+      // Only original package deployment/config scripts run on the fork. No fallback
+      // deployments, fixture generation, Medusa, or ABI accounting telemetry.
+      const dispositions=deployment.scriptDispositions??[];
+      const gaps=[...deployment.limitations,...reported.limitations];
+      const sourceHasDeploymentSurface=(readiness?.deploymentAndConfiguration?.deploymentFiles??[]).length>0;
+      const incomplete=dispositions.some(row=>row.disposition!=='EXECUTED_PASS')||deployment.attempts.some(row=>row.status!=='PASS')||packageDependencyInstall.status==='BLOCKED';
+      const status=dispositions.length===0?(sourceHasDeploymentSurface?'BLOCKED_NO_RUNNABLE_DEPLOYMENT_SCRIPT':'NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'):(incomplete?'BLOCKED_SCRIPT_FAILURE':'PASS');
+      const witness={
+        schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v3',
+        executionMode:'ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY',status,
+        campaignId:receipt.campaign.campaignId,sourceSha256:archiveSha256,
+        fork:{engine:'anvil',source:'RPC_ETHEREUM',chain:'ethereum',chainId:1,initialBlock,finalBlock:scriptEnd,upstreamChainId:anvil.upstreamChainId??null,identityNormalized:anvil.identityNormalized===true},
+        targetEvmChainIds:targetChainIds,
+        policy:'PACKAGE_NATIVE_SCRIPT_EXECUTION_ONLY_NO_FALLBACK_NO_FUZZ_NO_MEDUSA_NO_ABI_TELEMETRY',
+        packageDependencyInstall,detectedScripts:detected,scriptDispositions:dispositions,
+        attempts:deployment.attempts,
+        deployedContracts:[...new Map([...discoveredScriptDeployments,...reported.rows].map(row=>[String(row.address).toLowerCase(),row])).values()],
+        gaps,limitations:gaps,
+        coverage:{detectedScripts:dispositions.length,executedScripts:deployment.attempts.length,passedScripts:deployment.attempts.filter(row=>row.status==='PASS').length,failedOrUnsupportedScripts:dispositions.filter(row=>row.disposition!=='EXECUTED_PASS').length}
+      };
+      deploymentEvidence=witness;
+      await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(witness,null,2)+'\n');
+      await provider.destroy();
+      return{deployEvidence:witness};
+    }
+
     const deploymentRowsByAddress=new Map();
     for(const row of [...discoveredScriptDeployments,...reported.rows])deploymentRowsByAddress.set(String(row.address).toLowerCase(),row);
     const scriptDeployments=[...deploymentRowsByAddress.values()];
@@ -2961,6 +2988,19 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(deployEvidence,null,2)+'\n');await provider.destroy();
     return{summary,runIndex,deployEvidence};
   }catch(error){
+    if(deploymentOnly){
+      const witness=deploymentEvidence??{
+        schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v3',
+        executionMode:'ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY',
+        status:'BLOCKED_EXECUTION_ERROR',campaignId:receipt.campaign.campaignId,sourceSha256:archiveSha256,
+        fork:{engine:'anvil',source:'RPC_ETHEREUM',chain:'ethereum',chainId:1},
+        attempts:[],scriptDispositions:[],deployedContracts:[],
+        gaps:[{type:'DEPLOY_CONFIG_EXECUTION_ERROR',code:error?.code??null,message:String(error?.message??error).slice(0,2000)}]
+      };
+      await fs.mkdir(outputRoot,{recursive:true});
+      await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(witness,null,2)+'\n');
+      return{deployEvidence:witness};
+    }
     const typed={type:'PHASE0_SIMULATION_FAILURE',code:error?.code??'PHASE0_SIMULATION_FAILURE',message:String(error?.message??error),targetChainIds,securityEffect:'REQUIRES_PHASE6_INTERPRETATION'};
     const limitation={
       schemaVersion:'curveyield-phase0-randomized-simulation-summary-v1',
