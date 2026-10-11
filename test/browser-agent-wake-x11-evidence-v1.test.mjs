@@ -1,0 +1,23 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';
+const wake=fs.readFileSync('scripts/browser-agent-wake.mjs','utf8');
+const yml=fs.readFileSync('.github/workflows/browser-agent-wake.yml','utf8');
+const dispatch=fs.readFileSync('.github/workflows/phase1-wake-repair-dispatch-v1.yml','utf8');
+test('fixed-coordinate wake never marks Return key as durable delivery',()=>{
+ const block=wake.slice(wake.indexOf('// Pressing Return is not evidence'),wake.indexOf('  } finally {',wake.indexOf('// Pressing Return is not evidence')));
+ assert.match(block,/ok:false/); assert.match(block,/posted:false/);assert.match(block,/WAKE_NOT_VERIFIED/);
+});
+test('diagnostic-only captures X11 desktop without typing a message',()=>{
+ const a=wake.indexOf('if (bool(env.WAKE_DIAGNOSTIC_ONLY))');
+ const b=wake.indexOf('if (action === \'observe\')',a);
+ assert.ok(a>0 && b>a);
+ assert.match(wake.slice(a,b),/DIAGNOSTIC_ONLY_NO_SEND/);
+ assert.doesNotMatch(wake.slice(a,b),/humanX11TypeText\(page, wakeMessage\)/);
+ assert.match(wake.slice(0,b),/captureX11VisualEvidence\('01_after_chat_navigation'\)/);
+});
+test('wake workflow retains screenshot evidence and cannot arm state for unverified send',()=>{
+ assert.match(yml,/sudo apt-get install -y x11vnc xclip xdotool scrot/);
+ assert.match(yml,/WAKE_DIAGNOSTIC_ONLY/);
+ assert.match(yml,/Browser result claimed success without proven durable message delivery/);
+ assert.match(yml,/if: \$\{\{ steps.deliver.outputs.ok == 'true'/);
+ assert.match(dispatch,/diagnostic_only="\$diagnostic"/);
+});
