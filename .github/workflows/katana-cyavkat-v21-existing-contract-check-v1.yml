@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/katana-cyavkat-v21-existing-contract-check-v1.yml'
+      - 'scripts/katana/cyavkat-v21-existing-contract-check-v1.py'
 permissions:
   contents: read
   actions: read
