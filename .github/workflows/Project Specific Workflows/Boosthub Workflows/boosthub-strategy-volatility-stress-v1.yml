@@ -60,7 +60,7 @@ jobs:
 
       - name: Stress oracle-vs-execution across blocks and sizes
         env:
-          RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          RPC_URL: ${{ secrets.ETHEREUM_RPC }}
         shell: bash
         run: |
           set -euo pipefail
