@@ -41,19 +41,11 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Set up Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install trusted runner dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm ci --force
+      - name: Restore pinned Node dependencies No Telemetry
+        uses: ./.github/actions/setup-no-telemetry-node-cache
 
       - name: Install and verify retained audit toolchain
-        uses: ./.github/actions/setup-v7-toolchain
+        uses: ./.github/actions/setup-no-telemetry-v7-toolchain
 
       - name: Select cross-repository credential
         env:

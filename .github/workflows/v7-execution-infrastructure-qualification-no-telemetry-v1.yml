@@ -1,0 +1,605 @@
+name: V7 Execution Infrastructure Qualification v1 No Telemetry
+
+on:
+  workflow_call:
+    inputs:
+      controller_ref:
+        required: false
+        type: string
+        default: ''
+      qualification_lane:
+        required: false
+        type: string
+        default: FULL
+    secrets:
+      AUDIT_CONTROLLER_GITHUB_TOKEN:
+        required: false
+      PREFLIGHTSIM_GITHUB_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      controller_ref:
+        description: Optional exact Audit-Controller branch/tag/SHA to verify with npm test and npm run check
+        required: false
+        default: ''
+        type: string
+      qualification_lane:
+        description: 'Qualification scope: FULL or CONTROLLER_ONLY'
+        required: true
+        default: FULL
+        type: choice
+        options:
+          - FULL
+          - CONTROLLER_ONLY
+permissions:
+  contents: write
+
+concurrency:
+  # In a reusable-workflow call github.event_name is the caller's event, so
+  # detect a call by the caller's workflow name. Each Phase-0 call gets its own
+  # group; otherwise a push to main would cancel a running campaign's Phase 0.
+  group: v7-qualification-${{ github.workflow != 'V7 Execution Infrastructure Qualification' && format('call-{0}', github.run_id) || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify-v7-execution-infrastructure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact candidate runner
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Classify qualification scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          REQUESTED_LANE: ${{ inputs.qualification_lane }}
+          CONTROLLER_REF: ${{ inputs.controller_ref || 'main' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .audit-evidence/v7-infrastructure-qualification
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$EVENT_NAME" = "workflow_call" ]; then
+            if [ "$REQUESTED_LANE" = "CONTROLLER_ONLY" ]; then
+              if [ -z "$CONTROLLER_REF" ]; then
+                echo 'CONTROLLER_ONLY requires controller_ref' >&2
+                exit 1
+              fi
+              result='{"lane":"CONTROLLER_ONLY","paths":[],"reason":"EXPLICIT_CONTROLLER_ONLY"}'
+            else
+              result='{"lane":"FULL","paths":[],"reason":"EXPLICIT_FULL"}'
+            fi
+          else
+            base=''
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              base="$PR_BASE_SHA"
+            else
+              base="$BEFORE_SHA"
+            fi
+
+            if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then
+              result='{"lane":"FULL","paths":[],"reason":"MISSING_BASE_SHA"}'
+            elif git fetch --no-tags --depth=1 origin "$base" >/dev/null 2>&1; then
+              git diff --name-only "$base" HEAD > /tmp/v7-qualification-changed-paths.txt
+              result="$(node scripts/classify-v7-qualification-change.mjs < /tmp/v7-qualification-changed-paths.txt)"
+            else
+              result='{"lane":"FULL","paths":[],"reason":"BASE_FETCH_FAILED"}'
+            fi
+          fi
+
+          lane="$(printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).lane))")"
+          reason="$(printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).reason))")"
+          echo "V7_QUALIFICATION_LANE=$lane" >> "$GITHUB_ENV"
+          echo "V7_QUALIFICATION_REASON=$reason" >> "$GITHUB_ENV"
+          printf '%s\n' "$result" > .audit-evidence/v7-infrastructure-qualification/scope.json
+          {
+            echo "qualification_lane=$lane"
+            echo "qualification_reason=$reason"
+            echo 'changed_paths:'
+            printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{for(const p of JSON.parse(s).paths??[]) console.log('- '+p)})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve exact paired Audit-Controller candidate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EXPLICIT_CONTROLLER_REF: ${{ inputs.controller_ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
+          let ref=String(process.env.EXPLICIT_CONTROLLER_REF??'').trim();
+          if(process.env.EVENT_NAME==='pull_request'){
+            const body=String(event.pull_request?.body??'');
+            const declared=body.split(/\r?\n/).map(line=>line.trim()).filter(line=>/^controller_ref\s*=/.test(line));
+            if(declared.length>1)throw new Error('PR body must contain at most one controller_ref declaration');
+            if(declared.length===1){
+              const match=declared[0].match(/^controller_ref=([0-9a-fA-F]{40})$/);
+              if(!match)throw new Error('controller_ref PR trailer must be exactly controller_ref=<40-hex>');
+              ref=match[1];
+            }else ref='main';
+          }
+          let reworkPath='';
+          if(process.env.EVENT_NAME==='pull_request'){
+            const body=String(event.pull_request?.body??'');
+            const declared=body.split(/\r?\n/).map(line=>line.trim()).filter(line=>/^rework_request_path\s*=/.test(line));
+            if(declared.length>1)throw new Error('PR body must contain at most one rework_request_path declaration');
+            if(declared.length===1){
+              const match=declared[0].match(/^rework_request_path=(campaigns\/[^\/\r\n]+\/controller\/[A-Za-z0-9._-]+\.json)$/);
+              if(!match||match[1].includes('..'))throw new Error('rework_request_path PR trailer must be one safe private campaign controller JSON path');
+              const sameRepo=event.pull_request?.head?.repo?.full_name===event.repository?.full_name;
+              const authorized=['CurveYield-Developer-DK','JamesNexus'].includes(event.pull_request?.user?.login);
+              if(!sameRepo||!authorized)throw new Error('held rework qualification requires an authorized same-repository PR');
+              reworkPath=match[1];
+            }
+          }
+          if(!ref)ref='main';
+          if(ref!=='main'&&!/^[0-9a-fA-F]{40}$/.test(ref))throw new Error('controller_ref must be main or an exact 40-hex commit');
+          if(reworkPath&&ref==='main')throw new Error('held rework qualification requires an exact controller_ref commit');
+          fs.appendFileSync(process.env.GITHUB_ENV,'CONTROLLER_REF_TO_TEST='+ref+'\n');
+          fs.appendFileSync(process.env.GITHUB_ENV,'REWORK_REQUEST_PATH_TO_TEST='+reworkPath+'\n');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,'paired_controller_ref='+ref+'\n');
+          NODE
+
+      - name: Select working Audit-Controller credential
+        if: env.CONTROLLER_REF_TO_TEST != ''
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        shell: bash
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Checkout exact private Audit-Controller candidate
+        if: env.CONTROLLER_REF_TO_TEST != ''
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CONTROLLER_REF: ${{ env.CONTROLLER_REF_TO_TEST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${GH_TOKEN:-}"
+          gh api repos/CurveYield2/Audit-Controller --silent
+          rm -rf .controller-under-test
+          gh auth setup-git
+          gh repo clone CurveYield2/Audit-Controller .controller-under-test -- --filter=blob:none --no-checkout
+          cd .controller-under-test
+          git fetch --depth=1 origin "$CONTROLLER_REF"
+          expected_controller_commit="$(git rev-parse FETCH_HEAD)"
+          git checkout --detach "$expected_controller_commit"
+          test "$(git rev-parse HEAD)" = "$expected_controller_commit"
+
+      - name: Verify private Audit-Controller v26 suite
+        if: env.CONTROLLER_REF_TO_TEST != ''
+        working-directory: .controller-under-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+          npm run check
+
+      - name: Record private Audit-Controller qualification evidence
+        if: env.CONTROLLER_REF_TO_TEST != ''
+        env:
+          CONTROLLER_REF_TO_TEST: ${{ env.CONTROLLER_REF_TO_TEST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          controller_commit="$(git -C .controller-under-test rev-parse HEAD)"
+          qualified_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          runner_commit="${V7_BASELINE_QUALIFIED_COMMIT:-$(git rev-parse HEAD)}"
+          runner_run="${V7_BASELINE_QUALIFICATION_RUN_ID:-$GITHUB_RUN_ID}"
+          cat > .audit-evidence/v7-infrastructure-qualification/controller.json <<JSON
+          {
+            "schemaVersion": "v26-controller-qualification-v1",
+            "controllerCommit": "$controller_commit",
+            "controllerRef": "$CONTROLLER_REF_TO_TEST",
+            "status": "PASS",
+            "qualificationRunId": "$GITHUB_RUN_ID",
+            "qualifiedAt": "$qualified_at",
+            "runnerQualifiedCommit": "$runner_commit",
+            "runnerQualificationRunId": "$runner_run",
+            "testedSchemas": [
+              "audit-v7-sequential-review-state-v3",
+              "v26-phase-contract-v1",
+              "v26-successor-handoff-v1",
+              "v26-security-traceability-graph-v1",
+              "v26-obligation-ledger-v1",
+              "v26-domain-applicability-v1",
+              "v26-evidence-invalidation-v1",
+              "v26-phase6-subgate-state-v1",
+              "v26-audit-closure-manifest-v1"
+            ],
+            "testedGates": [
+              "reviewer-lineage",
+              "successor-handoffs",
+              "phase-contracts",
+              "traceability",
+              "obligations",
+              "domains",
+              "evidence-invalidation",
+              "P6.0-P6.8",
+              "Phase-10-closure",
+              "v26-machine-conformance"
+            ]
+          }
+          JSON
+
+      - name: Qualify authorized held sealed rework in detached private clone
+        if: github.event_name == 'pull_request' && env.REWORK_REQUEST_PATH_TO_TEST != ''
+        env:
+          REWORK_REQUEST_PATH_TO_TEST: ${{ env.REWORK_REQUEST_PATH_TO_TEST }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import {createHash} from 'node:crypto';
+          import {execFileSync} from 'node:child_process';
+
+          const controllerRoot='.controller-under-test';
+          const requestPath=process.env.REWORK_REQUEST_PATH_TO_TEST;
+          const hashFile=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+          const readJson=file=>JSON.parse(fs.readFileSync(file,'utf8'));
+          const allFiles=dir=>{
+            if(!fs.existsSync(dir))return [];
+            return fs.readdirSync(dir,{withFileTypes:true}).flatMap(ent=>{
+              const file=path.join(dir,ent.name);
+              return ent.isDirectory()?allFiles(file):ent.isFile()?[file]:[];
+            }).sort();
+          };
+          const hashTree=dir=>createHash('sha256').update(JSON.stringify(allFiles(dir).map(file=>[path.relative(dir,file).split(path.sep).join('/'),hashFile(file)]))).digest('hex');
+          const fail=message=>{throw new Error('held rework qualification failed: '+message);};
+          const requestFile=path.join(controllerRoot,...requestPath.split('/'));
+          if(!fs.existsSync(requestFile))fail('request pointer is absent');
+          const request=readJson(requestFile);
+          if(request.schemaVersion!=='curveyield-lite-sealed-phase-rework-request-v1'||request.holdSuccessorDelivery!==true)fail('typed request/hold mismatch');
+          const directoryRoot=path.join(controllerRoot,'Audit Campaign Directory','campaigns');
+          const matches=allFiles(directoryRoot).filter(file=>file.endsWith('.json')).filter(file=>{
+            try{return readJson(file).campaignId===request.campaignId;}catch{return false;}
+          });
+          if(matches.length!==1)fail('campaign directory identity is not unique');
+          const directoryFile=matches[0];
+          const directoryRel=path.relative(controllerRoot,directoryFile).split(path.sep).join('/');
+          const beforeDirectory=readJson(directoryFile);
+          if(beforeDirectory.campaignGenerationId!==request.campaignGenerationId&&request.campaignGenerationId!==undefined)fail('campaign generation mismatch');
+          const campaignPath=beforeDirectory.workspacePath;
+          if(requestPath!==campaignPath+'/controller/PHASE_01_REWORK_REQUEST_v1.json')fail('request is not the admitted Phase-1 controller pointer');
+          const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
+          const sourceDigestBefore=hashTree(path.join(campaignRoot,'source'));
+          const sourceShaBefore=beforeDirectory.sourceSha256;
+          const receiptDir=path.join(campaignRoot,'receipts');
+          const priorReceiptFile=path.join(controllerRoot,...request.priorReceipt.path.split('/'));
+          const priorReceiptDigestBefore=hashFile(priorReceiptFile);
+          const oldReceiptDigests=new Map(allFiles(receiptDir).map(file=>[file,hashFile(file)]));
+          let raw;
+          try{
+            raw=execFileSync(process.execPath,[
+              'scripts/lite-phase-packet-controller-v1.mjs',
+              '--controller-root',controllerRoot,
+              '--campaign-id',request.campaignId,
+              '--campaign-path',campaignPath,
+              '--campaign-directory-path',directoryRel,
+              '--review-kind','sealed-rework',
+              '--phase-sequence','1',
+              '--rework-request-path',requestPath
+            ],{encoding:'utf8',stdio:['ignore','pipe','pipe']});
+          }catch{fail('candidate controller invocation did not complete');}
+          let result;
+          try{result=JSON.parse(raw.trim());}catch{fail('candidate controller returned non-JSON status');}
+          if(result.status!=='PASS'||result.sealedRework!==true)fail('candidate controller did not admit held sealed rework');
+          const afterDirectory=readJson(directoryFile);
+          if(afterDirectory.sourceSha256!==sourceShaBefore||hashTree(path.join(campaignRoot,'source'))!==sourceDigestBefore)fail('source changed');
+          if(hashFile(priorReceiptFile)!==priorReceiptDigestBefore)fail('prior receipt changed');
+          for(const [file,digest] of oldReceiptDigests)if(hashFile(file)!==digest)fail('accepted receipt history changed');
+          const newReceipt=path.join(receiptDir,'PHASE_01_RECEIPT_v3.json');
+          const report=path.join(controllerRoot,...request.generatedFinalReportPath.split('/'));
+          const packet=path.join(controllerRoot,...request.generatedPacketPath.split('/'));
+          for(const [label,file] of [['receipt',newReceipt],['report',report],['packet',packet]])if(!fs.existsSync(file)||!hashFile(file).match(/^[0-9a-f]{64}$/))fail(label+' product is missing');
+          const invalidation=readJson(path.join(campaignRoot,'controller','EVIDENCE_INVALIDATION_MATRIX_v1.json'));
+          const events=invalidation.events??invalidation.invalidationEvents??[];
+          const event=events.find(row=>(row.eventId??row.id)===request.evidenceInvalidation.eventId);
+          if(event?.status!==request.evidenceInvalidation.resolveTo)fail('EIM-013 event was not resolved');
+          const hold=readJson(path.join(campaignRoot,'controller','SUCCESSOR_DELIVERY_HOLD_v1.json'));
+          if(hold.status!=='ACTIVE'||hold.campaignId!==request.campaignId||hold.releaseRequiresExplicitHumanAuthorization!==true)fail('persistent delivery hold is not active');
+          if(afterDirectory.currentAssignment?.phaseSequence!==2)fail('controller did not prepare the bounded dependent successor assignment');
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,[
+            'held_rework_qualification=PASS',
+            'held_rework_source_sha256='+sourceShaBefore,
+            'held_rework_prior_receipt_sha256='+priorReceiptDigestBefore,
+            'held_rework_revision3_receipt_sha256='+hashFile(newReceipt),
+            'held_rework_report_sha256='+hashFile(report),
+            'held_rework_packet_sha256='+hashFile(packet),
+            'held_rework_delivery=HELD'
+          ].join('\n')+'\n');
+          NODE
+
+      - name: Validate controller-only runner baseline
+        if: env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
+        shell: bash
+        run: |
+          set -euo pipefail
+          status_path='process/V7_QUALIFICATION_STATUS.json'
+          test -s "$status_path"
+          test "$(jq -r '.status // empty' "$status_path")" = 'PASS'
+          qualified_commit="$(jq -r '.qualifiedCommit // empty' "$status_path")"
+          qualified_run="$(jq -r '.workflowRunId // empty' "$status_path")"
+          [[ "$qualified_commit" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$qualified_run" =~ ^[0-9]+$ ]]
+
+          git fetch --no-tags --depth=1 origin "$qualified_commit" >/dev/null 2>&1
+          if git diff --quiet "$qualified_commit" HEAD; then
+            result='{"lane":"CONTROL_LIGHT","paths":[],"reason":"NO_RUNNER_DELTA"}'
+          else
+            git diff --name-only "$qualified_commit" HEAD > /tmp/controller-only-runner-delta.txt
+            result="$(node scripts/classify-v7-qualification-change.mjs < /tmp/controller-only-runner-delta.txt)"
+          fi
+          observed_lane="$(printf '%s' "$result" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).lane))")"
+          if [ "$observed_lane" != 'CONTROL_LIGHT' ]; then
+            echo 'CONTROLLER_ONLY refused: current main contains runner/dependency/protocol/unknown changes since the last FULL-qualified runner.' >&2
+            printf '%s\\n' "$result" >&2
+            exit 1
+          fi
+
+          echo "V7_BASELINE_QUALIFIED_COMMIT=$qualified_commit" >> "$GITHUB_ENV"
+          echo "V7_BASELINE_QUALIFICATION_RUN_ID=$qualified_run" >> "$GITHUB_ENV"
+          printf '%s\\n' "$result" > .audit-evidence/v7-infrastructure-qualification/controller-only-baseline.json
+          {
+            echo "controller_only_runner_commit=$qualified_commit"
+            echo "controller_only_runner_run=$qualified_run"
+            echo "controller_only_delta_lane=$observed_lane"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore pinned Node dependencies No Telemetry
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        uses: ./.github/actions/setup-no-telemetry-node-cache
+
+      - name: Confirm exact Node dependency lock
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s package-lock.json
+          node -e "const p=require('./package-lock.json'); if(p.lockfileVersion!==3) process.exit(1)"
+          echo "V7_DEPENDENCY_LOCKED=true" >> "$GITHUB_ENV"
+
+      - name: Install and verify canonical V7 toolchain
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        uses: ./.github/actions/setup-no-telemetry-v7-toolchain
+
+      - name: Initialize qualification evidence
+        run: mkdir -p .audit-evidence/v7-infrastructure-qualification
+
+      - name: Record exact toolchain verification evidence
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        run: node packages/github-native-sim/src/v7-cli.mjs toolchain:verify > .audit-evidence/v7-infrastructure-qualification/toolchain.json
+
+      - name: Verify canonical runner manifest
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        run: npm run v7:manifest -- --check
+
+      - name: V7 request and execution contract qualification
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        run: node --test packages/github-native-sim/test/*.test.mjs
+
+      - name: Anvil-only runner qualification
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        run: node --test packages/runner/test/anvil-*.test.mjs packages/runner/test/full-simulation-anvil-only-v1.test.mjs
+
+      - name: Control-plane lightweight qualification
+        if: env.V7_QUALIFICATION_LANE == 'CONTROL_LIGHT' || env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test packages/github-native-sim/test/browser-agent-*.test.mjs packages/github-native-sim/test/audit-controller-token-selection-v1.test.mjs packages/github-native-sim/test/atomic-request-bridge-v1.test.mjs packages/github-native-sim/test/execution-workflow-v2.test.mjs
+          node --check scripts/browser-agent-wake.mjs
+          bash -n scripts/select-audit-controller-token.sh
+
+      - name: Full repository Node test suite
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        run: npm test
+
+      - name: Repository static checks
+        if: env.V7_QUALIFICATION_LANE == 'FULL'
+        run: npm run lint
+
+
+      - name: Publish controller-only qualification into canonical status
+        if: success() && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') && github.ref == 'refs/heads/main' && env.V7_QUALIFICATION_LANE == 'CONTROLLER_ONLY'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          controller_path='.audit-evidence/v7-infrastructure-qualification/controller.json'
+          test -s "$controller_path"
+          status_api="repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main"
+          gh api "$status_api" --jq '.content' | base64 -d > /tmp/current-v7-status.json
+          existing_sha="$(gh api "$status_api" --jq '.sha')"
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const status=JSON.parse(fs.readFileSync('/tmp/current-v7-status.json','utf8'));
+          const controller=JSON.parse(fs.readFileSync('.audit-evidence/v7-infrastructure-qualification/controller.json','utf8'));
+          if(status.status!=='PASS') throw new Error('canonical runner qualification is not PASS');
+          if(status.qualifiedCommit!==process.env.V7_BASELINE_QUALIFIED_COMMIT) throw new Error('canonical runner qualified commit changed during controller-only qualification');
+          if(String(status.workflowRunId)!==String(process.env.V7_BASELINE_QUALIFICATION_RUN_ID)) throw new Error('canonical runner qualification run changed during controller-only qualification');
+          if(controller.status!=='PASS') throw new Error('controller qualification is not PASS');
+          controller.runnerQualifiedCommit=status.qualifiedCommit;
+          controller.runnerQualificationRunId=String(status.workflowRunId);
+          status.controllerQualification=controller;
+          fs.writeFileSync('.audit-evidence/v7-infrastructure-qualification/current-status.json',JSON.stringify(status,null,2)+'\n');
+          NODE
+          content="$(base64 -w0 .audit-evidence/v7-infrastructure-qualification/current-status.json)"
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json" -f message='chore(v7): refresh controller qualification status' -f content="$content" -f sha="$existing_sha" -f branch='main' >/dev/null
+
+      - name: Live trusted-main Phase 6 and Phase 7 mutable-Anvil qualification
+        if: github.event_name != 'pull_request' && env.V7_QUALIFICATION_LANE == 'FULL'
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          import { createPhase6MutableRpcSession } from './packages/github-native-sim/src/phase6-mutable-rpc-v1.mjs';
+          import { runMedusaEndToEndSmokeV1 } from './packages/github-native-sim/src/medusa-e2e-smoke-v1.mjs';
+          import { runPhase7ForkPreflightV2 } from './packages/github-native-sim/src/phase7-fork-preflight-v2.mjs';
+          import { V7_POLICY } from './packages/github-native-sim/src/v7-policy.mjs';
+
+          const qualifiedCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
+          const manifest=JSON.parse(fs.readFileSync('process/RUNNER_MANIFEST.json','utf8'));
+          const capabilities=Object.keys(manifest.qualifiedCapabilities?.components??{}).sort();
+          const recipes=[...(manifest.qualifiedCapabilities?.recipes??[])].sort();
+          const controllerQualification=fs.existsSync('.audit-evidence/v7-infrastructure-qualification/controller.json')
+            ? JSON.parse(fs.readFileSync('.audit-evidence/v7-infrastructure-qualification/controller.json','utf8'))
+            : null;
+          const phase6Session = await createPhase6MutableRpcSession({ environment: process.env });
+          let phase6;
+          let phase6MedusaSmoke;
+          try {
+            phase6 = {
+              ...phase6Session.evidence,
+              runtime: phase6Session.runtime ? {
+                identityNormalized: phase6Session.runtime.identityNormalized === true,
+                blockNumber: phase6Session.runtime.blockNumber,
+                blockHash: phase6Session.runtime.blockHash,
+                profile: phase6Session.runtime.profile,
+                rpcUrlExposed: false,
+              } : null,
+            };
+            if (!phase6Session.runtime?.url) throw new Error('Phase 6 live qualification requires an active normalized RPC session');
+            phase6MedusaSmoke = await runMedusaEndToEndSmokeV1({
+              rpcUrl: phase6Session.runtime.url,
+              rpcBlock: phase6Session.runtime.blockNumber,
+              rpcBlockHash: phase6Session.runtime.blockHash,
+              rpcProfile: phase6Session.runtime.profile,
+              sourceCommit: qualifiedCommit,
+              evidenceDir: '.audit-evidence/v7-infrastructure-qualification/medusa-e2e-smoke'
+            });
+          } finally {
+            await phase6Session.close();
+          }
+
+          const expectedBlockHash='0xb7f45fdc91b604d7c0450a505cf5c9571c9bb6267c86b6a8d535f4bc11b3f4ee';
+          const request={
+            requestId:'dar-00000000000000000000000000000000', phaseId:'fork-simulation-lifecycle', profileId:V7_POLICY.profiles.simulate,
+            source:{commit:'0000000000000000000000000000000000000000'},
+            configuration:{evmVersion:'cancun',harness:{recipeId:'external-readiness-v1'},simulation:{chain:'ethereum',block:25817400,workflow:{steps:[
+              {action:'staticCall',target:'0x73968b9a57c6E53d41345FD57a6E6ae27d6CDB2F',function:'decimals() view returns (uint8)',args:[],label:'qualified SDT external readiness'}
+            ]}}}
+          };
+          const preflight=await runPhase7ForkPreflightV2({request,environment:process.env});
+          const observed=preflight.observedPinnedBlockHash?.toLowerCase()??null;
+          const checks={
+            dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true' && fs.existsSync('package-lock.json'),
+            phase6MutableRpcPass:phase6.status==='PASS',
+            phase6IdentityNormalized:phase6.runtime?.identityNormalized===true && phase6.identityNormalization?.status==='PASS',
+            phase6ForkSourceNotExposed:JSON.stringify(phase6).includes(process.env.ETHEREUM_FORK_RPC_URL)===false,
+            medusaSmokePass:phase6MedusaSmoke?.checks?.medusaSmokePass===true,
+            medusaSmokeFalsification:phase6MedusaSmoke?.checks?.medusaSmokeFalsification===true,
+            medusaSmokeNoTests:phase6MedusaSmoke?.checks?.medusaSmokeNoTests===true,
+            rawEvidencePreserved:phase6MedusaSmoke?.checks?.rawEvidencePreserved===true,
+            medusaSmokeForkSourceNotExposed:JSON.stringify(phase6MedusaSmoke).includes(process.env.ETHEREUM_FORK_RPC_URL)===false,
+            phase7PreflightPass:preflight.status==='PASS',
+            recipeEnforced:preflight.checks?.lifecycleRecipe?.status==='PASS',
+            recipeId:preflight.recipeId==='external-readiness-v1',
+            ethereumMutableRpcOnly:preflight.chain==='ethereum',
+            anvilOnly:preflight.checks?.anvilLauncher?.engine==='anvil',
+            cancunAccepted:preflight.checks?.exactHardfork?.requested==='cancun',
+            chainIdentityReconciled:preflight.checks?.chainIdentity?.status==='PASS',
+            historicalStateAvailable:preflight.checks?.pinnedBlockState?.status==='PASS',
+            targetCodePresent:preflight.checks?.targetCode?.status==='PASS',
+            impersonationBalanceControl:preflight.checks?.impersonationBalanceControl?.status==='PASS',
+            fixtureBlockHashMatches:observed===expectedBlockHash,
+            workflowAllowlist:preflight.checks?.workflowActions?.status==='PASS',
+            advertisedV26CapabilitiesPresent:capabilities.length>0,
+            advertisedRepeatedLifecycleRecipe:recipes.includes('repeated-lifecycle-v1'),
+            controllerQualificationPass:controllerQualification===null||controllerQualification.status==='PASS'
+          };
+          const qualification={
+            schemaVersion:'v7-execution-infrastructure-qualification-v5',
+            status:Object.values(checks).every(Boolean)?'PASS':'FAIL',
+            qualifiedCommit,
+            requestSchema:V7_POLICY.requestSchema,
+            profiles:Object.values(V7_POLICY.profiles),
+            fullSimulationBackend:'anvil',
+            mutableRpcPolicy:{supportedChains:['ethereum'],rpcProfile:V7_POLICY.mutableRpc.ethereumProfile,phase6IdentityPolicy:V7_POLICY.phase6.rpcIdentityPolicy},
+            toolchain:{slither:V7_POLICY.tools.slither,medusa:V7_POLICY.tools.medusa,forge:V7_POLICY.tools.forge,anvilPackage:V7_POLICY.tools.anvilPackage},
+            runnerManifest:{schemaVersion:manifest.schemaVersion,qualifiedCapabilities:manifest.qualifiedCapabilities},
+            capabilities,
+            recipes,
+            controllerQualification,
+            dependencyLockPresent:process.env.V7_DEPENDENCY_LOCKED==='true' && fs.existsSync('package-lock.json'),
+            testMatrix:{githubNative:'PASS',anvilRunner:'PASS',fullNodeSuite:'PASS',staticChecks:'PASS',toolchainVerification:'PASS'},
+            phase6,
+            phase6MedusaSmoke,
+            fixture:{chain:'ethereum',block:25817400,expectedBlockHash},
+            checks,
+            phase7:preflight
+          };
+          fs.writeFileSync('.audit-evidence/v7-infrastructure-qualification/qualification.json',`${JSON.stringify(qualification,null,2)}\n`);
+          if(qualification.status!=='PASS') process.exit(1);
+          NODE
+
+      - name: Publish canonical current qualification status
+        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && env.V7_QUALIFICATION_LANE == 'FULL'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const qualification=JSON.parse(fs.readFileSync('.audit-evidence/v7-infrastructure-qualification/qualification.json','utf8'));
+          const toolchain=JSON.parse(fs.readFileSync('.audit-evidence/v7-infrastructure-qualification/toolchain.json','utf8'));
+          const status={
+            schemaVersion:'curveyield-v7-current-qualification-status-v1',
+            status:'PASS',
+            qualifiedCommit:qualification.qualifiedCommit,
+            workflowRunId:process.env.GITHUB_RUN_ID,
+            qualifiedAt:new Date().toISOString(),
+            requestSchema:qualification.requestSchema,
+            profiles:qualification.profiles,
+            capabilities:qualification.capabilities,
+            recipes:qualification.recipes,
+            runnerManifest:qualification.runnerManifest,
+            controllerQualification:qualification.controllerQualification,
+            dependencyLockPresent:qualification.dependencyLockPresent,
+            toolchain,
+            testMatrix:qualification.testMatrix,
+            phase6:{status:qualification.phase6.status,identityNormalization:qualification.phase6.identityNormalization,runtime:qualification.phase6.runtime,medusaSmoke:qualification.phase6MedusaSmoke},
+            phase7:{status:qualification.phase7.status,checks:qualification.phase7.checks},
+          };
+          fs.writeFileSync('.audit-evidence/v7-infrastructure-qualification/current-status.json',`${JSON.stringify(status,null,2)}\n`);
+          NODE
+          content="$(base64 -w0 .audit-evidence/v7-infrastructure-qualification/current-status.json)"
+          existing_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.sha' 2>/dev/null || true)"
+          if [ -n "$existing_sha" ]; then
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json" \
+              -f message='chore(v7): refresh canonical qualification status' \
+              -f content="$content" -f sha="$existing_sha" -f branch='main' >/dev/null
+          else
+            gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json" \
+              -f message='chore(v7): publish canonical qualification status' \
+              -f content="$content" -f branch='main' >/dev/null
+          fi
+
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v7-infrastructure-qualification-${{ github.sha }}
+          path: .audit-evidence/v7-infrastructure-qualification
+          if-no-files-found: warn
+          retention-days: 30
