@@ -82,11 +82,11 @@ jobs:
       - name: Run Anvil baseline, deployment simulation, Medusa and ABI telemetry
         if: inputs.completed_stages_manifest == ''
         env:
-          ETHEREUM_FORK_RPC_URL: ${{ secrets.ETHEREUM_RPC }}
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::ETHEREUM_RPC secret is missing"; exit 1; }
+          test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::RPC_ETHEREUM secret is missing"; exit 1; }
           chain_id="$(curl -fsS --max-time 15 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
           test "$chain_id" = "0x1" || { echo "::error::Ethereum fork source did not report chain ID 1"; exit 1; }
           historical_code="$(curl -fsS --max-time 30 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_getCode","params":["0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2","0x112a880"]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
