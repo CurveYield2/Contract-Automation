@@ -2359,17 +2359,25 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         if(!artifacts.some(a=>`${a.sourceName}:${a.contractName}`===q))artifacts.push(synthetic);
       }
       const createdAddresses=[...new Set(creatorRound.creations.flatMap(row=>row.createdAddresses??[]).map(x=>String(x).toLowerCase()))];
+      // Balancer pool BPT contracts are NOT token spenders. Router/Permit2
+      // were already approved in Stage 1. Hundreds of unnecessary ERC20 and
+      // Permit2 approve transactions here caused the post-creation timeout.
+      const newBptAddresses=new Set(creatorRound.creations
+        .filter(row=>/CURVEYIELD_WRAPPER_ALLOWLIST|BALANCER_V3_FACTORY/.test(String(row.basis??'')))
+        .flatMap(row=>row.createdAddresses??[]).map(x=>String(x).toLowerCase()));
+      const spendableChildren=createdAddresses.filter(x=>!newBptAddresses.has(x));
       const existingTokens=valuePool.tokens.filter(token=>!creatorRound.createdTokens.some(created=>String(created.address).toLowerCase()===String(token?.address??token).toLowerCase()));
-      if(createdAddresses.length){
+      console.log(`[phase0-fixture] Stage2 round=${stage2Round} created=${createdAddresses.length} pools=${newBptAddresses.size} approvedSpenders=${spendableChildren.length}`);
+      if(spendableChildren.length){
         try{
-          const approval=await approveFixtureSpendersV1({provider,ethers,tokens:existingTokens,holders:stage2Holders,spenders:createdAddresses});
+          const approval=await approveFixtureSpendersV1({provider,ethers,tokens:existingTokens,holders:stage2Holders,spenders:spendableChildren});
           stage2Approvals.push({round:stage2Round,...approval});
-        }catch(error){stage2Approvals.push({round:stage2Round,holders:stage2Holders,spenders:createdAddresses,transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_SPENDER_APPROVALS_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
+        }catch(error){stage2Approvals.push({round:stage2Round,holders:stage2Holders,spenders:spendableChildren,transactionReceipts:[],receiptCounts:{},gaps:[{type:'STAGE2_CREATED_SPENDER_APPROVALS_FAILED',message:String(error?.message??error).slice(0,1200)}]});}
+      }else{
+        stage2Approvals.push({round:stage2Round,holders:stage2Holders,spenders:[],transactionReceipts:[],receiptCounts:{erc20Approvals:0,permit2Allowances:0,gaps:0},gaps:[],status:'BALANCER_POOL_APPROVALS_NOT_REQUIRED'});
       }
-      // A newly created Balancer pool is an ERC20 BPT, but its shares must
-      // originate from Vault initialize/addLiquidity. Writing arbitrary
-      // balances into pool storage violates its supply/accounting invariants.
-      const newBptAddresses=new Set(createdAddresses.map(x=>String(x).toLowerCase()));
+      // BPT shares must originate from Vault initialize/addLiquidity; never
+      // fabricate balances into storage.
       const newlyCreatedUnderlyingTokens=creatorRound.createdTokens.filter(t=>!newBptAddresses.has(String(t.address).toLowerCase()));
       if(creatorRound.createdTokens.length>newlyCreatedUnderlyingTokens.length){
         stage2CreatedTokenFunding.push({round:stage2Round,status:'POOL_BPT_STORAGE_FUNDING_PREVENTED',poolTokens:creatorRound.createdTokens.filter(t=>newBptAddresses.has(String(t.address).toLowerCase())).map(t=>t.address),policy:'BPT_ONLY_MINTED_BY_VAULT'});
@@ -2385,6 +2393,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       }
       const boundRows=creatorRound.createdDeployments.filter(row=>row?.qualifiedName);
       let newTargets=targetObjects(ethers,artifacts,boundRows,sourceIntelligence);
+      console.log(`[phase0-fixture] Stage2 round=${stage2Round} createdTargets=${newTargets.length} runtimePreparation=START`);
       if(newTargets.length){
         try{
           const prepared=await prepareQualifiedRuntimeV2({provider,ethers,targets:newTargets,actors});
@@ -2401,6 +2410,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         if(existingTargetKeys.has(key))continue;
         existingTargetKeys.add(key);targets.push(target);admitted.push(target);
       }
+      console.log(`[phase0-fixture] Stage2 round=${stage2Round} runtimePreparation=END admitted=${admitted.length}`);
       stage2Rounds.push({
         round:stage2Round,candidates:creatorRound.candidates,successfulCreations:creatorRound.creations.length,
         createdContracts:creatorRound.createdContracts,boundTargets:admitted.length,createdAddresses
@@ -2411,6 +2421,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     console.log(`[phase0-smoke-progress] END Stage 2 creators; rounds=${stage2Rounds.length}; created=${valuePool.created?.length??0}`);
     let stage3AssociationHarvest={receipts:[],gaps:[],newTokens:[]},stage3AssociationTokenFunding=null,stage3Activation={activations:[],activationGaps:[],createdContracts:valuePool.created?.length??0};
     if((valuePool.created?.length??0)>0){
+      console.log('[phase0-smoke-progress] START Stage 3 created-association harvest');
       try{
         stage3AssociationHarvest=await refreshCreatedAssociationsV1({
           provider,ethers,createdAddresses:valuePool.created,targets,
@@ -2419,6 +2430,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       }catch(error){
         stage3AssociationHarvest={receipts:[],gaps:[{type:'CREATED_ASSOCIATION_REFRESH_FAILED',message:String(error?.message??error).slice(0,1600)}],newTokens:[]};
       }
+      console.log(`[phase0-smoke-progress] END Stage 3 association harvest; newTokens=${stage3AssociationHarvest.newTokens.length}`);
       if(stage3AssociationHarvest.newTokens.length){
         try{
           // Newly registered Balancer BPT is minted only via the Vault. Never
