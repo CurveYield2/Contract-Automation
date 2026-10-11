@@ -818,18 +818,20 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
       if(probes>=96)break;
       const implArtifact=extension.artifact,implDeployment=asDeployment(extension.address)??extension;
       if(!implArtifact||!implDeployment?.qualifiedName)continue;
-      for(const facade of targets.filter(candidate=>String(candidate.address).toLowerCase()!==String(extension.address).toLowerCase())){
+      for(const facadeDeployment of deployed.filter(candidate=>String(candidate.address).toLowerCase()!==String(extension.address).toLowerCase())){
         if(probes>=96)break;
+        const facadeArtifact=facadeDeployment?.qualifiedName?byQ.get(facadeDeployment.qualifiedName):null;
+        if(!facadeArtifact)continue;
         let facadeIface;
-        try{facadeIface=new ethers.Interface(normalizedAbi(facade.artifact?.abi??[]));}catch{continue;}
+        try{facadeIface=new ethers.Interface(normalizedAbi(facadeArtifact.abi??[]));}catch{continue;}
         const probeFunction=(extension.functions??[]).find(selected=>{
           try{facadeIface.getFunction(selected.signature);return false;}catch{return true;}
         });
         if(!probeFunction)continue;
         probes++;
-        const answered=await facadeAnswersSelectorV2({provider,ethers,facadeAddress:facade.address,implArtifact,selected:probeFunction,from});
+        const answered=await facadeAnswersSelectorV2({provider,ethers,facadeAddress:facadeDeployment.address,implArtifact,selected:probeFunction,from});
         if(!answered)continue;
-        const added=addVariant({facadeDeployment:facade,implDeployment,implArtifact,contextType:'FACADE',basis:'SELECTOR_ANSWERED_BY_FACADE',evidence:{selectorProbe:probeFunction.signature}});
+        const added=addVariant({facadeDeployment,implDeployment,implArtifact,contextType:'FACADE',basis:'SELECTOR_ANSWERED_BY_FACADE',evidence:{selectorProbe:probeFunction.signature}});
         if(added)break;
       }
     }
