@@ -459,10 +459,16 @@ async function runNormalChromeExistingSession(chromium) {
     if (contexts.length !== 1) {
       throw new BrowserAgentError('NORMAL_CHROME_CONTEXT_INVALID', 'Expected one normal Chrome browser context', true);
     }
-    const context = contexts[0];
-    await context.addCookies(storage.cookies || []);
-    const pages = context.pages();
-    const page = pages[0] || await context.newPage();
+    // The old cookie-only restore dropped Playwright storageState.origins,
+    // which can leave ChatGPT unauthenticated even with a valid saved session.
+    // Restore the complete browser profile state BEFORE normal X11 navigation;
+    // no ChatGPT DOM or network endpoint is inspected or modified.
+    console.log('[normal-chrome-watchdog] stored-session-inventory='+JSON.stringify({
+      cookies:Array.isArray(storage.cookies)?storage.cookies.length:0,
+      origins:Array.isArray(storage.origins)?storage.origins.length:0
+    }));
+    const context = await browser.newContext({storageState:storage,viewport:null});
+    const page = await context.newPage();
 
     // Xvfb does not run a window manager. Alt+F10 is ignored, leaving Chrome
     // 820px wide while the old fixed-point composer click landed at x=1210.
