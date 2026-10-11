@@ -19,9 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     env:
-      PACKAGE_URL: ${{ inputs.source_url || 'https://drive.google.com/file/d/1epGQ6VuGfss81dUZ0b8VV4UY79bkqSv9/view' }}
       PACKAGE_SHA256: b605c80ebdf2c06d62bb7bda5dfc5c681a3963bc14fa53f781d4b9130908b1be
-      FORK_SOURCE_RPC: ${{ secrets.RPC_KATANA }}
       DEPLOYER: '0x11b78837cadC8E894F1c6e13fA9f3A085a75FA35'
     steps:
       - uses: actions/checkout@v4
@@ -30,20 +28,15 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p katana-cyavkat-v21-evidence
-          download="$PACKAGE_URL"
-          if [[ "$download" =~ ^https://drive\.google\.com/file/d/([A-Za-z0-9_-]+) ]]; then
-            download="https://drive.usercontent.google.com/download?id=${BASH_REMATCH[1]}&export=download&confirm=t"
-          fi
-          curl --fail --location --retry 2 --connect-timeout 15 --max-time 120 --output /tmp/cyavkat-v21.zip "$download"
+          cp packages/github-native-sim/inputs/cyavKAT_signing_layer_v21.zip /tmp/cyavkat-v21.zip
           python3 - <<'PY'
           import hashlib,zipfile,os
           p='/tmp/cyavkat-v21.zip'
-          assert os.path.getsize(p)==821155, f"size mismatch: {os.path.getsize(p)}; likely Drive sign-in HTML, not the v21 ZIP"
+          assert os.path.getsize(p)==821155, f"source size mismatch: {os.path.getsize(p)}"
           digest=hashlib.sha256(open(p,'rb').read()).hexdigest()
           assert digest==os.environ['PACKAGE_SHA256'],f"v21 SHA256 mismatch: {digest}"
           with zipfile.ZipFile(p) as z:
-            bad=z.testzip()
-            assert bad is None, f"corrupt archive entry: {bad}"
+            assert z.testzip() is None, "corrupt archive"
             assert 'cyavKAT/upgrade/script/P2_01_Deploy.s.sol' in z.namelist()
           print(f"Verified exact v21 source: {digest}")
           PY
