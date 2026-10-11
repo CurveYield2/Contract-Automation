@@ -101,10 +101,10 @@ jobs:
       - name: Checkout exact campaign
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_REF: ${{ env.SMOKE_AUDIT_CONTROLLER_REF }}
         shell: bash
         run: |
           set -euo pipefail
+          AUDIT_CONTROLLER_REF="$SMOKE_AUDIT_CONTROLLER_REF"
           gh auth setup-git
           gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
           cd .audit-controller
@@ -114,12 +114,12 @@ jobs:
       - name: Deploy on Anvil and run requested smoke stages
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
-          CAMPAIGN_PATH: ${{ env.SMOKE_CAMPAIGN_PATH }}
-          MEDUSA_CALLS: ${{ env.SMOKE_MEDUSA_CALLS }}
-          TELEMETRY_CALLS: ${{ env.SMOKE_TELEMETRY_CALLS }}
         shell: bash
         run: |
           set -euo pipefail
+          CAMPAIGN_PATH="$SMOKE_CAMPAIGN_PATH"
+          MEDUSA_CALLS="$SMOKE_MEDUSA_CALLS"
+          TELEMETRY_CALLS="$SMOKE_TELEMETRY_CALLS"
           [[ "$MEDUSA_CALLS" =~ ^[0-9]{1,6}$ ]] || { echo "::error::medusa_calls must be an integer from 0 to 999999"; exit 1; }
           [[ "$TELEMETRY_CALLS" =~ ^[0-9]{1,6}$ ]] || { echo "::error::telemetry_calls must be an integer from 0 to 999999"; exit 1; }
           (( MEDUSA_CALLS > 0 || TELEMETRY_CALLS > 0 )) || { echo "::error::at least one smoke call budget must be greater than zero"; exit 1; }
@@ -130,12 +130,11 @@ jobs:
 
       - name: Report and require requested smoke results
         if: ${{ always() }}
-        env:
-          MEDUSA_CALLS: ${{ env.SMOKE_MEDUSA_CALLS }}
-          TELEMETRY_CALLS: ${{ env.SMOKE_TELEMETRY_CALLS }}
         shell: bash
         run: |
           set -euo pipefail
+          MEDUSA_CALLS="$SMOKE_MEDUSA_CALLS"
+          TELEMETRY_CALLS="$SMOKE_TELEMETRY_CALLS"
           summary=.phase0-medusa-smoke/PHASE0_RANDOMIZED_SIMULATION_SUMMARY_v1.json
           test -f "$summary" || { echo "::error::No simulation summary was produced"; exit 1; }
           echo "---- Deployment coverage ----"
@@ -143,7 +142,7 @@ jobs:
 
           if (( TELEMETRY_CALLS > 0 )); then
             echo "---- Telemetry smoke summary ----"
-            jq '.telemetry[] | {runId,minedSuccess,minedRevert,simulatedRejection,positiveTransitions,positiveEconomicTransitions,accountingActionShare,observationReads}' "$summary"
+            jq '.telemetry[] | {runId,minedSuccess,minedRevert,simulatedRejection,positiveTransitions,positiveEconomicTransitions,accountingActionShare,observationReads,accountingObservationCalls,skippedObservationCalls,observationReadsPerAccountingCall}' "$summary"
             echo "---- Top 15 decoded telemetry revert reasons ----"
             jq -r '[.telemetry[]?.decodedRevertReasons[]?] | group_by(.reason) | map({reason:.[0].reason,kind:.[0].kind,selector:.[0].selector,count:(map(.count)|add)}) | sort_by(-.count, .reason) | .[:15] | ("COUNT\tKIND\tSELECTOR\tREASON"), (.[] | [.count,.kind,(.selector // ""),.reason] | @tsv)' "$summary"
           fi
