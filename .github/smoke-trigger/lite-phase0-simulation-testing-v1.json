@@ -5,5 +5,5 @@
   "audit_controller_ref": "main",
   "medusa_calls": 0,
   "telemetry_calls": 300,
-  "trigger_nonce": "balancer-v3-router-planner-core-repair-v1"
+  "trigger_nonce": "curveyield-wrapper-only-balancer-pool-creation-v1"
 }
