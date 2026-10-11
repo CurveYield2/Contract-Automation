@@ -1,0 +1,23 @@
+name: Lite Master Review Recovery Tests v1
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/lib/lite-master-review-v1.mjs'
+      - 'test/lite-master-review-recovery-v1.test.mjs'
+      - '.github/workflows/lite-master-review-recovery-tests-v1.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify sealed blob recovery and concise master instructions
+        run: node --test test/lite-master-review-recovery-v1.test.mjs
