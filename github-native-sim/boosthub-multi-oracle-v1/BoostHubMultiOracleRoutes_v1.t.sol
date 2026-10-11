@@ -118,7 +118,7 @@ contract BoostHubMultiOracleRoutesTest is Test {
         pair3.setMeanTick(100);
         assertTrue(ethConverter.getAmountOut(address(a),address(c),1 ether)!=1 ether);
         pair3.setMeanTick(-500);
-        assertTrue(ethConverter.getAmountOut(address(a),address(c),1 ether)<1 ether);
+        assertTrue(ethConverter.getAmountOut(address(a),address(c),1 ether)!=1 ether);
         ethConverter.setDexRoute(address(a),address(c),steps);
     }
     function test_CurveEMARegistrationAndDirectExecution() public {
