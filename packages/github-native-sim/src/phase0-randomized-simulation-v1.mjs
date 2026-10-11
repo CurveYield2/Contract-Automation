@@ -12,7 +12,7 @@ import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
-import {isBalancerV3TargetV1,discoverBalancerV3PoolsV1,buildBalancerV3ActionV1,bootstrapBalancerV3PoolsV1} from './phase0-balancer-v3-planner-v1.mjs';
+import {isBalancerV3TargetV1,discoverBalancerV3PoolsV1,buildBalancerV3ActionV1,balancerV3BptTransferRecipeV1,bootstrapBalancerV3PoolsV1} from './phase0-balancer-v3-planner-v1.mjs';
 import {topDecodedTelemetryRevertsV1,discoverValuePoolV1,fundActorsV1,PHASE0_MEDUSA_SENDERS_V1,weightedFixtureAddressSeedV1,chooseFixtureAddressV1,chooseFixtureAmountV1,recordChosenAddressesV1,serializeValuePoolV1,executeForkTokenAccountingWitnessV1,executeCreatorSynthesisV1,balancerCreatedPoolAddressesV1,approveFixtureSpendersV1,refreshCreatedAssociationsV1,executeActivationSynthesisV1} from './phase0-fixture-synthesis-v1.mjs';
 
 export const PHASE0_MEDUSA_CALL_LIMIT_V1=125000;
@@ -1442,7 +1442,20 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
     }
     const runId=`${runPrefix}-${String(run).padStart(3,'0')}`,dir=path.join(outRoot,'runs',runId);await fs.mkdir(dir,{recursive:true});
     const file=path.join(dir,'RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),h=await fs.open(file,'w'),rng=seeded(repeatSameSeedAcrossRuns?seedSalt:`${runId}-${seedSalt}`);
-    const schedule=buildBurstSchedule(targets,callsPerRun,rng);
+    // Exclude selectors that cannot be invoked at this lifecycle stage,
+    // while retaining an explicit inventory of every unavailable selector.
+    // The per-target calibration now covers executable ABIs, not knowingly
+    // impossible direct Vault/hook/settlement entrypoints.
+    const protocolPrerequisiteGaps=[];
+    const qualifiedScheduleTargets=balancerDiscovery.active?targets.map(t=>({
+      ...t,functions:t.functions.filter(fn=>{
+        const plan=buildBalancerV3ActionV1({ethers,target:t,selected:fn,discovery:balancerDiscovery,valuePool,actors});
+        if(plan.kind!=='BLOCKED')return true;
+        protocolPrerequisiteGaps.push({target:t.logicalQualifiedName??t.qualifiedName,address:t.address,signature:fn.signature,reason:plan.reason});
+        return false;
+      })
+    })):targets;
+    const schedule=buildBurstSchedule(qualifiedScheduleTargets,callsPerRun,rng);
     const accountingFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.semanticFamily==='ECONOMIC').length,0);
     const otherFunctionCount=targets.reduce((n,t)=>n+t.functions.filter(x=>x.semanticFamily!=='ECONOMIC').length,0);
     const stats={
@@ -1454,9 +1467,12 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       notExecutedEncodingOrPlanning:0,positiveTransitions:0,positiveEconomicTransitions:0,
       observationFailures:0,observationReads:0,accountingObservationCalls:0,skippedObservationCalls:0,byContract:{},byFunction:{},balancerPoolOperationCoverage:{},
       feedbackUpdates:0,feedbackSelections:0,contextAdaptations:[],protocolPlanningFailures:{},protocolAwareCalls:0,
+      protocolPrerequisiteGaps,protocolPrerequisiteGapCount:protocolPrerequisiteGaps.length,bptAllowanceSetupReceipts:[],
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
     const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),preflightRejections=new Map(),noEffectCounts=new Map(),successfulFunctionContexts=new Map();
+    const protocolExcludedKeys=new Set(protocolPrerequisiteGaps.map(x=>`${String(x.address).toLowerCase()}|${x.target}|${x.signature}`));
+    for(const key of protocolExcludedKeys)blockedContextFunctions.add(key);
     // Rotate across all registered, initialized pools at dispatch time.
     let balancerPoolDispatchCursor=0;
     // A Balancer router action is routable only if actual on-chain pool metadata
@@ -1493,6 +1509,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             // after the whole contract has exhausted all plausible contexts.
             // Recycle only as a bounded fallback when no alternative exists.
             blockedContextFunctions.clear();
+            for(const key of protocolExcludedKeys)blockedContextFunctions.add(key);
             picked=pickFn(target,rng,burst.actionClass,feedback,blockedContextFunctions,contextWeightMultipliers);
             if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
           }
@@ -1508,16 +1525,20 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               stats.contextAdaptations.push({kind:'ECONOMIC_BURST_PROTOCOL_RESELECTION',fromTarget:from,toTarget:target.qualifiedName,signature:selected.signature,atCallIndex:stats.calls+1});
             }
           }
-          let balancerAction=balancerDiscovery.active
+          let bptAction=balancerDiscovery.active
+            ? balancerV3BptTransferRecipeV1({target,selected,discovery:balancerDiscovery,actors})
+            : null;
+          let balancerAction=bptAction??(balancerDiscovery.active
             ? buildBalancerV3ActionV1({ethers,target,selected,discovery:balancerDiscovery,valuePool,actors,poolSelectionIndex:balancerPoolDispatchCursor})
-            : {kind:'GENERIC'};
+            : {kind:'GENERIC'});
           if(balancerAction.kind==='BLOCKED'){
             const substitutes=balancerReadyActions.filter(candidate=>candidate.selected.semanticFamily===selected.semanticFamily);
             if(substitutes.length){
               const next=substitutes[ri(rng,substitutes.length)];
               const previous=target;
               target=next.target;selected=next.selected;
-              balancerAction=buildBalancerV3ActionV1({ethers,target,selected,discovery:balancerDiscovery,valuePool,actors,poolSelectionIndex:balancerPoolDispatchCursor});
+              bptAction=balancerV3BptTransferRecipeV1({target,selected,discovery:balancerDiscovery,actors});
+              balancerAction=bptAction??buildBalancerV3ActionV1({ethers,target,selected,discovery:balancerDiscovery,valuePool,actors,poolSelectionIndex:balancerPoolDispatchCursor});
               picked={...picked,selectionKey:`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${selected.signature}`,feedbackWeight:1,selectionWeightMultiplier:1};
               stats.contextAdaptations.push({kind:'BALANCER_V3_ROUTE_RESELECTION',fromTarget:previous.qualifiedName,toTarget:target.qualifiedName,signature:selected.signature,atCallIndex:stats.calls+1});
             }
@@ -1569,6 +1590,23 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             rec.error=rec.stages.ARG_GEN.error;
           }else{
             const value=qualifiedAction?.value??(f.stateMutability==='payable'?BigInt(ri(rng,1000000)):0n);
+            // transferFrom's spender must have an actual BPT allowance from
+            // the verified holder. Execute a local-Anvil holder-signed approval,
+            // retain its receipt, and never assume unlimited allowance.
+            if(bptAction?.kind==='READY'&&bptAction.transferFrom){
+              const bptToken=new ethers.Contract(bptAction.pool,[
+                'function allowance(address,address) view returns (uint256)',
+                'function approve(address,uint256) returns (bool)'
+              ],provider);
+              const current=BigInt(await bptToken.allowance(bptAction.owner,bptAction.spender));
+              if(current<BigInt(bptAction.amount)){
+                const approval=await bptToken.connect(await provider.getSigner(bptAction.owner)).approve(bptAction.spender,BigInt(bptAction.amount));
+                const receipt=await approval.wait();
+                const entry={pool:bptAction.pool,owner:bptAction.owner,spender:bptAction.spender,amount:bptAction.amount,transactionHash:approval.hash,receiptStatus:receipt.status};
+                stats.bptAllowanceSetupReceipts.push(entry);
+                rec.bptAllowanceSetup=entry;
+              }
+            }
             const resolved=await resolveTelemetryCallerContextV2({
               provider,ethers,target,selected,iface,args,value,defaultSender:sender,targets,valuePool,
               callerState:callerResolutionState,weightMultipliers:contextWeightMultipliers
@@ -1662,9 +1700,9 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
               if(rec.positiveTransition)entry.economicTransitions++;
               stats.balancerPoolOperationCoverage[key]=coverage;
               // BPT supply and holder balances change on adds and exits.
-              if(rec.executionOutcome==='MINED_SUCCESS'&&(op==='addLiquidity'||op==='removeLiquidity')&&p){
+              if(rec.executionOutcome==='MINED_SUCCESS'&&(op==='addLiquidity'||op==='removeLiquidity'||Boolean(bptAction))&&p){
                 const bpt=new ethers.Contract(p.address,['function balanceOf(address) view returns (uint256)'],provider);
-                const holders=new Set([sender,...(p.bptHolders??[]).map(x=>x.actor)]),next=[];
+                const holders=new Set([sender,...(p.bptHolders??[]).map(x=>x.actor),...(bptAction?.recipient?[bptAction.recipient]:[])]),next=[];
                 for(const actor of holders){
                   try{const amount=BigInt(await bpt.balanceOf(actor));if(amount>0n)next.push({actor,amount:amount.toString()});}
                   catch(error){stats.contextAdaptations.push({kind:'BPT_BALANCE_REFRESH_FAILED',pool:p.address,actor,message:String(error?.shortMessage??error?.message??error).slice(0,180),atCallIndex:stats.calls});}
