@@ -377,7 +377,13 @@ test('existing-chat reviewer initial wake is idempotent per campaign milestone',
   assert.match(wake, /Resolve idempotent reviewer wake/);
   assert.match(wake, /INITIAL_WAKE_DEDUPED=true/);
   assert.match(wake, /Persist existing-chat reviewer wake into campaign registration/);
-  assert.match(wake, /wakeDelivery=\{milestoneId:\$milestoneId,chatUrl:\$url,deliveredAt:\$deliveredAt\}/);
+  assert.match(wake, /wakeDelivery=\{milestoneId:\$milestoneId,chatUrl:\$url,deliveredAt:\$deliveredAt,verification:"REVIEWER_GITHUB_CHECK_IN",ackId:\$ackId\}/);
+  assert.ok(wake.includes('DO THIS FIRST, RIGHT NOW'));
+  assert.ok(wake.includes('for i in $(seq 0 10); do'));
+  assert.ok(wake.includes('if [ "$i" -lt 10 ]; then sleep 30; fi'));
+  assert.ok(wake.includes('WAKE_ACK_PATH'));
+  const watchdog = read('.github/workflows/browser-agent-watchdog.yml');
+  assert.doesNotMatch(watchdog, /WAKE_ACK_PATH|WAKE_ACK_ID/);
   assert.match(wake, /group:\s*chatgpt-shared-browser-session-v1/);
   assert.match(wake, /cancel-in-progress:\s*false/);
   assert.match(wake, /Requested reviewer chat is not one of the pre-created registered reviewer chats/);
