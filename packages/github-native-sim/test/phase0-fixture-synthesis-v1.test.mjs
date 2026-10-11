@@ -149,6 +149,9 @@ contract MockPermit2 {
     stored.amount = amount;
     stored.expiration = expiration;
   }
+  function setNonce(address owner, address token, address spender, uint48 nonce) external {
+    allowance[owner][token][spender].nonce = nonce;
+  }
 }
 
 contract Registry {
@@ -194,6 +197,7 @@ test('Stage-1 discovers associations and privileged actors, funds Solidity and V
     await provider.send('anvil_setCode',[PHASE0_PERMIT2_ADDRESS_V1,await provider.getCode(await permit2Impl.getAddress())]);
     const permit2=new ethers.Contract(PHASE0_PERMIT2_ADDRESS_V1,compiled.MockPermit2.abi,provider);
     const accounts=await provider.send('eth_accounts',[]);
+    await (await permit2.connect(await provider.getSigner(0)).setNonce(accounts[0],await slotToken.getAddress(),await registry.getAddress(),7)).wait();
     const targets=[
       {qualifiedName:'Stage1.sol:SlotToken',address:await slotToken.getAddress(),artifact:{abi:compiled.SlotToken.abi}},
       {qualifiedName:'Stage1.sol:VyperShapeToken',address:await vyperToken.getAddress(),artifact:{abi:compiled.VyperShapeToken.abi}},
@@ -237,7 +241,8 @@ test('Stage-1 discovers associations and privileged actors, funds Solidity and V
         const values=await permit2.getFunction('allowance(address,address,address)').staticCall(holder,token,registryAddress);
         assert.equal(BigInt(values[0]),(1n<<160n)-1n);
         assert.equal(BigInt(values[1]),(1n<<48n)-1n);
-        assert.equal(BigInt(values[2]),0n);
+        const expectedNonce=holder.toLowerCase()===accounts[0].toLowerCase()&&token.toLowerCase()===slotTokenAddress.toLowerCase()?7n:0n;
+        assert.equal(BigInt(values[2]),expectedNonce);
       }
       assert.equal((await slotToken.allowance(holder,PHASE0_PERMIT2_ADDRESS_V1)).toString(),ethers.MaxUint256.toString());
       assert.equal((await vyperToken.allowance(holder,PHASE0_PERMIT2_ADDRESS_V1)).toString(),ethers.MaxUint256.toString());
