@@ -575,12 +575,16 @@ function randomValue(param,rng,ctx){
   return generated.value;
 }
 function simpleView(f){return (f.outputs??[]).length>0&&(f.outputs??[]).every(x=>/^(?:u?int\d*|address|bool|bytes\d*|string)$/.test(x.type));}
-function probePlan(ethers,abi){
+function probePlan(ethers,abi,qualifiedName=''){
   const iface=new ethers.Interface(normalizedAbi(abi)),zero=[],address=[],addressPair=[];
   for(const f of iface.fragments.filter(x=>x.type==='function'&&['view','pure'].includes(x.stateMutability)&&simpleView(x))){
     const signature=f.format('sighash');
     const admitted=ACCOUNTING_VIEW_RE.test(f.name)||['totalSupply()','totalAssets()','asset()','balanceOf(address)','allowance(address,address)'].includes(signature);
     if(!admitted)continue;
+    // Only numeric quantities are comparable for accounting deltas.
+    if(!(f.outputs??[]).every(x=>/^u?int(?:[0-9]+)?$/.test(x.type)))continue;
+    // Weighted/Stable Balancer pool getRate() can be unsupported/reverting.
+    if(signature==='getRate()'&&/@balancer-labs\/v3-pool-(?:weighted|stable)/i.test(qualifiedName))continue;
     if(f.inputs.length===0&&zero.length<18)zero.push(f);
     else if(f.inputs.length===1&&f.inputs[0].type==='address'&&address.length<10)address.push(f);
     else if(f.inputs.length===2&&f.inputs.every(x=>x.type==='address')&&addressPair.length<6)addressPair.push(f);
@@ -741,7 +745,7 @@ export function targetObjects(ethers,artifacts,deployed,sourceIntelligence={}){
       const semantic=classifySemanticFamilyV2({signature:x.signature,stateMutability:x.fragment.stateMutability,recipe:recipe.status==='QUALIFIED'?recipe:null});
       return{...x,accounting:semantic.semanticFamily==='ECONOMIC',semanticFamily:semantic.semanticFamily,semanticBasis:semantic.basis};
     });
-    return{...d,artifact,functions,plan:probePlan(ethers,artifact),declaredStandards,recipe};
+    return{...d,artifact,functions,plan:probePlan(ethers,artifact,d.qualifiedName),declaredStandards,recipe};
   }).filter(t=>t.functions.length);
 }
 const EIP1967_IMPLEMENTATION_SLOT_V2='0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
@@ -850,7 +854,7 @@ export async function augmentDelegateProxyContextsV2({provider,ethers,targets,ar
       logicalQualifiedName:implDeployment.qualifiedName,
       artifact:implArtifact,
       functions:built.functions,
-      plan:probePlan(ethers,implArtifact),
+      plan:probePlan(ethers,implArtifact,implDeployment.qualifiedName),
       declaredStandards:built.declaredStandards,recipe:built.recipe,
       contextType,contextDisposition:'READY',
       contextEvidence:{facadeAddress:facadeDeployment.address,implementationAddress:implDeployment.address??null,discoveryBasis:basis,...evidence}
@@ -1404,10 +1408,12 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
       burstSchedule:schedule.map(x=>({contract:targets[x.targetIndex].qualifiedName,calls:x.count,actionClass:x.actionClass}))
     };
     const terminalRows=[],feedback=new Map(),blockedContextFunctions=new Set(),preflightRejections=new Map(),successfulFunctionContexts=new Map();
+    // Rotate across all registered, initialized pools at dispatch time.
+    let balancerPoolDispatchCursor=0;
     // A Balancer router action is routable only if actual on-chain pool metadata
     // supplies the registered pool and exact Vault token order. Do not guess.
     const refreshBalancerReadyActions=()=>balancerDiscovery.active?targets.flatMap((t)=>t.functions.flatMap((fn)=>{
-      const plan=buildBalancerV3ActionV1({ethers,target:t,selected:fn,discovery:balancerDiscovery,valuePool,actors});
+      const plan=buildBalancerV3ActionV1({ethers,target:t,selected:fn,discovery:balancerDiscovery,valuePool,actors,poolSelectionIndex:0});
       return plan.kind==='READY'?[{target:t,selected:fn,plan}]:[];
     })):[];
     let balancerReadyActions=refreshBalancerReadyActions();
@@ -1442,21 +1448,36 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
             if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
           }
           let selected=picked.selected;
+          // Do not silently downgrade reserved economic calls to nonce or
+          // configuration calls merely because this target lacks such an ABI.
+          if(burst.actionClass==='ACCOUNTING_STATE_CHANGE'&&selected.semanticFamily!=='ECONOMIC'&&!burst.calibration){
+            const economicReady=balancerReadyActions.filter(x=>x.selected.semanticFamily==='ECONOMIC');
+            if(economicReady.length){
+              const next=economicReady[ri(rng,economicReady.length)],from=target.qualifiedName;
+              target=next.target;selected=next.selected;
+              picked={...picked,selectionKey:`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${selected.signature}`,feedbackWeight:1,selectionWeightMultiplier:1};
+              stats.contextAdaptations.push({kind:'ECONOMIC_BURST_PROTOCOL_RESELECTION',fromTarget:from,toTarget:target.qualifiedName,signature:selected.signature,atCallIndex:stats.calls+1});
+            }
+          }
           let balancerAction=balancerDiscovery.active
-            ? buildBalancerV3ActionV1({ethers,target,selected,discovery:balancerDiscovery,valuePool,actors})
+            ? buildBalancerV3ActionV1({ethers,target,selected,discovery:balancerDiscovery,valuePool,actors,poolSelectionIndex:balancerPoolDispatchCursor})
             : {kind:'GENERIC'};
           if(balancerAction.kind==='BLOCKED'){
             const substitutes=balancerReadyActions.filter(candidate=>candidate.selected.semanticFamily===selected.semanticFamily);
             if(substitutes.length){
               const next=substitutes[ri(rng,substitutes.length)];
               const previous=target;
-              target=next.target;selected=next.selected;balancerAction=next.plan;
+              target=next.target;selected=next.selected;
+              balancerAction=buildBalancerV3ActionV1({ethers,target,selected,discovery:balancerDiscovery,valuePool,actors,poolSelectionIndex:balancerPoolDispatchCursor});
               picked={...picked,selectionKey:`${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${selected.signature}`,feedbackWeight:1,selectionWeightMultiplier:1};
               stats.contextAdaptations.push({kind:'BALANCER_V3_ROUTE_RESELECTION',fromTarget:previous.qualifiedName,toTarget:target.qualifiedName,signature:selected.signature,atCallIndex:stats.calls+1});
             }
           }
           if(balancerAction.kind==='BLOCKED')stats.protocolPlanningFailures[balancerAction.reason]=(stats.protocolPlanningFailures[balancerAction.reason]??0)+1;
-          if(balancerAction.kind==='READY')stats.protocolAwareCalls++;
+          if(balancerAction.kind==='READY'){
+            stats.protocolAwareCalls++;
+            if(balancerAction.pool)balancerPoolDispatchCursor++;
+          }
           const f=selected.fragment,iface=new ethers.Interface(normalizedAbi(target.artifact.abi));
           const qualifiedAction=balancerAction.kind==='READY'
             ? {sender:balancerAction.sender,args:balancerAction.args,value:balancerAction.value,basis:balancerAction.basis,pool:balancerAction.pool}
