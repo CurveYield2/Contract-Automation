@@ -1328,7 +1328,7 @@ if (mode === 'resume_existing' && action === 'wake') {
   try {
     const result = await runNormalChromeExistingSession(chromium);
     console.log(JSON.stringify(result));
-    process.exit(0);
+    process.exit(result.ok === true ? 0 : 1);
   } catch (error) {
     const failure = {
       provider: 'normal-system-chrome-x11',
