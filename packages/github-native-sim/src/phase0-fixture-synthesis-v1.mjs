@@ -954,14 +954,28 @@ export function buildCreatorArgumentsV1({ethers,candidate,attempt=0,actor,valueP
   });
   return{args,tokenSet:tokenSet.map(x=>x.address),chosenAddresses:context.chosenAddresses};
 }
-function normalizeEvidenceValueV1(value){
-  if(typeof value==='bigint')return value.toString();
-  if(Array.isArray(value))return value.map(normalizeEvidenceValueV1);
-  if(value&&typeof value==='object'){
-    if(typeof value.toArray==='function'){try{return value.toArray().map(normalizeEvidenceValueV1);}catch{}}
-    return Object.fromEntries(Object.entries(value).filter(([key])=>!/^\d+$/.test(key)).map(([key,child])=>[key,normalizeEvidenceValueV1(child)]));
+// Creator inputs are untrusted ABI-shaped values. Keep evidence traversal bounded:
+// ethers Result objects, deeply nested tuples or cyclic objects must never block
+// the entire randomized campaign after successful on-chain pool creation.
+export function normalizeEvidenceValueV1(value){
+  const active=new WeakSet();
+  let nodes=0;
+  function convert(v,depth){
+    if(++nodes>100000||depth>32)throw Object.assign(new Error('creator evidence exceeds bounded serializer limits'),{code:'CREATOR_EVIDENCE_TOO_COMPLEX'});
+    if(typeof v==='bigint')return v.toString();
+    if(v===null||typeof v!=='object')return v;
+    if(active.has(v))throw Object.assign(new Error('cyclic creator evidence argument'),{code:'CREATOR_EVIDENCE_CYCLE'});
+    active.add(v);
+    try{
+      if(Array.isArray(v))return v.map(child=>convert(child,depth+1));
+      if(typeof v.toArray==='function'){
+        const row=v.toArray();
+        if(Array.isArray(row))return row.map(child=>convert(child,depth+1));
+      }
+      return Object.fromEntries(Object.entries(v).filter(([key])=>!/^\d+$/.test(key)).map(([key,child])=>[key,convert(child,depth+1)]));
+    }finally{active.delete(v);}
   }
-  return value;
+  return convert(value,0);
 }
 function knownAddressSetV1({valuePool={},targets=[]}){
   return new Set([
@@ -1246,13 +1260,17 @@ export async function executeCreatorSynthesisV1({provider,ethers,targets=[],acto
         }
         bound.push({address,status:binding.status,qualifiedName:binding.deployment?.qualifiedName??null,implementationAddress:binding.implementationAddress??null});
       }
+      console.log(`[phase0-fixture] Stage2 creator ${candidateIndex+1}/${candidates.length} CHECKPOINT bound_children=${bound.length} prior_to_evidence_serialization`);
+      const serializedCreatorArgs=normalizeEvidenceValueV1(built.args);
+      console.log(`[phase0-fixture] Stage2 creator ${candidateIndex+1}/${candidates.length} CHECKPOINT creator_evidence_serialized`);
       creations.push({
         functionKey:candidate.key,target:candidate.target.qualifiedName,address:candidate.target.address,
         function:candidate.selected.signature,basis:candidate.basis,recipeBasis:built.basis??null,strategy,sender,
-        argsSummary:normalizeEvidenceValueV1(built.args),valueWei:String(built.value??0n),
+        argsSummary:serializedCreatorArgs,valueWei:String(built.value??0n),
         receipt:{transactionHash:result.transactionHash,blockNumber:result.receipt?.blockNumber??null,status:Number(result.receipt?.status??0),gasUsed:result.receipt?.gasUsed?.toString?.()??null},
         createdAddresses:newAddresses,boundArtifacts:bound
       });
+      console.log(`[phase0-fixture] Stage2 creator ${candidateIndex+1}/${candidates.length} CHECKPOINT creation_recorded`);
     }
     console.log(`[phase0-fixture] Stage2 creator ${candidateIndex+1}/${candidates.length} complete successes=${successes} calls=${attempts.length}`);
     const failedAttempts=attempts.filter(x=>x.status!=='PASS');
