@@ -783,12 +783,12 @@ if(sequence===5){
     const feedback=['Phase 5 execution gate BLOCKED: no receipt, PASS or handoff was issued.',
       'Repair the exact runner, harness or machine-evidence defect, then invoke the same phase controller again.',
       ...deficiencies.map(x=>'- '+x),
-      'Machine failure is not a vulnerability finding.'].join('\\n');
+      'Machine failure is not a vulnerability finding.'].join('\n');
     process.stdout.write(JSON.stringify({status:'NEEDS_REWORK',campaignId:directory.campaignId,
       campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-5',
       reviewer:assignment.reviewer,feedbackText:feedback,
       feedbackB64:Buffer.from(feedback).toString('base64'),
-      packetPath:assignment.packetPath,directoryPath:directoryRel})+'\\n');
+      packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
     process.exit(0);
   }
 }
