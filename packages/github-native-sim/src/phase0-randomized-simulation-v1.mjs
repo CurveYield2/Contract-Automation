@@ -1088,6 +1088,155 @@ function preflightKindV2(error){
   const text=String(error?.shortMessage??error?.message??error??'');
   return error?.code==='CALL_EXCEPTION'||/revert|execution reverted|panic/i.test(text)?'PROTOCOL_REJECTION':'INFRASTRUCTURE';
 }
+const CONTEXT_REQUIRED_RE_V2=/(?:SenderIsNot|NotVault|OnlyVault|CallerIsNot|NotDelegateCall|onlyVault|only[A-Z]\w+)/;
+const AUTH_LOOKING_RE_V2=/(?:NotOwner|Unauthorized|owner|auth|admin|allowed|permission|role|onlyOwner|onlyAdmin)/i;
+
+function collectAddressStringsV2(value,out=[]){
+  if(typeof value==='string'&&/^0x[0-9a-fA-F]{40}$/.test(value)){out.push(value);return out;}
+  if(Array.isArray(value)){for(const child of value)collectAddressStringsV2(child,out);return out;}
+  if(value&&typeof value==='object')for(const child of Object.values(value))collectAddressStringsV2(child,out);
+  return out;
+}
+function contextErrorTextV2(info={}){
+  return [
+    info?.decodedCustomError?.name,
+    info?.decodedCustomError?.signature,
+    info?.reason,info?.shortMessage,info?.message
+  ].filter(Boolean).join(' | ');
+}
+function associationCallerCandidatesV2({ethers,valuePool,targetAddress,targets=[]}){
+  const out=[];
+  for(const target of targets){
+    if(!target?.address)continue;
+    if(associationHoldsV2(valuePool?.associations??{},target.address,targetAddress))out.push(target.address);
+  }
+  return [...new Set(out.map(address=>ethers.getAddress(address)))];
+}
+function alternateFacadeTargetsV2({target,selected,targets=[]}){
+  const logical=target.logicalQualifiedName??target.qualifiedName;
+  return targets.filter(candidate=>
+    String(candidate.address).toLowerCase()!==String(target.address).toLowerCase()&&
+    ['FACADE','DELEGATE_PROXY'].includes(candidate.contextType??'DIRECT')&&
+    (candidate.logicalQualifiedName??candidate.qualifiedName)===logical&&
+    (candidate.functions??[]).some(fn=>fn.signature===selected.signature)
+  );
+}
+async function ensureImpersonatedSenderV2({provider,ethers,address}){
+  const sender=ethers.getAddress(address);
+  try{await provider.send('anvil_impersonateAccount',[sender]);}catch{}
+  try{
+    const balance=BigInt(await provider.send('eth_getBalance',[sender,'latest']));
+    if(balance<ethers.parseEther('1'))await provider.send('anvil_setBalance',[sender,ethers.toQuantity(ethers.parseEther('100'))]);
+  }catch{}
+  return sender;
+}
+async function telemetryPreflightAttemptV2({provider,iface,signature,args,sender,to,value}){
+  const data=iface.encodeFunctionData(signature,args);
+  let callProbe;
+  try{
+    const rawReturn=await provider.call({from:sender,to,data,value});
+    let decodedReturn=null;
+    try{decodedReturn=normalize(iface.decodeFunctionResult(signature,rawReturn));}catch{}
+    callProbe={status:'RETURNED',rawReturn,decodedReturn};
+  }catch(error){
+    callProbe={status:'REVERTED',error:errorInfo(error,iface)};
+  }
+  try{
+    const estimate=await provider.estimateGas({from:sender,to,data,value});
+    return{success:true,estimate,callProbe,error:null,errorDetails:null,to,sender,data};
+  }catch(error){
+    return{success:false,estimate:null,callProbe,error,errorDetails:errorInfo(error,iface),to,sender,data};
+  }
+}
+function callerResolutionForTargetV2(target){
+  return ['FACADE','DELEGATE_PROXY'].includes(target.contextType??'DIRECT')?`FACADE:${target.address}`:'DEFAULT';
+}
+function selectionCallerStateKeyV2(target,selected){
+  return `${target.address.toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${selected.signature}`;
+}
+export async function resolveTelemetryCallerContextV2({
+  provider,ethers,target,selected,iface,args,value,defaultSender,targets=[],valuePool=null,callerState=new Map(),weightMultipliers=new Map()
+}){
+  const key=selectionCallerStateKeyV2(target,selected),saved=callerState.get(key);
+  const adaptations=[];
+  if(saved&&saved.resolution!=='UNRESOLVED'){
+    const sender=saved.sender?await ensureImpersonatedSenderV2({provider,ethers,address:saved.sender}):defaultSender;
+    const to=saved.executionAddress??target.address;
+    const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender,to,value});
+    if(attempt.success)return{...attempt,resolution:saved.resolution,executionAddress:to,sender,adaptations,reused:true};
+  }
+
+  const initial=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender:defaultSender,to:target.address,value});
+  if(initial.success){
+    const resolution=callerResolutionForTargetV2(target);
+    if(resolution!=='DEFAULT')callerState.set(key,{resolution,executionAddress:target.address,sender:null});
+    weightMultipliers.set(key,1);
+    return{...initial,resolution,executionAddress:target.address,sender:defaultSender,adaptations,reused:false};
+  }
+
+  const info=initial.errorDetails??{},text=contextErrorTextV2(info);
+  const delegateRequired=/DelegateCall/i.test(text);
+  const contextRequired=delegateRequired||CONTEXT_REQUIRED_RE_V2.test(text);
+  const authRequired=AUTH_LOOKING_RE_V2.test(text);
+  const namedAddresses=[...new Set(collectAddressStringsV2(info?.decodedCustomError?.args??[]).map(address=>ethers.getAddress(address)))];
+
+  if(delegateRequired){
+    for(const facade of alternateFacadeTargetsV2({target,selected,targets})){
+      const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender:defaultSender,to:facade.address,value});
+      adaptations.push({kind:'FACADE_RETRY',fromAddress:target.address,toAddress:facade.address,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,signature:selected.signature,status:attempt.success?'PASS':'REVERTED'});
+      if(attempt.success){
+        const resolution=`FACADE:${facade.address}`;
+        callerState.set(key,{resolution,executionAddress:facade.address,sender:null});
+        weightMultipliers.set(key,1);
+        return{...attempt,resolution,executionAddress:facade.address,sender:defaultSender,adaptations,reused:false};
+      }
+    }
+  }
+
+  if(contextRequired&&!delegateRequired){
+    const candidates=namedAddresses.length
+      ? namedAddresses.slice(0,1)
+      : associationCallerCandidatesV2({ethers,valuePool,targetAddress:target.address,targets});
+    for(const candidate of candidates){
+      if(String(candidate).toLowerCase()===String(defaultSender).toLowerCase())continue;
+      const sender=await ensureImpersonatedSenderV2({provider,ethers,address:candidate});
+      const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender,to:target.address,value});
+      adaptations.push({kind:'IMPERSONATED_CALLER_RETRY',fromSender:defaultSender,toSender:sender,targetAddress:target.address,signature:selected.signature,status:attempt.success?'PASS':'REVERTED'});
+      if(attempt.success){
+        const resolution=`IMPERSONATED_CALLER:${sender}`;
+        callerState.set(key,{resolution,executionAddress:target.address,sender});
+        weightMultipliers.set(key,1);
+        return{...attempt,resolution,executionAddress:target.address,sender,adaptations,reused:false};
+      }
+    }
+  }
+
+  if(authRequired){
+    for(const raw of valuePool?.privileged??[]){
+      let privileged;
+      try{privileged=ethers.getAddress(raw);}catch{continue;}
+      if(privileged.toLowerCase()===String(defaultSender).toLowerCase())continue;
+      const sender=await ensureImpersonatedSenderV2({provider,ethers,address:privileged});
+      const attempt=await telemetryPreflightAttemptV2({provider,iface,signature:selected.signature,args,sender,to:target.address,value});
+      adaptations.push({kind:'PRIVILEGED_CALLER_RETRY',fromSender:defaultSender,toSender:sender,targetAddress:target.address,signature:selected.signature,status:attempt.success?'PASS':'REVERTED'});
+      if(attempt.success){
+        const resolution=`PRIVILEGED:${sender}`;
+        callerState.set(key,{resolution,executionAddress:target.address,sender});
+        weightMultipliers.set(key,1);
+        return{...attempt,resolution,executionAddress:target.address,sender,adaptations,reused:false};
+      }
+    }
+  }
+
+  if(contextRequired||authRequired){
+    callerState.set(key,{resolution:'UNRESOLVED',executionAddress:target.address,sender:null});
+    weightMultipliers.set(key,0.1);
+    adaptations.push({kind:'CALLER_CONTEXT_UNRESOLVED',targetAddress:target.address,logicalQualifiedName:target.logicalQualifiedName??target.qualifiedName,signature:selected.signature,reason:text.slice(0,1000),selectionWeightMultiplier:0.1});
+    return{...initial,resolution:'UNRESOLVED',executionAddress:target.address,sender:defaultSender,adaptations,reused:false,contextRequired:true};
+  }
+
+  return{...initial,resolution:callerResolutionForTargetV2(target),executionAddress:target.address,sender:defaultSender,adaptations,reused:false};
+}
 export async function runTelemetry({provider,ethers,targets,actors,outRoot,baselineSnapshot,artifacts=[],valuePool=null,telemetryRuns=PHASE0_TELEMETRY_RUNS_V1,callsPerRun=PHASE0_TELEMETRY_CALLS_PER_RUN_V1,seedSalt='phase0-v2',runPrefix='abi-telemetry',repeatSameSeedAcrossRuns=false}){
   const summaries=[];
   let snapshotId=baselineSnapshot;
