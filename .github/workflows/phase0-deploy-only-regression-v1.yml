@@ -28,6 +28,7 @@ on:
       - 'packages/github-native-sim/test/phase0-*.test.mjs'
 permissions:
   contents: read
+  actions: read
 jobs:
   verify-deploy-only:
     runs-on: ubuntu-latest
@@ -62,3 +63,41 @@ jobs:
             packages/github-native-sim/test/phase0-optimization4-v1.test.mjs \
             packages/github-native-sim/test/phase0-randomized-simulation-v1.test.mjs \
             packages/github-native-sim/test/lite-phase-packet-controller-integration-v1.test.mjs
+
+  verify-original-blocker-reconciliation:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Select private Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Load original campaign and immutable deployment artifact
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        run: bash scripts/checkout-audit-controller-once-v1.sh .audit-controller main
+      - name: Fetch prior failed run with read-only GitHub token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .phase0-regression-evidence
+          gh run download 38157021296 --repo "$GITHUB_REPOSITORY" \\
+            --name phase0-deploy-config-curveyield-dex-v16-source-r4-38157021296 \\
+            --dir .phase0-regression-evidence
+      - name: Source-verify all exclusions without executing a deployment
+        run: |
+          set -euo pipefail
+          node scripts/reconcile-phase0-deploy-evidence-v1.mjs \\
+            --input .phase0-regression-evidence/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json \\
+            --output .phase0-regression-reconciled/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json \\
+            --campaign-root '.audit-controller/campaigns/CurveYield DEX v16 Source r4' \\
+            --source-run-id 38157021296
+          node --input-type=module -e 'import fs from "node:fs";import {assertDeployGateEvidenceV2} from "./scripts/lib/phase0-deploy-gate-v2.mjs";const e=JSON.parse(fs.readFileSync(".phase0-regression-reconciled/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json","utf8"));assertDeployGateEvidenceV2(e);if(e.reconciliation.excludedScripts.length!==4)process.exit(3)'
