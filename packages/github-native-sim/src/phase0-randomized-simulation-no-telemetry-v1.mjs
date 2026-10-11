@@ -2035,6 +2035,7 @@ function baselineTargetRows({medusa}){
   ];
 }
 export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl,medusaSmokeCalls=null,telemetrySmokeCalls=null}){
+  const overallStartedAt=Date.now();
   // Smoke budgets are independent and never produce campaign evidence. Medusa-only preserves the prior smoke behavior.
   const medusaSmoke=Number.isInteger(medusaSmokeCalls)&&medusaSmokeCalls>0;
   const telemetrySmoke=Number.isInteger(telemetrySmokeCalls)&&telemetrySmokeCalls>0;
@@ -2335,7 +2336,17 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         }catch(error){stateSource={mode:'LIVE_FORK_ANVIL',snapshotFailure:String(error?.message??error).slice(0,1200)};}
         console.log(`[phase0-medusa] state source: ${JSON.stringify(stateSource)}`);
         try{
-          medusa=await runMedusaShardsV2({projectRoot:staged.projectRoot,anvilUrl:medusaNode?.url??anvil.url,blockNumber:medusaNode?.blockNumber??baselineBlock,ethers,targets,outRoot:outputRoot,valuePool,...(medusaSmoke?{minimumRequiredCalls:medusaSmokeCalls,shardCallLimit:Math.max(medusaSmokeCalls,1000)}:{})});
+          // 50min hard outer limit; reserve 3min for evidence writing.
+           // The global Medusa budget now exceeds 20min without resetting
+           // at each new shard; completeness and variety remain gated.
+           const remainingSeconds=Math.floor((3000000-(Date.now()-overallStartedAt))/1000)-180;
+           const medusaBudgetSeconds=Math.min(2400,Math.max(0,remainingSeconds));
+           if(medusaBudgetSeconds<30){
+             const failure=new Error('Insufficient remaining 50-minute simulation budget for Medusa; preserve typed evidence');
+             failure.code='PHASE0_MEDUSA_GLOBAL_BUDGET_EXHAUSTED';throw failure;
+           }
+           console.log('[phase0-medusa] global budget seconds='+medusaBudgetSeconds+'; total simulation hard limit=3000s');
+           medusa=await runMedusaShardsV2({projectRoot:staged.projectRoot,anvilUrl:medusaNode?.url??anvil.url,blockNumber:medusaNode?.blockNumber??baselineBlock,ethers,targets,outRoot:outputRoot,valuePool,maxSeconds:medusaBudgetSeconds,...(medusaSmoke?{minimumRequiredCalls:medusaSmokeCalls,shardCallLimit:Math.max(medusaSmokeCalls,1000)}:{})});
           medusa.stateSource=stateSource;
         }finally{if(medusaNode)await medusaNode.close();}
       }catch(error){
