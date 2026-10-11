@@ -2050,7 +2050,9 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const artifacts=[...artifactByQualified.values()];
     anvil=await startAnvil({forkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
     const provider=new ethers.JsonRpcProvider(anvil.url,1,{staticNetwork:true,cacheTimeout:-1}),actors=await provider.send('eth_accounts',[]),initialBlock=Number(await provider.getBlockNumber());
+    console.log('[phase0-smoke-progress] START native deployment scripts');
     const deployment=await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],localSigner:anvil.localSigner,detected});
+    console.log(`[phase0-smoke-progress] END native deployment scripts; attempts=${deployment.attempts.length}; failed=${deployment.attempts.filter(x=>x.status==='FAILED').length}`);
     const scriptEnd=Number(await provider.getBlockNumber());
     const discoveredScriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
     const reported=await reportedPackageDeployments({projectRoot:staged.projectRoot,attempts:deployment.attempts,artifacts});
@@ -2060,10 +2062,13 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const expectedNativeNames=new Set(build.deploymentOrder??[]);
     const observedNativeNames=new Set(scriptDeployments.map(x=>x.contractName).filter(Boolean));
     const nativeScriptComplete=deployment.status==='PASS'&&[...expectedNativeNames].every(name=>observedNativeNames.has(name));
+    console.log('[phase0-smoke-progress] START source-known deployment plan');
     const sourcePlan=nativeScriptComplete
       ? {status:'SKIPPED_PACKAGE_DEPLOYMENT_SCRIPT_COMPLETE',planPath:null,planned:0,rows:[],attempts:[],limitations:[],unresolvedSteps:0}
       : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
+    console.log(`[phase0-smoke-progress] END source-known deployment plan; deployed=${sourcePlan.rows.length}; unresolved=${sourcePlan.unresolvedSteps}`);
     const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows];
+    console.log(`[phase0-smoke-progress] END fallback deployment; deployed=${deployed.length}`);
     let targets=targetObjects(ethers,artifacts,deployed,sourceIntelligence);
     const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence,probeSelectors:false});
     targets=delegateContexts.targets;
@@ -2081,6 +2086,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       await provider.destroy();
       throw error;
     }
+    console.log('[phase0-smoke-progress] START Stage 1 value-pool discovery and actor funding');
     // Fixture synthesis is best effort: a failure is recorded as a typed gap and never aborts the simulation.
     let valuePool,fixtureFunding;
     try{valuePool=await discoverValuePoolV1({provider,ethers,targets,actors});}
@@ -2092,6 +2098,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         spenders:targets.map(x=>x.address)
       });
     }catch(error){fixtureFunding={holders:[],spenders:[],slotResults:[],rpcMutations:[],transactionReceipts:[],receiptCounts:{},permit2:null,gaps:[{type:'ACTOR_FUNDING_FAILED',message:String(error?.message??error).slice(0,1200)}]};}
+    console.log(`[phase0-smoke-progress] END Stage 1 funding; tokens=${valuePool.tokens?.length??0}`);
     const stage2Holders=[...actors,...PHASE0_MEDUSA_SENDERS_V1];
     const stage2Creations=[],stage2CreationGaps=[],stage2Approvals=[],stage2CreatedTokenFunding=[],stage2Rounds=[],stage2CreatedDeployments=[];
     let pendingCreatorTargets=[...targets],stage2Round=0;
@@ -2157,6 +2164,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       pendingCreatorTargets=admitted;
       if(!creatorRound.creations.length&&!admitted.length)break;
     }
+    console.log(`[phase0-smoke-progress] END Stage 2 creators; rounds=${stage2Rounds.length}; created=${valuePool.created?.length??0}`);
     let stage3AssociationHarvest={receipts:[],gaps:[],newTokens:[]},stage3AssociationTokenFunding=null,stage3Activation={activations:[],activationGaps:[],createdContracts:valuePool.created?.length??0};
     if((valuePool.created?.length??0)>0){
       try{
@@ -2185,6 +2193,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         stage3Activation={activations:[],activationGaps:[{type:'ACTIVATION_SYNTHESIS_EXECUTION_FAILED',message:String(error?.message??error).slice(0,1600)}],createdContracts:valuePool.created.length};
       }
     }
+    console.log('[phase0-smoke-progress] END Stage 3 association and activation');
     let stage4ContextPreparation={contextEvidence:[],addedTargets:[],gaps:[]};
     try{
       const existingContextKeys=new Set(targets.map(target=>`${String(target.address).toLowerCase()}|${target.logicalQualifiedName??target.qualifiedName}|${target.contextType??'DIRECT'}`));
@@ -2216,6 +2225,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     }catch(error){
       stage4ContextPreparation={contextEvidence:[],addedTargets:[],gaps:[{type:'STAGE4_CONTEXT_PREPARATION_FAILED',message:String(error?.message??error).slice(0,1600)}]};
     }
+    console.log('[phase0-smoke-progress] END Stage 4 context preparation');
     const serializedValuePool=serializeValuePoolV1(valuePool);
     const fixtureEvidence={
       schemaVersion:'curveyield-phase0-fixture-synthesis-v1',
@@ -2302,6 +2312,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     let telemetry=[];
     let telemetryExecutionFailure=null;
     const shouldRunTelemetry=targets.length&&(!medusaSmoke||telemetrySmoke);
+    console.log(`[phase0-smoke-progress] START Stage 5 telemetry; enabled=${Boolean(shouldRunTelemetry)}; targets=${targets.length}`);
     if(shouldRunTelemetry){
       try{
         telemetry=await runTelemetry({provider,ethers,targets,actors,outRoot:outputRoot,baselineSnapshot,artifacts,valuePool,...(telemetrySmoke?{telemetryRuns:1,callsPerRun:telemetrySmokeCalls}:{})});
@@ -2310,6 +2321,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         console.log(`[phase0-telemetry] failed but workflow will continue to evidence finalization: ${telemetryExecutionFailure.message}`);
       }
     }
+    console.log(`[phase0-smoke-progress] END Stage 5 telemetry; runs=${telemetry.length}; failure=${telemetryExecutionFailure?.message??'none'}`);
     const callerResolutionEvidence=[];
     for(const run of telemetry){
       for(const [functionKey,row] of Object.entries(run.byFunction??{})){
