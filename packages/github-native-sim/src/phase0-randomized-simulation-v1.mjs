@@ -2031,7 +2031,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       : await deploySourceKnownPlanV1({projectRoot:staged.projectRoot,provider,ethers,artifacts,detected,deploymentOrder:build.deploymentOrder??[]});
     const fallback=await fallbackDeploy({provider,ethers,artifacts,existing:[...scriptDeployments,...sourcePlan.rows]}),deployed=[...scriptDeployments,...sourcePlan.rows,...fallback.rows];
     let targets=targetObjects(ethers,artifacts,deployed,sourceIntelligence);
-    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence});
+    const delegateContexts=await augmentDelegateProxyContextsV2({provider,ethers,targets,artifacts,deployed,sourceIntelligence,probeSelectors:false});
     targets=delegateContexts.targets;
     const runtimePreparation=await prepareQualifiedRuntimeV2({provider,ethers,targets,actors});
     runtimePreparation.contextEvidence=delegateContexts.contextEvidence;
