@@ -51,7 +51,7 @@ jobs:
         run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
       - name: Compile and execute real-position fork acceptance
         env:
-          ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          ETH_RPC_URL: ${{ secrets.ETHEREUM_RPC }}
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: simulate-only
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
@@ -84,7 +84,7 @@ jobs:
         run: npm install --prefix "$RUNNER_TEMP/fxmint-deps" --no-package-lock --ignore-scripts ethers@6.15.0 @openzeppelin/contracts@5.4.0
       - name: Repeat fresh fork acceptance then broadcast as the owner
         env:
-          ETH_RPC_URL: ${{ secrets.SD_ETH_RPC_URL || secrets.SIM_ARCHIVE_PRIMARY_ETHEREUM_01 }}
+          ETH_RPC_URL: ${{ secrets.ETHEREUM_RPC }}
           FXMINT_DEPS: ${{ runner.temp }}/fxmint-deps
           FXMINT_MODE: live-broadcast
           FXMINT_POSITION_ID: ${{ inputs.position_id }}
