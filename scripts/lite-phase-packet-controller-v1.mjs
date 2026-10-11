@@ -10,7 +10,7 @@ import {
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-phase-work-v1.mjs';
 import {
-  executePhase5TargetsV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
+  executePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
   validateTargetExecutionRequestBindingV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
@@ -647,6 +647,19 @@ try{
   }
 }catch(e){deficiencies.push(String(e.message||e));}
 
+function materialPhase5CandidateKeys({root,campaignPath,form}){
+  const prior=canonicalFor(root,campaignPath,4);
+  const phase4=phaseOutput(prior,'step-3','candidateRecords')??[];
+  const newCandidates=form?.actions?.['step-2']?.outputs?.newCandidateRecords??[];
+  const keys=[];
+  for(const record of [...phase4,...newCandidates]){
+    if(record==='NONE_IDENTIFIED')continue;
+    const key=String(record?.tempKey??'').trim();
+    if(!key)throw new Error('Phase 5 material candidate has no key');
+    keys.push(key);
+  }
+  return [...new Set(keys)];
+}
 if(sequence===5&&form&&deficiencies.length===0){
   const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
   for(const target of targets){
@@ -702,6 +715,14 @@ if(sequence===5&&form&&deficiencies.length===0){
   }
 }
 
+if(sequence===5&&form&&deficiencies.length===0){
+  try{
+    deficiencies.push(...validatePhase5TargetCoverageV1({
+      targetDesigns:form.actions['step-3'].outputs.targetDesigns,
+      materialCandidateKeys:materialPhase5CandidateKeys({root,campaignPath,form})
+    }));
+  }catch(e){deficiencies.push('Phase 5 coverage validation failed: '+String(e.message||e));}
+}
 if(deficiencies.length){
   packet.status='REWORK_REQUIRED';
   packet.controllerValidation={status:'FAIL',validatedAt:now,deficiencies};
@@ -712,6 +733,47 @@ if(deficiencies.length){
   process.exit(0);
 }
 
+// Execute mandatory Phase-5 candidate tests before any PASS, bookkeeping or seal.
+let phase5MachineResults=null;
+if(sequence===5){
+  const targetDesigns=form.actions['step-3'].outputs.targetDesigns;
+  const materialCandidateKeys=materialPhase5CandidateKeys({root,campaignPath,form});
+  try{
+    phase5MachineResults=await executePhase5TargetsV1({
+      controllerRoot:root,campaignPath,targetDesigns,
+      expectedCampaignId:directory.campaignId,expectedSourceSha256:directory.sourceSha256
+    });
+    deficiencies.push(...validatePhase5TargetExecutionGateV1({
+      controllerRoot:root,campaignPath,targetDesigns,
+      materialCandidateKeys,executionResults:phase5MachineResults,
+      expectedSourceSha256:directory.sourceSha256
+    }));
+  }catch(e){
+    deficiencies.push('Phase 5 mandatory machine execution failed: '+String(e.message||e));
+  }
+  const matrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
+  fs.mkdirSync(path.dirname(repoFile(root,matrixRel)),{recursive:true});
+  fs.writeFileSync(repoFile(root,matrixRel),renderTargetedTestMatrixV1({
+    targetDesigns,executionResults:phase5MachineResults??{},baselineRows:[]
+  }));
+  if(deficiencies.length){
+    // Evidence and diagnostic matrix may persist; receipt and graph cannot.
+    packet.status='REWORK_REQUIRED';
+    packet.controllerValidation={status:'FAIL',machineExecutionGate:'BLOCKED',validatedAt:now,deficiencies};
+    directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
+    writeJson(packetFile,packet);writeJson(directoryFile,directory);
+    const feedback=['Phase 5 execution gate BLOCKED: no receipt, PASS or handoff was issued.',
+      'Repair the exact runner, harness or machine-evidence defect, then invoke the same phase controller again.',
+      ...deficiencies.map(x=>'- '+x),
+      'Machine failure is not a vulnerability finding.'].join('\\n');
+    process.stdout.write(JSON.stringify({status:'NEEDS_REWORK',campaignId:directory.campaignId,
+      campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-5',
+      reviewer:assignment.reviewer,feedbackText:feedback,
+      feedbackB64:Buffer.from(feedback).toString('base64'),
+      packetPath:assignment.packetPath,directoryPath:directoryRel})+'\\n');
+    process.exit(0);
+  }
+}
 const canonicalRel=path.posix.join(campaignPath,'derived/phase-'+sequence,'PHASE_'+phaseNum(sequence)+'_CANONICAL_DATA_v1.json');
 const canonical={
   schemaVersion:'curveyield-lite-phase-canonical-data-v1',
@@ -726,6 +788,10 @@ const canonical={
   generatedAt:now
 };
 if(sequence===4) canonical.automationOutputs.phase4Coverage=phase4CoverageFromForm(form);
+if(sequence===5) canonical.automationOutputs.phase5MachineExecutionGate={
+  status:'PASS',targetKeys:Object.keys(phase5MachineResults??{}).sort(),
+  evidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef).filter(Boolean)
+};
 if(sequence===8){
   canonical.actions['step-2'].outputs.validatedFindings=materializeValidatedFindings(canonical.actions?.['step-2']?.outputs?.candidateValidations??[]);
   canonical.automationOutputs.validatedFindingsMaterialized=true;
@@ -755,7 +821,9 @@ if(schema.finalReport){
 }
 if(deficiencies.length) throw new Error('controller-generated report validation failed: '+deficiencies.join('; '));
 
-packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS'};
+packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS',
+  ...(sequence===5?{machineExecutionGate:'PASS',machineEvidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef)}:{})
+};
 const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now,replacePhase:Boolean(masterAmendmentRefreshSha)});
 if(sealedRework){
   const invalid=readJson(requiredFile(root,controls.invalidRel,'evidence invalidation matrix'));
@@ -770,20 +838,8 @@ const boundaryArtifactRels=[];
 let successorPrefillContext={};
 if(sequence===5){
   const targetDesigns=phaseOutput(canonical,'step-3','targetDesigns')??[];
-  const executionResults=await executePhase5TargetsV1({
-    controllerRoot:root,
-    campaignPath,
-    targetDesigns,
-    expectedCampaignId:directory.campaignId,
-    expectedSourceSha256:directory.sourceSha256
-  });
-  successorPrefillContext={targetDesigns,phase5ExecutionResults:executionResults};
-  const targetMatrixRel=path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
-  // Phase 6 receives Phase-5 candidate-specific tests; no broad Phase-0 fuzz baseline is required.
-  const baselineRows=[];
-  fs.mkdirSync(path.dirname(repoFile(root,targetMatrixRel)),{recursive:true});
-  fs.writeFileSync(repoFile(root,targetMatrixRel),renderTargetedTestMatrixV1({targetDesigns,executionResults,baselineRows}));
-  boundaryArtifactRels.push(targetMatrixRel);
+  successorPrefillContext={targetDesigns,phase5ExecutionResults:phase5MachineResults};
+  boundaryArtifactRels.push(path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md'));
 }
 if(sequence===8&&hasRemediation(campaignRoot)){
   const validatedFindings=phaseOutput(canonical,'step-2','validatedFindings')??[];
@@ -830,6 +886,11 @@ if(assignment.finalReportPath) evidence.push(receiptRef(root,campaignPath,assign
 evidence.push(receiptRef(root,campaignPath,canonicalRel,'PHASE_CANONICAL_DATA'));
 for(const rel of derivedRels) evidence.push(receiptRef(root,campaignPath,rel,'DERIVED_DOWNSTREAM_DATA'));
 for(const rel of boundaryArtifactRels) evidence.push(receiptRef(root,campaignPath,rel,'BOUNDARY_MACHINE_ARTIFACT'));
+if(sequence===5){
+  for(const result of Object.values(phase5MachineResults??{})){
+    if(result.status==='PASS')evidence.push(receiptRef(root,campaignPath,result.evidenceRef,'PHASE5_BOUNDARY_RAW_RESULT'));
+  }
+}
 
 let nextSequence=sequence===10?null:sequence+1;
 let fresh=false;let nextAssignment=null;let nextDerivedInputs=[];
