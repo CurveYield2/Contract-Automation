@@ -1382,7 +1382,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
     // A Balancer router action is routable only if actual on-chain pool metadata
     // supplies the registered pool and exact Vault token order. Do not guess.
     const refreshBalancerReadyActions=()=>balancerDiscovery.active?targets.flatMap((t)=>t.functions.flatMap((fn)=>{
-      const plan=buildBalancerV3ActionV1({target:t,selected:fn,discovery:balancerDiscovery,valuePool,actors});
+      const plan=buildBalancerV3ActionV1({ethers,target:t,selected:fn,discovery:balancerDiscovery,valuePool,actors});
       return plan.kind==='READY'?[{target:t,selected:fn,plan}]:[];
     })):[];
     let balancerReadyActions=refreshBalancerReadyActions();
@@ -1411,7 +1411,7 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
           if(!picked)throw new Error('Phase-0 telemetry selection exhausted all admitted functions for scheduled target');
           let selected=picked.selected;
           let balancerAction=balancerDiscovery.active
-            ? buildBalancerV3ActionV1({target,selected,discovery:balancerDiscovery,valuePool,actors})
+            ? buildBalancerV3ActionV1({ethers,target,selected,discovery:balancerDiscovery,valuePool,actors})
             : {kind:'GENERIC'};
           if(balancerAction.kind==='BLOCKED'){
             const substitutes=balancerReadyActions.filter(candidate=>candidate.selected.semanticFamily===selected.semanticFamily);
@@ -1546,6 +1546,17 @@ export async function runTelemetry({provider,ethers,targets,actors,outRoot,basel
           // Router.initialize is a lifecycle transition: all subsequent Router
           // arguments must use the pool's new initialized state, not run-start
           // metadata. Never count a predicted initialization as confirmed.
+          // Factory.create deploys and registers a real pool in the same
+          // transaction. Re-discover from the factory getters; do not trust
+          // random addresses, prediction, or arbitrary return-data alone.
+          if(rec.executionOutcome==='MINED_SUCCESS'&&balancerAction.createsPool){
+            const next=await discoverBalancerV3PoolsV1({provider,ethers,targets,valuePool,actors});
+            const prior=new Set(balancerDiscovery.pools.map(row=>String(row.address).toLowerCase()));
+            const created=next.pools.filter(row=>!prior.has(String(row.address).toLowerCase()));
+            balancerDiscovery=next;
+            balancerReadyActions=refreshBalancerReadyActions();
+            stats.contextAdaptations.push({kind:'BALANCER_V3_FACTORY_POOL_REDISCOVERY',newRegisteredPools:created.map(row=>row.address),atCallIndex:stats.calls});
+          }
           if(rec.executionOutcome==='MINED_SUCCESS'&&balancerAction.kind==='READY'&&selected.signature==='initialize(address,address[],uint256[],uint256,bool,bytes)'){
             const pool=balancerDiscovery.pools.find(row=>String(row.address).toLowerCase()===String(balancerAction.pool).toLowerCase());
             if(pool){
