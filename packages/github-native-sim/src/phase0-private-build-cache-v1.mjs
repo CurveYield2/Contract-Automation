@@ -76,9 +76,16 @@ function ghEnv(token) {
 
 async function tryLoad({url,ref,token,identity,pseudo}) {
   // Raw media mode works for content blobs above GitHub Contents API's 1MB JSON threshold.
-  const raw=execFileSync('gh',['api','-H','Accept: application/vnd.github.raw+json',url+'?ref='+encodeURIComponent(ref)],{
+  let raw=execFileSync('gh',['api','-H','Accept: application/vnd.github.raw+json',url+'?ref='+encodeURIComponent(ref)],{
     env:ghEnv(token),maxBuffer:MAX_BYTES,timeout:45000,stdio:['ignore','pipe','pipe']
   });
+  // GitHub returns raw bytes with this media type; some API clients may
+  // return the standard base64-encoded JSON Contents envelope for small blobs.
+  if(raw[0]===0x7b){
+    const envelope=JSON.parse(raw.toString('utf8'));
+    if(envelope.encoding!=='base64'||!envelope.content)throw new Error('private build cache raw content unavailable');
+    raw=Buffer.from(envelope.content,'base64');
+  }
   if(raw.length>MAX_BYTES) throw new Error('private build cache too large');
   const cache=JSON.parse(gunzipSync(raw,{maxOutputLength:MAX_BYTES}).toString('utf8'));
   if(!validateCache(cache,identity,pseudo)) throw new Error('private compilation cache identity or artifact validation failed');
