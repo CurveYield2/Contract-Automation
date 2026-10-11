@@ -5,11 +5,19 @@
   "audit_controller_ref": "main",
   "resume_from_finalize": false,
   "source_telemetry_run_id": 38126544342,
-  "prior_no_telemetry_run_id": 38129518686,
+  "prior_no_telemetry_run_id": 38130279883,
   "workflow": "lite-phase0-bootstrap-no-telemetry-v1.yml",
   "request_version": "v3",
   "repairs": [
     605,
-    606
-  ]
+    606,
+    607,
+    608,
+    609,
+    610,
+    611,
+    612,
+    613
+  ],
+  "recovery_reason": "Rerun full Phase 0 No Telemetry using main with 50-minute simulation watchdog and fail-fast RPC/progress checks"
 }
