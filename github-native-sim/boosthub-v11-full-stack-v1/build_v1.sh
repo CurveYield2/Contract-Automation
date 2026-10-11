@@ -9,9 +9,12 @@ python3 github-native-sim/boosthub-v11-full-stack-v1/validate_source_v1.py "$ROO
 mkdir -p "$ROOT/lib"
 git clone -q --depth 1 --branch v4.9.6 https://github.com/OpenZeppelin/openzeppelin-contracts.git "$ROOT/lib/openzeppelin-4"
 git clone -q --depth 1 --branch v5.4.0 https://github.com/OpenZeppelin/openzeppelin-contracts.git "$ROOT/lib/openzeppelin-5"
+mkdir -p "$ROOT/ci-src"
+cp -a "$ROOT/beefy/contracts/beefy" "$ROOT/ci-src/beefy"
+cp -a "$ROOT/beefy/contracts/converter" "$ROOT/ci-src/converter"
 cat > "$ROOT/foundry.toml" <<'EOF'
 [profile.default]
-src = "beefy/contracts"
+src = "ci-src"
 test = "unused-tests"
 script = "unused-scripts"
 out = "out"
