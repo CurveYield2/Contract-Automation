@@ -245,6 +245,23 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
     if(expectedSourceSha256&&raw.source?.archiveSha256!==expectedSourceSha256){
       failures.push('Phase 5 mandatory '+key+' raw execution source identity differs from campaign source');
     }
+    if(!raw.build||typeof raw.build!=='object')failures.push('Phase 5 mandatory '+key+' has no successful source-build evidence');
+    if((raw.failedStepCount??0)>0||(raw.failedSteps?.length??0)>0)
+      failures.push('Phase 5 mandatory '+key+' contains failed execution steps');
+    const boundRequest=validateTargetExecutionRequestBindingV1({
+      controllerRoot,campaignPath,target,expectedSourceSha256
+    });
+    if(!String(boundRequest.status).startsWith('PASS_')){
+      failures.push('Phase 5 mandatory '+key+' request/source binding failed on evidence replay');
+    }else{
+      try{
+        const req=JSON.parse(fs.readFileSync(path.join(controllerRoot,...campaignPath.split('/'),...boundRequest.requestRef.split('/')),'utf8'));
+        if(raw.requestId!==req.requestId||raw.requestDigest!==req.requestDigest||
+           raw.source?.commit!==req.source?.commit||
+           raw.source?.archiveSha256!==req.source?.archiveSha256)
+          failures.push('Phase 5 mandatory '+key+' persisted evidence does not match the exact request digest and source commit');
+      }catch(e){failures.push('Phase 5 mandatory '+key+' bound request cannot be re-read: '+String(e.message||e));}
+    }
     const reproduction=raw.reproduction;
     if(!reproduction||reproduction.candidateId!==key||
        reproduction.status!=='REPRODUCED'||reproduction.observedPredicate?.matched!==true||
@@ -264,6 +281,62 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
         failures.push('Phase 5 mandatory '+key+' has no executed Anvil simulation steps');
       }
     }else failures.push('Phase 5 mandatory '+key+' has unsupported reproductionType');
+  }
+  return failures;
+}
+
+// Recheck sealed machine evidence at Phase-6 admission and every downstream
+// master review. No reviewer-supplied PASS status or receipt can substitute for
+// re-reading the exact source-bound V7 request and nested execution artifact.
+export function validateRecordedPhase5MachineEvidenceV1({controllerRoot,campaignPath,targetDesigns=[],expectedCampaignId=null,expectedSourceSha256=null,requireCompletedMatrix=false}={}){
+  const failures=[];
+  const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
+  const readJsonRel=rel=>JSON.parse(fs.readFileSync(path.join(controllerRoot,...rel.split('/')),'utf8'));
+  let materialCandidateKeys=[];
+  try{
+    const p4=readJsonRel(path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json'));
+    const p5=readJsonRel(path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json'));
+    materialCandidateKeys=[
+      ...(p4.actions?.['step-3']?.outputs?.candidateRecords??[]),
+      ...(p5.actions?.['step-2']?.outputs?.newCandidateRecords??[])
+    ].filter(x=>x&&typeof x==='object').map(x=>String(x.tempKey??'').trim()).filter(Boolean);
+  }catch(e){failures.push('Cannot derive required candidate coverage from sealed Phase 4/5 canonical artifacts: '+String(e.message||e));}
+  const executionResults={};
+  for(const target of arr(targetDesigns)){
+    if(!target||typeof target!=='object'||Array.isArray(target))continue;
+    const key=String(target.candidateKey??'').trim();
+    if(!key||target.executionMethod==='NOT_APPLICABLE')continue;
+    const binding=validateTargetExecutionRequestBindingV1({controllerRoot,campaignPath,target,expectedCampaignId,expectedSourceSha256});
+    if(!String(binding.status).startsWith('PASS_')){
+      failures.push(key+': sealed execution request failed binding validation: '+String(binding.status));
+      continue;
+    }
+    let req=null;
+    try{req=readJsonRel(path.posix.join(campaignPath,binding.requestRef));}catch(e){failures.push(key+': bound request cannot be read: '+String(e.message||e));continue;}
+    if(!/^dar-[0-9a-f]{32}$/.test(String(req.requestId??''))){failures.push(key+': invalid bound request ID');continue;}
+    const rel=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key),req.requestId,'raw-result.json');
+    let raw=null;
+    try{raw=readJsonRel(rel);}catch(e){failures.push(key+': required V7 raw result is missing: '+rel);continue;}
+    executionResults[key]={
+      status:raw.status==='completed'&&raw.blocking!==true?'PASS':'BLOCKED',
+      exitCode:raw.status==='completed'&&raw.blocking!==true?0:1,
+      evidenceRef:rel,requestBindingStatus:binding.status,rawResult:raw
+    };
+  }
+  failures.push(...validatePhase5TargetExecutionGateV1({
+    controllerRoot,campaignPath,targetDesigns,executionResults,materialCandidateKeys,expectedSourceSha256
+  }));
+  if(requireCompletedMatrix){
+    const matrixPath=path.join(campaignRoot,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md');
+    let matrix=null;
+    try{matrix=fs.readFileSync(matrixPath,'utf8');if(!matrix.trim())failures.push('Sealed Phase-6 target matrix is empty');}
+    catch{failures.push('Sealed Phase-6 target matrix is missing');}
+    if(matrix)for(const [key,result] of Object.entries(executionResults)){
+      const row=matrix.split(/\r?\n/).find(line=>line.startsWith('| '+key+' |'));
+      const cells=row?.split('|').map(v=>v.trim())??[];
+      if(!row||!cells[10]?.includes('status=PASS')||cells[11]!==result.evidenceRef)
+        failures.push(key+': sealed target matrix does not bind a completed result to its exact raw evidence path');
+    }
   }
   return failures;
 }
