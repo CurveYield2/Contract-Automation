@@ -21,6 +21,10 @@ test('master review topology gates each whole normal-reviewer segment exactly on
     {id:'reviewer-3l-phases-06-07',reviewer:'reviewer-3L',phases:[6,7],boundary:7},
     {id:'reviewer-4-phases-08-10',reviewer:'reviewer-4',phases:[8,9,10],boundary:10}
   ]);
+  const followup=MASTER_REVIEW_SEGMENTS_V1.filter(x=>x.segmentId==='reviewer-4-followup-v1');
+  assert.equal(followup.length,1);
+  assert.equal(followup[0].reviewerId,'reviewer-4');
+  assert.deepEqual([...followup[0].phases],[8,9,10]);
 });
 
 function fixture(){
