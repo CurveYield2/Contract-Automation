@@ -10,7 +10,7 @@ import {
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-phase-work-v1.mjs';
 import {
-  executePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
+  executePhase5TargetsV1,selectReusablePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
   validateTargetExecutionRequestBindingV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
@@ -479,7 +479,7 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
       shadowDirectory.campaignStatus='MASTER_AMENDMENT_REFRESH';
       shadowDirectory.updatedAt=now;
       writeJson(repoFile(shadowRoot,directoryRel),shadowDirectory);
-      const output=execFileSync(process.execPath,[
+      const childArgs=[
         process.argv[1],
         '--controller-root',shadowRoot,
         '--campaign-id',shadowDirectory.campaignId,
@@ -487,7 +487,30 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
         '--campaign-directory-path',directoryRel,
         '--phase-sequence',String(phase),
         '--master-amendment-refresh-sha',amendmentSha
-      ],{encoding:'utf8',stdio:['ignore','pipe','pipe']});
+      ];
+      if(phase===5){
+        const oldPhase5=canonicalFor(root,campaignPath,5);
+        const oldPhase4=canonicalFor(root,campaignPath,4);
+        const newPhase4=canonicalFor(shadowRoot,campaignPath,4);
+        // The original campaign remains immutable during shadow replay.
+        // Only targets with identical reviewer test designs and source anchors
+        // may even TRY to reuse a prior machine result; the gate revalidates
+        // exact request, persisted raw result, source, and observed outcome.
+        const reuseKeys=selectReusablePhase5TargetsV1({
+          priorTargetDesigns:phaseOutput(oldPhase5,'step-3','targetDesigns')??[],
+          targetDesigns:phaseOutput(form,'step-3','targetDesigns')??[],
+          priorCandidateRecords:[
+            ...(phaseOutput(oldPhase4,'step-3','candidateRecords')??[]),
+            ...(phaseOutput(oldPhase5,'step-2','newCandidateRecords')??[])
+          ],
+          candidateRecords:[
+            ...(phaseOutput(newPhase4,'step-3','candidateRecords')??[]),
+            ...(phaseOutput(form,'step-2','newCandidateRecords')??[])
+          ]
+        });
+        childArgs.push('--phase5-reuse-keys-b64',Buffer.from(JSON.stringify(reuseKeys)).toString('base64'));
+      }
+      const output=execFileSync(process.execPath,childArgs,{encoding:'utf8',stdio:['ignore','pipe','pipe']});
       const parsed=JSON.parse(output.trim());
       if(parsed.status!=='PASS'||parsed.masterAmendmentRefresh!==true)throw new Error('controller dependent refresh failed for Phase '+phase+': '+String(parsed.feedbackText??parsed.status));
       shadowDirectory=readJson(repoFile(shadowRoot,directoryRel));
@@ -541,6 +564,13 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
 const a=parse(process.argv);
 const reviewKind=a['review-kind']??'phase';
 const masterAmendmentRefreshSha=a['master-amendment-refresh-sha']??null;
+const phase5ReuseCandidateKeys=masterAmendmentRefreshSha&&a['phase5-reuse-keys-b64']
+  ?JSON.parse(Buffer.from(a['phase5-reuse-keys-b64'],'base64').toString('utf8')):[];
+if(!Array.isArray(phase5ReuseCandidateKeys)||phase5ReuseCandidateKeys.some(x=>typeof x!=='string'))
+  throw new Error('internal Phase 5 reused target IDs must be a string array');
+if(a['phase5-reuse-keys-b64']&&!masterAmendmentRefreshSha)
+  throw new Error('Phase 5 reuse IDs are only authorized in master amendment refresh');
+
 if(masterAmendmentRefreshSha&&reviewKind!=='phase')throw new Error('master-amendment-refresh-sha is internal to phase refresh');
 for(const k of ['controller-root','campaign-id','campaign-path','campaign-directory-path']) if(a[k]===undefined) throw new Error('missing --'+k);
 if(['phase','sealed-rework'].includes(reviewKind)&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
@@ -814,7 +844,8 @@ if(sequence===5){
   try{
     phase5MachineResults=await executePhase5TargetsV1({
       controllerRoot:root,campaignPath,targetDesigns,
-      expectedCampaignId:directory.campaignId,expectedSourceSha256:directory.sourceSha256
+      expectedCampaignId:directory.campaignId,expectedSourceSha256:directory.sourceSha256,
+      reuseCandidateKeys:phase5ReuseCandidateKeys
     });
     deficiencies.push(...validatePhase5TargetExecutionGateV1({
       controllerRoot:root,campaignPath,targetDesigns,
