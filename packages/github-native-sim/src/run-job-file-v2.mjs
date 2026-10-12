@@ -79,12 +79,14 @@ async function executePhase6V2({
   let mutableRpcSession = null;
   let executionSnapshot = null;
   try {
+    if(environment.PHASE5_BOUNDARY_PROGRESS==='true')process.stderr.write('[phase5-v7] Staging exact source and audit overlay\n');
     phase6Snapshot = await stagePhase6Snapshot(legacyRequest, {
       workspaceRoot: path.join(workspaceRoot, 'staging'),
       environment,
       runnerRoot,
     });
 
+    if(environment.PHASE5_BOUNDARY_PROGRESS==='true')process.stderr.write('[phase5-v7] Source snapshot ready; checking fork preflight\n');
     if (phase6RequiresMutableRpc(request)) {
       const medusaForkPin = request.configuration?.analysis?.medusa;
       mutableRpcSession = await createMutableRpcSession({
@@ -120,6 +122,7 @@ async function executePhase6V2({
       } : { status: 'NOT_REQUIRED' },
     };
 
+    if(environment.PHASE5_BOUNDARY_PROGRESS==='true')process.stderr.write(`[phase5-v7] Preflight status: ${preflight.status}\n`);
     if (preflight.status !== 'PASS') {
       return attachExecutionDisposition({ request, result: preflightFailure(request, preflight), requestPath });
     }
@@ -132,12 +135,14 @@ async function executePhase6V2({
       return executionSnapshot;
     };
 
+    if(environment.PHASE5_BOUNDARY_PROGRESS==='true')process.stderr.write('[phase5-v7] Executing trusted V7 build and Foundry tests\n');
     let result = await runGitHubNativeJobV1(legacyRequest, {
       workspaceRoot: path.join(workspaceRoot, 'execution'),
       environment,
       ...delegated,
     });
 
+    if(environment.PHASE5_BOUNDARY_PROGRESS==='true')process.stderr.write(`[phase5-v7] V7 execution status: ${result.status}\n`);
     result = normalizePhase6TerminalSemantics(result);
     const verified = executionSnapshot?.snapshotDigestSha256 === phase6Snapshot?.snapshotDigestSha256;
     result = {
