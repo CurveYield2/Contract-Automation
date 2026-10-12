@@ -645,7 +645,7 @@ if(directory.campaignId!==expectedCampaignId) throw new Error('campaign-id does 
 if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does not match Audit Campaign Directory workspacePath');
 // Stage every master decision in an isolated controller checkout. Only a
 // fully successful acceptance or targeted-test directive may change Git state.
-if(reviewKind==='master'&&a['master-transaction-child']!=='true'){
+if(['master','master-test-result'].includes(reviewKind)&&a['master-transaction-child']!=='true'){
   let response;
   const shadowRoot=fs.mkdtempSync(path.join(os.tmpdir(),'lite-master-transaction-'));
   try{
@@ -674,8 +674,16 @@ if(reviewKind==='master'&&a['master-transaction-child']!=='true'){
       childArgs.push('--master-transaction-child','true');
       const output=execFileSync(process.execPath,[process.argv[1],...childArgs],{encoding:'utf8',stdio:['ignore','pipe','inherit'],maxBuffer:16*1024*1024});
       response=JSON.parse(output.trim());
-      if(['PASS','MASTER_TESTS_REQUESTED'].includes(response.status)){
-        fs.cpSync(repoFile(shadowRoot,campaignPath),repoFile(root,campaignPath),{recursive:true,force:true});
+      if(['PASS','MASTER_TESTS_REQUESTED','WAITING_FOR_MASTER_REVIEW'].includes(response.status)){
+        // Mirror the entire validated campaign tree, including deletions. A
+        // plain cpSync overlay resurrects artifacts removed into superseded/.
+        // Any failure leaves this Actions checkout unpublished.
+        const target=repoFile(root,campaignPath);
+        const candidate=target+'.master-stage';
+        fs.rmSync(candidate,{recursive:true,force:true});
+        fs.cpSync(repoFile(shadowRoot,campaignPath),candidate,{recursive:true});
+        fs.rmSync(target,{recursive:true,force:true});
+        fs.renameSync(candidate,target);
         fs.copyFileSync(repoFile(shadowRoot,directoryRel),directoryFile);
       }
     }
