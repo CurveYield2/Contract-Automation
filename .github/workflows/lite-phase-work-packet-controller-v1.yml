@@ -127,7 +127,8 @@ jobs:
               .schemaVersion=="curveyield-lite-phase-boundary-request-v1" and
               ((.campaignId|type)=="string") and (.campaignId|length)>0 and
               (((.reviewKind // "phase")=="phase" and ((.phaseSequence|type)=="number") and ((.phaseSequence|floor)==.phaseSequence) and .phaseSequence>=1 and .phaseSequence<=10) or
-               ((.reviewKind // "phase")=="master" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and (.masterOutcome=="AMENDED" or .masterOutcome=="ACCEPT_WITHOUT_MODIFICATIONS") and ((.summary // "")|type)=="string") or
+               ((.reviewKind // "phase")=="master" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and (.masterOutcome=="AMENDED" or .masterOutcome=="ACCEPT_WITHOUT_MODIFICATIONS" or (.masterOutcome=="REQUEST_TARGETED_TESTS" and ((.testPlanPath|type)=="string") and (.testPlanPath|length)>0)) and ((.summary // "")|type)=="string") or
+               ((.reviewKind // "phase")=="master-test-result" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and ((.testResultPath|type)=="string") and (.testResultPath|length)>0) or
                ((.reviewKind // "phase")=="sealed-rework" and ((.phaseSequence|type)=="number") and .phaseSequence==1 and ((.reworkRequestPath|type)=="string") and (.reworkRequestPath|length)>0 and .holdSuccessorDelivery==true)) and
               ((.auditControllerRef|type)=="string") and (.auditControllerRef|length)>0 and
               ((.attempt|type)=="number") and ((.attempt|floor)==.attempt) and .attempt>=1
@@ -138,6 +139,8 @@ jobs:
             segment_id="$(jq -r '.segmentId // empty' /tmp/lite-phase-boundary-request.json)"
             master_outcome="$(jq -r '.masterOutcome // empty' /tmp/lite-phase-boundary-request.json)"
             master_summary_b64="$(jq -j '.summary // ""' /tmp/lite-phase-boundary-request.json | base64 -w0)"
+            test_plan_path="$(jq -r '.testPlanPath // empty' /tmp/lite-phase-boundary-request.json)"
+            test_result_path="$(jq -r '.testResultPath // empty' /tmp/lite-phase-boundary-request.json)"
             rework_request_path="$(jq -r '.reworkRequestPath // empty' /tmp/lite-phase-boundary-request.json)"
             hold_delivery="$(jq -r '.holdSuccessorDelivery // false' /tmp/lite-phase-boundary-request.json)"
             controller_ref="$(jq -r '.auditControllerRef' /tmp/lite-phase-boundary-request.json)"
@@ -166,6 +169,8 @@ jobs:
             echo "segment_id=$segment_id"
             echo "master_outcome=$master_outcome"
             echo "master_summary_b64=$master_summary_b64"
+            echo "test_plan_path=$test_plan_path"
+            echo "test_result_path=$test_result_path"
             echo "rework_request_path=$rework_request_path"
             echo "hold_delivery=$hold_delivery"
             echo "audit_controller_ref=$controller_ref"
