@@ -40,7 +40,7 @@ function fixture(){
 test('mandatory material candidates cannot be omitted, duplicated or marked NOT_APPLICABLE',()=>{
   assert.match(validatePhase5TargetCoverageV1({targetDesigns:['NONE_IDENTIFIED'],materialCandidateKeys:[key]}).join(' '),/material candidates/);
   assert.match(validatePhase5TargetCoverageV1({targetDesigns:[],materialCandidateKeys:[key]}).join(' '),/mandatory material candidate/);
-  assert.match(validatePhase5TargetCoverageV1({targetDesigns:[{...target,executionMethod:'NOT_APPLICABLE'}],materialCandidateKeys:[key]}).join(' '),/cannot be NOT_APPLICABLE/);
+  assert.match(validatePhase5TargetCoverageV1({targetDesigns:[{...target,executionMethod:'NOT_APPLICABLE'}],materialCandidateKeys:[key]}).join(' '),/no supported, verifiable NOT_APPLICABLE disposition/);
   assert.match(validatePhase5TargetCoverageV1({targetDesigns:[target,target],materialCandidateKeys:[key]}).join(' '),/duplicate/);
   assert.deepEqual(validatePhase5TargetCoverageV1({targetDesigns:[target],materialCandidateKeys:[key]}),[]);
   assert.deepEqual(validatePhase5TargetCoverageV1({targetDesigns:['NONE_IDENTIFIED'],materialCandidateKeys:[]}),[]);
@@ -76,6 +76,72 @@ test('an orphan raw path, preflight failure, source mismatch, or missing reprodu
   const notExecuted=structuredClone(args);
   notExecuted.executionResults[key].rawResult.analysis.nativeFuzz.componentStatus='NOT_APPLICABLE';
   assert.match(validatePhase5TargetExecutionGateV1(notExecuted).join(' '),/never completed/);
+});
+const aliasKey='P4-CAND-002';
+const sharedPlan={
+  setup:'Identical immutable source-bound call fixture',
+  prerequisites:'Identical prerequisite state and roles',
+  transactionSequence:'Identical state transition sequence',
+  oracle:'Identical observation and negative assertions',
+  fuzzVariablesAndBounds:'Identical fuzz bounds and parameters',
+  snapshotReuseSafety:'Identical snapshot replay limitations',
+  expectedSecurityProperty:'Identical security claim under identical source'
+};
+function coveredDesign(){
+  const covering={...target,...sharedPlan};
+  const duplicate={...covering,candidateKey:aliasKey,
+    executionMethod:'NOT_APPLICABLE',reproductionType:'NOT_APPLICABLE',
+    expectedMachineObservation:'NOT_APPLICABLE',
+    notApplicableDisposition:{
+      reasonCode:'COVERED_BY_EXECUTED_TARGET',
+      coveredByCandidateKey:key,
+      technicalReason:'Exact duplicate source anchor and every candidate test field is identical.'
+    }
+  };
+  const sourceAnchors={[key]:'ANCHOR-1234',[aliasKey]:'ANCHOR-1234'};
+  return {covering,duplicate,sourceAnchors};
+}
+test('verified duplicate method waiver inherits a real completed covering execution',t=>{
+  const {args,controllerRoot}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
+  const {covering,duplicate,sourceAnchors}=coveredDesign();
+  args.targetDesigns=[duplicate,covering];
+  args.materialCandidateKeys=[key,aliasKey];
+  args.candidateSourceAnchors=sourceAnchors;
+  assert.deepEqual(validatePhase5TargetCoverageV1(args),[]);
+  assert.deepEqual(validatePhase5TargetExecutionGateV1(args),[]);
+});
+test('duplicate waiver fails closed on source mismatch, different security claim or blocked covering execution',t=>{
+  const {args,controllerRoot}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
+  const {covering,duplicate,sourceAnchors}=coveredDesign();
+  args.targetDesigns=[duplicate,covering];args.materialCandidateKeys=[key,aliasKey];
+  args.candidateSourceAnchors=sourceAnchors;
+  const anchorWrong=structuredClone(args);
+  anchorWrong.candidateSourceAnchors[aliasKey]='ANCHOR-9999';
+  assert.match(validatePhase5TargetCoverageV1(anchorWrong).join(' '),/source anchor/);
+  const claimWrong=structuredClone(args);
+  claimWrong.targetDesigns[0].expectedSecurityProperty='Different security threat';
+  assert.match(validatePhase5TargetCoverageV1(claimWrong).join(' '),/exactly equivalent expectedSecurityProperty/);
+  const blocked=structuredClone(args);
+  blocked.executionResults[key].status='INCONCLUSIVE';
+  assert.match(validatePhase5TargetExecutionGateV1(blocked).join(' '),/covering evidence/);
+  const unsupported=structuredClone(args);
+  unsupported.targetDesigns[0].notApplicableDisposition.reasonCode='STATIC_SOURCE_PROOF';
+  assert.match(validatePhase5TargetCoverageV1(unsupported).join(' '),/no supported, verifiable/);
+});
+test('completed negative outcome is evidence, not an automatic execution failure',t=>{
+  const {args,controllerRoot,file}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
+  const result=args.executionResults[key].rawResult;
+  result.reproduction.status='NOT_REPRODUCED';
+  result.reproduction.observedPredicate.matched=false;
+  fs.writeFileSync(file,JSON.stringify(result)+'\n');
+  assert.deepEqual(validatePhase5TargetExecutionGateV1(args),[]);
+  result.reproduction.status='INCONCLUSIVE';
+  fs.writeFileSync(file,JSON.stringify(result)+'\n');
+  assert.match(validatePhase5TargetExecutionGateV1(args).join(' '),/completed, observed reproduction or non-reproduction/);
+  result.reproduction.status='NOT_REPRODUCED';
+  result.analysis.nativeFuzz.componentStatus='COMPLETED_WITH_FAILURES';
+  fs.writeFileSync(file,JSON.stringify(result)+'\n');
+  assert.match(validatePhase5TargetExecutionGateV1(args).join(' '),/never completed/);
 });
 test('controller executes and validates Phase-5 results before PASS and audit bookkeeping',()=>{
   const file=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../scripts/lite-phase-packet-controller-v1.mjs');
