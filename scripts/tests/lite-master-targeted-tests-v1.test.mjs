@@ -88,15 +88,34 @@ test('zero observed calls and wrong raw digests cannot certify a conclusive test
   f.put(e.resultPath,result);
   assert.throws(()=>acceptMasterTargetedTestResults({root:f.root,campaignPath:camp,directory:f.directory,resultPath:e.resultPath,now:'y'}),/digest mismatch/);
 });
-test('terminal gate refuses unconfirmed non-findings, not evidence-supported resolved cases',t=>{
+test('terminal gate requires conclusive delegated evidence for an originally unresolved candidate',t=>{
   const f=setup(t);
   const can=camp+'/derived/phase-8/PHASE_08_CANONICAL_DATA_v1.json';
-  const candidate={candidateKey:'P4-CAND-001',findingPromotion:'NO_FINDING',finalDisposition:'UNCONFIRMED_NO_FINDING',outcome:'NOT_PROMOTED',propertyViolation:'NOT_ESTABLISHED',impact:'UNQUANTIFIED'};
+  const original={candidateKey:'P4-CAND-001',findingPromotion:'NO_FINDING',finalDisposition:'UNCONFIRMED_NO_FINDING',outcome:'NOT_PROMOTED',propertyViolation:'NOT_ESTABLISHED',impact:'UNQUANTIFIED'};
+  const originalPath=camp+'/work/master-review/'+segment+'/sealed-originals/phase-08/PHASE_08_WORK_FORM_v1.json';
+  const originalFile=f.put(originalPath,{actions:{'step-2':{outputs:{candidateValidations:[original]}}}});
+  f.directory.pendingMasterReview.sealedWorkForms=[{phase:8,sealedOriginalPath:originalPath,sha256:sha(fs.readFileSync(originalFile))}];
+  const candidate={...original};
   f.put(can,{actions:{'step-2':{outputs:{candidateValidations:[candidate]}}}});
   assert.match(unresolvedFinalCandidateFailures({root:f.root,campaignPath:camp,directory:f.directory}).join('; '),/P4-CAND-001/);
   candidate.finalDisposition='DISPROVEN_WITH_RAW_EXECUTION';
   candidate.propertyViolation='NO_VIOLATION_UNDER_PROVEN_REACHABLE_CASES';
-  candidate.impact='Measured nil under tested complete and realistic lifecycle';
+  candidate.impact='Measured zero under the complete healthy and adversarial lifecycle';
+  f.put(can,{actions:{'step-2':{outputs:{candidateValidations:[candidate]}}}});
+  assert.match(unresolvedFinalCandidateFailures({root:f.root,campaignPath:camp,directory:f.directory}).join('; '),/requires a raw-evidence-bound delegated DISPROVEN/);
+  const entry=registerMasterTargetedTests({root:f.root,campaignPath:camp,directory:f.directory,planPath:f.planPath,now:'x'});
+  const ev=camp+'/evidence/master-targeted-tests/'+entry.requestId+'/raw-result.json';const raw='{"executed":5,"complete":true}\\n';f.put(ev,raw);
+  const result={schemaVersion:'curveyield-lite-master-targeted-test-result-v1',campaignId:f.directory.campaignId,segmentId:segment,requestId:entry.requestId,sourceSha256:source,reviewer:'reviewer-3L',tests:[{
+    candidateId:'P4-CAND-001',disposition:'DISPROVEN',
+    executionNarrative:'Measured all five realistic contract calls and both controls with native dependencies.',
+    observedAssertions:'Healthy and adversarial trace assertions passed under bounded reachability.',
+    impactAssessment:'The token balance and beneficiary effects were measured without loss.',
+    executedCalls:5,evidence:[{path:ev,sha256:sha(raw)}]
+  }]};
+  f.put(entry.resultPath,result);
+  acceptMasterTargetedTestResults({root:f.root,campaignPath:camp,directory:f.directory,resultPath:entry.resultPath,now:'y'});
+  assert.match(unresolvedFinalCandidateFailures({root:f.root,campaignPath:camp,directory:f.directory}).join('; '),/must cite the exact delegated raw evidence/);
+  candidate.evidenceRefs=ev+'#assertions';
   f.put(can,{actions:{'step-2':{outputs:{candidateValidations:[candidate]}}}});
   assert.deepEqual(unresolvedFinalCandidateFailures({root:f.root,campaignPath:camp,directory:f.directory}),[]);
 });
