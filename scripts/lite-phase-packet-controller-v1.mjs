@@ -24,6 +24,7 @@ import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,process
 import {registerMasterTargetedTests,acceptMasterTargetedTestResults,verifyMasterTargetedTestEvidence,unresolvedFinalCandidateFailures} from './lib/lite-master-targeted-tests-v1.mjs';
 import {admitPostCompletionFollowupV1} from './lib/lite-post-completion-followup-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
+import {resolveFrozenAuthorityFileV1,authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-discovery-v1.mjs';
 import {validatePhase6AttackerWorkV1,validatePhase8LinkageV1,validatePhase10CoverageLabelV1,appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
@@ -415,10 +416,11 @@ function copyAuthorityForShadow(root,shadowRoot,authorityRoot){
     fs.cpSync(logical,repoFile(shadowRoot,authorityRoot),{recursive:true});
     return;
   }
-  const frozen='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3';
-  if(authorityRoot!=='Audit Skill - Current Authority/Audit_Litemode_v10.3'||!fs.existsSync(repoFile(root,frozen)))throw new Error('master repair refresh cannot materialize bound authority '+authorityRoot);
-  fs.mkdirSync(path.dirname(repoFile(shadowRoot,frozen)),{recursive:true});
-  fs.cpSync(repoFile(root,frozen),repoFile(shadowRoot,frozen),{recursive:true});
+  const frozen=resolveFrozenAuthorityFileV1(root,authorityRoot);
+  if(!frozen||!fs.existsSync(frozen)||!fs.statSync(frozen).isDirectory())throw new Error('master repair refresh cannot materialize bound authority '+authorityRoot);
+  const dest=repoFile(shadowRoot,authorityRoot);
+  fs.mkdirSync(path.dirname(dest),{recursive:true});
+  fs.cpSync(frozen,dest,{recursive:true});
 }
 function isSupersedableRow(row){
   if(['SEALED_RECEIPT','SKIP_MARKER'].includes(row.kind)||row.kind.startsWith('GLOBAL_CONTROL_'))return false;
@@ -740,6 +742,13 @@ const now=new Date().toISOString();
 if(directory.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2') throw new Error('packet controller requires Audit Campaign Directory v2');
 if(directory.campaignId!==expectedCampaignId) throw new Error('campaign-id does not match Audit Campaign Directory');
 if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does not match Audit Campaign Directory workspacePath');
+const boundAuthorityHome=directory.lastSealedReceiptPath
+  ?readJson(requiredFile(root,directory.lastSealedReceiptPath,'bound authority receipt'))?.authority?.homepagePath
+  :directory.skillAuthority?.current?.homepagePath;
+const boundAuthorityRoot=typeof boundAuthorityHome==='string'&&boundAuthorityHome.endsWith('/SKILL.md')
+  ?boundAuthorityHome.slice(0,-'/SKILL.md'.length)
+  :String(directory.currentAssignment?.workSchemaPath??'').split('/phases/')[0];
+const authorityLinkRoot=boundAuthorityRoot?authorityLinkPathV1(root,boundAuthorityRoot):'';
 // Stage every master decision in an isolated controller checkout. Only a
 // fully successful acceptance or targeted-test directive may change Git state.
 if(['master','master-test-result'].includes(reviewKind)&&a['master-transaction-child']!=='true'&&!(reviewKind==='master'&&a['master-outcome']==='REQUEST_TARGETED_TESTS')){
@@ -791,7 +800,7 @@ if(['master','master-test-result'].includes(reviewKind)&&a['master-transaction-c
     fs.rmSync(shadowRoot,{recursive:true,force:true});
   }
   const feedback=String(response.feedbackText??response.status);
-  process.stdout.write(JSON.stringify({...response,feedbackB64:Buffer.from(feedback).toString('base64')})+'\n');
+  process.stdout.write(JSON.stringify({authorityLinkRoot,...response,feedbackB64:Buffer.from(feedback).toString('base64')})+'\n');
   process.exit(0);
 }
 if(masterAmendmentRefreshSha){
@@ -803,7 +812,7 @@ if(reviewKind==='post-completion-followup'){
   const result=admitPostCompletionFollowupV1({root,campaignPath,directory,requestPath:a['rework-request-path'],now});
   writeJson(directoryFile,directory);
   const feedback='POST_COMPLETION_FOLLOWUP_ADMITTED: exact source, two retained candidates and governance obligation are held for reviewer-3L delegated technical tests. Master reviewer must issue a typed targeted-test directive; the original Phase-5/6/8/10 receipts and accepted master decision remain unchanged. No candidate is yet resolved.';
-  process.stdout.write(JSON.stringify({status:'FOLLOWUP_ADMITTED',campaignId:directory.campaignId,campaignName:directory.campaignName,
+  process.stdout.write(JSON.stringify({authorityLinkRoot,status:'FOLLOWUP_ADMITTED',campaignId:directory.campaignId,campaignName:directory.campaignName,
     segmentId:result.pending.segmentId,recordPath:result.recordPath,
     masterChatUrl:directory.masterReview?.chatUrl??null,
     freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,
@@ -818,7 +827,7 @@ if(reviewKind==='master-test-result'){
   const submitted=acceptMasterTargetedTestResults({root,campaignPath,directory,resultPath:a['test-result-path'],now});
   writeJson(directoryFile,directory);
   const feedback='MASTER_TARGETED_TESTS_EVIDENCE_SUBMITTED: '+submitted.requestId+'. Master must inspect raw evidence and amend the reviewer-owned work forms before acceptance. Unresolved candidates still block final COMPLETE.';
-  process.stdout.write(JSON.stringify({status:'WAITING_FOR_MASTER_REVIEW',campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:directory.pendingMasterReview.segmentId,masterChatUrl:directory.masterReview.chatUrl,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+  process.stdout.write(JSON.stringify({authorityLinkRoot,status:'WAITING_FOR_MASTER_REVIEW',campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:directory.pendingMasterReview.segmentId,masterChatUrl:directory.masterReview.chatUrl,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
   process.exit(0);
 }
 function activeDetectionPolicyV1(receipt) {
@@ -836,7 +845,7 @@ if(reviewKind==='discovery'){
     authorityRoot:authorityRootFromReceipt(sourceReceipt),automationRoot:process.cwd(),
     unitId:a['unit-id'],now,auditControllerRef:a['audit-controller-ref']??'main'});
   if(result.status==='DISCOVERY_STALE_REQUEST'){
-    process.stdout.write(JSON.stringify({status:result.status,campaignName:directory.campaignName})+'\n');
+    process.stdout.write(JSON.stringify({authorityLinkRoot,status:result.status,campaignName:directory.campaignName})+'\n');
     process.exit(0);
   }
   directory.discovery.status=result.status==='DISCOVERY_COMPLETE'?'COMPLETE':'RUNNING';
@@ -851,7 +860,7 @@ if(reviewKind==='discovery'){
   }
   directory.updatedAt=now;writeJson(directoryFile,directory);
   const feedback=result.feedbackText??result.status;
-  process.stdout.write(JSON.stringify({status:result.status,campaignName:directory.campaignName,
+  process.stdout.write(JSON.stringify({authorityLinkRoot,status:result.status,campaignName:directory.campaignName,
     feedbackB64:Buffer.from(feedback).toString('base64'),
     discoveryWakeChatKey:result.wake?.chatKey??'',discoveryWakeId:result.wake?.wakeId??'',
     discoveryWakePhaseId:result.wake?.phaseId??'',discoveryWakeMilestoneId:result.wake?.milestoneId??'',
@@ -866,7 +875,7 @@ if(reviewKind==='master'){
   const summary=a['master-summary-b64']?(Buffer.from(a['master-summary-b64'],'base64').toString('utf8').trim()||null):null;
   const result=processMasterReviewSubmission({root,campaignPath,directory,authorityRoot:masterAuthorityRoot,segmentId:a['segment-id']??null,outcome:a['master-outcome']??null,summary,now});
   const emit=(status,feedback,extra={})=>{
-    process.stdout.write(JSON.stringify({status,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview?.chatUrl??null,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel,...extra})+'\n');
+    process.stdout.write(JSON.stringify({authorityLinkRoot,status,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview?.chatUrl??null,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel,...extra})+'\n');
     process.exit(0);
   };
   if(result.status==='MASTER_REVIEW_HELD')emit(result.status,'MASTER_REVIEW_HELD: '+result.failures.join('; ')+'. No campaign state or reviewed artifact was changed.');
@@ -1127,7 +1136,7 @@ if(deficiencies.length){
   directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
   writeJson(packetFile,packet);writeJson(directoryFile,directory);
   const feedback=feedbackText(sequence,deficiencies).replace('resubmit the same phase packet','repair the substantive fields and invoke controller validation again; the controller will rebuild the packet');
-  process.stdout.write(JSON.stringify({status:'NEEDS_REWORK',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer:assignment.reviewer,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
+  process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer:assignment.reviewer,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
   process.exit(0);
 }
 
@@ -1198,7 +1207,7 @@ if(sequence===5){
       'Repair the exact runner, harness or machine-evidence defect, then invoke the same phase controller again.',
       ...deficiencies.map(x=>'- '+x),
       'Machine failure is not a vulnerability finding.'].join('\n');
-    process.stdout.write(JSON.stringify({status:'NEEDS_REWORK',campaignId:directory.campaignId,
+    process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',campaignId:directory.campaignId,
       campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-5',
       reviewer:assignment.reviewer,feedbackText:feedback,
       feedbackB64:Buffer.from(feedback).toString('base64'),
@@ -1420,7 +1429,7 @@ if(gatedMasterReview&&masterBoundary!==null){
       extraLines.push('Check the coverage label and every gap in '+blob(path.posix.join(campaignPath,'work/phase-10/COVERAGE_MATRIX_v1.json'))+' before accepting.');
   }
   const feedback=masterWakeMessage({campaignId:directory.campaignId,pending:staged.pending,auditControllerRef:ref,authorityRoot,extraLines});
-  process.stdout.write(JSON.stringify({status:'WAITING_FOR_MASTER_REVIEW',controllerPassToken:'CONTROLLER_PHASE_PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,segmentId:staged.segment.segmentId,masterReviewRequired:true,masterChatUrl:directory.masterReview.chatUrl,masterReasoning:'MAXIMUM',recordPath:staged.pending.recordPath,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+  process.stdout.write(JSON.stringify({authorityLinkRoot,status:'WAITING_FOR_MASTER_REVIEW',controllerPassToken:'CONTROLLER_PHASE_PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,segmentId:staged.segment.segmentId,masterReviewRequired:true,masterChatUrl:directory.masterReview.chatUrl,masterReasoning:'MAXIMUM',recordPath:staged.pending.recordPath,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
   process.exit(0);
 }
 if(sequence===10){
@@ -1453,4 +1462,4 @@ else{
 }
 writeJson(directoryFile,directory);
 const feedback='CONTROLLER_PHASE_PASS: Phase '+sequence+' validated and sealed.'+(nextAssignment?' Next authorized assignment: Phase '+nextAssignment.phaseSequence+' / '+nextAssignment.reviewer+'.':' Campaign complete.');
-process.stdout.write(JSON.stringify({status:'PASS',controllerPassToken:'CONTROLLER_PHASE_PASS',sealedRework:Boolean(sealedRework),masterAmendmentRefresh:Boolean(masterAmendmentRefreshSha),campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:!discoveryStarted&&Boolean(nextAssignment&&nextAssignment.status==='WAITING_FOR_SUCCESSOR_AGENT'),sameReviewerAdvanced:!discoveryStarted&&Boolean(nextAssignment&&nextAssignment.status==='ACTIVE'),discoveryStarted,discoveryWakeChatKey:discoveryWake?.chatKey??'',discoveryWakeId:discoveryWake?.wakeId??'',discoveryWakePhaseId:discoveryWake?.phaseId??'',discoveryWakeMilestoneId:discoveryWake?.milestoneId??'',discoveryWakeMessageB64:discoveryWake?.messageB64??'',nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+process.stdout.write(JSON.stringify({authorityLinkRoot,status:'PASS',controllerPassToken:'CONTROLLER_PHASE_PASS',sealedRework:Boolean(sealedRework),masterAmendmentRefresh:Boolean(masterAmendmentRefreshSha),campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:!discoveryStarted&&Boolean(nextAssignment&&nextAssignment.status==='WAITING_FOR_SUCCESSOR_AGENT'),sameReviewerAdvanced:!discoveryStarted&&Boolean(nextAssignment&&nextAssignment.status==='ACTIVE'),discoveryStarted,discoveryWakeChatKey:discoveryWake?.chatKey??'',discoveryWakeId:discoveryWake?.wakeId??'',discoveryWakePhaseId:discoveryWake?.phaseId??'',discoveryWakeMilestoneId:discoveryWake?.milestoneId??'',discoveryWakeMessageB64:discoveryWake?.messageB64??'',nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
