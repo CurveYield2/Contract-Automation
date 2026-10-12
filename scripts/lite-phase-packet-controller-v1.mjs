@@ -433,6 +433,7 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
     shadowDirectory.pendingMasterReview={...shadowDirectory.pendingMasterReview,status:'MASTER_AMENDMENT_REFRESH',amendmentSha256:amendmentSha};
     for(let index=0;index<refreshPhases.length;index++){
       const phase=refreshPhases[index];
+      process.stderr.write(`[lite-master] Revalidating Phase ${phase} of ${refreshPhases.join(', ')} in isolated master-amendment replay\n`);
       const loaded=loadPhaseSchema(shadowRoot,authorityRoot,phase);
       const schema=loaded.schema;
       const row=phaseRows.get(phase);
@@ -541,7 +542,9 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
       };
       let parsed;
       try{
-        const output=execFileSync(process.execPath,childArgs,{encoding:'utf8',stdio:['ignore','pipe','pipe']});
+        // Child writes exactly one JSON result on stdout. Relay only its stderr
+        // so candidate start/heartbeat/end are visible during long Foundry work.
+        const output=execFileSync(process.execPath,childArgs,{encoding:'utf8',stdio:['ignore','pipe','inherit']});
         parsed=JSON.parse(output.trim());
       }catch(error){
         preservePhase5AttemptEvidence();
@@ -551,6 +554,7 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
         preservePhase5AttemptEvidence();
         throw new Error('controller dependent refresh failed for Phase '+phase+': '+String(parsed.feedbackText??parsed.status));
       }
+      process.stderr.write(`[lite-master] Phase ${phase} replay PASS\n`);
       shadowDirectory=readJson(repoFile(shadowRoot,directoryRel));
     }
     const refreshedDirectory=readJson(repoFile(shadowRoot,directoryRel));
