@@ -84,3 +84,33 @@ test('disabled policy writes nothing to the output directory (legacy path)',asyn
   assert.deepEqual(await fs.readdir(temp),[]);
  }finally{await fs.rm(temp,{force:true,recursive:true});}
 });
+
+test('opted-in policy writes both artifacts with exact campaign and source identities',async()=>{
+ const {build}=await prepared;
+ const temp=await fs.mkdtemp(path.join(fileURLToPath(new URL('../../../',import.meta.url)),'adr-active-'));
+ try {
+  const request={...campaign,source:{archiveSha256:campaign.sourceSha256}};
+  await writeReviewInventoryOutputsV1({outputDir:temp,projectRoot:fixtureRoot,build,request,policy:'audit-detection-rebuild-v1'});
+  const files=(await fs.readdir(temp)).sort();
+  assert.deepEqual(files,['REVIEW_INVENTORY_v1.json','SYSTEM_FACTS_v1.json']);
+  const inventory=JSON.parse(await fs.readFile(path.join(temp,files[0]),'utf8'));
+  const facts=JSON.parse(await fs.readFile(path.join(temp,files[1]),'utf8'));
+  assert.equal(inventory.campaignId,campaign.campaignId);
+  assert.equal(facts.sourceSha256,campaign.sourceSha256);
+  assert.equal(inventory.generatedAt,campaign.generatedAt);
+  assert.equal(facts.generatedAt,inventory.generatedAt);
+ }finally{await fs.rm(temp,{force:true,recursive:true});}
+});
+test('inventory builder failures become typed incomplete inventory without throwing',async()=>{
+ const {build}=await prepared;
+ const temp=await fs.mkdtemp(path.join(fileURLToPath(new URL('../../../',import.meta.url)),'adr-incomplete-'));
+ try {
+  await writeReviewInventoryOutputsV1({outputDir:temp,projectRoot:'/nonexistent-adr-fixture',build,
+   request:{...campaign,source:{archiveSha256:campaign.sourceSha256}},policy:'audit-detection-rebuild-v1'});
+  const files=await fs.readdir(temp);
+  assert.deepEqual(files,['REVIEW_INVENTORY_v1.json']);
+  const inventory=JSON.parse(await fs.readFile(path.join(temp,files[0]),'utf8'));
+  assert.equal(inventory.payload.complete,false);
+  assert.ok(inventory.payload.limitations.some(x=>x.code==='INVENTORY_BUILD_ERROR'));
+ }finally{await fs.rm(temp,{force:true,recursive:true});}
+});
