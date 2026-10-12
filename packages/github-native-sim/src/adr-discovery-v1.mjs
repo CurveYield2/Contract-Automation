@@ -47,7 +47,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
   sourceRoot:campaignPath+'/source',sourceInventoryPath:asset(campaignPath,'REVIEW_INVENTORY_v1.json'),
   flowPlanPath:asset(campaignPath,'FLOW_PLAN_v1.json'),
   systemFactsPath:asset(campaignPath,'SYSTEM_FACTS_v1.json'),
-  primaryContexts:role==='ATTACK'?[]:primary.map(id=>contextFor(inventory,id)).filter(Boolean).map(c=>({...c,requiredClasses:requiredClasses[id]})),
+  primaryContexts:role==='ATTACK'?[]:primary.map(id=>contextFor(inventory,id)).filter(Boolean).map(c=>({...c,requiredClasses:requiredClasses[c.contextId]})),
   primaryContextIds:primary,readContextIds:role==='ATTACK'?contextIds:arr(unit.readContextIds),
   requiredClasses,flows,flowIds:arr(unit.flowIds),integrationQuestions:questions,
   integrationQuestionIds:arr(unit.integrationQuestionIds),
