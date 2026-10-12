@@ -83,6 +83,7 @@ target_args=()
 if [[ -n "$authority_root" ]]; then target_args+=(--authority-root "$authority_root"); fi
 target_authority_rc="$(run_authority_sync .ac-target "${target_args[@]}")"
 echo "Authority validator main code=$main_authority_rc; target code=$target_authority_rc"
+if [[ "$target_authority_rc" != 0 ]]; then echo "Target authority validator failure:"; tail -n 35 .ac-target/authority-sync.txt; fi
 if [[ "$target_authority_rc" != 0 && "$main_authority_rc" == 0 ]]; then
   echo "::error::Staging authority validation regressed" >&2
   cat .ac-target/authority-sync.txt
