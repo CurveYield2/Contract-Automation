@@ -311,6 +311,22 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
     const needed=loadTaxonomyV1(new URL('../../../',import.meta.url).pathname).classes.filter(x=>x.testRequired).flatMap(x=>x.triggers);
     triggers[ctx.contextId]=distinct(needed);
   }
+  for (const ctx of contexts) {
+    const t=temp.get(ctx.contextId), contract=t?.meta?.contract;
+    if(contract) {
+      ctx.directBases=distinct(contract.directBases??[]);
+      ctx.implementedInterfaces=distinct(contract.implementedInterfaces??[]);
+      ctx.contractKind=contract.containerKind;
+      ctx.contractAbstract=contract.abstract;
+    }
+    if(t?.meta?.node) {
+      const source=t.source.bytes, sourceSlice=sourceText(source,t.meta.node.src);
+      const firstLine=ctx.lineStart;
+      ctx.senderCheckLines=distinct(sourceSlice.split('\\n').flatMap((line,i)=>
+        /(?:require|if)\\s*\\(|hasRole\\s*\\(|_checkRole\\s*\\(|msg\\.sender/.test(line)?[firstLine+i]:[])).map(Number);
+      ctx.txOriginLines=distinct(sourceSlice.split('\\n').flatMap((line,i)=>/tx\\.origin/.test(line)?[firstLine+i]:[])).map(Number);
+    }
+  }
   const triggerObj={};for(const c of [...contexts].sort(byPosition))triggerObj[c.contextId]=distinct([...(triggers[c.contextId]??[])]);
   contexts.sort(byPosition);declarations.sort((a,b)=>a.path.localeCompare(b.path)||a.lineStart-b.lineStart||a.symbolId.localeCompare(b.symbolId));
   limitations.sort((a,b)=>a.path.localeCompare(b.path)||a.code.localeCompare(b.code));
