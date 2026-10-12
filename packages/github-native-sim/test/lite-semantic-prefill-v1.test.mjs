@@ -125,9 +125,9 @@ test('Phase9 controller harvests rerun evidence refs from trusted ingested execu
   const findingKey='FIND-001';
   const requestId='dar-0123456789abcdef0123456789abcdef';
   const requestDir='controller/phase9-reruns/FIND-001/rerun-1';
-  writeJson(path.join(b.root,b.campaign,requestDir,'EXECUTION_REQUEST_v1.json'),{requestId});
+  writeJson(path.join(b.root,b.campaign,requestDir,'EXECUTION_REQUEST_v1.json'),{requestId,requestDigest:'a'.repeat(64)});
   const evidenceDir=path.join(b.root,b.campaign,'controller/automation',requestId);
-  writeJson(path.join(evidenceDir,'EXECUTION_EVIDENCE_v1.json'),{schemaVersion:'test-evidence',requestId});
+  writeJson(path.join(evidenceDir,'EXECUTION_EVIDENCE_v1.json'),{schemaVersion:'test-evidence',requestId,requestDigest:'a'.repeat(64),disposition:'PASS',blocking:false,failedStepCount:0,analysisComponentFailureCount:0,failedSteps:[]});
   writeJson(path.join(evidenceDir,'EXECUTION_OBSERVER_RECEIPT_v1.json'),{schemaVersion:'observer',requestId});
   writeJson(path.join(evidenceDir,'ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json'),{
     schemaVersion:'audit-execution-evidence-ingestion-receipt-v1',
@@ -182,7 +182,7 @@ test('Phase9 controller fails closed while rerun evidence ingestion is incomplet
     }]}}
   }};
   const deficiencies=populatePhase9RerunEvidenceRefs({root:b.root,campaignPath:b.campaign,form});
-  assert.ok(deficiencies.some(x=>x.includes('no durable ingested execution evidence yet')));
+  assert.ok(deficiencies.some(x=>x.includes('no complete, successfully ingested rerun evidence')));
 });
 
 
@@ -247,4 +247,19 @@ test('formal obligations normalize, carry forward, and close on the same stable 
   });
   assert.equal(ledger.obligations[0].status,'SATISFIED');
   assert.ok(ledger.obligations[0].closureEvidenceRefs.includes('phase6-evidence'));
+});
+
+test('Phase9 rerun ingestion receipt cannot hide failed or blocked execution',()=>{
+  const b=base();const requestId='dar-failed-regression';const rel='controller/phase9-reruns/FIND-FAILED/rerun-1';
+  writeJson(path.join(b.root,b.campaign,rel,'EXECUTION_REQUEST_v1.json'),{requestId,requestDigest:'d'.repeat(64)});
+  const evidenceDir=path.join(b.root,b.campaign,'controller/automation',requestId);
+  writeJson(path.join(evidenceDir,'EXECUTION_EVIDENCE_v1.json'),{requestId,requestDigest:'d'.repeat(64),disposition:'RUNNER_REPAIR_REBIND',blocking:true,failedStepCount:1,analysisComponentFailureCount:0,failedSteps:[{status:'FAILED'}],preflight:{status:'BLOCKED'}});
+  writeJson(path.join(evidenceDir,'ingestion/EXECUTION_EVIDENCE_INGESTION_RECEIPT_v1.json'),{schemaVersion:'audit-execution-evidence-ingestion-receipt-v1',requestId});
+  const form={schemaVersion:'curveyield-lite-phase-work-form-v1',phase:9,automationInputs:{},actions:{'step-2':{outputs:{remediationDispositions:[{
+    findingKey:'FIND-FAILED',rerunRequestDirectory:'controller/phase9-reruns/FIND-FAILED/',rerunEvidenceRefs:[],
+    rootCauseFixed:'YES',regressionAssessment:'NO_REGRESSION',disposition:'FIXED',rationale:'incorrectly claims pass',
+    newCandidateOrNone:'NONE_IDENTIFIED'
+  }]}}}};
+  const errors=populatePhase9RerunEvidenceRefs({root:b.root,campaignPath:b.campaign,form});
+  assert.match(errors.join('; '),/lacks successful, request-bound, ingested machine execution/);
 });
