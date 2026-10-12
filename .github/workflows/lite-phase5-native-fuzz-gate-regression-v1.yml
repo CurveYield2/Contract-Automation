@@ -1,0 +1,25 @@
+name: Lite Phase-5 Native Fuzz Gate Regression v1
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/github-native-sim/src/native-fuzz.mjs'
+      - 'packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs'
+      - 'scripts/tests/phase5-native-fuzz-fail-closed-v1.test.mjs'
+      - '.github/workflows/lite-phase5-native-fuzz-gate-regression-v1.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check JavaScript syntax
+        run: |
+          node --check packages/github-native-sim/src/native-fuzz.mjs
+          node --check packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs
+          node --check scripts/tests/phase5-native-fuzz-fail-closed-v1.test.mjs
+      - name: Verify fail-closed forge results
+        run: node --test scripts/tests/phase5-native-fuzz-fail-closed-v1.test.mjs
