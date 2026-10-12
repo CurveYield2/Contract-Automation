@@ -36,7 +36,9 @@ export function buildSystemFactsV1({inventory}) {
         valueFlows.push({contextId:c.contextId,contract,memberName:e.memberName,line:e.line});
       const match=/^contract\s+([A-Za-z0-9_$]+)/.exec(e.targetType??'');
       if(!match)continue;
-      const name=match[1],toType=[...contractNames].find(x=>x.split(':').at(-1)===name);
+      const name=match[1];
+      const toType=[...contractNames].find(x=>x.split(':').at(-1)===name) ??
+        contexts.find(x=>x.scopeTier==='IN_SCOPE'&&(x.implementedInterfaces??[]).some(i=>i.split(':').at(-1)===name))?.effectiveIn?.[0];
       const dest=toType?'cross':'dependency';
       if(dest==='cross')crossContractEdges.push({fromContextId:c.contextId,fromContract:contract,toType,memberName:e.memberName,line:e.line});
       else if([...depNames].some(x=>x.includes(name))||
