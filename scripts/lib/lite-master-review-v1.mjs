@@ -229,7 +229,14 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
   return {segment,pending,record};
 }
 
-function exactJson(a,b){return JSON.stringify(a)===JSON.stringify(b);}
+// Compare semantic JSON objects independent of serialization/key order. Raw byte digests
+// remain authoritative for identifying which sealed artifacts changed.
+function canonicalJson(value){
+  if(Array.isArray(value))return '['+value.map(canonicalJson).join(',')+']';
+  if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonicalJson(value[k])).join(',')+'}';
+  return JSON.stringify(value);
+}
+function exactJson(a,b){return canonicalJson(a)===canonicalJson(b);}
 function validateLockedRecord(record,pending,directory,cfg){
   const failures=[];
   if(record.schemaVersion!=='curveyield-lite-master-review-record-v1')failures.push('master review record schemaVersion mismatch');
@@ -299,11 +306,20 @@ export function readSealedOriginal(root,sealed,{campaignPath,segmentId}={}){
   if(gitBlobSha1(bytes)!==sealed.gitBlobSha1||digestBytes(bytes)!==sealed.sha256)throw new Error('sealed original campaign snapshot Git/SHA256 digest mismatch: '+expected);
   return bytes;
 }
-function reviewerOutputPaths(schema){
+// The bound phase schema is the single authority for reviewer-owned outputs.
+// Nested controller-prefilled record attributes remain immutable even though
+// the surrounding semantic record is reviewer-owned.
+export function masterReviewerFieldContract(schema){
   const out=[];
-  for(const [stepKey,action] of Object.entries(schema.actions??{}))for(const field of action.fields??[])out.push('actions.'+stepKey+'.outputs.'+field.name);
+  for(const [stepKey,action] of Object.entries(schema.actions??{})){
+    for(const field of action.fields??[]){
+      out.push({path:'actions.'+stepKey+'.outputs.'+field.name,
+        controllerPrefillFields:[...(field.controllerPrefillFields??[])]});
+    }
+  }
   return out;
 }
+function reviewerOutputPaths(schema){return masterReviewerFieldContract(schema).map(row=>row.path);}
 function valueAt(object,dot){return String(dot).split('.').reduce((v,k)=>v===undefined||v===null?undefined:v[k],object);}
 function amendmentFailures({root,authorityRoot,sealed,original,amended}){
   const failures=[];
@@ -315,8 +331,20 @@ function amendmentFailures({root,authorityRoot,sealed,original,amended}){
   for(const dot of owned){deleteObjectPath(protectedOriginal,dot);deleteObjectPath(protectedAmended,dot);}
   if(!exactJson(protectedOriginal,protectedAmended))failures.push('amended work form changed controller-owned data outside reviewer-written fields: '+sealed.path);
   const changedFields=owned.filter(dot=>!exactJson(valueAt(original,dot),valueAt(amended,dot)));
-  const reducerPaths=[...(schema.bookkeepingMappings?.obligationRecordPaths??[]),...(schema.bookkeepingMappings?.invalidationRecordPaths??[])];
-  for(const dot of changedFields)if(reducerPaths.includes(dot))failures.push('amended field requires unsupported historical obligation/invalidation replay: '+sealed.path+'#'+dot);
+  for(const field of masterReviewerFieldContract(schema)){
+    if(!field.controllerPrefillFields.length)continue;
+    const before=valueAt(original,field.path),after=valueAt(amended,field.path);
+    if(!Array.isArray(before)||!Array.isArray(after))continue;
+    const protectedValues=(rows)=>rows.map(row=>{
+      if(!row||typeof row!=='object'||Array.isArray(row))return row;
+      return Object.fromEntries(field.controllerPrefillFields.map(k=>[k,row[k]]));
+    });
+    if(!exactJson(protectedValues(before),protectedValues(after))){
+      failures.push('amended field changed schema-protected controller-prefilled record attributes: '+sealed.path+'#'+field.path);
+    }
+  }
+  // Historical bookkeeping mappings are valid reviewer outputs. The controller
+  // must replay them from sealed predecessors, not reject their correction.
   for(const deficiency of validatePhaseScaffold(sealed.phase,amended,original?.automationInputs?.controllerPrefillDigestSha256??null))failures.push(sealed.path+': '+deficiency);
   return {failures,changedFields};
 }
