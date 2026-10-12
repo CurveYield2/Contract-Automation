@@ -363,30 +363,47 @@ function overlayReviewerOutputs(schema,fresh,saved){
   }
   return fresh;
 }
-// A master amendment replays earlier sealed phases against a ledger that still
-// includes dispositions from later sealed phases. Re-deriving historical due IDs
-// from that final-state ledger can incorrectly turn a nonempty prefill into [].
-// Reuse the due-ID set sealed with this phase; reviewer-owned disposition rows
-// must still match it exactly under validatePhaseScaffold.
-function retainSealedDueObligationPrefill(fresh,sealed,phase){
+// Reuse sealed historical due IDs only if the deterministically regenerated
+// precursor obligations agree. Upstream changes may alter obligations, but may
+// never silently erase, invent or retain stale controller-prefilled requirements.
+function retainSealedDueObligationPrefill(form,sealed,phase,trusted,schema,allowRequirementsUpdate=false){
   const sealedIds=sealed?.automationInputs?.expectedDueObligationIds;
-  if(sealedIds===undefined)return fresh;
-  if(!Array.isArray(sealedIds)||!Array.isArray(fresh?.automationInputs?.expectedDueObligationIds))
-    throw new Error('master amendment refresh Phase '+phase+' has malformed due-obligation prefills');
+  if(sealedIds===undefined)return form;
+  const freshIds=trusted?.automationInputs?.expectedDueObligationIds;
+  if(!Array.isArray(sealedIds)||!Array.isArray(freshIds))
+    throw new Error('MASTER_DEPENDENCY_REWORK_REQUIRED: malformed Phase '+phase+' historical obligation prefills');
+  const sorted=(ids)=>[...ids].map(String).sort();
+  if(JSON.stringify(sorted(sealedIds))!==JSON.stringify(sorted(freshIds)))
+    throw new Error('MASTER_DEPENDENCY_REWORK_REQUIRED: Phase '+phase+' due obligations changed after upstream amendment. Sealed: '+sorted(sealedIds).join(', ')+'; regenerated: '+sorted(freshIds).join(', ')+'. Regenerate trusted dependent prefills before accepting any disposition.');
   const actual=[];
-  for(const action of Object.values(sealed.actions??{})){
-    if(!Array.isArray(action?.outputs?.obligationDispositions))continue;
-    for(const row of action.outputs.obligationDispositions){
+  for(const action of Object.values(form?.actions??{})){
+    for(const row of action?.outputs?.obligationDispositions??[]){
       if(row&&typeof row==='object'&&!Array.isArray(row)&&row.obligationId)actual.push(String(row.obligationId));
     }
   }
-  const sorted=(ids)=>[...ids].map(String).sort();
   if(JSON.stringify(sorted(sealedIds))!==JSON.stringify(sorted(actual)))
-    throw new Error('master amendment refresh Phase '+phase+' sealed due-obligation IDs do not match its disposition rows');
+    throw new Error('MASTER_DEPENDENCY_REWORK_REQUIRED: Phase '+phase+' reviewer dispositions do not match the bound due-obligation set');
   if(new Set(sealedIds).size!==sealedIds.length)
-    throw new Error('master amendment refresh Phase '+phase+' sealed due-obligation IDs contain duplicates');
-  fresh.automationInputs.expectedDueObligationIds=structuredClone(sealedIds);
-  return fresh;
+    throw new Error('MASTER_DEPENDENCY_REWORK_REQUIRED: duplicate Phase '+phase+' due obligations');
+  for(const [stepKey,action] of Object.entries(schema.actions??{})){
+    const field=(action.fields??[]).find(x=>x.name==='obligationDispositions');
+    if(!field)continue;
+    const trustedRows=trusted?.actions?.[stepKey]?.outputs?.obligationDispositions??[];
+    const bound=new Map(trustedRows.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)).map(x=>[String(x.obligationId),x]));
+    for(const row of form?.actions?.[stepKey]?.outputs?.obligationDispositions??[]){
+      if(!row||typeof row!=='object'||Array.isArray(row))continue;
+      const expected=bound.get(String(row.obligationId??''));
+      if(!expected)throw new Error('MASTER_DEPENDENCY_REWORK_REQUIRED: unbound Phase '+phase+' obligation '+String(row.obligationId));
+      for(const key of field.controllerPrefillFields??[]){
+        if(JSON.stringify(row[key])===JSON.stringify(expected[key]))continue;
+        if(!allowRequirementsUpdate)
+          throw new Error('MASTER_DEPENDENCY_REWORK_REQUIRED: Phase '+phase+' obligation '+row.obligationId+' changed its controller-owned '+key+'; master must correct dependent reviewer dispositions before refresh.');
+        row[key]=structuredClone(expected[key]);
+      }
+    }
+  }
+  form.automationInputs.expectedDueObligationIds=structuredClone(freshIds);
+  return form;
 }
 function copyAuthorityForShadow(root,shadowRoot,authorityRoot){
   const logical=repoFile(root,authorityRoot);
@@ -531,9 +548,11 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
         predecessorReceiptPath=generated.predecessorReceiptPath;
         derivedInputPaths=generated.derivedInputPaths??[];
         const fresh=readJson(requiredFile(shadowRoot,generated.workFormPath,'refreshed Phase '+phase+' scaffold'));
+        const trustedPrefill=structuredClone(fresh);
+        const amendedDisposition=(amendedForms.get(row.path)?.changedFields??[]).some(x=>x.endsWith('.obligationDispositions'));
         form=retainSealedDueObligationPrefill(
           overlayReviewerOutputs(schema,fresh,originalForms.get(phase)),
-          originalForms.get(phase),phase
+          originalForms.get(phase),phase,trustedPrefill,schema,amendedDisposition
         );
       }
       if(!predecessorReceiptPath)throw new Error('master amendment refresh lacks predecessor receipt for Phase '+phase);
@@ -857,6 +876,8 @@ if(reviewKind==='master'){
     }catch(error){
       if(String(error?.message??'').startsWith('MASTER_TARGETED_TESTS_REQUIRED:'))
         emit('MASTER_REVIEW_INVALID',String(error.message)+' Issue a targeted-test directive; do not convert the candidate to a false-positive without evidence.');
+      if(String(error?.message??'').startsWith('MASTER_DEPENDENCY_REWORK_REQUIRED:'))
+        emit('MASTER_REVIEW_INVALID',String(error.message)+' Controller-prefilled attributes must not be edited by hand; correct dependent semantic outputs or request a controller prefill regeneration.');
       throw error;
     }
     Object.assign(decision,{
