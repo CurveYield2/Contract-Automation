@@ -38,8 +38,12 @@ test('real swap binds v12 as the single live package and preserves all historica
     if(!exists){
       // Archived campaign directories can survive after their workspaces.
       // Record missing evidence without inventing or rebinding a receipt.
-      assert.equal(fs.existsSync(path.join(root,entry.workspacePath)),false,
-        name+' still has a live workspace with a missing receipt');
+      const workspaceStillInGit=(()=>{
+        try{execFileSync('git',['cat-file','-e','HEAD:'+entry.workspacePath],{cwd:root,stdio:'ignore'});return true;}
+        catch{return false;}
+      })();
+      assert.equal(workspaceStillInGit,false,
+        name+' still has a versioned workspace with a missing receipt');
       missingHistoricalReceipts.push({name,receipt:entry.lastSealedReceiptPath});
       continue;
     }
