@@ -21,6 +21,7 @@ import {
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
 import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
+import {registerMasterTargetedTests,acceptMasterTargetedTestResults,unresolvedFinalCandidateFailures} from './lib/lite-master-targeted-tests-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
@@ -565,6 +566,10 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
     const refreshedDirectory=readJson(repoFile(shadowRoot,directoryRel));
     const expectedAuthority={homepagePath:result.record.bindings.authority.homepagePath,liteSkillSha256:result.record.bindings.authority.sha256};
     const postArtifacts=collectSegmentArtifacts({root:shadowRoot,campaignPath,segment,directory:refreshedDirectory,expectedAuthority});
+    if(segment.boundaryPhase===10){
+      const unresolved=unresolvedFinalCandidateFailures({root:shadowRoot,campaignPath,directory:refreshedDirectory});
+      if(unresolved.length)throw new Error('MASTER_TARGETED_TESTS_REQUIRED: '+unresolved.join('; '));
+    }
     const postByPath=new Map(postArtifacts.map(x=>[x.path,x]));
 
     // Every reviewer product that the amendment replaced or left unreferenced is
@@ -621,8 +626,10 @@ if(a['phase5-reuse-keys-b64']&&!masterAmendmentRefreshSha)
 if(masterAmendmentRefreshSha&&reviewKind!=='phase')throw new Error('master-amendment-refresh-sha is internal to phase refresh');
 for(const k of ['controller-root','campaign-id','campaign-path','campaign-directory-path']) if(a[k]===undefined) throw new Error('missing --'+k);
 if(['phase','sealed-rework'].includes(reviewKind)&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
+if(reviewKind==='master-test-result'&&!a['test-result-path'])throw new Error('missing --test-result-path');
+if(reviewKind==='master'&&a['master-outcome']==='REQUEST_TARGETED_TESTS'&&!a['test-plan-path'])throw new Error('missing --test-plan-path');
 if(reviewKind==='sealed-rework'&&!a['rework-request-path']) throw new Error('missing --rework-request-path');
-if(!['phase','master','sealed-rework'].includes(reviewKind)) throw new Error('review-kind must be phase, master, or sealed-rework');
+if(!['phase','master','master-test-result','sealed-rework'].includes(reviewKind)) throw new Error('review-kind must be phase, master, master-test-result, or sealed-rework');
 const root=path.resolve(a['controller-root']);
 const expectedCampaignId=a['campaign-id'];
 const campaignPath=a['campaign-path']; const campaignRoot=repoFile(root,campaignPath);
@@ -641,6 +648,13 @@ function masterAmendmentReceipt(priorRevision){
   const pending=directory.pendingMasterReview;
   return {schemaVersion:'curveyield-lite-master-amendment-receipt-v1',segmentId:pending.segmentId,amendmentSha256:masterAmendmentRefreshSha,amendmentRecordPath:pending.recordPath,supersededDirectory:path.posix.join(campaignPath,SUPERSEDED_DIRECTORY_V1),priorRevision,controllerDependentRefresh:true};
 }
+if(reviewKind==='master-test-result'){
+  const submitted=acceptMasterTargetedTestResults({root,campaignPath,directory,resultPath:a['test-result-path'],now});
+  writeJson(directoryFile,directory);
+  const feedback='MASTER_TARGETED_TESTS_EVIDENCE_SUBMITTED: '+submitted.requestId+'. Master must inspect raw evidence and amend the reviewer-owned work forms before acceptance. Unresolved candidates still block final COMPLETE.';
+  process.stdout.write(JSON.stringify({status:'WAITING_FOR_MASTER_REVIEW',campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:directory.pendingMasterReview.segmentId,masterChatUrl:directory.masterReview.chatUrl,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+  process.exit(0);
+}
 if(reviewKind==='master'){
   const pending=directory.pendingMasterReview;
   if(!pending) throw new Error('campaign has no pending master review');
@@ -654,9 +668,21 @@ if(reviewKind==='master'){
   };
   if(result.status==='MASTER_REVIEW_HELD')emit(result.status,'MASTER_REVIEW_HELD: '+result.failures.join('; ')+'. No campaign state or reviewed artifact was changed.');
   if(result.status==='MASTER_REVIEW_INVALID')emit(result.status,['Master-review submission is invalid. Repair only the exact items below, then submit the master request again with attempt increased by 1.','',...result.failures.map(x=>'- '+x),'','The campaign has not advanced.'].join('\n'));
+  if(result.status==='MASTER_TARGETED_TESTS_REQUEST_READY'){
+    try{
+      const assignment=registerMasterTargetedTests({root,campaignPath,directory,planPath:a['test-plan-path'],now});
+      writeJson(directoryFile,directory);
+      const feedback='MASTER_TARGETED_TESTS_REQUIRED: Execute the exact plan at '+assignment.planPath+' for '+directory.campaignId+'. Reviewer '+assignment.assignedReviewer+' must run decisive tests, retain raw evidence under campaign evidence/master-targeted-tests/'+assignment.requestId+', submit a digest-bound RESULT_v1.json at '+assignment.resultPath+' and then submit a master-test-result boundary request. Do not edit any sealed phase or controller bookkeeping. Master acceptance and campaign COMPLETE remain held.';
+      emit('MASTER_TESTS_REQUESTED',feedback,{testReviewer:assignment.assignedReviewer,testPlanPath:assignment.planPath,testResultPath:assignment.resultPath,testRequestId:assignment.requestId});
+    }catch(error){emit('MASTER_REVIEW_INVALID','Invalid targeted-test directive: '+String(error?.message??error));}
+  }
   // Legacy sealed Phase-5 machine failures cannot be accepted unchanged
   // at the Reviewer-2 master-review boundary. An amended segment is
   // reexecuted through the new mandatory pre-seal gate.
+  if(result.status==='MASTER_REVIEW_ACCEPTED'&&pending.segmentId==='reviewer-4-phases-08-10'){
+    const unresolved=unresolvedFinalCandidateFailures({root,campaignPath,directory});
+    if(unresolved.length)emit('MASTER_REVIEW_INVALID','Final audit cannot COMPLETE with unresolved material candidates. Request reviewer-directed targeted tests: '+unresolved.join('; '));
+  }
   if(pending.segmentId==='reviewer-2-phases-02-05'&&result.status==='MASTER_REVIEW_ACCEPTED'){
     const phase5=canonicalFor(root,campaignPath,5);
     // The successor prefill is deliberately metadata-only; verify the actual
@@ -677,7 +703,14 @@ if(reviewKind==='master'){
   let nextAssignment=null;
   const decision={outcome:result.outcome,summary,submittedAt:now};
   if(result.status==='MASTER_AMENDMENT_READY_FOR_REFRESH'){
-    const refresh=applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRoot:masterAuthorityRoot,result,now});
+    let refresh;
+    try{
+      refresh=applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRoot:masterAuthorityRoot,result,now});
+    }catch(error){
+      if(String(error?.message??'').startsWith('MASTER_TARGETED_TESTS_REQUIRED:'))
+        emit('MASTER_REVIEW_INVALID',String(error.message)+' Issue a targeted-test directive; do not convert the candidate to a false-positive without evidence.');
+      throw error;
+    }
     Object.assign(decision,{
       amendmentSha256:result.amendmentSha256,
       amendedForms:result.amendedForms.map(({originalBytes,...rest})=>rest),
