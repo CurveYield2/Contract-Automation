@@ -46,25 +46,6 @@ jobs:
           timeout -k 10s 900s node --test "${files[@]}"
       - name: Validate V7 runner manifest pin
         run: timeout -k 10s 120s npm run v7:manifest -- --check
-      - uses: actions/checkout@v4
-        if: github.event.pull_request.number == 654
-        with:
-          ref: main
-          path: .adr-main-baseline
-          persist-credentials: false
-      - name: Prove baseline failures on main
-        if: github.event.pull_request.number == 654
-        shell: bash
-        run: |
-          set -euo pipefail
-          ln -s "$GITHUB_WORKSPACE/node_modules" .adr-main-baseline/node_modules
-          set +e
-          (cd .adr-main-baseline && node --test packages/github-native-sim/test/native-fuzz-v1.test.mjs) >/tmp/adr-main-fuzz-tap.txt 2>&1
-          exitcode=$?
-          set -e
-          grep '^not ok' /tmp/adr-main-fuzz-tap.txt
-          test "$exitcode" -ne 0
-          test "$(grep -c '^not ok' /tmp/adr-main-fuzz-tap.txt)" = 4
       - name: Existing controller regression tests
         shell: bash
         run: |
