@@ -277,6 +277,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish validation response or successful phase transaction
+        if: ${{ always() && steps.routing.outcome == 'success' && steps.controller.outcome != 'skipped' }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
