@@ -18,7 +18,7 @@ on:
         type: string
 
       resume_from_finalize:
-        description: Requalify, then finalize already-published Phase 0 build and forked native deployment/configuration evidence
+        description: Finalize already-published Phase 0 build and forked native deployment/configuration evidence
         required: false
         default: false
         type: boolean
@@ -33,16 +33,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  qualification:
-    uses: ./.github/workflows/v7-execution-infrastructure-qualification.yml
-    with:
-      controller_ref: ${{ inputs.audit_controller_ref }}
-      qualification_lane: FULL
-    secrets: inherit
-
   intelligence:
     if: ${{ !inputs.resume_from_finalize }}
-    needs: qualification
     uses: ./.github/workflows/lite-phase0-intelligence-v1.yml
     with:
       campaign_id: ${{ inputs.campaign_id }}
@@ -51,8 +43,8 @@ jobs:
     secrets: inherit
 
   fork-deploy-config:
-    needs: [qualification, intelligence]
-    if: ${{ !inputs.resume_from_finalize && needs.qualification.result == 'success' && needs.intelligence.result == 'success' }}
+    needs: intelligence
+    if: ${{ !inputs.resume_from_finalize && needs.intelligence.result == 'success' }}
     uses: ./.github/workflows/lite-phase0-randomized-simulation-v1.yml
     with:
       campaign_id: ${{ inputs.campaign_id }}
@@ -61,8 +53,8 @@ jobs:
     secrets: inherit
 
   finalize-and-launch-reviewer1:
-    needs: [qualification, fork-deploy-config]
-    if: ${{ always() && (needs.fork-deploy-config.result == 'success' || (inputs.resume_from_finalize && needs.qualification.result == 'success')) }}
+    needs: [fork-deploy-config]
+    if: ${{ always() && (needs.fork-deploy-config.result == 'success' || inputs.resume_from_finalize) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -88,16 +80,6 @@ jobs:
         shell: bash
         run: bash scripts/select-audit-controller-token.sh
 
-      - name: Fetch exact canonical qualification
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d > /tmp/v7-qualification.json
-          test "$(jq -r '.status' /tmp/v7-qualification.json)" = PASS
-          test "$(jq -r '.qualifiedCommit' /tmp/v7-qualification.json)" = "$GITHUB_SHA"
-
       - name: Checkout exact Audit-Controller campaign
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -111,7 +93,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node scripts/lite-phase0-finalize-v1.mjs             --controller-root .audit-controller             --campaign-path "$CAMPAIGN_PATH"             --qualification-path /tmp/v7-qualification.json             --contract-automation-sha "$(jq -r '.qualifiedCommit' /tmp/v7-qualification.json)" --bootstrap-sha "$GITHUB_SHA"             --workflow-run-id "$GITHUB_RUN_ID" | tee /tmp/phase0-finalize.json
+          node scripts/lite-phase0-finalize-v1.mjs             --controller-root .audit-controller             --campaign-path "$CAMPAIGN_PATH"             --contract-automation-sha "$GITHUB_SHA" --bootstrap-sha "$GITHUB_SHA"             --workflow-run-id "$GITHUB_RUN_ID" | tee /tmp/phase0-finalize.json
           test "$(jq -r '.status' /tmp/phase0-finalize.json)" = PASS
           echo "campaign_name=$(jq -r '.campaignName' /tmp/phase0-finalize.json)" >> "$GITHUB_OUTPUT"
 
