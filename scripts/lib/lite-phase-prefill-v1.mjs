@@ -653,7 +653,17 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
       const ingestionAbs=repoFile(root,path.posix.join(campaignPath,ingestionRel));
       const observerAbs=repoFile(root,path.posix.join(campaignPath,observerRel));
       const ingestion=readJsonIf(ingestionAbs);
-      if(!fs.existsSync(evidenceAbs)||!ingestion||ingestion.schemaVersion!=='audit-execution-evidence-ingestion-receipt-v1'||ingestion.requestId!==requestId) continue;
+      // An ingestion receipt can exist after a failed runner. Do not treat
+      // presence of an artifact as proof that the required remediation ran.
+      if(!fs.existsSync(evidenceAbs)||!ingestion||
+         ingestion.schemaVersion!=='audit-execution-evidence-ingestion-receipt-v1'||
+         ingestion.requestId!==requestId||
+         !/^[0-9a-f]{64}$/.test(String(request.requestDigest??''))||
+         ingestion.requestDigest!==request.requestDigest||
+         !['PASS','FINDINGS'].includes(String(ingestion.disposition??''))||
+         ingestion.securityDisposition!=='REVIEWER_REQUIRED'||
+         ingestion.findingPromotion!=='FORBIDDEN_BY_INGESTOR'||
+         !Array.isArray(ingestion.componentRefs)||ingestion.componentRefs.length===0)continue;
       refs.push(evidenceRel,ingestionRel);
       if(fs.existsSync(observerAbs)) refs.push(observerRel);
     }
