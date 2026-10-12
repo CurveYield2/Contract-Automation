@@ -4,6 +4,8 @@ import path from 'node:path';
 import {assertDeployGateEvidenceV2,digestV2} from './lib/phase0-deploy-gate-v2.mjs';
 import { createHash } from 'node:crypto';
 import {preparePhaseWork} from './lib/lite-phase-work-v1.mjs';
+import {detectionPolicyForAuthorityV1,authorityRootFromHomepageV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
+import {buildFlowPlanV1} from '../packages/github-native-sim/src/adr-flow-plan-v1.mjs';
 
 function args(argv){const out={};for(let i=2;i<argv.length;i+=2){const k=argv[i],v=argv[i+1];if(!k?.startsWith('--')||v===undefined)throw new Error('arguments must be --key value');out[k.slice(2)]=v;}return out;}
 function sha(bytes){return createHash('sha256').update(bytes).digest('hex');}
@@ -64,8 +66,63 @@ if(deploy.reconciliation){
   evidence.deployConfigExecutionRaw=rawFile;
 }
 
+// Optional policy-gated evidence: never block a legacy Phase-0 campaign or the finalizer.
+try {
+  const root=authorityRootFromHomepageV1(receipt.authority.homepagePath);
+  const policy=detectionPolicyForAuthorityV1({
+    repoRoot:controllerRoot,authorityRoot:root,
+    readJsonIfExists:(relPath)=>{
+      const full=path.join(controllerRoot,...relPath.split('/'));
+      return fs.existsSync(full)?read(full):null;
+    }
+  });
+  if(policy) {
+    const reviewRoot=path.join(campaignRoot,'evidence/review-inventory');
+    const locate=name=>path.join(reviewRoot,name);
+    const loaded=name=>fs.existsSync(locate(name))?read(locate(name)):null;
+    const inventory=loaded('REVIEW_INVENTORY_v1.json');
+    const facts=loaded('SYSTEM_FACTS_v1.json');
+    const snapshot=loaded('DEPLOYED_STATE_SNAPSHOT_v1.json');
+    const header={
+      campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,
+      sourceSha256:sourceSha,taxonomyVersion:'curveyield-defect-taxonomy-v1',
+      detectionPolicy:'audit-detection-rebuild-v1',generatedAt:new Date().toISOString()
+    };
+    const fallbackInventory={...header,schemaVersion:'curveyield-review-inventory-v1',payload:{
+      sourceUnits:[],declarations:[],contexts:[],triggers:{},complete:false,
+      limitations:[{code:'INVENTORY_INCOMPLETE',path:'*',detail:'Review inventory missing at Phase-0 finalization'}]
+    }};
+    const fallbackFacts={...header,schemaVersion:'curveyield-system-facts-v1',payload:{
+      guardTable:[],siblingGroups:[],valueFlows:[],crossContractEdges:[],dependencyEdges:[]}};
+    let plan;
+    try {
+      plan=buildFlowPlanV1({inventory:inventory??fallbackInventory,facts:facts??fallbackFacts,snapshot});
+      if(!inventory||inventory.payload?.complete===false){
+        if(!plan.payload.gaps.some(g=>g.code==='INVENTORY_INCOMPLETE')){
+          plan.payload.gaps.push({code:'INVENTORY_INCOMPLETE',path:'*',detail:'Missing or incomplete review inventory'});
+        }
+      }
+    } catch(error) {
+      plan={...header,schemaVersion:'curveyield-flow-plan-v1',payload:{
+        limits:{maxPrimaryContextsPerUnit:40,maxFlowDepth:8,maxIntegrationQuestionsPerAttackUnit:15},
+        flows:[],clusters:[],reviewUnits:[],attackUnits:[],integrationQuestions:[],
+        gaps:[{code:'PLAN_BUILD_ERROR',detail:String(error?.message??error).slice(0,2000)}],
+        capacity:{flows:0,crossContractFlows:0,clusters:0,flowReviewUnits:0,residualUnits:0,attackUnits:0,reviewableContexts:0,integrationQuestions:0}
+      }};
+    }
+    write(locate('FLOW_PLAN_v1.json'),plan);
+    for(const name of ['REVIEW_INVENTORY_v1.json','SYSTEM_FACTS_v1.json','DEPLOYED_STATE_SNAPSHOT_v1.json','FLOW_PLAN_v1.json']) {
+      const file=locate(name);
+      if(fs.existsSync(file))evidence['ADR_REVIEW_INVENTORY:'+name]=file;
+    }
+  }
+} catch(error) {
+  // Invalid or absent authority manifests do not alter legacy behavior.
+  console.error('ADR Phase-0 optional flow plan unavailable: '+String(error?.message??error).slice(0,2000));
+}
+
 const now=new Date().toISOString();
-const refs=Object.entries(evidence).map(([role,file])=>({role,path:rel(campaignRoot,file),sha256:digestFile(file)}));
+const refs=Object.entries(evidence).map(([role,file])=>({role:role.startsWith('ADR_REVIEW_INVENTORY:')?'ADR_REVIEW_INVENTORY':role,path:rel(campaignRoot,file),sha256:digestFile(file)}));
 const retired=/PHASE0_RANDOMIZED_SIMULATION|PHASE0_SIMULATION_RUN_INDEX|PHASE5_SIMULATION_BASELINE_INPUT|PHASE6_SIMULATION_BASELINE_INPUT|PHASE0_TELEMETRY_ANALYSIS|MEDUSA/;
 receipt.evidence=refs.reduce((rows,row)=>upsert(rows,row),(receipt.evidence??[]).filter(row=>!retired.test(String(row.role??'')+' '+String(row.path??''))));
 receipt.outputs=(receipt.outputs??[]).filter(row=>!retired.test(String(row.role??'')+' '+String(row.path??'')));
