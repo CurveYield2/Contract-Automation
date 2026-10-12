@@ -8,6 +8,7 @@ import { buildProject } from '../../runner/src/build-dispatch.mjs';
 import { runSlitherAnalysis } from './analysis.mjs';
 import { generateBuildSbomV1 } from './sbom-v1.mjs';
 import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligence-technical-v1.mjs';
+import { writeReviewInventoryOutputsV1 } from './adr-review-inventory-v1.mjs';
 import { buildExecutionArtifactBundleV2 } from './phase0-execution-input-v2.mjs';
 import { compileWithPrivateCacheV1 } from './phase0-private-build-cache-v1.mjs';
 
@@ -669,6 +670,7 @@ async function main(){
   const slither=await withProgressStage('slither-static-analysis',()=>slitherRepair({projectRoot:detected.absolute,build,sourceCommit:request.source.commit}));
   const sbom=await withProgressStage('generate-sbom',()=>generateBuildSbomV1({projectRoot:detected.absolute,request:pseudo,build}));
   const sourceIntelligence=await withProgressStage('generate-source-intelligence',()=>generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute,request:pseudo,build,analysis:{slither}}));
+  await writeReviewInventoryOutputsV1({outputDir:out,projectRoot:detected.absolute,build,request,policy:process.env.ADR_DETECTION_POLICY||null});
   const projectReadiness=await withProgressStage('scan-project-readiness',()=>scanProjectReadiness({projectRoot:detected.absolute,build,cfg:effectiveCfg}));
   const deployConfigExecution=await withProgressStage('execute-local-deployment-inventory',()=>executeSourceKnownLocalSetup({projectRoot:detected.absolute,projectReadiness}));
 
