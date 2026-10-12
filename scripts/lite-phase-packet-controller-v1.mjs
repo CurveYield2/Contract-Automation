@@ -654,7 +654,7 @@ if(reviewKind==='post-completion-followup'){
     segmentId:result.pending.segmentId,recordPath:result.recordPath,
     masterChatUrl:directory.masterReview?.chatUrl??null,
     freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,
-    feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\\n');
+    feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
   process.exit(0);
 }
 function masterAmendmentReceipt(priorRevision){
