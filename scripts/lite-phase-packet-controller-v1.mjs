@@ -585,7 +585,8 @@ if(reviewKind==='master'){
     const failures=validatePhase5TargetExecutionGateV1({
       controllerRoot:root,campaignPath,
       targetDesigns:phaseOutput(phase5,'step-3','targetDesigns')??[],
-      materialCandidateKeys:materialPhase5CandidateKeys({root,campaignPath,form:phase5}),
+      materialCandidateKeys:materialPhase5Candidates({root,campaignPath,form:phase5}).keys,
+      candidateSourceAnchors:materialPhase5Candidates({root,campaignPath,form:phase5}).sourceAnchors,
       executionResults:pending.successorPlan?.prefillContext?.phase5ExecutionResults??{},
       expectedSourceSha256:directory.sourceSha256
     });
@@ -693,18 +694,21 @@ try{
   }
 }catch(e){deficiencies.push(String(e.message||e));}
 
-function materialPhase5CandidateKeys({root,campaignPath,form}){
+function materialPhase5Candidates({root,campaignPath,form}){
   const prior=canonicalFor(root,campaignPath,4);
   const phase4=phaseOutput(prior,'step-3','candidateRecords')??[];
   const newCandidates=form?.actions?.['step-2']?.outputs?.newCandidateRecords??[];
-  const keys=[];
+  const keys=[],sourceAnchors={};
   for(const record of [...phase4,...newCandidates]){
     if(record==='NONE_IDENTIFIED')continue;
     const key=String(record?.tempKey??'').trim();
     if(!key)throw new Error('Phase 5 material candidate has no key');
-    keys.push(key);
+    const anchor=String(record?.sourceAnchor??'').trim();
+    if(sourceAnchors[key]!==undefined&&sourceAnchors[key]!==anchor)
+      throw new Error('Phase 5 material candidate '+key+' has inconsistent source anchors');
+    keys.push(key);sourceAnchors[key]=anchor;
   }
-  return [...new Set(keys)];
+  return {keys:[...new Set(keys)],sourceAnchors};
 }
 if(sequence===5&&form&&deficiencies.length===0){
   const targets=form?.actions?.['step-3']?.outputs?.targetDesigns??[];
@@ -765,7 +769,8 @@ if(sequence===5&&form&&deficiencies.length===0){
   try{
     deficiencies.push(...validatePhase5TargetCoverageV1({
       targetDesigns:form.actions['step-3'].outputs.targetDesigns,
-      materialCandidateKeys:materialPhase5CandidateKeys({root,campaignPath,form})
+      materialCandidateKeys:materialPhase5Candidates({root,campaignPath,form}).keys,
+      candidateSourceAnchors:materialPhase5Candidates({root,campaignPath,form}).sourceAnchors
     }));
   }catch(e){deficiencies.push('Phase 5 coverage validation failed: '+String(e.message||e));}
 }
@@ -804,7 +809,8 @@ if(deficiencies.length){
 let phase5MachineResults=null;
 if(sequence===5){
   const targetDesigns=form.actions['step-3'].outputs.targetDesigns;
-  const materialCandidateKeys=materialPhase5CandidateKeys({root,campaignPath,form});
+  const {keys:materialCandidateKeys,sourceAnchors:candidateSourceAnchors}=
+    materialPhase5Candidates({root,campaignPath,form});
   try{
     phase5MachineResults=await executePhase5TargetsV1({
       controllerRoot:root,campaignPath,targetDesigns,
@@ -812,7 +818,7 @@ if(sequence===5){
     });
     deficiencies.push(...validatePhase5TargetExecutionGateV1({
       controllerRoot:root,campaignPath,targetDesigns,
-      materialCandidateKeys,executionResults:phase5MachineResults,
+      materialCandidateKeys,candidateSourceAnchors,executionResults:phase5MachineResults,
       expectedSourceSha256:directory.sourceSha256
     }));
   }catch(e){

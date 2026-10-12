@@ -171,7 +171,42 @@ Rules:
 // Completion of every material Phase-5 target is a mandatory seal precondition.
 // A structurally valid request is not machine evidence, and "no target" cannot
 // discharge a retained material candidate.
-export function validatePhase5TargetCoverageV1({targetDesigns=[],materialCandidateKeys=[]}={}){
+// Only exact, machine-verifiable equivalence can waive a duplicate test.
+// No static-proof or out-of-scope assertion is accepted merely as prose:
+// those require a separate independently verifiable proof mechanism.
+const PHASE5_EQUIVALENCE_FIELDS=[
+  'setup','prerequisites','transactionSequence','oracle',
+  'fuzzVariablesAndBounds','snapshotReuseSafety','expectedSecurityProperty'
+];
+function verifiedNotApplicableDesignV1(target,targets,candidateSourceAnchors={}){
+  const key=String(target?.candidateKey??'');
+  const disposition=target?.notApplicableDisposition;
+  if(target?.executionMethod!=='NOT_APPLICABLE')
+    return ['Candidate '+key+' is not a NOT_APPLICABLE design'];
+  if(target?.reproductionType!=='NOT_APPLICABLE')
+    return ['Phase 5 '+key+' NOT_APPLICABLE method requires reproductionType NOT_APPLICABLE'];
+  if(!disposition||disposition.reasonCode!=='COVERED_BY_EXECUTED_TARGET')
+    return ['Phase 5 '+key+' has no supported, verifiable NOT_APPLICABLE disposition (only COVERED_BY_EXECUTED_TARGET)'];
+  if(typeof disposition.technicalReason!=='string'||disposition.technicalReason.trim().length<20)
+    return ['Phase 5 '+key+' NOT_APPLICABLE requires a substantive technicalReason'];
+  const coveredKey=disposition.coveredByCandidateKey;
+  if(typeof coveredKey!=='string'||!coveredKey||coveredKey===key)
+    return ['Phase 5 '+key+' NOT_APPLICABLE coveredByCandidateKey must identify a different executed candidate'];
+  const covered=targets.find(x=>x&&typeof x==='object'&&x.candidateKey===coveredKey);
+  if(!covered||covered.executionMethod!=='V7_REQUEST')
+    return ['Phase 5 '+key+' NOT_APPLICABLE has no executable covering candidate '+String(coveredKey)];
+  const sourceAnchor=candidateSourceAnchors[key],coveredAnchor=candidateSourceAnchors[coveredKey];
+  if(!sourceAnchor||!coveredAnchor||sourceAnchor!==coveredAnchor)
+    return ['Phase 5 '+key+' NOT_APPLICABLE candidate source anchor must exactly match the executed '+coveredKey];
+  for(const field of PHASE5_EQUIVALENCE_FIELDS){
+    if(target[field]===undefined||covered[field]===undefined||
+       stableJson(target[field])!==stableJson(covered[field])){
+      return ['Phase 5 '+key+' NOT_APPLICABLE does not have exactly equivalent '+field+' to executed '+coveredKey];
+    }
+  }
+  return [];
+}
+export function validatePhase5TargetCoverageV1({targetDesigns=[],materialCandidateKeys=[],candidateSourceAnchors={}}={}){
   const failures=[];
   const required=[...new Set(arr(materialCandidateKeys).filter(x=>typeof x==='string'&&x&&x!=='NONE_IDENTIFIED'))];
   const seen=new Set();
@@ -189,36 +224,29 @@ export function validatePhase5TargetCoverageV1({targetDesigns=[],materialCandida
     if(!key||key==='NONE_IDENTIFIED'){failures.push('Phase 5 target index '+i+' has no material candidateKey');continue;}
     if(seen.has(key))failures.push('Phase 5 duplicate candidate target '+key);
     seen.add(key);
-    if(required.includes(key)&&target.executionMethod==='NOT_APPLICABLE') failures.push('Phase 5 material candidate '+key+' cannot be NOT_APPLICABLE');
+    if(target.executionMethod==='NOT_APPLICABLE') failures.push(...verifiedNotApplicableDesignV1(target,targets,candidateSourceAnchors));
   }
   for(const key of required)if(!seen.has(key))failures.push('Phase 5 mandatory material candidate '+key+' has no targeted machine execution');
   if(!targets.length) failures.push('Phase 5 targetDesigns missing; explicit NONE_IDENTIFIED is allowed only when no material candidates exist');
   return failures;
 }
 
-export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath,targetDesigns=[],executionResults={},materialCandidateKeys=[],expectedSourceSha256=null}={}){
-  const failures=validatePhase5TargetCoverageV1({targetDesigns,materialCandidateKeys});
-  for(const target of arr(targetDesigns)){
-    if(!target||typeof target!=='object'||Array.isArray(target))continue;
-    const key=String(target.candidateKey??'').trim();
-    if(!key||key==='NONE_IDENTIFIED')continue;
-    if(target.executionMethod==='NOT_APPLICABLE'){
-      if(materialCandidateKeys.includes(key))failures.push('Phase 5 required '+key+' was marked NOT_APPLICABLE');
-      continue;
-    }
-    const result=executionResults?.[key];
+// This single evidence verifier is shared by direct targets and target aliases.
+function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,result,expectedSourceSha256=null}={}){
+  const failures=[];
+  const key=String(target?.candidateKey??'');
     if(!result||result.status!=='PASS'||result.exitCode!==0){
       failures.push('Phase 5 mandatory '+key+' machine execution did not PASS (status='+String(result?.status??'MISSING')+', exitCode='+String(result?.exitCode??'MISSING')+'); blocked, inconclusive and missing simulations prohibit seal');
-      continue;
+      return failures;
     }
     if(!String(result.requestBindingStatus??'').startsWith('PASS_')){
       failures.push('Phase 5 mandatory '+key+' request binding did not PASS');
-      continue;
+      return failures;
     }
     const raw=result.rawResult;
     if(!raw||typeof raw!=='object'||Array.isArray(raw)){
       failures.push('Phase 5 mandatory '+key+' missing parsed raw machine result');
-      continue;
+      return failures;
     }
     const rel=result.evidenceRef;
     const expectedPrefix=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key))+'/';
@@ -263,17 +291,18 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
       }catch(e){failures.push('Phase 5 mandatory '+key+' bound request cannot be re-read: '+String(e.message||e));}
     }
     const reproduction=raw.reproduction;
-    if(!reproduction||reproduction.candidateId!==key||
-       reproduction.status!=='REPRODUCED'||reproduction.observedPredicate?.matched!==true||
+    const terminalOutcome=reproduction?.status==='REPRODUCED'&&reproduction?.observedPredicate?.matched===true||
+      reproduction?.status==='NOT_REPRODUCED'&&reproduction?.observedPredicate?.matched===false;
+    if(!reproduction||reproduction.candidateId!==key||!terminalOutcome||
        reproduction.observedPredicate?.observed==null){
-      failures.push('Phase 5 mandatory '+key+' has no matching executed reproduction oracle (not a confirmed security conclusion)');
+      failures.push('Phase 5 mandatory '+key+' lacks a completed, observed reproduction or non-reproduction outcome');
     }
     const type=String(target.reproductionType??'');
     const component=type==='FOUNDRY_TEST'?raw.analysis?.nativeFuzz:
                     type==='MEDUSA_PROPERTY'?raw.analysis?.medusa:null;
     if(type==='FOUNDRY_TEST'||type==='MEDUSA_PROPERTY'){
       if(!component||component.toolInvoked===false||
-         !['COMPLETED','COMPLETED_WITH_FAILURES'].includes(component.componentStatus)){
+         component.componentStatus!=='COMPLETED'){
         failures.push('Phase 5 mandatory '+key+' required '+type+' component never completed its execution');
       }
     }else if(type==='ANVIL_WORKFLOW'){
@@ -281,6 +310,32 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
         failures.push('Phase 5 mandatory '+key+' has no executed Anvil simulation steps');
       }
     }else failures.push('Phase 5 mandatory '+key+' has unsupported reproductionType');
+
+  return failures;
+}
+
+export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath,targetDesigns=[],executionResults={},materialCandidateKeys=[],candidateSourceAnchors={},expectedSourceSha256=null}={}){
+  const failures=validatePhase5TargetCoverageV1({targetDesigns,materialCandidateKeys,candidateSourceAnchors});
+  for(const target of arr(targetDesigns)){
+    if(!target||typeof target!=='object'||Array.isArray(target))continue;
+    const key=String(target.candidateKey??'').trim();
+    if(!key||key==='NONE_IDENTIFIED')continue;
+    if(target.executionMethod==='NOT_APPLICABLE'){
+      const disposition=target.notApplicableDisposition;
+      const coveredKey=disposition?.coveredByCandidateKey;
+      const coveringDesign=arr(targetDesigns).find(x=>x&&typeof x==='object'&&x.candidateKey===coveredKey);
+      const coveredResult=executionResults?.[coveredKey];
+      if(coveringDesign?.executionMethod==='V7_REQUEST'&&coveredKey!==key){
+        const evidenceFailures=validateExecutedPhase5TargetV1({
+          controllerRoot,campaignPath,target:coveringDesign,result:coveredResult,expectedSourceSha256
+        });
+        for(const error of evidenceFailures)failures.push('Phase 5 '+key+' NOT_APPLICABLE covering evidence: '+error);
+      }else failures.push('Phase 5 '+key+' NOT_APPLICABLE has no verified covering execution');
+      continue;
+    }
+    failures.push(...validateExecutedPhase5TargetV1({
+      controllerRoot,campaignPath,target,result:executionResults?.[key],expectedSourceSha256
+    }));
   }
   return failures;
 }
@@ -350,7 +405,9 @@ export async function executePhase5TargetsV1({controllerRoot,campaignPath,target
     if(!key) continue;
     const method=String(t.executionMethod??'').toUpperCase();
     if(method==='NOT_APPLICABLE'){
-      executionResults[key]={status:'NOT_APPLICABLE',evidenceRef:'NO_MACHINE_EVIDENCE_REQUIRED'};
+      executionResults[key]={status:'NOT_APPLICABLE',
+        notApplicableDisposition:t.notApplicableDisposition??null,
+        evidenceRef:'VERIFIED_COVERING_TARGET_REQUIRED'};
       continue;
     }
     if(method!=='V7_REQUEST'){
@@ -401,6 +458,16 @@ export async function executePhase5TargetsV1({controllerRoot,campaignPath,target
       stdout:String(result.stdout??'').slice(-12000),
       stderr:String(result.stderr??'').slice(-12000)
     };
+  }
+  // All covering runs are finished before an omitted duplicate receives
+  // an inherited evidence reference. The gate separately verifies identity.
+  for(const target of arr(targetDesigns)){
+    if(target?.executionMethod!=='NOT_APPLICABLE')continue;
+    const key=String(target.candidateKey??'').trim();
+    const coveredKey=target.notApplicableDisposition?.coveredByCandidateKey;
+    if(executionResults[key]&&executionResults[coveredKey]?.evidenceRef){
+      executionResults[key].evidenceRef=executionResults[coveredKey].evidenceRef;
+    }
   }
   return executionResults;
 }
