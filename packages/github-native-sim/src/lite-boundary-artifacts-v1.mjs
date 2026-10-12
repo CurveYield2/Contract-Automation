@@ -178,7 +178,7 @@ const PHASE5_EQUIVALENCE_FIELDS=[
   'setup','prerequisites','transactionSequence','oracle',
   'fuzzVariablesAndBounds','snapshotReuseSafety','expectedSecurityProperty'
 ];
-function verifiedNotApplicableDesignV1(target,targets){
+function verifiedNotApplicableDesignV1(target,targets,candidateSourceAnchors={}){
   const key=String(target?.candidateKey??'');
   const disposition=target?.notApplicableDisposition;
   if(target?.executionMethod!=='NOT_APPLICABLE')
@@ -195,6 +195,9 @@ function verifiedNotApplicableDesignV1(target,targets){
   const covered=targets.find(x=>x&&typeof x==='object'&&x.candidateKey===coveredKey);
   if(!covered||covered.executionMethod!=='V7_REQUEST')
     return ['Phase 5 '+key+' NOT_APPLICABLE has no executable covering candidate '+String(coveredKey)];
+  const sourceAnchor=candidateSourceAnchors[key],coveredAnchor=candidateSourceAnchors[coveredKey];
+  if(!sourceAnchor||!coveredAnchor||sourceAnchor!==coveredAnchor)
+    return ['Phase 5 '+key+' NOT_APPLICABLE candidate source anchor must exactly match the executed '+coveredKey];
   for(const field of PHASE5_EQUIVALENCE_FIELDS){
     if(target[field]===undefined||covered[field]===undefined||
        stableJson(target[field])!==stableJson(covered[field])){
@@ -203,7 +206,7 @@ function verifiedNotApplicableDesignV1(target,targets){
   }
   return [];
 }
-export function validatePhase5TargetCoverageV1({targetDesigns=[],materialCandidateKeys=[]}={}){
+export function validatePhase5TargetCoverageV1({targetDesigns=[],materialCandidateKeys=[],candidateSourceAnchors={}}={}){
   const failures=[];
   const required=[...new Set(arr(materialCandidateKeys).filter(x=>typeof x==='string'&&x&&x!=='NONE_IDENTIFIED'))];
   const seen=new Set();
@@ -221,7 +224,7 @@ export function validatePhase5TargetCoverageV1({targetDesigns=[],materialCandida
     if(!key||key==='NONE_IDENTIFIED'){failures.push('Phase 5 target index '+i+' has no material candidateKey');continue;}
     if(seen.has(key))failures.push('Phase 5 duplicate candidate target '+key);
     seen.add(key);
-    if(target.executionMethod==='NOT_APPLICABLE') failures.push(...verifiedNotApplicableDesignV1(target,targets));
+    if(target.executionMethod==='NOT_APPLICABLE') failures.push(...verifiedNotApplicableDesignV1(target,targets,candidateSourceAnchors));
   }
   for(const key of required)if(!seen.has(key))failures.push('Phase 5 mandatory material candidate '+key+' has no targeted machine execution');
   if(!targets.length) failures.push('Phase 5 targetDesigns missing; explicit NONE_IDENTIFIED is allowed only when no material candidates exist');
@@ -294,8 +297,8 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
   return failures;
 }
 
-export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath,targetDesigns=[],executionResults={},materialCandidateKeys=[],expectedSourceSha256=null}={}){
-  const failures=validatePhase5TargetCoverageV1({targetDesigns,materialCandidateKeys});
+export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath,targetDesigns=[],executionResults={},materialCandidateKeys=[],candidateSourceAnchors={},expectedSourceSha256=null}={}){
+  const failures=validatePhase5TargetCoverageV1({targetDesigns,materialCandidateKeys,candidateSourceAnchors});
   for(const target of arr(targetDesigns)){
     if(!target||typeof target!=='object'||Array.isArray(target))continue;
     const key=String(target.candidateKey??'').trim();
