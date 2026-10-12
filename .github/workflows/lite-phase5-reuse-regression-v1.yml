@@ -1,0 +1,30 @@
+name: Lite Phase 5 Evidence Reuse Regression v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lite-phase5-reuse-regression-v1.yml'
+      - 'scripts/lite-phase-packet-controller-v1.mjs'
+      - 'packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs'
+      - 'packages/github-native-sim/test/lite-phase5-execution-gate-v1.test.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phase5-evidence-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify controller and evidence helper syntax
+        run: |
+          node --check scripts/lite-phase-packet-controller-v1.mjs
+          node --check packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs
+      - name: Check sealed-evidence reuse, invalidation, and fail-closed gates
+        run: node --test packages/github-native-sim/test/lite-phase5-execution-gate-v1.test.mjs
