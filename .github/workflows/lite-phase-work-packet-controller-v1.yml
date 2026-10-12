@@ -160,6 +160,283 @@ jobs:
             echo "supplied_campaign_path=$supplied_campaign_path"
             echo "supplied_directory_path=$supplied_directory_path"
           } >> "$GITHUB_OUTPUT"
+      - name: Retire explicitly superseded in-flight controller attempt
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          request=/tmp/lite-phase-boundary-request.json
+          prior_id="$(jq -r '.supersedesRunId // empty' "$request")"
+          [ -n "$prior_id" ] || exit 0
+          [[ "$prior_id" =~ ^[0-9]+$ ]] || { echo "::error::Invalid supersedesRunId"; exit 1; }
+          [ "$prior_id" != "$GITHUB_RUN_ID" ] || { echo "::error::Cannot supersede own run"; exit 1; }
+          current_attempt="$(jq -r '.attempt' "$request")"
+          current_campaign="$(jq -r '.campaignId' "$request")"
+          current_kind="$(jq -r '.reviewKind // "phase"' "$request")"
+          current_segment="$(jq -r '.segmentId // empty' "$request")"
+          old="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$prior_id")"
+          old_path="$(jq -r '.path' <<< "$old")"
+          old_sha="$(jq -r '.head_sha' <<< "$old")"
+          [ "$old_path" = ".github/workflows/lite-phase-work-packet-controller-v1.yml" ] || { echo "::error::Superseded run is not the Lite phase controller"; exit 1; }
+          old_files="$(gh api "repos/$GITHUB_REPOSITORY/commits/$old_sha" --jq '.files[]? | select(.status != "removed") | .filename' | grep -E '^process/agent-upload/lite-phase-boundary/[^/]+\\.json
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED')
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install trusted runner dependencies for Phase-5 boundary execution
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED')
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --force
+
+      - name: Install retained audit toolchain for Phase-5 boundary execution
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED')
+        uses: ./.github/actions/setup-v7-toolchain
+
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Checkout Audit-Controller assignment state
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          rm -rf .audit-controller
+          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
+          cd .audit-controller
+          git fetch origin "${{ steps.request.outputs.audit_controller_ref }}"
+          git checkout -B "${{ steps.request.outputs.audit_controller_ref }}" "origin/${{ steps.request.outputs.audit_controller_ref }}"
+
+      - name: Resolve canonical campaign routing
+        id: routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          campaign_id="${{ steps.request.outputs.campaign_id }}"
+          if [[ "$campaign_id" =~ ^(.+)-r[0-9]+$ ]]; then slug="${BASH_REMATCH[1]}"; else echo "::error::campaign_id must end in -rN"; exit 1; fi
+          directory_path="Audit Campaign Directory/campaigns/$slug.json"
+          directory_file=".audit-controller/$directory_path"
+          test -s "$directory_file"
+          test "$(jq -r '.schemaVersion' "$directory_file")" = "curveyield-audit-campaign-directory-entry-v2"
+          test "$(jq -r '.campaignId' "$directory_file")" = "$campaign_id"
+          if [ "${{ steps.request.outputs.review_kind }}" = phase ]; then
+            test "$(jq -r '.currentAssignment.phaseSequence' "$directory_file")" = "${{ steps.request.outputs.phase_sequence }}"
+          elif [ "${{ steps.request.outputs.review_kind }}" = master ]; then
+            test "$(jq -r '.pendingMasterReview.segmentId' "$directory_file")" = "${{ steps.request.outputs.segment_id }}"
+          else
+            test "${{ steps.request.outputs.hold_delivery }}" = true
+          fi
+          campaign_path="$(jq -r '.workspacePath' "$directory_file")"
+          [[ "$campaign_path" == campaigns/* ]] || { echo "::error::Canonical workspacePath must be under campaigns/"; exit 1; }
+          supplied_campaign="${{ steps.request.outputs.supplied_campaign_path }}"
+          supplied_directory="${{ steps.request.outputs.supplied_directory_path }}"
+          [ -z "$supplied_campaign" ] || test "$supplied_campaign" = "$campaign_path"
+          [ -z "$supplied_directory" ] || test "$supplied_directory" = "$directory_path"
+          effective_hold="${{ steps.request.outputs.hold_delivery }}"
+          campaign_status="$(jq -r '.campaignStatus // empty' "$directory_file")"
+          if [ "$campaign_status" = STOPPED_BY_HUMAN ] || [ "$campaign_status" = BLOCKED ]; then
+            effective_hold=true
+          fi
+          persistent_hold_file=".audit-controller/$campaign_path/controller/SUCCESSOR_DELIVERY_HOLD_v1.json"
+          if [ -s "$persistent_hold_file" ] && [ "$(jq -r '.status // empty' "$persistent_hold_file")" = ACTIVE ]; then
+            test "$(jq -r '.campaignId' "$persistent_hold_file")" = "${{ steps.request.outputs.campaign_id }}"
+            effective_hold=true
+          fi
+          {
+            echo "campaign_path=$campaign_path"
+            echo "campaign_directory_path=$directory_path"
+            echo "effective_hold=$effective_hold"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate packet/report, validate semantic work, then bookkeep after PASS
+        id: controller
+        env:
+          ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if { [ "${{ steps.request.outputs.review_kind }}" = phase ] && [ "${{ steps.request.outputs.phase_sequence }}" = 5 ]; } ||
+             { [ "${{ steps.request.outputs.review_kind }}" = master ] && [ "${{ steps.request.outputs.segment_id }}" = reviewer-2-phases-02-05 ] && [ "${{ steps.request.outputs.master_outcome }}" = AMENDED ]; }; then
+            test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::RPC_ETHEREUM secret missing for Phase-5 V7 fork preflight"; exit 1; }
+          fi
+          args=(--controller-root .audit-controller --campaign-id "${{ steps.request.outputs.campaign_id }}" --campaign-path "${{ steps.routing.outputs.campaign_path }}" --campaign-directory-path "${{ steps.routing.outputs.campaign_directory_path }}" --review-kind "${{ steps.request.outputs.review_kind }}" --audit-controller-ref "${{ steps.request.outputs.audit_controller_ref }}")
+          if [ "${{ steps.request.outputs.review_kind }}" = master ]; then
+            args+=(--segment-id "${{ steps.request.outputs.segment_id }}" --master-outcome "${{ steps.request.outputs.master_outcome }}")
+            if [ -n "${{ steps.request.outputs.master_summary_b64 }}" ]; then
+              args+=(--master-summary-b64 "${{ steps.request.outputs.master_summary_b64 }}")
+            fi
+          else
+            args+=(--phase-sequence "${{ steps.request.outputs.phase_sequence }}")
+          fi
+          if [ "${{ steps.request.outputs.review_kind }}" = sealed-rework ]; then
+            args+=(--rework-request-path "${{ steps.request.outputs.rework_request_path }}")
+          fi
+          node scripts/lite-phase-packet-controller-v1.mjs "${args[@]}" | tee /tmp/lite-phase-packet-result.json
+          {
+            echo "status=$(jq -r '.status' /tmp/lite-phase-packet-result.json)"
+            echo "feedback_b64=$(jq -r '.feedbackB64 // empty' /tmp/lite-phase-packet-result.json)"
+            echo "fresh=$(jq -r '.freshSuccessorRequired // false' /tmp/lite-phase-packet-result.json)"
+            echo "same=$(jq -r '.sameReviewerAdvanced // false' /tmp/lite-phase-packet-result.json)"
+            echo "next_phase=$(jq -r '.nextAssignment.phaseSequence // empty' /tmp/lite-phase-packet-result.json)"
+            echo "next_reviewer=$(jq -r '.nextAssignment.reviewer // empty' /tmp/lite-phase-packet-result.json)"
+            echo "campaign_name=$(jq -r '.campaignName // empty' /tmp/lite-phase-packet-result.json)"
+            echo "segment_id=$(jq -r '.segmentId // empty' /tmp/lite-phase-packet-result.json)"
+            echo "master_chat_url=$(jq -r '.masterChatUrl // empty' /tmp/lite-phase-packet-result.json)"
+            echo "master_review=$(jq -r '.masterReviewRequired // false' /tmp/lite-phase-packet-result.json)"
+            echo "master_accepted=$(jq -r '.masterReviewAccepted // false' /tmp/lite-phase-packet-result.json)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish validation response or successful phase transaction
+        if: ${{ always() && steps.routing.outcome == 'success' && steps.controller.outcome != 'skipped' }}
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .audit-controller
+          git config user.name 'CurveYield Lite Phase Controller'
+          git config user.email 'lite-phase-controller@users.noreply.github.com'
+          git add -- "${{ steps.routing.outputs.campaign_path }}" "${{ steps.routing.outputs.campaign_directory_path }}"
+          if ! git diff --cached --quiet; then
+            git commit -m "audit(controller): ${{ steps.request.outputs.review_kind }} ${{ steps.request.outputs.phase_sequence || steps.request.outputs.segment_id }} validation ${{ steps.controller.outputs.status }} for ${{ steps.request.outputs.campaign_id }}"
+            git push origin "HEAD:${{ steps.request.outputs.audit_controller_ref }}"
+          fi
+
+      - name: Resolve active reviewer chat
+        id: chat
+        if: steps.routing.outputs.effective_hold != 'true' && (steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID' || steps.controller.outputs.same == 'true' || (steps.controller.outputs.status == 'PASS' && steps.controller.outputs.fresh == 'true') || (steps.controller.outputs.status == 'PASS' && steps.controller.outputs.next_phase == ''))
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "${{ steps.request.outputs.campaign_id }}" | tr -c 'A-Za-z0-9._-' '_')"
+          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content' 2>/dev/null || true)"
+          if [ -z "$encoded" ]; then
+            echo "::warning::No active browser registration found for controller feedback."
+            echo "chat_url=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s' "$encoded" | base64 -d > /tmp/registration.json
+          echo "chat_url=$(jq -r '.activeChat.url // .chatUrl // empty' /tmp/registration.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Inform current reviewer of exact rework deficiencies
+        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'NEEDS_REWORK' && steps.chat.outputs.chat_url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-phase-${{ steps.request.outputs.phase_sequence }}-packet-rework"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.request.outputs.phase_sequence }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="${{ steps.controller.outputs.feedback_b64 }}"             -f watchdog_enabled=true             -f worker_role=reviewer             -f gate_mode=LITE             -f gate_repository=CurveYield2/Audit-Controller             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}"             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"             -f gate_expected_phase_id="phase-${{ steps.request.outputs.phase_sequence }}"             -f gate_expected_milestone_id="PHASE_${{ steps.request.outputs.phase_sequence }}_WORK_PACKET"
+
+      - name: Inform same reviewer that next phase is authorized
+        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.same == 'true' && steps.chat.outputs.chat_url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          msg="CONTROLLER_PHASE_PASS. Phase ${{ steps.request.outputs.phase_sequence }} is sealed. Proceed now to Phase ${{ steps.controller.outputs.next_phase }} using the new Audit Campaign Directory assignment and its schema-governed work form. Do not re-check Phase ${{ steps.request.outputs.phase_sequence }} bookkeeping."
+          b64="$(printf '%s' "$msg" | base64 -w0)"
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-phase-${{ steps.controller.outputs.next_phase }}-continue"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=true             -f worker_role=reviewer             -f gate_mode=LITE             -f gate_repository=CurveYield2/Audit-Controller             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}"             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"             -f gate_expected_phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f gate_expected_milestone_id="PHASE_${{ steps.controller.outputs.next_phase }}_WORK_PACKET"
+
+      - name: Dispatch fresh successor after controller PASS
+        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.fresh == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh workflow run lite-audit-browser-orchestrator-v1.yml --repo "$GITHUB_REPOSITORY" --ref main             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f campaign_name="${{ steps.controller.outputs.campaign_name }}"             -f campaign_path="${{ steps.routing.outputs.campaign_path }}"             -f audit_controller_ref="${{ steps.request.outputs.audit_controller_ref }}"
+
+      - name: Authorize final reviewer retirement
+        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.next_phase == '' && steps.chat.outputs.chat_url != '' && (steps.request.outputs.review_kind == 'phase' || steps.controller.outputs.master_accepted == 'true')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          msg="CONTROLLER_PHASE_PASS. Phase 10 is sealed and the Lite campaign is COMPLETE. Your audit responsibility is complete; retire."
+          b64="$(printf '%s' "$msg" | base64 -w0)"
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-complete"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id=phase-10             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=false             -f worker_role=reviewer             -f gate_mode=LITE
+
+      - name: Wake master reviewer
+        if: steps.routing.outputs.effective_hold != 'true' && (steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID') && steps.controller.outputs.master_chat_url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The master is woken and supervised exactly like a normal reviewer;
+          # an invalid submission re-delivers the controller feedback.
+          poke_b64="$(printf '%s' 'GET BACK TO WORK' | base64 -w0)"
+          purpose=initial_wake
+          [ "${{ steps.controller.outputs.status }}" != MASTER_REVIEW_INVALID ] || purpose=repair_notice
+          browser_context_b64="$(jq -cn --arg purpose "$purpose" \
+            '{routineId:"",projectName:"",projectUrl:"",chatName:"master-reviewer",repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:$purpose}' | base64 -w0)"
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.segment_id }}-master-reviewer" \
+            -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
+            -f phase_id=master-review \
+            -f mode=resume_existing \
+            -f chat_url="${{ steps.controller.outputs.master_chat_url }}" \
+            -f wake_message_b64="${{ steps.controller.outputs.feedback_b64 }}" \
+            -f watchdog_enabled=true \
+            -f worker_role=reviewer \
+            -f watchdog_message_b64="$poke_b64" \
+            -f gate_mode=LITE \
+            -f gate_repository=CurveYield2/Audit-Controller \
+            -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
+            -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
+            -f gate_expected_phase_id=master-review \
+            -f gate_expected_milestone_id="${{ steps.controller.outputs.segment_id }}" \
+            -f gate_active_pointer_path="" \
+            -f gate_stop_states_csv=STOPPED_BY_HUMAN \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN \
+            -f browser_context_b64="$browser_context_b64"
+
+      - name: Summary
+        run: |
+          {
+            echo "## Lite Phase Boundary Controller"
+            echo "- campaign: ${{ steps.request.outputs.campaign_id }}"
+            echo "- review kind: ${{ steps.request.outputs.review_kind }}"
+            echo "- phase: ${{ steps.request.outputs.phase_sequence }}"
+            echo "- segment: ${{ steps.controller.outputs.segment_id }}"
+            echo "- delivery hold: ${{ steps.routing.outputs.effective_hold }}"
+            echo "- result: ${{ steps.controller.outputs.status }}"
+            echo "- packet/report ownership: controller-generated"
+            echo "- bookkeeping before validation PASS: prohibited"
+            echo "- machine execution timing: phase-end boundaries only"
+          } >> "$GITHUB_STEP_SUMMARY"
+ || true)"
+          [ "$(printf '%s\\n' "$old_files" | grep -c . || true)" = 1 ] || { echo "::error::Superseded run request is not unambiguous"; exit 1; }
+          old_json="$(gh api "repos/$GITHUB_REPOSITORY/contents/$old_files?ref=$old_sha" --jq '.content' | base64 -d)"
+          jq -e --arg campaign "$current_campaign" --arg kind "$current_kind" --arg segment "$current_segment" --argjson attempt "$current_attempt" \
+            '.campaignId==$campaign and (.reviewKind // "phase")==$kind and (.segmentId // "")==$segment and .attempt < $attempt' <<< "$old_json" >/dev/null ||
+            { echo "::error::Superseded run is not an older attempt of the exact campaign segment"; exit 1; }
+          old_status="$(jq -r '.status' <<< "$old")"
+          if [ "$old_status" = completed ]; then
+            echo "Prior campaign attempt $prior_id already completed."
+            exit 0
+          fi
+          echo "::notice::Cancelling superseded in-flight campaign attempt $prior_id before running current simulations."
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$prior_id/cancel" >/dev/null
+          for i in $(seq 1 30); do
+            state="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$prior_id" --jq '.status')"
+            [ "$state" = completed ] && exit 0
+            sleep 5
+          done
+          echo "::error::Prior run did not finish cancellation; concurrent campaign execution prohibited."
+          exit 1
+
       - name: Set up Node.js for Phase-5 boundary execution
         if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED')
         uses: actions/setup-node@v4
