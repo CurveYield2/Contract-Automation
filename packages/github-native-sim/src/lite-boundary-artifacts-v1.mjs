@@ -396,7 +396,88 @@ export function validateRecordedPhase5MachineEvidenceV1({controllerRoot,campaign
   return failures;
 }
 
-export async function executePhase5TargetsV1({controllerRoot,campaignPath,targetDesigns=[],expectedCampaignId=null,expectedSourceSha256=null}={}){
+// A master refresh may reuse a completed run only when both the exact test
+// design and its source-anchored candidate identity survived the amendments.
+// Comparing all reviewer-owned test fields is deliberately conservative:
+// uncertainty costs an execution, never an unsupported PASS.
+const PHASE5_MACHINE_PREFILL_FIELDS_V1=new Set([
+  'automationOwnedFields','automationResolvedExecutionRequest',
+  'requestBindingStatus','requestBindingEvidenceRef'
+]);
+function executionSensitiveTargetV1(target){
+  if(!target||typeof target!=='object'||Array.isArray(target))return null;
+  return Object.fromEntries(Object.entries(target).filter(([key])=>!PHASE5_MACHINE_PREFILL_FIELDS_V1.has(key)));
+}
+function candidateByKeyV1(rows){
+  const result=new Map();
+  for(const row of arr(rows)){
+    if(!row||typeof row!=='object'||Array.isArray(row))continue;
+    const key=String(row.tempKey??'').trim();
+    if(!key||result.has(key))return null;
+    result.set(key,row);
+  }
+  return result;
+}
+export function selectReusablePhase5TargetsV1({
+  priorTargetDesigns=[],targetDesigns=[],
+  priorCandidateRecords=[],candidateRecords=[]
+}={}){
+  const oldCandidates=candidateByKeyV1(priorCandidateRecords);
+  const newCandidates=candidateByKeyV1(candidateRecords);
+  if(!oldCandidates||!newCandidates)return [];
+  const oldTargets=new Map(arr(priorTargetDesigns)
+    .filter(t=>t&&typeof t==='object'&&!Array.isArray(t)&&t.candidateKey)
+    .map(t=>[String(t.candidateKey),t]));
+  const selected=[];
+  for(const target of arr(targetDesigns)){
+    if(target?.executionMethod!=='V7_REQUEST')continue;
+    const key=String(target.candidateKey??'').trim();
+    const prior=oldTargets.get(key);
+    const before=oldCandidates.get(key),after=newCandidates.get(key);
+    if(!key||!prior||!before||!after)continue;
+    const oldAnchor=String(before.sourceAnchor??'').trim();
+    const newAnchor=String(after.sourceAnchor??'').trim();
+    if(!oldAnchor||oldAnchor!==newAnchor)continue;
+    if(stableJson(executionSensitiveTargetV1(prior))!==stableJson(executionSensitiveTargetV1(target)))continue;
+    selected.push(key);
+  }
+  return selected;
+}
+
+// Reading raw-result.json never counts as evidence unless the SAME strict
+// machine-evidence verifier used by the phase gate accepts it.
+export function verifiedReusablePhase5ResultV1({
+  controllerRoot,campaignPath,target,expectedCampaignId,expectedSourceSha256
+}={}){
+  if(!controllerRoot||!campaignPath||target?.executionMethod!=='V7_REQUEST')return null;
+  const key=String(target.candidateKey??'').trim();
+  const binding=validateTargetExecutionRequestBindingV1({
+    controllerRoot,campaignPath,target,expectedCampaignId,expectedSourceSha256
+  });
+  if(!String(binding.status).startsWith('PASS_'))return null;
+  try{
+    const request=JSON.parse(fs.readFileSync(path.join(controllerRoot,...campaignPath.split('/'),...binding.requestRef.split('/')),'utf8'));
+    if(!/^dar-[0-9a-f]{32}$/.test(String(request.requestId??'')))return null;
+    const evidenceRef=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key),request.requestId,'raw-result.json');
+    const rawResult=JSON.parse(fs.readFileSync(path.join(controllerRoot,...evidenceRef.split('/')),'utf8'));
+    const result={
+      status:'PASS',exitCode:0,evidenceRef,rawResult,
+      requestBindingStatus:binding.status,
+      requestBindingEvidenceRef:binding.requestRef,
+      requestBindingReasons:binding.reasons,
+      reusedRecordedEvidence:true
+    };
+    return validateExecutedPhase5TargetV1({
+      controllerRoot,campaignPath,target,result,expectedSourceSha256
+    }).length===0?result:null;
+  }catch{return null;}
+}
+
+export async function executePhase5TargetsV1({
+  controllerRoot,campaignPath,targetDesigns=[],
+  expectedCampaignId=null,expectedSourceSha256=null,
+  reuseCandidateKeys=[],runProcessFn=null
+}={}){
   const campaignRoot=path.join(controllerRoot,...campaignPath.split('/'));
   const executionResults={};
   let runProcessV1=null;
@@ -413,6 +494,12 @@ export async function executePhase5TargetsV1({controllerRoot,campaignPath,target
     if(method!=='V7_REQUEST'){
       executionResults[key]={status:'BLOCKED_UNSUPPORTED_EXECUTION_METHOD',evidenceRef:'NO_MACHINE_EVIDENCE'};
       continue;
+    }
+    if(reuseCandidateKeys.includes(key)){
+      const reused=verifiedReusablePhase5ResultV1({
+        controllerRoot,campaignPath,target:t,expectedCampaignId,expectedSourceSha256
+      });
+      if(reused){executionResults[key]=reused;continue;}
     }
     const binding=validateTargetExecutionRequestBindingV1({
       controllerRoot,campaignPath,target:t,expectedCampaignId,expectedSourceSha256
@@ -432,7 +519,10 @@ export async function executePhase5TargetsV1({controllerRoot,campaignPath,target
     const evRel=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key));
     const evAbs=path.join(controllerRoot,...evRel.split('/'));
     const workspace=path.join(process.cwd(),'.audit-work','phase5-boundary',safePart(key));
-    if(!runProcessV1){({runProcess:runProcessV1}=await import('./execution.mjs'));}
+    if(!runProcessV1){
+      if(runProcessFn)runProcessV1=runProcessFn;
+      else ({runProcess:runProcessV1}=await import('./execution.mjs'));
+    }
     const result=await runProcessV1({
       command:process.execPath,
       args:['packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace],
