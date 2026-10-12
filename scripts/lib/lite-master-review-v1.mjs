@@ -9,7 +9,8 @@ export const MASTER_REVIEW_SEGMENTS_V1=Object.freeze([
   Object.freeze({segmentId:'reviewer-1-phase-01',reviewerId:'reviewer-1',phases:Object.freeze([1]),boundaryPhase:1}),
   Object.freeze({segmentId:'reviewer-2-phases-02-05',reviewerId:'reviewer-2',phases:Object.freeze([2,3,4,5]),boundaryPhase:5}),
   Object.freeze({segmentId:'reviewer-3l-phases-06-07',reviewerId:'reviewer-3L',phases:Object.freeze([6,7]),boundaryPhase:7}),
-  Object.freeze({segmentId:'reviewer-4-phases-08-10',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10})
+  Object.freeze({segmentId:'reviewer-4-phases-08-10',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10}),
+  Object.freeze({segmentId:'reviewer-4-followup-v1',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10})
 ]);
 
 const SHA256=/^[0-9a-f]{64}$/;
@@ -160,10 +161,11 @@ function sealedOriginalSnapshotPath(campaignPath,segmentId,sealed){
   return path.posix.join(campaignPath,'work/master-review',segmentId,'sealed-originals','phase-'+phaseNumber(sealed.phase),path.posix.basename(sealed.path));
 }
 
-export function stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase,lastSealedReceiptPath,nextSequence,nextDerivedInputPaths=[],successorPrefillContext={},now}){
+export function stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase,segmentId=null,lastSealedReceiptPath,nextSequence,nextDerivedInputPaths=[],successorPrefillContext={},now}){
   const cfg=validateMasterReviewConfiguration(directory,{required:true});
   if(directory.pendingMasterReview)throw new Error('campaign already has pendingMasterReview');
-  const segment=segmentForBoundary(boundaryPhase);
+  const segment=segmentId?segmentForId(segmentId):segmentForBoundary(boundaryPhase);
+  if(segment&&segment.boundaryPhase!==boundaryPhase)throw new Error('master segment boundary mismatches requested phase');
   if(!segment)throw new Error('unsupported master review boundary '+boundaryPhase);
   const reviewedArtifacts=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:predecessor.authority});
   const bindings=bindingRecord({root,campaignPath,directory,predecessor,authorityRoot,reviewedArtifacts});
@@ -344,7 +346,23 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   // the original sealed receipt under the existing supersession protocol.
   // Ordinary acceptance and every later master segment stay held.
   const machineRepairReplay=(pending.segmentId==='reviewer-2-phases-02-05'&&outcome==='AMENDED');
-  if(segment.boundaryPhase>=5&&!machineRepairReplay&&outcome!=='REQUEST_TARGETED_TESTS'){
+  const isPostCompletionFollowup=pending.segmentId==='reviewer-4-followup-v1'&&
+    pending.postCompletionFollowup?.schemaVersion==='curveyield-lite-post-completion-followup-admission-v1';
+  if(isPostCompletionFollowup&&outcome==='ACCEPT_WITHOUT_MODIFICATIONS')
+    return {status:'MASTER_REVIEW_INVALID',failures:['Post-completion follow-up requires amended evidence-bound security decisions; accepting the original unconfirmed result unchanged is prohibited'],record,pending};
+  const requiredFollowupIds=['P4-CAND-001','P4-CAND-002','OBL-P3-P3-OBL-005'];
+  const submittedFollowupIds=new Set();
+  if(isPostCompletionFollowup){
+    for(const item of pending.targetedTests??[]){
+      if(item.status!=='EVIDENCE_SUBMITTED')continue;
+      for(const key of item.candidateIds??[])submittedFollowupIds.add(key);
+    }
+    if(outcome==='AMENDED'){
+      const missing=requiredFollowupIds.filter(key=>!submittedFollowupIds.has(key));
+      if(missing.length)return {status:'MASTER_REVIEW_INVALID',failures:['Follow-up requires verified technical evidence for '+missing.join(', ')+' before master amendment'],record,pending};
+    }
+  }
+  if(segment.boundaryPhase>=5&&!machineRepairReplay&&outcome!=='REQUEST_TARGETED_TESTS'&&!isPostCompletionFollowup){
     try{
       const prior=readJson(requiredFile(root,canonicalRel(campaignPath,5),'Phase-5 canonical data'));
       failures.push(...validateRecordedPhase5MachineEvidenceV1({
