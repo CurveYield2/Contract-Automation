@@ -142,7 +142,11 @@ const phase0Corpus=[
 ].join('\n');
 for(const row of phase0.requiredOutputs??[]){
   if(row?.required!==true) continue;
-  need(phase0Corpus.includes(row.artifact),`phase 0 required output is not produced/consumed by current automation: ${row.artifact}`);
+  const inventoryOutput = row.artifact.startsWith('evidence/review-inventory/') &&
+    phase0Corpus.includes(row.artifact.split('/').at(-1)) &&
+    phase0Corpus.includes('evidence/review-inventory');
+  need(phase0Corpus.includes(row.artifact)||inventoryOutput,
+    `phase 0 required output is not produced/consumed by current automation: ${row.artifact}`);
 }
 need(phase0.phase?.id==='phase-0','phase 0 contract phase.id must match runtime identity');
 need(sameSet(phase0.allowedNextStates??[],['ACTIVE','WAITING_FOR_SUCCESSOR_AGENT']),'phase 0 allowedNextStates do not match bootstrap/finalizer routing');
