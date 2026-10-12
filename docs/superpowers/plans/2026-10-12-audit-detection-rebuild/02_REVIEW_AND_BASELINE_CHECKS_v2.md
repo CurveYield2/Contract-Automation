@@ -422,29 +422,59 @@ All runs go through the existing V7 lane, with at most 3 rounds per test group o
 **Read first:**
 - `.github/workflows/lite-v7-execution-dispatch-v1.yml`.
 - `.github/workflows/audit-controller-execution.yml`: search `Prepare automatic Lite evidence ingestion` and `cp "../.audit-evidence/v7-execution/$V7_REQUEST_ID/controller-evidence.json" "$evidence_rel"`.
-- `packages/github-native-sim/src/v7-compact-result-v1.mjs`: search `export function readV7RawResultV1`.
+- `packages/github-native-sim/src/v7-compact-result-v1.mjs` (whole file).
+- `packages/github-native-sim/src/native-fuzz.mjs`: search `export async function runNativeFuzzAnalysis` and `function baseResult`.
+- `packages/github-native-sim/src/analysis.mjs`: search `export function parseMedusaOutput` and `parseMedusaCliOutput`.
+- `packages/github-native-sim/test/native-fuzz-v1.test.mjs`, `medusa-cli-output-v1.test.mjs` and `medusa-no-tests-real-output-v2.test.mjs` (real output fixtures).
 - `packages/github-native-sim/harness-skeletons-v2/README_v2.md`.
 - The root `AGENTS.md` harness sections.
 - `scripts/lib/lite-phase-prefill-v1.mjs`: search `if(sequence===6){` and `export function validatePhaseScaffold`.
 - `packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs`: search `export function renderFinalEvidenceIndexV1`.
 - `scripts/lib/lite-master-review-v1.mjs`: search `export function masterWakeMessage`.
 
-### T7.1 Assertion ledger: create `packages/github-native-sim/src/adr-assertion-ledger-v1.mjs`
+### T7.1 Named assertion results and the assertion ledger
 
-1. Export `buildAssertionLedgerV1({evidence})`, which returns `{schemaVersion:"curveyield-assertion-ledger-v1", parseStatus, tool, toolInvoked, executedCalls, tests:[{name, status:"PASS"|"FAIL"|"SKIPPED", reason}]}`.
-2. Before writing the parser, read real `campaigns/*/controller/automation/*/EXECUTION_EVIDENCE_v1.json` files in Audit-Controller and the output of `readV7RawResultV1`.
-   - Parse the Foundry test-result fields and Medusa property-result fields you actually find.
-   - If they are not found, return `parseStatus:"UNPARSEABLE"` with empty `tests`.
-   - Use `toolInvoked:null` when the tool flag is absent.
-   - The function never throws.
-3. CLI: `node packages/github-native-sim/src/adr-assertion-ledger-v1.mjs --evidence <path> --out <path>`. On any error it writes `{parseStatus:"UNPARSEABLE", error:"…"}` and exits 0.
-4. In `audit-controller-execution.yml`, step "Prepare automatic Lite evidence ingestion", directly after the line that copies `controller-evidence.json` to `"$evidence_rel"`, add:
+**Verified facts (2026-10-12):**
+- **Foundry.** The runner runs `forge test --fuzz-runs … --fork-url … --fork-block-number …` in `runNativeFuzzAnalysis` (`packages/github-native-sim/src/native-fuzz.mjs`). It keeps Forge's text output (`rawOutput`). That text already names every test (`[PASS] testName()` / `[FAIL: reason] testName()` under `Ran N tests for <path>:<Contract>`), but the result object never extracts those lines. So today's evidence has only an overall status.
+- **Medusa.** `parseMedusaOutput` (`packages/github-native-sim/src/analysis.mjs`) already returns `properties` (named, with `status`) for JSON output. For CLI output it uses `parseMedusaCliOutput`.
+- **Ledger location.** No `controller/automation/*/EXECUTION_EVIDENCE_v1.json` exists yet on Audit-Controller `main`, because the Lite dispatch-ingestion path has only been built for Phase 9 and never used. Tests must therefore use fixtures.
+
+**Fix:** make the runner record named results, additively, without changing any tool command, argument or status decision. Then build the ledger from them.
+
+1. **Foundry parser.** In `native-fuzz.mjs`, add and export `parseForgeTestResultsV1(text)`:
+   1. Remove ANSI escape codes: `/\u001b\[[0-9;]*m/g`.
+   2. Read line by line:
+      - `^Ran \d+ tests? for (.+)$` sets the current suite;
+      - `^\[PASS\]\s+([A-Za-z0-9_]+\([^)]*\))` adds `{suite, name, status:"PASS"}`;
+      - `^\[FAIL(?::\s*(.*?))?\]\s+([A-Za-z0-9_]+\([^)]*\))` adds `{suite, name, status:"FAIL", reason}`;
+      - `^\[SKIP[^\]]*\]\s+([A-Za-z0-9_]+\([^)]*\))` adds `{suite, name, status:"SKIPPED"}`.
+   3. Return `{parseStatus: tests.length ? "PARSED" : "NONE_FOUND", tests}`.
+   4. Never throw.
+2. **Attach to every result.** In `runNativeFuzzAnalysis`, when `input.command === 'forge'`, compute `testResults = parseForgeTestResultsV1((rawOutput.stdout ?? '') + '\n' + (rawOutput.stderr ?? ''))` once and add `testResults` to the fields of **every** `baseResult(...)` return. Read `normalizedRaw` to confirm the property names `stdout` and `stderr`. Change nothing else in that function.
+3. **Medusa CLI output.** If `parseMedusaCliOutput` does not already return a `properties` array of `{name, status}`, extend it to collect them. Derive the exact line format from the real Medusa 1.5.1 output fixtures in `packages/github-native-sim/test/medusa-cli-output-v1.test.mjs` and `medusa-no-tests-real-output-v2.test.mjs`. Map passing tests to `"passed"` and failing ones to `"failed"`. Do not change how status is decided.
+4. **Keep the results in compact evidence.** Open `packages/github-native-sim/src/v7-compact-result-v1.mjs`. If it copies only listed fields into the compact or controller evidence, add `testResults` for the native-fuzz component and `properties` (only `name` and `status`, at most 500 entries) for the Medusa component. Otherwise change nothing.
+5. **Ledger.** Create `packages/github-native-sim/src/adr-assertion-ledger-v1.mjs`:
+   - It exports `buildAssertionLedgerV1({evidence})`, which returns `{schemaVersion:"curveyield-assertion-ledger-v1", parseStatus, tool, toolInvoked, executedCalls, tests:[{name, status:"PASS"|"FAIL"|"SKIPPED", reason}]}`.
+   - Gather named results from every native-fuzz component's `testResults.tests`, and from every Medusa component's `properties`: `failed` becomes `FAIL`; `passed`, `completed` and `unfalsified` become `PASS`.
+   - For Forge tests, `name` is `"<suite>::<test name>"`. For Medusa, it is the property name as given.
+   - `toolInvoked` comes from the component's existing `toolInvoked` field, or `null` if absent.
+   - `parseStatus` is `"PARSED"` when at least one named result exists. Otherwise it is `"UNPARSEABLE"`.
+   - It never throws.
+   - CLI: `--evidence <path> --out <path>`. On any error it writes `{parseStatus:"UNPARSEABLE", error}` and exits 0.
+6. **Ingestion hook.** Unchanged: in `audit-controller-execution.yml`, step "Prepare automatic Lite evidence ingestion", directly after the line copying `controller-evidence.json` to `"$evidence_rel"`, add:
 
 ```bash
 node "$GITHUB_WORKSPACE/packages/github-native-sim/src/adr-assertion-ledger-v1.mjs" --evidence "$evidence_rel" --out "$evidence_dir/ASSERTION_LEDGER_v1.json" || true
 ```
 
-   If the step's `git add` lists explicit paths, include the new file.
+   Include that file in the step's `git add` if the step lists paths explicitly.
+7. **Runner manifest.** Add the step `npm run v7:manifest -- --check` to the T0 workflow's unit job. These edits are additive result fields and should not change the policy-derived manifest. If the check fails, record a `## Blocked question` with the exact diff; do not edit the manifest by hand.
+8. **Harness naming convention** (also written into `AGENT_GUIDED_TESTING.md`; see T8 Appendix C4), so outcomes can be matched to obligations:
+   - one assertion per test function or Medusa property;
+   - baseline tests: `test_prop_<obligationId>_<short>`;
+   - candidate tests: `test_attack_<n>_<short>` and `test_control_<n>_<short>`;
+   - Medusa: `property_<obligationId>_<short>`.
+   - The reviewer cites these exact names (with the `<suite>::` prefix for Forge) in `assertionNames`, `attackAssertionNames` and `controlAssertionNames`.
 
 ### T7.2 Dispatch lane: allow Phase 6 requests (`lite-v7-execution-dispatch-v1.yml`)
 
@@ -521,9 +551,15 @@ Keep the Phase 9 behavior byte-for-byte. Add:
 ### T7.5 Tests
 
 1. `packages/github-native-sim/test/adr-assertion-ledger-v1.test.mjs`:
-   - a Foundry-shaped fixture gives `PARSED` with PASS and FAIL entries;
-   - an unknown shape gives `UNPARSEABLE`;
+   - `parseForgeTestResultsV1` on Forge text containing two suites, ANSI colour codes, fuzz-run suffixes, one `[FAIL: reason]` and one `[SKIP]` returns every test with the right suite and status;
+   - text with no test lines gives `NONE_FOUND`;
+   - `runNativeFuzzAnalysis` with a stub `runCommand` returns `testResults` on both the success and the failure path, while status values are unchanged from today (compare against the existing `native-fuzz-v1` expectations);
+   - Medusa CLI fixture output gives named `properties`;
+   - compact evidence built from these results still contains `testResults` and `properties`;
+   - `buildAssertionLedgerV1` on that evidence gives `PARSED` with `<suite>::<name>` entries;
+   - evidence without named results gives `UNPARSEABLE`;
    - the CLI with a bad path writes `UNPARSEABLE` and exits 0.
+   - **Regression:** add `packages/github-native-sim/test/native-fuzz-v1.test.mjs` and the Medusa CLI tests to the T0 regression list.
 2. `packages/github-native-sim/test/adr-phase6-validation-v1.test.mjs`. Each case gives a deficiency unless it says "valid":
    - Step 4: `PASSED` with a valid ledger is valid;
    - Step 4: `PASSED` with an `UNPARSEABLE` ledger;
