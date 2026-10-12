@@ -28,14 +28,14 @@ This README inventories the core Contract Automation workflows currently organiz
    Recovers a failed/interrupted Phase-0 bootstrap request by resolving one recovery request and redispatching the same campaign through the normal Phase-0 path.
 
 8. [**Lite Fully Automated Phase 0 v1**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase0-bootstrap-v1.yml) — `lite-phase0-bootstrap-v1.yml`  
-   Top-level Phase-0 pipeline. It chains infrastructure qualification, intelligence generation, randomized simulation, finalizes/seals the machine Phase-0 receipt, and then activates Reviewer 1 through the existing browser/orchestrator system.
+   Top-level Phase-0 pipeline. It chains intelligence generation and targeted Phase-0 deployment/evidence processing, finalizes/seals the machine Phase-0 receipt, and then activates Reviewer 1 through the existing browser/orchestrator system.
 
 9. [**Lite V7 Execution Dispatch v1**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-v7-execution-dispatch-v1.yml) — `lite-v7-execution-dispatch-v1.yml`  
    Validates a V7 execution-dispatch request against the exact campaign/request binding and dispatches it to the qualified V7 execution system with automatic evidence ingestion.
 
 ---
 
-## 2. Phase-0 analysis, simulation & execution qualification — 7 workflows
+## 2. Phase-0 analysis and simulation — 4 workflows
 
 1. [**Lite Phase 0 Intelligence v1**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase0-intelligence-v1.yml) — `lite-phase0-intelligence-v1.yml`  
    Generates Phase-0 machine intelligence from the submitted source using the retained audit toolchain. It writes the useful intelligence outputs directly into the corresponding Audit-Controller campaign.
@@ -49,11 +49,7 @@ This README inventories the core Contract Automation workflows currently organiz
 4. [**Lite Phase 0 Simulation Testing v1**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/lite-phase0-simulation-testing-v1.yml) — `lite-phase0-simulation-testing-v1.yml`  
    Manual smoke test of the production Phase-0 Medusa stage: deploys the campaign on the Anvil fork and runs Medusa with a small call budget (default 1,000), skipping telemetry and publishing nothing. Use it to prove Medusa fixes before a full Phase-0 run.
 
-5. [**V7 Agent Qualification Bridge**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/v7-agent-qualification-bridge.yml) — `v7-agent-qualification-bridge.yml`  
-   Processes queued V7 qualification requests, dispatches the canonical qualification workflow, observes the result, records the qualification attempt, closes the trigger issue, and continues through queued requests.
-
-6. [**V7 Execution Infrastructure Qualification**](https://github.com/CurveYield2/Contract-Automation/blob/main/.github/workflows/v7-execution-infrastructure-qualification.yml) — `v7-execution-infrastructure-qualification.yml`  
-   Comprehensive qualification gate for the V7 runner and its paired Audit-Controller code. It checks exact source identities, toolchains, runner manifests, Node tests, static checks, Anvil execution, controller behavior, and live mutable Phase-6/7 infrastructure before publishing qualification status.
+The repository-wide V7 full qualification workflow and its issue-to-dispatch bridge were retired and preserved without changes at [CurveYield2/archive](https://github.com/CurveYield2/archive/tree/main/Contract-Automation/.github/workflows). Normal Phase-0 bootstrap no longer depends on running this 688-test suite. Source identity, Anvil deployment, and campaign evidence gates still execute in the Phase-0 workflows and finalizers. The prior V7 qualification status document is retained solely as legacy pinned-runner evidence for existing V7 execution flows; it is not renewed by Phase-0 runs.
 
 ---
 

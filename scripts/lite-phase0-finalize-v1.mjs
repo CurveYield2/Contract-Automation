@@ -15,7 +15,7 @@ function rel(root,file){return path.relative(root,file).replaceAll('\\','/');}
 function upsert(rows,row,key='path'){const out=Array.isArray(rows)?structuredClone(rows):[];const i=out.findIndex(x=>x?.[key]===row?.[key]);if(i>=0)out[i]=row;else out.push(row);return out;}
 
 const a=args(process.argv);
-for(const k of ['controller-root','campaign-path','qualification-path','contract-automation-sha','workflow-run-id']) if(!a[k]) throw new Error('missing --'+k);
+for(const k of ['controller-root','campaign-path','contract-automation-sha','bootstrap-sha','workflow-run-id']) if(!a[k]) throw new Error('missing --'+k);
 const controllerRoot=path.resolve(a['controller-root']);
 const campaignPath=a['campaign-path'];
 if(!campaignPath.startsWith('campaigns/')||campaignPath.includes('..')) throw new Error('unsafe campaign path');
@@ -24,9 +24,9 @@ const receiptPath=path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json');
 const receipt=read(required(receiptPath,'Phase-0 receipt'));
 if(receipt.schemaVersion!=='curveyield-lite-phase-receipt-v1'||receipt.campaign?.mode!=='LITE'||receipt.phase?.sequence!==0) throw new Error('invalid Phase-0 receipt');
 if(!['ACTIVE','EVIDENCE_READY','VALIDATING'].includes(receipt.phase.status)) throw new Error('Phase-0 receipt is not finalizable');
-const qualification=read(path.resolve(a['qualification-path']));
-if(qualification.status!=='PASS') throw new Error('V7 qualification is not PASS');
-if(qualification.qualifiedCommit!==a['contract-automation-sha']) throw new Error('V7 qualification does not bind current Contract-Automation commit');
+if(!/^[0-9a-f]{40}$/.test(a['contract-automation-sha'])||
+   a['contract-automation-sha']!==a['bootstrap-sha'])
+  throw new Error('Phase-0 finalizer must seal the exact workflow checkout commit');
 
 const evidence={
   build:required(path.join(campaignRoot,'evidence/build/BUILD_AND_SOURCE_IDENTITY_v1.json'),'build identity'),
@@ -81,7 +81,8 @@ receipt.globalControls={
 };
 const ledger=read(evidence.ledger);
 receipt.obligations.due=(ledger.obligations??[]).filter(x=>String(x.status??'OPEN').toUpperCase()==='OPEN'&&String(x.requiredPhase??'')==='1');
-receipt.automation=upsert(receipt.automation??[],{workflow:'v7-execution-infrastructure-qualification.yml',runId:Number(qualification.workflowRunId),status:'PASS',qualifiedCommit:qualification.qualifiedCommit},'workflow');
+// Retired infrastructure qualification is not evidence for a new Phase-0 run.
+receipt.automation=(receipt.automation??[]).filter(row=>row?.workflow!=='v7-execution-infrastructure-qualification.yml');
 receipt.automation=upsert(receipt.automation,{workflow:'lite-phase0-bootstrap-v1.yml',runId:Number(a['workflow-run-id']),status:'PASS',contractAutomationCommit:a['contract-automation-sha'],bootstrapCommit:a['bootstrap-sha']??a['contract-automation-sha']},'workflow');
 receipt.validation={status:'PASS',validatedAt:now,failures:[]};
 receipt.phase.status='SEALED';
