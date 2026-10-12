@@ -499,12 +499,13 @@ export async function executePhase5TargetsV1({
       const reused=verifiedReusablePhase5ResultV1({
         controllerRoot,campaignPath,target:t,expectedCampaignId,expectedSourceSha256
       });
-      if(reused){executionResults[key]=reused;continue;}
+      if(reused){process.stderr.write(`[phase5-sim] REUSE ${key}: verified exact completed machine evidence\n`);executionResults[key]=reused;continue;}
     }
     const binding=validateTargetExecutionRequestBindingV1({
       controllerRoot,campaignPath,target:t,expectedCampaignId,expectedSourceSha256
     });
     if(!String(binding.status).startsWith('PASS_')){
+      process.stderr.write(`[phase5-sim] BLOCKED ${key}: request binding ${binding.status}\n`);
       executionResults[key]={
         status:'BLOCKED_REQUEST_TARGET_BINDING_MISMATCH',
         requestBindingStatus:binding.status,
@@ -523,12 +524,28 @@ export async function executePhase5TargetsV1({
       if(runProcessFn)runProcessV1=runProcessFn;
       else ({runProcess:runProcessV1}=await import('./execution.mjs'));
     }
-    const result=await runProcessV1({
-      command:process.execPath,
-      args:['packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace],
-      cwd:process.cwd(),
-      env:process.env
-    });
+    // Each candidate is independently observable and time-bounded. The
+    // stdout evidence channel stays structured; progress goes only to stderr.
+    const startedAt=Date.now();
+    const candidateTimeoutMs=40*60*1000;
+    process.stderr.write(`[phase5-sim] START ${key} V7 execution (max 40 minutes)\n`);
+    const heartbeat=setInterval(()=>{
+      const elapsed=Math.floor((Date.now()-startedAt)/60000);
+      process.stderr.write(`[phase5-sim] RUNNING ${key} elapsed=${elapsed}m; awaiting runner result\n`);
+    },60_000);
+    let result;
+    try {
+      result=await runProcessV1({
+        command:process.execPath,
+        args:['packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace],
+        cwd:process.cwd(),
+        env:{...process.env,PHASE5_BOUNDARY_PROGRESS:'true'},
+        timeoutMs:candidateTimeoutMs
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
+    process.stderr.write(`[phase5-sim] END ${key} exitCode=${result?.exitCode??'UNKNOWN'} elapsed=${Math.floor((Date.now()-startedAt)/1000)}s${result?.timedOut?' TIMED_OUT':''}\n`);
     // V7 CLI nests evidence under the request ID; the parent directory has no
     // raw-result.json. Never issue PASS for a missing or unparsable raw result.
     const request=JSON.parse(fs.readFileSync(requestAbs,'utf8'));
