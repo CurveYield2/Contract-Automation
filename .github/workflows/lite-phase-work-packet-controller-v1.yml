@@ -22,7 +22,7 @@ on:
         required: false
         default: phase
         type: choice
-        options: [phase, master, master-test-result, sealed-rework]
+        options: [phase, master, master-test-result, sealed-rework, post-completion-followup]
       phase_sequence:
         required: false
         default: ''
@@ -129,7 +129,8 @@ jobs:
               (((.reviewKind // "phase")=="phase" and ((.phaseSequence|type)=="number") and ((.phaseSequence|floor)==.phaseSequence) and .phaseSequence>=1 and .phaseSequence<=10) or
                ((.reviewKind // "phase")=="master" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and (.masterOutcome=="AMENDED" or .masterOutcome=="ACCEPT_WITHOUT_MODIFICATIONS" or (.masterOutcome=="REQUEST_TARGETED_TESTS" and ((.testPlanPath|type)=="string") and (.testPlanPath|length)>0)) and ((.summary // "")|type)=="string") or
                ((.reviewKind // "phase")=="master-test-result" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and ((.testResultPath|type)=="string") and (.testResultPath|length)>0) or
-               ((.reviewKind // "phase")=="sealed-rework" and ((.phaseSequence|type)=="number") and .phaseSequence==1 and ((.reworkRequestPath|type)=="string") and (.reworkRequestPath|length)>0 and .holdSuccessorDelivery==true)) and
+               ((.reviewKind // "phase")=="sealed-rework" and ((.phaseSequence|type)=="number") and .phaseSequence==1 and ((.reworkRequestPath|type)=="string") and (.reworkRequestPath|length)>0 and .holdSuccessorDelivery==true) or
+               ((.reviewKind // "phase")=="post-completion-followup" and .phaseSequence==5 and ((.reworkRequestPath|type)=="string") and (.reworkRequestPath|length)>0 and .holdSuccessorDelivery==true)) and
               ((.auditControllerRef|type)=="string") and (.auditControllerRef|length)>0 and
               ((.attempt|type)=="number") and ((.attempt|floor)==.attempt) and .attempt>=1
             ' /tmp/lite-phase-boundary-request.json >/dev/null
@@ -148,7 +149,7 @@ jobs:
             supplied_directory_path=""
           fi
           [[ "$campaign_id" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || { echo "::error::Invalid campaign_id"; exit 1; }
-          case "$review_kind" in phase|master|master-test-result|sealed-rework) ;; *) echo "::error::Invalid review_kind"; exit 1;; esac
+          case "$review_kind" in phase|master|master-test-result|sealed-rework|post-completion-followup) ;; *) echo "::error::Invalid review_kind"; exit 1;; esac
           if [ "$review_kind" = phase ]; then [[ "$phase_sequence" =~ ^([1-9]|10)$ ]] || { echo "::error::Invalid phase_sequence"; exit 1; }; fi
           if [ "$review_kind" = master ]; then
             [[ "$segment_id" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Invalid segment_id"; exit 1; }
@@ -166,6 +167,12 @@ jobs:
             [[ "$rework_request_path" == campaigns/* ]] || { echo "::error::rework_request_path must be private campaign-relative state"; exit 1; }
             [ "$hold_delivery" = true ] || { echo "::error::sealed-rework requires hold_successor_delivery"; exit 1; }
             [ "$controller_ref" != main ] || { echo "::error::sealed-rework requires an Audit-Controller review branch"; exit 1; }
+          fi
+          if [ "$review_kind" = post-completion-followup ]; then
+            [ "$phase_sequence" = 5 ] || { echo "::error::post-completion followup must bind technical Phase-5 scope"; exit 1; }
+            [ "$rework_request_path" = 'campaigns/CurveYield DEX v16 Source r4/controller/POST_COMPLETION_FOLLOWUP_REQUEST_v1.json' ] || { echo "::error::Wrong typed followup request path"; exit 1; }
+            [ "$hold_delivery" = true ] || { echo "::error::Followup requires no automatic successor delivery"; exit 1; }
+            [ "$controller_ref" = main ] || { echo "::error::Followup requires current accepted main campaign"; exit 1; }
           fi
           case "$hold_delivery" in true|false) ;; *) echo "::error::Invalid hold_successor_delivery"; exit 1;; esac
           [[ "$controller_ref" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::Invalid audit_controller_ref"; exit 1; }
@@ -288,7 +295,7 @@ jobs:
           else
             args+=(--phase-sequence "${{ steps.request.outputs.phase_sequence }}")
           fi
-          if [ "${{ steps.request.outputs.review_kind }}" = sealed-rework ]; then
+          if [ "${{ steps.request.outputs.review_kind }}" = sealed-rework ] || [ "${{ steps.request.outputs.review_kind }}" = post-completion-followup ]; then
             args+=(--rework-request-path "${{ steps.request.outputs.rework_request_path }}")
           fi
           node scripts/lite-phase-packet-controller-v1.mjs "${args[@]}" | tee /tmp/lite-phase-packet-result.json
