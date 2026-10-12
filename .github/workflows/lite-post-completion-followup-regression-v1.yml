@@ -48,5 +48,7 @@ jobs:
             'campaigns/CurveYield DEX v16 Source r4/controller' \
             'campaigns/CurveYield DEX v16 Source r4/evidence/build' \
             'campaigns/CurveYield DEX v16 Source r4/evidence/source-intelligence'
+      - name: Install controller runtime imports inside GitHub Actions
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Validate bounded admission in ephemeral checkout only
         run: node scripts/tests/lite-post-completion-followup-v1.test.mjs .audit-controller
