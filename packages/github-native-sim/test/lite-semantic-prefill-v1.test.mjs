@@ -125,7 +125,7 @@ test('Phase9 controller harvests rerun evidence refs from trusted ingested execu
   const findingKey='FIND-001';
   const requestId='dar-0123456789abcdef0123456789abcdef';
   const requestDir='controller/phase9-reruns/FIND-001/rerun-1';
-  writeJson(path.join(b.root,b.campaign,requestDir,'EXECUTION_REQUEST_v1.json'),{requestId});
+  writeJson(path.join(b.root,b.campaign,requestDir,'EXECUTION_REQUEST_v1.json'),{requestId,requestDigest:'a'.repeat(64)});
   const evidenceDir=path.join(b.root,b.campaign,'controller/automation',requestId);
   writeJson(path.join(evidenceDir,'EXECUTION_EVIDENCE_v1.json'),{schemaVersion:'test-evidence',requestId});
   writeJson(path.join(evidenceDir,'EXECUTION_OBSERVER_RECEIPT_v1.json'),{schemaVersion:'observer',requestId});
@@ -137,7 +137,8 @@ test('Phase9 controller harvests rerun evidence refs from trusted ingested execu
     profileId:'test',
     source:{},
     artifactDigest:'b'.repeat(64),
-    componentRefs:[],
+    componentRefs:[{kind:'FOUNDRY_TEST',evidenceRef:'target-run.log'}],
+    disposition:'PASS',
     securityDisposition:'REVIEWER_REQUIRED',
     findingPromotion:'FORBIDDEN_BY_INGESTOR',
     ingestionDigest:'c'.repeat(64)
