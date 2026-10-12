@@ -23,6 +23,8 @@ import {
 import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
 import {registerMasterTargetedTests,acceptMasterTargetedTestResults,verifyMasterTargetedTestEvidence,unresolvedFinalCandidateFailures} from './lib/lite-master-targeted-tests-v1.mjs';
 import {admitPostCompletionFollowupV1} from './lib/lite-post-completion-followup-v1.mjs';
+import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
+import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-discovery-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
@@ -722,10 +724,11 @@ if(a['phase5-reuse-keys-b64']&&!masterAmendmentRefreshSha)
 if(masterAmendmentRefreshSha&&reviewKind!=='phase')throw new Error('master-amendment-refresh-sha is internal to phase refresh');
 for(const k of ['controller-root','campaign-id','campaign-path','campaign-directory-path']) if(a[k]===undefined) throw new Error('missing --'+k);
 if(['phase','sealed-rework','post-completion-followup'].includes(reviewKind)&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
+if(reviewKind==='discovery'&&!a['unit-id'])throw new Error('missing --unit-id');
 if(reviewKind==='master-test-result'&&!a['test-result-path'])throw new Error('missing --test-result-path');
 if(reviewKind==='master'&&a['master-outcome']==='REQUEST_TARGETED_TESTS'&&!a['test-plan-path'])throw new Error('missing --test-plan-path');
 if(['sealed-rework','post-completion-followup'].includes(reviewKind)&&!a['rework-request-path']) throw new Error('missing --rework-request-path');
-if(!['phase','master','master-test-result','sealed-rework','post-completion-followup'].includes(reviewKind)) throw new Error('unsupported review-kind');
+if(!['phase','master','master-test-result','sealed-rework','post-completion-followup','discovery'].includes(reviewKind)) throw new Error('unsupported review-kind');
 const root=path.resolve(a['controller-root']);
 const expectedCampaignId=a['campaign-id'];
 const campaignPath=a['campaign-path']; const campaignRoot=repoFile(root,campaignPath);
@@ -815,6 +818,43 @@ if(reviewKind==='master-test-result'){
   writeJson(directoryFile,directory);
   const feedback='MASTER_TARGETED_TESTS_EVIDENCE_SUBMITTED: '+submitted.requestId+'. Master must inspect raw evidence and amend the reviewer-owned work forms before acceptance. Unresolved candidates still block final COMPLETE.';
   process.stdout.write(JSON.stringify({status:'WAITING_FOR_MASTER_REVIEW',campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:directory.pendingMasterReview.segmentId,masterChatUrl:directory.masterReview.chatUrl,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+  process.exit(0);
+}
+function activeDetectionPolicyV1(receipt) {
+  const authorityRoot=authorityRootFromReceipt(receipt);
+  return detectionPolicyForAuthorityV1({repoRoot:root,authorityRoot,
+    readJsonIfExists:(rel)=>fs.existsSync(repoFile(root,rel))?readJson(repoFile(root,rel)):null});
+}
+if(reviewKind==='discovery'){
+  if(['STOPPED_BY_HUMAN','BLOCKED'].includes(directory.campaignStatus))
+    throw new Error('campaign is held by explicit human status');
+  if(!directory.discovery?.statePath)throw new Error('campaign has no discovery state');
+  const sourceReceipt=readJson(requiredFile(root,path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'),'Phase 0 authority receipt'));
+  if(!activeDetectionPolicyV1(sourceReceipt))throw new Error('discovery is not authorized for legacy campaign');
+  const result=advanceDiscoveryV1({root,campaignPath,directory,
+    authorityRoot:authorityRootFromReceipt(sourceReceipt),automationRoot:process.cwd(),
+    unitId:a['unit-id'],now,auditControllerRef:a['audit-controller-ref']??'main'});
+  if(result.status==='DISCOVERY_STALE_REQUEST'){
+    process.stdout.write(JSON.stringify({status:result.status,campaignName:directory.campaignName})+'\n');
+    process.exit(0);
+  }
+  directory.discovery.status=result.status==='DISCOVERY_COMPLETE'?'COMPLETE':'RUNNING';
+  directory.discovery.activeUnitId=readJson(repoFile(root,directory.discovery.statePath)).payload.activeUnitId;
+  if(result.status==='DISCOVERY_COMPLETE'){
+    const successor=preparePhaseWork({root,campaignPath,
+      authorityRoot:authorityRootFromReceipt(sourceReceipt),sequence:4,reviewer:'reviewer-2',
+      predecessorReceiptPath:directory.lastSealedReceiptPath,status:'ACTIVE',
+      derivedInputPaths:[...(directory.currentAssignment?.derivedInputPaths??[]),
+        path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')]});
+    directory.currentAssignment=successor;directory.campaignStatus='ACTIVE';
+  }
+  directory.updatedAt=now;writeJson(directoryFile,directory);
+  const feedback=result.feedbackText??result.status;
+  process.stdout.write(JSON.stringify({status:result.status,campaignName:directory.campaignName,
+    feedbackB64:Buffer.from(feedback).toString('base64'),
+    discoveryWakeChatKey:result.wake?.chatKey??'',discoveryWakeId:result.wake?.wakeId??'',
+    discoveryWakePhaseId:result.wake?.phaseId??'',discoveryWakeMilestoneId:result.wake?.milestoneId??'',
+    discoveryWakeMessageB64:result.wake?.messageB64??''})+'\n');
   process.exit(0);
 }
 if(reviewKind==='master'){
@@ -1297,6 +1337,7 @@ if(sequence===5){
 
 let nextSequence=sequence===10?null:sequence+1;
 let fresh=false;let nextAssignment=null;let nextDerivedInputs=[];
+let discoveryStarted=false,discoveryWake=null;
 let handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};
 if(sequence===1){nextSequence=2;fresh=true;handoff={required:true,boundary:'P1_TO_P2',incomingReviewer:'reviewer-2',assignedWork:'Combined Lite Phases 2-5',nextPhaseSequence:2,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
 if(sequence===5){nextSequence=6;fresh=true;handoff={required:true,boundary:'P5_TO_P6',incomingReviewer:'reviewer-3L',assignedWork:'Merged Lite Phases 6-7',nextPhaseSequence:6,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
@@ -1372,8 +1413,26 @@ else{
   const nextReviewer=assignmentReviewer(nextSequence);
   const nextStatus=fresh||isFreshBoundary(nextSequence)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
   nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
-  directory.currentAssignment=nextAssignment;directory.campaignStatus=nextStatus==='WAITING_FOR_SUCCESSOR_AGENT'?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';directory.updatedAt=now;
+  if(sequence===3&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
+    const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
+      now,auditControllerRef:a['audit-controller-ref']??'main'});
+    directory.discovery={statePath:started.statePath,status:started.completeImmediately?'COMPLETE':'RUNNING',
+      activeUnitId:started.state.payload.activeUnitId};
+    discoveryStarted=true;discoveryWake=started.wake;
+    if(started.completeImmediately){
+      const finished=completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
+        state:started.state,now});
+      nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot,sequence:4,reviewer:'reviewer-2',
+        predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:[
+          ...nextDerivedInputs,path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')],
+        status:'ACTIVE'});
+      directory.discovery.status='COMPLETE';directory.discovery.activeUnitId=null;discoveryWake=finished.wake;
+    }else{
+      nextAssignment.status='WAITING_FOR_DISCOVERY';
+    }
+  }
+  directory.currentAssignment=nextAssignment;directory.campaignStatus=discoveryStarted?(directory.discovery.status==='COMPLETE'?'ACTIVE':'WAITING_FOR_DISCOVERY'):(nextStatus==='WAITING_FOR_SUCCESSOR_AGENT'?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE');directory.updatedAt=now;
 }
 writeJson(directoryFile,directory);
 const feedback='CONTROLLER_PHASE_PASS: Phase '+sequence+' validated and sealed.'+(nextAssignment?' Next authorized assignment: Phase '+nextAssignment.phaseSequence+' / '+nextAssignment.reviewer+'.':' Campaign complete.');
-process.stdout.write(JSON.stringify({status:'PASS',controllerPassToken:'CONTROLLER_PHASE_PASS',sealedRework:Boolean(sealedRework),masterAmendmentRefresh:Boolean(masterAmendmentRefreshSha),campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:Boolean(nextAssignment&&nextAssignment.status==='WAITING_FOR_SUCCESSOR_AGENT'),sameReviewerAdvanced:Boolean(nextAssignment&&nextAssignment.status==='ACTIVE'),nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
+process.stdout.write(JSON.stringify({status:'PASS',controllerPassToken:'CONTROLLER_PHASE_PASS',sealedRework:Boolean(sealedRework),masterAmendmentRefresh:Boolean(masterAmendmentRefreshSha),campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:!discoveryStarted&&Boolean(nextAssignment&&nextAssignment.status==='WAITING_FOR_SUCCESSOR_AGENT'),sameReviewerAdvanced:!discoveryStarted&&Boolean(nextAssignment&&nextAssignment.status==='ACTIVE'),discoveryStarted,discoveryWakeChatKey:discoveryWake?.chatKey??'',discoveryWakeId:discoveryWake?.wakeId??'',discoveryWakePhaseId:discoveryWake?.phaseId??'',discoveryWakeMilestoneId:discoveryWake?.milestoneId??'',discoveryWakeMessageB64:discoveryWake?.messageB64??'',nextAssignment,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
