@@ -576,7 +576,7 @@ function historicalPhase5MachineFailures({root,campaignPath,directory}){
     const recorded=[...(marker.targetKeys??[])].sort();
     const failures=JSON.stringify(keys)===JSON.stringify(recorded)?[]:['Phase-5 machine PASS marker is missing candidate keys.'];
     const refs=Object.values(results).map(x=>x.evidenceRef).filter(Boolean).sort();
-    if(JSON.stringify(refs)!==JSON.stringify([...(marker.evidenceRefs??[])].sort()))
+    if(JSON.stringify(refs)!==JSON.stringify([...(marker.evidenceRefs??[])].filter(x=>x&&x!=='NO_MACHINE_EVIDENCE_REQUIRED').sort()))
       failures.push('Phase-5 machine PASS marker has missing or incorrect source-bound evidence references.');
     return failures.concat(validatePhase5TargetExecutionGateV1({
       controllerRoot:root,campaignPath,targetDesigns:targets,materialCandidateKeys:required,
