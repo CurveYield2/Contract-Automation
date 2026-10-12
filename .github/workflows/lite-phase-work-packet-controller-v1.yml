@@ -346,10 +346,15 @@ jobs:
             echo "master_accepted=$(jq -r '.masterReviewAccepted // false' /tmp/lite-phase-packet-result.json)"
             echo "test_reviewer=$(jq -r '.testReviewer // empty' /tmp/lite-phase-packet-result.json)"
             echo "test_request_id=$(jq -r '.testRequestId // empty' /tmp/lite-phase-packet-result.json)"
+            echo "discovery_wake_chat_key=$(jq -r '.discoveryWakeChatKey // empty' /tmp/lite-phase-packet-result.json)"
+            echo "discovery_wake_id=$(jq -r '.discoveryWakeId // empty' /tmp/lite-phase-packet-result.json)"
+            echo "discovery_wake_phase_id=$(jq -r '.discoveryWakePhaseId // empty' /tmp/lite-phase-packet-result.json)"
+            echo "discovery_wake_milestone_id=$(jq -r '.discoveryWakeMilestoneId // empty' /tmp/lite-phase-packet-result.json)"
+            echo "discovery_wake_message_b64=$(jq -r '.discoveryWakeMessageB64 // empty' /tmp/lite-phase-packet-result.json)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish validation response or successful phase transaction
-        if: ${{ steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' || steps.controller.outputs.status == 'FOLLOWUP_ADMITTED') }}
+        if: ${{ steps.routing.outputs.stale != 'true' && steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' || steps.controller.outputs.status == 'FOLLOWUP_ADMITTED' || steps.controller.outputs.status == 'DISCOVERY_REWORK' || steps.controller.outputs.status == 'DISCOVERY_NEXT' || steps.controller.outputs.status == 'DISCOVERY_COMPLETE') }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
@@ -361,8 +366,46 @@ jobs:
           git add -- "${{ steps.routing.outputs.campaign_path }}" "${{ steps.routing.outputs.campaign_directory_path }}"
           if ! git diff --cached --quiet; then
             git commit -m "audit(controller): ${{ steps.request.outputs.review_kind }} ${{ steps.request.outputs.phase_sequence || steps.request.outputs.segment_id }} validation ${{ steps.controller.outputs.status }} for ${{ steps.request.outputs.campaign_id }}"
-            timeout -k 10s 120s git push origin "HEAD:${{ steps.request.outputs.audit_controller_ref }}"
+            for attempt in 1 2 3; do
+              if timeout -k 10s 120s git push origin "HEAD:${{ steps.request.outputs.audit_controller_ref }}"; then break; fi
+              [ "$attempt" -lt 3 ] || { echo "::error::Publish failed after 3 attempts"; exit 1; }
+              timeout -k 10s 120s git pull --rebase origin "${{ steps.request.outputs.audit_controller_ref }}"
+            done
           fi
+
+      - name: Wake discovery chat
+        if: steps.routing.outputs.effective_hold != 'true' && steps.routing.outputs.stale != 'true' && steps.controller.outputs.discovery_wake_chat_key != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "${{ steps.request.outputs.campaign_id }}" | tr -c 'A-Za-z0-9._-' '_')"
+          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content')"
+          printf '%s' "$encoded" | base64 -d > /tmp/discovery-registration.json
+          reviewer="${{ steps.controller.outputs.discovery_wake_chat_key }}"
+          case "$reviewer" in reviewer-2|reviewer-3L) ;; *) echo "::error::Wrong discovery reviewer"; exit 1;; esac
+          chat="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // empty' /tmp/discovery-registration.json)"
+          [[ "$chat" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$chat" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || { echo "::error::No assigned discovery chat"; exit 1; }
+          # Watchdog Lite gate tracks currentAssignment, not discovery.activeUnitId.
+          # Disable it until discovery-aware gating is implemented; 30-minute re-push covers lost runs.
+          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="${{ steps.controller.outputs.discovery_wake_id }}" \
+            -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
+            -f phase_id="${{ steps.controller.outputs.discovery_wake_phase_id }}" \
+            -f mode=resume_existing \
+            -f chat_url="$chat" \
+            -f wake_message_b64="${{ steps.controller.outputs.discovery_wake_message_b64 }}" \
+            -f watchdog_enabled=false \
+            -f worker_role=reviewer \
+            -f gate_mode=LITE \
+            -f gate_repository=CurveYield2/Audit-Controller \
+            -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
+            -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
+            -f gate_expected_phase_id="${{ steps.controller.outputs.discovery_wake_phase_id }}" \
+            -f gate_expected_milestone_id="${{ steps.controller.outputs.discovery_wake_milestone_id }}" \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
 
       - name: Resolve active reviewer chat
         id: chat
