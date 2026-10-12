@@ -35,24 +35,39 @@ export function safeRepositoryProjectPath(root, relativePath) {
   return resolved;
 }
 
-export function runProcess({ command, args = [], cwd, env = process.env, onStdout = null }) {
+export function runProcess({ command, args = [], cwd, env = process.env, onStdout = null, timeoutMs = null }) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
     let settled = false;
-    const child = spawn(command, args, { cwd, env, shell: false });
+    let timedOut = false;
+    const bounded = Number.isSafeInteger(timeoutMs) && timeoutMs > 0;
+    // A bounded Linux runner must terminate the descendant Anvil/Foundry group too.
+    const group = bounded && process.platform !== 'win32';
+    const child = spawn(command, args, { cwd, env, shell: false, detached: group });
+    let killTimer = null;
+    const terminate = (signal) => {
+      try { if (group && child.pid) process.kill(-child.pid, signal); else child.kill(signal); } catch {}
+    };
+    const timeout = bounded ? setTimeout(() => {
+      timedOut = true;
+      stderr += `\nV7_EXECUTION_TIMEOUT: subprocess exceeded ${timeoutMs}ms\n`;
+      terminate('SIGTERM');
+      killTimer = setTimeout(() => terminate('SIGKILL'), 5_000);
+      killTimer.unref();
+    }, timeoutMs) : null;
+    const finish = (code, signal, error) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
+      resolve({ exitCode: timedOut ? -1 : Number.isInteger(code) ? code : -1,
+        signal: signal ?? null, timedOut, stdout, stderr: error ? `${stderr}${error.message}` : stderr });
+    };
     child.stdout?.on('data', (chunk) => { const text = chunk.toString(); stdout += text; if (onStdout) onStdout(text, child); });
     child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
-    child.on('error', (error) => {
-      if (settled) return;
-      settled = true;
-      resolve({ exitCode: -1, stdout, stderr: `${stderr}${error.message}` });
-    });
-    child.on('close', (code, signal) => {
-      if (settled) return;
-      settled = true;
-      resolve({ exitCode: Number.isInteger(code) ? code : -1, signal: signal ?? null, stdout, stderr });
-    });
+    child.on('error', (error) => finish(-1, null, error));
+    child.on('close', (code, signal) => finish(code, signal));
   });
 }
 
