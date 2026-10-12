@@ -857,7 +857,7 @@ if(sequence===5&&form&&deficiencies.length===0){
 if([6,8].includes(sequence)&&deficiencies.length===0){
   try{
     const sealedP5=canonicalFor(root,campaignPath,5);
-    const mandatory=materialPhase5CandidateKeys({root,campaignPath,form:sealedP5});
+    const mandatory=materialPhase5Candidates({root,campaignPath,form:sealedP5}).keys;
     const rows=sequence===6?(form.actions?.['step-2']?.outputs?.targetDispositions??[])
       :(form.actions?.['step-2']?.outputs?.candidateValidations??[]);
     const actual=rows.filter(x=>x&&typeof x==='object').map(x=>String(x.candidateKey??'').trim()).filter(Boolean);
