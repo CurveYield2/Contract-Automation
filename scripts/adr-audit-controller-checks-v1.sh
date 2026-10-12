@@ -92,4 +92,9 @@ if [[ "$target_authority_rc" != 0 && "$main_authority_rc" == 0 ]]; then
   cat .ac-target/authority-sync.txt
   exit 1
 fi
+if [[ "$target_ref" == *-swap ]]; then
+  rm -rf .ac-swapped
+  cp -a .ac-target .ac-swapped
+  ADR_SWAPPED_CONTROLLER_ROOT=.ac-swapped node --test packages/github-native-sim/test/adr-real-authority-swap-v1.test.mjs
+fi
 exit 0
