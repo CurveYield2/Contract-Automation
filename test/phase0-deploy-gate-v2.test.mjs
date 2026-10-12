@@ -21,3 +21,12 @@ test('gate rejects an unsupported native deployment',()=>{const x=fixture();x.sc
 test('gate rejects a failed executed script',()=>{const x=fixture();x.attempts[0].exitCode=1;assert.throws(()=>assertDeployGateEvidenceV2(x));});
 test('gate rejects lost source witness or unresolved gaps',()=>{const x=fixture();delete x.reconciliation.excludedScripts[0].sourceSha256;assert.throws(()=>assertDeployGateEvidenceV2(x));const y=fixture();y.gaps.push({type:'UNSAFE'});assert.throws(()=>assertDeployGateEvidenceV2(y));});
 test('gate rejects a skipped native script hidden outside exclusions',()=>{const x=fixture();x.scriptDispositions.push({scriptKey:'FOUNDRY:new',disposition:'EXCLUDED_OTHER_CHAIN'});x.coverage.detectedScripts++;assert.throws(()=>assertDeployGateEvidenceV2(x));});
+
+test('no-deployment-script waiver requires exact zero-script inventory and source binding',()=>{
+  const x=fixture();x.status='NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT';
+  x.sourceSha256='f'.repeat(64);x.detectedScripts=[];x.scriptDispositions=[];x.attempts=[];x.deployedContracts=[];
+  x.coverage={detectedScripts:0,requiredScripts:0,executedScripts:0,failedOrUnsupportedScripts:0};
+  assert.equal(assertDeployGateEvidenceV2(x),true);
+  x.coverage.detectedScripts=1;assert.throws(()=>assertDeployGateEvidenceV2(x),/zero-script/);
+  x.coverage.detectedScripts=0;x.detectedScripts=[{path:'deploy.mjs'}];assert.throws(()=>assertDeployGateEvidenceV2(x),/zero-script/);
+});
