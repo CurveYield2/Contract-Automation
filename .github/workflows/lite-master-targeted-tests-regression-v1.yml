@@ -1,4 +1,4 @@
-name: Lite Master Targeted Tests Regression v2
+name: Lite Master Targeted Tests Regression v3
 
 on:
   push:
@@ -12,12 +12,18 @@ on:
       - '.github/workflows/curveyield-dex-v17-master-targeted-tests-v1.yml'
       - '.github/workflows/curveyield-dex-master-targeted-tests-v1.yml'
       - 'scripts/audit-command-guard-v1.py'
+      - '.github/workflows/lite-phase0-randomized-simulation-v1.yml'
+      - '.github/workflows/lite-phase0-randomized-simulation-no-telemetry-v1.yml'
+      - '.github/workflows/lite-phase0-simulation-testing-v1.yml'
   pull_request:
     paths:
       - '.github/workflows/lite-master-targeted-tests-regression-v1.yml'
       - '.github/workflows/curveyield-dex-v17-master-targeted-tests-v1.yml'
       - '.github/workflows/curveyield-dex-master-targeted-tests-v1.yml'
       - 'scripts/audit-command-guard-v1.py'
+      - '.github/workflows/lite-phase0-randomized-simulation-v1.yml'
+      - '.github/workflows/lite-phase0-randomized-simulation-no-telemetry-v1.yml'
+      - '.github/workflows/lite-phase0-simulation-testing-v1.yml'
   workflow_dispatch:
 
 permissions:
