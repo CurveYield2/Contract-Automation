@@ -13,7 +13,7 @@ const key='P4-CAND-001';
 const sourceSha='a'.repeat(64);
 const requestId='dar-'+'b'.repeat(32);
 const campaignPath='campaigns/test-audit-r1';
-const target={candidateKey:key,executionMethod:'V7_REQUEST',reproductionType:'FOUNDRY_TEST'};
+const target={candidateKey:key,executionMethod:'V7_REQUEST',reproductionType:'FOUNDRY_TEST',executionRequestRef:'work/phase-05/execution-requests/'+key+'.json'};
 const evidenceRef=path.posix.join(campaignPath,'evidence/phase5-boundary',key,requestId,'raw-result.json');
 
 function fixture(){
@@ -21,12 +21,16 @@ function fixture(){
   const file=path.join(controllerRoot,...evidenceRef.split('/'));
   fs.mkdirSync(path.dirname(file),{recursive:true});
   // Persist the exact machine record, not a status-only placeholder.
+  const requestFile=path.join(controllerRoot,campaignPath,target.executionRequestRef);
+  fs.mkdirSync(path.dirname(requestFile),{recursive:true});
+  fs.writeFileSync(requestFile,JSON.stringify({requestId,requestDigest:'d'.repeat(64),
+    configuration:{analysis:{nativeFuzz:{fuzzRuns:1024}}}}));
   const rawResult={
-    requestId,status:'completed',blocking:false,preflight:{status:'PASS'},
+    requestId,status:'completed',blocking:false,preflight:{status:'PASS'},build:{status:'completed'},
     source:{archiveSha256:sourceSha},
     reproduction:{candidateId:key,status:'REPRODUCED',
       observedPredicate:{matched:true,observed:{componentStatus:'COMPLETED'}}},
-    analysis:{nativeFuzz:{componentStatus:'COMPLETED',toolInvoked:true}}
+    analysis:{nativeFuzz:{componentStatus:'COMPLETED',toolInvoked:true,rawOutput:{exitCode:0,stdout:'[PASS] testFuzz_Candidate (runs: 1024, μ: 100)'}}}
   };
   fs.writeFileSync(file,JSON.stringify(rawResult)+'\n');
   const executionResults={[key]:{
@@ -72,7 +76,7 @@ test('an orphan raw path, preflight failure, source mismatch, or missing reprodu
   assert.match(validatePhase5TargetExecutionGateV1(differentSource).join(' '),/source identity/);
   const fakeSuccess=structuredClone(args);
   fakeSuccess.executionResults[key].rawResult.reproduction=null;
-  assert.match(validatePhase5TargetExecutionGateV1(fakeSuccess).join(' '),/executed reproduction oracle/);
+  assert.match(validatePhase5TargetExecutionGateV1(fakeSuccess).join(' '),/conclusive executed reproduction observation/);
   const notExecuted=structuredClone(args);
   notExecuted.executionResults[key].rawResult.analysis.nativeFuzz.componentStatus='NOT_APPLICABLE';
   assert.match(validatePhase5TargetExecutionGateV1(notExecuted).join(' '),/never completed/);
