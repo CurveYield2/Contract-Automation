@@ -57,7 +57,6 @@ for(const wf of [
   '.github/workflows/lite-phase0-randomized-simulation-no-telemetry-v1.yml',
   '.github/workflows/lite-phase0-bootstrap-v1.yml',
   '.github/workflows/lite-phase0-bootstrap-no-telemetry-v1.yml',
-  '.github/workflows/v7-execution-infrastructure-qualification.yml',
   '.github/workflows/v7-execution-infrastructure-qualification-no-telemetry-v1.yml'
 ]){
   test(wf+' uses one checked private repository fetch per job',()=>{

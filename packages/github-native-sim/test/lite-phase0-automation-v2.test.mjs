@@ -17,13 +17,14 @@ test('fresh Lite audit keeps a single ZIP URL input surface',()=>{
 
 test('automated Phase 0 owns qualification intelligence finalization and only then launches browser orchestration',()=>{
   const coordinator=read('.github/workflows/lite-phase0-bootstrap-v1.yml');
-  const q=coordinator.indexOf('qualification:');
   const i=coordinator.indexOf('intelligence:');
+  const d=coordinator.indexOf('fork-deploy-config:');
   const f=coordinator.indexOf('finalize-and-launch-reviewer1:');
   const o=coordinator.indexOf('gh workflow run lite-audit-browser-orchestrator-v1.yml');
-  assert.ok(q>=0&&i>q&&f>i&&o>f);
-  assert.match(coordinator,/uses: \.\/\.github\/workflows\/v7-execution-infrastructure-qualification\.yml/);
+  assert.ok(i>=0&&d>i&&f>d&&o>f);
   assert.match(coordinator,/uses: \.\/\.github\/workflows\/lite-phase0-intelligence-v1\.yml/);
+  assert.match(coordinator,/uses: \.\/\.github\/workflows\/lite-phase0-randomized-simulation-v1\.yml/);
+  assert.doesNotMatch(coordinator,/uses: \.\/\.github\/workflows\/v7-execution-infrastructure-qualification\.yml/);
   assert.doesNotMatch(coordinator,/browser-agent-wake\.yml/);
 });
 
