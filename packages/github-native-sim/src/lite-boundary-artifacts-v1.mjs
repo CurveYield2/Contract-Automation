@@ -246,10 +246,13 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
       failures.push('Phase 5 mandatory '+key+' raw execution source identity differs from campaign source');
     }
     const reproduction=raw.reproduction;
+    // A completed negative finding is just as valid an audit result as a
+    // reproduced issue. Gate on an actual recorded observation, not on whether
+    // the attack hypothesis happened to be true.
     if(!reproduction||reproduction.candidateId!==key||
-       reproduction.status!=='REPRODUCED'||reproduction.observedPredicate?.matched!==true||
+       !['REPRODUCED','NOT_REPRODUCED'].includes(reproduction.status)||
        reproduction.observedPredicate?.observed==null){
-      failures.push('Phase 5 mandatory '+key+' has no matching executed reproduction oracle (not a confirmed security conclusion)');
+      failures.push('Phase 5 mandatory '+key+' has no conclusive executed reproduction observation');
     }
     const type=String(target.reproductionType??'');
     const component=type==='FOUNDRY_TEST'?raw.analysis?.nativeFuzz:
@@ -258,6 +261,21 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
       if(!component||component.toolInvoked===false||
          !['COMPLETED','COMPLETED_WITH_FAILURES'].includes(component.componentStatus)){
         failures.push('Phase 5 mandatory '+key+' required '+type+' component never completed its execution');
+      }
+      if(type==='FOUNDRY_TEST'){
+        const output=String(component?.rawOutput?.stdout??'')+'\\n'+String(component?.rawOutput?.stderr??'');
+        const requestRef=safeRel(target.executionRequestRef);
+        let requestedRuns=0;
+        if(requestRef&&controllerRoot)try{
+          const request=JSON.parse(fs.readFileSync(path.join(controllerRoot,...campaignPath.split('/'),...requestRef.split('/')),'utf8'));
+          requestedRuns=Number(request?.configuration?.analysis?.nativeFuzz?.fuzzRuns??0);
+        }catch{}
+        const executedRuns=[...output.matchAll(/\\bruns:\\s*(\\d+)/gi)].map(m=>Number(m[1]));
+        if(!Number.isInteger(requestedRuns)||requestedRuns<1||
+           component?.componentStatus!=='COMPLETED'||component?.rawOutput?.exitCode!==0||
+           !executedRuns.some(n=>n>=requestedRuns)){
+          failures.push('Phase 5 mandatory '+key+' has no passing Foundry fuzz test with the requested run count');
+        }
       }
     }else if(type==='ANVIL_WORKFLOW'){
       if(!Array.isArray(raw.simulation?.steps)||raw.simulation.steps.length===0){
