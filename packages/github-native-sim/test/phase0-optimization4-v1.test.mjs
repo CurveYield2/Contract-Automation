@@ -7,6 +7,7 @@ import { needsPackageRuntimeDependenciesV1 as primaryRequiresNode } from '../src
 const root=process.cwd();
 const read=rel=>fs.readFileSync(path.join(root,rel),'utf8');
 
+for(const [label,requiresNode] of [['primary',primaryRequiresNode]]){
   test(label+' only installs source-project runtime dependencies for admitted Node deployments',()=>{
     assert.equal(requiresNode({foundry:[{entry:'script/Deploy.s.sol'}],hardhat:[],genericPackageScripts:[]}),false);
     assert.equal(requiresNode({hardhat:[],unsafeHardhat:[{path:'scripts/unsafe.js'}],genericPackageScripts:[]}),false);
