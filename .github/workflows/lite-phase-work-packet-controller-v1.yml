@@ -161,20 +161,20 @@ jobs:
             echo "supplied_directory_path=$supplied_directory_path"
           } >> "$GITHUB_OUTPUT"
       - name: Set up Node.js for Phase-5 boundary execution
-        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05')
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED')
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install trusted runner dependencies for Phase-5 boundary execution
-        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05')
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED')
         shell: bash
         run: |
           set -euo pipefail
           npm ci --force
 
       - name: Install retained audit toolchain for Phase-5 boundary execution
-        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05')
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED')
         uses: ./.github/actions/setup-v7-toolchain
 
       - name: Select Audit-Controller credential
@@ -246,7 +246,7 @@ jobs:
         run: |
           set -euo pipefail
           if { [ "${{ steps.request.outputs.review_kind }}" = phase ] && [ "${{ steps.request.outputs.phase_sequence }}" = 5 ]; } ||
-             { [ "${{ steps.request.outputs.review_kind }}" = master ] && [ "${{ steps.request.outputs.segment_id }}" = reviewer-2-phases-02-05 ]; }; then
+             { [ "${{ steps.request.outputs.review_kind }}" = master ] && [ "${{ steps.request.outputs.segment_id }}" = reviewer-2-phases-02-05 ] && [ "${{ steps.request.outputs.master_outcome }}" = AMENDED ]; }; then
             test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::RPC_ETHEREUM secret missing for Phase-5 V7 fork preflight"; exit 1; }
           fi
           args=(--controller-root .audit-controller --campaign-id "${{ steps.request.outputs.campaign_id }}" --campaign-path "${{ steps.routing.outputs.campaign_path }}" --campaign-directory-path "${{ steps.routing.outputs.campaign_directory_path }}" --review-kind "${{ steps.request.outputs.review_kind }}" --audit-controller-ref "${{ steps.request.outputs.audit_controller_ref }}")
