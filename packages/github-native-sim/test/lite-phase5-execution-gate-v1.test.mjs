@@ -7,7 +7,10 @@ import {fileURLToPath} from 'node:url';
 import {
   validatePhase5TargetCoverageV1,
   validatePhase5TargetExecutionGateV1,
-  validateRecordedPhase5MachineEvidenceV1
+  validateRecordedPhase5MachineEvidenceV1,
+  selectReusablePhase5TargetsV1,
+  verifiedReusablePhase5ResultV1,
+  executePhase5TargetsV1
 } from '../src/lite-boundary-artifacts-v1.mjs';
 
 const key='P4-CAND-001';
@@ -176,4 +179,84 @@ test('Phase-6/master gate refuses a previously sealed Phase-5 claim without its 
   assert.match(failures.join('; '),/matrix|Sealed/);
   fs.unlinkSync(path.join(controllerRoot,...evidenceRef.split('/')));
   assert.match(validateRecordedPhase5MachineEvidenceV1({...args,expectedCampaignId:'test-audit-r1'}).join('; '),/missing|required/);
+});
+
+test('unchanged source-anchored target reuses evidence even if machine-owned prefills were refreshed',()=>{
+  const prior={...target,setup:'same setup',oracle:'same expected outcome',
+    requestBindingStatus:'PASS_OLD',automationResolvedExecutionRequest:false};
+  const current={...prior,requestBindingStatus:'PASS_NEW',
+    automationResolvedExecutionRequest:true};
+  const before=[{tempKey:key,sourceAnchor:'file.sol#L18',risk:'HIGH'}];
+  const after=[{tempKey:key,sourceAnchor:'file.sol#L18',risk:'MEDIUM'}];
+  assert.deepEqual(selectReusablePhase5TargetsV1({
+    priorTargetDesigns:[prior],targetDesigns:[current],
+    priorCandidateRecords:before,candidateRecords:after
+  }),[key]);
+  assert.deepEqual(selectReusablePhase5TargetsV1({
+    priorTargetDesigns:[prior],targetDesigns:[{...current,oracle:'changed oracle'}],
+    priorCandidateRecords:before,candidateRecords:after
+  }),[]);
+  assert.deepEqual(selectReusablePhase5TargetsV1({
+    priorTargetDesigns:[prior],targetDesigns:[current],
+    priorCandidateRecords:before,candidateRecords:[{tempKey:key,sourceAnchor:'other.sol#L18'}]
+  }),[]);
+  assert.deepEqual(selectReusablePhase5TargetsV1({
+    priorTargetDesigns:[prior],targetDesigns:[current],
+    priorCandidateRecords:[],candidateRecords:after
+  }),[]);
+});
+
+test('an unchanged, verified prior target does not spawn the simulation runner',async t=>{
+  const {args,controllerRoot}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
+  assert.ok(verifiedReusablePhase5ResultV1({
+    controllerRoot,campaignPath,target,expectedCampaignId:'test-audit-r1',expectedSourceSha256:sourceSha
+  }));
+  let spawned=0;
+  const results=await executePhase5TargetsV1({
+    ...args,expectedCampaignId:'test-audit-r1',reuseCandidateKeys:[key],
+    runProcessFn:async()=>{spawned++;return {exitCode:1,stdout:'unexpected execution',stderr:''};}
+  });
+  assert.equal(spawned,0);
+  assert.equal(results[key].reusedRecordedEvidence,true);
+  assert.deepEqual(validatePhase5TargetExecutionGateV1({...args,executionResults:results}),[]);
+});
+
+test('missing, tampered or source-mismatched result is never reused',async t=>{
+  const {args,controllerRoot,file}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
+  let spawned=0;
+  const stub=async()=>{spawned++;return {exitCode:1,stdout:'blocked before completion',stderr:''};};
+  const request={...args,expectedCampaignId:'test-audit-r1',
+    reuseCandidateKeys:[key],runProcessFn:stub};
+  fs.unlinkSync(file);
+  let results=await executePhase5TargetsV1(request);
+  assert.equal(spawned,1,'missing evidence must execute');
+  assert.notEqual(results[key].status,'PASS');
+  fs.writeFileSync(file,JSON.stringify({
+    ...args.executionResults[key].rawResult,requestDigest:'f'.repeat(64)
+  })+'\n');
+  results=await executePhase5TargetsV1(request);
+  assert.equal(spawned,2,'tampered request digest must not be reused');
+  fs.writeFileSync(file,JSON.stringify({
+    ...args.executionResults[key].rawResult,source:{archiveSha256:'0'.repeat(64),commit:'c'.repeat(40)}
+  })+'\n');
+  results=await executePhase5TargetsV1(request);
+  assert.equal(spawned,3,'wrong source identity must not be reused');
+  assert.ok(validatePhase5TargetExecutionGateV1({...args,executionResults:results}).length>0,
+    'blocked tests must never produce a controller PASS');
+});
+
+test('only eligible candidates are reused in a mixed set of targets',async t=>{
+  const {args,controllerRoot}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
+  let invoked=0;
+  const newTarget={...target,candidateKey:'P4-CAND-002',
+    executionRequestRef:'work/phase-05/execution-requests/P4-CAND-002.json'};
+  const results=await executePhase5TargetsV1({
+    ...args,targetDesigns:[target,newTarget],
+    reuseCandidateKeys:[key],
+    expectedCampaignId:'test-audit-r1',
+    runProcessFn:async()=>{invoked++;return {exitCode:1,stdout:'',stderr:'blocked'};}
+  });
+  assert.equal(invoked,0,'an unbound new target must be blocked without spawning Anvil');
+  assert.equal(results[key].reusedRecordedEvidence,true);
+  assert.equal(results['P4-CAND-002'].status,'BLOCKED_REQUEST_TARGET_BINDING_MISMATCH');
 });
