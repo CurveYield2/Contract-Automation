@@ -598,6 +598,40 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     }
   }
 
+  if(sequence===6&&form.actions?.['step-4']&&form.actions?.['step-5']&&
+     detectionPolicyForAuthorityV1({repoRoot:root,authorityRoot,readJsonIfExists:(rel)=>readJsonIf(repoFile(root,rel))})){
+    const b=readJsonIf(repoFile(root,path.posix.join(campaignPath,'work/phase-06/BASELINE_OBLIGATIONS_v1.json')))?.payload??{};
+    const groups=b.testGroups??[],obligations=b.obligations??[];
+    form.actions['step-4'].outputs.baselineTestRecords=groups.length?groups.map(g=>({
+      testGroupId:g.testGroupId,contract:g.contract,obligationIds:g.obligationIds,
+      obligationsDetail:obligations.filter(o=>g.obligationIds.includes(o.obligationId)),
+      requestDirectory:'controller/phase6-tests/'+g.testGroupId+'/',
+      harnessDesign:'<REQUIRED>',dispatchRounds:'<REQUIRED>',requestPaths:'<REQUIRED>',
+      obligationOutcomes:'<REQUIRED>',limitations:'<REQUIRED>',
+      automationOwnedFields:['testGroupId','contract','obligationIds','obligationsDetail','requestDirectory']
+    })):['NONE_IDENTIFIED'];
+    const p4=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json')));
+    const p5=readJsonIf(repoFile(root,path.posix.join(campaignPath,'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json')));
+    const sources=[...(p4?.actions?.['step-3']?.outputs?.candidateRecords??[]),
+      ...(p5?.actions?.['step-2']?.outputs?.newCandidateRecords??[])].filter(x=>x&&typeof x==='object');
+    const status=new Map(targetRows.map(x=>[x.candidateKey,x.reproductionStatus]));
+    const candidateRows=new Map();
+    for(const item of sources){
+      const key=item.tempKey??item.candidateKey;
+      if(!key||candidateRows.has(key))continue;
+      candidateRows.set(key,{
+        candidateKey:key,sourceAnchor:item.sourceAnchor??item.anchors?.[0]??'NONE_IDENTIFIED',
+        phase5Result:status.get(key)??'NOT_EXECUTED',
+        requestDirectory:'controller/phase6-tests/CP-'+String(key).replace(/[^A-Za-z0-9._-]/g,'_')+'/',
+        verdict:'<REQUIRED>',harnessDesign:'<REQUIRED>',dispatchRounds:'<REQUIRED>',
+        requestPaths:'<REQUIRED>',ledgerRef:'<REQUIRED>',
+        attackAssertionNames:'<REQUIRED>',controlAssertionNames:'<REQUIRED>',reasoning:'<REQUIRED>',
+        automationOwnedFields:['candidateKey','sourceAnchor','phase5Result','requestDirectory']
+      });
+    }
+    form.actions['step-5'].outputs.candidateProofRecords=candidateRows.size?[...candidateRows.values()]:['NONE_IDENTIFIED'];
+    form.actions['step-5'].outputs.newCandidateRecords=['NONE_IDENTIFIED'];
+  }
   if(sequence===9&&Array.isArray(prefillContext.remediationDeltaRows)){
     const rows=prefillContext.remediationDeltaRows;
     if(rows.length){

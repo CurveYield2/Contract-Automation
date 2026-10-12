@@ -619,6 +619,7 @@ jobs:
 
           mkdir -p "$evidence_dir" "$(dirname "$operator_rel")"
           cp "../.audit-evidence/v7-execution/$V7_REQUEST_ID/controller-evidence.json" "$evidence_rel"
+          node "$GITHUB_WORKSPACE/packages/github-native-sim/src/adr-assertion-ledger-v1.mjs" --evidence "$evidence_rel" --out "$evidence_dir/ASSERTION_LEDGER_v1.json" || true
           cp "../.audit-evidence/v7-execution/$V7_REQUEST_ID/EXECUTION_OBSERVER_RECEIPT_v1.json" "$observer_rel"
           gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq '.content' | base64 -d > "$qualification_rel"
           test "$(jq -r '.status // empty' "$qualification_rel")" = 'PASS'
@@ -647,7 +648,7 @@ jobs:
               writebackRef:$writeback_ref
             }' > "$operator_rel"
 
-          git add "$evidence_rel" "$observer_rel" "$qualification_rel" "$operator_rel"
+          git add "$evidence_rel" "$evidence_dir/ASSERTION_LEDGER_v1.json" "$observer_rel" "$qualification_rel" "$operator_rel"
           git config user.name 'CurveYield Audit Controller Automation'
           git config user.email 'audit-controller-automation@users.noreply.github.com'
           git commit -m "chore(audit): stage execution evidence for ingestion $V7_REQUEST_ID"

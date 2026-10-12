@@ -450,13 +450,13 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   };
 }
 
-export function masterWakeMessage({campaignId,pending,auditControllerRef='main',authorityRoot=null}){
+export function masterWakeMessage({campaignId,pending,auditControllerRef='main',authorityRoot=null,extraLines=[]}){
   const phases=pending.segmentPhases.length===1?'Phase '+pending.segmentPhases[0]:'Phases '+pending.segmentPhases[0]+'-'+pending.segmentPhases.at(-1);
   const guide=(authorityRoot?authorityRoot+'/':'')+'master-review/START_HERE.md';
   return 'MASTER_REVIEW_REQUIRED: campaign '+campaignId+', segment '+pending.segmentId+' ('+pending.reviewerId+', '+phases+'). '+
     'Read the segment record '+pending.recordPath+' in Audit-Controller. '+
     'Follow the authoritative Audit Skill guide '+guide+' for review, amendment limits, and submission. '+
-    'Use the campaign ref '+auditControllerRef+'.';
+    'Use the campaign ref '+auditControllerRef+'.'+(extraLines.length?'\n'+extraLines.join('\n'):'');
 }
 
 function assertDigest(root,record,label){

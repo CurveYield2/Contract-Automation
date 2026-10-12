@@ -25,6 +25,7 @@ import {registerMasterTargetedTests,acceptMasterTargetedTestResults,verifyMaster
 import {admitPostCompletionFollowupV1} from './lib/lite-post-completion-followup-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
 import {startDiscoveryV1,advanceDiscoveryV1,completeDiscoveryV1} from '../packages/github-native-sim/src/adr-discovery-v1.mjs';
+import {validatePhase6AttackerWorkV1,validatePhase8LinkageV1,validatePhase10CoverageLabelV1,appendAdrCoverageSectionV1} from '../packages/github-native-sim/src/adr-phase-validation-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
@@ -1002,6 +1003,10 @@ try{
 
   deficiencies.push(...validateWorkForm(schema,form));
   deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+  if(activeDetectionPolicyV1(predecessor)){
+    const fn=({6:validatePhase6AttackerWorkV1,8:validatePhase8LinkageV1,10:validatePhase10CoverageLabelV1})[sequence];
+    if(fn)deficiencies.push(...fn({root,campaignPath,form}));
+  }
 
   if(sequence===9&&deficiencies.length===0){
     const collectionDeficiencies=populatePhase9RerunEvidenceRefs({root,campaignPath,form});
@@ -1299,7 +1304,7 @@ if(sequence===8&&hasRemediation(campaignRoot)){
 if(sequence===8&&!hasRemediation(campaignRoot)){
   const indexRel=path.posix.join(campaignPath,'work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
   fs.mkdirSync(path.dirname(repoFile(root,indexRel)),{recursive:true});
-  fs.writeFileSync(repoFile(root,indexRel),renderFinalEvidenceIndexV1(buildFinalIndexInput({root,campaignPath,directory,predecessor})));
+  fs.writeFileSync(repoFile(root,indexRel),(activeDetectionPolicyV1(predecessor)?appendAdrCoverageSectionV1({root,campaignPath,automationRoot:process.cwd(),text:renderFinalEvidenceIndexV1(buildFinalIndexInput({root,campaignPath,directory,predecessor}))}):renderFinalEvidenceIndexV1(buildFinalIndexInput({root,campaignPath,directory,predecessor}))));
   boundaryArtifactRels.push(indexRel);
 }
 if(sequence===9){
@@ -1313,7 +1318,7 @@ if(sequence===9){
 
   const indexRel=path.posix.join(campaignPath,'work/phase-10/LITE_FINAL_EVIDENCE_INDEX.md');
   fs.mkdirSync(path.dirname(repoFile(root,indexRel)),{recursive:true});
-  fs.writeFileSync(repoFile(root,indexRel),renderFinalEvidenceIndexV1(buildFinalIndexInput({root,campaignPath,directory,predecessor})));
+  fs.writeFileSync(repoFile(root,indexRel),(activeDetectionPolicyV1(predecessor)?appendAdrCoverageSectionV1({root,campaignPath,automationRoot:process.cwd(),text:renderFinalEvidenceIndexV1(buildFinalIndexInput({root,campaignPath,directory,predecessor}))}):renderFinalEvidenceIndexV1(buildFinalIndexInput({root,campaignPath,directory,predecessor}))));
   boundaryArtifactRels.push(indexRel);
 }
 
@@ -1404,7 +1409,17 @@ const masterBoundary=sequence===1?1:sequence===5?5:sequence===6?7:sequence===10?
 if(gatedMasterReview&&masterBoundary!==null){
   const staged=stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase:masterBoundary,lastSealedReceiptPath:sealedReceiptRel,nextSequence,nextDerivedInputPaths:nextDerivedInputs,successorPrefillContext,now});
   writeJson(directoryFile,directory);
-  const feedback=masterWakeMessage({campaignId:directory.campaignId,pending:staged.pending,auditControllerRef:a['audit-controller-ref']??'main',authorityRoot});
+  const ref=a['audit-controller-ref']??'main';
+  const blob=(rel)=>'https://github.com/CurveYield2/Audit-Controller/blob/'+ref+'/'+
+    rel.split('/').map(encodeURIComponent).join('/');
+  const extraLines=[];
+  if(activeDetectionPolicyV1(predecessor)){
+    if(staged.segment.segmentId==='reviewer-2-phases-02-05')
+      extraLines.push('As challenger, review every item in '+blob(path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json'))+': attacker findings and contradictions, unresolved checks, not-applicable claims and coverage gaps. Amend reviewer work or order targeted tests through the existing directive; accept a gap only with a stated reason.');
+    if(staged.segment.segmentId==='reviewer-4-phases-08-10')
+      extraLines.push('Check the coverage label and every gap in '+blob(path.posix.join(campaignPath,'work/phase-10/COVERAGE_MATRIX_v1.json'))+' before accepting.');
+  }
+  const feedback=masterWakeMessage({campaignId:directory.campaignId,pending:staged.pending,auditControllerRef:ref,authorityRoot,extraLines});
   process.stdout.write(JSON.stringify({status:'WAITING_FOR_MASTER_REVIEW',controllerPassToken:'CONTROLLER_PHASE_PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,segmentId:staged.segment.segmentId,masterReviewRequired:true,masterChatUrl:directory.masterReview.chatUrl,masterReasoning:'MAXIMUM',recordPath:staged.pending.recordPath,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
   process.exit(0);
 }

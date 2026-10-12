@@ -44,6 +44,8 @@ jobs:
           files=(scripts/tests/adr-*.test.mjs packages/github-native-sim/test/adr-*.test.mjs)
           if [ "${#files[@]}" -eq 0 ]; then echo "No adr tests yet"; exit 0; fi
           timeout -k 10s 900s node --test "${files[@]}"
+      - name: Validate V7 runner manifest pin
+        run: timeout -k 10s 120s npm run v7:manifest -- --check
       - name: Existing controller regression tests
         shell: bash
         run: |
@@ -54,6 +56,9 @@ jobs:
             packages/github-native-sim/test/lite-phase5-execution-gate-v1.test.mjs \
             packages/github-native-sim/test/lite-phase-schema-policy-v1.test.mjs \
             packages/github-native-sim/test/source-intelligence-technical-v1.test.mjs \
+            packages/github-native-sim/test/native-fuzz-v1.test.mjs \
+            packages/github-native-sim/test/medusa-cli-output-v1.test.mjs \
+            packages/github-native-sim/test/medusa-no-tests-real-output-v2.test.mjs \
             scripts/tests/lite-master-targeted-tests-v1.test.mjs
 
   audit-controller-checks:
