@@ -89,4 +89,9 @@ if [[ "$target_authority_rc" != 0 && "$main_authority_rc" == 0 ]]; then
   cat .ac-target/authority-sync.txt
   exit 1
 fi
+# Temporary T8 staging-only self-check; revert before merging the ref-only verification PR.
+if [[ -n "$authority_root" ]]; then
+  echo "v12 staging old-release references:"
+  git -C .ac-target grep -n 'Audit_Litemode_v11' -- "$authority_root" | grep -v '/PACKAGE_PROVENANCE.md:' || true
+fi
 exit 0
