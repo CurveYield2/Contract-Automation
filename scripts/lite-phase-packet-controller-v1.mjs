@@ -652,6 +652,21 @@ if(reviewKind==='sealed-rework'){
 const assignment=directory.currentAssignment;
 if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current assignment does not match submitted phase');
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'predecessor sealed receipt'));
+const expectedPrevious=sequence===8?7:sequence-1;
+if(predecessor.phase?.sequence!==expectedPrevious||
+   predecessor.campaign?.campaignId!==directory.campaignId||
+   predecessor.campaign?.campaignGenerationId!==directory.campaignGenerationId||
+   predecessor.source?.sha256!==directory.sourceSha256){
+  throw new Error('Successor predecessor phase, campaign generation or source identity mismatch.');
+}
+const legitimatePhase9Skip=sequence===10&&expectedPrevious===9&&
+   predecessor.phase?.status==='SKIPPED'&&predecessor.validation?.status==='NOT_APPLICABLE'&&
+   (predecessor.automation??[]).some(x=>x.action==='SKIPPED_NO_REMEDIATION')&&
+   !hasRemediation(campaignRoot);
+if(!legitimatePhase9Skip&&
+   (predecessor.phase?.status!=='SEALED'||predecessor.validation?.status!=='PASS')){
+  throw new Error('Successor requires validated SEALED/PASS predecessor receipt; missing or skipped mandatory work cannot advance.');
+}
 const authorityRoot=authorityRootFromReceipt(predecessor);
 const loaded=loadPhaseSchema(root,authorityRoot,sequence); const schema=loaded.schema;
 const gatedMasterReview=masterReviewRequired(directory,authorityRoot)&&!masterAmendmentRefreshSha;
