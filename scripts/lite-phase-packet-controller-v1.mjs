@@ -428,12 +428,12 @@ function restoreLedgerBeforeMasterPhase({root,campaignPath,authorityRoot,earlies
     return {...structuredClone(o),requiredPhase:String(due),requiredReviewer:reviewerForPhase(due),
       status:'OPEN',statusReason:null,closureEvidenceRefs:[],updatedAt:o.createdAt??now};
   });
-  if((old.obligations??[]).length&&!initial.length)
-    throw new Error('historical ledger cannot identify any Phase-0 starting obligations');
   const ledger={...old,obligations:initial,
     controllerImports:(old.controllerImports??[]).filter(x=>Number(x?.phase)===0),
     phaseCheckpoints:(old.phaseCheckpoints??[]).filter(x=>x?.phaseId==='phase-0')};
   for(let phase=1;phase<earliest;phase++){
+    // Phase 7 is a marker only, not a second obligation-processing phase.
+    if(phase===7)continue;
     const canonical=canonicalFor(root,campaignPath,phase);
     if(!canonical){
       // The controller itself emits Phase 7 and optional skipped Phase 9.
