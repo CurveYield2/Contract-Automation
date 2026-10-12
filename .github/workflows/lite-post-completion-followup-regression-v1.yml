@@ -36,6 +36,17 @@ jobs:
         run: |
           set -euo pipefail
           gh auth setup-git
-          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none
+          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --sparse
+          cd .audit-controller
+          git sparse-checkout set \
+            'Audit Campaign Directory/campaigns' \
+            'Audit Skill - Current Authority/Audit_Litemode_v11' \
+            'campaigns/CurveYield DEX v16 Source r4/work' \
+            'campaigns/CurveYield DEX v16 Source r4/derived' \
+            'campaigns/CurveYield DEX v16 Source r4/receipts' \
+            'campaigns/CurveYield DEX v16 Source r4/submissions' \
+            'campaigns/CurveYield DEX v16 Source r4/controller' \
+            'campaigns/CurveYield DEX v16 Source r4/evidence/build' \
+            'campaigns/CurveYield DEX v16 Source r4/evidence/source-intelligence'
       - name: Validate bounded admission in ephemeral checkout only
         run: node scripts/tests/lite-post-completion-followup-v1.test.mjs .audit-controller
