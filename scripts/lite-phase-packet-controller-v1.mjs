@@ -404,6 +404,79 @@ function isSupersedableRow(row){
   if(['SEALED_RECEIPT','SKIP_MARKER'].includes(row.kind)||row.kind.startsWith('GLOBAL_CONTROL_'))return false;
   return !/^(receipts|controller|superseded)\//.test(row.path);
 }
+// Reconstruct the ledger at the *historical* boundary, not from final-state
+// obligations that later reviewers have already satisfied or carried. Existing
+// sealed canonical outputs are the authority for all predecessor transitions.
+// No new checkpoint/sidecar file is introduced.
+function restoreLedgerBeforeMasterPhase({root,campaignPath,authorityRoot,earliest,now}){
+  const rel=path.posix.join(campaignPath,'controller/CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json');
+  const old=readJson(requiredFile(root,rel,'current obligation ledger'));
+  const firstSeen=new Map();
+  for(let phase=1;phase<=10;phase++){
+    const canonical=canonicalFor(root,campaignPath,phase);
+    if(!canonical)continue;
+    for(const action of Object.values(canonical.actions??{})){
+      for(const row of action?.outputs?.obligationDispositions??[]){
+        const id=String(row?.obligationId??'');
+        if(id&&!firstSeen.has(id))firstSeen.set(id,phase);
+      }
+    }
+  }
+  const initial=(old.obligations??[]).filter(o=>Number(o?.originPhase)===0).map(o=>{
+    const due=firstSeen.get(String(o.obligationId??''))??Number(o.requiredPhase);
+    if(!Number.isInteger(due)||due<1||due>10)throw new Error('historical Phase-0 obligation has no valid first due phase: '+String(o.obligationId));
+    return {...structuredClone(o),requiredPhase:String(due),requiredReviewer:reviewerForPhase(due),
+      status:'OPEN',statusReason:null,closureEvidenceRefs:[],updatedAt:o.createdAt??now};
+  });
+  if((old.obligations??[]).length&&!initial.length)
+    throw new Error('historical ledger cannot identify any Phase-0 starting obligations');
+  const ledger={...old,obligations:initial,
+    controllerImports:(old.controllerImports??[]).filter(x=>Number(x?.phase)===0),
+    phaseCheckpoints:(old.phaseCheckpoints??[]).filter(x=>x?.phaseId==='phase-0')};
+  for(let phase=1;phase<earliest;phase++){
+    const canonical=canonicalFor(root,campaignPath,phase);
+    if(!canonical){
+      // The controller itself emits Phase 7 and optional skipped Phase 9.
+      if(phase===7||phase===9)continue;
+      throw new Error('historical master ledger replay lacks sealed predecessor Phase '+phase);
+    }
+    const schema=loadPhaseSchema(root,authorityRoot,phase).schema;
+    const canonicalRel=canonicalRelFor(campaignPath,phase);
+    for(const dot of schema.bookkeepingMappings?.obligationRecordPaths??[]){
+      normalizeFormalObligationsIntoLedger({ledger,items:getByPath(canonical,dot),originPhase:phase,canonicalRel,now});
+    }
+    const domain=canonical.automationInputs?.domainRegistryPath;
+    if(domain){
+      const registry=maybeJson(root,path.posix.join(campaignPath,domain));
+      if(!registry)throw new Error('historical domain registry missing at Phase '+phase);
+      normalizeFormalObligationsIntoLedger({
+        ledger,items:registry.generatedObligations??[],originPhase:phase,canonicalRel,now
+      });
+    }
+    applyObligationDispositionsToLedger({ledger,canonical,sequence:phase,canonicalRel,now});
+  }
+  // Preserve immutable predecessor bookkeeping timestamps and imports. Only
+  // the later phases under amendment are rebuilt and stamped with this replay.
+  ledger.controllerImports=(old.controllerImports??[]).filter(x=>Number(x?.phase)<earliest);
+  for(const checkpoint of old.phaseCheckpoints??[]){
+    const phase=Number(String(checkpoint?.phaseId??'').replace('phase-',''));
+    if(!(phase>=0&&phase<earliest))continue;
+    const idx=(ledger.phaseCheckpoints??[]).findIndex(x=>x?.phaseId===checkpoint.phaseId);
+    if(idx<0)continue;
+    const observed=ledger.phaseCheckpoints[idx];
+    if(observed.dispositionCount===checkpoint.dispositionCount &&
+       observed.openOrBlockedAfterPhase===checkpoint.openOrBlockedAfterPhase)
+      ledger.phaseCheckpoints[idx]=checkpoint;
+  }
+  // Preserve creation timestamps of accepted predecessors where IDs match.
+  const oldById=new Map((old.obligations??[]).map(o=>[String(o.obligationId??''),o]));
+  for(const item of ledger.obligations){
+    const prior=oldById.get(String(item.obligationId??''));
+    if(prior?.createdAt)item.createdAt=prior.createdAt;
+  }
+  writeJson(repoFile(root,rel),ledger);
+}
+
 function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRoot,result,now}){
   const segment=MASTER_REVIEW_SEGMENTS_V1.find(x=>x.segmentId===result.pending.segmentId);
   if(!segment)throw new Error('master amendment refresh segment is unsupported');
@@ -433,6 +506,7 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
     const receiptLibRel='packages/controller-core/src/lite-phase-receipt-v1.mjs';
     fs.mkdirSync(path.dirname(repoFile(shadowRoot,receiptLibRel)),{recursive:true});
     fs.copyFileSync(requiredFile(root,receiptLibRel,'lite receipt library'),repoFile(shadowRoot,receiptLibRel));
+    restoreLedgerBeforeMasterPhase({root:shadowRoot,campaignPath,authorityRoot,earliest,now});
 
     let shadowDirectory=readJson(repoFile(shadowRoot,directoryRel));
     shadowDirectory.pendingMasterReview={...shadowDirectory.pendingMasterReview,status:'MASTER_AMENDMENT_REFRESH',amendmentSha256:amendmentSha};
