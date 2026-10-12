@@ -1,0 +1,41 @@
+name: Lite Post-Completion Followup Admission Regression v1
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/lib/lite-post-completion-followup-v1.mjs'
+      - 'scripts/lib/lite-master-review-v1.mjs'
+      - 'scripts/lite-phase-packet-controller-v1.mjs'
+      - 'scripts/tests/lite-post-completion-followup-v1.test.mjs'
+      - '.github/workflows/lite-post-completion-followup-regression-v1.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify current controller source syntax
+        run: |
+          node --check scripts/lib/lite-post-completion-followup-v1.mjs
+          node --check scripts/lib/lite-master-review-v1.mjs
+          node --check scripts/lite-phase-packet-controller-v1.mjs
+          node --check scripts/tests/lite-post-completion-followup-v1.test.mjs
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Checkout accepted campaign and bound authority for read-only regression
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none
+      - name: Validate bounded admission in ephemeral checkout only
+        run: node scripts/tests/lite-post-completion-followup-v1.test.mjs .audit-controller
