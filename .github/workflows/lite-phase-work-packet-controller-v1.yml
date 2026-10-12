@@ -396,6 +396,23 @@ jobs:
           [[ "$chat" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$chat" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || { echo "::error::No preassigned test reviewer chat"; exit 1; }
           echo "url=$chat" >> "$GITHUB_OUTPUT"
 
+      - name: Wake test reviewer on master's directive
+        if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' && steps.testchat.outputs.url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.test_request_id }}-test-reviewer" \
+            -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
+            -f phase_id=master-targeted-tests \
+            -f mode=resume_existing \
+            -f chat_url="${{ steps.testchat.outputs.url }}" \
+            -f wake_message_b64="${{ steps.controller.outputs.feedback_b64 }}" \
+            -f watchdog_enabled=false \
+            -f worker_role=reviewer \
+            -f gate_mode=LITE
+
       - name: Wake master reviewer
         if: steps.routing.outputs.effective_hold != 'true' && (steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID') && steps.controller.outputs.master_chat_url != ''
         env:
