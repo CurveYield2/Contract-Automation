@@ -167,8 +167,8 @@ const phase0SimulationWorkflow=read(join(automationRoot,'.github/workflows/lite-
 const phase0Projector=read(join(automationRoot,'scripts/write-phase0-simulation-outputs-v1.mjs'));
 const phase0Bootstrap=read(join(automationRoot,'.github/workflows/lite-phase0-bootstrap-v1.yml'));
 need(phase0Simulation.includes('DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE'),'deployment-script adapter does not preserve typed unsafe-binding limitations');
-need(phase0SimulationWorkflow.includes('SIM_ARCHIVE_PRIMARY_ETHEREUM_01'),'Phase 0 simulation workflow is not bound to the canonical Ethereum fork RPC');
-need(phase0Bootstrap.includes('needs: randomized-simulation'),'Phase 0 finalization is not gated on randomized simulation');
+need(phase0SimulationWorkflow.includes('ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}')&&phase0SimulationWorkflow.includes('run-phase0-fork-deploy-config-v1.mjs'),'Phase 0 fork deploy/config must use exact private Ethereum fork RPC');
+need(phase0Bootstrap.includes('needs: [fork-deploy-config]'),'Phase 0 finalization must depend on fork deploy/config');
 
 need(boundaryWorkflow.includes("process/agent-upload/lite-phase-boundary/*.json"),'phase-boundary controller lacks an agent-operable request trigger');
 need(boundaryWorkflow.includes('curveyield-lite-phase-boundary-request-v1'),'phase-boundary controller does not validate the request schema');
