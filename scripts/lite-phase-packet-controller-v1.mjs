@@ -738,7 +738,7 @@ if(directory.campaignId!==expectedCampaignId) throw new Error('campaign-id does 
 if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does not match Audit Campaign Directory workspacePath');
 // Stage every master decision in an isolated controller checkout. Only a
 // fully successful acceptance or targeted-test directive may change Git state.
-if(['master','master-test-result'].includes(reviewKind)&&a['master-transaction-child']!=='true'){
+if(['master','master-test-result'].includes(reviewKind)&&a['master-transaction-child']!=='true'&&!(reviewKind==='master'&&a['master-outcome']==='REQUEST_TARGETED_TESTS')){
   let response;
   const shadowRoot=fs.mkdtempSync(path.join(os.tmpdir(),'lite-master-transaction-'));
   try{
