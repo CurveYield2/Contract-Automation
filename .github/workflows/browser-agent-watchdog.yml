@@ -601,6 +601,29 @@ jobs:
                     exit 0
                   fi
 
+                  if jq -e --arg state "$campaign_status" '.gate.stopCampaignStatuses | index($state) != null' /tmp/watchdog-state.json >/dev/null; then
+                    retire_state "LITE_CAMPAIGN_GATE_STOP_$campaign_status"
+                    exit 0
+                  fi
+
+                  # Targeted-test work has no currentAssignment. Supervise exactly the
+                  # outstanding master request; retire on result, re-review or cancellation.
+                  if [ "$campaign_status" = "WAITING_FOR_TARGETED_TESTS" ]; then
+                    if [ "$gate_expected_phase" != "master-targeted-tests" ]; then
+                      retire_state "LITE_TESTS_OWNED_BY_DELEGATED_REVIEWER"
+                      exit 0
+                    fi
+                    if [ -z "$gate_expected_milestone" ] || ! jq -e --arg request "$gate_expected_milestone" \
+                      '.pendingMasterReview.targetedTests[]? | select(.requestId==$request and .status=="AWAITING_EXECUTION")' \
+                      /tmp/audit-campaign-directory.json >/dev/null; then
+                      retire_state "LITE_TARGETED_REQUEST_NO_LONGER_PENDING"
+                      exit 0
+                    fi
+                  elif [ "$gate_expected_phase" = "master-targeted-tests" ]; then
+                    retire_state "LITE_TARGETED_REQUEST_NO_LONGER_PENDING"
+                    exit 0
+                  fi
+
                   # A completed segment is handed to the master reviewer; the outgoing
                   # reviewer's watchdog retires exactly as at a successor handoff.
                   if [ "$campaign_status" = "WAITING_FOR_MASTER_REVIEW" ] && [ "$gate_expected_phase" != "master-review" ]; then

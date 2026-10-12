@@ -430,12 +430,16 @@ jobs:
             -f mode=resume_existing \
             -f chat_url="${{ steps.testchat.outputs.url }}" \
             -f wake_message_b64="$message_b64" \
-            -f watchdog_enabled=false \
+            -f watchdog_enabled=true \
             -f worker_role=reviewer \
             -f gate_mode=LITE \
             -f gate_repository=CurveYield2/Audit-Controller \
             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
-            -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"
+            -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
+            -f gate_expected_phase_id=master-targeted-tests \
+            -f gate_expected_milestone_id="${{ steps.controller.outputs.test_request_id }}" \
+            -f gate_stop_states_csv=STOPPED_BY_HUMAN \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
 
       - name: Wake master reviewer
         if: steps.routing.outputs.effective_hold != 'true' && (steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID') && steps.controller.outputs.master_chat_url != ''
