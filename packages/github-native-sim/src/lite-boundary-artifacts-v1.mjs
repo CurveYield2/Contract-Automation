@@ -263,14 +263,14 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
         failures.push('Phase 5 mandatory '+key+' required '+type+' component never completed its execution');
       }
       if(type==='FOUNDRY_TEST'){
-        const output=String(component?.rawOutput?.stdout??'')+'\\n'+String(component?.rawOutput?.stderr??'');
+        const output=String(component?.rawOutput?.stdout??'')+'\n'+String(component?.rawOutput?.stderr??'');
         const requestRef=safeRel(target.executionRequestRef);
         let requestedRuns=0;
         if(requestRef&&controllerRoot)try{
           const request=JSON.parse(fs.readFileSync(path.join(controllerRoot,...campaignPath.split('/'),...requestRef.split('/')),'utf8'));
           requestedRuns=Number(request?.configuration?.analysis?.nativeFuzz?.fuzzRuns??0);
         }catch{}
-        const executedRuns=[...output.matchAll(/\\bruns:\\s*(\\d+)/gi)].map(m=>Number(m[1]));
+        const executedRuns=[...output.matchAll(/\bruns:\s*(\d+)/gi)].map(m=>Number(m[1]));
         if(!Number.isInteger(requestedRuns)||requestedRuns<1||
            component?.componentStatus!=='COMPLETED'||component?.rawOutput?.exitCode!==0||
            !executedRuns.some(n=>n>=requestedRuns)){
