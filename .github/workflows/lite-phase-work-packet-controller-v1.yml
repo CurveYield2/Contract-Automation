@@ -346,6 +346,7 @@ jobs:
             echo "master_accepted=$(jq -r '.masterReviewAccepted // false' /tmp/lite-phase-packet-result.json)"
             echo "test_reviewer=$(jq -r '.testReviewer // empty' /tmp/lite-phase-packet-result.json)"
             echo "test_request_id=$(jq -r '.testRequestId // empty' /tmp/lite-phase-packet-result.json)"
+            echo "authority_link_root=$(jq -r '.authorityLinkRoot // empty' /tmp/lite-phase-packet-result.json)"
             echo "discovery_wake_chat_key=$(jq -r '.discoveryWakeChatKey // empty' /tmp/lite-phase-packet-result.json)"
             echo "discovery_wake_id=$(jq -r '.discoveryWakeId // empty' /tmp/lite-phase-packet-result.json)"
             echo "discovery_wake_phase_id=$(jq -r '.discoveryWakePhaseId // empty' /tmp/lite-phase-packet-result.json)"
@@ -486,7 +487,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          guide='Audit Skill - Current Authority/Audit_Litemode_v11/master-review/TARGETED_TEST_DIRECTIVE_v1.md'
+          guide="${{ steps.controller.outputs.authority_link_root }}/master-review/TARGETED_TEST_DIRECTIVE_v1.md"
           message_b64="$({ printf 'AFTER YOUR MANDATORY WAKE RECEIPT, READ %s IN CurveYield2/Audit-Controller USING THE GITHUB CONNECTOR. Follow its executing-reviewer instructions exactly.\n\n' "$guide"; printf '%s' "${{ steps.controller.outputs.feedback_b64 }}" | base64 -d; } | base64 -w0)"
           timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.test_request_id }}-test-reviewer" \
