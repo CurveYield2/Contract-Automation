@@ -9,7 +9,20 @@ const root=path.resolve(process.argv[2]??'.audit-controller');
 const campaignPath='campaigns/CurveYield DEX v16 Source r4';
 const requestPath=campaignPath+'/controller/POST_COMPLETION_FOLLOWUP_REQUEST_v1.json';
 const dirPath='Audit Campaign Directory/campaigns/curveyield-dex-v16-source.json';
-const orig=readJson(path.join(root,dirPath));
+const observed=readJson(path.join(root,dirPath));
+// Reconstruct the terminal snapshot when the live campaign has already been legitimately reopened.
+// Never mutate the connected campaign: all admission assertions exercise an isolated in-memory copy.
+const orig=structuredClone(observed);
+if(orig.campaignStatus==='WAITING_FOR_MASTER_REVIEW'||orig.campaignStatus==='WAITING_FOR_TARGETED_TESTS'){
+  assert.equal(orig.pendingMasterReview?.postCompletionFollowup?.originalCampaignStatus,'COMPLETE');
+  assert.equal(orig.postCompletionFollowup?.originalCampaignStatus,'COMPLETE');
+  assert.equal(orig.postCompletionFollowup?.segmentId,'reviewer-4-followup-v1');
+  orig.lastAcceptedMasterReview=structuredClone(orig.postCompletionFollowup.originalAcceptedMasterReview);
+  orig.campaignStatus='COMPLETE';
+  orig.currentAssignment=null;
+  delete orig.pendingMasterReview;
+  delete orig.postCompletionFollowup;
+}
 const phase10=path.join(root,orig.lastSealedReceiptPath);
 const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 const receiptBefore=sha(phase10);
