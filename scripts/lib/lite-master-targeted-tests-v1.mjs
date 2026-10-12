@@ -10,7 +10,13 @@ const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const substantial=s=>typeof s==='string'&&s.trim().length>=24;
 const inside=(root,rel,prefix)=>{
   if(typeof rel!=='string'||!rel.startsWith(prefix)||rel!==path.posix.normalize(rel)||rel.split('/').includes('..'))throw new Error('targeted-test artifact path escapes its campaign allocation: '+rel);
-  return requiredFile(root,rel,'campaign-local targeted-test evidence');
+  const file=requiredFile(root,rel,'campaign-local targeted-test evidence');
+  const realRoot=fs.realpathSync(root);
+  const allowed=path.join(realRoot,...prefix.split('/').filter(Boolean));
+  const real=fs.realpathSync(file);
+  if(fs.lstatSync(file).isSymbolicLink()||!real.startsWith(allowed+path.sep))
+    throw new Error('targeted-test evidence must be a real regular file inside the allocated campaign directory');
+  return file;
 };
 const location=(campaignPath,segmentId)=>path.posix.join(campaignPath,'work/master-review',segmentId);
 const planRel=(campaignPath,segmentId,round)=>path.posix.join(location(campaignPath,segmentId),'TARGETED_TEST_REQUEST_v'+round+'.json');
