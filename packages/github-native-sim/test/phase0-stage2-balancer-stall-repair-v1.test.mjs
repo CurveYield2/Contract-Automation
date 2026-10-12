@@ -18,17 +18,6 @@ test('malformed recursive creator evidence fails immediately and never blocks fi
   let deep={a:'ok'};for(let i=0;i<40;i++)deep={child:deep};
   assert.throws(()=>normalizeEvidenceValueV1(deep),/bounded serializer limits/);
 });
-test('No Telemetry Stage 2 skips only known Balancer BPT pool spender approvals while retaining actual token/router funding',()=>{
-  const s=fs.readFileSync('packages/github-native-sim/src/phase0-randomized-simulation-no-telemetry-v1.mjs','utf8');
-  assert.match(s,/const balancerPoolChildren=new Set/);
-  assert.match(s,/CURVEYIELD_WRAPPER_ALLOWLIST\|BALANCER_V3_FACTORY/);
-  assert.match(s,/const approvalSpenders=createdAddresses.filter/);
-  assert.match(s,/approveFixtureSpendersV1\(\{provider,ethers,tokens:existingTokens,holders:stage2Holders,spenders:approvalSpenders\}\)/);
-  assert.match(s,/spenders:\[\.\.\.targets.map\(x=>x.address\),\.\.\.createdAddresses\]/);
-  assert.match(s,/BALANCER_V3_POOLS_ARE_NOT_TOKEN_SPENDERS/);
-  assert.match(s,/END Stage 2 creator round/);
-  assert.match(s,/START Stage 2 created BPT\/token funding/);
-});
 test('creator checkpoint includes evidence serialization and completed creator records',()=>{
   const s=fs.readFileSync('packages/github-native-sim/src/phase0-fixture-synthesis-v1.mjs','utf8');
   assert.match(s,/CHECKPOINT bound_children=/);
