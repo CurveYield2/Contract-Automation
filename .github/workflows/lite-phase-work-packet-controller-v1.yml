@@ -22,7 +22,7 @@ on:
         required: false
         default: phase
         type: choice
-        options: [phase, master, sealed-rework]
+        options: [phase, master, master-test-result, sealed-rework]
       phase_sequence:
         required: false
         default: ''
@@ -33,6 +33,14 @@ on:
         type: string
       master_outcome:
         description: Master review outcome (AMENDED or ACCEPT_WITHOUT_MODIFICATIONS)
+        required: false
+        default: ''
+        type: string
+      test_plan_path:
+        required: false
+        default: ''
+        type: string
+      test_result_path:
         required: false
         default: ''
         type: string
@@ -84,6 +92,8 @@ jobs:
           DISPATCH_PHASE_SEQUENCE: ${{ inputs.phase_sequence }}
           DISPATCH_SEGMENT_ID: ${{ inputs.segment_id }}
           DISPATCH_MASTER_OUTCOME: ${{ inputs.master_outcome }}
+          DISPATCH_TEST_PLAN_PATH: ${{ inputs.test_plan_path }}
+          DISPATCH_TEST_RESULT_PATH: ${{ inputs.test_result_path }}
           DISPATCH_REWORK_REQUEST_PATH: ${{ inputs.rework_request_path }}
           DISPATCH_HOLD_DELIVERY: ${{ inputs.hold_successor_delivery }}
           DISPATCH_CONTROLLER_REF: ${{ inputs.audit_controller_ref }}
@@ -97,6 +107,8 @@ jobs:
             segment_id="$DISPATCH_SEGMENT_ID"
             master_outcome="$DISPATCH_MASTER_OUTCOME"
             master_summary_b64=""
+            test_plan_path="$DISPATCH_TEST_PLAN_PATH"
+            test_result_path="$DISPATCH_TEST_RESULT_PATH"
             rework_request_path="$DISPATCH_REWORK_REQUEST_PATH"
             hold_delivery="${DISPATCH_HOLD_DELIVERY:-false}"
             controller_ref="${DISPATCH_CONTROLLER_REF:-main}"
@@ -133,11 +145,11 @@ jobs:
             supplied_directory_path=""
           fi
           [[ "$campaign_id" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || { echo "::error::Invalid campaign_id"; exit 1; }
-          case "$review_kind" in phase|master|sealed-rework) ;; *) echo "::error::Invalid review_kind"; exit 1;; esac
+          case "$review_kind" in phase|master|master-test-result|sealed-rework) ;; *) echo "::error::Invalid review_kind"; exit 1;; esac
           if [ "$review_kind" = phase ]; then [[ "$phase_sequence" =~ ^([1-9]|10)$ ]] || { echo "::error::Invalid phase_sequence"; exit 1; }; fi
           if [ "$review_kind" = master ]; then
             [[ "$segment_id" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Invalid segment_id"; exit 1; }
-            case "$master_outcome" in AMENDED|ACCEPT_WITHOUT_MODIFICATIONS) ;; *) echo "::error::master_outcome must be AMENDED or ACCEPT_WITHOUT_MODIFICATIONS"; exit 1;; esac
+            case "$master_outcome" in AMENDED|ACCEPT_WITHOUT_MODIFICATIONS|REQUEST_TARGETED_TESTS) ;; *) echo "::error::master_outcome must be AMENDED or ACCEPT_WITHOUT_MODIFICATIONS"; exit 1;; esac
           fi
           if [ "$review_kind" = sealed-rework ]; then
             [ "$phase_sequence" = 1 ] || { echo "::error::sealed-rework is restricted to Phase 1"; exit 1; }
