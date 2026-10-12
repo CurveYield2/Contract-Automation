@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {readV7RawResultV1} from '../packages/github-native-sim/src/v7-compact-result-v1.mjs';
 import {pathToFileURL} from 'node:url';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,loadPhaseSchema,
@@ -527,12 +528,16 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
             const sourceDir=path.join(from,candidate.name,requestDir.name);
             const rawPath=path.join(sourceDir,'raw-result.json');
             if(!fs.existsSync(rawPath))continue;
-            let raw;
-            try{raw=readJson(rawPath);}catch{continue;}
+            let raw,envelope;
+            try{
+              envelope=readJson(rawPath);
+              raw=readV7RawResultV1(rawPath);
+            }catch{continue;}
             if(raw?.requestId!==requestDir.name||raw?.source?.archiveSha256!==shadowDirectory.sourceSha256)continue;
             const destDir=path.join(into,candidate.name,requestDir.name);
             fs.mkdirSync(destDir,{recursive:true});
-            for(const file of ['raw-result.json','controller-evidence.json','execution-summary.json']){
+            const partFiles=Array.isArray(envelope?.parts)?envelope.parts.map(p=>p.file):[];
+            for(const file of ['raw-result.json','controller-evidence.json','execution-summary.json',...partFiles]){
               const sourceFile=path.join(sourceDir,file);
               if(fs.existsSync(sourceFile)&&fs.statSync(sourceFile).isFile())
                 fs.copyFileSync(sourceFile,path.join(destDir,file));
