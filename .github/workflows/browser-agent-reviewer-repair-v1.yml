@@ -135,6 +135,11 @@ jobs:
             if [ "$authority_home" = "$legacy_root/SKILL.md" ]; then
               authority_home='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3/SKILL.md'
             fi
+            registry_json="$(gh api "repos/$gate_repo/contents/audit-process/v7/frozen-authorities/FROZEN_AUTHORITY_REGISTRY_v1.json?ref=$gate_ref" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
+            if [ -n "$registry_json" ] && ! gh api "repos/$gate_repo/contents/$(encode_path "$authority_home")?ref=$gate_ref" >/dev/null 2>&1; then
+              mapped="$(printf '%s' "$registry_json" | jq -r --arg h "$authority_home" '.entries[] | . as $e | select($h | startswith($e.logicalRoot + "/")) | $e.frozenRoot + ($h | ltrimstr($e.logicalRoot))' | head -n1)"
+              [ -z "$mapped" ] || authority_home="$mapped"
+            fi
             authority_url="https://github.com/$gate_repo/blob/$gate_ref/$(encode_path "$authority_home")"
             {
               printf '%s\n' \
