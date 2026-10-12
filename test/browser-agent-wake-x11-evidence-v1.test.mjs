@@ -3,8 +3,12 @@ const wake=fs.readFileSync('scripts/browser-agent-wake.mjs','utf8');
 const yml=fs.readFileSync('.github/workflows/browser-agent-wake.yml','utf8');
 const dispatch=fs.readFileSync('.github/workflows/phase1-wake-repair-dispatch-v1.yml','utf8');
 test('fixed-coordinate wake never marks Return key as durable delivery',()=>{
- const block=wake.slice(wake.indexOf('// Pressing Return is not evidence'),wake.indexOf('  } finally {',wake.indexOf('// Pressing Return is not evidence')));
- assert.match(block,/ok:false/); assert.match(block,/posted:false/);assert.match(block,/WAKE_NOT_VERIFIED/);
+ const start=wake.indexOf('let sendChanged');
+ const block=wake.slice(start,wake.indexOf('  } finally {',start));
+ assert.ok(start>0);
+ assert.match(block,/sendAttempted: true, persisted:false/);
+ assert.match(block,/verification:'X11_VISIBLE_COMPOSER_TRANSITION_ONLY'/);
+ assert.match(block,/NOT proof that ChatGPT/);
 });
 test('diagnostic-only captures X11 desktop without typing a message',()=>{
  const a=wake.indexOf('if (bool(env.WAKE_DIAGNOSTIC_ONLY))');
@@ -17,7 +21,7 @@ test('diagnostic-only captures X11 desktop without typing a message',()=>{
 test('wake workflow retains screenshot evidence and cannot arm state for unverified send',()=>{
  assert.match(yml,/sudo apt-get install -y x11vnc xclip xdotool scrot/);
  assert.match(yml,/WAKE_DIAGNOSTIC_ONLY/);
- assert.match(yml,/Browser result claimed success without proven durable message delivery/);
- assert.match(yml,/if: \$\{\{ steps.deliver.outputs.ok == 'true'/);
+ assert.match(yml,/Browser result claimed an X11 send without input evidence/);
+ assert.match(yml,/steps.receipt.outputs.verified == 'true'/);
  assert.match(dispatch,/diagnosticOnly:\$diagnostic/);
 });

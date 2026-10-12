@@ -639,6 +639,7 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
     const requestFiles=walk(requestDirAbs).filter(file=>file.toLowerCase().endsWith('.json'));
     const refs=[];
     let discoveredRequests=0;
+    let incompleteRequests=0;
     for(const requestFile of requestFiles){
       const request=readJsonIf(requestFile);
       const requestId=typeof request?.requestId==='string'?request.requestId.trim():'';
@@ -653,7 +654,22 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
       const ingestionAbs=repoFile(root,path.posix.join(campaignPath,ingestionRel));
       const observerAbs=repoFile(root,path.posix.join(campaignPath,observerRel));
       const ingestion=readJsonIf(ingestionAbs);
-      if(!fs.existsSync(evidenceAbs)||!ingestion||ingestion.schemaVersion!=='audit-execution-evidence-ingestion-receipt-v1'||ingestion.requestId!==requestId) continue;
+      const machine=readJsonIf(evidenceAbs);
+      const valid=ingestion?.schemaVersion==='audit-execution-evidence-ingestion-receipt-v1'
+        && ingestion.requestId===requestId
+        && machine?.requestId===requestId
+        && machine?.requestDigest===request.requestDigest
+        && machine?.blocking===false
+        && ['PASS','FINDINGS'].includes(machine.disposition)
+        && (machine?.failedStepCount??0)===0
+        && (machine?.analysisComponentFailureCount??0)===0
+        && (machine?.failedSteps?.length??0)===0
+        && (!machine?.preflight||machine.preflight.status==='PASS');
+      if(!valid){
+        incompleteRequests++;
+        deficiencies.push('Phase 9 finding '+findingKey+' rerun '+requestId+' lacks successful, request-bound, ingested machine execution; a failed or partial rerun is not remediation proof.');
+        continue;
+      }
       refs.push(evidenceRel,ingestionRel);
       if(fs.existsSync(observerAbs)) refs.push(observerRel);
     }
@@ -662,8 +678,8 @@ export function populatePhase9RerunEvidenceRefs({root,campaignPath,form}){
       continue;
     }
     const uniqueRefs=uniq(refs);
-    if(!uniqueRefs.length){
-      deficiencies.push('Phase 9 finding '+findingKey+' has rerun request(s) but no durable ingested execution evidence yet. Complete trusted execution and evidence ingestion before validation.');
+    if(!uniqueRefs.length||incompleteRequests>0){
+      if(!uniqueRefs.length)deficiencies.push('Phase 9 finding '+findingKey+' has no complete, successfully ingested rerun evidence. Repair and rerun required machine work before validation.');
       continue;
     }
     row.rerunEvidenceRefs=uniqueRefs;

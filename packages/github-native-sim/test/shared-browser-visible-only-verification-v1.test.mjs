@@ -43,8 +43,8 @@ test('executed audit wake verifies only the fixed X11 input sequence', () => {
   assert.match(source, /for \(const char of value\)/);
   assert.match(fixedAuditWake, /humanX11TypeText\(page, wakeMessage\)/);
   assert.match(fixedAuditWake, /wake-entry=OS-X11-skilled-typist/);
-  assert.match(fixedAuditWake, /verification: 'phase1-fixed-x11-submit-no-chatgpt-page-read'/);
-  assert.match(fixedAuditWake, /verificationMethod: 'x11-human-input-only'/);
+  assert.match(fixedAuditWake, /sendAttempted: true, persisted:false/);
+  assert.match(fixedAuditWake, /verification:'X11_VISIBLE_COMPOSER_TRANSITION_ONLY'/);
   assert.doesNotMatch(fixedAuditWake, /postWithVisibleVerification|wakeMarkerVisible|composerDiagnostics/);
 });
 

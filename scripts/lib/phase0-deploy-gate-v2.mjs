@@ -5,7 +5,17 @@ export function assertDeployGateEvidenceV2(e){
   if(e?.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||e.executionMode!=='ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY')throw new Error('Invalid Phase 0 deploy evidence schema/mode');
   if(e.fork?.engine!=='anvil'||e.fork?.chainId!==1||e.fork?.identityNormalized!==true)throw new Error('Invalid Ethereum Anvil fork identity');
   if(e.status==='NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'){
-    if(e.attempts?.length||e.scriptDispositions?.length||e.deployedContracts?.length)throw new Error('Non-applicable evidence contains deploy activity');
+    // No deployment script is a machine-discovered negative, never an agent
+    // choice that can hide failed or unexecuted source-native deployment.
+    if(!Array.isArray(e.detectedScripts)||e.detectedScripts.length
+      ||!Array.isArray(e.scriptDispositions)||e.scriptDispositions.length
+      ||!Array.isArray(e.attempts)||e.attempts.length
+      ||!Array.isArray(e.deployedContracts)||e.deployedContracts.length
+      ||e.coverage?.detectedScripts!==0||e.coverage?.requiredScripts!==0
+      ||e.coverage?.executedScripts!==0||e.coverage?.failedOrUnsupportedScripts!==0)
+      throw new Error('No-deployment-script waiver lacks complete zero-script machine inventory and coverage');
+    if(!/^[0-9a-f]{64}$/.test(String(e.sourceSha256??'')))
+      throw new Error('No-deployment-script waiver is not bound to an exact source');
     return true;
   }
   if(e.status!=='PASS'||!Array.isArray(e.attempts)||e.attempts.length<1||e.attempts.some(a=>a.status!=='PASS'||a.exitCode!==0))throw new Error('Source-native deployment attempt did not pass');

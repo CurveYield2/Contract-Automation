@@ -3,6 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {readJson,writeJson,repoFile,requiredFile,loadPhaseSchema,getByPath} from './lite-phase-work-v1.mjs';
 import {validatePhaseScaffold} from './lite-phase-prefill-v1.mjs';
+import {validateRecordedPhase5MachineEvidenceV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 
 export const MASTER_REVIEW_SEGMENTS_V1=Object.freeze([
   Object.freeze({segmentId:'reviewer-1-phase-01',reviewerId:'reviewer-1',phases:Object.freeze([1]),boundaryPhase:1}),
@@ -326,7 +327,27 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
     ...validateLockedRecord(record,pending,directory,cfg),
     ...currentBindingFailures(root,campaignPath,record,directory)
   ];
-  if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,record,pending};
+  // Independent master-review gate: even a previously SEALED/PASS receipt is
+  // insufficient when required machine execution never occurred. Never mutate
+  // sealed originals; hold acceptance until a controller-authorized repair.
+  // Only reviewer-2's Phase-5 master segment may enter a controlled AMENDED
+  // replay before machine evidence is complete. The controller replay itself
+  // MUST rerun Phase 5 and satisfy the fail-closed Phase-5 gate, preserving
+  // the original sealed receipt under the existing supersession protocol.
+  // Ordinary acceptance and every later master segment stay held.
+  const machineRepairReplay=(pending.segmentId==='reviewer-2-phases-02-05'&&outcome==='AMENDED');
+  if(segment.boundaryPhase>=5&&!machineRepairReplay){
+    try{
+      const prior=readJson(requiredFile(root,canonicalRel(campaignPath,5),'Phase-5 canonical data'));
+      failures.push(...validateRecordedPhase5MachineEvidenceV1({
+        controllerRoot:root,campaignPath,
+        targetDesigns:prior?.actions?.['step-3']?.outputs?.targetDesigns??[],
+        expectedCampaignId:directory.campaignId,expectedSourceSha256:directory.sourceSha256,
+        requireCompletedMatrix:true
+      }));
+    }catch(error){failures.push('Required Phase-5 machine evidence validation failed: '+String(error?.message??error));}
+  }
+  if(failures.length)return {status:'MASTER_REVIEW_HELD',failures,record,pending};
   const sealedByPath=new Map((pending.sealedWorkForms??[]).map(x=>[x.path,x]));
   // Only reviewer work forms may change; every report, canonical record, receipt
   // and machine artifact must still match the sealed segment manifest.

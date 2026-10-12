@@ -10,7 +10,7 @@ import {
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
 } from './lib/lite-phase-work-v1.mjs';
 import {
-  executePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
+  executePhase5TargetsV1,validatePhase5TargetCoverageV1,validatePhase5TargetExecutionGateV1,validateRecordedPhase5MachineEvidenceV1,renderTargetedTestMatrixV1,renderRemediationDeltaLedgerV1,renderFinalEvidenceIndexV1,
   validateTargetExecutionRequestBindingV1
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
@@ -769,6 +769,27 @@ if(sequence===5&&form&&deficiencies.length===0){
     }));
   }catch(e){deficiencies.push('Phase 5 coverage validation failed: '+String(e.message||e));}
 }
+// Downstream gates must independently reconstruct the mandatory candidate set
+// and read actual V7 machine artifacts. A prior phase PASS/receipt is not proof.
+if([6,8].includes(sequence)&&deficiencies.length===0){
+  try{
+    const sealedP5=canonicalFor(root,campaignPath,5);
+    const mandatory=materialPhase5CandidateKeys({root,campaignPath,form:sealedP5});
+    const rows=sequence===6?(form.actions?.['step-2']?.outputs?.targetDispositions??[])
+      :(form.actions?.['step-2']?.outputs?.candidateValidations??[]);
+    const actual=rows.filter(x=>x&&typeof x==='object').map(x=>String(x.candidateKey??'').trim()).filter(Boolean);
+    if(actual.length!==new Set(actual).size)deficiencies.push('Phase '+sequence+' contains duplicate candidate dispositions');
+    for(const key of mandatory)if(!actual.includes(key))
+      deficiencies.push('Phase '+sequence+' skipped mandatory predecessor candidate '+key);
+    if(sequence===6)deficiencies.push(...validateRecordedPhase5MachineEvidenceV1({
+      controllerRoot:root,campaignPath,
+      targetDesigns:phaseOutput(sealedP5,'step-3','targetDesigns')??[],
+      expectedCampaignId:directory.campaignId,
+      expectedSourceSha256:directory.sourceSha256,requireCompletedMatrix:true
+    }));
+  }catch(e){deficiencies.push('Phase '+sequence+' mandatory predecessor/evidence gate failed: '+String(e.message||e));}
+}
+
 if(deficiencies.length){
   packet.status='REWORK_REQUIRED';
   packet.controllerValidation={status:'FAIL',validatedAt:now,deficiencies};
