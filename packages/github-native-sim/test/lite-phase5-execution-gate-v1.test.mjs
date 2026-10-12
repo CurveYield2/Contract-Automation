@@ -38,7 +38,8 @@ function fixture(){
     source:{archiveSha256:sourceSha,commit:'c'.repeat(40)},build:{status:'completed'},
     reproduction:{candidateId:key,status:'REPRODUCED',
       observedPredicate:{matched:true,observed:{componentStatus:'COMPLETED'}}},
-    analysis:{nativeFuzz:{componentStatus:'COMPLETED',toolInvoked:true}}
+    analysis:{nativeFuzz:{componentStatus:'COMPLETED',toolInvoked:true,
+      rawOutput:{exitCode:0,stdout:'[PASS] testHealthySettlement() (gas: 12345)\\nSuite result: ok. 2 passed; 0 failed; 0 skipped; finished in 1ms\\n',stderr:''}}}
   };
   fs.writeFileSync(file,JSON.stringify(rawResult)+'\n');
   const executionResults={[key]:{
@@ -266,7 +267,7 @@ test('oversized Phase5 raw machine evidence is losslessly compressed, verified a
   const {args,controllerRoot,file}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
   const raw={...args.executionResults[key].rawResult,analysis:{
     nativeFuzz:{...args.executionResults[key].rawResult.analysis.nativeFuzz,
-      rawOutput:{exitCode:0,stdout:'source-bound-Foundry-trace '.repeat(450000),stderr:''}}
+      rawOutput:{exitCode:0,stdout:'source-bound-Foundry-trace '.repeat(450000)+'\\nSuite result: ok. 2 passed; 0 failed; 0 skipped; finished in 1ms\\n',stderr:''}}
   }};
   const saved=writeV7RawResultV1({evidenceRoot:path.dirname(file),result:raw,compact:true});
   assert.equal(saved.compact,true);
