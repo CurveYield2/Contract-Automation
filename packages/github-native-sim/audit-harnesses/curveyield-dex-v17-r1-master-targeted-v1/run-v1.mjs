@@ -48,7 +48,28 @@ const chain = defineChain({
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
   rpcUrls: { default: { http: [rpcUrl] } },
 });
-const transport = http(rpcUrl, { timeout: 120_000 });
+// Capture the *exact JSON-RPC method* rejected by Anvil or its fork upstream.
+ // No request parameters, private keys or token-bearing upstream URL are logged.
+const transport = (options) => {
+  const native = http(rpcUrl, { timeout: 120_000 })(options);
+  return {
+    ...native,
+    async request(...args) {
+      const method = args[0]?.method || 'unknown';
+      try {
+        return await native.request(...args);
+      } catch (error) {
+        console.error('TARGETED_RPC_REJECTION', JSON.stringify({
+          method,
+          code: error?.code ?? null,
+          name: error?.name ?? 'Error',
+          message: String(error?.shortMessage || error?.message || error).slice(0, 1800),
+        }));
+        throw error;
+      }
+    },
+  };
+};
 const publicClient = createPublicClient({ chain, transport });
 const testClient = createTestClient({ chain, mode: 'anvil', transport });
 
@@ -359,6 +380,9 @@ async function daoObserved(candidateId,label,to,abi,functionName,callArgs=[],exp
  'executeProposal',[stringToHex(label),[{to,value:0n,data}],0n],expectSuccess);
 }
 async function main() {
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const anvilLogPath = path.join(path.dirname(outputPath), 'TARGETED_ANVIL_v1.log');
+  const anvilLogHandle = fs.openSync(anvilLogPath, 'a');
   const anvil = spawn(
     anvilPath,
     [
@@ -369,12 +393,17 @@ async function main() {
       '--compute-units-per-second', '25',
       '--silent',
     ],
-    { stdio: 'ignore' },
+    { stdio: ['ignore', anvilLogHandle, anvilLogHandle] },
   );
+  fs.closeSync(anvilLogHandle);
 
   try {
     await waitForRpc();
-    await testClient.loadState({ state: fs.readFileSync(statePath, 'utf8').trim() });
+    const rawState = fs.readFileSync(statePath, 'utf8').trim();
+    if (!/^0x(?:[a-f0-9]{2})+$/i.test(rawState)) throw new Error('Handed-off Anvil state is not valid even-length hex data');
+    console.log('TARGETED_STATE_RESTORE_BEGIN', JSON.stringify({ hexLength: rawState.length }));
+    await testClient.loadState({ state: rawState });
+    console.log('TARGETED_STATE_RESTORE_COMPLETE');
     await impersonateAll();
     const observedChainId = await publicClient.getChainId();
     if (observedChainId !== 747474) throw new Error(`Expected Katana chain 747474, got ${observedChainId}`);

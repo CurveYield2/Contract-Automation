@@ -69,14 +69,27 @@ jobs:
           ' "$request_file" >/dev/null
 
           gh auth setup-git
-          rm -rf .audit-source
-          timeout -k 10s 240s gh repo clone CurveYield2/Audit-Controller .audit-source -- --filter=blob:none --no-checkout
-          (
-            cd .audit-source
-            timeout -k 10s 180s git fetch --depth=1 origin "$SOURCE_COMMIT"
-            git checkout --detach FETCH_HEAD
-            test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
-          )
+          # Git CLI cloning avoids gh repo clone's GraphQL metadata lookup, which
+          # failed before Git ever ran in the previous source-bound v2 attempt.
+          source_ready=false
+          for attempt in 1 2 3; do
+            rm -rf .audit-source
+            echo "::notice::Exact source clone attempt $attempt/3"
+            if timeout -k 10s 180s git clone --quiet --filter=blob:none --no-checkout https://github.com/CurveYield2/Audit-Controller.git .audit-source; then
+              if (
+                cd .audit-source
+                timeout -k 10s 180s git fetch --depth=1 origin "$SOURCE_COMMIT" &&
+                git checkout --detach FETCH_HEAD &&
+                test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+              ); then
+                source_ready=true
+                break
+              fi
+            fi
+            echo "::warning::Exact source transport failed on attempt $attempt/3"
+            sleep $((attempt * 3))
+          done
+          [ "$source_ready" = true ] || { echo "::error::Could not fetch the pinned Audit-Controller source after three bounded Git attempts"; exit 1; }
           archive=".audit-source/campaigns/CurveYield DEX v17 Source r1/source/CurveYield DEX v17 Source.zip"
           test -s "$archive"
           observed="$(sha256sum "$archive" | awk '{print $1}')"
@@ -215,16 +228,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .audit-writeback
           gh auth setup-git
-          gh repo clone CurveYield2/Audit-Controller .audit-writeback -- --filter=blob:none --no-checkout
-          (
-            cd .audit-writeback
-            timeout -k 10s 180s git fetch origin main
-            git checkout -B main origin/main
-          )
+          writeback_ready=false
+          for attempt in 1 2 3; do
+            rm -rf .audit-writeback
+            echo "::notice::Audit evidence repository clone attempt $attempt/3"
+            if timeout -k 10s 180s git clone --quiet --filter=blob:none --no-checkout https://github.com/CurveYield2/Audit-Controller.git .audit-writeback; then
+              if (
+                cd .audit-writeback
+                timeout -k 10s 180s git fetch origin main &&
+                git checkout -B main origin/main
+              ); then
+                writeback_ready=true
+                break
+              fi
+            fi
+            echo "::warning::Evidence repository transport failed on attempt $attempt/3"
+            sleep $((attempt * 3))
+          done
+          [ "$writeback_ready" = true ] || { echo "::error::Audit evidence writeback source unavailable after three bounded Git attempts"; exit 1; }
 
-          dest=".audit-writeback/$EVIDENCE_REL"
+          # Never overwrite a preceding attempt's raw failure or execution evidence.
+          dest=".audit-writeback/$EVIDENCE_REL/attempts/$GITHUB_RUN_ID"
           mkdir -p "$dest"
           cp -f targeted-output/* "$dest/" 2>/dev/null || true
 
