@@ -3,6 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {classesForTriggersV1,loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
 import {buildCoverageMatrixV1} from './adr-coverage-matrix-v1.mjs';
+import {deriveBaselineObligationsV1} from './adr-baseline-obligations-v1.mjs';
 import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1} from './adr-discovery-validators-v1.mjs';
 import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 
@@ -171,8 +172,8 @@ export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,a
  }
  const summary=buildDiscoverySummaryV1({state,inventory,plan:inputs.plan,acceptedSubmissions,taxonomy:inputs.taxonomy,now});
  writeJson(repoFile(root,pathJoin(campaignPath,'DISCOVERY_SUMMARY_v1.json')),summary);
- const stub=stubObligations(directory,now);
- writeJson(repoFile(root,path.posix.join(campaignPath,'work/phase-06/BASELINE_OBLIGATIONS_v1.json')),stub);
+ const obligations=deriveBaselineObligationsV1({inventory,taxonomy:inputs.taxonomy,summary});
+ writeJson(repoFile(root,path.posix.join(campaignPath,'work/phase-06/BASELINE_OBLIGATIONS_v1.json')),obligations);
  const message='CONTROLLER: Phase 4 discovery is complete. Phase 4 is now ACTIVE for reviewer-2. Follow phases/phase-4/START_HERE.md of the bound authority: Step 1 reconciles every record prefilled from work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json, then complete Steps 2 and 3 and invoke controller validation as usual.';
  return {status:'DISCOVERY_COMPLETE',feedbackText:message,wake:{chatKey:'reviewer-2',
   wakeId:directory.campaignId+'-discovery-complete',phaseId:'phase-4',
