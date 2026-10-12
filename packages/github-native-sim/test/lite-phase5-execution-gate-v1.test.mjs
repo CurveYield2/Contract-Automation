@@ -24,7 +24,7 @@ function fixture(){
   fs.mkdirSync(path.dirname(file),{recursive:true});
   const request={requestId,requestDigest:'d'.repeat(64),campaignId:'test-audit-r1',phaseId:'build-and-test',
     source:{archiveSha256:sourceSha,commit:'c'.repeat(40)},
-    configuration:{v26:{reproduction:{candidateId:key,reproductionType:'FOUNDRY_TEST',expectedObservation:{componentStatus:'COMPLETED'}}}}};
+    configuration:{analysis:{nativeFuzz:{enabled:true,fuzzRuns:1024}},v26:{reproduction:{candidateId:key,reproductionType:'FOUNDRY_TEST',expectedObservation:{componentStatus:'COMPLETED'}}}}};
   const requestFile=path.join(controllerRoot,...campaignPath.split('/'),...requestRef.split('/'));
   fs.mkdirSync(path.dirname(requestFile),{recursive:true});
   fs.writeFileSync(requestFile,JSON.stringify(request)+'\n');
@@ -34,7 +34,7 @@ function fixture(){
     source:{archiveSha256:sourceSha,commit:'c'.repeat(40)},build:{status:'completed'},
     reproduction:{candidateId:key,status:'REPRODUCED',
       observedPredicate:{matched:true,observed:{componentStatus:'COMPLETED'}}},
-    analysis:{nativeFuzz:{componentStatus:'COMPLETED',toolInvoked:true}}
+    analysis:{nativeFuzz:{componentStatus:'COMPLETED',toolInvoked:true,rawOutput:{exitCode:0,stdout:'[PASS] testFuzz_Candidate (runs: 1024, μ: 100)'}}}
   };
   fs.writeFileSync(file,JSON.stringify(rawResult)+'\n');
   const executionResults={[key]:{
@@ -56,6 +56,14 @@ test('mandatory material candidates cannot be omitted, duplicated or marked NOT_
 test('successful source-bound machine execution with persisted raw evidence passes the gate',t=>{
   const {args,controllerRoot}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
   assert.deepEqual(validatePhase5TargetExecutionGateV1(args),[]);
+});
+test('Forge exit zero with no fuzz cases does not satisfy the mandatory execution gate',t=>{
+  const {args,controllerRoot,file}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
+  const raw=structuredClone(args.executionResults[key].rawResult);
+  raw.analysis.nativeFuzz.rawOutput.stdout='No tests found';
+  fs.writeFileSync(file,JSON.stringify(raw)+'\n');
+  args.executionResults[key].rawResult=raw;
+  assert.match(validatePhase5TargetExecutionGateV1(args).join(' '),/no executed Foundry fuzz case/);
 });
 test('missing, blocked or inconclusive machine runs fail even if the request is structurally bound',t=>{
   const {args,controllerRoot}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
