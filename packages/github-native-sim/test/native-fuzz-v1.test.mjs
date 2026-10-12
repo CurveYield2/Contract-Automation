@@ -72,7 +72,7 @@ test('non-recoverable Forge output without successful suite fails closed', async
   });
   assert.equal(result.terminal, true);
   assert.equal(result.status, 'failed');
-  assert.equal(result.failureKind, 'HARD_FAILURE');
+  assert.equal(result.failureKind, 'NO_SUCCESSFUL_TEST_EXECUTION');
   assert.equal(result.componentStatus, 'FAILED');
   assert.equal(result.continuationDisposition, 'STOP_EXECUTION');
   assert.match(result.rawOutput.stderr, /fatal fuzz harness error/);
