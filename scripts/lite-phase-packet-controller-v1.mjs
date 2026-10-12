@@ -538,6 +538,55 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
 }
 
 
+// Independent recheck for downstream phases and later master reviewers.
+// Current evidence must still prove the exact Phase-5 target executions;
+// an old sealed PASS receipt with blocked simulations is never sufficient.
+function historicalPhase5MachineFailures({root,campaignPath,directory}){
+  try{
+    const p5=canonicalFor(root,campaignPath,5);
+    const marker=p5?.automationOutputs?.phase5MachineExecutionGate;
+    if(marker?.status!=='PASS')return ['Phase 5 has no verified machine-execution PASS marker.'];
+    const targets=phaseOutput(p5,'step-3','targetDesigns')??[];
+    const required=materialPhase5CandidateKeys({root,campaignPath,form:p5});
+    const results={};
+    for(const target of targets){
+      const key=String(target?.candidateKey??'');
+      if(!key||String(target?.executionMethod??'')==='NOT_APPLICABLE')continue;
+      const binding=validateTargetExecutionRequestBindingV1({
+        controllerRoot:root,campaignPath,target,
+        expectedCampaignId:directory.campaignId,
+        expectedSourceSha256:directory.sourceSha256
+      });
+      if(!String(binding.status).startsWith('PASS_')){
+        results[key]={status:'BLOCKED',exitCode:1,requestBindingStatus:binding.status};
+        continue;
+      }
+      const request=readJson(requiredFile(root,path.posix.join(campaignPath,binding.requestRef),'Phase-5 execution request'));
+      const rel=path.posix.join(campaignPath,'evidence/phase5-boundary',key,request.requestId,'raw-result.json');
+      const raw=readJson(requiredFile(root,rel,'Phase-5 executed machine proof'));
+      results[key]={
+        status:raw.status==='completed'?'PASS':'BLOCKED',
+        exitCode:raw.status==='completed'?0:1,
+        requestBindingStatus:binding.status,
+        rawResult:raw,evidenceRef:rel
+      };
+      if(request.requestDigest!==raw.requestDigest)results[key].status='BLOCKED';
+    }
+    const keys=targets.filter(x=>x&&typeof x==='object').map(x=>x.candidateKey).sort();
+    const recorded=[...(marker.targetKeys??[])].sort();
+    const failures=JSON.stringify(keys)===JSON.stringify(recorded)?[]:['Phase-5 machine PASS marker is missing candidate keys.'];
+    const refs=Object.values(results).map(x=>x.evidenceRef).filter(Boolean).sort();
+    if(JSON.stringify(refs)!==JSON.stringify([...(marker.evidenceRefs??[])].sort()))
+      failures.push('Phase-5 machine PASS marker has missing or incorrect source-bound evidence references.');
+    return failures.concat(validatePhase5TargetExecutionGateV1({
+      controllerRoot:root,campaignPath,targetDesigns:targets,materialCandidateKeys:required,
+      executionResults:results,expectedSourceSha256:directory.sourceSha256
+    }));
+  }catch(error){
+    return ['Phase-5 required machine proof unavailable: '+String(error?.message??error)];
+  }
+}
+
 const a=parse(process.argv);
 const reviewKind=a['review-kind']??'phase';
 const masterAmendmentRefreshSha=a['master-amendment-refresh-sha']??null;
@@ -575,6 +624,10 @@ if(reviewKind==='master'){
     process.stdout.write(JSON.stringify({status,campaignId:directory.campaignId,campaignName:directory.campaignName,segmentId:pending.segmentId,masterChatUrl:directory.masterReview?.chatUrl??null,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel,...extra})+'\n');
     process.exit(0);
   };
+  if((pending?.segmentPhases??[]).some(x=>Number(x)>=6)){
+    const blockers=historicalPhase5MachineFailures({root,campaignPath,directory});
+    if(blockers.length)emit('MASTER_REVIEW_HELD','MANDATORY_PHASE_5_EVIDENCE_BLOCKED: '+blockers.join('; ')+'. No master acceptance or successor delivery.');
+  }
   if(result.status==='MASTER_REVIEW_HELD')emit(result.status,'MASTER_REVIEW_HELD: '+result.failures.join('; ')+'. No campaign state or reviewed artifact was changed.');
   if(result.status==='MASTER_REVIEW_INVALID')emit(result.status,['Master-review submission is invalid. Repair only the exact items below, then submit the master request again with attempt increased by 1.','',...result.failures.map(x=>'- '+x),'','The campaign has not advanced.'].join('\n'));
   // Legacy sealed Phase-5 machine failures cannot be accepted unchanged
@@ -776,6 +829,24 @@ if(sequence===5&&form&&deficiencies.length===0){
   }
 }
 
+if(sequence>=6){
+  const blockers=historicalPhase5MachineFailures({root,campaignPath,directory});
+  for(const item of blockers)deficiencies.push('Phase-5 predecessor execution: '+item);
+}
+if([6,8].includes(sequence)&&form&&deficiencies.length===0){
+  const p5=canonicalFor(root,campaignPath,5);
+  const needed=(phaseOutput(p5,'step-3','targetDesigns')??[])
+    .filter(x=>x&&typeof x==='object').map(x=>String(x.candidateKey??''));
+  const rows=sequence===6
+    ?form?.actions?.['step-2']?.outputs?.targetDispositions
+    :form?.actions?.['step-2']?.outputs?.candidateValidations;
+  const found=Array.isArray(rows)?rows.filter(x=>x&&typeof x==='object')
+    .map(x=>String(x.candidateKey??'')):[];
+  for(const key of needed)if(!found.includes(key))
+    deficiencies.push('Mandatory Phase-5 candidate '+key+' has no Phase-'+sequence+' disposition.');
+  if(new Set(found).size!==found.length)
+    deficiencies.push('Duplicate Phase-'+sequence+' candidate dispositions.');
+}
 if(sequence===5&&form&&deficiencies.length===0){
   try{
     deficiencies.push(...validatePhase5TargetCoverageV1({
