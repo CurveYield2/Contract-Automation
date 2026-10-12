@@ -1,13 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {readJson,writeJson,repoFile,requiredFile} from './lite-phase-work-v1.mjs';
+import {readJson,requiredFile} from './lite-phase-work-v1.mjs';
 
 const SHA=/^[0-9a-f]{64}$/;
 const ID=/^[A-Za-z0-9._-]+$/;
 const REVIEWERS=new Set(['reviewer-1','reviewer-2','reviewer-3L','reviewer-4']);
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
-const exact=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
 const substantial=s=>typeof s==='string'&&s.trim().length>=24;
 const inside=(root,rel,prefix)=>{
   if(typeof rel!=='string'||!rel.startsWith(prefix)||rel!==path.posix.normalize(rel)||rel.split('/').includes('..'))throw new Error('targeted-test artifact path escapes its campaign allocation: '+rel);
@@ -94,6 +93,34 @@ export function acceptMasterTargetedTestResults({root,campaignPath,directory,res
 
 // Final campaign completion must never convert a live, potentially material,
 // unconfirmed candidate into a no-finding closure by word choice alone.
+export function verifyMasterTargetedTestEvidence({root,campaignPath,directory}){
+  const pending=directory.pendingMasterReview;
+  const failures=[];
+  for(const entry of pending?.targetedTests??[]){
+    if(entry.status!=='EVIDENCE_SUBMITTED'||!SHA.test(String(entry.resultSha256??''))){
+      failures.push('master targeted-test round '+entry.round+' has no admitted evidence');continue;
+    }
+    try{
+      const plan=inside(root,entry.planPath,location(campaignPath,pending.segmentId)+'/');
+      if(sha(fs.readFileSync(plan))!==entry.planSha256||entry.planSha256!==entry.requestId)
+        throw new Error('immutable targeted-test plan changed');
+      const file=inside(root,entry.resultPath,location(campaignPath,pending.segmentId)+'/targeted-tests/'+entry.requestId+'/');
+      const bytes=fs.readFileSync(file);
+      if(sha(bytes)!==entry.resultSha256)throw new Error('targeted-test result changed after controller admission');
+      const result=JSON.parse(bytes.toString('utf8'));
+      if(result.requestId!==entry.requestId||result.sourceSha256!==directory.sourceSha256)
+        throw new Error('targeted-test result source/request binding changed');
+      for(const test of result.tests??[]){
+        for(const ref of test.evidence??[]){
+          const raw=inside(root,ref.path,evidenceRel(campaignPath,entry.requestId)+'/');
+          if(sha(fs.readFileSync(raw))!==ref.sha256)throw new Error('targeted-test raw evidence changed: '+ref.path);
+        }
+      }
+    }catch(error){failures.push('master test round '+entry.round+': '+String(error?.message??error));}
+  }
+  return failures;
+}
+
 export function unresolvedFinalCandidateFailures({root,campaignPath,directory}){
   const phase8=path.posix.join(campaignPath,'derived/phase-8/PHASE_08_CANONICAL_DATA_v1.json');
   const data=readJson(requiredFile(root,phase8,'Phase-8 canonical candidate disposition'));
