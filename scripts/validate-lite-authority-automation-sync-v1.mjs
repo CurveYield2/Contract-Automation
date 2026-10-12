@@ -193,7 +193,7 @@ need(orchestrator.includes('--audit-controller-ref "$AUDIT_CONTROLLER_REF"'),'Li
 need(legacyReceiptController.includes("legacy receipt controller is prohibited for current assignment-v2 Lite campaigns"),'legacy receipt controller is not fenced off from current assignment-v2 campaigns');
 need(phase9ExecutionDispatch.includes("process/agent-upload/lite-v7-execution/*.json"),'Phase 9 V7 execution lacks a connector-operable request-file trigger');
 need(phase9ExecutionDispatch.includes('curveyield-lite-v7-execution-dispatch-v1'),'Phase 9 V7 execution trigger does not validate its dispatch schema');
-need(phase9ExecutionDispatch.includes('.currentAssignment.phaseSequence')&&phase9ExecutionDispatch.includes('= "9"'),'Phase 9 V7 execution trigger does not bind dispatch to current Phase-9 assignment');
+need(phase9ExecutionDispatch.includes('.currentAssignment.phaseSequence')&&phase9ExecutionDispatch.includes('phase_seq')&&phase9ExecutionDispatch.includes('phaseSequence==9 or .phaseSequence==6'),'Phase 6/9 V7 dispatch is not bound to current phase assignment');
 need(phase9ExecutionDispatch.includes('gh workflow run audit-controller-execution.yml'),'Phase 9 V7 execution trigger does not launch the qualified V7 execution lane');
 need(phase9ExecutionDispatch.includes('controller_writeback_ref'),'Phase 9 V7 execution trigger does not bind durable evidence writeback');
 const phase9StartHere=read(path.join(authorityRoot,'phases/phase-9/START_HERE.md'));
