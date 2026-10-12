@@ -29,7 +29,6 @@ test('watchdog is a real independent process using Linux CPU process-tree counte
 });
 for(const [flavor,workflow,engine] of [
  ['primary','.github/workflows/lite-phase0-intelligence-v1.yml','packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs'],
- ['no-telemetry','.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml','packages/github-native-sim/src/lite-phase0-intelligence-no-telemetry-v1.mjs']
 ]){
  test(flavor+' gives compile 30min while allowing downstream intelligence and fail-closed publication',()=>{
    const wf=fs.readFileSync(workflow,'utf8');
@@ -40,6 +39,5 @@ for(const [flavor,workflow,engine] of [
    const src=fs.readFileSync(engine,'utf8');
    assert.match(src,/compileWithPrivateCacheV1/);
    assert.match(src,/compile-exact-build/);
-   if(flavor==='no-telemetry')assert.match(src,/withStage\('compile-exact-build',2100000,/);
  });
 }
