@@ -265,18 +265,16 @@ jobs:
           echo "requires_execution=$(printf '%s' "$decision" | jq -r '.requiresExecution')" >> "$GITHUB_OUTPUT"
           printf '%s\n' "$decision" | jq .
 
-      - name: Set up Node.js for Phase-5 boundary execution
-        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.phase5_plan.outputs.requires_execution == 'true')
+      - name: Set up Node.js for controller validation and Phase-5 execution
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Install trusted runner dependencies for Phase-5 boundary execution
-        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.phase5_plan.outputs.requires_execution == 'true')
+      - name: Install locked Node dependencies for controller validation
         shell: bash
         run: |
           set -euo pipefail
-          npm ci --force
+          npm ci --force --ignore-scripts --no-audit --no-fund
 
       - name: Install retained audit toolchain for Phase-5 boundary execution
         if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.phase5_plan.outputs.requires_execution == 'true')
