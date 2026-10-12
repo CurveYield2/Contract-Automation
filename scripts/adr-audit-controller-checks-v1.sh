@@ -62,6 +62,9 @@ if [[ "$target_check_code" != "0" && "$main_check_code" == "0" ]]; then
 fi
 
 # ADR-EXTRA-CHECKS
+if [[ -f .ac-target/audit-process/v7/frozen-authorities/FROZEN_AUTHORITY_REGISTRY_v1.json ]]; then
+  node scripts/adr-check-frozen-authorities-v1.mjs --controller-root .ac-target
+fi
 authority_root_file="process/adr-verify/AUTHORITY_ROOT_v1.txt"
 authority_root=""
 if [[ -f "$authority_root_file" ]]; then

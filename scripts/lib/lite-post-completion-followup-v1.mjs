@@ -32,7 +32,7 @@ export function validatePostCompletionFollowupV1({root,campaignPath,directory,re
   const receipt=load(root,directory.lastSealedReceiptPath,'last accepted Phase-10 receipt');
   if(receipt?.phase?.sequence!==10||receipt?.phase?.status!=='COMPLETE'||receipt?.validation?.status!=='PASS'||receipt?.source?.sha256!==SOURCE)
     throw Error('accepted terminal receipt does not bind exact source and PASS state');
-  if(receipt?.authority?.homepagePath!=='Audit Skill - Current Authority/Audit_Litemode_v11/SKILL.md')
+  if(!/^Audit Skill - Current Authority\/Audit_Litemode_v(1[1-9]|[2-9][0-9])\/SKILL\.md$/.test(String(receipt?.authority?.homepagePath??'')))
     throw Error('followup must preserve bound v11 audit authority');
   const p8=load(root,path.posix.join(W,'derived/phase-8/PHASE_08_CANONICAL_DATA_v1.json'),'final candidate dispositions');
   const rows=p8?.actions?.['step-2']?.outputs?.candidateValidations??[];

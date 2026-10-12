@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {repoFile,requiredFile,readJson} from './lib/lite-phase-work-v1.mjs';
+import {authorityLinkPathV1} from '../packages/github-native-sim/src/adr-frozen-authority-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 const a=parse(process.argv);
@@ -26,13 +27,7 @@ const encodeRepoPath=p=>String(p).split('/').map(encodeURIComponent).join('/');
 const controllerTreeUrl=p=>'https://github.com/CurveYield2/Audit-Controller/tree/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
 const controllerBlobUrl=p=>'https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(controllerRef)+'/'+encodeRepoPath(p);
 const logicalAuthorityHome=predecessor.authority?.homepagePath??assignment.workSchemaPath.replace(/\/phases\/phase-[^/]+\/[^/]+$/,'/SKILL.md');
-const legacyLogicalRoot='Audit Skill - Current Authority/Audit_Litemode_v10.3';
-const frozenAuthorityRoot='audit-process/v7/frozen-authorities/Audit_Litemode_v10.3';
-const authorityLinkPath=p=>{
-  if(typeof p!=='string')return p;
-  if((p===legacyLogicalRoot||p.startsWith(legacyLogicalRoot+'/'))&&!fs.existsSync(repoFile(root,p)))return frozenAuthorityRoot+p.slice(legacyLogicalRoot.length);
-  return p;
-};
+const authorityLinkPath=p=>authorityLinkPathV1(root,p);
 const linkedAuthorityHome=authorityLinkPath(logicalAuthorityHome);
 if(predecessor.authority?.homepagePath)requiredFile(root,logicalAuthorityHome,'bound successor authority homepage');
 const campaignUrl=controllerTreeUrl(directory.workspacePath);

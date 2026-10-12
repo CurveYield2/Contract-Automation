@@ -41,6 +41,7 @@ jobs:
           git sparse-checkout set \
             'Audit Campaign Directory/campaigns' \
             'Audit Skill - Current Authority/Audit_Litemode_v11' \
+            'audit-process/v7/frozen-authorities' \
             'campaigns/CurveYield DEX v16 Source r4/work' \
             'campaigns/CurveYield DEX v16 Source r4/derived' \
             'campaigns/CurveYield DEX v16 Source r4/receipts' \
