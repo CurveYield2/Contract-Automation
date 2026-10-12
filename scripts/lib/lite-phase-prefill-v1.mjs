@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {detectionPolicyForAuthorityV1} from '../../packages/github-native-sim/src/adr-policy-v1.mjs';
 
 function repoFile(root,rel){return path.join(root,...String(rel).split('/'));}
 function readJsonIf(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
@@ -537,13 +538,31 @@ export function applyPhaseBoundaryPrefill({root,campaignPath,authorityRoot,seque
     form.automationInputs.controllerOwnedAutomationInputs=[...(form.automationInputs.controllerOwnedAutomationInputs??[]),'sourceIntelligencePath','domainRegistryPath'];
   }
 
+  if(sequence===4 && Object.hasOwn(form?.actions?.['step-1']?.outputs??{},'discoveryReconciliationRecords')){
+    const policy=detectionPolicyForAuthorityV1({repoRoot:root,authorityRoot,
+      readJsonIfExists:(rel)=>readJsonIf(repoFile(root,rel))});
+    if(policy){
+      const summary=readJsonIf(repoFile(root,path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')));
+      const items=summary?.payload?.reconciliationItems??null;
+      const controllerFields=['recordKey','contextIds','sourceAnchor','origin','reviewerFinding','attackerFinding'];
+      const records=items===null?['<PENDING_DISCOVERY>']:items.length?items.map(item=>({
+        ...Object.fromEntries(controllerFields.map(k=>[k,item[k]])),
+        reconciliation:'<REQUIRED>',disposition:'<REQUIRED>',candidateTempKeyOrNone:'<REQUIRED>',rationale:'<REQUIRED>',
+        automationOwnedFields:controllerFields
+      })):['NONE_IDENTIFIED'];
+      form.actions['step-1'].outputs.discoveryReconciliationRecords=records;
+      form.automationInputs.expectedDiscoveryRecordKeys=items?.map(x=>x.recordKey)??[];
+      form.automationInputs.controllerOwnedAutomationInputs=uniq([
+       ...form.automationInputs.controllerOwnedAutomationInputs,'expectedDiscoveryRecordKeys']);
+    }
+  }
   if(sequence===4){
     const registryRel=path.posix.join(campaignPath,'controller/DOMAIN_APPLICABILITY_REGISTRY_v1.json');
     const registry=readJsonIf(repoFile(root,registryRel))??{};
     const domains=registry.decisions??[];
-    form.actions['step-1'].outputs.sourceReviewRecords=sourceReviewScaffold(si??{});
+    if(!Object.hasOwn(form.actions['step-1'].outputs,'discoveryReconciliationRecords'))form.actions['step-1'].outputs.sourceReviewRecords=sourceReviewScaffold(si??{});
     form.actions['step-2'].outputs.specialistReviewRecords=specialistScaffold(si??{},domains);
-    form.automationInputs.expectedSourceReviewKeys=(form.actions['step-1'].outputs.sourceReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey);
+    if(!Object.hasOwn(form.actions['step-1'].outputs,'discoveryReconciliationRecords'))form.automationInputs.expectedSourceReviewKeys=(form.actions['step-1'].outputs.sourceReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey);
     form.automationInputs.expectedSpecialistReviewKeys=(form.actions['step-2'].outputs.specialistReviewRecords??[]).filter(x=>typeof x==='object').map(x=>x.recordKey);
     form.automationInputs.controllerOwnedAutomationInputs=uniq([
       ...(form.automationInputs.controllerOwnedAutomationInputs??[]),
@@ -705,6 +724,21 @@ export function phase4CoverageFromForm(form){
   };
 }
 
+export function phase4DiscoveryCoverageV1({summary}){
+  const coverage=summary?.payload?.coverage??{};
+  const contexts=new Set((coverage.rows??[]).map(x=>x.contextId));
+  const records=summary?.payload??{};
+  const contradicted=(coverage.rows??[]).filter(x=>x.reviewStatus==='CONTRADICTED').length;
+  const accepted=(coverage.rows??[]).filter(x=>x.reviewStatus==='ACCEPTED').length;
+  const na=(records.notApplicableClaims??[]).length;
+  const gaps=(records.gaps??[]).length;
+  const gapIds=[...new Set((records.gaps??[]).flatMap(x=>[x.contextId,...(x.contextIds??[])].filter(Boolean)))].sort();
+  return {coverageSummary:'Required contexts: '+contexts.size+'; accepted: '+accepted+
+   '; contradicted by attacker: '+contradicted+'; not-applicable claims: '+na+
+   '; gaps: '+gaps+'; label: '+(coverage.label??'PARTIAL_COVERAGE')+'.',
+    unreviewedRequiredSurfaces:gapIds.length?gapIds:['NONE_IDENTIFIED']};
+}
+
 export function materializeValidatedFindings(candidateValidations=[]){
   const out=[];let n=1;
   for(const v of candidateValidations??[]){
@@ -799,7 +833,29 @@ export function validatePhaseScaffold(sequence,form,assignmentExpectedDigest=nul
   else if(ownedProjection.length&&!expectedDigest) deficiencies.push('Controller prefill integrity digest is missing.');
   if(assignmentExpectedDigest&&formDigest!==assignmentExpectedDigest) deficiencies.push('Reviewer work form controller-prefill digest does not match the controller-owned assignment digest.');
   if(expectedDigest&&controllerOwnedDigest(form)!==expectedDigest) deficiencies.push('Controller-prefilled/read-only fields were modified; restore the generated values before validation.');
-  if(sequence===4){
+  if(sequence===4 && Object.hasOwn(form?.automationInputs??{},'expectedDiscoveryRecordKeys')){
+    const expected=form.automationInputs.expectedDiscoveryRecordKeys??[];
+    const rows=form?.actions?.['step-1']?.outputs?.discoveryReconciliationRecords??[];
+    if(rows.some(x=>x==='<PENDING_DISCOVERY>'))deficiencies.push('Phase 4 discovery summary is still pending.');
+    const actual=rows.filter(x=>x&&typeof x==='object').map(x=>x.recordKey);
+    if(JSON.stringify([...actual].sort())!==JSON.stringify([...expected].sort())||new Set(actual).size!==actual.length)
+      deficiencies.push('Phase 4 discovery reconciliation keys must exactly match controller-prefilled keys.');
+    const candidates=new Set((form?.actions?.['step-3']?.outputs?.candidateRecords??[]).filter(x=>x&&typeof x==='object').map(x=>x.tempKey));
+    for(const row of rows.filter(x=>x&&typeof x==='object')){
+      if(!['CANDIDATE_CREATED','RESOLVED_NO_ISSUE','COVERAGE_GAP_ACCEPTED'].includes(row.disposition))
+        deficiencies.push('Discovery '+row.recordKey+' requires a valid disposition.');
+      if(row.disposition==='CANDIDATE_CREATED'&&!candidates.has(row.candidateTempKeyOrNone))
+        deficiencies.push('Discovery '+row.recordKey+' candidate must be present in Step 3.');
+      if(row.disposition==='RESOLVED_NO_ISSUE'&&!/\.(sol|vy):L\d+/.test(row.rationale??''))
+        deficiencies.push('Discovery '+row.recordKey+' resolution requires a source anchor.');
+      if(row.disposition==='RESOLVED_NO_ISSUE'&&['ATTACK_FINDING','ATTACK_CONTRADICTS_REVIEW'].includes(row.origin)&&
+        !/block|guard|revert|check|restrict|prevent/i.test(row.rationale??''))
+        deficiencies.push('Discovery '+row.recordKey+' must name the blocking control.');
+      if(row.disposition==='COVERAGE_GAP_ACCEPTED'&&row.origin!=='COVERAGE_GAP')
+        deficiencies.push('Discovery '+row.recordKey+' cannot accept a non-gap as a coverage gap.');
+    }
+  }
+  if(sequence===4 && !Object.hasOwn(form?.automationInputs??{},'expectedDiscoveryRecordKeys')){
     const c=phase4CoverageFromForm(form);
     if(!(c.unreviewedRequiredSurfaces.length===1&&c.unreviewedRequiredSurfaces[0]==='NONE_IDENTIFIED')) deficiencies.push('Phase 4 required review scaffolds were removed or omitted: '+c.unreviewedRequiredSurfaces.join(', '));
   }
