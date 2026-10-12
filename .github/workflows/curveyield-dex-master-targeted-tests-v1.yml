@@ -1,10 +1,12 @@
-name: CurveYield DEX Master Targeted Tests v2
+name: CurveYield DEX Master Targeted Tests v3
 
 on:
   push:
     branches: [main]
     paths:
       - 'packages/github-native-sim/audit-harnesses/curveyield-dex-v16-r4-master-targeted-v1/requests/*.json'
+  workflow_dispatch:
+    # Re-run the existing frozen request without rewriting it or mutating sealed audit inputs.
 
 permissions:
   contents: read
