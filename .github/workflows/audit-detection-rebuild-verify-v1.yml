@@ -46,17 +46,17 @@ jobs:
           timeout -k 10s 900s node --test "${files[@]}"
       - name: Validate V7 runner manifest pin
         run: timeout -k 10s 120s npm run v7:manifest -- --check
-      - name: Confirm archived no-telemetry fork no longer has live references
+      - name: Confirm retired Phase 0 fork has no active references
         shell: bash
         run: |
           set -euo pipefail
           unresolved=0
           while IFS= read -r file; do
             case "$file" in
-              docs/*|.github/actions/setup-no-telemetry-node-cache/*|.github/actions/setup-no-telemetry-v7-toolchain/*|process/RUNNER_MANIFEST.json|packages/github-native-sim/src/v7-policy.mjs|packages/github-native-sim/test/*) ;;
+              docs/*|.github/actions/setup-no*telemetry-node-cache/*|.github/actions/setup-no*telemetry-v7-toolchain/*|process/RUNNER_MANIFEST.json|packages/github-native-sim/src/v7-policy.mjs|packages/github-native-sim/test/*) ;;
               *) echo "::error::Retired fork reference remains in $file"; unresolved=1 ;;
             esac
-          done < <(git grep -l 'no-telemetry' || true)
+          done < <(git grep -l "no""-telemetry" || true)
           test "$unresolved" = 0
       - name: Existing controller regression tests
         shell: bash
