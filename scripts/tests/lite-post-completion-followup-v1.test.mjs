@@ -37,3 +37,9 @@ assert.equal(sha(path.join(root,orig.lastAcceptedMasterReview.recordPath)),maste
 assert.equal(adm.lastAcceptedMasterReview.recordPath,orig.lastAcceptedMasterReview.recordPath);
 assert.throws(()=>admitPostCompletionFollowupV1({root,campaignPath,directory:adm,requestPath,now:'2026-10-12T07:01:00Z'}),/actually COMPLETE/);
 console.log(JSON.stringify({status:'PASS',sourceSha256:orig.sourceSha256,priorMasterPreserved:true,priorPhase10Preserved:true,newMasterRecord:result.recordPath,segmentId:result.pending.segmentId,sealCount:result.pending.sealedWorkForms.length}));
+
+// An admitted follow-up must be committed, not merely returned from an ephemeral controller checkout.
+const workflow=fs.readFileSync(path.resolve('.github/workflows/lite-phase-work-packet-controller-v1.yml'),'utf8');
+const publish=workflow.split('      - name: Publish validation response or successful phase transaction')[1]?.split('      - name: Resolve active reviewer chat')[0]??'';
+assert.match(publish,/FOLLOWUP_ADMITTED/);
+assert.match(publish,/git add --/);
