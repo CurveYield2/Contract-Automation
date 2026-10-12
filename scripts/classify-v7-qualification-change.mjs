@@ -40,6 +40,11 @@ const LIGHT_PATTERNS = [
   /^packages\/github-native-sim\/test\/audit-controller-token-selection-v1\.test\.mjs$/,
   /^packages\/github-native-sim\/test\/atomic-request-bridge-v1\.test\.mjs$/,
   /^packages\/github-native-sim\/test\/execution-workflow-v2\.test\.mjs$/,
+  // Controller Phase-5 evidence selection is independently covered by the
+  // lightweight exact-evidence regression workflow. It does not change the
+  // V7 engine, fork simulator, or deployment runtime.
+  /^packages\/github-native-sim\/src\/lite-boundary-artifacts-v1\.mjs$/,
+  /^packages\/github-native-sim\/test\/lite-phase5-execution-gate-v1\.test\.mjs$/,
 ];
 
 export function classifyV7QualificationChanges(paths, { forceFull = false } = {}) {
