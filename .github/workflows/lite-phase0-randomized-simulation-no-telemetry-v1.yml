@@ -1,4 +1,4 @@
-name: Lite Phase 0 Forked Deployment and Configuration No Telemetry v2
+name: Lite Phase 0 Forked Deployment and Configuration No Telemetry v3
 on:
   workflow_call:
     inputs:
@@ -63,7 +63,7 @@ jobs:
           chain_id="$(curl -fsS --max-time 15 -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "$ETHEREUM_FORK_RPC_URL" | jq -r '.result // empty')"
           test "$chain_id" = "0x1" || { echo "::error::Fork source must report Ethereum chain ID 1"; exit 1; }
           rm -rf .phase0-deploy-output
-          timeout -s TERM -k 30s 2400s node scripts/run-phase0-fork-deploy-config-v1.mjs \
+          python3 scripts/audit-command-guard-v1.py --label phase0-fork-deploy --wall 2400 --idle 900 --log "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" -- node scripts/run-phase0-fork-deploy-config-v1.mjs \
             --controller-root .audit-controller \
             --campaign-path "$CAMPAIGN_PATH" \
             --output .phase0-deploy-output \
@@ -79,6 +79,16 @@ jobs:
               --input "$file" --output "$file" \
               --campaign-root ".audit-controller/${{ inputs.campaign_path }}" \
               --source-run-id "$GITHUB_RUN_ID"
+          fi
+
+      - name: Retain guard log alongside fork-deployment evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -s "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" ]; then
+            mkdir -p .phase0-deploy-output
+            cp "$GITHUB_WORKSPACE/.phase0-deploy-command-v1.log" .phase0-deploy-output/PHASE0_COMMAND_GUARD_v1.log
           fi
 
       - name: Retain deployment/configuration evidence even on failure
