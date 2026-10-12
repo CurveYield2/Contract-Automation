@@ -9,6 +9,7 @@ import {
   renderRemediationDeltaLedgerV1,
   renderFinalEvidenceIndexV1,
   executePhase5TargetsV1,
+  validatePhase5TargetExecutionGateV1,
   validateTargetExecutionRequestBindingV1
 } from '../src/lite-boundary-artifacts-v1.mjs';
 
@@ -165,4 +166,39 @@ test('target matrix exposes structural request binding separately from semantic 
   });
   assert.match(text,/Request\/target structural binding/);
   assert.match(text,/PASS_STRUCTURAL_BINDING_REQUIRES_PHASE6_SEMANTIC_HARNESS_REVIEW/);
+});
+
+test('Phase 5 machine gate needs real fuzz runs but accepts a conclusive negative hypothesis',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'lite-phase5-real-execution-'));
+  const campaign='campaigns/demo';
+  const key='P4-CAND-001', requestId='dar-0123456789abcdef0123456789abcdef', digest='a'.repeat(64);
+  const requestRef='work/phase-05/execution-requests/'+key+'.json';
+  const requestFile=path.join(root,campaign,requestRef);
+  fs.mkdirSync(path.dirname(requestFile),{recursive:true});
+  fs.writeFileSync(requestFile,JSON.stringify({requestId,requestDigest:digest,
+    configuration:{analysis:{nativeFuzz:{fuzzRuns:1024}}}}));
+  const evidenceRef=campaign+'/evidence/phase5-boundary/'+key+'/'+requestId+'/raw-result.json';
+  const evidenceFile=path.join(root,evidenceRef);
+  fs.mkdirSync(path.dirname(evidenceFile),{recursive:true});
+  const raw={requestId,requestDigest:digest,status:'completed',blocking:false,
+    source:{archiveSha256:digest},preflight:{status:'PASS'},
+    reproduction:{candidateId:key,status:'NOT_REPRODUCED',
+      observedPredicate:{matched:false,observed:{componentStatus:'COMPLETED'}}},
+    analysis:{nativeFuzz:{componentStatus:'COMPLETED',
+      rawOutput:{exitCode:0,stdout:'[PASS] testFuzz_Candidate (runs: 1024, \\u03bc: 1)'}}}};
+  const target={candidateKey:key,executionMethod:'V7_REQUEST',reproductionType:'FOUNDRY_TEST',
+    executionRequestRef:requestRef};
+  const evidence={status:'PASS',exitCode:0,requestBindingStatus:'PASS_STRUCTURAL_BINDING_REQUIRES_PHASE6_SEMANTIC_HARNESS_REVIEW',
+    evidenceRef,rawResult:raw};
+  const check=()=>validatePhase5TargetExecutionGateV1({controllerRoot:root,campaignPath:campaign,
+    targetDesigns:[target],materialCandidateKeys:[key],executionResults:{[key]:evidence},
+    expectedSourceSha256:digest});
+  fs.writeFileSync(evidenceFile,JSON.stringify(raw));
+  assert.deepEqual(check(),[]);
+  const broken={...raw,analysis:{nativeFuzz:{componentStatus:'COMPLETED',
+    rawOutput:{exitCode:0,stdout:'No tests found'}}}};
+  fs.writeFileSync(evidenceFile,JSON.stringify(broken));
+  evidence.rawResult=broken;
+  assert.ok(check().some(x=>x.includes('no passing Foundry fuzz test')));
+  fs.rmSync(root,{recursive:true,force:true});
 });
