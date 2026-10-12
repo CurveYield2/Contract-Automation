@@ -34,7 +34,7 @@ test('all executable declaration kinds, library and inherited function are inven
  const {inventory}=await prepared;
  const kinds=new Set(inventory.payload.declarations.map(x=>x.kind));
  for(const k of ['FUNCTION','CONSTRUCTOR','FALLBACK','RECEIVE','FREE_FUNCTION','MODIFIER','CONSTANT','IMMUTABLE','STATE_INITIALIZER','GENERATED_GETTER'])
-  if(k!=='FREE_FUNCTION')assert.ok(kinds.has(k),k+' missing');
+  assert.ok(kinds.has(k),k+' missing');
  assert.ok(inventory.payload.contexts.some(c=>c.qualifiedContainer==='Main.sol:DemoMath'&&c.kind==='FUNCTION'));
  const inherited=inventory.payload.contexts.filter(c=>c.canonicalSignature==='inherited()'&&c.qualifiedContainer.endsWith(':SharedBase'));
  assert.equal(inherited.length,1);
