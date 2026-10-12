@@ -89,7 +89,7 @@ This plan fixes the system. It does not repair, rerun or measure any past campai
 
 | Task | File | Repo | Delivers | Depends on |
 |---|---|---|---|---|
-| T0 | 01 | CA (+AC state) | Verification workflow; retire v17 r1 | — |
+| T0 | 01 | CA (+AC state, +archive) | Verification workflow; retire v17 r1; archive the discontinued no-telemetry Phase 0 fork (T0.4) | — |
 | T1 | 01 | CA | Defect taxonomy + coverage-matrix library | T0 |
 | T2 | 01 | CA | Phase 0 review inventory, system facts, deployed-state snapshot | T1 |
 | T3 | 01 | CA | Phase 0 flow plan: flows, review units, attack units, integration questions | T2 |

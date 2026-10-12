@@ -147,6 +147,41 @@ There are no new tests in T0. The workflow must run green on the T0 PR: the prog
 - Add schedules.
 - Add `continue-on-error`.
 
+### T0.4 Archive the discontinued no-telemetry Phase 0 fork (do this next, before resuming T2)
+
+Owner decision, 2026-10-12: the no-telemetry Phase 0 fork is discontinued and self-contained. Nothing in the live campaign flow uses it; initialization starts only `lite-phase0-bootstrap-v1.yml`. Never edit the fork, only archive it.
+
+This task is one Contract-Automation PR, `upgrade/adr-T0-archive-no-telemetry`. It is explicitly authorized to touch the workflows named here (exception to N7).
+
+1. **Archive.** Copy each file below byte-for-byte to `CurveYield2/archive` at `Contract-Automation/<original path>`. Use one archive PR or commit. Then delete each one from Contract-Automation.
+   - `.github/workflows/lite-phase0-bootstrap-no-telemetry-v1.yml`
+   - `.github/workflows/lite-phase0-bootstrap-recovery-dispatch-no-telemetry-v1.yml`
+   - `.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml`
+   - `.github/workflows/lite-phase0-randomized-simulation-no-telemetry-v1.yml`
+   - `.github/workflows/v7-execution-infrastructure-qualification-no-telemetry-v1.yml`
+   - `.github/workflows/lite-phase0-evidence-gate-resume-v1.yml`: this is the fork's recovery path and calls the fork's finalizer.
+   - `packages/github-native-sim/src/lite-phase0-intelligence-no-telemetry-v1.mjs`
+   - `packages/github-native-sim/src/phase0-randomized-simulation-no-telemetry-v1.mjs`
+   - `packages/github-native-sim/test/phase0-no-telemetry-active-watchdog-v1.test.mjs`
+   - `scripts/lite-phase0-finalize-no-telemetry-v1.mjs`
+   - `scripts/phase0-no-telemetry-watchdog-v1.mjs`
+   - `scripts/run-phase0-randomized-simulation-no-telemetry-v1.mjs`
+   - `scripts/write-phase0-simulation-outputs-no-telemetry-v1.mjs`
+   - the four files in `process/agent-upload/lite-phase0-bootstrap-no-telemetry/`
+2. **Keep** `.github/actions/setup-no-telemetry-node-cache/` and `.github/actions/setup-no-telemetry-v7-toolchain/` for now. They are listed in `process/RUNNER_MANIFEST.json` and `packages/github-native-sim/src/v7-policy.mjs`. Removing them would break the V7 manifest check (`npm run v7:manifest -- --check`) that `audit-controller-execution.yml` runs. Do not rename or edit them in this task.
+3. **Fix the remaining references in the same PR:**
+   - `.github/workflows/phase0-deploy-only-regression-v1.yml`: delete the line `node --check scripts/lite-phase0-finalize-no-telemetry-v1.mjs` and the line naming `phase0-no-telemetry-active-watchdog-v1.test.mjs`.
+   - `.github/workflows/lite-master-targeted-tests-regression-v1.yml`: delete the two path-filter lines naming `lite-phase0-randomized-simulation-no-telemetry-v1.yml`.
+   - `scripts/phase0-compile-watchdog-v1.mjs`: remove the `no-telemetry` mode. Accept only `primary`, always use the primary module path, and keep only the `phase0-intelligence-primary` log pattern.
+   - Tests that mention archived files: `phase0-optimization4-v1`, `phase0-compiler-watchdog-30m-v1`, `phase0-private-build-cache-v1`, `v7-unified-test-qualification-v1`, `lite-phase0-automation-v2`, `phase0-stage2-balancer-stall-repair-v1` and `phase0-v2-consumers` (all `.test.mjs` under `packages/github-native-sim/test/`).
+     - Delete only the cases or assertions that reference an archived file.
+     - If a test file only covers archived files, archive it too.
+     - Add each remaining file to the "Existing controller regression tests" list in `audit-detection-rebuild-verify-v1.yml`, so the PR proves they still pass.
+4. **Done when:**
+   - `git grep -n no-telemetry` on the branch matches only the two kept action folders, the files that reference them (`RUNNER_MANIFEST.json`, `v7-policy.mjs` and their tests) and `docs/`;
+   - the T0 workflow is green;
+   - the archive copy is merged.
+
 ---
 
 ## T1 — Defect taxonomy and coverage-matrix library
@@ -269,8 +304,7 @@ It exports:
 **Read first:**
 - `packages/github-native-sim/src/source-intelligence-technical-v1.mjs`, especially `function sources(`, `function astIndex(`, `function loc(` and the loop starting `for (const abi of a.abi??[])`;
 - `packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs`, search `generateSourceIntelligenceTechnicalBundleV1(` and `SOURCE_INTELLIGENCE_AUTOMATED_v1.json`;
-- `packages/github-native-sim/src/lite-phase0-intelligence-no-telemetry-v1.mjs`, same searches;
-- `.github/workflows/lite-phase0-intelligence-v1.yml` and `.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml`, search `receipt_path="$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"` and `Write only useful outputs to Audit-Controller campaign`;
+- `.github/workflows/lite-phase0-intelligence-v1.yml`, search `receipt_path="$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"` and `Write only useful outputs to Audit-Controller campaign`;
 - `packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs`, search `if(deploymentOnly){` (first occurrence) and `return{deployEvidence:witness};`;
 - `scripts/write-phase0-fork-deploy-outputs-v1.mjs`.
 
@@ -412,19 +446,19 @@ Export `buildSystemFactsV1({inventory})`. It returns an artifact with `schemaVer
 
 Sort all arrays deterministically.
 
-### T2.5 Wire inventory and facts into Phase 0 (two intelligence modules + two intelligence workflows)
+### T2.5 Wire inventory and facts into Phase 0 (intelligence module + intelligence workflow)
 
 **How Phase 0 intelligence actually publishes (verified 2026-10-12):**
-- The modules `lite-phase0-intelligence-v1.mjs` and `lite-phase0-intelligence-no-telemetry-v1.mjs` only write files into their temporary `--output` directory (`.phase0-intelligence-output`). They never read the Phase 0 receipt and never touch Audit-Controller.
-- The workflows `.github/workflows/lite-phase0-intelligence-v1.yml` and `.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml` handle the rest:
+- The module `lite-phase0-intelligence-v1.mjs` only writes files into their temporary `--output` directory (`.phase0-intelligence-output`). It never reads the Phase 0 receipt and never touch Audit-Controller.
+- The workflow `.github/workflows/lite-phase0-intelligence-v1.yml` handles the rest:
   - fetch the receipt into `/tmp/phase0-receipt.json` in the step guarded by `if: inputs.campaign_id != ''`;
   - run the module;
   - in the step "Write only useful outputs to Audit-Controller campaign", copy a fixed list of output files into the campaign;
   - commit with `git add "$campaign_path/evidence" …`.
 
-**This task is authorized to edit both of those workflows,** exactly as described below (exception to N7). Make no other change to them.
+**This task is authorized to edit that workflow,** exactly as described below (exception to N7). Make no other change to it. **Never edit any `*no-telemetry*` file**: that fork is discontinued and is archived by T0.4.
 
-1. **Policy for the run (both workflows).** In the step that writes `/tmp/phase0-receipt.json` (search `receipt_path="$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"`), append these lines at the end of its `run:` block:
+1. **Policy for the run.** In the step that writes `/tmp/phase0-receipt.json` (search `receipt_path="$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"`), append these lines at the end of its `run:` block:
 
 ```bash
 homepage="$(jq -r '.authority.homepagePath // empty' /tmp/phase0-receipt.json)"
@@ -443,7 +477,7 @@ echo "ADR_DETECTION_POLICY=$adr_policy" >> "$GITHUB_ENV"
    - When that step is skipped (no `campaign_id`) or the manifest is not found, the variable is empty and nothing new happens.
    - The receipt is the campaign's `receipts/PHASE_00_RECEIPT_v1.json` at `inputs.audit_controller_ref`. It is already fetched by this step; do not fetch it anywhere else.
 
-2. **Module change (both modules).** Find the statement containing `generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute`. Directly after it, add:
+2. **Module change.** Find the statement containing `generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute`. Directly after it, add:
 
 ```js
 await writeReviewInventoryOutputsV1({outputDir: <the module's --output directory variable>, projectRoot: detected.absolute, build, request, policy: process.env.ADR_DETECTION_POLICY || null});
@@ -458,7 +492,7 @@ await writeReviewInventoryOutputsV1({outputDir: <the module's --output directory
    - Wrap everything in `try/catch`. On error, write `REVIEW_INVENTORY_v1.json` with `payload.complete:false`, empty arrays and `limitations:[{code:'INVENTORY_BUILD_ERROR', path:'*', detail:<message, max 2000 chars>}]`, do not write `SYSTEM_FACTS_v1.json`, and return normally.
    - Never throw.
 
-4. **Copy into the campaign (both workflows).** In the step "Write only useful outputs to Audit-Controller campaign", directly after the line that copies `PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json`, add:
+4. **Copy into the campaign.** In the step "Write only useful outputs to Audit-Controller campaign", directly after the line that copies `PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json`, add:
 
 ```bash
 if [ -f ../.phase0-intelligence-output/REVIEW_INVENTORY_v1.json ]; then
@@ -525,8 +559,8 @@ await fs.writeFile(path.join(outputRoot,'DEPLOYED_STATE_SNAPSHOT_v1.json'), JSON
       - with a `build` that makes the builder throw, it writes only `REVIEW_INVENTORY_v1.json` with `INVENTORY_BUILD_ERROR` and does not throw.
 
 `packages/github-native-sim/test/adr-phase0-wiring-v1.test.mjs` (text test):
-- Both intelligence workflows contain `ADR_DETECTION_POLICY=` and the guarded `evidence/review-inventory` copy block.
-- Both intelligence modules contain `writeReviewInventoryOutputsV1(`.
+- `lite-phase0-intelligence-v1.yml` contains `ADR_DETECTION_POLICY=` and the guarded `evidence/review-inventory` copy block.
+- `lite-phase0-intelligence-v1.mjs` contains `writeReviewInventoryOutputsV1(`.
 - `scripts/write-phase0-fork-deploy-outputs-v1.mjs` contains `DEPLOYED_STATE_SNAPSHOT_v1.json` inside a `detectionPolicyForAuthorityV1` guard.
 
 `packages/github-native-sim/test/adr-system-facts-v1.test.mjs`:
@@ -555,7 +589,7 @@ await fs.writeFile(path.join(outputRoot,'DEPLOYED_STATE_SNAPSHOT_v1.json'), JSON
 Nothing here limits what a reviewer may read or cite (00 D11). Units only bound how many rows one submission must fill.
 
 **Read first:**
-- `scripts/lite-phase0-finalize-v1.mjs` and `scripts/lite-phase0-finalize-no-telemetry-v1.mjs`: search `const required=` or `required(`, and the place the receipt is sealed.
+- `scripts/lite-phase0-finalize-v1.mjs`: search `const required=` or `required(`, and the place the receipt is sealed.
 
 ### T3.1 Create `packages/github-native-sim/src/adr-flow-plan-v1.mjs`
 
@@ -643,9 +677,9 @@ Every `FILE_FALLBACK` context and every `INVENTORY_INCOMPLETE` limitation goes i
 - `capacity = {flows, crossContractFlows, clusters, flowReviewUnits, residualUnits, attackUnits, reviewableContexts, integrationQuestions}`.
 - Reversed inputs must produce identical output.
 
-### T3.2 Wire into both Phase 0 finalizers
+### T3.2 Wire into the Phase 0 finalizer
 
-In `scripts/lite-phase0-finalize-v1.mjs` and `scripts/lite-phase0-finalize-no-telemetry-v1.mjs`, just before the receipt is sealed (search for where `validation.status` is set to `PASS`):
+In `scripts/lite-phase0-finalize-v1.mjs`, just before the receipt is sealed (search for where `validation.status` is set to `PASS`):
 
 1. Compute the policy exactly as in T2.6 step 2. The finalizer writes directly into the `--controller-root` checkout, and the bootstrap workflows commit with `git add -- "$CAMPAIGN_PATH" …`, so no workflow change is needed.
    - Read the receipt from `<controller-root>/<campaign-path>/receipts/PHASE_00_RECEIPT_v1.json`.
