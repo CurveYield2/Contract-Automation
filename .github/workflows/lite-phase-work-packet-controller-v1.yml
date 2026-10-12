@@ -22,7 +22,11 @@ on:
         required: false
         default: phase
         type: choice
-        options: [phase, master, master-test-result, sealed-rework, post-completion-followup]
+        options: [phase, discovery, master, master-test-result, sealed-rework, post-completion-followup]
+      unit_id:
+        required: false
+        default: ''
+        type: string
       phase_sequence:
         required: false
         default: ''
@@ -91,6 +95,7 @@ jobs:
           DISPATCH_CAMPAIGN_PATH: ${{ inputs.campaign_path }}
           DISPATCH_DIRECTORY_PATH: ${{ inputs.campaign_directory_path }}
           DISPATCH_REVIEW_KIND: ${{ inputs.review_kind }}
+          DISPATCH_UNIT_ID: ${{ inputs.unit_id }}
           DISPATCH_PHASE_SEQUENCE: ${{ inputs.phase_sequence }}
           DISPATCH_SEGMENT_ID: ${{ inputs.segment_id }}
           DISPATCH_MASTER_OUTCOME: ${{ inputs.master_outcome }}
@@ -105,6 +110,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             campaign_id="$DISPATCH_CAMPAIGN_ID"
             review_kind="${DISPATCH_REVIEW_KIND:-phase}"
+            unit_id="$DISPATCH_UNIT_ID"
             phase_sequence="$DISPATCH_PHASE_SEQUENCE"
             segment_id="$DISPATCH_SEGMENT_ID"
             master_outcome="$DISPATCH_MASTER_OUTCOME"
@@ -129,6 +135,7 @@ jobs:
               .schemaVersion=="curveyield-lite-phase-boundary-request-v1" and
               ((.campaignId|type)=="string") and (.campaignId|length)>0 and
               (((.reviewKind // "phase")=="phase" and ((.phaseSequence|type)=="number") and ((.phaseSequence|floor)==.phaseSequence) and .phaseSequence>=1 and .phaseSequence<=10) or
+               ((.reviewKind // "phase")=="discovery" and ((.unitId|type)=="string") and (.unitId|test("^[FRX]-[0-9]{3}$"))) or
                ((.reviewKind // "phase")=="master" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and (.masterOutcome=="AMENDED" or .masterOutcome=="ACCEPT_WITHOUT_MODIFICATIONS" or (.masterOutcome=="REQUEST_TARGETED_TESTS" and ((.testPlanPath|type)=="string") and (.testPlanPath|length)>0)) and ((.summary // "")|type)=="string") or
                ((.reviewKind // "phase")=="master-test-result" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and ((.testResultPath|type)=="string") and (.testResultPath|length)>0) or
                ((.reviewKind // "phase")=="sealed-rework" and ((.phaseSequence|type)=="number") and .phaseSequence==1 and ((.reworkRequestPath|type)=="string") and (.reworkRequestPath|length)>0 and .holdSuccessorDelivery==true) or
@@ -138,6 +145,7 @@ jobs:
             ' /tmp/lite-phase-boundary-request.json >/dev/null
             campaign_id="$(jq -r '.campaignId' /tmp/lite-phase-boundary-request.json)"
             review_kind="$(jq -r '.reviewKind // "phase"' /tmp/lite-phase-boundary-request.json)"
+            unit_id="$(jq -r '.unitId // empty' /tmp/lite-phase-boundary-request.json)"
             phase_sequence="$(jq -r '.phaseSequence // empty' /tmp/lite-phase-boundary-request.json)"
             segment_id="$(jq -r '.segmentId // empty' /tmp/lite-phase-boundary-request.json)"
             master_outcome="$(jq -r '.masterOutcome // empty' /tmp/lite-phase-boundary-request.json)"
@@ -151,8 +159,9 @@ jobs:
             supplied_directory_path=""
           fi
           [[ "$campaign_id" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || { echo "::error::Invalid campaign_id"; exit 1; }
-          case "$review_kind" in phase|master|master-test-result|sealed-rework|post-completion-followup) ;; *) echo "::error::Invalid review_kind"; exit 1;; esac
+          case "$review_kind" in phase|discovery|master|master-test-result|sealed-rework|post-completion-followup) ;; *) echo "::error::Invalid review_kind"; exit 1;; esac
           if [ "$review_kind" = phase ]; then [[ "$phase_sequence" =~ ^([1-9]|10)$ ]] || { echo "::error::Invalid phase_sequence"; exit 1; }; fi
+          if [ "$review_kind" = discovery ]; then [[ "$unit_id" =~ ^[FRX]-[0-9]{3}$ ]] || { echo "::error::Invalid unit_id"; exit 1; }; fi
           if [ "$review_kind" = master ]; then
             [[ "$segment_id" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Invalid segment_id"; exit 1; }
             case "$master_outcome" in AMENDED|ACCEPT_WITHOUT_MODIFICATIONS|REQUEST_TARGETED_TESTS) ;; *) echo "::error::Invalid master outcome"; exit 1;; esac
@@ -181,6 +190,7 @@ jobs:
           {
             echo "campaign_id=$campaign_id"
             echo "review_kind=$review_kind"
+            echo "unit_id=$unit_id"
             echo "phase_sequence=$phase_sequence"
             echo "segment_id=$segment_id"
             echo "master_outcome=$master_outcome"
@@ -227,6 +237,12 @@ jobs:
           test "$(jq -r '.campaignId' "$directory_file")" = "$campaign_id"
           if [ "${{ steps.request.outputs.review_kind }}" = phase ]; then
             test "$(jq -r '.currentAssignment.phaseSequence' "$directory_file")" = "${{ steps.request.outputs.phase_sequence }}"
+          elif [ "${{ steps.request.outputs.review_kind }}" = discovery ]; then
+            active="$(jq -r '.discovery.activeUnitId // empty' "$directory_file")"
+            if [ "$active" != "${{ steps.request.outputs.unit_id }}" ]; then
+              echo "::notice::stale discovery request"
+              stale=true
+            fi
           elif [ "${{ steps.request.outputs.review_kind }}" = master ] || [ "${{ steps.request.outputs.review_kind }}" = master-test-result ]; then
             test "$(jq -r '.pendingMasterReview.segmentId' "$directory_file")" = "${{ steps.request.outputs.segment_id }}"
           else
@@ -249,17 +265,20 @@ jobs:
             effective_hold=true
           fi
           {
+            echo "stale=${stale:-false}"
             echo "campaign_path=$campaign_path"
             echo "campaign_directory_path=$directory_path"
             echo "effective_hold=$effective_hold"
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js for controller validation and Phase-5 execution
+        if: steps.routing.outputs.stale != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install locked Node dependencies for controller validation
+        if: steps.routing.outputs.stale != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -267,7 +286,7 @@ jobs:
 
       - name: Determine whether master amendment needs Phase-5 execution
         id: phase5_plan
-        if: steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED'
+        if: steps.routing.outputs.stale != 'true' && steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED'
         shell: bash
         run: |
           set -euo pipefail
@@ -277,10 +296,11 @@ jobs:
           printf '%s\n' "$decision" | jq .
 
       - name: Install retained audit toolchain for Phase-5 boundary execution
-        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.phase5_plan.outputs.requires_execution == 'true')
+        if: steps.routing.outputs.stale != 'true' && ((steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.phase5_plan.outputs.requires_execution == 'true'))
         uses: ./.github/actions/setup-v7-toolchain
 
       - name: Generate packet/report, validate semantic work, then bookkeep after PASS
+        if: steps.routing.outputs.stale != 'true'
         id: controller
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
@@ -303,6 +323,8 @@ jobs:
             if [ -n "${{ steps.request.outputs.master_summary_b64 }}" ]; then
               args+=(--master-summary-b64 "${{ steps.request.outputs.master_summary_b64 }}")
             fi
+          elif [ "${{ steps.request.outputs.review_kind }}" = discovery ]; then
+            args+=(--unit-id "${{ steps.request.outputs.unit_id }}")
           else
             args+=(--phase-sequence "${{ steps.request.outputs.phase_sequence }}")
           fi
