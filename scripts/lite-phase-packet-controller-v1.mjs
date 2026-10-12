@@ -16,7 +16,7 @@ import {
 } from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {
   buildControllerPacket,renderControllerPhaseReport,validatePhaseScaffold,
-  phase4CoverageFromForm,materializeValidatedFindings,resolveTargetExecutionRequestRef,
+  phase4CoverageFromForm,phase4DiscoveryCoverageV1,materializeValidatedFindings,resolveTargetExecutionRequestRef,
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
@@ -1214,7 +1214,10 @@ const canonical={
   automationOutputs:{},
   generatedAt:now
 };
-if(sequence===4) canonical.automationOutputs.phase4Coverage=phase4CoverageFromForm(form);
+if(sequence===4) canonical.automationOutputs.phase4Coverage=
+  Object.hasOwn(form?.automationInputs??{},'expectedDiscoveryRecordKeys')
+    ? phase4DiscoveryCoverageV1({summary:(()=>{const rel=path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json');return fs.existsSync(repoFile(root,rel))?readJson(repoFile(root,rel)):null;})()})
+    : phase4CoverageFromForm(form);
 if(sequence===5) canonical.automationOutputs.phase5MachineExecutionGate={
   status:'PASS',targetKeys:Object.keys(phase5MachineResults??{}).sort(),
   evidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef).filter(Boolean)
