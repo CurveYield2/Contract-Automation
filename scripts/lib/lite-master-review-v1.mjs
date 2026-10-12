@@ -33,11 +33,17 @@ function receiptCandidates(root,campaignPath,phase){
     revision:Number(x.match[1]),rel:path.posix.join(campaignPath,'receipts',x.name)
   })).sort((a,b)=>b.revision-a.revision);
 }
-function latestReceipt(root,campaignPath,phase){
+function latestReceipt(root,campaignPath,phase,{allowTerminalComplete=false}={}){
   const found=receiptCandidates(root,campaignPath,phase)[0];
   if(!found)throw new Error('master review segment is missing sealed Phase '+phase+' receipt');
   const receipt=readJson(requiredFile(root,found.rel,'Phase '+phase+' receipt'));
-  if(!['SEALED','SKIPPED'].includes(String(receipt?.phase?.status??'')))throw new Error('master review requires sealed/skipped Phase '+phase+' receipt');
+  const status=String(receipt?.phase?.status??'');
+  // Phase 10 emits COMPLETE during a final master-amendment replay. Treat it
+  // as terminal only in the COMPLETE campaign, with a passing final receipt.
+  const terminalComplete=phase===10&&allowTerminalComplete&&status==='COMPLETE'
+    &&receipt?.validation?.status==='PASS'&&receipt?.handoff?.nextPhaseSequence===null;
+  if(!['SEALED','SKIPPED'].includes(status)&&!terminalComplete)
+    throw new Error('master review requires sealed/skipped Phase '+phase+' receipt (or validated terminal Phase 10 COMPLETE)');
   return {...found,receipt};
 }
 function canonicalRel(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNumber(phase)+'_CANONICAL_DATA_v1.json');}
@@ -83,7 +89,7 @@ export function collectSegmentArtifacts({root,campaignPath,segment,directory,exp
   if(!directory||!expectedAuthority)throw new Error('segment collection requires exact campaign and authority bindings');
   const artifacts=[];const seen=new Set();
   for(const phase of segment.phases){
-    const receiptInfo=latestReceipt(root,campaignPath,phase);
+    const receiptInfo=latestReceipt(root,campaignPath,phase,{allowTerminalComplete:segment.boundaryPhase===10&&directory.campaignStatus==='COMPLETE'});
     const receipt=receiptInfo.receipt;
     if(receipt.campaign?.campaignId!==directory.campaignId||receipt.campaign?.campaignGenerationId!==directory.campaignGenerationId)throw new Error('sealed receipt campaign binding mismatch for Phase '+phase);
     if(receipt.source?.sha256!==directory.sourceSha256)throw new Error('sealed receipt source binding mismatch for Phase '+phase);
