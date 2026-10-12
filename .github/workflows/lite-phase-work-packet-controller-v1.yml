@@ -152,7 +152,14 @@ jobs:
           if [ "$review_kind" = phase ]; then [[ "$phase_sequence" =~ ^([1-9]|10)$ ]] || { echo "::error::Invalid phase_sequence"; exit 1; }; fi
           if [ "$review_kind" = master ]; then
             [[ "$segment_id" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Invalid segment_id"; exit 1; }
-            case "$master_outcome" in AMENDED|ACCEPT_WITHOUT_MODIFICATIONS|REQUEST_TARGETED_TESTS) ;; *) echo "::error::master_outcome must be AMENDED or ACCEPT_WITHOUT_MODIFICATIONS"; exit 1;; esac
+            case "$master_outcome" in AMENDED|ACCEPT_WITHOUT_MODIFICATIONS|REQUEST_TARGETED_TESTS) ;; *) echo "::error::Invalid master outcome"; exit 1;; esac
+            if [ "$master_outcome" = REQUEST_TARGETED_TESTS ]; then
+              [[ "$test_plan_path" == campaigns/* ]] || { echo "::error::Missing campaign-local test plan"; exit 1; }
+            fi
+          fi
+          if [ "$review_kind" = master-test-result ]; then
+            [[ "$segment_id" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Invalid segment_id"; exit 1; }
+            [[ "$test_result_path" == campaigns/* ]] || { echo "::error::Missing campaign-local test result"; exit 1; }
           fi
           if [ "$review_kind" = sealed-rework ]; then
             [ "$phase_sequence" = 1 ] || { echo "::error::sealed-rework is restricted to Phase 1"; exit 1; }
@@ -228,7 +235,7 @@ jobs:
           test "$(jq -r '.campaignId' "$directory_file")" = "$campaign_id"
           if [ "${{ steps.request.outputs.review_kind }}" = phase ]; then
             test "$(jq -r '.currentAssignment.phaseSequence' "$directory_file")" = "${{ steps.request.outputs.phase_sequence }}"
-          elif [ "${{ steps.request.outputs.review_kind }}" = master ]; then
+          elif [ "${{ steps.request.outputs.review_kind }}" = master ] || [ "${{ steps.request.outputs.review_kind }}" = master-test-result ]; then
             test "$(jq -r '.pendingMasterReview.segmentId' "$directory_file")" = "${{ steps.request.outputs.segment_id }}"
           else
             test "${{ steps.request.outputs.hold_delivery }}" = true
