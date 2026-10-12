@@ -49,5 +49,8 @@
     "consecutiveUnviewable": 0
   },
   "watchdogRunId": "38198590884",
-  "watchdogSweepStartedAt": "2026-10-12T03:09:12Z"
+  "watchdogSweepStartedAt": "2026-10-12T03:09:12Z",
+  "lastDecision": "WAITING_NO_CHATGPT_READ",
+  "lastNoReadSweepAt": "2026-10-12T03:09:15Z",
+  "elapsedSinceLastPokeMinutes": 2
 }
