@@ -46,7 +46,8 @@ const lines=[
   '',
   'The Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority.',
   '',
-  'Start '+assignment.phaseId+' now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.'
+  'Start '+assignment.phaseId+' now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.',
+  'Submit the boundary validation request using schema curveyield-lite-phase-boundary-request-v1 under process/agent-upload/lite-phase-boundary/ for the exact campaign and phase; do not bookkeep receipts yourself.'
 ];
 const wakeMessage=lines.join('\n');
 process.stdout.write(JSON.stringify({status:'PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,directoryPath:a['campaign-directory-path'],incomingPhaseId:assignment.phaseId,incomingPhaseSequence:assignment.phaseSequence,incomingReviewer:assignment.reviewer,wakeMessage,wakeMessageB64:Buffer.from(wakeMessage).toString('base64')})+'\n');
