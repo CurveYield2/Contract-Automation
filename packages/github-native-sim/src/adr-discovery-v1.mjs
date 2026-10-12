@@ -27,9 +27,9 @@ const resolveUnit=(plan,unitId)=>unitList(plan).find(x=>x.unitId===unitId);
 const contextAnchor=(c)=>c?c.path+':L'+c.lineStart+'-L'+c.lineEnd:'NO_SOURCE_ANCHOR';
 function contextFor(inventory,id){return arr(inventory?.payload?.contexts).find(c=>c.contextId===id);}
 function normalizeAccepted(state){return state?.payload??state;}
-function packetRel(campaign,unit)=>pathJoin(campaign,unit+'/ASSIGNMENT_PACKET_v1.json');
-function submissionRel(campaign,unit)=>pathJoin(campaign,unit+'/SUBMISSION_v1.json');
-function stateRel(campaign)=>pathJoin(campaign,'DISCOVERY_STATE_v1.json');
+const packetRel=(campaign,unit)=>pathJoin(campaign,unit+'/ASSIGNMENT_PACKET_v1.json');
+const submissionRel=(campaign,unit)=>pathJoin(campaign,unit+'/SUBMISSION_v1.json');
+const stateRel=(campaign)=>pathJoin(campaign,'DISCOVERY_STATE_v1.json');
 const stubObligations=(directory,now)=>head(directory,now,'curveyield-baseline-obligations-v1',{obligations:[],testGroups:[]});
 
 export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,state,now}){
