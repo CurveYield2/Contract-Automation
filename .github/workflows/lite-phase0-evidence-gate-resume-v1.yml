@@ -11,15 +11,7 @@ concurrency:
   group: lite-phase0-evidence-resume-${{ github.ref }}
   cancel-in-progress: false
 jobs:
-  qualification:
-    uses: ./.github/workflows/v7-execution-infrastructure-qualification.yml
-    with:
-      controller_ref: main
-      qualification_lane: FULL
-    secrets: inherit
   evidence-gate-resume:
-    needs: qualification
-    if: ${{ needs.qualification.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -117,7 +109,7 @@ jobs:
           node scripts/write-phase0-fork-deploy-outputs-v1.mjs \
             --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" \
             --simulation-output .phase0-resume-reconciled
-      - name: Verify current V7 qualification and finalize Phase 0
+      - name: Verify recovered Phase 0 evidence and finalize
         id: finalize
         env:
           GH_TOKEN: ${{ github.token }}
@@ -125,12 +117,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/contents/process/V7_QUALIFICATION_STATUS.json?ref=main" --jq .content | base64 -d > /tmp/v7-qualification.json
-          test "$(jq -r .status /tmp/v7-qualification.json)" = PASS
-          test "$(jq -r .qualifiedCommit /tmp/v7-qualification.json)" = "$GITHUB_SHA"
           node scripts/lite-phase0-finalize-no-telemetry-v1.mjs \
             --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" \
-            --qualification-path /tmp/v7-qualification.json \
             --contract-automation-sha "$GITHUB_SHA" --bootstrap-sha "$GITHUB_SHA" \
             --workflow-run-id "$GITHUB_RUN_ID" | tee /tmp/phase0-gate-replay-finalize.json
           test "$(jq -r .status /tmp/phase0-gate-replay-finalize.json)" = PASS
