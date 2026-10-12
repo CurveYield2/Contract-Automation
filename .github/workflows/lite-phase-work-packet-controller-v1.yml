@@ -64,7 +64,9 @@ permissions:
   actions: write
 
 concurrency:
-  group: lite-phase-boundary-${{ inputs.campaign_id || github.sha }}-${{ inputs.phase_sequence || github.run_id }}
+  # Push requests do not have workflow_dispatch inputs. A stable global lock
+  # protects all campaign mutations from concurrent stale-state publishing.
+  group: lite-phase-boundary-controller-v1
   cancel-in-progress: false
 
 jobs:
@@ -184,23 +186,6 @@ jobs:
             echo "supplied_campaign_path=$supplied_campaign_path"
             echo "supplied_directory_path=$supplied_directory_path"
           } >> "$GITHUB_OUTPUT"
-      - name: Set up Node.js for Phase-5 boundary execution
-        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED')
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Install trusted runner dependencies for Phase-5 boundary execution
-        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED')
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm ci --force
-
-      - name: Install retained audit toolchain for Phase-5 boundary execution
-        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED')
-        uses: ./.github/actions/setup-v7-toolchain
-
       - name: Select Audit-Controller credential
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -262,6 +247,34 @@ jobs:
             echo "effective_hold=$effective_hold"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Determine whether master amendment needs Phase-5 execution
+        id: phase5_plan
+        if: steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha="$(jq -r '.sourceSha256' ".audit-controller/${{ steps.routing.outputs.campaign_directory_path }}")"
+          decision="$(node scripts/lite-master-phase5-execution-plan-v1.mjs             .audit-controller "${{ steps.routing.outputs.campaign_path }}"             "${{ steps.request.outputs.campaign_id }}" "$sha")"
+          echo "requires_execution=$(printf '%s' "$decision" | jq -r '.requiresExecution')" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$decision" | jq .
+
+      - name: Set up Node.js for Phase-5 boundary execution
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.phase5_plan.outputs.requires_execution == 'true')
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install trusted runner dependencies for Phase-5 boundary execution
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.phase5_plan.outputs.requires_execution == 'true')
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --force
+
+      - name: Install retained audit toolchain for Phase-5 boundary execution
+        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.phase5_plan.outputs.requires_execution == 'true')
+        uses: ./.github/actions/setup-v7-toolchain
+
       - name: Generate packet/report, validate semantic work, then bookkeep after PASS
         id: controller
         env:
@@ -270,7 +283,7 @@ jobs:
         run: |
           set -euo pipefail
           if { [ "${{ steps.request.outputs.review_kind }}" = phase ] && [ "${{ steps.request.outputs.phase_sequence }}" = 5 ]; } ||
-             { [ "${{ steps.request.outputs.review_kind }}" = master ] && [ "${{ steps.request.outputs.segment_id }}" = reviewer-2-phases-02-05 ] && [ "${{ steps.request.outputs.master_outcome }}" = AMENDED ]; }; then
+             { [ "${{ steps.phase5_plan.outputs.requires_execution }}" = true ]; }; then
             test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::RPC_ETHEREUM secret missing for Phase-5 V7 fork preflight"; exit 1; }
           fi
           args=(--controller-root .audit-controller --campaign-id "${{ steps.request.outputs.campaign_id }}" --campaign-path "${{ steps.routing.outputs.campaign_path }}" --campaign-directory-path "${{ steps.routing.outputs.campaign_directory_path }}" --review-kind "${{ steps.request.outputs.review_kind }}" --audit-controller-ref "${{ steps.request.outputs.audit_controller_ref }}")
@@ -309,7 +322,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish validation response or successful phase transaction
-        if: ${{ always() && steps.routing.outcome == 'success' && steps.controller.outcome != 'skipped' }}
+        if: ${{ steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK') }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
@@ -455,6 +468,7 @@ jobs:
             -f browser_context_b64="$browser_context_b64"
 
       - name: Summary
+        if: always()
         run: |
           {
             echo "## Lite Phase Boundary Controller"
@@ -466,5 +480,12 @@ jobs:
             echo "- result: ${{ steps.controller.outputs.status }}"
             echo "- packet/report ownership: controller-generated"
             echo "- bookkeeping before validation PASS: prohibited"
-            echo "- machine execution timing: phase-end boundaries only"
+            echo "- machine execution timing: only when exact Phase-5 evidence cannot be safely reused"
+            echo "- automation failure: ${{ steps.controller.outputs.status == 'CONTROLLER_ERROR' || steps.controller.outputs.status == 'MASTER_REVIEW_HELD' }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on infrastructure error or held machine-evidence gate
+        if: steps.controller.outputs.status == 'CONTROLLER_ERROR' || steps.controller.outputs.status == 'MASTER_REVIEW_HELD'
+        run: |
+          echo "::error::Controller maintenance required; do not request reviewer changes for automation failures."
+          exit 1
