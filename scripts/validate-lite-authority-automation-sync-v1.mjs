@@ -113,16 +113,16 @@ for(let phase=1;phase<=10;phase++){
   need(sameSet(contractDerived,schemaDerived),`phase ${phase}: contract/schema derived outputs mismatch`);
   need(packetController.includes('buildDerivedOutputs({root,campaignPath,schema,canonicalData:canonical'),`phase ${phase}: generic schema-driven derived-output generation is missing from boundary controller`);
   const expectedNextStates={
-    1:['REWORK_REQUIRED','WAITING_FOR_SUCCESSOR_AGENT'],
+    1:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
     2:['REWORK_REQUIRED','ACTIVE'],
     3:['REWORK_REQUIRED','ACTIVE'],
     4:['REWORK_REQUIRED','ACTIVE'],
-    5:['REWORK_REQUIRED','WAITING_FOR_SUCCESSOR_AGENT'],
-    6:['REWORK_REQUIRED','WAITING_FOR_SUCCESSOR_AGENT'],
-    7:['WAITING_FOR_SUCCESSOR_AGENT'],
+    5:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
+    6:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
+    7:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
     8:['REWORK_REQUIRED','ACTIVE'],
     9:['REWORK_REQUIRED','ACTIVE'],
-    10:['REWORK_REQUIRED','COMPLETE']
+    10:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','COMPLETE']
   };
   need(sameSet(contract.allowedNextStates??[],expectedNextStates[phase]),`phase ${phase}: allowedNextStates do not match current assignment-v2 controller transitions`);
   phaseSummaries.push({phase,steps:schemaSteps.length,derivedOutputs:schemaDerived.length});
