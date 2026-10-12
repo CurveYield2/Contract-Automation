@@ -13,14 +13,14 @@ runs:
       id: slither-cache
       uses: actions/cache@v4
       with:
-        path: ~/.cache/curveyield-no-telemetry/slither-0.11.6-py312
-        key: phase0-no-telemetry-slither-env-v1-${{ runner.os }}-${{ runner.arch }}-py312-${{ hashFiles('.github/actions/setup-v7-toolchain/action.yml') }}
+        path: ~/.cache/curveyield-primary/slither-0.11.6-py312
+        key: phase0-primary-slither-env-v1-${{ runner.os }}-${{ runner.arch }}-py312-${{ hashFiles('.github/actions/setup-v7-toolchain/action.yml') }}
 
     - name: Restore or install pinned Slither
       shell: bash
       run: |
         set -euo pipefail
-        slither_env="$HOME/.cache/curveyield-no-telemetry/slither-0.11.6-py312"
+        slither_env="$HOME/.cache/curveyield-primary/slither-0.11.6-py312"
         if [ -x "$slither_env/bin/python" ] && "$slither_env/bin/python" -c "import importlib.metadata as m; assert m.version('slither-analyzer') == '0.11.6'"; then
           echo 'Slither 0.11.6 cache HIT - skipping pip installation'
         else
@@ -89,7 +89,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        slither_env="$HOME/.cache/curveyield-no-telemetry/slither-0.11.6-py312"
+        slither_env="$HOME/.cache/curveyield-primary/slither-0.11.6-py312"
         export PATH="$slither_env/bin:$RUNNER_TEMP/v7-tools/bin:$GITHUB_WORKSPACE/node_modules/.bin:$PATH"
         timeout -s TERM -k 15s 90s npm run v7:toolchain:verify
         echo 'V7 cached toolchain PASS: Slither, Medusa, Forge versions verified'

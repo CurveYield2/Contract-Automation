@@ -4,7 +4,7 @@ import fs from 'node:fs';
 const read=p=>fs.readFileSync(p,'utf8');
 
 test('Phase 0 finalization ignores removed randomized simulation and telemetry contracts',()=>{
- for(const name of ['scripts/lite-phase0-finalize-v1.mjs','scripts/lite-phase0-finalize-no-telemetry-v1.mjs']){
+ for(const name of ['scripts/lite-phase0-finalize-v1.mjs']){
   const f=read(name);
   assert.match(f,/curveyield-lite-phase0-deploy-config-execution-v3/);
   assert.match(f,/ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY/);

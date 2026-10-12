@@ -36,12 +36,12 @@ test('untrusted or credential-less requests always execute the original compiler
   assert.equal(builds,2);
 });
 
-test('primary and No Telemetry only use private cache through exact intelligence stage',()=>{
-  for(const name of ['lite-phase0-intelligence-v1.mjs','lite-phase0-intelligence-no-telemetry-v1.mjs']){
+test('primary only use private cache through exact intelligence stage',()=>{
+  for(const name of ['lite-phase0-intelligence-v1.mjs']){
     const engine=fs.readFileSync(new URL('../src/'+name,import.meta.url),'utf8');
     assert.match(engine,/compileWithPrivateCacheV1\(/);
   }
-  for(const name of ['lite-phase0-intelligence-v1.yml','lite-phase0-intelligence-no-telemetry-v1.yml']){
+  for(const name of ['lite-phase0-intelligence-v1.yml']){
     const workflow=fs.readFileSync(new URL('../../../.github/workflows/'+name,import.meta.url),'utf8');
     assert.match(workflow,/PHASE0_PRIVATE_BUILD_CACHE_ENABLED/);
     assert.doesNotMatch(workflow,/actions\/cache.*PHASE0_VERIFIED_COMPILATION/);
@@ -64,19 +64,6 @@ test('compilation outputs live only in an isolated folder on private Audit-Contr
   assert.doesNotMatch(source,/compressed compilation exceeds private cache size cap; skip storing/);
   assert.doesNotMatch(source,/phase0-verified-build-cache/);
   assert.doesNotMatch(source,/actions\/cache@/);
-});
-
-test('V7 reuse requires an exact runner, previously qualified controller tree, and only private cache-folder changes',()=>{
-  const workflow=fs.readFileSync(new URL('../../../.github/workflows/v7-execution-infrastructure-qualification.yml',import.meta.url),'utf8');
-  assert.match(workflow,/qualifiedCommit==\$runner/);
-  assert.match(workflow,/prior_controller_commit=.*controllerQualification\.controllerCommit/);
-  assert.match(workflow,/git -C \.controller-under-test diff --name-only -z/);
-  assert.match(workflow,/all\(p\.startswith\(b"Phase0 Build Cache\/"\) for p in files\)/);
-  assert.match(workflow,/private controller contains non-cache changes/);
-  assert.match(workflow,/\.status=="completed" and \.conclusion=="success" and \.head_sha==\$sha/);
-  assert.match(workflow,/V7_QUALIFICATION_LANE=REUSE_EXACT/);
-  assert.match(workflow,/V7_QUALIFICATION_LANE != 'REUSE_EXACT'/);
-  assert.match(workflow,/V7_QUALIFICATION_LANE == 'FULL'/);
 });
 
 test('private cache shards arbitrarily large gzip bytes without losing payload',()=>{

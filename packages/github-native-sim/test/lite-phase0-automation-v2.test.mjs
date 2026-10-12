@@ -66,7 +66,7 @@ test('reusable Phase-0 intelligence materializes its request from inputs even wh
 });
 
 test('Phase 0 and smoke use the private RPC and only execute package deploy/config scripts on Anvil',()=>{
-  for(const name of ['lite-phase0-randomized-simulation-v1.yml','lite-phase0-randomized-simulation-no-telemetry-v1.yml','lite-phase0-simulation-testing-v1.yml']){
+  for(const name of ['lite-phase0-randomized-simulation-v1.yml','lite-phase0-simulation-testing-v1.yml']){
     const workflow=read('.github/workflows/'+name);
     assert.ok(workflow.includes('ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}'),name);
     assert.match(workflow,/run-phase0-fork-deploy-config-v1\.mjs/);

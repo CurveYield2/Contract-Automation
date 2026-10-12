@@ -46,6 +46,18 @@ jobs:
           timeout -k 10s 900s node --test "${files[@]}"
       - name: Validate V7 runner manifest pin
         run: timeout -k 10s 120s npm run v7:manifest -- --check
+      - name: Confirm retired Phase 0 fork has no active references
+        shell: bash
+        run: |
+          set -euo pipefail
+          unresolved=0
+          while IFS= read -r file; do
+            case "$file" in
+              docs/*|.github/actions/setup-no*telemetry-node-cache/*|.github/actions/setup-no*telemetry-v7-toolchain/*|process/RUNNER_MANIFEST.json|packages/github-native-sim/src/v7-policy.mjs|packages/github-native-sim/test/*) ;;
+              *) echo "::error::Retired fork reference remains in $file"; unresolved=1 ;;
+            esac
+          done < <(git grep -l "no""-telemetry" || true)
+          test "$unresolved" = 0
       - name: Existing controller regression tests
         shell: bash
         run: |
@@ -59,6 +71,13 @@ jobs:
             packages/github-native-sim/test/native-fuzz-v1.test.mjs \
             packages/github-native-sim/test/medusa-cli-output-v1.test.mjs \
             packages/github-native-sim/test/medusa-no-tests-real-output-v2.test.mjs \
+            packages/github-native-sim/test/phase0-optimization4-v1.test.mjs \
+            packages/github-native-sim/test/phase0-compiler-watchdog-30m-v1.test.mjs \
+            packages/github-native-sim/test/phase0-private-build-cache-v1.test.mjs \
+            packages/github-native-sim/test/v7-unified-test-qualification-v1.test.mjs \
+            packages/github-native-sim/test/lite-phase0-automation-v2.test.mjs \
+            packages/github-native-sim/test/phase0-stage2-balancer-stall-repair-v1.test.mjs \
+            packages/github-native-sim/test/phase0-v2-consumers.test.mjs \
             scripts/tests/lite-master-targeted-tests-v1.test.mjs
 
   audit-controller-checks:

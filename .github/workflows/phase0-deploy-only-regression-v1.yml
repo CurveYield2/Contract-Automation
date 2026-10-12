@@ -47,7 +47,6 @@ jobs:
           node --check scripts/run-phase0-fork-deploy-config-v1.mjs
           node --check scripts/write-phase0-fork-deploy-outputs-v1.mjs
           node --check scripts/lite-phase0-finalize-v1.mjs
-          node --check scripts/lite-phase0-finalize-no-telemetry-v1.mjs
           node --check scripts/lib/lite-phase-prefill-v1.mjs
           node --check scripts/reconcile-phase0-deploy-evidence-v1.mjs
           node --check scripts/lib/phase0-deploy-gate-v2.mjs
@@ -59,7 +58,6 @@ jobs:
             packages/github-native-sim/test/phase0-v2-consumers.test.mjs \
             packages/github-native-sim/test/phase0-v2-wiring.test.mjs \
             packages/github-native-sim/test/phase0-telemetry-smoke-guardrails-v1.test.mjs \
-            packages/github-native-sim/test/phase0-no-telemetry-active-watchdog-v1.test.mjs \
             packages/github-native-sim/test/phase0-optimization4-v1.test.mjs \
             packages/github-native-sim/test/phase0-randomized-simulation-v1.test.mjs \
             packages/github-native-sim/test/lite-phase-packet-controller-integration-v1.test.mjs
