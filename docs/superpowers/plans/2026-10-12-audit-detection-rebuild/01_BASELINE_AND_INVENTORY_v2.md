@@ -147,7 +147,7 @@ There are no new tests in T0. The workflow must run green on the T0 PR: the prog
 - Add schedules.
 - Add `continue-on-error`.
 
-### T0.4 Archive the discontinued no-telemetry Phase 0 fork (do this next, before resuming T2)
+### T0.4 Archive the discontinued no-telemetry Phase 0 fork (run after T7 is merged and before T8)
 
 Owner decision, 2026-10-12: the no-telemetry Phase 0 fork is discontinued and self-contained. Nothing in the live campaign flow uses it; initialization starts only `lite-phase0-bootstrap-v1.yml`. Never edit the fork, only archive it.
 
