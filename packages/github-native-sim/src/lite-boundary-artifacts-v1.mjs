@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {readV7RawResultV1} from './v7-compact-result-v1.mjs';
+import {inspectForgeTestEvidenceV1} from './native-fuzz.mjs';
 
 function md(value){
   if(value===null||value===undefined||value==='') return '—';
@@ -305,6 +306,16 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
       if(!component||component.toolInvoked===false||
          component.componentStatus!=='COMPLETED'){
         failures.push('Phase 5 mandatory '+key+' required '+type+' component never completed its execution');
+      }
+      if(type==='FOUNDRY_TEST'){
+        const forgeEvidence=inspectForgeTestEvidenceV1('forge',component?.rawOutput);
+        if(!forgeEvidence.successful){
+          failures.push('Phase 5 mandatory '+key+' forge log does not prove at least one passing test suite with zero failures and no compiler errors (observed passed='+forgeEvidence.passed+', failed='+forgeEvidence.failed+', compilerFailure='+forgeEvidence.compilerFailure+'). Process exit 0 and componentStatus COMPLETED are insufficient.');
+        }
+      }
+      if(raw.analysis?.slither?.componentStatus==='COMPLETED_WITH_FAILURES'&&
+         raw.analysis?.slither?.rawOutput?.exitCode!==0){
+        failures.push('Phase 5 mandatory '+key+' Slither component reported an untriaged process failure (exit='+String(raw.analysis.slither.rawOutput.exitCode)+'); reconcile failed profile before conclusive PASS.');
       }
     }else if(type==='ANVIL_WORKFLOW'){
       if(!Array.isArray(raw.simulation?.steps)||raw.simulation.steps.length===0){
