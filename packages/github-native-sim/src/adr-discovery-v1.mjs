@@ -157,7 +157,7 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
  return head(state,now??state.generatedAt,'curveyield-discovery-summary-v1',{
   reconciliationItems:items,notApplicableClaims:na.sort((a,b)=>sort(a.contextId,b.contextId)||sort(a.classId,b.classId)),
   attackPaths:paths,perContext:Object.fromEntries([...checks.entries()].sort(([a],[b])=>sort(a,b))),
-  gaps,coverage});
+  gaps,coverage,discoveryState});
 }
 export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now}){
  state??=known(root,stateRel(campaignPath));
