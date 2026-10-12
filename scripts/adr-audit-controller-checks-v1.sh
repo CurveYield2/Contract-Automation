@@ -62,4 +62,30 @@ if [[ "$target_check_code" != "0" && "$main_check_code" == "0" ]]; then
 fi
 
 # ADR-EXTRA-CHECKS
+authority_root_file="process/adr-verify/AUTHORITY_ROOT_v1.txt"
+authority_root=""
+if [[ -f "$authority_root_file" ]]; then
+  authority_root="$(head -n1 "$authority_root_file" | tr -d '\r')"
+fi
+if [[ -n "$authority_root" ]] && [[ "$authority_root" == /* || "$authority_root" == *".."* ]]; then
+  echo "::error::Authority root must be controller-relative" >&2
+  exit 1
+fi
+run_authority_sync() {
+  local checkout="$1"
+  shift
+  local rc=0
+  node scripts/validate-lite-authority-automation-sync-v1.mjs --controller-root "$checkout" --automation-root . "$@" >"$checkout/authority-sync.txt" 2>&1 || rc=$?
+  printf '%s\n' "$rc"
+}
+main_authority_rc="$(run_authority_sync .ac-main)"
+target_args=()
+if [[ -n "$authority_root" ]]; then target_args+=(--authority-root "$authority_root"); fi
+target_authority_rc="$(run_authority_sync .ac-target "${target_args[@]}")"
+echo "Authority validator main code=$main_authority_rc; target code=$target_authority_rc"
+if [[ "$target_authority_rc" != 0 && "$main_authority_rc" == 0 ]]; then
+  echo "::error::Staging authority validation regressed" >&2
+  cat .ac-target/authority-sync.txt
+  exit 1
+fi
 exit 0
