@@ -164,7 +164,7 @@ test('controller CLI holds master review, admits reviewer results and returns to
     '--campaign-directory-path',dirPath,'--audit-controller-ref','main'];
   const invoke=tail=>JSON.parse(execFileSync(process.execPath,[controller,...args,...tail],{encoding:'utf8'}));
   const request=invoke(['--review-kind','master','--segment-id',segment,'--master-outcome','REQUEST_TARGETED_TESTS','--test-plan-path',f.planPath]);
-  assert.equal(request.status,'MASTER_TESTS_REQUESTED');
+  assert.equal(request.status,'MASTER_TESTS_REQUESTED',request.feedbackText??JSON.stringify(request));
   assert.equal(request.testReviewer,'reviewer-3L');
   const held=JSON.parse(fs.readFileSync(path.join(f.root,dirPath)));
   assert.equal(held.campaignStatus,'WAITING_FOR_TARGETED_TESTS');
