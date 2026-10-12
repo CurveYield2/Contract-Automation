@@ -18,7 +18,8 @@ This task has two PRs: first Contract-Automation, then Audit-Controller.
    1. Add an optional argument `--authority-root <repo-relative path>`. When it is given, validate that package directory instead of discovering the single package (search `need(packages.length===1`). When it is not given, keep today's behavior.
    2. Delete the check containing `PHASE0_MEDUSA_CALL_LIMIT_V1=125000`.
    3. Run the validator against current main through the T0 job (next step). If any other check fails only because it requires retired Phase 0 Medusa or telemetry text or artifacts, delete that check too and list each deleted check in the PR.
-   4. Do not weaken any other check.
+   4. In the `phase0Corpus` list (search `const phase0Corpus=[`), add `read(join(automationRoot,'scripts/write-phase0-fork-deploy-outputs-v1.mjs'))`. That script is where `evidence/review-inventory/DEPLOYED_STATE_SNAPSHOT_v1.json` is written, and the v12 Phase 0 contract lists it as a required output.
+   5. Do not weaken any other check.
 2. At the marker `# ADR-EXTRA-CHECKS` in `scripts/adr-audit-controller-checks-v1.sh`, add the following (keep the T0 "no new failures" rule: it fails only if target fails and main passes):
    1. Read the optional file `process/adr-verify/AUTHORITY_ROOT_v1.txt`. Create it in this PR containing an empty line.
    2. For both checkouts, run `node scripts/validate-lite-authority-automation-sync-v1.mjs --controller-root <checkout> --automation-root .`. For the target checkout only, append `--authority-root <value>` when the file is non-empty.
@@ -28,6 +29,19 @@ This task has two PRs: first Contract-Automation, then Audit-Controller.
 ### T8.2 Audit-Controller PR (`upgrade/adr-T8-skill-v12`)
 
 1. Copy the whole directory `Audit Skill - Current Authority/Audit_Litemode_v11/` to `audit-process/v7/staging-authority/Audit_Litemode_v12/`. Copy every file byte-for-byte first, then edit only as listed below.
+
+   **How to copy whole package directories (T8.2, T9.2, T9.4).** These folders hold about 150 files each. Never recreate them one file at a time through the API. Use a local clone with line-ending conversion **disabled**, otherwise the frozen digests will not match:
+
+```bash
+git clone https://github.com/CurveYield2/Audit-Controller.git ac && cd ac
+git config core.autocrlf false && git config core.longpaths true
+git checkout -b <task branch>
+# copy:   cp -a "<source dir>/." "<destination dir>/"     (T8.2, T9.2)
+# move:   git mv "<source dir>" "<destination dir>"        (T9.4)
+git add -A && git commit -m "<message>" && git push -u origin <task branch>
+```
+
+   If your environment cannot run `git`, stop and give the owner these exact commands to run; do not attempt an API-based copy.
 2. Apply **every** edit in Appendices A–E to the copy. Do not edit any file in `Audit Skill - Current Authority/`.
 3. `MANIFEST.json` in the copy:
    - set `"schemaVersion": "audit-litemode-v12-manifest-v1"`, `"release": "Audit_Litemode_v12"` and `"packageRevision": "v12"`;
@@ -69,12 +83,24 @@ This task has two PRs: first Contract-Automation, then Audit-Controller.
    - make the controller print an extra output `authorityLinkRoot`, equal to `authorityLinkPathV1(root, authorityRoot)`, for every status;
    - read it in the controller step outputs as `authority_link_root`;
    - set `guide="${{ steps.controller.outputs.authority_link_root }}/master-review/TARGETED_TEST_DIRECTIVE_v1.md"`.
-7. **`.github/workflows/browser-agent-reviewer-repair-v1.yml`:** search `Audit_Litemode_v11`. Replace each occurrence with a value resolved at runtime: the single package directory under `Audit Skill - Current Authority` for new wakes, or the campaign's bound authority link path when the step has the campaign. Read the surrounding step to decide which. List both replacements in the PR.
+7. **`.github/workflows/browser-agent-reviewer-repair-v1.yml`.** This workflow has no Audit-Controller checkout; it reads files through `gh api`. Search for `legacy_root='Audit Skill - Current Authority/Audit_Litemode_v10.3'`. Directly **after** the existing `fi` that closes that `if` block, add the following (keep the v10.3 block as a fallback):
+
+```bash
+registry_json="$(gh api "repos/$gate_repo/contents/audit-process/v7/frozen-authorities/FROZEN_AUTHORITY_REGISTRY_v1.json?ref=$gate_ref" --jq '.content' 2>/dev/null | base64 -d 2>/dev/null || true)"
+if [ -n "$registry_json" ] && ! gh api "repos/$gate_repo/contents/$(encode_path "$authority_home")?ref=$gate_ref" >/dev/null 2>&1; then
+  mapped="$(printf '%s' "$registry_json" | jq -r --arg h "$authority_home" '.entries[] | . as $e | select($h | startswith($e.logicalRoot + "/")) | $e.frozenRoot + ($h | ltrimstr($e.logicalRoot))' | head -n1)"
+  [ -z "$mapped" ] || authority_home="$mapped"
+fi
+```
+
+   Make no other change to this workflow.
+7a. **`.github/workflows/lite-post-completion-followup-regression-v1.yml`.** In its `git sparse-checkout set` list, directly after the line `'Audit Skill - Current Authority/Audit_Litemode_v11' `, add the line `'audit-process/v7/frozen-authorities' `. Keep the v11 line. After the swap the v11 path no longer exists, and the frozen copy is what resolves.
 8. **Create `scripts/adr-check-frozen-authorities-v1.mjs`** (CLI `--controller-root <dir>`). For every registry entry it verifies:
    - the `SKILL.md` and `MANIFEST.json` digests;
    - every `files` entry exists with matching bytes and sha256;
    - every file in the frozen directory except `MANIFEST.json` is listed.
-   - It exits non-zero with a list of problems.
+   - It prints, for every entry, `<release> skillSha256=<actual> manifestSha256=<actual>`, so the values for T9.2 can be copied from the job log.
+   - It exits non-zero with a list of problems (expected and actual for each mismatch).
    - Add a call to it at the `# ADR-EXTRA-CHECKS` marker for the target checkout. It is skipped when the registry file is absent.
 9. **Tests** — `packages/github-native-sim/test/adr-frozen-authority-v1.test.mjs`, using temporary directories:
    - a v10.3 logical path resolves through the built-in default;
@@ -88,7 +114,7 @@ This task has two PRs: first Contract-Automation, then Audit-Controller.
 
 v11 stays in Current Authority in this PR.
 
-1. Copy `Audit Skill - Current Authority/Audit_Litemode_v11/` byte-for-byte to `audit-process/v7/frozen-authorities/Audit_Litemode_v11/`.
+1. Copy `Audit Skill - Current Authority/Audit_Litemode_v11/` byte-for-byte to `audit-process/v7/frozen-authorities/Audit_Litemode_v11/`, using the git procedure in T8.2.
 2. Create `audit-process/v7/frozen-authorities/FROZEN_AUTHORITY_REGISTRY_v1.json`:
 
 ```json
@@ -109,7 +135,7 @@ v11 stays in Current Authority in this PR.
 }
 ```
 
-   Get the two v11 digests from the T0 job log: the T9.1 checker prints the actual digests when a placeholder does not match. Run the job once with placeholders, copy the printed values, and run it again.
+   Get the two v11 digests from the T0 job log. The T9.1 checker prints `skillSha256=` and `manifestSha256=` for every entry. Run the check once with the placeholders, copy the two printed values for `Audit_Litemode_v11` into the registry, and run it again until it is green.
 3. Verify with a Contract-Automation check PR setting the ref file to `upgrade/adr-T9-freeze-v11`. Both the frozen-authority checker and the "no new failures" checks must be green. Then merge the AC PR and set the ref back to `main` in the check PR.
 
 ### T9.3 Swap readiness test (Contract-Automation PR `upgrade/adr-T9-swap-check`)
@@ -125,7 +151,7 @@ v11 stays in Current Authority in this PR.
 
 ### T9.4 Audit-Controller swap PR (`upgrade/adr-T9-swap`)
 
-1. Run `git mv "audit-process/v7/staging-authority/Audit_Litemode_v12" "Audit Skill - Current Authority/Audit_Litemode_v12"`.
+1. Using the git procedure in T8.2, run `git mv "audit-process/v7/staging-authority/Audit_Litemode_v12" "Audit Skill - Current Authority/Audit_Litemode_v12"`.
 2. Run `git rm -r "Audit Skill - Current Authority/Audit_Litemode_v11"`. Leave `Audit_Litemode_v11.zip` in place; the sync deletes stale ZIPs.
 3. In `test/lite-semantic-automation-policy.test.mjs`, search `assert.equal(manifest.release,'Audit_Litemode_v11')`. Replace the hard-coded release with: find the single package directory, then assert `manifest.release` equals its directory name.
 4. In `README.md`, under "Primary Lite methodology authority", replace the sentence that claims the pointer binds a ZIP path and SHA-256 with: "The pointer names the stable authority folder; the single unpacked package inside it is resolved at runtime and its release, revision and digest are recorded in each campaign."
@@ -204,13 +230,13 @@ Create `packages/github-native-sim/test/adr-rejection-matrix-v1.test.mjs`. It ha
 | Zero candidates; authorization and fee surfaces | `deriveBaselineObligationsV1` | `ACCESS_CONTROL` and `ACCOUNTING_MATH` obligations |
 | Reviewer-2 claims NOT_APPLICABLE | `deriveBaselineObligationsV1` | Obligation kept |
 | Gap context | `deriveBaselineObligationsV1` | Obligation kept, `HIGH` |
-| PASSED with an unparseable ledger | Phase 6 validation | Deficiency |
-| PASSED with `toolInvoked:null` | Phase 6 validation | Deficiency |
-| DISPROVEN resting only on Phase 5 NOT_REPRODUCED | Phase 6 validation | Deficiency |
-| CONFIRMED with a failing control assertion | Phase 6 validation | Deficiency |
-| NOT_ACHIEVED/ROUNDS_EXHAUSTED with 2 rounds | Phase 6 validation | Deficiency |
-| PROPERTY_FAILED or P6-NEW absent from Phase 8 | Phase 8 validation | Deficiency |
-| Verdict text without the coverage label | Phase 10 validation | Deficiency |
+| PASSED with an unparseable ledger | `validatePhase6AttackerWorkV1` | Deficiency |
+| PASSED with `toolInvoked:null` | `validatePhase6AttackerWorkV1` | Deficiency |
+| DISPROVEN resting only on Phase 5 NOT_REPRODUCED | `validatePhase6AttackerWorkV1` | Deficiency |
+| CONFIRMED with a failing control assertion | `validatePhase6AttackerWorkV1` | Deficiency |
+| NOT_ACHIEVED/ROUNDS_EXHAUSTED with 2 rounds | `validatePhase6AttackerWorkV1` | Deficiency |
+| PROPERTY_FAILED or P6-NEW absent from Phase 8 | `validatePhase8LinkageV1` | Deficiency |
+| `verdictRationale` without the coverage label | `validatePhase10CoverageLabelV1` | Deficiency |
 | v11-bound campaign at Phase 3 PASS | Controller | Same-reviewer Phase 4; no discovery files |
 | Phase 0 inventory build throws | Phase 0 block | Inventory written with `complete:false`; Phase 0 not failed |
 | Frozen v11 file tampered | `resolveFrozenAuthorityFileV1` | Throws |
@@ -323,7 +349,7 @@ Create `packages/github-native-sim/test/adr-rejection-matrix-v1.test.mjs`. It ha
 }
 ```
 
-4. Add `"actions.step-4.outputs.baselineTestRecords"`, `"actions.step-5.outputs.candidateProofRecords"` and `"actions.step-5.outputs.newCandidateRecords"` to the selectors of the derived output `derived/phase-6/PHASE8_INPUT_v1.json`, and to `bookkeepingMappings.graphRecordPaths`.
+4. Do **not** change `derivedOutputs`: its only selector is already `"actions"`, which includes the new steps. Add `"actions.step-4.outputs.baselineTestRecords"`, `"actions.step-5.outputs.candidateProofRecords"` and `"actions.step-5.outputs.newCandidateRecords"` to `bookkeepingMappings.graphRecordPaths` only.
 
 **B2. `phases/phase-6/PHASE_CONTRACT.json`.** Add steps 4 and 5, matching B1. Each needs `action`, `instruction`, an `outputDestination` (section, schema pointer `#actions.step-4` or `#actions.step-5`, and requiredFields equal to the B1 field names), and resources `["./PHASE_06_SCHEMA_v1.json", "./resources/PHASE_06_WORK_FORM_TEMPLATE_v1.json", "../../shared/execution/AGENT_GUIDED_TESTING.md", "../../shared/execution/TECHNICAL_EXECUTION_REQUEST_PLAYBOOK.md"]`.
 

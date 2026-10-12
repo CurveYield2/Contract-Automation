@@ -109,6 +109,13 @@ This plan fixes the system. It does not repair, rerun or measure any past campai
 | T9 | 03 | CA + AC | Frozen-authority registry, v11 freeze, version-agnostic resolution, v12 swap, end-to-end test | T8 |
 | T10 | 03 | CA + AC | Qualification scorer (non-blocking), runner-pin docs, rejection-matrix test, handoff | T9 |
 
+**Remaining execution order (2026-10-12):**
+1. Finish T7 (PR #654).
+2. **T0.4** (archive the no-telemetry fork). It was added after T0 and has not run yet.
+3. T8, then T9, then T10.
+
+Do not skip T0.4: T8.1 removes the validator checks that still refer to the retired Phase 0 fork.
+
 ## 6. Release order (mandatory)
 
 1. T1–T7 are merged into CA `main`. All of it is dormant because no campaign is bound to v12 yet (D7).

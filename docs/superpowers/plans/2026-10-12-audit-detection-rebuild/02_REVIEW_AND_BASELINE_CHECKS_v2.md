@@ -506,60 +506,81 @@ Keep the Phase 9 behavior byte-for-byte. Add:
 
 ### T7.3 Phase 6 prefill and validation (v12 only; T8 Appendix B defines Steps 4 and 5)
 
+**Where the code goes (verified 2026-10-12):**
+- `validatePhaseScaffold(sequence, form, digest)` in `scripts/lib/lite-phase-prefill-v1.mjs` has **no repository root**, so it cannot count request files, open ledgers or read other phases. Put only pure form checks there.
+- Every check that needs files goes in a new module, `packages/github-native-sim/src/adr-phase-validation-v1.mjs`. It exports:
+  - `validatePhase6AttackerWorkV1({root, campaignPath, form})`;
+  - `validatePhase8LinkageV1({root, campaignPath, form})`;
+  - `validatePhase10CoverageLabelV1({root, campaignPath, form})`.
+  - Each returns an array of deficiency strings and never throws.
+- In `scripts/lite-phase-packet-controller-v1.mjs`, directly after the first line `deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));`, add: when the policy is active, push the result of the validator for `sequence` 6, 8 or 10. Change nothing else there.
+- The prefill below goes in the existing `if(sequence===6){` block of `applyPhaseBoundaryPrefill`, which receives `root` and `campaignPath`. Run it only when the policy is active and the template has `actions['step-4']` and `actions['step-5']`.
+
 1. **Step 4 prefill:** one `baselineTestRecords` row per test group from `work/phase-06/BASELINE_OBLIGATIONS_v1.json`.
    - Controller fields: `testGroupId`, `contract`, `obligationIds`, `obligationsDetail` and `requestDirectory: "controller/phase6-tests/<testGroupId>/"`.
    - Reviewer fields: `harnessDesign`, `dispatchRounds`, `requestPaths`, `obligationOutcomes` and `limitations`, set to `"<REQUIRED>"`.
    - With zero groups, set `["NONE_IDENTIFIED"]`.
-2. **Step 5 prefill:** one `candidateProofRecords` row per material candidate (Phase 4 step 3 `candidateRecords` plus Phase 5 step 2 `newCandidateRecords`).
+2. **Step 5 prefill:** one `candidateProofRecords` row per material candidate. Candidates are read from `derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json` (`actions['step-3'].outputs.candidateRecords`) and `derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json` (`actions['step-2'].outputs.newCandidateRecords`), skipping `"NONE_IDENTIFIED"`. These are the same sources `materialPhase5Candidates` uses in the controller.
    - Controller fields:
-     - `candidateKey`;
+     - `candidateKey` (the record's `tempKey`);
      - `sourceAnchor`;
-     - `phase5Result`: `REPRODUCED`, `NOT_REPRODUCED`, `INCONCLUSIVE`, `EXECUTION_FAILED` or `NOT_EXECUTED`, read from the Phase 5 boundary target results the controller already renders into `LITE_TARGETED_TEST_MATRIX.md` (search `renderTargetedTestMatrixV1`);
-     - `requestDirectory: "controller/phase6-tests/CP-<safe candidateKey>/"`.
-   - Reviewer fields: `verdict`, `harnessDesign`, `dispatchRounds`, `requestPaths`, `ledgerRef`, `attackAssertionNames`, `controlAssertionNames` and `reasoning`.
-   - Also prefill `newCandidateRecords` as `["NONE_IDENTIFIED"]`. The attacker replaces it when it finds something new.
-3. **Step 4 validation**, per row:
-   - `dispatchRounds` is an integer 0–3 and equals the number of `*.json` files in `requestDirectory`;
+     - `phase5Result`: the `reproductionStatus` of the matching `targetDispositions` row that this same block already builds with `targetDispositionScaffold(...)` (match by `candidateKey`). Use `"NOT_EXECUTED"` when no row matches. Copy the value as-is and do not invent an enum.
+     - `requestDirectory: "controller/phase6-tests/CP-<candidateKey with every character outside [A-Za-z0-9._-] replaced by _>/"`.
+   - Reviewer fields: `verdict`, `harnessDesign`, `dispatchRounds`, `requestPaths`, `ledgerRef`, `attackAssertionNames`, `controlAssertionNames` and `reasoning`, set to `"<REQUIRED>"`.
+   - Prefill `newCandidateRecords` as `["NONE_IDENTIFIED"]`.
+3. **Step 4 validation** (`validatePhase6AttackerWorkV1`), per row:
+   - `dispatchRounds` is an integer 0–3 and equals the number of `*.json` files in `<campaignPath>/<requestDirectory>` (0 if the folder is missing);
    - `requestPaths` equals that sorted list, or `["NONE_IDENTIFIED"]` when 0;
    - `harnessDesign` is non-blank when `dispatchRounds > 0`;
-   - `obligationOutcomes` covers exactly `obligationIds`, each as `{obligationId, outcome, ledgerRef, assertionNames, reasonCode, note, anchors}`.
+   - `obligationOutcomes` covers exactly `obligationIds`, each `{obligationId, outcome, ledgerRef, assertionNames, reasonCode, note, anchors}`.
+   - A **ledger** is the file `<campaignPath>/<ledgerRef>`. It must exist, be under `controller/automation/`, and end in `/ASSERTION_LEDGER_v1.json`.
    - Rules per outcome:
 
      | Outcome | Requirement |
      |---|---|
-     | `PASSED` | Ledger `PARSED`, `toolInvoked:true`, and every named assertion `PASS` |
+     | `PASSED` | Ledger `parseStatus:"PARSED"`, `toolInvoked===true`, and every name in `assertionNames` present in `tests` with status `PASS` |
      | `PROPERTY_FAILED` | Same ledger checks, and at least one named assertion `FAIL` |
      | `NOT_APPLICABLE_CONFIRMED` | Non-blank `note` and at least one anchor |
      | `INCONCLUSIVE` | Non-blank `note` |
      | `NOT_ACHIEVED` | Non-blank `note`, and `reasonCode` is `ROUNDS_EXHAUSTED` (requires `dispatchRounds===3`), `NO_EXECUTABLE_SETUP` or `TOOL_UNSUPPORTED` |
 
-4. **Step 5 validation**, per row (`verdict` ∈ {`CONFIRMED`, `DISPROVEN`, `INCONCLUSIVE`, `PHASE5_DECISIVE`}):
+4. **Step 5 validation** (same function), per row:
 
    | Verdict | Requirement |
    |---|---|
    | `PHASE5_DECISIVE` | `phase5Result === "REPRODUCED"` and `reasoning` non-blank |
-   | `CONFIRMED` | `ledgerRef` points to a Phase 6 ledger (`PARSED`, `toolInvoked:true`); at least one `attackAssertionNames` entry is `FAIL` (the security property is violated); every `controlAssertionNames` entry is `PASS` (the healthy path works) |
-   | `DISPROVEN` | Same ledger checks; every `attackAssertionNames` entry is `PASS` (the attack is blocked) and every `controlAssertionNames` entry is `PASS`; `reasoning` names the blocking control with an anchor |
-   | `INCONCLUSIVE` | Non-blank `reasoning` stating the missing proof |
+   | `CONFIRMED` | Valid ledger (as above); at least one `attackAssertionNames` entry `FAIL`; every `controlAssertionNames` entry `PASS`; `controlAssertionNames` non-empty |
+   | `DISPROVEN` | Valid ledger; every `attackAssertionNames` and `controlAssertionNames` entry `PASS`; both lists non-empty; `reasoning` contains an anchor matching `/\.(sol|vy):L\d+/` |
+   | `INCONCLUSIVE` | Non-blank `reasoning` |
 
-   - `dispatchRounds` and `requestPaths` follow the same rules as Step 4.
-   - **`NOT_REPRODUCED` from Phase 5 alone is never `DISPROVEN`.**
-5. **New candidates.** Every `newCandidateRecords` item has `{tempKey: "P6-NEW-<3 digits>", title, classId, description, anchors, ledgerRef}`. `ledgerRef` may be `"NONE_IDENTIFIED"` when the finding came from reading the code during testing.
-6. **Phase 8 linkage.** When the policy is active, Phase 8 step 2 `candidateValidations` must contain a `candidateKey` for:
+   - `dispatchRounds` and `requestPaths` follow the Step 4 rules.
+   - A Phase 5 `NOT_REPRODUCED` alone is never `DISPROVEN`. This is enforced by the ledger requirement.
+5. **New candidates.** Every `newCandidateRecords` item other than `"NONE_IDENTIFIED"` has a non-blank `tempKey` matching `^P6-NEW-[0-9]{3}$`, plus `title`, `classId`, `description` and at least one anchor. `ledgerRef` is a valid ledger or `"NONE_IDENTIFIED"`.
+6. **Phase 8 linkage** (`validatePhase8LinkageV1`). Read Phase 6 data from `<campaignPath>/derived/phase-6/PHASE_06_CANONICAL_DATA_v1.json`. Phase 8 `actions['step-2'].outputs.candidateValidations` must contain a `candidateKey` for:
    - every Step 4 `PROPERTY_FAILED`, as `P6-PROP-<testGroupId>-<obligationId>`;
-   - every Step 5 `CONFIRMED` or `INCONCLUSIVE` candidate (its own key);
+   - every Step 5 `CONFIRMED` or `INCONCLUSIVE` candidate;
    - every `P6-NEW-*` key.
-   - A missing key is a deficiency. Read the Phase 6 data with `canonicalFor(root, campaignPath, 6)`.
-7. Each failure is a normal Phase 6 or Phase 8 deficiency, which means rework by the same reviewer.
+   - A missing key is a deficiency. If the Phase 6 file is missing, return no deficiency, because v11 campaigns never have one.
+7. Each failure is a normal deficiency, meaning rework by the same reviewer.
 
 ### T7.4 Coverage matrix, Phase 10 and the master (v12 only)
 
-1. **Coverage matrix.** Before the call to `renderFinalEvidenceIndexV1(`:
-   - build `buildCoverageMatrixV1({inventory, taxonomy, discoveryState, phase6Results})`, where `phase6Results` maps each `obligationId` to its Step 4 outcome;
-   - write `work/phase-10/COVERAGE_MATRIX_v1.json`;
-   - append `## Coverage matrix` and `renderCoverageMarkdownV1(matrix)` to the evidence index.
-2. **Phase 10 validation.** The step 3 verdict text must contain the exact label from the matrix: `FULL_COVERAGE` or `PARTIAL_COVERAGE`.
-3. **Master wake.** In `masterWakeMessage`, when the policy is active, append: `As challenger, review every item in <blob URL of DISCOVERY_SUMMARY_v1.json>: attacker findings and contradictions, unresolved checks, not-applicable claims and coverage gaps. Amend reviewer work or order targeted tests through the existing directive; accept a gap only with a stated reason.` If `COVERAGE_MATRIX_v1.json` exists, add its URL too.
+1. **Persist the discovery state.** In `buildDiscoverySummaryV1` (`packages/github-native-sim/src/adr-discovery-v1.mjs`), add the already-computed `discoveryState` object to the returned payload as `discoveryState`. This is additive; change nothing else in the function.
+2. **Coverage section helper.** Create `appendAdrCoverageSectionV1({root, campaignPath, automationRoot, text})` in `adr-phase-validation-v1.mjs`. It:
+   1. reads `work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json` (use `payload.discoveryState`), `evidence/review-inventory/REVIEW_INVENTORY_v1.json`, the taxonomy (`loadTaxonomyV1(automationRoot)`) and the Phase 6 canonical data;
+   2. builds `phase6Results` = `{obligationId: outcome}` from Phase 6 Step 4 `obligationOutcomes`;
+   3. builds the matrix with `buildCoverageMatrixV1`;
+   4. writes `work/phase-10/COVERAGE_MATRIX_v1.json`;
+   5. returns `text + "\n## Coverage matrix\n" + renderCoverageMarkdownV1(matrix) + "\nDetection qualification status: <status>\n"`. The status comes from `<automationRoot>/process/adr-qualification/QUALIFICATION_STATUS_v1.json`, or is `NOT_YET_QUALIFIED` until T10 creates that file.
+   - If the summary is missing it returns `text` unchanged. It never throws.
+3. **Use it at both call sites.** The controller calls `renderFinalEvidenceIndexV1(` in **two** places (search for it). At both, wrap the rendered text: `appendAdrCoverageSectionV1({root, campaignPath, automationRoot: <the same automationRoot value the controller already passes to startDiscoveryV1>, text: renderFinalEvidenceIndexV1(...)})`, only when the policy is active.
+4. **Phase 10 validation** (`validatePhase10CoverageLabelV1`). Phase 10 `actions['step-3'].outputs.verdictRationale` (a text field) must contain the exact `label` from `COVERAGE_MATRIX_v1.json`. If the matrix file is missing, return no deficiency.
+5. **Master wake.**
+   - Add an optional parameter `extraLines = []` to `masterWakeMessage` in `scripts/lib/lite-master-review-v1.mjs`. When non-empty, append them, each on its own line, to the returned text.
+   - At its call site in the controller (search `masterWakeMessage({campaignId:directory.campaignId`), when the policy is active, pass:
+     - for segment `reviewer-2-phases-02-05`: `["As challenger, review every item in <blob URL of DISCOVERY_SUMMARY_v1.json>: attacker findings and contradictions, unresolved checks, not-applicable claims and coverage gaps. Amend reviewer work or order targeted tests through the existing directive; accept a gap only with a stated reason."]`;
+     - for segment `reviewer-4-phases-08-10`: `["Check the coverage label and every gap in <blob URL of work/phase-10/COVERAGE_MATRIX_v1.json> before accepting."]`.
+   - Build blob URLs the same way `scripts/prepare-lite-assignment-successor-v2.mjs` does.
 
 ### T7.5 Tests
 
@@ -573,7 +594,7 @@ Keep the Phase 9 behavior byte-for-byte. Add:
    - evidence without named results gives `UNPARSEABLE`;
    - the CLI with a bad path writes `UNPARSEABLE` and exits 0.
    - **Regression:** add `packages/github-native-sim/test/native-fuzz-v1.test.mjs` and the Medusa CLI tests to the T0 regression list.
-2. `packages/github-native-sim/test/adr-phase6-validation-v1.test.mjs`. Each case gives a deficiency unless it says "valid":
+2. `packages/github-native-sim/test/adr-phase-validation-v1.test.mjs`, using temporary campaign directories with request files, ledgers and canonical files. Each case gives a deficiency unless it says "valid":
    - Step 4: `PASSED` with a valid ledger is valid;
    - Step 4: `PASSED` with an `UNPARSEABLE` ledger;
    - Step 4: `PASSED` with `toolInvoked:null`;
@@ -585,6 +606,10 @@ Keep the Phase 9 behavior byte-for-byte. Add:
    - Step 5: a `P6-NEW` key missing from Phase 8;
    - a mismatch in the request-file count;
    - a v11 Phase 6 form is unaffected (no deficiency from these rules).
+   - the Step 5 prefill takes `phase5Result` from the `targetDispositions` row with the same `candidateKey`, or `NOT_EXECUTED`;
+   - `appendAdrCoverageSectionV1` without a summary returns the text unchanged; with one, it writes `COVERAGE_MATRIX_v1.json` and appends the section and the qualification status;
+   - `validatePhase10CoverageLabelV1`: `verdictRationale` without the label is a deficiency, and with the label it is valid;
+   - `masterWakeMessage` with `extraLines` appends them, and without them the output is byte-identical to today.
 3. `packages/github-native-sim/test/adr-dispatch-workflow-v1.test.mjs`: the phase-9 pattern is still present, `controller/phase6-tests/` is present, and `ROUND_LIMIT_REACHED` is present.
 
 **Done when:** all are green in the T0 workflow and the regression step is green.
