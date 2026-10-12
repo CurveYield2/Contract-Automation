@@ -11,6 +11,7 @@ import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligen
 import { writeReviewInventoryOutputsV1 } from './adr-review-inventory-v1.mjs';
 import { buildExecutionArtifactBundleV2 } from './phase0-execution-input-v2.mjs';
 import { compileWithPrivateCacheV1 } from './phase0-private-build-cache-v1.mjs';
+import { loadAuditScope, sourceIsInScope } from './phase0-audit-scope-v1.mjs';
 
 // The outer workflow owns the hard wall-clock timeout. This helper reports
 // per-stage progress without changing compilation or evidence semantics.
@@ -160,10 +161,11 @@ async function resolveCompiledSourceFile(projectRoot, sourceName){
   }
   throw new Error(`compiled source is missing from staged project: ${sourceName}`);
 }
-function sourceIsDependency(sourceName){
-  return !String(sourceName).replaceAll('\\\\','/').startsWith('contracts/');
+function sourceIsDependency(sourceName,scope){
+  return !sourceIsInScope(sourceName,scope);
 }
 async function writeCryticCompileExport({projectRoot,build,outDir}){
+  const scope=await loadAuditScope(projectRoot);
   const buildUnits=(Array.isArray(build?.compilationUnits)&&build.compilationUnits.length)
     ? build.compilationUnits.map((unit,index)=>({
         unitId:unit.unitId??`unit-${index+1}`,
@@ -225,7 +227,7 @@ async function writeCryticCompileExport({projectRoot,build,outDir}){
         'srcmap-runtime':artifact.deployedBytecodeSourceMap??'',
         filenames:sourceUnit.filename,
         libraries:{},
-        is_dependency:sourceIsDependency(sourceName),
+        is_dependency:sourceIsDependency(sourceName,scope),
         userdoc:artifact.userdoc??{},
         devdoc:artifact.devdoc??{}
       };
@@ -656,6 +658,7 @@ async function main(){
   if(observed!==request.source.archiveSha256)throw new Error(`source archive SHA mismatch expected ${request.source.archiveSha256} observed ${observed}`);
   const extractionRoot=path.join(work,'archive'); const extraction=await withProgressStage('extract-verified-archive',()=>extractArchive(archiveAbs,extractionRoot));
   const detected=await withProgressStage('detect-project-root',()=>detectProjectRoot(extractionRoot)); const cfg=await withProgressStage('detect-build-config',()=>detectBuildConfig(detected.absolute));
+  const auditScope=await loadAuditScope(detected.absolute);
 
   const pseudo={
     requestId:request.requestId,requestDigest:request.requestDigest??sha256(Buffer.from(JSON.stringify(request))),
@@ -683,6 +686,7 @@ async function main(){
     source:{...request.source,checkoutCommit:checkout.commit,archiveSha256Observed:observed},
     discovery:{projectPath:detected.relativePath,topCandidates:detected.candidates,archiveEntryCount:extraction.entryCount,archiveExtractedBytes:extraction.extractedBytes},
     configurationDetection:effectiveCfg,
+    auditScope,
     build:{status:build.status,system:build.system,compilerVersion:build.compilerVersion,compilerVersions:build.compilerVersions??[build.compilerVersion].filter(Boolean),compilerProfiles:build.compilerProfiles??[],compilationUnitCount:build.compilationUnits?.length??0,compilationUnits:executionBuildArtifacts.buildIdentity.compilationUnits,buildConfigurationDigestSha256:executionBuildArtifacts.buildConfigurationDigestSha256,embeddedBuildContract:build.embeddedBuildContract??null,sourceInventoryFiles:build.sourceInventoryFiles??0,artifactCount:build.artifacts?.length??0,compilerInputSha256:build.compilerInputSha256??null,compilerOutputSha256:build.compilerOutputSha256??null,stagingManifestSha256:build.stagingManifestSha256??null,diagnosticCount:build.compilerDiagnostics?.length??0,slitherStandardJsonPath:build.slitherStandardJsonPath??null,vendorRootAdapter:build.vendorRootAdapter??null},
     status:'PASS'
   };
