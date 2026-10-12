@@ -21,7 +21,7 @@ import {
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
 import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
-import {registerMasterTargetedTests,acceptMasterTargetedTestResults,unresolvedFinalCandidateFailures} from './lib/lite-master-targeted-tests-v1.mjs';
+import {registerMasterTargetedTests,acceptMasterTargetedTestResults,verifyMasterTargetedTestEvidence,unresolvedFinalCandidateFailures} from './lib/lite-master-targeted-tests-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
@@ -676,6 +676,10 @@ if(reviewKind==='master'){
       emit('MASTER_TESTS_REQUESTED',feedback,{testReviewer:assignment.assignedReviewer,testPlanPath:assignment.planPath,testResultPath:assignment.resultPath,testRequestId:assignment.requestId});
     }catch(error){emit('MASTER_REVIEW_INVALID','Invalid targeted-test directive: '+String(error?.message??error));}
   }
+  if(['MASTER_REVIEW_ACCEPTED','MASTER_AMENDMENT_READY_FOR_REFRESH'].includes(result.status)){
+    const evidenceFailures=verifyMasterTargetedTestEvidence({root,campaignPath,directory});
+    if(evidenceFailures.length)emit('MASTER_REVIEW_INVALID','Master-directed targeted-test evidence failed exact revalidation: '+evidenceFailures.join('; '));
+  }
   // Legacy sealed Phase-5 machine failures cannot be accepted unchanged
   // at the Reviewer-2 master-review boundary. An amended segment is
   // reexecuted through the new mandatory pre-seal gate.
@@ -701,7 +705,8 @@ if(reviewKind==='master'){
     ].join('\n'));
   }
   let nextAssignment=null;
-  const decision={outcome:result.outcome,summary,submittedAt:now};
+  const decision={outcome:result.outcome,summary,submittedAt:now,
+    targetedTests:(pending.targetedTests??[]).map(x=>({...x}))};
   if(result.status==='MASTER_AMENDMENT_READY_FOR_REFRESH'){
     let refresh;
     try{
