@@ -75,7 +75,7 @@ jobs:
           for attempt in 1 2 3; do
             rm -rf .audit-source
             echo "::notice::Exact source clone attempt $attempt/3"
-            if timeout -k 10s 180s git clone --quiet --filter=blob:none --no-checkout https://github.com/CurveYield2/Audit-Controller.git .audit-source; then
+            if timeout -k 10s 180s git clone --quiet --depth=1 --single-branch --filter=blob:none --no-checkout https://github.com/CurveYield2/Audit-Controller.git .audit-source; then
               if (
                 cd .audit-source
                 timeout -k 10s 180s git fetch --depth=1 origin "$SOURCE_COMMIT" &&
@@ -233,7 +233,7 @@ jobs:
           for attempt in 1 2 3; do
             rm -rf .audit-writeback
             echo "::notice::Audit evidence repository clone attempt $attempt/3"
-            if timeout -k 10s 180s git clone --quiet --filter=blob:none --no-checkout https://github.com/CurveYield2/Audit-Controller.git .audit-writeback; then
+            if timeout -k 10s 180s git clone --quiet --depth=1 --single-branch --filter=blob:none --no-checkout https://github.com/CurveYield2/Audit-Controller.git .audit-writeback; then
               if (
                 cd .audit-writeback
                 timeout -k 10s 180s git fetch origin main &&
