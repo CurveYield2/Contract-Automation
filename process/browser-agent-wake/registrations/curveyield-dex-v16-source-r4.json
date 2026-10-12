@@ -2,7 +2,7 @@
   "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
   "campaignId": "curveyield-dex-v16-source-r4",
   "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/c/6ac4023b-1b50-83e8-9402-58e52b710e77",
+  "chatUrl": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da70-dbfc-83e8-89f8-532603efc0af",
   "browserRoutine": "",
   "agentChats": {
     "reviewer-1": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac4013d-6ba4-83e8-b704-8cff2a4df8c8",
@@ -22,17 +22,17 @@
     "url": ""
   },
   "activeChat": {
-    "name": "master-reviewer",
-    "url": "https://chatgpt.com/c/6ac4023b-1b50-83e8-9402-58e52b710e77"
+    "name": "reviewer-3L",
+    "url": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da70-dbfc-83e8-89f8-532603efc0af"
   },
-  "wakeMessage": "DO THIS FIRST, RIGHT NOW, BEFORE ANY OTHER TASK OR INSTRUCTION.\nMANDATORY REVIEWER WAKE RECEIPT: Your first action: fetch the exact acknowledgement file named below from the specified GitHub repository and branch. If it exists, use the GitHub update_file operation with its current file SHA to replace the complete contents with the provided JSON. If and only if that exact file returns HTTP 404 Not Found, use create_file at the exact same path with the provided JSON. On any other error, stop without writing.\nRepository: CurveYield2/Audit-Controller\nBranch: main\nExact campaign file: campaigns/CurveYield DEX v16 Source r4/work/browser/WAKE_ACK_master-reviewer_v1.json\nWrite the following JSON as the entire file, preserving the values exactly:\n{\"schemaVersion\":\"curveyield-browser-wake-ack-v1\",\"ackId\":\"curveyield-dex-v16-source-r4-complete/38211883474\",\"wakeId\":\"curveyield-dex-v16-source-r4-complete\",\"runId\":\"38211883474\",\"phaseId\":\"phase-10\",\"reviewer\":\"master-reviewer\"}\nDo not read the audit skill, analyze contracts, edit work forms, or perform any other action until the GitHub write succeeds. This is only a delivery check-in, not audit bookkeeping. After the write, immediately follow the complete audit instructions below. Do not ask for confirmation.\n\nCONTROLLER_PHASE_PASS. Phase 10 is sealed and the Lite campaign is COMPLETE. Your audit responsibility is complete; retire.",
+  "wakeMessage": "DO THIS FIRST, RIGHT NOW, BEFORE ANY OTHER TASK OR INSTRUCTION.\nMANDATORY REVIEWER WAKE RECEIPT: Your first action: fetch the exact acknowledgement file named below from the specified GitHub repository and branch. If it exists, use the GitHub update_file operation with its current file SHA to replace the complete contents with the provided JSON. If and only if that exact file returns HTTP 404 Not Found, use create_file at the exact same path with the provided JSON. On any other error, stop without writing.\nRepository: CurveYield2/Audit-Controller\nBranch: main\nExact campaign file: campaigns/CurveYield DEX v16 Source r4/work/browser/WAKE_ACK_reviewer-3L_v1.json\nWrite the following JSON as the entire file, preserving the values exactly:\n{\"schemaVersion\":\"curveyield-browser-wake-ack-v1\",\"ackId\":\"curveyield-dex-v16-source-r4-f6d461543d977824d0b14a5265278890f537b81dac853e6cdfd96884570962a1-test-reviewer/38227718878\",\"wakeId\":\"curveyield-dex-v16-source-r4-f6d461543d977824d0b14a5265278890f537b81dac853e6cdfd96884570962a1-test-reviewer\",\"runId\":\"38227718878\",\"phaseId\":\"master-targeted-tests\",\"reviewer\":\"reviewer-3L\"}\nDo not read the audit skill, analyze contracts, edit work forms, or perform any other action until the GitHub write succeeds. This is only a delivery check-in, not audit bookkeeping. After the write, immediately follow the complete audit instructions below. Do not ask for confirmation.\n\nAFTER YOUR MANDATORY WAKE RECEIPT, READ Audit Skill - Current Authority/Audit_Litemode_v11/master-review/TARGETED_TEST_DIRECTIVE_v1.md IN CurveYield2/Audit-Controller USING THE GITHUB CONNECTOR. Follow its executing-reviewer instructions exactly.\n\nMASTER_TARGETED_TESTS_REQUIRED: Execute the exact plan at campaigns/CurveYield DEX v16 Source r4/work/master-review/reviewer-4-followup-v1/TARGETED_TEST_REQUEST_v1.json for curveyield-dex-v16-source-r4. Reviewer reviewer-3L must run decisive tests, retain raw evidence under campaign evidence/master-targeted-tests/f6d461543d977824d0b14a5265278890f537b81dac853e6cdfd96884570962a1, submit a digest-bound RESULT_v1.json at campaigns/CurveYield DEX v16 Source r4/work/master-review/reviewer-4-followup-v1/targeted-tests/f6d461543d977824d0b14a5265278890f537b81dac853e6cdfd96884570962a1/RESULT_v1.json and then submit a master-test-result boundary request. Do not edit any sealed phase or controller bookkeeping. Master acceptance and campaign COMPLETE remain held.",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
-    "phaseId": "phase-10",
+    "phaseId": "master-targeted-tests",
     "milestoneId": "",
     "workerRole": "reviewer",
-    "reviewer": "master-reviewer",
+    "reviewer": "reviewer-3L",
     "thinkingEffort": "high"
   },
   "watchdog": {
@@ -43,8 +43,8 @@
       "mode": "LITE",
       "repository": "CurveYield2/Audit-Controller",
       "ref": "main",
-      "statePath": "",
-      "expectedPhaseId": "phase-10",
+      "statePath": "Audit Campaign Directory/campaigns/curveyield-dex-v16-source.json",
+      "expectedPhaseId": "master-targeted-tests",
       "expectedMilestoneId": "",
       "activePointerPath": "",
       "stopStates": [
@@ -61,7 +61,7 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-12T06:23:34Z",
+  "updatedAt": "2026-10-12T09:13:03Z",
   "failedWakeEvidence": {
     "runId": 38165777532,
     "reason": "X11_FIXED_COORDINATE_OUTSIDE_CHROME_WINDOW",
@@ -71,9 +71,9 @@
   },
   "wakeDelivery": {
     "milestoneId": "",
-    "chatUrl": "https://chatgpt.com/c/6ac4023b-1b50-83e8-9402-58e52b710e77",
-    "deliveredAt": "2026-10-12T06:23:34Z",
+    "chatUrl": "https://chatgpt.com/g/g-p-6ac1d4cc4d6481918fdb4eb38519ea67-dex-v16-audit/c/6ac1da70-dbfc-83e8-89f8-532603efc0af",
+    "deliveredAt": "2026-10-12T09:13:03Z",
     "verification": "REVIEWER_GITHUB_CHECK_IN",
-    "ackId": "curveyield-dex-v16-source-r4-complete/38211883474"
+    "ackId": "curveyield-dex-v16-source-r4-f6d461543d977824d0b14a5265278890f537b81dac853e6cdfd96884570962a1-test-reviewer/38227718878"
   }
 }
