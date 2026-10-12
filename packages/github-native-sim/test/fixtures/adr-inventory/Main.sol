@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 interface ITarget { function ping() external; }
 interface IERC20Demo { function transfer(address to,uint amount) external returns(bool); }
+contract PingImpl is ITarget { function ping() external override {} }
 
 library DemoMath {
     function increment(uint256 a) internal pure returns(uint256) { return a+1; }
