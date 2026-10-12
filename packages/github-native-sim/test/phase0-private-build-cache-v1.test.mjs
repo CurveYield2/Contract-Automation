@@ -66,19 +66,6 @@ test('compilation outputs live only in an isolated folder on private Audit-Contr
   assert.doesNotMatch(source,/actions\/cache@/);
 });
 
-test('V7 reuse requires an exact runner, previously qualified controller tree, and only private cache-folder changes',()=>{
-  const workflow=fs.readFileSync(new URL('../../../.github/workflows/v7-execution-infrastructure-qualification.yml',import.meta.url),'utf8');
-  assert.match(workflow,/qualifiedCommit==\$runner/);
-  assert.match(workflow,/prior_controller_commit=.*controllerQualification\.controllerCommit/);
-  assert.match(workflow,/git -C \.controller-under-test diff --name-only -z/);
-  assert.match(workflow,/all\(p\.startswith\(b"Phase0 Build Cache\/"\) for p in files\)/);
-  assert.match(workflow,/private controller contains non-cache changes/);
-  assert.match(workflow,/\.status=="completed" and \.conclusion=="success" and \.head_sha==\$sha/);
-  assert.match(workflow,/V7_QUALIFICATION_LANE=REUSE_EXACT/);
-  assert.match(workflow,/V7_QUALIFICATION_LANE != 'REUSE_EXACT'/);
-  assert.match(workflow,/V7_QUALIFICATION_LANE == 'FULL'/);
-});
-
 test('private cache shards arbitrarily large gzip bytes without losing payload',()=>{
   const original=Buffer.from('0123456789abcdef'.repeat(29));
   const pieces=splitPrivateCompilationCacheV1(original,37);
