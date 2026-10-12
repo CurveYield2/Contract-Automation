@@ -68,6 +68,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
       if(bySource.has(name)&&!asts.has(name))asts.set(name,ast);
 
   const sourceUnits=sources.map(s=>({sourceId:s.sourceId,path:s.path,sha256:s.sha256,scopeTier:bySource.get(s.path).tier,
+    lineCount:bySource.get(s.path).bytes.reduce((n,byte)=>n+(byte===10?1:0),1),
     astStatus:s.path.endsWith('.vy')?'UNSUPPORTED_LANGUAGE':asts.has(s.path)?'AVAILABLE':'MISSING'}));
   const limitations=[{code:'DEPENDENCY_TIER_BY_PATH',path:'*',detail:'Dependency tier assigned by path prefix; modified vendored code must be moved out of vendor/ to be reviewed as in-scope.'}];
   const declarations=[],contexts=[],triggers={},nodeById=new Map(),contractById=new Map(),metadata=new Map(),contextBySymbol=new Map(),usedIds=new Map();

@@ -1,0 +1,203 @@
+const FLOW_SCHEMA='curveyield-flow-review-submission-v1';
+const ATTACK_SCHEMA='curveyield-attack-submission-v1';
+const REVIEW_RESULTS=new Set(['SUPPORTED','CONCERN','UNRESOLVED','NOT_APPLICABLE']);
+const ATTACK_RESULTS=new Set(['BLOCKED','VIABLE','UNCERTAIN']);
+const ATTACK_ROLES=new Set(['UNPRIVILEGED','UNPRIVILEGED_CALLER','OTHER_ROLE','DIFFERENT_ROLE',
+ 'MALICIOUS_TOKEN','MALICIOUS_ADAPTER','MALICIOUS_TOKEN_OR_ADAPTER','MALICIOUS_CALLBACK',
+ 'MEV','MEV_SEARCHER','CARELESS_ADMIN','ADMIN','PRIVILEGED','PRIVILEGED_ROLE']);
+const blank=x=>typeof x!=='string'||!x.trim();
+const emptyEvidence=x=>blank(x)||['n/a','none','safe','no issue','reviewed'].includes(x.trim().toLowerCase());
+const keys=arr=>Array.isArray(arr)?arr.map(x=>typeof x==='string'?x:x?.contextId??x?.flowId??x?.obligationId):[];
+const comparable=x=>typeof x==='string'?x.toLowerCase().replace(/\s+/g,' ').trim():'';
+const obj=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
+const err=(out,code,path,message)=>out.push({code,path,message});
+const finish=(errors,value)=>({ok:errors.length===0,errors,value:errors.length===0?value:null});
+const validAnchors=(anchors,inventory,errors,path)=>{
+ if(!Array.isArray(anchors)){err(errors,'SUBMISSION_SCHEMA',path,'anchors must be an array');return 0;}
+ let accepted=0;
+ for(let i=0;i<anchors.length;i++){
+   if(parseAnchorV1(anchors[i],inventory))accepted++;
+   else err(errors,'ANCHOR_INVALID',path+'['+i+']','Invalid or out-of-scope source anchor');
+ }
+ return accepted;
+};
+const packetIds=(packet,field)=>keys(packet?.[field]??[]);
+const requiredFor=(packet,id)=>{
+ const direct=packet?.requiredClasses?.[id]??packet?.requiredClasses?.find?.(x=>x.contextId===id)?.classIds ??
+ packet?.primaryContexts?.find?.(x=>x.contextId===id)?.requiredClasses ??
+ packet?.primaryContexts?.find?.(x=>x.contextId===id)?.classIds ?? [];
+ return Array.isArray(direct)?direct:[];
+};
+function candidateRecords(submission,row,check){
+ return [ ...(Array.isArray(submission?.candidates)?submission.candidates:[]),
+   ...(Array.isArray(row?.candidates)?row.candidates:[]),
+   ...(obj(check?.candidate)?[check.candidate]:[]) ];
+}
+function hasCandidate(check,all){
+ const pointer=check?.candidateTempKey??check?.candidateId??(typeof check?.candidate==='string'?check.candidate:null);
+ return obj(check?.candidate)|| (typeof pointer==='string'&&pointer.trim()&&all.some(x=>[x?.tempKey,x?.candidateId,x?.id].includes(pointer)))||
+   all.some(x=>x?.classId===check.classId);
+}
+function validateCandidate(c,inventory,errors,path){
+ if(!obj(c)||blank(c.title)||blank(c.description))err(errors,'CANDIDATE_INVALID',path,'Candidate title and description are required');
+ const before=errors.length;
+ const count=validAnchors(c?.anchors,inventory,errors,path+'.anchors');
+ if(count===0)err(errors,'CANDIDATE_INVALID',path,'Candidate requires a valid source anchor');
+ return before===errors.length;
+}
+function checkSchema(submission,expected){
+ return obj(submission)&&submission.schemaVersion===expected;
+}
+export function parseAnchorV1(text,inventory) {
+ if(typeof text!=='string')return null;
+ const m=/^(.+):L([0-9]+)(?:-L([0-9]+))?$/.exec(text);
+ if(!m)return null;
+ const path=m[1],lineStart=Number(m[2]),lineEnd=m[3]===undefined?lineStart:Number(m[3]);
+ if(!Number.isSafeInteger(lineStart)||!Number.isSafeInteger(lineEnd)||lineStart<1||lineEnd<lineStart)return null;
+ const files=inventory?.payload?.sourceUnits??[];
+ const file=files.find(s=>s.path===path&&['IN_SCOPE','DEPENDENCY'].includes(s.scopeTier));
+ if(!file||!Number.isInteger(file.lineCount)||lineEnd>file.lineCount)return null;
+ return {path,lineStart,lineEnd};
+}
+export function validateFlowReviewSubmissionV1({packet,submission,inventory}={}) {
+ const errors=[];
+ if(!checkSchema(submission,FLOW_SCHEMA)||!Array.isArray(submission?.rows)||
+    (submission?.flowNotes!==undefined&&!Array.isArray(submission.flowNotes))||
+    (submission?.candidates!==undefined&&!Array.isArray(submission.candidates))){
+   err(errors,'SUBMISSION_SCHEMA','$','Unexpected flow-review schema or non-array fields');
+   if(!obj(submission)||!Array.isArray(submission?.rows))return finish(errors,submission);
+ }
+ if(!packet||submission.unitId!==packet.unitId)err(errors,'UNIT_MISMATCH','unitId','Submission does not match assigned unit');
+ const primary=packetIds(packet,'primaryContexts').length?packetIds(packet,'primaryContexts'):packetIds(packet,'primaryContextIds');
+ const expected=new Set(primary),seen=new Set();
+ const rows=Array.isArray(submission.rows)?submission.rows:[];
+ const allCandidates=candidateRecords(submission);
+ const repeats=new Map();
+ for(let i=0;i<rows.length;i++){
+  const row=rows[i],p='rows['+i+']',id=row?.contextId;
+  if(!expected.has(id))err(errors,'EXTRA_CONTEXT',p+'.contextId','Context is not primary in this unit');
+  if(seen.has(id))err(errors,'DUPLICATE_CONTEXT',p+'.contextId','Context occurs more than once');
+  seen.add(id);
+  if(blank(row?.summary))err(errors,'SUMMARY_EMPTY',p+'.summary','Context summary is blank');
+  if(!Array.isArray(row?.checks))err(errors,'SUBMISSION_SCHEMA',p+'.checks','Checks must be an array');
+  const checks=Array.isArray(row?.checks)?row.checks:[],required=requiredFor(packet,id);
+  const allowed=new Set(required),observed=new Set();
+  for(let j=0;j<checks.length;j++){
+   const check=checks[j],cp=p+'.checks['+j+']',classId=check?.classId;
+   if(!allowed.has(classId))err(errors,'CHECK_UNKNOWN_CLASS',cp+'.classId','Class not required for this context');
+   if(observed.has(classId))err(errors,'CHECK_DUPLICATE',cp+'.classId','Class checked more than once');
+   observed.add(classId);
+   if(emptyEvidence(check?.evidence))err(errors,'EVIDENCE_EMPTY',cp+'.evidence','Evidence is blank or generic');
+   if(!REVIEW_RESULTS.has(check?.assessment))err(errors,'SUBMISSION_SCHEMA',cp+'.assessment','Unknown review assessment');
+   const count=validAnchors(check?.anchors,inventory,errors,cp+'.anchors');
+   if(['SUPPORTED','CONCERN','NOT_APPLICABLE'].includes(check?.assessment)&&count===0)
+     err(errors,'ANCHOR_REQUIRED',cp+'.anchors','Source anchor required for the assessment');
+   if((check?.assessment==='NOT_APPLICABLE')!==(check?.applicability==='NOT_APPLICABLE'))
+     err(errors,'NA_MISMATCH',cp+'.applicability','Applicability disagrees with assessment');
+   const candidates=candidateRecords(submission,row,check);
+   if(check?.assessment==='CONCERN'&&!hasCandidate(check,candidates))
+     err(errors,'CONCERN_WITHOUT_CANDIDATE',cp,'Concern requires a candidate');
+   if(obj(check?.candidate))validateCandidate(check.candidate,inventory,errors,cp+'.candidate');
+   const normalized=comparable(check?.evidence);
+   if(normalized){
+     const covered=repeats.get(normalized)??new Set();covered.add(id);repeats.set(normalized,covered);
+   }
+  }
+  for(const requiredClass of required)if(!observed.has(requiredClass))
+    err(errors,'CHECK_MISSING',p+'.checks','Missing required class '+requiredClass);
+  for(let j=0;j<(Array.isArray(row?.candidates)?row.candidates:[]).length;j++)
+    validateCandidate(row.candidates[j],inventory,errors,p+'.candidates['+j+']');
+ }
+ for(const id of expected)if(!seen.has(id))err(errors,'MISSING_CONTEXT','rows','Primary context missing: '+id);
+ for(let i=0;i<(Array.isArray(submission?.candidates)?submission.candidates:[]).length;i++)
+  validateCandidate(submission.candidates[i],inventory,errors,'candidates['+i+']');
+ for(const [e,contexts] of repeats)if(contexts.size>3)
+  err(errors,'REPEATED_EVIDENCE','rows','Identical evidence used in '+contexts.size+' different contexts: '+e.slice(0,70));
+ const flows=packetIds(packet,'flows').length?packetIds(packet,'flows'):packetIds(packet,'flowIds');
+ const notes=Array.isArray(submission?.flowNotes)?submission.flowNotes:[];
+ for(const id of flows){
+  const note=notes.find(x=>x?.flowId===id);
+  if(!note)err(errors,'FLOW_NOTE_MISSING','flowNotes','Missing flow note: '+id);
+  else {
+   const p='flowNotes['+notes.indexOf(note)+']';
+   const count=validAnchors(note.anchors,inventory,errors,p+'.anchors');
+   if(blank(note.note??note.summary??note.description)||count===0)
+     err(errors,'FLOW_NOTE_EMPTY',p,'Flow note must contain source-specific prose and valid anchors');
+  }
+ }
+ return finish(errors,submission);
+}
+export function validateAttackSubmissionV1({packet,submission,inventory}={}) {
+ const errors=[];
+ if(!checkSchema(submission,ATTACK_SCHEMA)||!Array.isArray(submission?.attackPaths)||
+   !Array.isArray(submission?.integrationAnswers)){
+  err(errors,'SUBMISSION_SCHEMA','$','Unexpected attack schema or missing/non-array attackPaths or integrationAnswers');
+  if(!obj(submission))return finish(errors,submission);
+ }
+ if(!packet||submission.unitId!==packet.unitId)err(errors,'UNIT_MISMATCH','unitId','Attack submission does not match its unit');
+ const expected=new Set(packetIds(packet,'flows').length?packetIds(packet,'flows'):packetIds(packet,'flowIds'));
+ const paths=Array.isArray(submission.attackPaths)?submission.attackPaths:[],seenPaths=new Set(),covered=new Set();
+ const blocking=new Map();
+ for(let i=0;i<paths.length;i++){
+   const attack=paths[i],p='attackPaths['+i+']';
+   const id=attack?.pathId??attack?.attackId;
+   if(blank(id)||seenPaths.has(id))err(errors,'PATH_DUPLICATE_ID',p+'.pathId','Path id missing or duplicated');
+   seenPaths.add(id);
+   const flowIds=[...new Set([...(Array.isArray(attack?.flowIds)?attack.flowIds:[]),...(attack?.flowId?[attack.flowId]:[])])];
+   for(const flowId of flowIds){
+     if(!expected.has(flowId))err(errors,'UNKNOWN_FLOW',p+'.flowIds','Unassigned flow '+flowId);
+     else covered.add(flowId);
+   }
+   if(blank(attack?.goal))err(errors,'GOAL_EMPTY',p+'.goal','Attack goal missing');
+   if(!Array.isArray(attack?.steps)||attack.steps.length===0||
+      attack.steps.some(x=>typeof x!=='string'||!x.trim()))
+      err(errors,'STEPS_EMPTY',p+'.steps','Attack steps must be non-empty strings');
+   if(!ATTACK_ROLES.has(attack?.role))err(errors,'ROLE_UNKNOWN',p+'.role','Attack role unrecognized');
+   const count=validAnchors(attack?.anchors,inventory,errors,p+'.anchors');
+   if(count===0)err(errors,'ANCHOR_REQUIRED',p+'.anchors','Attack path must cite source');
+   if(attack?.result==='BLOCKED'){
+     if(blank(attack?.blockingControl)||count===0)
+       err(errors,'BLOCKING_CONTROL_MISSING',p,'Blocked path needs a named anchored control');
+     else for(const f of flowIds.filter(x=>expected.has(x))){
+       const value=comparable(attack.blockingControl),set=blocking.get(value)??new Set();set.add(f);blocking.set(value,set);
+     }
+   } else if(['VIABLE','UNCERTAIN'].includes(attack?.result)){
+     if(!obj(attack?.candidate))err(errors,'CANDIDATE_REQUIRED',p+'.candidate','Viable/uncertain attack requires a candidate');
+     else validateCandidate(attack.candidate,inventory,errors,p+'.candidate');
+     const idea=attack?.simulationIdea??attack;
+     if(!Array.isArray(idea?.transactionSequence)||!idea.transactionSequence.length||
+       blank(idea?.oracle))err(errors,'SIMULATION_IDEA_REQUIRED',p+'.simulationIdea','Transaction sequence and oracle required');
+   } else if(!ATTACK_RESULTS.has(attack?.result))
+     err(errors,'SUBMISSION_SCHEMA',p+'.result','Unrecognized attack result');
+ }
+ for(const f of expected)if(!covered.has(f))err(errors,'FLOW_NOT_ATTACKED','attackPaths','No attack path covers '+f);
+ for(const [value,flows] of blocking)if(flows.size>3)
+   err(errors,'REPEATED_BLOCKING_CONTROL','attackPaths','Repeated blocking control across '+flows.size+' flows: '+value.slice(0,70));
+ const questions=new Set(packetIds(packet,'integrationQuestions').length?
+   packetIds(packet,'integrationQuestions'):packetIds(packet,'integrationQuestionIds'));
+ const answered=new Set(),answers=Array.isArray(submission?.integrationAnswers)?submission.integrationAnswers:[];
+ for(let i=0;i<answers.length;i++){
+  const ans=answers[i],p='integrationAnswers['+i+']',id=ans?.obligationId;
+  if(!questions.has(id))err(errors,'QUESTION_EXTRA',p+'.obligationId','Question not part of unit');
+  if(answered.has(id))err(errors,'QUESTION_DUPLICATE',p+'.obligationId','Question answered more than once');
+  answered.add(id);
+  if(blank(ans?.reasoning)||emptyEvidence(ans.reasoning))
+    err(errors,'REASONING_EMPTY',p+'.reasoning','Question needs specific reasoning');
+  const count=validAnchors(ans?.anchors,inventory,errors,p+'.anchors');
+  if(count===0)err(errors,'ANCHOR_REQUIRED',p+'.anchors','Question must cite source');
+  if(ans?.assessment==='CONCERN'&&!obj(ans?.candidate))
+    err(errors,'CONCERN_WITHOUT_CANDIDATE',p,'Concern answer must contain a candidate');
+  if(obj(ans?.candidate))validateCandidate(ans.candidate,inventory,errors,p+'.candidate');
+ }
+ for(const id of questions)if(!answered.has(id))err(errors,'QUESTION_UNANSWERED','integrationAnswers','Missing question '+id);
+ return finish(errors,submission);
+}
+export function feedbackTextV1(result,{attempt,maxAttempts,submissionPath,unitId}={}) {
+ const errors=Array.isArray(result?.errors)?result.errors:[];
+ const lines=['Discovery unit '+unitId+' attempt '+attempt+'/'+maxAttempts+' failed validation.'];
+ for(const e of errors.slice(0,60))
+  lines.push('- '+e.code+' at '+e.path+': '+e.message);
+ if(errors.length>60)lines.push('- … '+(errors.length-60)+' more');
+ lines.push('Repair only these items in '+submissionPath+', then push the boundary request again with attempt increased by 1.');
+ return lines.join('\n');
+}
