@@ -51,7 +51,7 @@ function fixture(){
 test('mandatory material candidates cannot be omitted, duplicated or marked NOT_APPLICABLE',()=>{
   assert.match(validatePhase5TargetCoverageV1({targetDesigns:['NONE_IDENTIFIED'],materialCandidateKeys:[key]}).join(' '),/material candidates/);
   assert.match(validatePhase5TargetCoverageV1({targetDesigns:[],materialCandidateKeys:[key]}).join(' '),/mandatory material candidate/);
-  assert.match(validatePhase5TargetCoverageV1({targetDesigns:[{...target,executionMethod:'NOT_APPLICABLE'}],materialCandidateKeys:[key]}).join(' '),/no supported, verifiable NOT_APPLICABLE disposition/);
+  assert.match(validatePhase5TargetCoverageV1({targetDesigns:[{...target,executionMethod:'NOT_APPLICABLE'}],materialCandidateKeys:[key]}).join(' '),/NOT_APPLICABLE method requires reproductionType NOT_APPLICABLE/);
   assert.match(validatePhase5TargetCoverageV1({targetDesigns:[target,target],materialCandidateKeys:[key]}).join(' '),/duplicate/);
   assert.deepEqual(validatePhase5TargetCoverageV1({targetDesigns:[target],materialCandidateKeys:[key]}),[]);
   assert.deepEqual(validatePhase5TargetCoverageV1({targetDesigns:['NONE_IDENTIFIED'],materialCandidateKeys:[]}),[]);
