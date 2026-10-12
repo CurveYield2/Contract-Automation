@@ -468,6 +468,19 @@ node "$GITHUB_WORKSPACE/packages/github-native-sim/src/adr-assertion-ledger-v1.m
 ```
 
    Include that file in the step's `git add` if the step lists paths explicitly.
+6a. **Authorization for this task.**
+   - The `audit-controller-execution.yml` ingestion hook in item 6 is an approved, additive edit to a runner-listed file (00 §4 rule 8a). Record it in the PR under "Runner-listed edits".
+   - `native-fuzz-v1.test.mjs` has four expectations that are already stale on `main`, because the runner already rejects output without a successful Forge suite (`NO_SUCCESSFUL_TEST_EXECUTION`). The four tests are:
+     - successful native fuzz;
+     - Forge failed-test output;
+     - configured native-fuzz limitation;
+     - non-recoverable execution failure.
+   - Correct them under 00 §4 rule 8b:
+     - success cases use a real Forge suite block and expect `completed`;
+     - failure cases expect the status `main` actually returns today;
+     - keep every negative case.
+   - Do not change `runNativeFuzzAnalysis` status logic.
+
 7. **Runner manifest.** Add the step `npm run v7:manifest -- --check` to the T0 workflow's unit job. These edits are additive result fields and should not change the policy-derived manifest. If the check fails, record a `## Blocked question` with the exact diff; do not edit the manifest by hand.
 8. **Harness naming convention** (also written into `AGENT_GUIDED_TESTING.md`; see T8 Appendix C4), so outcomes can be matched to obligations:
    - one assertion per test function or Medusa property;

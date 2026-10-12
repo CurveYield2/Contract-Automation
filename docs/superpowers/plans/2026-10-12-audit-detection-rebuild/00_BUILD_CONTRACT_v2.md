@@ -83,6 +83,14 @@ This plan fixes the system. It does not repair, rerun or measure any past campai
    - "old-path regression: PASS";
    - the exact next task.
 8. **Runner pin note:** after each CA merge, check whether any changed file is listed in `process/RUNNER_MANIFEST.json`. If none is, write `Runner components unchanged` in the PR. If one is, stop and ask in the PR. T10 replaces the retired full-qualification pin process.
+8a. **Runner-listed files named by a task.** When a task explicitly names a file that `process/RUNNER_MANIFEST.json` lists, and the edit is additive (it adds a step, field or file and changes no existing command, argument or status decision), that edit is authorized. You do not need to stop. `npm run v7:manifest -- --check` must still pass, and the PR must list the file under "Runner-listed edits".
+   - Lite execution evidence binds the exact runner commit of each run, so no qualification rebind is needed (T10.2).
+   - Any non-additive change to a runner-listed file still requires a `## Blocked question`.
+8b. **Stale existing tests surfaced by a task.** A task may add an existing test file to the T0 regression list, and that file may then fail. If it also fails on unmodified `main`, it is stale, not broken by the task. You must:
+   1. prove it by running the same file against `main` in the PR's workflow run (or by citing a run on `main`);
+   2. update only the stale expectations or fixtures, so they match the current behavior on `main`. Never change runner or controller logic to satisfy an old test. Keep every negative case. Where a fixture must represent a success, use authentic tool output (for Forge, a real `Suite result: ok. N passed; 0 failed` block);
+   3. list every changed expectation in the PR under "Stale test corrections", with old expectation → new expectation → the `main` behavior that justifies it.
+
 9. **Stop rule:** if the same check fails twice with no code change between the runs, stop and report in the PR. Do not loop.
 
 ## 5. Task map
