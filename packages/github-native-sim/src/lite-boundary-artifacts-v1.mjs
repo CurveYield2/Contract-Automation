@@ -245,6 +245,9 @@ export function validatePhase5TargetExecutionGateV1({controllerRoot,campaignPath
     if(expectedSourceSha256&&raw.source?.archiveSha256!==expectedSourceSha256){
       failures.push('Phase 5 mandatory '+key+' raw execution source identity differs from campaign source');
     }
+    if(raw.build?.status!=='completed'){
+      failures.push('Phase 5 mandatory '+key+' has no successful production-source compiler/build evidence');
+    }
     const reproduction=raw.reproduction;
     // A completed negative finding is just as valid an audit result as a
     // reproduced issue. Gate on an actual recorded observation, not on whether
