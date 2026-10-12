@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {registerMasterTargetedTests,acceptMasterTargetedTestResults,verifyMasterTargetedTestEvidence,unresolvedFinalCandidateFailures} from '../lib/lite-master-targeted-tests-v1.mjs';
 
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -118,4 +119,77 @@ test('terminal gate requires conclusive delegated evidence for an originally unr
   candidate.evidenceRefs=ev+'#assertions';
   f.put(can,{actions:{'step-2':{outputs:{candidateValidations:[candidate]}}}});
   assert.deepEqual(unresolvedFinalCandidateFailures({root:f.root,campaignPath:camp,directory:f.directory}),[]);
+});
+
+test('controller CLI holds master review, admits reviewer results and returns to master',t=>{
+  const f=setup(t);
+  const dirPath='Audit Campaign Directory/campaigns/example-audit.json';
+  const rootAuthority='Audit Skill - Current Authority/Audit_Litemode_v11/SKILL.md';
+  const authorityBytes='fixture bound audit authority\\n';
+  f.put(rootAuthority,authorityBytes);
+  const buildRel='evidence/build/build-identity.json';
+  const buildBytes='{"build":"exact test identity"}\\n';
+  f.put(camp+'/'+buildRel,buildBytes);
+  const bindings={
+    source:{path:null,sha256:source},
+    build:{path:buildRel,sha256:sha(buildBytes)},
+    authority:{homepagePath:rootAuthority,sha256:sha(authorityBytes)},
+    segmentManifestSha256:sha(JSON.stringify([]))
+  };
+  const recordPath=camp+'/work/master-review/'+segment+'/MASTER_REVIEW_RECORD_v1.json';
+  f.put(recordPath,{
+    schemaVersion:'curveyield-lite-master-review-record-v1',
+    campaignId:f.directory.campaignId,campaignGenerationId:'fixture-generation',
+    segmentId:segment,reviewerId:'reviewer-4',boundaryPhase:10,segmentPhases:[8,9,10],
+    masterIdentity:{chatUrl:'https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc',reasoning:'MAXIMUM'},
+    bindings,reviewedArtifacts:[]
+  });
+  const receiptPath=camp+'/receipts/PHASE_10_RECEIPT_v1.json';
+  f.put(receiptPath,{authority:{homepagePath:rootAuthority}});
+  Object.assign(f.directory,{
+    schemaVersion:'curveyield-audit-campaign-directory-entry-v2',
+    campaignGenerationId:'fixture-generation',workspacePath:camp,
+    masterReview:{chatUrl:'https://chatgpt.com/c/12345678-1234-1234-1234-123456789abc',
+      reasoning:'MAXIMUM',repairModel:'SOL',repairReasoning:'HIGH'},
+    lastSealedReceiptPath:receiptPath
+  });
+  Object.assign(f.directory.pendingMasterReview,{
+    boundaryPhase:10,segmentPhases:[8,9,10],recordPath,lastSealedReceiptPath:receiptPath,
+    manifestSha256:sha(JSON.stringify([])),bindingsSha256:sha(JSON.stringify(bindings)),
+    sealedWorkForms:[],successorPlan:{nextPhaseSequence:null}
+  });
+  f.put(dirPath,f.directory);
+  const controller=path.resolve('scripts/lite-phase-packet-controller-v1.mjs');
+  const args=['--controller-root',f.root,'--campaign-id',f.directory.campaignId,'--campaign-path',camp,
+    '--campaign-directory-path',dirPath,'--audit-controller-ref','main'];
+  const invoke=tail=>JSON.parse(execFileSync(process.execPath,[controller,...args,...tail],{encoding:'utf8'}));
+  const request=invoke(['--review-kind','master','--segment-id',segment,'--master-outcome','REQUEST_TARGETED_TESTS','--test-plan-path',f.planPath]);
+  assert.equal(request.status,'MASTER_TESTS_REQUESTED');
+  assert.equal(request.testReviewer,'reviewer-3L');
+  const held=JSON.parse(fs.readFileSync(path.join(f.root,dirPath)));
+  assert.equal(held.campaignStatus,'WAITING_FOR_TARGETED_TESTS');
+  assert.equal(held.pendingMasterReview.status,'WAITING_FOR_TARGETED_TESTS');
+  const entry=held.pendingMasterReview.targetedTests[0];
+  const ev=camp+'/evidence/master-targeted-tests/'+entry.requestId+'/raw-result.json';
+  const raw='{"observedCalls":5,"assertionsPassed":5}\\n';
+  f.put(ev,raw);
+  f.put(entry.resultPath,{
+    schemaVersion:'curveyield-lite-master-targeted-test-result-v1',
+    campaignId:f.directory.campaignId,segmentId:segment,requestId:entry.requestId,
+    sourceSha256:source,reviewer:'reviewer-3L',
+    tests:[{
+      candidateId:'P4-CAND-001',disposition:'DISPROVEN',
+      executionNarrative:'Observed full external dependencies and five execution calls on the bound fork.',
+      observedAssertions:'The healthy and adversarial tests produced five validated expected assertions.',
+      impactAssessment:'Token balance and beneficiary payout deltas were measured and fully reconciled.',
+      executedCalls:5,evidence:[{path:ev,sha256:sha(raw)}]
+    }]
+  });
+  const returned=invoke(['--review-kind','master-test-result','--segment-id',segment,'--test-result-path',entry.resultPath]);
+  assert.equal(returned.status,'WAITING_FOR_MASTER_REVIEW');
+  const after=JSON.parse(fs.readFileSync(path.join(f.root,dirPath)));
+  assert.equal(after.campaignStatus,'WAITING_FOR_MASTER_REVIEW');
+  assert.equal(after.pendingMasterReview.targetedTests[0].status,'EVIDENCE_SUBMITTED');
+  assert.equal(after.currentAssignment,null);
+  assert.deepEqual(verifyMasterTargetedTestEvidence({root:f.root,campaignPath:camp,directory:after}),[]);
 });
