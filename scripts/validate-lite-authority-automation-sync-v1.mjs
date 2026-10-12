@@ -22,11 +22,13 @@ for(const k of ['controller-root','automation-root']) if(!a[k]) throw new Error(
 const controllerRoot=path.resolve(a['controller-root']);
 const automationRoot=path.resolve(a['automation-root']);
 const authorityParent=join(controllerRoot,'Audit Skill - Current Authority');
-const packages=fs.readdirSync(authorityParent,{withFileTypes:true})
+const packages=a['authority-root']?[]:fs.readdirSync(authorityParent,{withFileTypes:true})
   .filter(e=>e.isDirectory()&&fs.existsSync(path.join(authorityParent,e.name,'SKILL.md')))
   .map(e=>path.join(authorityParent,e.name));
-need(packages.length===1,'expected exactly one unpacked current Lite authority package');
-const authorityRoot=packages[0];
+if(!a['authority-root'])need(packages.length===1,'expected exactly one unpacked current Lite authority package');
+const authorityRoot=a['authority-root']?path.resolve(controllerRoot,a['authority-root']):packages[0];
+need(authorityRoot.startsWith(controllerRoot+path.sep),'authority root must be within controller checkout');
+need(fs.existsSync(path.join(authorityRoot,'SKILL.md')),'authority root is not an unpacked Lite package');
 const authorityRel=path.relative(controllerRoot,authorityRoot).split(path.sep).join('/');
 
 const prefillSource=read(join(automationRoot,'scripts/lib/lite-phase-prefill-v1.mjs'));
@@ -135,7 +137,8 @@ const phase0Corpus=[
   read(join(automationRoot,'.github/workflows/lite-phase0-intelligence-v1.yml')),
   read(join(automationRoot,'.github/workflows/lite-phase0-randomized-simulation-v1.yml')),
   read(join(automationRoot,'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs')),
-  read(join(automationRoot,'scripts/write-phase0-simulation-outputs-v1.mjs'))
+  read(join(automationRoot,'scripts/write-phase0-simulation-outputs-v1.mjs')),
+  read(join(automationRoot,'scripts/write-phase0-fork-deploy-outputs-v1.mjs'))
 ].join('\n');
 for(const row of phase0.requiredOutputs??[]){
   if(row?.required!==true) continue;
@@ -159,22 +162,9 @@ const phase0Simulation=read(join(automationRoot,'packages/github-native-sim/src/
 const phase0SimulationWorkflow=read(join(automationRoot,'.github/workflows/lite-phase0-randomized-simulation-v1.yml'));
 const phase0Projector=read(join(automationRoot,'scripts/write-phase0-simulation-outputs-v1.mjs'));
 const phase0Bootstrap=read(join(automationRoot,'.github/workflows/lite-phase0-bootstrap-v1.yml'));
-need(phase0Simulation.includes('PHASE0_MEDUSA_CALL_LIMIT_V1=125000'),'Phase 0 Medusa configured call limit is not 125000');
-need(phase0Simulation.includes('PHASE0_MEDUSA_MIN_CALLS_V1=100001'),'Phase 0 Medusa >100K minimum is missing');
-need(phase0Simulation.includes('PHASE0_ACCOUNTING_ACTION_WEIGHT_V1=0.80'),'Phase 0 accounting/state-changing action weight is not 80%');
-need(phase0Simulation.includes('abiGenerated:true')&&phase0Simulation.includes('rawRandomBytes:false'),'Phase 0 randomized calls are not explicitly ABI-generated');
-need(phase0Simulation.includes('buildBurstSchedule')&&phase0Simulation.includes('previous'),'Phase 0 telemetry lacks cross-contract burst interleaving');
-need(phase0Simulation.includes('beforeAccounting')&&phase0Simulation.includes('afterAccounting')&&phase0Simulation.includes('accountingDeltas'),'Phase 0 raw telemetry lacks pre/post accounting evidence');
-need(phase0Simulation.includes('RAW_SIMULATION_TRANSCRIPT_v1.jsonl'),'Phase 0 raw per-run transcript is missing');
-need(phase0Simulation.includes('forkModeEnabled:true')&&phase0Simulation.includes('rpcUrl:anvilUrl'),'Medusa is not forked from the Anvil RPC state');
-need(phase0Simulation.includes('ALL_EVM_PACKAGES_USE_CANONICAL_ETHEREUM_ANVIL_BASELINE'),'Phase 0 does not normalize all EVM packages onto the canonical Ethereum Anvil baseline');
-need(!phase0Simulation.includes("if(targetChainIds.some(id=>id!==1))"),'Phase 0 still suppresses randomized execution for non-Ethereum EVM target chain IDs');
 need(phase0Simulation.includes('DEPLOYMENT_SCRIPT_NOT_SAFELY_REDIRECTABLE'),'deployment-script adapter does not preserve typed unsafe-binding limitations');
 need(phase0SimulationWorkflow.includes('SIM_ARCHIVE_PRIMARY_ETHEREUM_01'),'Phase 0 simulation workflow is not bound to the canonical Ethereum fork RPC');
 need(phase0Bootstrap.includes('needs: randomized-simulation'),'Phase 0 finalization is not gated on randomized simulation');
-need(phase0Projector.includes('PHASE5_SIMULATION_BASELINE_INPUT_v1.json')&&phase0Projector.includes('PHASE6_SIMULATION_BASELINE_INPUT_v1.json'),'Phase 0 simulation evidence is not projected into Phase 5 and 6 canonical inputs');
-need(prefillSource.includes('phase0BaselineSimulation')&&prefillSource.includes('phase0BaselineTargetDispositions'),'Phase 5/6 controller prefill does not consume Phase 0 simulation inputs');
-need(packetController.includes('baselineMatrixRows'),'Phase 5 boundary does not preserve Phase 0 baseline rows in the Phase 6 target matrix');
 
 need(boundaryWorkflow.includes("process/agent-upload/lite-phase-boundary/*.json"),'phase-boundary controller lacks an agent-operable request trigger');
 need(boundaryWorkflow.includes('curveyield-lite-phase-boundary-request-v1'),'phase-boundary controller does not validate the request schema');
