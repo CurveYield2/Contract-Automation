@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {readV7RawResultV1} from './v7-compact-result-v1.mjs';
 
 function md(value){
   if(value===null||value===undefined||value==='') return '—';
@@ -257,7 +258,7 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
       failures.push('Phase 5 mandatory '+key+' missing exact persisted raw-result.json evidence');
     }else{
       try{
-        const persisted=JSON.parse(fs.readFileSync(rawFile,'utf8'));
+        const persisted=readV7RawResultV1(rawFile);
         if(stableJson(persisted)!==stableJson(raw)){
           failures.push('Phase 5 mandatory '+key+' raw machine result does not match persisted artifact');
         }
@@ -371,7 +372,7 @@ export function validateRecordedPhase5MachineEvidenceV1({controllerRoot,campaign
     if(!/^dar-[0-9a-f]{32}$/.test(String(req.requestId??''))){failures.push(key+': invalid bound request ID');continue;}
     const rel=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key),req.requestId,'raw-result.json');
     let raw=null;
-    try{raw=readJsonRel(rel);}catch(e){failures.push(key+': required V7 raw result is missing: '+rel);continue;}
+    try{raw=readV7RawResultV1(path.join(controllerRoot,...rel.split('/')));}catch(e){failures.push(key+': required V7 raw result is missing: '+rel);continue;}
     executionResults[key]={
       status:raw.status==='completed'&&raw.blocking!==true?'PASS':'BLOCKED',
       exitCode:raw.status==='completed'&&raw.blocking!==true?0:1,
@@ -459,7 +460,7 @@ export function verifiedReusablePhase5ResultV1({
     const request=JSON.parse(fs.readFileSync(path.join(controllerRoot,...campaignPath.split('/'),...binding.requestRef.split('/')),'utf8'));
     if(!/^dar-[0-9a-f]{32}$/.test(String(request.requestId??'')))return null;
     const evidenceRef=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key),request.requestId,'raw-result.json');
-    const rawResult=JSON.parse(fs.readFileSync(path.join(controllerRoot,...evidenceRef.split('/')),'utf8'));
+    const rawResult=readV7RawResultV1(path.join(controllerRoot,...evidenceRef.split('/')));
     const result={
       status:'PASS',exitCode:0,evidenceRef,rawResult,
       requestBindingStatus:binding.status,
@@ -549,7 +550,7 @@ export async function executePhase5TargetsV1({
     try {
       result=await runProcessV1({
         command:process.execPath,
-        args:['packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace],
+        args:['packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace,'--compact-raw-result'],
         cwd:process.cwd(),
         env:{...process.env,PHASE5_BOUNDARY_PROGRESS:'true'},
         timeoutMs:candidateTimeoutMs,
@@ -566,7 +567,7 @@ export async function executePhase5TargetsV1({
     const validId=typeof requestId==='string'&&/^dar-[0-9a-f]{32}$/.test(requestId);
     const rawPath=validId?path.join(evAbs,requestId,'raw-result.json'):null;
     let rawResult=null;
-    try{if(rawPath)rawResult=JSON.parse(fs.readFileSync(rawPath,'utf8'));}catch{}
+    try{if(rawPath)rawResult=readV7RawResultV1(rawPath);}catch{}
     executionResults[key]={
       status:result.exitCode===0&&rawResult?'PASS':(rawResult?.blocking?'BLOCKED':'INCONCLUSIVE'),
       exitCode:result.exitCode,
