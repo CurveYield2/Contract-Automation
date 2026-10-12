@@ -6,24 +6,32 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
   validatePhase5TargetCoverageV1,
-  validatePhase5TargetExecutionGateV1
+  validatePhase5TargetExecutionGateV1,
+  validateRecordedPhase5MachineEvidenceV1
 } from '../src/lite-boundary-artifacts-v1.mjs';
 
 const key='P4-CAND-001';
 const sourceSha='a'.repeat(64);
 const requestId='dar-'+'b'.repeat(32);
 const campaignPath='campaigns/test-audit-r1';
-const target={candidateKey:key,executionMethod:'V7_REQUEST',reproductionType:'FOUNDRY_TEST'};
+const requestRef='work/phase-05/execution-requests/'+key+'.json';
+const target={candidateKey:key,executionMethod:'V7_REQUEST',reproductionType:'FOUNDRY_TEST',executionRequestRef:requestRef,expectedMachineObservation:{componentStatus:'COMPLETED'}};
 const evidenceRef=path.posix.join(campaignPath,'evidence/phase5-boundary',key,requestId,'raw-result.json');
 
 function fixture(){
   const controllerRoot=fs.mkdtempSync(path.join(os.tmpdir(),'lite-p5-gate-'));
   const file=path.join(controllerRoot,...evidenceRef.split('/'));
   fs.mkdirSync(path.dirname(file),{recursive:true});
+  const request={requestId,requestDigest:'d'.repeat(64),campaignId:'test-audit-r1',phaseId:'build-and-test',
+    source:{archiveSha256:sourceSha,commit:'c'.repeat(40)},
+    configuration:{v26:{reproduction:{candidateId:key,reproductionType:'FOUNDRY_TEST',expectedObservation:{componentStatus:'COMPLETED'}}}}};
+  const requestFile=path.join(controllerRoot,...campaignPath.split('/'),...requestRef.split('/'));
+  fs.mkdirSync(path.dirname(requestFile),{recursive:true});
+  fs.writeFileSync(requestFile,JSON.stringify(request)+'\\n');
   // Persist the exact machine record, not a status-only placeholder.
   const rawResult={
-    requestId,status:'completed',blocking:false,preflight:{status:'PASS'},
-    source:{archiveSha256:sourceSha},
+    requestId,requestDigest:'d'.repeat(64),status:'completed',blocking:false,preflight:{status:'PASS'},
+    source:{archiveSha256:sourceSha,commit:'c'.repeat(40)},build:{status:'completed'},
     reproduction:{candidateId:key,status:'REPRODUCED',
       observedPredicate:{matched:true,observed:{componentStatus:'COMPLETED'}}},
     analysis:{nativeFuzz:{componentStatus:'COMPLETED',toolInvoked:true}}
@@ -88,4 +96,18 @@ test('controller executes and validates Phase-5 results before PASS and audit bo
   assert.ok(execute>0&&verify>execute&&pass>verify&&bookkeeping>pass&&receipt>bookkeeping);
   assert.equal(script.split('executePhase5TargetsV1({').length-1,1,
     'required execution must be performed once, prior to phase seal');
+});
+
+test('Phase-6/master gate refuses a previously sealed Phase-5 claim without its exact machine result',t=>{
+  const {args,controllerRoot}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
+  const phase4=path.join(controllerRoot,...campaignPath.split('/'),'derived/phase-4/PHASE_04_CANONICAL_DATA_v1.json');
+  const phase5=path.join(controllerRoot,...campaignPath.split('/'),'derived/phase-5/PHASE_05_CANONICAL_DATA_v1.json');
+  fs.mkdirSync(path.dirname(phase4),{recursive:true});
+  fs.mkdirSync(path.dirname(phase5),{recursive:true});
+  fs.writeFileSync(phase4,JSON.stringify({actions:{'step-3':{outputs:{candidateRecords:[{tempKey:key}]}}}}));
+  fs.writeFileSync(phase5,JSON.stringify({actions:{'step-2':{outputs:{newCandidateRecords:['NONE_IDENTIFIED']}}}}));
+  const failures=validateRecordedPhase5MachineEvidenceV1({...args,expectedCampaignId:'test-audit-r1',requireCompletedMatrix:true});
+  assert.match(failures.join('; '),/matrix|Sealed/);
+  fs.unlinkSync(path.join(controllerRoot,...evidenceRef.split('/')));
+  assert.match(validateRecordedPhase5MachineEvidenceV1({...args,expectedCampaignId:'test-audit-r1'}).join('; '),/missing|required/);
 });
