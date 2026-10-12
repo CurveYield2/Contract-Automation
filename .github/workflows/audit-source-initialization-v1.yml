@@ -1,4 +1,4 @@
-name: Audit Source Initialization
+name: Audit Source Initialization v2
 
 on:
   workflow_dispatch:
@@ -158,4 +158,4 @@ jobs:
           MASTER_CHAT_URL: ${{ steps.request.outputs.master_chat_url }}
           REQUEST_ID: ${{ steps.request.outputs.request_id }}
         shell: bash
-        run: bash scripts/audit-source-initialization/run-v1.sh
+        run: python3 scripts/audit-command-guard-v1.py --label audit-source-initialization --wall 1080 --idle 720 --log /tmp/audit-source-initialization-guard-v1.log -- bash scripts/audit-source-initialization/run-v1.sh
