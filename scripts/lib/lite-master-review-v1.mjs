@@ -65,8 +65,9 @@ export function validateMasterReviewConfiguration(directory,{required=false}={})
 }
 
 export function masterReviewRequired(directory,authorityRoot){
-  const isV11=/Audit_Litemode_v11(?:\/|$)/.test(String(authorityRoot??''));
-  if(isV11)return Boolean(validateMasterReviewConfiguration(directory,{required:true}));
+  const rev=Number((String(authorityRoot??'').match(/Audit_Litemode_v(\d+)(?:\.\d+)?(?:\/|$)/)||[])[1]??0);
+  const isV11OrLater=rev>=11;
+  if(isV11OrLater)return Boolean(validateMasterReviewConfiguration(directory,{required:true}));
   return Boolean(directory?.masterReview&&validateMasterReviewConfiguration(directory));
 }
 
