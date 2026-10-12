@@ -27,7 +27,7 @@ function fixture(){
     configuration:{v26:{reproduction:{candidateId:key,reproductionType:'FOUNDRY_TEST',expectedObservation:{componentStatus:'COMPLETED'}}}}};
   const requestFile=path.join(controllerRoot,...campaignPath.split('/'),...requestRef.split('/'));
   fs.mkdirSync(path.dirname(requestFile),{recursive:true});
-  fs.writeFileSync(requestFile,JSON.stringify(request)+'\\n');
+  fs.writeFileSync(requestFile,JSON.stringify(request)+'\n');
   // Persist the exact machine record, not a status-only placeholder.
   const rawResult={
     requestId,requestDigest:'d'.repeat(64),status:'completed',blocking:false,preflight:{status:'PASS'},
