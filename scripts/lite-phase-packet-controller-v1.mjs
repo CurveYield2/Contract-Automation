@@ -79,6 +79,8 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,repla
     graph.controllerImports=graph.controllerImports.filter(x=>x?.phase!==schema.phase);
     ledger.controllerImports=ledger.controllerImports.filter(x=>x?.phase!==schema.phase);
     invalid.controllerImports=invalid.controllerImports.filter(x=>x?.phase!==schema.phase);
+    ledger.obligations=(ledger.obligations??[]).filter(x=>Number(x?.originPhase)!==Number(schema.phase));
+    ledger.phaseCheckpoints=(ledger.phaseCheckpoints??[]).filter(x=>x?.phaseId!=='phase-'+schema.phase);
   }
   const graphRecords=importedRecords(canonical,schema.bookkeepingMappings?.graphRecordPaths);
   const obligationRecords=importedRecords(canonical,schema.bookkeepingMappings?.obligationRecordPaths);
@@ -641,6 +643,52 @@ const now=new Date().toISOString();
 if(directory.schemaVersion!=='curveyield-audit-campaign-directory-entry-v2') throw new Error('packet controller requires Audit Campaign Directory v2');
 if(directory.campaignId!==expectedCampaignId) throw new Error('campaign-id does not match Audit Campaign Directory');
 if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does not match Audit Campaign Directory workspacePath');
+// Stage every master decision in an isolated controller checkout. Only a
+// fully successful acceptance or targeted-test directive may change Git state.
+if(reviewKind==='master'&&a['master-transaction-child']!=='true'){
+  let response;
+  const shadowRoot=fs.mkdtempSync(path.join(os.tmpdir(),'lite-master-transaction-'));
+  try{
+    const pending=directory.pendingMasterReview;
+    if(!pending){
+      const prior=directory.lastAcceptedMasterReview;
+      const record=prior?.recordPath?maybeJson(root,prior.recordPath):null;
+      const summary=a['master-summary-b64']?Buffer.from(a['master-summary-b64'],'base64').toString('utf8').trim():null;
+      response=prior?.segmentId===a['segment-id']&&prior?.outcome===a['master-outcome']&&record?.decision?.summary===summary
+        ?{status:'ALREADY_ACCEPTED',campaignId:directory.campaignId,segmentId:prior.segmentId,feedbackText:'Already accepted; no repeat transaction or wake.',freshSuccessorRequired:false}
+        :{status:'MASTER_REVIEW_INVALID',campaignId:directory.campaignId,segmentId:a['segment-id']??null,feedbackText:'No pending master review matches this request.',freshSuccessorRequired:false};
+    }else{
+      fs.mkdirSync(path.dirname(repoFile(shadowRoot,campaignPath)),{recursive:true});
+      fs.cpSync(repoFile(root,campaignPath),repoFile(shadowRoot,campaignPath),{recursive:true});
+      fs.mkdirSync(path.dirname(repoFile(shadowRoot,directoryRel)),{recursive:true});
+      fs.copyFileSync(directoryFile,repoFile(shadowRoot,directoryRel));
+      const receipt=readJson(requiredFile(root,pending.lastSealedReceiptPath??directory.lastSealedReceiptPath,'master predecessor receipt'));
+      copyAuthorityForShadow(root,shadowRoot,authorityRootFromReceipt(receipt));
+      const lib='packages/controller-core/src/lite-phase-receipt-v1.mjs';
+      fs.mkdirSync(path.dirname(repoFile(shadowRoot,lib)),{recursive:true});
+      fs.copyFileSync(requiredFile(root,lib,'receipt library'),repoFile(shadowRoot,lib));
+      const childArgs=[...process.argv.slice(2)];
+      const index=childArgs.indexOf('--controller-root');
+      if(index<0||!childArgs[index+1])throw new Error('missing master transaction root');
+      childArgs[index+1]=shadowRoot;
+      childArgs.push('--master-transaction-child','true');
+      const output=execFileSync(process.execPath,[process.argv[1],...childArgs],{encoding:'utf8',stdio:['ignore','pipe','inherit'],maxBuffer:16*1024*1024});
+      response=JSON.parse(output.trim());
+      if(['PASS','MASTER_TESTS_REQUESTED'].includes(response.status)){
+        fs.cpSync(repoFile(shadowRoot,campaignPath),repoFile(root,campaignPath),{recursive:true,force:true});
+        fs.copyFileSync(repoFile(shadowRoot,directoryRel),directoryFile);
+      }
+    }
+  }catch(error){
+    response={status:'CONTROLLER_ERROR',campaignId:directory.campaignId,segmentId:a['segment-id']??null,
+      feedbackText:'Controller automation failed; reviewer inputs are unchanged. '+String(error?.message??error).slice(0,6000),freshSuccessorRequired:false};
+  }finally{
+    fs.rmSync(shadowRoot,{recursive:true,force:true});
+  }
+  const feedback=String(response.feedbackText??response.status);
+  process.stdout.write(JSON.stringify({...response,feedbackB64:Buffer.from(feedback).toString('base64')})+'\n');
+  process.exit(0);
+}
 if(masterAmendmentRefreshSha){
   if(directory.pendingMasterReview?.status!=='MASTER_AMENDMENT_REFRESH'||directory.pendingMasterReview?.amendmentSha256!==masterAmendmentRefreshSha)throw new Error('master amendment refresh is not bound to the pending master amendment');
   if(directory.currentAssignment?.masterAmendmentRefreshSha256!==masterAmendmentRefreshSha)throw new Error('master amendment refresh assignment binding mismatch');
@@ -738,9 +786,10 @@ if(reviewKind==='master'){
       postAmendmentArtifacts:refresh.postArtifacts
     });
     directory.lastSealedReceiptPath=refresh.lastSealedReceiptPath;
-    nextAssignment=refresh.campaignStatus==='COMPLETE'?null:refresh.nextAssignment;
+    const terminal=result.successorPlan?.nextPhaseSequence===null;
+    nextAssignment=terminal?null:refresh.nextAssignment;
     directory.currentAssignment=nextAssignment;
-    directory.campaignStatus=refresh.campaignStatus;
+    directory.campaignStatus=terminal?'COMPLETE':refresh.campaignStatus;
   }else{
     const plan=result.successorPlan??{};
     if(plan.nextPhaseSequence===null||plan.nextPhaseSequence===undefined){
@@ -1158,7 +1207,7 @@ const ledgerAfter=maybeJson(root,controls.ledgerRel)??{};
 const receipt=receiptLib.createLitePhaseReceiptV1({
   campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,
   workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence,revision:phaseRevision,executorType:'AI_REVIEWER',executorLineage:assignment.reviewer,
-  authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:sequence===10&&!gatedMasterReview?'COMPLETE':'SEALED',
+  authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:sequence===10&&!gatedMasterReview&&!masterAmendmentRefreshSha?'COMPLETE':'SEALED',
   inputs:[{role:'PREDECESSOR_RECEIPT',path:assignment.predecessorReceiptPath},{role:'CONTROLLER_GENERATED_PHASE_WORK_PACKET',path:assignment.packetPath}],
   evidence,outputs:evidence,
   globalControls:{securityTraceabilityGraph:path.posix.relative(campaignPath,controls.graphRel),carriedForwardObligationLedger:path.posix.relative(campaignPath,controls.ledgerRel),evidenceInvalidationMatrix:path.posix.relative(campaignPath,controls.invalidRel),sourceIntelligenceBundle:predecessor.globalControls?.sourceIntelligenceBundle??null},
@@ -1212,7 +1261,10 @@ if(gatedMasterReview&&masterBoundary!==null){
   process.stdout.write(JSON.stringify({status:'WAITING_FOR_MASTER_REVIEW',controllerPassToken:'CONTROLLER_PHASE_PASS',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,segmentId:staged.segment.segmentId,masterReviewRequired:true,masterChatUrl:directory.masterReview.chatUrl,masterReasoning:'MAXIMUM',recordPath:staged.pending.recordPath,receiptPath:receiptRel,lastSealedReceiptPath:directory.lastSealedReceiptPath,freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\n');
   process.exit(0);
 }
-if(sequence===10){directory.campaignStatus='COMPLETE';directory.currentAssignment=null;directory.updatedAt=now;}
+if(sequence===10){
+  directory.campaignStatus=masterAmendmentRefreshSha?'MASTER_AMENDMENT_REFRESH':'COMPLETE';
+  directory.currentAssignment=null;directory.updatedAt=now;
+}
 else{
   const nextReviewer=assignmentReviewer(nextSequence);
   const nextStatus=fresh||isFreshBoundary(nextSequence)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
