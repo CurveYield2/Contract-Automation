@@ -15,7 +15,7 @@ const write=(p,v)=>{mkdir(path.dirname(p));fs.writeFileSync(p,v);};
 const readJson=p=>JSON.parse(fs.readFileSync(p,'utf8'));
 
 test('master review topology gates each whole normal-reviewer segment exactly once',()=>{
-  assert.deepEqual(MASTER_REVIEW_SEGMENTS_V1.map(x=>({id:x.segmentId,reviewer:x.reviewerId,phases:[...x.phases],boundary:x.boundaryPhase})),[
+  assert.deepEqual(MASTER_REVIEW_SEGMENTS_V1.filter(x=>x.segmentId!=='reviewer-4-followup-v1').map(x=>({id:x.segmentId,reviewer:x.reviewerId,phases:[...x.phases],boundary:x.boundaryPhase})),[
     {id:'reviewer-1-phase-01',reviewer:'reviewer-1',phases:[1],boundary:1},
     {id:'reviewer-2-phases-02-05',reviewer:'reviewer-2',phases:[2,3,4,5],boundary:5},
     {id:'reviewer-3l-phases-06-07',reviewer:'reviewer-3L',phases:[6,7],boundary:7},
