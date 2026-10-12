@@ -50,7 +50,7 @@ export async function runCompileWatchdogV1(args=process.argv.slice(2)){
   const engine=mode==='no-telemetry'?
     'packages/github-native-sim/src/lite-phase0-intelligence-no-telemetry-v1.mjs':
     'packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs';
-  if(!['primary','no-telemetry'].includes(mode) || marker!==1 ||
+  if(mode!=='primary' || marker!==1 ||
     args[marker+1]!=='node' || args[marker+2]!==engine)throw new Error('invalid canonical Phase 0 intelligence supervisor invocation');
   const child=spawn(process.execPath,args.slice(marker+2),{
     cwd:process.cwd(),env:process.env,stdio:['ignore','pipe','pipe'],detached:true
@@ -68,7 +68,7 @@ export async function runCompileWatchdogV1(args=process.argv.slice(2)){
     const t=setTimeout(()=>{try{process.kill(-child.pid,'SIGKILL');}catch{}},5000);t.unref?.();
   }
   function onLine(line){
-    const m=line.match(/\[(?:phase0-intelligence-no-telemetry|phase0-intelligence-primary)\] START ([a-z0-9-]+)/);
+    const m=line.match(/\[(?:phase0-intelligence-primary)\] START ([a-z0-9-]+)/);
     if(m){phase=m[1];if(phase==='compile-exact-build'){lastCpuProgressAt=Date.now();}
       log('stage='+phase+' starting');}
     if(line.includes('[phase0-build-cache] COMPILATION_START')){
@@ -81,7 +81,7 @@ export async function runCompileWatchdogV1(args=process.argv.slice(2)){
     if(line.includes('[phase0-build-cache] verified private cache HIT')){
       compileActive=false;log('exact verified private compiler cache HIT');
     }
-    const e=line.match(/\[(?:phase0-intelligence-no-telemetry|phase0-intelligence-primary)\] (?:DONE|FAILED) ([a-z0-9-]+)/);
+    const e=line.match(/\[(?:phase0-intelligence-primary)\] (?:DONE|FAILED) ([a-z0-9-]+)/);
     if(e?.[1]==='compile-exact-build')compileActive=false;
   }
   for(const [src,dest] of [[child.stdout,process.stdout],[child.stderr,process.stderr]]){
