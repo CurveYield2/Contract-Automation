@@ -124,7 +124,6 @@ Mandatory rules:
 For Audit V7, this repository has exactly one active execution workflow, one active qualification workflow, one active runner manifest, and one operational CLI:
 
 - execution workflow: `.github/workflows/audit-controller-execution.yml`
-- qualification workflow: `.github/workflows/v7-execution-infrastructure-qualification.yml`
 - runner manifest: `process/RUNNER_MANIFEST.json`
 - CLI: `packages/github-native-sim/src/v7-cli.mjs`
 
@@ -229,15 +228,7 @@ Do not use Ganache as a full-simulation compatibility fallback and do not downgr
 
 ## V7 qualification
 
-Infrastructure qualification is repository-level and outside individual audit campaigns. The only active workflow is:
-
-`.github/workflows/v7-execution-infrastructure-qualification.yml`
-
-Static/schema/unit/build qualification runs on relevant PRs. Live mutable-Anvil qualification runs only on trusted `main`/manual execution, where the approved secret is available.
-
-Phase 7 uses `packages/github-native-sim/src/phase7-fork-preflight-v2.mjs` plus standardized lifecycle recipes. Unsupported required behavior is `RECIPE_GAP`, not permission for arbitrary commands.
-
-If infrastructure must change after campaign admission, preserve the failed attempt and return through `RUNNER_REPAIR_REBIND`; do not change target source to repair runner infrastructure.
+The repository-wide full V7 qualification workflow was retired on 2026-10-11 and preserved in CurveYield2/archive. Lite execution evidence records the exact runner commit of each run in EXECUTION_EVIDENCE_v1.json; Lite campaigns do not require a qualification rebind. Do not restore the archived suite.
 
 ## Dependency locking status
 

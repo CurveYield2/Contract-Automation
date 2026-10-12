@@ -65,15 +65,6 @@ fi
 if [[ -f .ac-target/audit-process/v7/frozen-authorities/FROZEN_AUTHORITY_REGISTRY_v1.json ]]; then
   node scripts/adr-check-frozen-authorities-v1.mjs --controller-root .ac-target
 fi
-authority_root_file="process/adr-verify/AUTHORITY_ROOT_v1.txt"
-authority_root=""
-if [[ -f "$authority_root_file" ]]; then
-  authority_root="$(head -n1 "$authority_root_file" | tr -d '\r')"
-fi
-if [[ -n "$authority_root" ]] && [[ "$authority_root" == /* || "$authority_root" == *".."* ]]; then
-  echo "::error::Authority root must be controller-relative" >&2
-  exit 1
-fi
 run_authority_sync() {
   local checkout="$1"
   shift
@@ -82,9 +73,7 @@ run_authority_sync() {
   printf '%s\n' "$rc"
 }
 main_authority_rc="$(run_authority_sync .ac-main)"
-target_args=()
-if [[ -n "$authority_root" ]]; then target_args+=(--authority-root "$authority_root"); fi
-target_authority_rc="$(run_authority_sync .ac-target "${target_args[@]}")"
+target_authority_rc="$(run_authority_sync .ac-target)"
 echo "Authority validator main code=$main_authority_rc; target code=$target_authority_rc"
 if [[ "$target_authority_rc" != 0 ]]; then echo "Target authority validator failure:"; tail -n 35 .ac-target/authority-sync.txt; fi
 if [[ "$target_authority_rc" != 0 && "$main_authority_rc" == 0 ]]; then
