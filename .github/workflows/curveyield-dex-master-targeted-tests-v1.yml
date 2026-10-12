@@ -1,4 +1,4 @@
-name: CurveYield DEX Master Targeted Tests v3
+name: CurveYield DEX Master Targeted Tests v4
 
 on:
   push:
@@ -69,14 +69,25 @@ jobs:
           ' "$request_file" >/dev/null
 
           gh auth setup-git
-          rm -rf .audit-source
-          timeout -k 10s 240s gh repo clone CurveYield2/Audit-Controller .audit-source -- --filter=blob:none --no-checkout
-          (
-            cd .audit-source
-            timeout -k 10s 180s git fetch --depth=1 origin "$SOURCE_COMMIT"
-            git checkout --detach FETCH_HEAD
-            test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
-          )
+          source_ready=false
+          for attempt in 1 2 3; do
+            rm -rf .audit-source
+            echo "::notice::Exact source Git clone/fetch attempt $attempt/3"
+            if timeout -k 10s 180s git clone --quiet --depth=1 --single-branch --filter=blob:none --no-checkout https://github.com/CurveYield2/Audit-Controller.git .audit-source; then
+              if (
+                cd .audit-source
+                timeout -k 10s 180s git fetch --depth=1 origin "$SOURCE_COMMIT" &&
+                git checkout --detach FETCH_HEAD &&
+                test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+              ); then
+                source_ready=true
+                break
+              fi
+            fi
+            echo "::warning::Exact source Git transport failed (attempt $attempt/3)"
+            sleep $((attempt * 3))
+          done
+          [ "$source_ready" = true ] || { echo "::error::Exact source unavailable after three bounded Git attempts"; exit 1; }
           archive=".audit-source/campaigns/CurveYield DEX v16 Source r4/source/CurveYield DEX v16 Source.zip"
           test -s "$archive"
           observed="$(sha256sum "$archive" | awk '{print $1}')"
@@ -224,8 +235,9 @@ jobs:
           fi
           cast rpc anvil_setBalance "$deployer_addr" 0x21e19e0c9bab2400000 --rpc-url "$BASE_RPC" >/dev/null
 
-          RPC_URL="$BASE_RPC"           DEPLOYER_PRIVATE_KEY="$deployer_key"           MAX_FEE_PER_GAS_WEI=1000000000000           MAX_PRIORITY_FEE_PER_GAS_WEI=1000000           timeout 28m node tooling/scripts/deployCurveYieldDexFresh.mjs --network base             2>&1 | tee "$GITHUB_WORKSPACE/targeted-output/BASE_DEPLOYMENT_v1.log"
-          code=${PIPESTATUS[0]}
+          RPC_URL="$BASE_RPC" DEPLOYER_PRIVATE_KEY="$deployer_key" MAX_FEE_PER_GAS_WEI=1000000000000 MAX_PRIORITY_FEE_PER_GAS_WEI=1000000 \
+          python3 "$GITHUB_WORKSPACE/scripts/audit-command-guard-v1.py" --label base-deployment --wall 1680 --idle 600 --log "$GITHUB_WORKSPACE/targeted-output/BASE_DEPLOYMENT_v1.log" -- node tooling/scripts/deployCurveYieldDexFresh.mjs --network base
+          code=$?
           report_path="$(grep -oE 'Report: .+\.json' "$GITHUB_WORKSPACE/targeted-output/BASE_DEPLOYMENT_v1.log" | tail -n1 | sed 's/^Report: //' || true)"
           if [ -n "$report_path" ] && [ -f "$report_path" ]; then
             cp "$report_path" "$GITHUB_WORKSPACE/targeted-output/BASE_DEPLOYMENT_REPORT_v1.json"
@@ -268,16 +280,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .audit-writeback
           gh auth setup-git
-          gh repo clone CurveYield2/Audit-Controller .audit-writeback -- --filter=blob:none --no-checkout
-          (
-            cd .audit-writeback
-            timeout -k 10s 180s git fetch origin main
-            git checkout -B main origin/main
-          )
+          writeback_ready=false
+          for attempt in 1 2 3; do
+            rm -rf .audit-writeback
+            echo "::notice::Evidence destination Git clone/fetch attempt $attempt/3"
+            if timeout -k 10s 180s git clone --quiet --depth=1 --single-branch --filter=blob:none --no-checkout https://github.com/CurveYield2/Audit-Controller.git .audit-writeback; then
+              if (
+                cd .audit-writeback
+                timeout -k 10s 180s git fetch origin main &&
+                git checkout -B main origin/main
+              ); then
+                writeback_ready=true
+                break
+              fi
+            fi
+            echo "::warning::Evidence destination transport failed (attempt $attempt/3)"
+            sleep $((attempt * 3))
+          done
+          [ "$writeback_ready" = true ] || { echo "::error::Evidence destination unavailable after three bounded attempts"; exit 1; }
 
-          dest=".audit-writeback/$EVIDENCE_REL"
+          # Preserve every separate run's raw failure evidence; never overwrite attempts.
+          dest=".audit-writeback/$EVIDENCE_REL/attempts/$GITHUB_RUN_ID"
           mkdir -p "$dest"
           cp -f targeted-output/* "$dest/" 2>/dev/null || true
 
@@ -304,7 +328,12 @@ jobs:
             git config user.email "master-targeted-tests@users.noreply.github.com"
             git commit -m "audit(evidence): persist CurveYield DEX targeted tests v1"
             for attempt in 1 2 3 4 5; do
-              timeout -k 10s 120s git pull --rebase origin main
+              if ! timeout -k 10s 120s git pull --rebase origin main; then
+                git rebase --abort 2>/dev/null || true
+                echo "::warning::Evidence publish synchronization failed on attempt $attempt/5"
+                sleep $((attempt * 2))
+                continue
+              fi
               if timeout -k 10s 120s git push origin HEAD:main; then exit 0; fi
               sleep $((attempt * 2))
             done
