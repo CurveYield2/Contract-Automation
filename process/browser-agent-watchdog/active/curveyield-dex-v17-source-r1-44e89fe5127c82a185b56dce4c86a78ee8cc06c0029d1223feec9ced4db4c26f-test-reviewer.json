@@ -45,7 +45,7 @@
     "enabled": true,
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2,
-    "consecutiveIdlePokes": 1,
+    "consecutiveIdlePokes": 2,
     "consecutiveUnviewable": 0
   },
   "watchdogRunId": "38274439776",
@@ -53,6 +53,6 @@
   "lastDecision": "TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ",
   "lastPokeFailureAt": "2026-10-12T12:45:47Z",
   "pokeFailureCount": 1,
-  "lastPokedAt": "2026-10-12T12:51:03Z",
-  "pokeCount": 1
+  "lastPokedAt": "2026-10-12T16:03:49Z",
+  "pokeCount": 2
 }
