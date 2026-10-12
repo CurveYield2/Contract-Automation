@@ -1,8 +1,13 @@
 name: Sync Lite Authority ZIP v2
 
 on:
-  # Broad V7 workflow_run completions generated hundreds of skipped sync runs.
-  # Check the external authority at most once daily; manual dispatch stays available.
+  # Do not subscribe to unrelated audit workflows or generated results.
+  # Revalidate when the sync implementation itself changes.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sync-lite-authority-zip-v2.yml'
+      - 'scripts/sync-lite-authority-zip-v1.py'
   workflow_dispatch:
   schedule:
     - cron: '23 6 * * *'
@@ -41,8 +46,21 @@ jobs:
         run: |
           set -euo pipefail
           gh auth setup-git
-          rm -rf .audit-controller-authority
-          gh repo clone CurveYield2/Audit-Controller .audit-controller-authority -- --branch main
+          # Large campaign blobs are irrelevant to ZIP generation; avoid cloning
+          # the full audit history and fail fast instead of spending 10m hung.
+          for attempt in 1 2; do
+            rm -rf .audit-controller-authority
+            if timeout -k 10s 150s gh repo clone CurveYield2/Audit-Controller .audit-controller-authority -- --branch main --filter=blob:none --sparse; then
+              if (cd .audit-controller-authority && timeout -k 10s 90s git sparse-checkout set 'Audit Skill - Current Authority'); then
+                break
+              fi
+            fi
+            if [ "$attempt" = 2 ]; then
+              echo "::error::Authority partial clone failed twice; refusing ZIP publication"
+              exit 1
+            fi
+            sleep 5
+          done
           cd .audit-controller-authority
           git config user.name 'CurveYield Authority ZIP Sync'
           git config user.email 'authority-zip-sync@users.noreply.github.com'
