@@ -653,6 +653,22 @@ if(reviewKind==='sealed-rework'){
 const assignment=directory.currentAssignment;
 if(!assignment||assignment.phaseSequence!==sequence) throw new Error('current assignment does not match submitted phase');
 const predecessor=readJson(requiredFile(root,assignment.predecessorReceiptPath,'predecessor sealed receipt'));
+const requiredPrevious=sequence===8?7:sequence-1;
+if(predecessor.phase?.sequence!==requiredPrevious||
+   predecessor.campaign?.campaignId!==directory.campaignId||
+   predecessor.campaign?.campaignGenerationId!==directory.campaignGenerationId||
+   predecessor.source?.sha256!==directory.sourceSha256){
+  throw new Error('Required predecessor receipt phase, campaign generation or source identity does not match the current assignment.');
+}
+const allowedPhase9Skip=sequence===10&&
+   predecessor.phase?.status==='SKIPPED'&&
+   predecessor.validation?.status==='NOT_APPLICABLE'&&
+   (predecessor.automation??[]).some(x=>x.action==='SKIPPED_NO_REMEDIATION')&&
+   !hasRemediation(campaignRoot);
+if(!allowedPhase9Skip&&
+   (predecessor.phase?.status!=='SEALED'||predecessor.validation?.status!=='PASS')){
+  throw new Error('Predecessor phase is not SEALED with machine controller validation PASS; successor progression is prohibited.');
+}
 const authorityRoot=authorityRootFromReceipt(predecessor);
 const loaded=loadPhaseSchema(root,authorityRoot,sequence); const schema=loaded.schema;
 const gatedMasterReview=masterReviewRequired(directory,authorityRoot)&&!masterAmendmentRefreshSha;
