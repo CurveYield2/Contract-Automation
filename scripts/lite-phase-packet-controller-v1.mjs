@@ -677,7 +677,9 @@ if(reviewKind==='master'&&a['master-transaction-child']!=='true'){
       childArgs.push('--master-transaction-child','true');
       const output=execFileSync(process.execPath,[process.argv[1],...childArgs],{encoding:'utf8',stdio:['ignore','pipe','inherit'],maxBuffer:16*1024*1024});
       response=JSON.parse(output.trim());
-      if(response.status==='PASS'){
+      // REQUEST_TARGETED_TESTS is a valid non-acceptance transaction that
+      // creates a held targeted-test assignment; preserve it atomically too.
+      if(['PASS','MASTER_TESTS_REQUESTED'].includes(response.status)){
         fs.cpSync(repoFile(shadowRoot,campaignPath),repoFile(root,campaignPath),{recursive:true,force:true});
         fs.copyFileSync(repoFile(shadowRoot,directoryRel),directoryFile);
       }
