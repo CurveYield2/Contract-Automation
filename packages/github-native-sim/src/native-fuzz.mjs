@@ -40,6 +40,25 @@ export function inspectForgeTestEvidenceV1(command, rawOutput) {
       !forgeReportsFailedTests(command,rawOutput)};
 }
 
+export function parseForgeTestResultsV1(text){
+  try{
+    const tests=[],lines=String(text??'').replace(/\u001b\[[0-9;]*m/g,'').split(/\r?\n/);
+    let suite=null;
+    for(const original of lines){
+      const line=original.trim();
+      const header=/^Ran \d+ tests? for (.+)$/.exec(line);
+      if(header){suite=header[1];continue;}
+      let hit=/^\[PASS\]\s+([A-Za-z0-9_]+\([^)]*\))/.exec(line);
+      if(hit){tests.push({suite,name:hit[1],status:'PASS'});continue;}
+      hit=/^\[FAIL(?::\s*(.*?))?\]\s+([A-Za-z0-9_]+\([^)]*\))/.exec(line);
+      if(hit){tests.push({suite,name:hit[2],status:'FAIL',reason:hit[1]??''});continue;}
+      hit=/^\[SKIP[^\]]*\]\s+([A-Za-z0-9_]+\([^)]*\))/.exec(line);
+      if(hit)tests.push({suite,name:hit[1],status:'SKIPPED'});
+    }
+    return {parseStatus:tests.length?'PARSED':'NONE_FOUND',tests};
+  }catch{return {parseStatus:'NONE_FOUND',tests:[]};}
+}
+
 function validateInput(input) {
   if (!input || typeof input !== 'object') throw new V7ExecutionError('NATIVE_FUZZ_CONFIGURATION_FAILURE', 'native fuzz input is required');
   if (!COMMIT.test(input.sourceCommit ?? '')) throw new V7ExecutionError('SOURCE_INTEGRITY_FAILURE', 'sourceCommit must be a 40-hex commit');
@@ -72,12 +91,13 @@ export async function runNativeFuzzAnalysis(input, { runCommand = runProcess } =
   const rawOutput = normalizedRaw(result, secrets);
 
   const testExecution=inspectForgeTestEvidenceV1(input.command,rawOutput);
+  const testResults=input.command==='forge'?parseForgeTestResultsV1((rawOutput.stdout??'')+'\n'+(rawOutput.stderr??'')):null;
   if (forgeReportsFailedTests(input.command, rawOutput)||testExecution.applicable&&!testExecution.successful)
-    return baseResult(input, { status:'failed', terminal:true, failureKind:testExecution.compilerFailure?'COMPILER_OUTPUT_FAILURE':'NO_SUCCESSFUL_TEST_EXECUTION', componentStatus:'FAILED', continuationDisposition:'STOP_EXECUTION', testExecution, rawOutput });
-  if (rawOutput.exitCode === 0) return baseResult(input, { status:'completed', terminal:true, componentStatus:'COMPLETED', continuationDisposition:'COMPLETE_EVIDENCE', toolInvoked:true, ...(testExecution.applicable?{testExecution}:{}), rawOutput });
+    return baseResult(input, { status:'failed', terminal:true, failureKind:testExecution.compilerFailure?'COMPILER_OUTPUT_FAILURE':'NO_SUCCESSFUL_TEST_EXECUTION', componentStatus:'FAILED', continuationDisposition:'STOP_EXECUTION', testExecution, ...(testResults?{testResults}:{}), rawOutput });
+  if (rawOutput.exitCode === 0) return baseResult(input, { status:'completed', terminal:true, componentStatus:'COMPLETED', continuationDisposition:'COMPLETE_EVIDENCE', toolInvoked:true, ...(testExecution.applicable?{testExecution}:{}), ...(testResults?{testResults}:{}), rawOutput });
 
   const recoverable = new Set(input.recoverableExitCodes ?? []);
-  if (recoverable.has(rawOutput.exitCode)) return baseResult(input, { status:'completed_with_limitations', terminal:true, failureKind:'RECOVERABLE_LIMITATION', componentStatus:'COMPLETED_WITH_FAILURES', continuationDisposition:'CONTINUE_WITH_LIMITATION', rawOutput });
+  if (recoverable.has(rawOutput.exitCode)) return baseResult(input, { status:'completed_with_limitations', terminal:true, failureKind:'RECOVERABLE_LIMITATION', componentStatus:'COMPLETED_WITH_FAILURES', continuationDisposition:'CONTINUE_WITH_LIMITATION', ...(testResults?{testResults}:{}), rawOutput });
 
-  return baseResult(input, { status:'failed', terminal:true, failureKind:'HARD_FAILURE', componentStatus:'FAILED', continuationDisposition:'STOP_EXECUTION', rawOutput });
+  return baseResult(input, { status:'failed', terminal:true, failureKind:'HARD_FAILURE', componentStatus:'FAILED', continuationDisposition:'STOP_EXECUTION', ...(testResults?{testResults}:{}), rawOutput });
 }
