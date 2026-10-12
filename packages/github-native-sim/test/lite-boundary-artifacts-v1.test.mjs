@@ -181,7 +181,7 @@ test('Phase 5 machine gate needs real fuzz runs but accepts a conclusive negativ
   const evidenceFile=path.join(root,evidenceRef);
   fs.mkdirSync(path.dirname(evidenceFile),{recursive:true});
   const raw={requestId,requestDigest:digest,status:'completed',blocking:false,
-    source:{archiveSha256:digest},preflight:{status:'PASS'},
+    source:{archiveSha256:digest},preflight:{status:'PASS'},build:{status:'completed'},
     reproduction:{candidateId:key,status:'NOT_REPRODUCED',
       observedPredicate:{matched:false,observed:{componentStatus:'COMPLETED'}}},
     analysis:{nativeFuzz:{componentStatus:'COMPLETED',
