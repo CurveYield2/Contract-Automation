@@ -21,5 +21,7 @@ jobs:
           node --check packages/github-native-sim/src/native-fuzz.mjs
           node --check packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs
           node --check scripts/tests/phase5-native-fuzz-fail-closed-v1.test.mjs
+      - name: Install runtime imports in GitHub Actions
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Verify fail-closed forge results
         run: node --test scripts/tests/phase5-native-fuzz-fail-closed-v1.test.mjs
