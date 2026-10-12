@@ -852,6 +852,28 @@ if(sequence===5){
       materialCandidateKeys,candidateSourceAnchors,executionResults:phase5MachineResults,
       expectedSourceSha256:directory.sourceSha256
     }));
+    // Report the actual runner cause, not merely BLOCKED. The shadow
+    // campaign is discarded on failed master refresh, so these diagnostics
+    // are essential to distinguish harness defects from RPC or build faults.
+    for(const [key,machine] of Object.entries(phase5MachineResults??{})){
+      if(machine?.status==='PASS'||machine?.status==='NOT_APPLICABLE')continue;
+      let cli=null;
+      try{cli=JSON.parse(String(machine?.stdout??''));}catch{}
+      const failed=(machine?.rawResult?.failedSteps??[]).slice(0,3).map(x=>({
+        component:x?.component??x?.name??x?.step??null,
+        kind:x?.kind??x?.failureKind??null,
+        error:String(x?.error??x?.message??'').slice(0,450)
+      }));
+      const cause={
+        candidate:key,status:machine?.status,exitCode:machine?.exitCode,
+        disposition:machine?.rawResult?.disposition??cli?.disposition??null,
+        runnerError:machine?.rawResult?.error??cli?.error??null,
+        preflight:machine?.rawResult?.preflight?.failureKind??null,
+        failedSteps:failed,
+        stderrTail:String(machine?.stderr??'').slice(-1500)
+      };
+      deficiencies.push('Phase 5 machine diagnostic: '+JSON.stringify(cause));
+    }
   }catch(e){
     deficiencies.push('Phase 5 mandatory machine execution failed: '+String(e.message||e));
   }
