@@ -85,6 +85,17 @@ jobs:
               source:{repository:"CurveYield2/Audit-Controller",commit:$sourceCommit,archivePath:$archivePath,archiveSha256:$archiveSha},
               destination:{repository:"CurveYield2/Audit-Controller",ref:$destRef,campaignPath:$campaignPath}
             }' > .phase0-request.json
+          homepage="$(jq -r '.authority.homepagePath // empty' /tmp/phase0-receipt.json)"
+          adr_policy=""
+          if [ -n "$homepage" ]; then
+            manifest_path="$(dirname "$homepage")/MANIFEST.json"
+            encoded="$(jq -rn --arg p "$manifest_path" '$p|split("/")|map(@uri)|join("/")')"
+            if gh api "repos/CurveYield2/Audit-Controller/contents/$encoded?ref=$AUDIT_CONTROLLER_REF" --jq '.content' > /tmp/adr-manifest.b64 2>/dev/null; then
+              adr_policy="$(base64 -d /tmp/adr-manifest.b64 2>/dev/null | jq -r '.detectionPolicy // empty' 2>/dev/null || true)"
+            fi
+          fi
+          [ "$adr_policy" = "audit-detection-rebuild-v1" ] || adr_policy=""
+          echo "ADR_DETECTION_POLICY=$adr_policy" >> "$GITHUB_ENV"
 
       - name: Resolve exactly one lean Phase-0 request
         id: request
@@ -168,6 +179,14 @@ jobs:
           cp ../.phase0-intelligence-output/SOURCE_INTELLIGENCE_AUTOMATED_v1.json "$campaign_path/evidence/source-intelligence/SOURCE_INTELLIGENCE_AUTOMATED_v1.json"
           cp ../.phase0-intelligence-output/PROJECT_READINESS_AUTOMATED_v1.json "$campaign_path/evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json"
           cp ../.phase0-intelligence-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json "$campaign_path/evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json"
+
+          if [ -f ../.phase0-intelligence-output/REVIEW_INVENTORY_v1.json ]; then
+            mkdir -p "$campaign_path/evidence/review-inventory"
+            cp ../.phase0-intelligence-output/REVIEW_INVENTORY_v1.json "$campaign_path/evidence/review-inventory/REVIEW_INVENTORY_v1.json"
+            if [ -f ../.phase0-intelligence-output/SYSTEM_FACTS_v1.json ]; then
+              cp ../.phase0-intelligence-output/SYSTEM_FACTS_v1.json "$campaign_path/evidence/review-inventory/SYSTEM_FACTS_v1.json"
+            fi
+          fi
 
           # Project machine evidence into the exact canonical output paths already
           # required by the Lite Phase-0 skill. The automation adapts to the skill;
