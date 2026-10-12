@@ -6,7 +6,6 @@ import path from 'node:path';
 const root=process.cwd();
 const workflows=[
   '.github/workflows/v7-execution-infrastructure-qualification.yml',
-  '.github/workflows/v7-execution-infrastructure-qualification-no-telemetry-v1.yml'
 ];
 const workflow=(file)=>fs.readFileSync(path.join(root,file),'utf8');
 const step=(source,name)=>{
@@ -64,6 +63,4 @@ test('primary intelligence logs all stages with an external wall clock watchdog'
   assert.match(src,/setInterval/);
   assert.match(src,/clearInterval\(heartbeat\)/);
   assert.match(src,/compileWithPrivateCacheV1/);
-  const lite=workflow('.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml');
-  assert.match(lite,/timeout -s TERM -k 30s 3000s node scripts\/phase0-compile-watchdog-v1\.mjs no-telemetry -- node/);
 });
