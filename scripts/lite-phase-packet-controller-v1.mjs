@@ -510,9 +510,47 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
         });
         childArgs.push('--phase5-reuse-keys-b64',Buffer.from(JSON.stringify(reuseKeys)).toString('base64'));
       }
-      const output=execFileSync(process.execPath,childArgs,{encoding:'utf8',stdio:['ignore','pipe','pipe']});
-      const parsed=JSON.parse(output.trim());
-      if(parsed.status!=='PASS'||parsed.masterAmendmentRefresh!==true)throw new Error('controller dependent refresh failed for Phase '+phase+': '+String(parsed.feedbackText??parsed.status));
+      // Preserve only genuine Phase-5 runner evidence on a failed shadow replay.
+      // No work form, receipt, packet, control, or campaign assignment is copied
+      // into the live campaign unless the entire master refresh subsequently PASSes.
+      const preservePhase5AttemptEvidence=()=>{
+        if(phase!==5)return;
+        const rel=path.posix.join(campaignPath,'evidence/phase5-boundary');
+        const from=repoFile(shadowRoot,rel);
+        if(!fs.existsSync(from))return;
+        const into=repoFile(root,rel);
+        for(const candidate of fs.readdirSync(from,{withFileTypes:true})){
+          if(!candidate.isDirectory()||!/^[A-Za-z0-9._-]+$/.test(candidate.name))continue;
+          for(const requestDir of fs.readdirSync(path.join(from,candidate.name),{withFileTypes:true})){
+            if(!requestDir.isDirectory()||!/^dar-[0-9a-f]{32}$/.test(requestDir.name))continue;
+            const sourceDir=path.join(from,candidate.name,requestDir.name);
+            const rawPath=path.join(sourceDir,'raw-result.json');
+            if(!fs.existsSync(rawPath))continue;
+            let raw;
+            try{raw=readJson(rawPath);}catch{continue;}
+            if(raw?.requestId!==requestDir.name||raw?.source?.archiveSha256!==shadowDirectory.sourceSha256)continue;
+            const destDir=path.join(into,candidate.name,requestDir.name);
+            fs.mkdirSync(destDir,{recursive:true});
+            for(const file of ['raw-result.json','controller-evidence.json','execution-summary.json']){
+              const sourceFile=path.join(sourceDir,file);
+              if(fs.existsSync(sourceFile)&&fs.statSync(sourceFile).isFile())
+                fs.copyFileSync(sourceFile,path.join(destDir,file));
+            }
+          }
+        }
+      };
+      let parsed;
+      try{
+        const output=execFileSync(process.execPath,childArgs,{encoding:'utf8',stdio:['ignore','pipe','pipe']});
+        parsed=JSON.parse(output.trim());
+      }catch(error){
+        preservePhase5AttemptEvidence();
+        throw error;
+      }
+      if(parsed.status!=='PASS'||parsed.masterAmendmentRefresh!==true){
+        preservePhase5AttemptEvidence();
+        throw new Error('controller dependent refresh failed for Phase '+phase+': '+String(parsed.feedbackText??parsed.status));
+      }
       shadowDirectory=readJson(repoFile(shadowRoot,directoryRel));
     }
     const refreshedDirectory=readJson(repoFile(shadowRoot,directoryRel));
