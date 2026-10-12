@@ -1,0 +1,79 @@
+name: Audit Detection Rebuild Verify v1
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'packages/github-native-sim/**'
+      - 'protocol/**'
+      - 'process/adr-verify/**'
+      - '.github/workflows/audit-detection-rebuild-verify-v1.yml'
+      - '.github/workflows/lite-phase-work-packet-controller-v1.yml'
+      - '.github/workflows/lite-v7-execution-dispatch-v1.yml'
+      - '.github/workflows/audit-source-initialization-v1.yml'
+      - '.github/workflows/audit-controller-execution.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: adr-verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-and-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked dependencies without scripts
+        run: timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
+      - name: Program tests (adr-*)
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(scripts/tests/adr-*.test.mjs packages/github-native-sim/test/adr-*.test.mjs)
+          if [ "${#files[@]}" -eq 0 ]; then echo "No adr tests yet"; exit 0; fi
+          timeout -k 10s 900s node --test "${files[@]}"
+      - name: Existing controller regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 10s 900s node --test \
+            packages/github-native-sim/test/lite-phase-packet-controller-integration-v1.test.mjs \
+            packages/github-native-sim/test/lite-assignment-successor-v1.test.mjs \
+            packages/github-native-sim/test/lite-phase5-execution-gate-v1.test.mjs \
+            packages/github-native-sim/test/lite-phase-schema-policy-v1.test.mjs \
+            packages/github-native-sim/test/source-intelligence-technical-v1.test.mjs \
+            scripts/tests/lite-master-targeted-tests-v1.test.mjs
+
+  audit-controller-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Select Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+      - name: Audit-Controller checks (no new failures versus main)
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        run: bash scripts/adr-audit-controller-checks-v1.sh
