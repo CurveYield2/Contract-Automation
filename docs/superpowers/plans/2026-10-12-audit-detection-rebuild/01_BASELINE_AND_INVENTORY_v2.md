@@ -270,6 +270,7 @@ It exports:
 - `packages/github-native-sim/src/source-intelligence-technical-v1.mjs`, especially `function sources(`, `function astIndex(`, `function loc(` and the loop starting `for (const abi of a.abi??[])`;
 - `packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs`, search `generateSourceIntelligenceTechnicalBundleV1(` and `SOURCE_INTELLIGENCE_AUTOMATED_v1.json`;
 - `packages/github-native-sim/src/lite-phase0-intelligence-no-telemetry-v1.mjs`, same searches;
+- `.github/workflows/lite-phase0-intelligence-v1.yml` and `.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml`, search `receipt_path="$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"` and `Write only useful outputs to Audit-Controller campaign`;
 - `packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs`, search `if(deploymentOnly){` (first occurrence) and `return{deployEvidence:witness};`;
 - `scripts/write-phase0-fork-deploy-outputs-v1.mjs`.
 
@@ -411,17 +412,65 @@ Export `buildSystemFactsV1({inventory})`. It returns an artifact with `schemaVer
 
 Sort all arrays deterministically.
 
-### T2.5 Wire inventory and facts into Phase 0 (both intelligence entry modules)
+### T2.5 Wire inventory and facts into Phase 0 (two intelligence modules + two intelligence workflows)
 
-In **both** `lite-phase0-intelligence-v1.mjs` and `lite-phase0-intelligence-no-telemetry-v1.mjs`:
+**How Phase 0 intelligence actually publishes (verified 2026-10-12):**
+- The modules `lite-phase0-intelligence-v1.mjs` and `lite-phase0-intelligence-no-telemetry-v1.mjs` only write files into their temporary `--output` directory (`.phase0-intelligence-output`). They never read the Phase 0 receipt and never touch Audit-Controller.
+- The workflows `.github/workflows/lite-phase0-intelligence-v1.yml` and `.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml` handle the rest:
+  - fetch the receipt into `/tmp/phase0-receipt.json` in the step guarded by `if: inputs.campaign_id != ''`;
+  - run the module;
+  - in the step "Write only useful outputs to Audit-Controller campaign", copy a fixed list of output files into the campaign;
+  - commit with `git add "$campaign_path/evidence" …`.
 
-1. Find the line containing `generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute`.
-2. Directly after the statement that assigns `sourceIntelligence`, insert a block that does the following:
-   1. Reads the campaign's `receipts/PHASE_00_RECEIPT_v1.json` from the Audit-Controller checkout the module already uses. Search the module for `PHASE_00_RECEIPT_v1.json` to find its variable; if the module does not read it, read it with the same root and campaign-path variables used for writing `SOURCE_INTELLIGENCE_AUTOMATED_v1.json`.
-   2. Computes `authorityRoot = authorityRootFromHomepageV1(receipt.authority.homepagePath)`.
-   3. Computes `policy = detectionPolicyForAuthorityV1(...)`.
-   4. **Only if `policy` is non-null:** builds the inventory and facts and writes `evidence/review-inventory/REVIEW_INVENTORY_v1.json` and `evidence/review-inventory/SYSTEM_FACTS_v1.json` into the campaign, using the same write helper and commit path the module uses for `SOURCE_INTELLIGENCE_AUTOMATED_v1.json`.
-   5. Wraps steps 3–4 in `try/catch`. On error it writes `REVIEW_INVENTORY_v1.json` with `payload.complete:false`, empty arrays and `limitations:[{code:'INVENTORY_BUILD_ERROR', path:'*', detail:<error message, max 2000 chars>}]`, and continues. Never fail Phase 0 because of this block.
+**This task is authorized to edit both of those workflows,** exactly as described below (exception to N7). Make no other change to them.
+
+1. **Policy for the run (both workflows).** In the step that writes `/tmp/phase0-receipt.json` (search `receipt_path="$CAMPAIGN_PATH/receipts/PHASE_00_RECEIPT_v1.json"`), append these lines at the end of its `run:` block:
+
+```bash
+homepage="$(jq -r '.authority.homepagePath // empty' /tmp/phase0-receipt.json)"
+adr_policy=""
+if [ -n "$homepage" ]; then
+  manifest_path="$(dirname "$homepage")/MANIFEST.json"
+  encoded="$(jq -rn --arg p "$manifest_path" '$p|split("/")|map(@uri)|join("/")')"
+  if gh api "repos/CurveYield2/Audit-Controller/contents/$encoded?ref=$AUDIT_CONTROLLER_REF" --jq '.content' > /tmp/adr-manifest.b64 2>/dev/null; then
+    adr_policy="$(base64 -d /tmp/adr-manifest.b64 2>/dev/null | jq -r '.detectionPolicy // empty' 2>/dev/null || true)"
+  fi
+fi
+[ "$adr_policy" = "audit-detection-rebuild-v1" ] || adr_policy=""
+echo "ADR_DETECTION_POLICY=$adr_policy" >> "$GITHUB_ENV"
+```
+
+   - When that step is skipped (no `campaign_id`) or the manifest is not found, the variable is empty and nothing new happens.
+   - The receipt is the campaign's `receipts/PHASE_00_RECEIPT_v1.json` at `inputs.audit_controller_ref`. It is already fetched by this step; do not fetch it anywhere else.
+
+2. **Module change (both modules).** Find the statement containing `generateSourceIntelligenceTechnicalBundleV1({projectRoot:detected.absolute`. Directly after it, add:
+
+```js
+await writeReviewInventoryOutputsV1({outputDir: <the module's --output directory variable>, projectRoot: detected.absolute, build, request, policy: process.env.ADR_DETECTION_POLICY || null});
+```
+
+   Use the same variable the module passes to `fs.writeFile` for `SOURCE_INTELLIGENCE_AUTOMATED_v1.json`.
+
+3. **The function `writeReviewInventoryOutputsV1`.** Add and export it in `packages/github-native-sim/src/adr-review-inventory-v1.mjs`:
+   - If `policy !== 'audit-detection-rebuild-v1'`, return without writing anything. The outputs of old campaigns stay byte-identical.
+   - Otherwise build the inventory (T2.3) and the facts (T2.4), with header values `campaignId = request.campaignId`, `campaignGenerationId = request.campaignGenerationId` and `sourceSha256 = request.source.archiveSha256`.
+   - Write `REVIEW_INVENTORY_v1.json` and `SYSTEM_FACTS_v1.json` into `outputDir` with `fs.writeFile(…, JSON.stringify(x,null,2)+'\n')`.
+   - Wrap everything in `try/catch`. On error, write `REVIEW_INVENTORY_v1.json` with `payload.complete:false`, empty arrays and `limitations:[{code:'INVENTORY_BUILD_ERROR', path:'*', detail:<message, max 2000 chars>}]`, do not write `SYSTEM_FACTS_v1.json`, and return normally.
+   - Never throw.
+
+4. **Copy into the campaign (both workflows).** In the step "Write only useful outputs to Audit-Controller campaign", directly after the line that copies `PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json`, add:
+
+```bash
+if [ -f ../.phase0-intelligence-output/REVIEW_INVENTORY_v1.json ]; then
+  mkdir -p "$campaign_path/evidence/review-inventory"
+  cp ../.phase0-intelligence-output/REVIEW_INVENTORY_v1.json "$campaign_path/evidence/review-inventory/REVIEW_INVENTORY_v1.json"
+  if [ -f ../.phase0-intelligence-output/SYSTEM_FACTS_v1.json ]; then
+    cp ../.phase0-intelligence-output/SYSTEM_FACTS_v1.json "$campaign_path/evidence/review-inventory/SYSTEM_FACTS_v1.json"
+  fi
+fi
+```
+
+   The existing `git add "$campaign_path/evidence" …` line already commits these files. Do not change it.
 
 ### T2.6 Deployed-state snapshot (read-only, in the existing deploy-only branch)
 
@@ -440,7 +489,11 @@ await fs.writeFile(path.join(outputRoot,'DEPLOYED_STATE_SNAPSHOT_v1.json'), JSON
 ```
 
    Add the import at the top of the file. Make no other change to this file.
-3. In `scripts/write-phase0-fork-deploy-outputs-v1.mjs`, after the line that writes `PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json` into `destination`, add: if `path.join(src,'DEPLOYED_STATE_SNAPSHOT_v1.json')` exists, copy it to `<campaignRoot>/evidence/review-inventory/DEPLOYED_STATE_SNAPSHOT_v1.json` (create the directory). The copy is unconditional because the file is harmless for old campaigns; later consumers check the policy.
+3. In `scripts/write-phase0-fork-deploy-outputs-v1.mjs`, after the line that writes `PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json` into `destination`, add a block that runs only when the campaign opts in:
+   1. Read the receipt `<campaignRoot>/receipts/PHASE_00_RECEIPT_v1.json`. This script writes directly into the Audit-Controller checkout given by `--controller-root`, and the calling workflows already commit with `git add -A -- "$CAMPAIGN_PATH"`, so no workflow change is needed for this step.
+   2. Compute `policy = detectionPolicyForAuthorityV1({repoRoot: controllerRoot, authorityRoot: authorityRootFromHomepageV1(receipt.authority.homepagePath), readJsonIfExists})`, where `readJsonIfExists(rel)` reads `path.join(controllerRoot, rel)` and returns `null` if it is missing.
+   3. If `policy` is non-null and `path.join(src,'DEPLOYED_STATE_SNAPSHOT_v1.json')` exists, copy it to `<campaignRoot>/evidence/review-inventory/DEPLOYED_STATE_SNAPSHOT_v1.json` (create the directory).
+   4. Wrap the whole block in `try/catch` and ignore errors. Never fail the writer because of it.
 
 ### T2.7 Tests
 
@@ -466,6 +519,15 @@ await fs.writeFile(path.join(outputRoot,'DEPLOYED_STATE_SNAPSHOT_v1.json'), JSON
   9. Reversing every input array gives identical `canonicalJsonV1`.
   10. A state write after an external call yields `EXTERNAL_CALL_BEFORE_STATE_WRITE`.
   11. `tx.origin` yields `TX_ORIGIN`.
+  12. `writeReviewInventoryOutputsV1` into a temporary directory:
+      - with `policy: null` it writes no files;
+      - with the policy set it writes both files;
+      - with a `build` that makes the builder throw, it writes only `REVIEW_INVENTORY_v1.json` with `INVENTORY_BUILD_ERROR` and does not throw.
+
+`packages/github-native-sim/test/adr-phase0-wiring-v1.test.mjs` (text test):
+- Both intelligence workflows contain `ADR_DETECTION_POLICY=` and the guarded `evidence/review-inventory` copy block.
+- Both intelligence modules contain `writeReviewInventoryOutputsV1(`.
+- `scripts/write-phase0-fork-deploy-outputs-v1.mjs` contains `DEPLOYED_STATE_SNAPSHOT_v1.json` inside a `detectionPolicyForAuthorityV1` guard.
 
 `packages/github-native-sim/test/adr-system-facts-v1.test.mjs`:
 - Two sibling contracts where one public function lacks the modifier the other has gives `asymmetric:true`.
@@ -478,7 +540,7 @@ await fs.writeFile(path.join(outputRoot,'DEPLOYED_STATE_SNAPSHOT_v1.json'), JSON
 
 **Old-path regression:** the existing regression step must stay green. Do not change `generateSourceIntelligenceTechnicalBundleV1` output.
 
-**Done when:** all three test files are green in the T0 workflow and the regression step is green.
+**Done when:** all four test files are green in the T0 workflow and the regression step is green.
 
 ---
 
@@ -585,7 +647,9 @@ Every `FILE_FALLBACK` context and every `INVENTORY_INCOMPLETE` limitation goes i
 
 In `scripts/lite-phase0-finalize-v1.mjs` and `scripts/lite-phase0-finalize-no-telemetry-v1.mjs`, just before the receipt is sealed (search for where `validation.status` is set to `PASS`):
 
-1. Compute the policy as in T2.5.
+1. Compute the policy exactly as in T2.6 step 2. The finalizer writes directly into the `--controller-root` checkout, and the bootstrap workflows commit with `git add -- "$CAMPAIGN_PATH" …`, so no workflow change is needed.
+   - Read the receipt from `<controller-root>/<campaign-path>/receipts/PHASE_00_RECEIPT_v1.json`.
+   - Read the authority manifest from the same checkout.
 2. If the policy is non-null:
    - read `evidence/review-inventory/REVIEW_INVENTORY_v1.json`, `SYSTEM_FACTS_v1.json` and, optionally, `DEPLOYED_STATE_SNAPSHOT_v1.json`;
    - build the plan;
