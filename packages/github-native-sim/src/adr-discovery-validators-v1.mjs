@@ -97,6 +97,7 @@ export function validateFlowReviewSubmissionV1({packet,submission,inventory}={})
    const candidates=candidateRecords(submission,row,check);
    if(check?.assessment==='CONCERN'&&!hasCandidate(check,candidates))
      err(errors,'CONCERN_WITHOUT_CANDIDATE',cp,'Concern requires a candidate');
+   if(obj(check?.candidate))validateCandidate(check.candidate,inventory,errors,cp+'.candidate');
    const normalized=comparable(check?.evidence);
    if(normalized){
      const covered=repeats.get(normalized)??new Set();covered.add(id);repeats.set(normalized,covered);
