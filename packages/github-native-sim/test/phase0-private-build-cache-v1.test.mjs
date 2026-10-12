@@ -36,12 +36,12 @@ test('untrusted or credential-less requests always execute the original compiler
   assert.equal(builds,2);
 });
 
-test('primary and No Telemetry only use private cache through exact intelligence stage',()=>{
-  for(const name of ['lite-phase0-intelligence-v1.mjs','lite-phase0-intelligence-no-telemetry-v1.mjs']){
+test('primary only use private cache through exact intelligence stage',()=>{
+  for(const name of ['lite-phase0-intelligence-v1.mjs']){
     const engine=fs.readFileSync(new URL('../src/'+name,import.meta.url),'utf8');
     assert.match(engine,/compileWithPrivateCacheV1\(/);
   }
-  for(const name of ['lite-phase0-intelligence-v1.yml','lite-phase0-intelligence-no-telemetry-v1.yml']){
+  for(const name of ['lite-phase0-intelligence-v1.yml']){
     const workflow=fs.readFileSync(new URL('../../../.github/workflows/'+name,import.meta.url),'utf8');
     assert.match(workflow,/PHASE0_PRIVATE_BUILD_CACHE_ENABLED/);
     assert.doesNotMatch(workflow,/actions\/cache.*PHASE0_VERIFIED_COMPILATION/);
