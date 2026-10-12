@@ -654,13 +654,14 @@ if(reviewKind==='master'){
   // reexecuted through the new mandatory pre-seal gate.
   if(pending.segmentId==='reviewer-2-phases-02-05'&&result.status==='MASTER_REVIEW_ACCEPTED'){
     const phase5=canonicalFor(root,campaignPath,5);
-    const failures=validatePhase5TargetExecutionGateV1({
+    // The successor prefill is deliberately metadata-only; verify the actual
+    // campaign-local machine artifacts instead of trusting inherited PASS text.
+    const failures=validateRecordedPhase5MachineEvidenceV1({
       controllerRoot:root,campaignPath,
       targetDesigns:phaseOutput(phase5,'step-3','targetDesigns')??[],
-      materialCandidateKeys:materialPhase5Candidates({root,campaignPath,form:phase5}).keys,
-      candidateSourceAnchors:materialPhase5Candidates({root,campaignPath,form:phase5}).sourceAnchors,
-      executionResults:pending.successorPlan?.prefillContext?.phase5ExecutionResults??{},
-      expectedSourceSha256:directory.sourceSha256
+      expectedCampaignId:directory.campaignId,
+      expectedSourceSha256:directory.sourceSha256,
+      requireCompletedMatrix:true
     });
     if(failures.length)emit('MASTER_REVIEW_INVALID',[
       'A sealed Phase 5 with missing or inconclusive mandatory simulations cannot be accepted unchanged.',
@@ -1016,7 +1017,23 @@ const boundaryArtifactRels=[];
 let successorPrefillContext={};
 if(sequence===5){
   const targetDesigns=phaseOutput(canonical,'step-3','targetDesigns')??[];
-  successorPrefillContext={targetDesigns,phase5ExecutionResults:phase5MachineResults};
+  // Never embed the full V7 machine result (often >100 MB) inside the
+  // directory entry or successor prefill. Phase 6 and master-review gates
+  // independently reload and SHA-256 verify the complete persisted evidence.
+  const compactMachineResults=Object.fromEntries(
+    Object.entries(phase5MachineResults??{}).map(([key,result])=>[key,{
+      status:result?.status??'MISSING',
+      exitCode:result?.exitCode??null,
+      evidenceRef:result?.evidenceRef??null,
+      requestBindingStatus:result?.requestBindingStatus??null,
+      requestBindingEvidenceRef:result?.requestBindingEvidenceRef??null,
+      requestBindingReasons:result?.requestBindingReasons??[],
+      rawResult:null,
+      stdout:String(result?.stdout??'').slice(-900),
+      stderr:String(result?.stderr??'').slice(-900)
+    }])
+  );
+  successorPrefillContext={targetDesigns,phase5ExecutionResults:compactMachineResults};
   boundaryArtifactRels.push(path.posix.join(campaignPath,'work/phase-06/LITE_TARGETED_TEST_MATRIX.md'));
 }
 if(sequence===8&&hasRemediation(campaignRoot)){
