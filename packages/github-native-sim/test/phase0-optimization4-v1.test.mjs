@@ -3,12 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { needsPackageRuntimeDependenciesV1 as primaryRequiresNode } from '../src/phase0-randomized-simulation-v1.mjs';
-import { needsPackageRuntimeDependenciesV1 as noTelemetryRequiresNode } from '../src/phase0-randomized-simulation-no-telemetry-v1.mjs';
 
 const root=process.cwd();
 const read=rel=>fs.readFileSync(path.join(root,rel),'utf8');
 
-for(const [label,requiresNode] of [['primary',primaryRequiresNode],['No Telemetry',noTelemetryRequiresNode]]){
   test(label+' only installs source-project runtime dependencies for admitted Node deployments',()=>{
     assert.equal(requiresNode({foundry:[{entry:'script/Deploy.s.sol'}],hardhat:[],genericPackageScripts:[]}),false);
     assert.equal(requiresNode({hardhat:[],unsafeHardhat:[{path:'scripts/unsafe.js'}],genericPackageScripts:[]}),false);
@@ -21,7 +19,6 @@ for(const [label,requiresNode] of [['primary',primaryRequiresNode],['No Telemetr
 
 for(const [mode,file] of [
   ['primary','packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'],
-  ['No Telemetry','packages/github-native-sim/src/phase0-randomized-simulation-no-telemetry-v1.mjs']
 ]){
   test(mode+' preserves exact archive, installation lock and retained evidence while skipping unneeded installs',()=>{
     const source=read(file);
@@ -54,10 +51,7 @@ test('one-ref private Git checkout helper is shallow, authenticated, and commit 
 
 for(const wf of [
   '.github/workflows/lite-phase0-randomized-simulation-v1.yml',
-  '.github/workflows/lite-phase0-randomized-simulation-no-telemetry-v1.yml',
   '.github/workflows/lite-phase0-bootstrap-v1.yml',
-  '.github/workflows/lite-phase0-bootstrap-no-telemetry-v1.yml',
-  '.github/workflows/v7-execution-infrastructure-qualification-no-telemetry-v1.yml'
 ]){
   test(wf+' uses one checked private repository fetch per job',()=>{
     const src=read(wf);
@@ -69,7 +63,6 @@ for(const wf of [
 
 for(const wf of [
   '.github/workflows/lite-phase0-intelligence-v1.yml',
-  '.github/workflows/lite-phase0-intelligence-no-telemetry-v1.yml'
 ]){
   test(wf+' reuses exact previously verified source checkout when publishing',()=>{
     const src=read(wf);
