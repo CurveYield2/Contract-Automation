@@ -57,8 +57,8 @@ export function buildSystemFactsV1({inventory}) {
     for(const c of funcs) {
       const members=bySig.get(c.canonicalSignature)??[];
       if(!members.some(x=>x.contract===q))members.push({contract:q,modifiers:uniq(c.modifiers??[]),
-        hasGuard:guardById.get(c.contextId)?.hasGuard??(c.modifiers??[]).some(x=>PRIV.test(x))||
-          (c.senderCheckLines??[]).length>0});
+        hasGuard:guardById.get(c.contextId)?.hasGuard??((c.modifiers??[]).some(x=>PRIV.test(x))||
+          (c.senderCheckLines??[]).length>0)});
       bySig.set(c.canonicalSignature,members);
     }
   }
