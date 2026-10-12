@@ -20,7 +20,7 @@ test('successful native fuzz is a distinct completed component with raw evidence
   const result = await runNativeFuzzAnalysis(baseInput(), {
     runCommand: async (call) => {
       calls.push(call);
-      return { exitCode: 0, stdout: '256 fuzz runs passed\n', stderr: '' };
+      return { exitCode: 0, stdout: 'Ran 1 test for test/Vault.t.sol:VaultTest\n[PASS] test_property() (gas: 12000)\nSuite result: ok. 1 passed; 0 failed; 0 skipped; finished in 0.2s\n', stderr: '' };
     }
   });
   assert.equal(result.backend, 'native-fuzz');
@@ -29,7 +29,7 @@ test('successful native fuzz is a distinct completed component with raw evidence
   assert.equal(result.componentStatus, 'COMPLETED');
   assert.equal(result.continuationDisposition, 'COMPLETE_EVIDENCE');
   assert.equal(result.rawArtifactRef, baseInput().rawArtifactRef);
-  assert.match(result.rawOutput.stdout, /256 fuzz runs passed/);
+  assert.match(result.rawOutput.stdout, /Suite result: ok\. 1 passed; 0 failed/);
   assert.deepEqual(calls[0], { command: 'forge', args: ['test', '--fuzz-runs', '256'], cwd: '/tmp/project' });
 });
 
@@ -48,25 +48,25 @@ test('Forge failed-test output is a hard failure even when the wrapper exits zer
     })
   });
   assert.equal(result.status, 'failed');
-  assert.equal(result.failureKind, 'HARD_FAILURE');
+  assert.equal(result.failureKind, 'NO_SUCCESSFUL_TEST_EXECUTION');
   assert.equal(result.componentStatus, 'FAILED');
   assert.equal(result.continuationDisposition, 'STOP_EXECUTION');
   assert.match(result.rawOutput.stdout, /\[FAIL: SOLVENCY\]/);
 });
 
-test('configured native-fuzz limitation is typed as recoverable and preserves continuation', async () => {
+test('configured Forge recoverable exit still fails when no tests succeeded', async () => {
   const result = await runNativeFuzzAnalysis(baseInput(), {
     runCommand: async () => ({ exitCode: 2, stdout: 'coverage unavailable', stderr: 'backend limitation' })
   });
   assert.equal(result.terminal, true);
-  assert.equal(result.status, 'completed_with_limitations');
-  assert.equal(result.failureKind, 'RECOVERABLE_LIMITATION');
-  assert.equal(result.componentStatus, 'COMPLETED_WITH_FAILURES');
-  assert.equal(result.continuationDisposition, 'CONTINUE_WITH_LIMITATION');
+  assert.equal(result.status, 'failed');
+  assert.equal(result.failureKind, 'NO_SUCCESSFUL_TEST_EXECUTION');
+  assert.equal(result.componentStatus, 'FAILED');
+  assert.equal(result.continuationDisposition, 'STOP_EXECUTION');
   assert.equal(result.rawOutput.exitCode, 2);
 });
 
-test('non-recoverable native-fuzz execution failure is typed as hard failure', async () => {
+test('non-recoverable Forge output without successful suite fails closed', async () => {
   const result = await runNativeFuzzAnalysis(baseInput(), {
     runCommand: async () => ({ exitCode: 1, stdout: '', stderr: 'fatal fuzz harness error' })
   });
