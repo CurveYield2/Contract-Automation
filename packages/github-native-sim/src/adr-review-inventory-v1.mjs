@@ -322,9 +322,9 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
     if(t?.meta?.node) {
       const source=t.source.bytes, sourceSlice=sourceText(source,t.meta.node.src);
       const firstLine=ctx.lineStart;
-      ctx.senderCheckLines=distinct(sourceSlice.split('\\n').flatMap((line,i)=>
-        /(?:require|if)\\s*\\(|hasRole\\s*\\(|_checkRole\\s*\\(|msg\\.sender/.test(line)?[firstLine+i]:[])).map(Number);
-      ctx.txOriginLines=distinct(sourceSlice.split('\\n').flatMap((line,i)=>/tx\\.origin/.test(line)?[firstLine+i]:[])).map(Number);
+      ctx.senderCheckLines=distinct(sourceSlice.split('\n').flatMap((line,i)=>
+        /(?:require|if)\s*\(|hasRole\s*\(|_checkRole\s*\(|msg\.sender/.test(line)?[firstLine+i]:[])).map(Number);
+      ctx.txOriginLines=distinct(sourceSlice.split('\n').flatMap((line,i)=>/tx\.origin/.test(line)?[firstLine+i]:[])).map(Number);
     }
   }
   const triggerObj={};for(const c of [...contexts].sort(byPosition))triggerObj[c.contextId]=distinct([...(triggers[c.contextId]??[])]);
