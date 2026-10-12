@@ -234,16 +234,16 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
   const key=String(target?.candidateKey??'');
     if(!result||result.status!=='PASS'||result.exitCode!==0){
       failures.push('Phase 5 mandatory '+key+' machine execution did not PASS (status='+String(result?.status??'MISSING')+', exitCode='+String(result?.exitCode??'MISSING')+'); blocked, inconclusive and missing simulations prohibit seal');
-      continue;
+      return failures;
     }
     if(!String(result.requestBindingStatus??'').startsWith('PASS_')){
       failures.push('Phase 5 mandatory '+key+' request binding did not PASS');
-      continue;
+      return failures;
     }
     const raw=result.rawResult;
     if(!raw||typeof raw!=='object'||Array.isArray(raw)){
       failures.push('Phase 5 mandatory '+key+' missing parsed raw machine result');
-      continue;
+      return failures;
     }
     const rel=result.evidenceRef;
     const expectedPrefix=path.posix.join(campaignPath,'evidence/phase5-boundary',safePart(key))+'/';
@@ -382,6 +382,16 @@ export async function executePhase5TargetsV1({controllerRoot,campaignPath,target
       stdout:String(result.stdout??'').slice(-12000),
       stderr:String(result.stderr??'').slice(-12000)
     };
+  }
+  // All covering runs are finished before an omitted duplicate receives
+  // an inherited evidence reference. The gate separately verifies identity.
+  for(const target of arr(targetDesigns)){
+    if(target?.executionMethod!=='NOT_APPLICABLE')continue;
+    const key=String(target.candidateKey??'').trim();
+    const coveredKey=target.notApplicableDisposition?.coveredByCandidateKey;
+    if(executionResults[key]&&executionResults[coveredKey]?.evidenceRef){
+      executionResults[key].evidenceRef=executionResults[coveredKey].evidenceRef;
+    }
   }
   return executionResults;
 }
