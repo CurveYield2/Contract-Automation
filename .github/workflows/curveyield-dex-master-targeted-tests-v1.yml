@@ -1,4 +1,4 @@
-name: CurveYield DEX Master Targeted Tests v1
+name: CurveYield DEX Master Targeted Tests v2
 
 on:
   push:
@@ -68,10 +68,10 @@ jobs:
 
           gh auth setup-git
           rm -rf .audit-source
-          gh repo clone CurveYield2/Audit-Controller .audit-source -- --filter=blob:none --no-checkout
+          timeout -k 10s 240s gh repo clone CurveYield2/Audit-Controller .audit-source -- --filter=blob:none --no-checkout
           (
             cd .audit-source
-            git fetch --depth=1 origin "$SOURCE_COMMIT"
+            timeout -k 10s 180s git fetch --depth=1 origin "$SOURCE_COMMIT"
             git checkout --detach FETCH_HEAD
             test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
           )
@@ -100,13 +100,13 @@ jobs:
         shell: bash
         run: |
           set +e
-          npm ci --force 2>&1 | tee "$GITHUB_WORKSPACE/targeted-output/NPM_INSTALL_v1.log"
-          code=${PIPESTATUS[0]}
+          python3 "$GITHUB_WORKSPACE/scripts/audit-command-guard-v1.py" --label npm-install --wall 900 --idle 360 --log "$GITHUB_WORKSPACE/targeted-output/NPM_INSTALL_v1.log" -- npm ci --force
+          code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
           exit 0
 
       - name: Record toolchain
-        if: always()
+        if: steps.source.outcome == 'success'
         working-directory: ${{ env.SOURCE_ROOT }}
         shell: bash
         run: |
@@ -127,20 +127,34 @@ jobs:
         shell: bash
         run: |
           set +e
-          ANVIL_PATH="$(command -v anvil)" timeout 18m             ./node_modules/.bin/vitest run               tooling/test/curveYieldDexSettlementRuntime.test.mjs               tooling/test/curveYieldDexPermanentLiquidityRuntime.test.mjs               tooling/test/curveYieldCreatorConfigEpochRuntime.test.mjs               --reporter=verbose --no-file-parallelism               2>&1 | tee "$GITHUB_WORKSPACE/targeted-output/RUNTIME_CONTROLS_v1.log"
-          code=${PIPESTATUS[0]}
+          ANVIL_PATH="$(command -v anvil)" python3 "$GITHUB_WORKSPACE/scripts/audit-command-guard-v1.py" --label runtime-controls --wall 1080 --idle 600 --log "$GITHUB_WORKSPACE/targeted-output/RUNTIME_CONTROLS_v1.log" -- ./node_modules/.bin/vitest run               tooling/test/curveYieldDexSettlementRuntime.test.mjs               tooling/test/curveYieldDexPermanentLiquidityRuntime.test.mjs               tooling/test/curveYieldCreatorConfigEpochRuntime.test.mjs               --reporter=verbose --no-file-parallelism
+          code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
           exit 0
 
+      - name: Preflight Katana fork upstream
+        id: katana-rpc
+        if: steps.install.outputs.code == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload='{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
+          response="$(curl --fail --silent --show-error --connect-timeout 5 --max-time 15 --retry 2 --retry-delay 2 --retry-all-errors -H 'content-type: application/json' --data "$payload" https://katana.drpc.org/)"
+          expected="$(printf '0x%x' 747474)"
+          printf '%s' "$response" | jq -e --arg expected "$expected" '.result == $expected' >/dev/null || {
+            echo "::error::Katana RPC unavailable or wrong chain; refusing long fork execution"
+            exit 1
+          }
+
       - name: Run source-native Katana fork deployment and handoff
         id: katana
-        if: steps.install.outputs.code == '0'
+        if: steps.install.outputs.code == '0' && steps.katana-rpc.outcome == 'success'
         working-directory: ${{ env.SOURCE_ROOT }}
         shell: bash
         run: |
           set +e
-          FORK_RPC_URL="https://katana.drpc.org/"           ANVIL_PATH="$(command -v anvil)"           timeout 38m node tooling/scripts/simulateCurveYieldDexKatanaFork.mjs             2>&1 | tee "$GITHUB_WORKSPACE/targeted-output/KATANA_SOURCE_NATIVE_v1.log"
-          code=${PIPESTATUS[0]}
+          FORK_RPC_URL="https://katana.drpc.org/" ANVIL_PATH="$(command -v anvil)" python3 "$GITHUB_WORKSPACE/scripts/audit-command-guard-v1.py" --label katana-deployment --wall 2280 --idle 720 --log "$GITHUB_WORKSPACE/targeted-output/KATANA_SOURCE_NATIVE_v1.log" -- node tooling/scripts/simulateCurveYieldDexKatanaFork.mjs
+          code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
 
           report_path="$(grep -oE 'Report: .+\.json' "$GITHUB_WORKSPACE/targeted-output/KATANA_SOURCE_NATIVE_v1.log" | tail -n1 | sed 's/^Report: //' || true)"
@@ -165,13 +179,13 @@ jobs:
 
       - name: Run decisive real-integration targeted sequences
         id: integration
-        if: steps.katana.outputs.state_ready == 'true'
+        if: steps.katana.outputs.state_ready == 'true' && steps.katana.outputs.code == '0'
         working-directory: ${{ env.SOURCE_ROOT }}
         shell: bash
         run: |
           set +e
-          ANVIL_PATH="$(command -v anvil)" timeout 24m             node tooling/scripts/masterTargetedDexV16_v1.mjs               --report "${{ steps.katana.outputs.report_path }}"               --state "${{ steps.katana.outputs.state_path }}"               --fork-url "https://katana.drpc.org/"               --output "$GITHUB_WORKSPACE/targeted-output/TARGETED_INTEGRATION_RESULT_v1.json"               2>&1 | tee "$GITHUB_WORKSPACE/targeted-output/TARGETED_INTEGRATION_v1.log"
-          code=${PIPESTATUS[0]}
+          ANVIL_PATH="$(command -v anvil)" python3 "$GITHUB_WORKSPACE/scripts/audit-command-guard-v1.py" --label targeted-integration --wall 1440 --idle 480 --log "$GITHUB_WORKSPACE/targeted-output/TARGETED_INTEGRATION_v1.log" -- node tooling/scripts/masterTargetedDexV16_v1.mjs               --report "${{ steps.katana.outputs.report_path }}"               --state "${{ steps.katana.outputs.state_path }}"               --fork-url "https://katana.drpc.org/"               --output "$GITHUB_WORKSPACE/targeted-output/TARGETED_INTEGRATION_RESULT_v1.json"
+          code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
           exit 0
 
@@ -245,6 +259,7 @@ jobs:
             }' > targeted-output/EXECUTION_METADATA_v1.json
 
       - name: Persist raw campaign evidence with SHA-256 manifest
+        id: persist
         if: always()
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
@@ -256,7 +271,7 @@ jobs:
           gh repo clone CurveYield2/Audit-Controller .audit-writeback -- --filter=blob:none --no-checkout
           (
             cd .audit-writeback
-            git fetch origin main
+            timeout -k 10s 180s git fetch origin main
             git checkout -B main origin/main
           )
 
@@ -287,8 +302,8 @@ jobs:
             git config user.email "master-targeted-tests@users.noreply.github.com"
             git commit -m "audit(evidence): persist CurveYield DEX targeted tests v1"
             for attempt in 1 2 3 4 5; do
-              git pull --rebase origin main
-              if git push origin HEAD:main; then exit 0; fi
+              timeout -k 10s 120s git pull --rebase origin main
+              if timeout -k 10s 120s git push origin HEAD:main; then exit 0; fi
               sleep $((attempt * 2))
             done
             exit 1
@@ -310,3 +325,45 @@ jobs:
             echo "- Base deployment exit: ${{ steps.base.outputs.code || 'not-run' }}"
             echo "- raw evidence persisted under: $EVIDENCE_REL"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # Test steps collect evidence on failure; enforce result only after writeback.
+      - name: Enforce mandatory execution stages and qualified evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          check() {
+            local stage="$1" code="$2"
+            if [ "$code" != "0" ]; then
+              echo "::error::${stage} failed: ${code}; 124=wall timeout, 125=inactivity timeout, not-run=missing"
+              failed=1
+            fi
+          }
+          check install "${{ steps.install.outputs.code || 'not-run' }}"
+          check controls "${{ steps.controls.outputs.code || 'not-run' }}"
+          check katana "${{ steps.katana.outputs.code || 'not-run' }}"
+          check integration "${{ steps.integration.outputs.code || 'not-run' }}"
+          check base "${{ steps.base.outputs.code || 'not-run' }}"
+          if [ "${{ steps.persist.outcome }}" != "success" ]; then
+            echo "::error::Durable audit evidence writeback did not succeed"
+            failed=1
+          fi
+          result=targeted-output/TARGETED_INTEGRATION_RESULT_v1.json
+          if [ ! -s "$result" ]; then
+            echo "::error::Targeted integration result missing"
+            failed=1
+          elif ! jq -e '
+            .fatalError == null and
+            (.summary.assertions // 0) > 0 and
+            (.summary.failedAssertions // -1) == 0 and
+            (.candidates | type == "object" and (to_entries | all(.[]; (.value.executedCalls // 0) > 0)))
+          ' "$result" >/dev/null; then
+            echo "::error::Incomplete candidate execution or failed/missing targeted assertions"
+            failed=1
+          fi
+          if [ "$failed" != "0" ]; then
+            echo "::error::Audit tests NOT qualified; do not interpret this run as a PASS"
+            exit 1
+          fi
+          echo "::notice::All mandatory stages and persisted targeted evidence passed"
