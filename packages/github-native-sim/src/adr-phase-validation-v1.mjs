@@ -26,7 +26,7 @@ function roundCheck({root,campaignPath,row,identifier,errors}){
   errors.push(prefix+'dispatchRounds must equal request JSON count (0–3)');
  if(JSON.stringify(actual)!==JSON.stringify(expected.length?expected:['NONE_IDENTIFIED']))
   errors.push(prefix+'requestPaths must equal sorted request files');
- if(expected.length&&!blank(row.harnessDesign)===false)errors.push(prefix+'harnessDesign required when dispatched');
+ if(expected.length&&blank(row.harnessDesign))errors.push(prefix+'harnessDesign required when dispatched');
 }
 function ledger(root,campaign,ref,errors,identifier){
  if(blank(ref)||!/^controller\/automation\/[^/]+\/ASSERTION_LEDGER_v1\.json$/.test(ref)){
@@ -135,7 +135,8 @@ export function appendAdrCoverageSectionV1({root,campaignPath,automationRoot,tex
   const inventory=read(rootFile(root,campaignPath,'evidence/review-inventory/REVIEW_INVENTORY_v1.json'));
   if(!inventory)return text;
   const p6=read(rootFile(root,campaignPath,'derived/phase-6/PHASE_06_CANONICAL_DATA_v1.json'));
-  const phase6Results={};
+  const baseline=read(rootFile(root,campaignPath,'work/phase-06/BASELINE_OBLIGATIONS_v1.json'));
+  const phase6Results={baselineObligations:baseline?.payload?.obligations??[]};
   for(const row of arr(output(p6,4,'baselineTestRecords')).filter(obj))
    for(const outcome of arr(row.obligationOutcomes))if(outcome?.obligationId)phase6Results[outcome.obligationId]=outcome.outcome;
   const matrix=buildCoverageMatrixV1({inventory,taxonomy:loadTaxonomyV1(automationRoot),
