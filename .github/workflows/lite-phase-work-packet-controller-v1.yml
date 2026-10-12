@@ -404,7 +404,7 @@ jobs:
         run: |
           set -euo pipefail
           guide='Audit Skill - Current Authority/Audit_Litemode_v11/master-review/TARGETED_TEST_DIRECTIVE_v1.md'
-          message_b64="$({ printf 'AFTER YOUR MANDATORY WAKE RECEIPT, READ %s IN CurveYield2/Audit-Controller USING THE GITHUB CONNECTOR. Follow its executing-reviewer instructions exactly.\\n\\n' "$guide"; printf '%s' "${{ steps.controller.outputs.feedback_b64 }}" | base64 -d; } | base64 -w0)"
+          message_b64="$({ printf 'AFTER YOUR MANDATORY WAKE RECEIPT, READ %s IN CurveYield2/Audit-Controller USING THE GITHUB CONNECTOR. Follow its executing-reviewer instructions exactly.\n\n' "$guide"; printf '%s' "${{ steps.controller.outputs.feedback_b64 }}" | base64 -d; } | base64 -w0)"
           gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.test_request_id }}-test-reviewer" \
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
