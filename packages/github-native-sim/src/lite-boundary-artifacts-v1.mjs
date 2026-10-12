@@ -534,13 +534,26 @@ export async function executePhase5TargetsV1({
       process.stderr.write(`[phase5-sim] RUNNING ${key} elapsed=${elapsed}m; awaiting runner result\n`);
     },60_000);
     let result;
+    let markerBuffer='';
+    const relayProgress=(chunk)=>{
+      markerBuffer+=chunk;
+      let index;
+      while((index=markerBuffer.indexOf('\n'))!==-1){
+        const line=markerBuffer.slice(0,index).trimEnd();
+        markerBuffer=markerBuffer.slice(index+1);
+        // Machine stderr can contain RPC URLs; relay only our fixed markers.
+        if(line.startsWith('[phase5-v7]'))process.stderr.write(line+'\n');
+      }
+      if(markerBuffer.length>8192)markerBuffer=markerBuffer.slice(-8192);
+    };
     try {
       result=await runProcessV1({
         command:process.execPath,
         args:['packages/github-native-sim/src/v7-cli.mjs','execute','--request',requestAbs,'--evidence-dir',evAbs,'--workspace',workspace],
         cwd:process.cwd(),
         env:{...process.env,PHASE5_BOUNDARY_PROGRESS:'true'},
-        timeoutMs:candidateTimeoutMs
+        timeoutMs:candidateTimeoutMs,
+        onStderr:relayProgress
       });
     } finally {
       clearInterval(heartbeat);
