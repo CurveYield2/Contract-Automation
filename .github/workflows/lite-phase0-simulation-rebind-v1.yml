@@ -8,6 +8,7 @@ permissions:
 jobs:
   retired:
     runs-on: ubuntu-latest
+    timeout-minutes: 3
     steps:
       - name: Explain retired Phase 0 rebind mechanism
         run: |
