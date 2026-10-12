@@ -1,4 +1,4 @@
-name: Lite Master Targeted Tests Regression v1
+name: Lite Master Targeted Tests Regression v2
 
 on:
   push:
@@ -9,6 +9,15 @@ on:
       - 'scripts/lite-phase-packet-controller-v1.mjs'
       - 'scripts/tests/lite-master-targeted-tests-v1.test.mjs'
       - '.github/workflows/lite-master-targeted-tests-regression-v1.yml'
+      - '.github/workflows/curveyield-dex-v17-master-targeted-tests-v1.yml'
+      - '.github/workflows/curveyield-dex-master-targeted-tests-v1.yml'
+      - 'scripts/audit-command-guard-v1.py'
+  pull_request:
+    paths:
+      - '.github/workflows/lite-master-targeted-tests-regression-v1.yml'
+      - '.github/workflows/curveyield-dex-v17-master-targeted-tests-v1.yml'
+      - '.github/workflows/curveyield-dex-master-targeted-tests-v1.yml'
+      - 'scripts/audit-command-guard-v1.py'
   workflow_dispatch:
 
 permissions:
@@ -31,3 +40,33 @@ jobs:
           node --check scripts/tests/lite-master-targeted-tests-v1.test.mjs
       - name: Validate targeted-test lifecycle and terminal gate
         run: node --test scripts/tests/lite-master-targeted-tests-v1.test.mjs
+
+  audit-command-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify clean exits, failure propagation, inactivity and wall guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          guard=scripts/audit-command-guard-v1.py
+          python3 "$guard" --wall 10 --idle 5 --log /tmp/audit-guard-pass.log --label pass -- python3 -c "print('pass')"
+          grep -q pass /tmp/audit-guard-pass.log
+          set +e
+          python3 "$guard" --wall 10 --idle 5 --log /tmp/audit-guard-exit.log --label exit -- python3 -c "import sys; sys.exit(17)"
+          rc=$?
+          set -e
+          test "$rc" -eq 17
+          set +e
+          python3 "$guard" --wall 10 --idle 2 --log /tmp/audit-guard-idle.log --label idle -- python3 -u -c "import time; print('started'); time.sleep(30)"
+          rc=$?
+          set -e
+          test "$rc" -eq 125
+          grep -q 'output inactivity' /tmp/audit-guard-idle.log
+          set +e
+          python3 "$guard" --wall 3 --idle 2 --log /tmp/audit-guard-wall.log --label wall -- python3 -u -c "import time; [(print('alive', flush=True), time.sleep(.25)) for _ in range(100)]"
+          rc=$?
+          set -e
+          test "$rc" -eq 124
+          grep -q 'wall timeout' /tmp/audit-guard-wall.log
