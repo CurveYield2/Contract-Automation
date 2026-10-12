@@ -22,6 +22,7 @@ import {
 } from './lib/lite-phase-prefill-v1.mjs';
 import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
 import {registerMasterTargetedTests,acceptMasterTargetedTestResults,verifyMasterTargetedTestEvidence,unresolvedFinalCandidateFailures} from './lib/lite-master-targeted-tests-v1.mjs';
+import {admitPostCompletionFollowupV1} from './lib/lite-post-completion-followup-v1.mjs';
 
 function parse(argv){const o={};for(let i=2;i<argv.length;i+=2){if(!argv[i]?.startsWith('--')||argv[i+1]===undefined) throw new Error('args must be --key value');o[argv[i].slice(2)]=argv[i+1];}return o;}
 function shaFile(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
@@ -585,7 +586,7 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
       if(!amended&&post&&postSha===row.sha256)continue;
       const originalBytes=amended?amended.originalBytes:fs.readFileSync(repoFile(root,path.posix.join(campaignPath,row.path)));
       if(createHash('sha256').update(originalBytes).digest('hex')!==row.sha256)throw new Error('superseded original digest mismatch: '+row.path);
-      superseded.push({phase:row.phase,kind:row.kind,originalPath:row.path,supersededPath:path.posix.join(SUPERSEDED_DIRECTORY_V1,row.path),sha256:row.sha256,replacedBySha256:post?postSha:null,originalBytes});
+      superseded.push({phase:row.phase,kind:row.kind,originalPath:row.path,supersededPath:path.posix.join(SUPERSEDED_DIRECTORY_V1,result.pending.segmentId==='reviewer-4-followup-v1'?'reviewer-4-followup-v1':'',row.path),sha256:row.sha256,replacedBySha256:post?postSha:null,originalBytes});
     }
     for(const item of superseded){
       const target=repoFile(root,path.posix.join(campaignPath,item.supersededPath));
@@ -625,11 +626,11 @@ if(a['phase5-reuse-keys-b64']&&!masterAmendmentRefreshSha)
 
 if(masterAmendmentRefreshSha&&reviewKind!=='phase')throw new Error('master-amendment-refresh-sha is internal to phase refresh');
 for(const k of ['controller-root','campaign-id','campaign-path','campaign-directory-path']) if(a[k]===undefined) throw new Error('missing --'+k);
-if(['phase','sealed-rework'].includes(reviewKind)&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
+if(['phase','sealed-rework','post-completion-followup'].includes(reviewKind)&&a['phase-sequence']===undefined) throw new Error('missing --phase-sequence');
 if(reviewKind==='master-test-result'&&!a['test-result-path'])throw new Error('missing --test-result-path');
 if(reviewKind==='master'&&a['master-outcome']==='REQUEST_TARGETED_TESTS'&&!a['test-plan-path'])throw new Error('missing --test-plan-path');
-if(reviewKind==='sealed-rework'&&!a['rework-request-path']) throw new Error('missing --rework-request-path');
-if(!['phase','master','master-test-result','sealed-rework'].includes(reviewKind)) throw new Error('review-kind must be phase, master, master-test-result, or sealed-rework');
+if(['sealed-rework','post-completion-followup'].includes(reviewKind)&&!a['rework-request-path']) throw new Error('missing --rework-request-path');
+if(!['phase','master','master-test-result','sealed-rework','post-completion-followup'].includes(reviewKind)) throw new Error('unsupported review-kind');
 const root=path.resolve(a['controller-root']);
 const expectedCampaignId=a['campaign-id'];
 const campaignPath=a['campaign-path']; const campaignRoot=repoFile(root,campaignPath);
@@ -643,6 +644,18 @@ if(directory.workspacePath!==campaignPath) throw new Error('campaign-path does n
 if(masterAmendmentRefreshSha){
   if(directory.pendingMasterReview?.status!=='MASTER_AMENDMENT_REFRESH'||directory.pendingMasterReview?.amendmentSha256!==masterAmendmentRefreshSha)throw new Error('master amendment refresh is not bound to the pending master amendment');
   if(directory.currentAssignment?.masterAmendmentRefreshSha256!==masterAmendmentRefreshSha)throw new Error('master amendment refresh assignment binding mismatch');
+}
+if(reviewKind==='post-completion-followup'){
+  if(sequence!==5)throw new Error('post-completion followup technical work is bound to the Phase-5 target family');
+  const result=admitPostCompletionFollowupV1({root,campaignPath,directory,requestPath:a['rework-request-path'],now});
+  writeJson(directoryFile,directory);
+  const feedback='POST_COMPLETION_FOLLOWUP_ADMITTED: exact source, two retained candidates and governance obligation are held for reviewer-3L delegated technical tests. Master reviewer must issue a typed targeted-test directive; the original Phase-5/6/8/10 receipts and accepted master decision remain unchanged. No candidate is yet resolved.';
+  process.stdout.write(JSON.stringify({status:'FOLLOWUP_ADMITTED',campaignId:directory.campaignId,campaignName:directory.campaignName,
+    segmentId:result.pending.segmentId,recordPath:result.recordPath,
+    masterChatUrl:directory.masterReview?.chatUrl??null,
+    freshSuccessorRequired:false,sameReviewerAdvanced:false,nextAssignment:null,
+    feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),directoryPath:directoryRel})+'\\n');
+  process.exit(0);
 }
 function masterAmendmentReceipt(priorRevision){
   const pending=directory.pendingMasterReview;
@@ -683,7 +696,7 @@ if(reviewKind==='master'){
   // Legacy sealed Phase-5 machine failures cannot be accepted unchanged
   // at the Reviewer-2 master-review boundary. An amended segment is
   // reexecuted through the new mandatory pre-seal gate.
-  if(result.status==='MASTER_REVIEW_ACCEPTED'&&pending.segmentId==='reviewer-4-phases-08-10'){
+  if(result.status==='MASTER_REVIEW_ACCEPTED'&&pending.boundaryPhase===10){
     const unresolved=unresolvedFinalCandidateFailures({root,campaignPath,directory});
     if(unresolved.length)emit('MASTER_REVIEW_INVALID','Final audit cannot COMPLETE with unresolved material candidates. Request reviewer-directed targeted tests: '+unresolved.join('; '));
   }
