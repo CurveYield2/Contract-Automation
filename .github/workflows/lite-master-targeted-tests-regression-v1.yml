@@ -1,4 +1,4 @@
-name: Lite Master Targeted Tests Regression v4
+name: Lite Master Targeted Tests Regression v5
 
 on:
   push:
@@ -12,6 +12,7 @@ on:
       - '.github/workflows/curveyield-dex-v17-master-targeted-tests-v1.yml'
       - '.github/workflows/curveyield-dex-master-targeted-tests-v1.yml'
       - 'scripts/audit-command-guard-v1.py'
+      - 'packages/github-native-sim/audit-harnesses/curveyield-dex-v17-r1-master-targeted-v1/run-v1.mjs'
       - '.github/workflows/lite-phase0-randomized-simulation-v1.yml'
       - '.github/workflows/lite-phase0-randomized-simulation-no-telemetry-v1.yml'
       - '.github/workflows/lite-phase0-simulation-testing-v1.yml'
@@ -23,6 +24,7 @@ on:
       - '.github/workflows/curveyield-dex-v17-master-targeted-tests-v1.yml'
       - '.github/workflows/curveyield-dex-master-targeted-tests-v1.yml'
       - 'scripts/audit-command-guard-v1.py'
+      - 'packages/github-native-sim/audit-harnesses/curveyield-dex-v17-r1-master-targeted-v1/run-v1.mjs'
       - '.github/workflows/lite-phase0-randomized-simulation-v1.yml'
       - '.github/workflows/lite-phase0-randomized-simulation-no-telemetry-v1.yml'
       - '.github/workflows/lite-phase0-simulation-testing-v1.yml'
@@ -48,6 +50,7 @@ jobs:
           node --check scripts/lib/lite-master-targeted-tests-v1.mjs
           node --check scripts/lite-phase-packet-controller-v1.mjs
           node --check scripts/tests/lite-master-targeted-tests-v1.test.mjs
+          node --check packages/github-native-sim/audit-harnesses/curveyield-dex-v17-r1-master-targeted-v1/run-v1.mjs
       - name: Validate targeted-test lifecycle and terminal gate
         run: node --test scripts/tests/lite-master-targeted-tests-v1.test.mjs
 
