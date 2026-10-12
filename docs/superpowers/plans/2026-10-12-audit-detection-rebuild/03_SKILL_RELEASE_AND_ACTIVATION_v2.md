@@ -396,6 +396,8 @@ Create these files in the v12 package with exactly this content.
 > - Invariant obligations: state the conservation or bound being checked.
 > - Candidate tests: always pair the attack with a healthy-path control.
 >
+> Naming, so results can be matched in the ledger: one assertion per test function or property; baseline tests `test_prop_<obligationId>_<short>`, candidate tests `test_attack_<n>_<short>` and `test_control_<n>_<short>`, Medusa properties `property_<obligationId>_<short>`. Cite Forge tests as `<suite>::<test name>` exactly as the ledger shows them.
+>
 > Use Medusa only through a `MEDUSA_PROPERTY` request you designed. Triage every failing assertion: a real violation is recorded as a failure or confirmation; a harness defect is fixed in the next round. Stop after 3 rounds per folder and record the honest outcome.
 
 ## Appendix D — Edits to existing skill files (in the v12 copy)
