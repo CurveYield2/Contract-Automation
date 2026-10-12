@@ -7,6 +7,8 @@ on:
       - '.github/workflows/lite-phase5-reuse-regression-v1.yml'
       - 'scripts/lite-phase-packet-controller-v1.mjs'
       - 'packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs'
+      - 'packages/github-native-sim/src/v7-compact-result-v1.mjs'
+      - 'packages/github-native-sim/src/v7-cli.mjs'
       - 'packages/github-native-sim/test/lite-phase5-execution-gate-v1.test.mjs'
   workflow_dispatch:
 
@@ -26,5 +28,7 @@ jobs:
         run: |
           node --check scripts/lite-phase-packet-controller-v1.mjs
           node --check packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs
+          node --check packages/github-native-sim/src/v7-compact-result-v1.mjs
+          node --check packages/github-native-sim/src/v7-cli.mjs
       - name: Check sealed-evidence reuse, invalidation, and fail-closed gates
         run: node --test packages/github-native-sim/test/lite-phase5-execution-gate-v1.test.mjs
