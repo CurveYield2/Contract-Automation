@@ -97,7 +97,9 @@ async function compiled(){
 // Row 01
 test('A to B to C external calls remain one flow, cluster and attacker unit',()=>{
  const c=['A','B','C'].map(n=>ctx(n));
- const p=buildFlowPlanV1({...flowInputs(c,[edge('A','B'),edge('B','C')]),limits:{maxPrimaryContextsPerUnit:1,maxFlowDepth:8,maxIntegrationQuestionsPerAttackUnit:15}}).payload;
+ const input=flowInputs(c,[edge('A','B'),edge('B','C')]);
+ input.inventory.payload.triggers={'CTX-A-1':['EXTERNAL_CALL'],'CTX-B-1':[],'CTX-C-1':[]};
+ const p=buildFlowPlanV1({...input,limits:{maxPrimaryContextsPerUnit:1,maxFlowDepth:8,maxIntegrationQuestionsPerAttackUnit:15}}).payload;
  assert.equal(p.flows.length,1);
  assert.deepEqual(p.flows[0].contexts,['CTX-A-1','CTX-B-1','CTX-C-1']);
  assert.equal(p.clusters.length,1);
