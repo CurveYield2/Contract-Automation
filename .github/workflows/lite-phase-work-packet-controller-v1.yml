@@ -22,7 +22,11 @@ on:
         required: false
         default: phase
         type: choice
-        options: [phase, master, master-test-result, sealed-rework, post-completion-followup]
+        options: [phase, discovery, master, master-test-result, sealed-rework, post-completion-followup]
+      unit_id:
+        required: false
+        default: ''
+        type: string
       phase_sequence:
         required: false
         default: ''
@@ -91,6 +95,7 @@ jobs:
           DISPATCH_CAMPAIGN_PATH: ${{ inputs.campaign_path }}
           DISPATCH_DIRECTORY_PATH: ${{ inputs.campaign_directory_path }}
           DISPATCH_REVIEW_KIND: ${{ inputs.review_kind }}
+          DISPATCH_UNIT_ID: ${{ inputs.unit_id }}
           DISPATCH_PHASE_SEQUENCE: ${{ inputs.phase_sequence }}
           DISPATCH_SEGMENT_ID: ${{ inputs.segment_id }}
           DISPATCH_MASTER_OUTCOME: ${{ inputs.master_outcome }}
@@ -105,6 +110,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             campaign_id="$DISPATCH_CAMPAIGN_ID"
             review_kind="${DISPATCH_REVIEW_KIND:-phase}"
+            unit_id="$DISPATCH_UNIT_ID"
             phase_sequence="$DISPATCH_PHASE_SEQUENCE"
             segment_id="$DISPATCH_SEGMENT_ID"
             master_outcome="$DISPATCH_MASTER_OUTCOME"
@@ -129,6 +135,7 @@ jobs:
               .schemaVersion=="curveyield-lite-phase-boundary-request-v1" and
               ((.campaignId|type)=="string") and (.campaignId|length)>0 and
               (((.reviewKind // "phase")=="phase" and ((.phaseSequence|type)=="number") and ((.phaseSequence|floor)==.phaseSequence) and .phaseSequence>=1 and .phaseSequence<=10) or
+               ((.reviewKind // "phase")=="discovery" and ((.unitId|type)=="string") and (.unitId|test("^[FRX]-[0-9]{3}$"))) or
                ((.reviewKind // "phase")=="master" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and (.masterOutcome=="AMENDED" or .masterOutcome=="ACCEPT_WITHOUT_MODIFICATIONS" or (.masterOutcome=="REQUEST_TARGETED_TESTS" and ((.testPlanPath|type)=="string") and (.testPlanPath|length)>0)) and ((.summary // "")|type)=="string") or
                ((.reviewKind // "phase")=="master-test-result" and ((.segmentId|type)=="string") and (.segmentId|length)>0 and ((.testResultPath|type)=="string") and (.testResultPath|length)>0) or
                ((.reviewKind // "phase")=="sealed-rework" and ((.phaseSequence|type)=="number") and .phaseSequence==1 and ((.reworkRequestPath|type)=="string") and (.reworkRequestPath|length)>0 and .holdSuccessorDelivery==true) or
@@ -138,6 +145,7 @@ jobs:
             ' /tmp/lite-phase-boundary-request.json >/dev/null
             campaign_id="$(jq -r '.campaignId' /tmp/lite-phase-boundary-request.json)"
             review_kind="$(jq -r '.reviewKind // "phase"' /tmp/lite-phase-boundary-request.json)"
+            unit_id="$(jq -r '.unitId // empty' /tmp/lite-phase-boundary-request.json)"
             phase_sequence="$(jq -r '.phaseSequence // empty' /tmp/lite-phase-boundary-request.json)"
             segment_id="$(jq -r '.segmentId // empty' /tmp/lite-phase-boundary-request.json)"
             master_outcome="$(jq -r '.masterOutcome // empty' /tmp/lite-phase-boundary-request.json)"
@@ -151,8 +159,9 @@ jobs:
             supplied_directory_path=""
           fi
           [[ "$campaign_id" =~ ^[A-Za-z0-9._-]+-r[0-9]+$ ]] || { echo "::error::Invalid campaign_id"; exit 1; }
-          case "$review_kind" in phase|master|master-test-result|sealed-rework|post-completion-followup) ;; *) echo "::error::Invalid review_kind"; exit 1;; esac
+          case "$review_kind" in phase|discovery|master|master-test-result|sealed-rework|post-completion-followup) ;; *) echo "::error::Invalid review_kind"; exit 1;; esac
           if [ "$review_kind" = phase ]; then [[ "$phase_sequence" =~ ^([1-9]|10)$ ]] || { echo "::error::Invalid phase_sequence"; exit 1; }; fi
+          if [ "$review_kind" = discovery ]; then [[ "$unit_id" =~ ^[FRX]-[0-9]{3}$ ]] || { echo "::error::Invalid unit_id"; exit 1; }; fi
           if [ "$review_kind" = master ]; then
             [[ "$segment_id" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::Invalid segment_id"; exit 1; }
             case "$master_outcome" in AMENDED|ACCEPT_WITHOUT_MODIFICATIONS|REQUEST_TARGETED_TESTS) ;; *) echo "::error::Invalid master outcome"; exit 1;; esac
@@ -181,6 +190,7 @@ jobs:
           {
             echo "campaign_id=$campaign_id"
             echo "review_kind=$review_kind"
+            echo "unit_id=$unit_id"
             echo "phase_sequence=$phase_sequence"
             echo "segment_id=$segment_id"
             echo "master_outcome=$master_outcome"
@@ -227,6 +237,12 @@ jobs:
           test "$(jq -r '.campaignId' "$directory_file")" = "$campaign_id"
           if [ "${{ steps.request.outputs.review_kind }}" = phase ]; then
             test "$(jq -r '.currentAssignment.phaseSequence' "$directory_file")" = "${{ steps.request.outputs.phase_sequence }}"
+          elif [ "${{ steps.request.outputs.review_kind }}" = discovery ]; then
+            active="$(jq -r '.discovery.activeUnitId // empty' "$directory_file")"
+            if [ "$active" != "${{ steps.request.outputs.unit_id }}" ]; then
+              echo "::notice::stale discovery request"
+              stale=true
+            fi
           elif [ "${{ steps.request.outputs.review_kind }}" = master ] || [ "${{ steps.request.outputs.review_kind }}" = master-test-result ]; then
             test "$(jq -r '.pendingMasterReview.segmentId' "$directory_file")" = "${{ steps.request.outputs.segment_id }}"
           else
@@ -249,17 +265,20 @@ jobs:
             effective_hold=true
           fi
           {
+            echo "stale=${stale:-false}"
             echo "campaign_path=$campaign_path"
             echo "campaign_directory_path=$directory_path"
             echo "effective_hold=$effective_hold"
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up Node.js for controller validation and Phase-5 execution
+        if: steps.routing.outputs.stale != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install locked Node dependencies for controller validation
+        if: steps.routing.outputs.stale != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -267,7 +286,7 @@ jobs:
 
       - name: Determine whether master amendment needs Phase-5 execution
         id: phase5_plan
-        if: steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED'
+        if: steps.routing.outputs.stale != 'true' && steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED'
         shell: bash
         run: |
           set -euo pipefail
@@ -277,10 +296,11 @@ jobs:
           printf '%s\n' "$decision" | jq .
 
       - name: Install retained audit toolchain for Phase-5 boundary execution
-        if: (steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.phase5_plan.outputs.requires_execution == 'true')
+        if: steps.routing.outputs.stale != 'true' && ((steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5') || (steps.phase5_plan.outputs.requires_execution == 'true'))
         uses: ./.github/actions/setup-v7-toolchain
 
       - name: Generate packet/report, validate semantic work, then bookkeep after PASS
+        if: steps.routing.outputs.stale != 'true'
         id: controller
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
@@ -303,6 +323,8 @@ jobs:
             if [ -n "${{ steps.request.outputs.master_summary_b64 }}" ]; then
               args+=(--master-summary-b64 "${{ steps.request.outputs.master_summary_b64 }}")
             fi
+          elif [ "${{ steps.request.outputs.review_kind }}" = discovery ]; then
+            args+=(--unit-id "${{ steps.request.outputs.unit_id }}")
           else
             args+=(--phase-sequence "${{ steps.request.outputs.phase_sequence }}")
           fi
@@ -324,10 +346,15 @@ jobs:
             echo "master_accepted=$(jq -r '.masterReviewAccepted // false' /tmp/lite-phase-packet-result.json)"
             echo "test_reviewer=$(jq -r '.testReviewer // empty' /tmp/lite-phase-packet-result.json)"
             echo "test_request_id=$(jq -r '.testRequestId // empty' /tmp/lite-phase-packet-result.json)"
+            echo "discovery_wake_chat_key=$(jq -r '.discoveryWakeChatKey // empty' /tmp/lite-phase-packet-result.json)"
+            echo "discovery_wake_id=$(jq -r '.discoveryWakeId // empty' /tmp/lite-phase-packet-result.json)"
+            echo "discovery_wake_phase_id=$(jq -r '.discoveryWakePhaseId // empty' /tmp/lite-phase-packet-result.json)"
+            echo "discovery_wake_milestone_id=$(jq -r '.discoveryWakeMilestoneId // empty' /tmp/lite-phase-packet-result.json)"
+            echo "discovery_wake_message_b64=$(jq -r '.discoveryWakeMessageB64 // empty' /tmp/lite-phase-packet-result.json)"
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish validation response or successful phase transaction
-        if: ${{ steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' || steps.controller.outputs.status == 'FOLLOWUP_ADMITTED') }}
+        if: ${{ steps.routing.outputs.stale != 'true' && steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' || steps.controller.outputs.status == 'FOLLOWUP_ADMITTED' || steps.controller.outputs.status == 'DISCOVERY_REWORK' || steps.controller.outputs.status == 'DISCOVERY_NEXT' || steps.controller.outputs.status == 'DISCOVERY_COMPLETE') }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
@@ -339,8 +366,46 @@ jobs:
           git add -- "${{ steps.routing.outputs.campaign_path }}" "${{ steps.routing.outputs.campaign_directory_path }}"
           if ! git diff --cached --quiet; then
             git commit -m "audit(controller): ${{ steps.request.outputs.review_kind }} ${{ steps.request.outputs.phase_sequence || steps.request.outputs.segment_id }} validation ${{ steps.controller.outputs.status }} for ${{ steps.request.outputs.campaign_id }}"
-            timeout -k 10s 120s git push origin "HEAD:${{ steps.request.outputs.audit_controller_ref }}"
+            for attempt in 1 2 3; do
+              if timeout -k 10s 120s git push origin "HEAD:${{ steps.request.outputs.audit_controller_ref }}"; then break; fi
+              [ "$attempt" -lt 3 ] || { echo "::error::Publish failed after 3 attempts"; exit 1; }
+              timeout -k 10s 120s git pull --rebase origin "${{ steps.request.outputs.audit_controller_ref }}"
+            done
           fi
+
+      - name: Wake discovery chat
+        if: steps.routing.outputs.effective_hold != 'true' && steps.routing.outputs.stale != 'true' && steps.controller.outputs.discovery_wake_chat_key != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "${{ steps.request.outputs.campaign_id }}" | tr -c 'A-Za-z0-9._-' '_')"
+          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content')"
+          printf '%s' "$encoded" | base64 -d > /tmp/discovery-registration.json
+          reviewer="${{ steps.controller.outputs.discovery_wake_chat_key }}"
+          case "$reviewer" in reviewer-2|reviewer-3L) ;; *) echo "::error::Wrong discovery reviewer"; exit 1;; esac
+          chat="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // empty' /tmp/discovery-registration.json)"
+          [[ "$chat" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$chat" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || { echo "::error::No assigned discovery chat"; exit 1; }
+          # Watchdog Lite gate tracks currentAssignment, not discovery.activeUnitId.
+          # Disable it until discovery-aware gating is implemented; 30-minute re-push covers lost runs.
+          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="${{ steps.controller.outputs.discovery_wake_id }}" \
+            -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
+            -f phase_id="${{ steps.controller.outputs.discovery_wake_phase_id }}" \
+            -f mode=resume_existing \
+            -f chat_url="$chat" \
+            -f wake_message_b64="${{ steps.controller.outputs.discovery_wake_message_b64 }}" \
+            -f watchdog_enabled=false \
+            -f worker_role=reviewer \
+            -f gate_mode=LITE \
+            -f gate_repository=CurveYield2/Audit-Controller \
+            -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
+            -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
+            -f gate_expected_phase_id="${{ steps.controller.outputs.discovery_wake_phase_id }}" \
+            -f gate_expected_milestone_id="${{ steps.controller.outputs.discovery_wake_milestone_id }}" \
+            -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN
 
       - name: Resolve active reviewer chat
         id: chat
