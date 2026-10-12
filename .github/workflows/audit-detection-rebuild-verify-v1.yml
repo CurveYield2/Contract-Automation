@@ -46,14 +46,6 @@ jobs:
           timeout -k 10s 900s node --test "${files[@]}"
       - name: Validate V7 runner manifest pin
         run: timeout -k 10s 120s npm run v7:manifest -- --check
-      - name: T7 temporary prove four stale native-fuzz expectations on unmodified main
-        if: github.event.pull_request.number == 654
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/adr-main-baseline
-          cp -a .git /tmp/adr-main-baseline/.git
-          # Read a fresh unmodified main checkout using the standard checkout action below.
       - uses: actions/checkout@v4
         if: github.event.pull_request.number == 654
         with:
