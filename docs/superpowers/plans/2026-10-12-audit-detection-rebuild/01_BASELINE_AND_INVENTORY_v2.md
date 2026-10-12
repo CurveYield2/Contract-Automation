@@ -1,4 +1,4 @@
-# Audit Detection Rebuild v2 — T0–T3: Verification Lane, Taxonomy, Phase 0 Inventory and Assignment Plan
+# Audit Detection Rebuild v2 — T0–T3: Verification Lane, Taxonomy, Phase 0 Inventory and Flow Plan
 
 > **For the implementing agent:** `00_BUILD_CONTRACT_v2.md` applies in full. Do tasks in order. One task = one branch = one PR (T0 also has one small Audit-Controller PR). Every new test file name starts with `adr-` so the T0 workflow runs it automatically.
 
@@ -226,18 +226,20 @@ It exports:
 - `buildCoverageMatrixV1({inventory, taxonomy, discoveryState = null, phase6Results = null})`. It returns `{rows, byContract, byClass, gapCount, label}`.
   - `rows` has one row per (contextId, classId) where the class is required for the context (via `classesForTriggersV1(taxonomy, inventory.payload.triggers[contextId])`).
   - Each row is `{contextId, contract, classId, reviewStatus, testStatus}`.
-  - `reviewStatus` is one of `ACCEPTED`, `DISPUTED`, `NOT_APPLICABLE_ACCEPTED`, `GAP`, `PENDING`:
-    - `PENDING` when `discoveryState` is null;
-    - `ACCEPTED` when the challenger accepted the context and the class check was `SUPPORTED` or `CONCERN`;
-    - `NOT_APPLICABLE_ACCEPTED` when the challenger accepted a `NOT_APPLICABLE` check;
-    - `DISPUTED` when the challenger disputed it;
-    - `GAP` when the context is listed in `discoveryState.gaps`.
-  - `testStatus` is one of `PASSED`, `PROPERTY_FAILED`, `INCONCLUSIVE`, `NOT_ACHIEVED`, `NOT_REQUIRED`, `PENDING`:
-    - `NOT_REQUIRED` when the class has `testRequired:false` or the review is `NOT_APPLICABLE_ACCEPTED`;
-    - otherwise taken from `phase6Results[obligationId]` for the matching baseline obligation;
+  - `discoveryState` is `{reviewChecks: {<contextId>: {<classId>: assessment}}, attackContradictions: [{contextId, classId}], gaps: [contextId]}`. T5 builds it from the accepted reviewer-2 submissions and the attacker's paths.
+  - `reviewStatus` is one of `ACCEPTED`, `CONTRADICTED`, `NOT_APPLICABLE_CLAIMED`, `GAP`, `PENDING`:
+    - `PENDING` when `discoveryState` is null.
+    - `GAP` when the context is in `gaps`.
+    - `CONTRADICTED` when the (contextId, classId) pair is in `attackContradictions`.
+    - `NOT_APPLICABLE_CLAIMED` when reviewer-2's assessment is `NOT_APPLICABLE`.
+    - `ACCEPTED` otherwise, meaning the check is `SUPPORTED`, `CONCERN` or `UNRESOLVED`. Candidates and unresolved items are carried by reconciliation, not by this matrix.
+  - `testStatus` is one of `PASSED`, `PROPERTY_FAILED`, `NOT_APPLICABLE_CONFIRMED`, `INCONCLUSIVE`, `NOT_ACHIEVED`, `NOT_REQUIRED`, `PENDING`:
+    - `NOT_REQUIRED` when the class has `testRequired:false`.
     - `PENDING` when `phase6Results` is null.
-  - `label` is `PARTIAL_COVERAGE` if any row has `reviewStatus` in {`GAP`, `DISPUTED`, `PENDING`} or `testStatus` in {`NOT_ACHIEVED`, `INCONCLUSIVE`, `PENDING`}. Otherwise it is `FULL_COVERAGE`.
-- `renderCoverageMarkdownV1(matrix)`: a deterministic markdown table per contract (columns: class, contexts, accepted, disputed, gaps, tests passed, property failures, not achieved), then the `label`.
+    - Otherwise it is taken from `phase6Results[obligationId]` for the matching baseline obligation.
+  - `label` is `PARTIAL_COVERAGE` if any row has `reviewStatus` in {`GAP`, `CONTRADICTED`, `PENDING`}, or `testStatus` in {`NOT_ACHIEVED`, `INCONCLUSIVE`, `PENDING`}. Otherwise it is `FULL_COVERAGE`.
+  - The Phase 10 matrix is built after reconciliation and testing. A `CONTRADICTED` row stays `CONTRADICTED` only when the related Phase 6 obligation was not `PASSED`; T7 passes that information in `phase6Results`.
+- `renderCoverageMarkdownV1(matrix)`: a deterministic markdown table per contract, with columns class, contexts, accepted, contradicted, not-applicable claims, gaps, tests passed, property failures, not achieved. The `label` follows the table.
 
 ### T1.4 Tests
 
@@ -253,7 +255,8 @@ It exports:
 2. With all contexts accepted and all tests passed, the label is `FULL_COVERAGE`.
 3. One gap context makes the label `PARTIAL_COVERAGE` and the gap appears in `byContract`.
 4. `REVIEW_ONLY` classes always get `NOT_REQUIRED`.
-5. Shuffled input arrays produce the same `digestCanonicalV1(matrix)`.
+5. An attacker contradiction whose obligation later `PASSED` does not make the label partial. Without that pass, it does.
+6. Shuffled input arrays produce the same `digestCanonicalV1(matrix)`.
 
 **Done when:** both test files are green in the T0 workflow and the existing regression step is green.
 
@@ -479,79 +482,132 @@ await fs.writeFile(path.join(outputRoot,'DEPLOYED_STATE_SNAPSHOT_v1.json'), JSON
 
 ---
 
-## T3 — Phase 0 assignment plan and integration obligations
+## T3 — Phase 0 flow plan: flows, review units, attack units and integration questions
 
 **Goal:** before any reviewer starts, Phase 0 computes:
-- the bounded lane partition;
-- the capacity numbers;
-- the integration obligations that cover cross-contract behaviour and the boundaries with dependency code.
+- every end-to-end **flow** through the system;
+- reviewer-2's **review units** (built from flows, so cross-contract paths stay together);
+- the attacker's **attack units** (one per connected group of contracts);
+- the cross-contract **integration questions** the attacker must answer.
+
+Nothing here limits what a reviewer may read or cite (00 D11). Units only bound how many rows one submission must fill.
 
 **Read first:**
-- `scripts/lite-phase0-finalize-v1.mjs` and `scripts/lite-phase0-finalize-no-telemetry-v1.mjs`; search `const required=` or `required(`, and the place the receipt is sealed.
+- `scripts/lite-phase0-finalize-v1.mjs` and `scripts/lite-phase0-finalize-no-telemetry-v1.mjs`: search `const required=` or `required(`, and the place the receipt is sealed.
 
-### T3.1 Create `packages/github-native-sim/src/adr-assignment-plan-v1.mjs`
+### T3.1 Create `packages/github-native-sim/src/adr-flow-plan-v1.mjs`
 
-Export `buildAssignmentPlanV1({inventory, facts, snapshot = null, limits = DEFAULT_LIMITS})`, where:
+Export `buildFlowPlanV1({inventory, facts, snapshot = null, limits = DEFAULT_LIMITS})`, where:
 
 ```js
-export const DEFAULT_LIMITS = Object.freeze({maxContextsPerAssignment: 40, maxPrimaryLinesPerAssignment: 1500, maxContractsPerAssignment: 3, maxObligationsPerIntegrationAssignment: 10});
+export const DEFAULT_LIMITS = Object.freeze({maxPrimaryContextsPerUnit: 40, maxFlowDepth: 8, maxIntegrationQuestionsPerAttackUnit: 15});
 ```
 
-It returns an artifact with `schemaVersion: "curveyield-assignment-plan-v1"` and a payload of `{limits, assignments, integrationObligations, gaps, capacity}`. Rules:
+It returns an artifact with `schemaVersion: "curveyield-flow-plan-v1"` and a payload of `{limits, flows, clusters, reviewUnits, attackUnits, integrationQuestions, gaps, capacity}`. The rules are below.
 
-1. **Reviewable contexts:** contexts with `scopeTier` `IN_SCOPE` or `INHERITED_DEPENDENCY`.
-2. **Grouping:** group contexts by `qualifiedContainer` (contract or library), sorted by `path`, then by name.
-3. **Filling:** fill assignments greedily in that order. Start a new assignment when adding the next container would exceed `maxContractsPerAssignment`, or when adding the next context would exceed `maxContextsPerAssignment` or `maxPrimaryLinesPerAssignment` (sum of `lineEnd - lineStart + 1`).
-   - Split a single large container at context boundaries.
-   - Never split one context.
-   - A single context larger than `maxPrimaryLinesPerAssignment` gets its own assignment with `oversize:true`. This is allowed and is not an error.
-4. **Lane copies:** for every partition `k` create three assignments with the same `contextIds`: `A-<k>`, `B-<k>` and `C-<k>` (3 digits, starting at 001), each with `{assignmentId, lane: 'A'|'B'|'CHALLENGE', contextIds, containers, primaryLineCount, oversize}`. Lanes A and B must have identical partitions.
-5. **Integration obligations**, one per item below, with ids `IOB-0001`… in this order:
-   1. each unordered pair of in-scope contracts connected by `crossContractEdges`;
-   2. each in-scope contract with `dependencyEdges` (one obligation per contract and dependency type);
-   3. each `siblingGroups` entry with `asymmetric:true`;
-   4. each in-scope contract with `valueFlows` to more than one distinct contract;
-   5. each guard-table row with `hasGuard:false` and `STATE_WRITE_EXTERNAL` (an "unguarded state change" obligation);
-   6. if the snapshot `status` is `CAPTURED`, one obligation `"Reconcile deployed owners/roles/allowlists with intended configuration"`; and in that case add trigger `DEPLOY_ROLE_STATE` to every `CONSTRUCTOR` context of a deployed contract.
+#### 1. Reviewable contexts
 
-   Each obligation is `{obligationId, kind, contracts, contextIds, evidence: <the facts rows that created it>, question: <one sentence from the templates below>}`. Question templates, by item number:
-   1. "Do the calls between {A} and {B} preserve each contract's invariants and authorization assumptions in every order and failure case?"
-   2. "Are {A}'s assumptions about {Dep} (return values, reentrancy, rounding, access control) correct?"
-   3. "Is the guard difference on {signature} across {members} intended, and is the unguarded variant safe?"
-   4. "Is value conserved across all outgoing value flows of {A}?"
-   5. "Who may call {signature} on {A}, and is that intended?"
-   6. "Do the deployed owners, roles and allowlists match the intended configuration?"
-6. **Integration assignments:** chunk the integration obligations into `I-<k>` assignments of at most `maxObligationsPerIntegrationAssignment`, lane `INTEGRATION`.
-7. **Gaps:** every `FILE_FALLBACK` context and every inventory limitation `INVENTORY_INCOMPLETE` is copied into `gaps` with `code: 'INVENTORY_INCOMPLETE'`. Gaps do not stop planning.
-8. **Capacity:** `capacity = {laneAAssignments, laneBAssignments, challengeAssignments, integrationAssignments, totalAssignments, reviewableContexts, integrationObligations}`.
-9. **Determinism:** reversed inputs must produce identical output.
+Contexts with `scopeTier` `IN_SCOPE` or `INHERITED_DEPENDENCY`.
+
+#### 2. Entry points
+
+Every reviewable context that meets all of these:
+- kind `FUNCTION`, `FALLBACK`, `RECEIVE` or `INHERITED_DEPENDENCY`;
+- visibility `external` or `public`;
+- has trigger `STATE_WRITE_EXTERNAL`, `PAYABLE` or `EXTERNAL_CALL`.
+
+Sort them by `path`, then `lineStart`.
+
+#### 3. Flows
+
+For each entry point, build the **flow**:
+- Start at the entry point.
+- Follow `internalCalls` (and modifier definitions).
+- Follow every `crossContractEdges` row from a context in the flow: add every context of the target contract whose `canonicalSignature` matches the called `memberName` (any overload). An interface-typed target resolves to every `IN_SCOPE` contract implementing that interface.
+- Stop at `maxFlowDepth` hops.
+- Record `{flowId: "FLOW-<4 digits>", entryContextId, contexts: [contextIds in first-visit order], contracts: [sorted qualified names], crossContract: <contracts.length > 1>, depthLimited: boolean}`.
+
+A flow that reaches the depth limit is still valid; it records `depthLimited:true` and the attacker sees it.
+
+#### 4. Clusters
+
+Contracts connected by any `crossContractEdges` (treated as undirected), any `valueFlows` between them, or shared inheritance of an `IN_SCOPE` base form one **cluster**, computed as connected components. Each cluster is `{clusterId: "CL-<3 digits>", contracts, flowIds}`. Sort clusters by their first contract path.
+
+#### 5. Review units for reviewer-2 (F units)
+
+- Go through clusters in order. Inside a cluster, go through its flows in order.
+- A context is **primary** in the first flow that reaches it. Later flows list it as context only.
+- Add flows to the current unit until adding the next flow's new primary contexts would exceed `maxPrimaryContextsPerUnit`. Then start a new unit.
+- **Never split a flow across units.** A single flow with more new primary contexts than the limit gets its own unit with `oversize:true`.
+- **Never put two clusters into one unit.**
+- Each unit is `{unitId: "F-<3 digits>", role: "FLOW_REVIEW", clusterId, flowIds, primaryContextIds, readContextIds: <all contexts of its flows>, oversize}`.
+
+#### 6. Residual units (R units)
+
+Reviewable contexts that are primary in no flow, such as unused helpers, view functions, constants and getters, are grouped by `qualifiedContainer` into units `{unitId: "R-<3 digits>", role: "RESIDUAL_REVIEW", primaryContextIds, readContextIds: <all contexts of the same contracts>}` of at most `maxPrimaryContextsPerUnit`.
+
+#### 7. Integration questions
+
+One `IOB-<4 digits>` per item below, in this order:
+1. each unordered pair of in-scope contracts joined by `crossContractEdges`;
+2. each in-scope contract with `dependencyEdges` (one per contract and dependency type);
+3. each `siblingGroups` entry with `asymmetric:true`;
+4. each in-scope contract with `valueFlows` to more than one distinct contract;
+5. each guard-table row with `hasGuard:false`;
+6. each flow with `crossContract:true` that also contains `EXTERNAL_CALL_BEFORE_STATE_WRITE` or `ARBITRARY_TARGET_CALL` anywhere;
+7. if the snapshot `status` is `CAPTURED`, one question "Reconcile deployed owners, roles and allowlists with the intended configuration". In that case also add trigger `DEPLOY_ROLE_STATE` to the `CONSTRUCTOR` contexts of deployed contracts.
+
+Each question is `{obligationId, kind, clusterId, contracts, contextIds, evidence, question}`. Use these question templates, by item number:
+1. "Do the calls between {A} and {B} preserve each contract's invariants and authorization assumptions in every order, re-entry and failure case?"
+2. "Are {A}'s assumptions about {Dep} (return values, callbacks, rounding, access control) correct?"
+3. "Is the guard difference on {signature} across {members} intended, and is the unguarded variant exploitable?"
+4. "Is value conserved across all outgoing value flows of {A}?"
+5. "Who can call {signature} on {A}, and what can they achieve with it?"
+6. "Can an attacker re-enter or redirect {flowId} across {contracts} to break state or steal value?"
+7. "Do the deployed owners, roles and allowlists match the intended configuration?"
+
+#### 8. Attack units for the attacker reviewer (X units)
+
+- There is one unit per cluster: `{unitId: "X-<3 digits>", role: "ATTACK", clusterId, flowIds: <all flows of the cluster>, contracts, integrationQuestionIds: <the cluster's IOBs>}`.
+- If a cluster has more than `maxIntegrationQuestionsPerAttackUnit` questions, split it into consecutive X units for the same cluster, each listing all flows but only its slice of questions.
+- Questions without a cluster (pure dependency questions) join the unit of the contract's cluster.
+
+#### 9. Gaps
+
+Every `FILE_FALLBACK` context and every `INVENTORY_INCOMPLETE` limitation goes into `gaps` with `code: 'INVENTORY_INCOMPLETE'`. Fallback contexts also become R units, so they are still reviewed.
+
+#### 10. Capacity and determinism
+
+- `capacity = {flows, crossContractFlows, clusters, flowReviewUnits, residualUnits, attackUnits, reviewableContexts, integrationQuestions}`.
+- Reversed inputs must produce identical output.
 
 ### T3.2 Wire into both Phase 0 finalizers
 
 In `scripts/lite-phase0-finalize-v1.mjs` and `scripts/lite-phase0-finalize-no-telemetry-v1.mjs`, just before the receipt is sealed (search for where `validation.status` is set to `PASS`):
 
 1. Compute the policy as in T2.5.
-2. If it is non-null:
-   - read `evidence/review-inventory/REVIEW_INVENTORY_v1.json`, `SYSTEM_FACTS_v1.json` and (optionally) `DEPLOYED_STATE_SNAPSHOT_v1.json`;
+2. If the policy is non-null:
+   - read `evidence/review-inventory/REVIEW_INVENTORY_v1.json`, `SYSTEM_FACTS_v1.json` and, optionally, `DEPLOYED_STATE_SNAPSHOT_v1.json`;
    - build the plan;
-   - write `evidence/review-inventory/ASSIGNMENT_PLAN_v1.json`;
-   - add `{role:'ADR_REVIEW_INVENTORY', path, sha256}` references for all present review-inventory files to the receipt's evidence list, in the same structure the finalizer uses for its other evidence references.
-3. If the inventory file is missing or `complete:false`, still write the plan (its `gaps` record the problem) and still seal.
-4. If plan building throws, write a plan with empty assignments, one gap `{code:'PLAN_BUILD_ERROR', detail}` and still seal.
+   - write `evidence/review-inventory/FLOW_PLAN_v1.json`;
+   - add `{role:'ADR_REVIEW_INVENTORY', path, sha256}` references for all present review-inventory files to the receipt's evidence list, using the same structure the finalizer uses for its other evidence references.
+3. If the inventory file is missing or has `complete:false`, still write the plan (its `gaps` record the problem) and still seal.
+4. If plan building throws, write a plan with empty units and one gap `{code:'PLAN_BUILD_ERROR', detail}`, and still seal.
 
 Phase 0 must never be blocked by T2 or T3 artifacts.
 
 ### T3.3 Tests
 
-`packages/github-native-sim/test/adr-assignment-plan-v1.test.mjs`. Synthetic inventories built in the test:
-1. 30 contracts with 5 contexts each: every context appears exactly once in A, once in B and once in C, and A/B/C partitions are identical.
-2. A single container with 41 contexts is split into two assignments.
-3. One 2000-line context gets an assignment with `oversize:true`.
-4. A `FILE_FALLBACK` context appears in `gaps` and in an assignment.
-5. Sibling asymmetry produces an obligation.
-6. An unguarded `STATE_WRITE_EXTERNAL` row produces an obligation.
-7. 25 integration obligations give 3 `I-` assignments.
+`packages/github-native-sim/test/adr-flow-plan-v1.test.mjs`, using synthetic inventories built in the test:
+
+1. Contracts A → B → C chained by external calls give one flow from A's entry point containing contexts of A, B and C, with `crossContract:true` and a single cluster. **The flow is never split across units.**
+2. 30 connected contracts: every reviewable context is primary in exactly one F or R unit, and no unit mixes clusters.
+3. One flow with 60 new primary contexts gets its own unit with `oversize:true`.
+4. An unused private helper becomes an R unit.
+5. Two unconnected groups give two clusters and two X units.
+6. Sibling asymmetry, an unguarded state-changing function and a cross-contract re-entry flow each produce an integration question in the right cluster's X unit.
+7. 40 questions in one cluster give 3 X units, each listing all of the cluster's flows.
 8. Reversed inputs give an identical digest.
-9. Changing limits changes the plan.
+9. A `FILE_FALLBACK` context appears in `gaps` and in an R unit.
 
 **Done when:** the test file is green in the T0 workflow and the regression step is green.

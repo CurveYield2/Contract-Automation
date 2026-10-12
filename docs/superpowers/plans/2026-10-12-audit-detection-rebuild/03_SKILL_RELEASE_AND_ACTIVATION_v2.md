@@ -183,32 +183,38 @@ The full V7 infrastructure qualification was retired on 2026-10-11 (see `.github
 
 ### T10.3 Rejection-matrix test
 
-Create `packages/github-native-sim/test/adr-rejection-matrix-v1.test.mjs`. It has one `test()` per row below. Each calls the named module function with a minimal synthetic input and asserts the result.
+Create `packages/github-native-sim/test/adr-rejection-matrix-v1.test.mjs`. It has one `test()` per row below. Each test calls the named module function with a minimal synthetic input and asserts the expected result.
 
 | Row | Function | Expected |
 |---|---|---|
-| 30 contracts, 2 accepted lane assignments, rest invalid 3× | `advanceDiscoveryV1` loop | 28 contracts' contexts in `gaps`; summary label `PARTIAL_COVERAGE`; campaign reaches Phase 4 (not stuck) |
-| Internal/private helper exists | `buildReviewInventoryV1` | helper is a context with triggers |
-| Inherited base function in 2 contracts | `buildReviewInventoryV1` | one context, `effectiveIn` has both |
-| Same boilerplate evidence in 4 contexts | `validateLaneSubmissionV1` | `REPEATED_EVIDENCE` |
-| Anchor outside context | `validateLaneSubmissionV1` | `ANCHOR_OUT_OF_RANGE` |
-| CONCERN without candidate | `validateLaneSubmissionV1` | `CONCERN_WITHOUT_CANDIDATE` |
-| Lane B packet | `buildAssignmentPacketV1` | no hypotheses path, no lane A path |
-| Lanes disagree, challenger says AGREE | `validateChallengeSubmissionV1` | `LANE_COMPARISON_WRONG` |
-| Stale assignment request | `advanceDiscoveryV1` | `DISCOVERY_STALE_REQUEST`, no state change |
-| Same submission bytes resubmitted | `advanceDiscoveryV1` | attempts unchanged |
-| Zero candidates, auth + fee surfaces | `deriveBaselineObligationsV1` | `ACCESS_CONTROL` and `ACCOUNTING_MATH` obligations |
-| N/A claimed but not accepted | `deriveBaselineObligationsV1` | obligation kept |
-| Gap context | `deriveBaselineObligationsV1` | obligation kept, `HIGH` |
-| PASSED with unparseable ledger | Phase 6 validation | deficiency |
-| PASSED with `toolInvoked:null` | Phase 6 validation | deficiency |
-| NOT_ACHIEVED/ROUNDS_EXHAUSTED with 2 rounds | Phase 6 validation | deficiency |
-| PROPERTY_FAILED absent from Phase 8 | Phase 8 validation | deficiency |
-| Verdict text without coverage label | Phase 10 validation | deficiency |
-| v11-bound campaign at Phase 3 PASS | controller | same-reviewer Phase 4, no discovery files |
-| Phase 0 inventory build throws | Phase 0 block | inventory written with `complete:false`, Phase 0 not failed |
-| Frozen v11 file tampered | `resolveFrozenAuthorityFileV1` | throws |
-| Critical defect found but rated Medium | `scoreQualificationV1` | counted in `criticalHighMisses` |
+| A → B → C contracts chained by external calls | `buildFlowPlanV1` | One flow spans all three; it is never split across units; one cluster; one X unit |
+| 30 contracts; 2 units accepted, the rest invalid 3× | `advanceDiscoveryV1` loop | The rest are recorded as gaps; label `PARTIAL_COVERAGE`; campaign reaches Phase 4 (not stuck) |
+| Internal/private helper exists | `buildReviewInventoryV1` | Helper is a context with triggers |
+| Inherited base function in 2 contracts | `buildReviewInventoryV1` | One context; `effectiveIn` lists both |
+| Anchor in a different contract than the reviewed context | `validateFlowReviewSubmissionV1` | Accepted |
+| Anchor beyond the file's last line | `validateFlowReviewSubmissionV1` | `ANCHOR_INVALID` |
+| Same boilerplate evidence in 4 contexts | `validateFlowReviewSubmissionV1` | `REPEATED_EVIDENCE` |
+| CONCERN without a candidate | `validateFlowReviewSubmissionV1` | `CONCERN_WITHOUT_CANDIDATE` |
+| Attack unit with one flow never attacked | `validateAttackSubmissionV1` | `FLOW_NOT_ATTACKED` |
+| VIABLE path without a simulation idea | `validateAttackSubmissionV1` | `SIMULATION_IDEA_REQUIRED` |
+| X unit packet | `buildUnitPacketV1` | No hypotheses path, no reviewer-2 submission paths |
+| VIABLE attack inside a context reviewer-2 marked SUPPORTED | `buildDiscoverySummaryV1` | `ATTACK_CONTRADICTS_REVIEW` item |
+| Stale unit request | `advanceDiscoveryV1` | `DISCOVERY_STALE_REQUEST`; no state change |
+| Same submission bytes resubmitted | `advanceDiscoveryV1` | Attempts unchanged |
+| Zero candidates; authorization and fee surfaces | `deriveBaselineObligationsV1` | `ACCESS_CONTROL` and `ACCOUNTING_MATH` obligations |
+| Reviewer-2 claims NOT_APPLICABLE | `deriveBaselineObligationsV1` | Obligation kept |
+| Gap context | `deriveBaselineObligationsV1` | Obligation kept, `HIGH` |
+| PASSED with an unparseable ledger | Phase 6 validation | Deficiency |
+| PASSED with `toolInvoked:null` | Phase 6 validation | Deficiency |
+| DISPROVEN resting only on Phase 5 NOT_REPRODUCED | Phase 6 validation | Deficiency |
+| CONFIRMED with a failing control assertion | Phase 6 validation | Deficiency |
+| NOT_ACHIEVED/ROUNDS_EXHAUSTED with 2 rounds | Phase 6 validation | Deficiency |
+| PROPERTY_FAILED or P6-NEW absent from Phase 8 | Phase 8 validation | Deficiency |
+| Verdict text without the coverage label | Phase 10 validation | Deficiency |
+| v11-bound campaign at Phase 3 PASS | Controller | Same-reviewer Phase 4; no discovery files |
+| Phase 0 inventory build throws | Phase 0 block | Inventory written with `complete:false`; Phase 0 not failed |
+| Frozen v11 file tampered | `resolveFrozenAuthorityFileV1` | Throws |
+| Critical defect found but rated Medium | `scoreQualificationV1` | Counted in `criticalHighMisses` |
 
 ### T10.4 Close-out
 
@@ -220,54 +226,69 @@ Create `packages/github-native-sim/test/adr-rejection-matrix-v1.test.mjs`. It ha
 
 ## Appendix A — Phase 4 (v12) files
 
-**A1. `phases/phase-4/PHASE_04_SCHEMA_v1.json`.** Keep every key from v11 except the following changes:
-- `"title": "Lite Combined Phases 2-5 - Discovery Reconciliation and Specialist Review"`.
-- Replace `actions.step-1` with:
+**A1. `phases/phase-4/PHASE_04_SCHEMA_v1.json`.** Keep every key from v11 except the following:
+
+1. Set `"title": "Lite Combined Phases 2-5 - Flow Review, Attack Reconciliation and Specialist Review"`.
+2. Replace `actions.step-1` with:
 
 ```json
 "step-1": {
-  "title": "Reconcile discovery lane, challenge and integration results",
+  "title": "Reconcile flow review and attacker results",
   "formPath": "work/phase-04/PHASE_04_WORK_FORM_v1.json",
-  "section": "Step 1 Input — Reconcile discovery lane, challenge and integration results",
+  "section": "Step 1 Input — Reconcile flow review and attacker results",
   "fields": [
     {
       "name": "discoveryReconciliationRecords",
       "type": "REQUIRED_RECORD_LIST",
       "consumers": ["phase-5", "phase-6", "phase-8"],
-      "itemRequiredFields": ["recordKey", "contextIds", "sourceAnchor", "origin", "laneAFinding", "laneBFinding", "challengeDecision", "reconciliation", "disposition", "candidateTempKeyOrNone", "rationale"],
+      "itemRequiredFields": ["recordKey", "contextIds", "sourceAnchor", "origin", "reviewerFinding", "attackerFinding", "reconciliation", "disposition", "candidateTempKeyOrNone", "rationale"],
       "itemFieldAllowedValues": {
-        "origin": ["LANE_CANDIDATE", "LANE_UNRESOLVED", "DISPUTED_ROW", "LANE_DISAGREEMENT", "INTEGRATION_CONCERN", "COVERAGE_GAP"],
+        "origin": ["REVIEWER_CANDIDATE", "REVIEWER_UNRESOLVED", "ATTACK_FINDING", "ATTACK_CONTRADICTS_REVIEW", "INTEGRATION_CONCERN", "COVERAGE_GAP"],
         "disposition": ["CANDIDATE_CREATED", "RESOLVED_NO_ISSUE", "COVERAGE_GAP_ACCEPTED"]
       },
-      "controllerPrefillFields": ["recordKey", "contextIds", "sourceAnchor", "origin", "laneAFinding", "laneBFinding", "challengeDecision"]
+      "controllerPrefillFields": ["recordKey", "contextIds", "sourceAnchor", "origin", "reviewerFinding", "attackerFinding"]
     }
   ],
-  "controllerPrefillFields": ["recordKey", "contextIds", "sourceAnchor", "origin", "laneAFinding", "laneBFinding", "challengeDecision"]
+  "controllerPrefillFields": ["recordKey", "contextIds", "sourceAnchor", "origin", "reviewerFinding", "attackerFinding"]
 }
 ```
 
-- In `derivedOutputs[0].selectors` and `bookkeepingMappings.graphRecordPaths`, replace `actions.step-1.outputs.sourceReviewRecords` with `actions.step-1.outputs.discoveryReconciliationRecords`.
-- In `controllerAutomationInputs`, replace the entry named `expectedSourceReviewKeys` with `{"name": "expectedDiscoveryRecordKeys", "type": "CONTROLLER_PREFILLED_READ_ONLY_LIST", "consumers": ["phase-4-controller-validation"], "source": "controller discovery summary"}`.
+3. In `derivedOutputs[0].selectors` and in `bookkeepingMappings.graphRecordPaths`, replace `actions.step-1.outputs.sourceReviewRecords` with `actions.step-1.outputs.discoveryReconciliationRecords`.
+4. In `controllerAutomationInputs`, replace `expectedSourceReviewKeys` with `{"name": "expectedDiscoveryRecordKeys", "type": "CONTROLLER_PREFILLED_READ_ONLY_LIST", "consumers": ["phase-4-controller-validation"], "source": "controller discovery summary"}`.
 
 **A2. `phases/phase-4/PHASE_CONTRACT.json`.**
-- Set `phase.title` to the A1 title.
-- Replace step 1 with `{"step": 1, "action": "Reconcile discovery lane, challenge and integration results", "instruction": "Disposition every controller-prefilled reconciliation record: create a candidate, resolve it with source-anchored reasoning, or accept a coverage gap only for COVERAGE_GAP records. Do not re-review accepted contexts.", "condition": null, "outputDestination": {"document": "work/phase-04/PHASE_04_WORK_FORM_v1.json", "section": "Step 1 Input — Reconcile discovery lane, challenge and integration results", "schema": "phases/phase-4/PHASE_04_SCHEMA_v1.json#actions.step-1", "requiredFields": ["discoveryReconciliationRecords"]}, "resources": ["./PHASE_04_SCHEMA_v1.json", "./resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json", "../../discovery/RECONCILIATION_GUIDE.md"]}`.
-- In `inputs.required`, replace the source-review-rows item with "Controller-generated discovery summary (lane A, lane B, challenge and integration results with gaps)".
 
-**A3. `phases/phase-4/resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json`.** Replace `actions.step-1` with `{"section": "Step 1 Input — Reconcile discovery lane, challenge and integration results", "outputs": {"discoveryReconciliationRecords": [{"recordKey": "<REQUIRED>", "contextIds": "<REQUIRED>", "sourceAnchor": "<REQUIRED>", "origin": "<REQUIRED>", "laneAFinding": "<REQUIRED>", "laneBFinding": "<REQUIRED>", "challengeDecision": "<REQUIRED>", "reconciliation": "<REQUIRED>", "disposition": "<REQUIRED>", "candidateTempKeyOrNone": "<REQUIRED>", "rationale": "<REQUIRED>"}]}}`.
+1. Set `phase.title` to the A1 title.
+2. Replace step 1 with:
+
+```json
+{"step": 1, "action": "Reconcile flow review and attacker results", "instruction": "Disposition every controller-prefilled reconciliation record: create a candidate, resolve it with source-anchored reasoning (for attacker findings, name the blocking control), or accept a coverage gap only for COVERAGE_GAP records. Do not redo accepted flow-review rows.", "condition": null, "outputDestination": {"document": "work/phase-04/PHASE_04_WORK_FORM_v1.json", "section": "Step 1 Input — Reconcile flow review and attacker results", "schema": "phases/phase-4/PHASE_04_SCHEMA_v1.json#actions.step-1", "requiredFields": ["discoveryReconciliationRecords"]}, "resources": ["./PHASE_04_SCHEMA_v1.json", "./resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json", "../../discovery/RECONCILIATION_GUIDE.md"]}
+```
+
+3. In `inputs.required`, replace the source-review-rows item with "Controller-generated discovery summary (reviewer-2 flow review, attacker reviewer results, integration answers and gaps)".
+
+**A3. `phases/phase-4/resources/PHASE_04_WORK_FORM_TEMPLATE_v1.json`.** Replace `actions.step-1` with one `discoveryReconciliationRecords` item that contains all ten A1 item fields, each set to `"<REQUIRED>"`, under the section `"Step 1 Input — Reconcile flow review and attacker results"`.
 
 **A4. `phases/phase-4/START_HERE.md`.**
-- Replace the "Step 1" section with:
 
-> ## Step 1 — Reconcile discovery results
-> Before you were woken, two independent discovery lanes reviewed every in-scope context against the defect taxonomy, a challenger checked both, and the challenger reviewed every integration obligation. Read `derived` input `work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json`. The controller has prefilled one record for every lane candidate, unresolved check, dispute, lane disagreement, integration concern and coverage gap. For each record: read the cited source, decide, and fill `reconciliation`, `disposition`, `candidateTempKeyOrNone` and `rationale`. `CANDIDATE_CREATED` requires a matching Step 3 candidate. `RESOLVED_NO_ISSUE` requires source anchors (`path.sol:L<n>`) in `rationale`. `COVERAGE_GAP_ACCEPTED` is allowed only for `COVERAGE_GAP` records, and gaps stay visible in the final report. Do not re-review contexts the challenger accepted without dispute.
+1. Insert this as a new section before Step 1:
 
-- Delete the file `phases/phase-4/resources/PHASE4_MANUAL_COVERAGE_CANDIDATE_REGISTRY.md`. Its bookkeeping instructions contradict the controller-owned bookkeeping rule.
+> ## Before Step 1 — flow review units
+> When Phase 3 passes, the controller sends you flow-review units one at a time in this chat. A unit is one or more end-to-end flows: an entry point traced through every contract it touches. Follow [`discovery/FLOW_REVIEW_START_HERE.md`](../../discovery/FLOW_REVIEW_START_HERE.md) for each unit. You may read and cite any source file. After your units, the attacker reviewer attacks the same system independently. You are then woken for Step 1.
+
+2. Replace the "Step 1" section with:
+
+> ## Step 1 — Reconcile flow review and attacker results
+> Read `work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json`. The controller has prefilled one record for each of these: every candidate and unresolved check from your flow review; every attack the attacker reviewer found viable or uncertain; every attack that contradicts one of your SUPPORTED checks; every integration concern; and every coverage gap. For each record, read the cited source and decide. `CANDIDATE_CREATED` requires a matching Step 3 candidate. `RESOLVED_NO_ISSUE` requires source anchors (`path.sol:L<n>`), and for attacker records it must name the exact control that blocks the attack. `COVERAGE_GAP_ACCEPTED` is allowed only for `COVERAGE_GAP` records. Gaps stay visible in the final report. The master reviews your reconciliation and the attacker's findings.
+
+3. Delete `phases/phase-4/resources/PHASE4_MANUAL_COVERAGE_CANDIDATE_REGISTRY.md`.
 
 ## Appendix B — Phase 6 (v12) files
 
 **B1. `phases/phase-6/PHASE_06_SCHEMA_v1.json`.**
-- Add `actions.step-4`:
+
+1. Set `"executor": "reviewer-3L"` (unchanged) and `"title": "Merged Lite Phases 6-7 - Attacker Testing and Execution Interpretation"`.
+2. Add `actions.step-4`:
 
 ```json
 "step-4": {
@@ -275,104 +296,156 @@ Create `packages/github-native-sim/test/adr-rejection-matrix-v1.test.mjs`. It ha
   "formPath": "work/phase-06/PHASE_06_WORK_FORM_v1.json",
   "section": "Step 4 Input — Agent-guided baseline testing",
   "fields": [
-    {
-      "name": "baselineTestRecords",
-      "type": "REQUIRED_RECORD_LIST",
-      "consumers": ["phase-8", "phase-10"],
-      "itemRequiredFields": ["testGroupId", "contract", "obligationIds", "obligationsDetail", "requestDirectory", "harnessDesign", "dispatchRounds", "requestPaths", "obligationOutcomes", "limitations"],
-      "controllerPrefillFields": ["testGroupId", "contract", "obligationIds", "obligationsDetail", "requestDirectory"]
-    }
+    {"name": "baselineTestRecords", "type": "REQUIRED_RECORD_LIST", "consumers": ["phase-8", "phase-10"],
+     "itemRequiredFields": ["testGroupId", "contract", "obligationIds", "obligationsDetail", "requestDirectory", "harnessDesign", "dispatchRounds", "requestPaths", "obligationOutcomes", "limitations"],
+     "controllerPrefillFields": ["testGroupId", "contract", "obligationIds", "obligationsDetail", "requestDirectory"]}
   ],
   "controllerPrefillFields": ["testGroupId", "contract", "obligationIds", "obligationsDetail", "requestDirectory"]
 }
 ```
 
-- Add `"actions.step-4.outputs.baselineTestRecords"` to the selectors of the derived output whose path is `derived/phase-6/PHASE8_INPUT_v1.json`.
-- Add the same path to `bookkeepingMappings.graphRecordPaths`.
+3. Add `actions.step-5`:
 
-**B2. `phases/phase-6/PHASE_CONTRACT.json`.** Add step 4 with:
-- action `"Agent-guided baseline testing"`;
-- instruction `"For every controller-prefilled test group, design and author harnesses for its obligations, dispatch them through the Phase-6 V7 lane (at most 3 rounds), triage every result from its assertion ledger, and record one outcome per obligation."`;
-- outputDestination section `"Step 4 Input — Agent-guided baseline testing"`, schema pointer `#actions.step-4`, requiredFields `["baselineTestRecords"]`;
-- resources `["./PHASE_06_SCHEMA_v1.json", "./resources/PHASE_06_WORK_FORM_TEMPLATE_v1.json", "../../shared/execution/AGENT_GUIDED_TESTING.md", "../../shared/execution/TECHNICAL_EXECUTION_REQUEST_PLAYBOOK.md"]`.
+```json
+"step-5": {
+  "title": "Prove or disprove candidates and record new findings",
+  "formPath": "work/phase-06/PHASE_06_WORK_FORM_v1.json",
+  "section": "Step 5 Input — Prove or disprove candidates and record new findings",
+  "fields": [
+    {"name": "candidateProofRecords", "type": "REQUIRED_RECORD_LIST", "consumers": ["phase-8", "phase-10"],
+     "itemRequiredFields": ["candidateKey", "sourceAnchor", "phase5Result", "requestDirectory", "verdict", "harnessDesign", "dispatchRounds", "requestPaths", "ledgerRef", "attackAssertionNames", "controlAssertionNames", "reasoning"],
+     "itemFieldAllowedValues": {"verdict": ["CONFIRMED", "DISPROVEN", "INCONCLUSIVE", "PHASE5_DECISIVE"]},
+     "controllerPrefillFields": ["candidateKey", "sourceAnchor", "phase5Result", "requestDirectory"]},
+    {"name": "newCandidateRecords", "type": "REQUIRED_RECORD_LIST", "consumers": ["phase-8"],
+     "itemRequiredFields": ["tempKey", "title", "classId", "description", "anchors", "ledgerRef"]}
+  ],
+  "controllerPrefillFields": ["candidateKey", "sourceAnchor", "phase5Result", "requestDirectory"]
+}
+```
 
-**B3. `phases/phase-6/resources/PHASE_06_WORK_FORM_TEMPLATE_v1.json`.** Add `actions.step-4` with section `"Step 4 Input — Agent-guided baseline testing"` and one `baselineTestRecords` item containing all ten fields set to `"<REQUIRED>"`.
+4. Add `"actions.step-4.outputs.baselineTestRecords"`, `"actions.step-5.outputs.candidateProofRecords"` and `"actions.step-5.outputs.newCandidateRecords"` to the selectors of the derived output `derived/phase-6/PHASE8_INPUT_v1.json`, and to `bookkeepingMappings.graphRecordPaths`.
+
+**B2. `phases/phase-6/PHASE_CONTRACT.json`.** Add steps 4 and 5, matching B1. Each needs `action`, `instruction`, an `outputDestination` (section, schema pointer `#actions.step-4` or `#actions.step-5`, and requiredFields equal to the B1 field names), and resources `["./PHASE_06_SCHEMA_v1.json", "./resources/PHASE_06_WORK_FORM_TEMPLATE_v1.json", "../../shared/execution/AGENT_GUIDED_TESTING.md", "../../shared/execution/TECHNICAL_EXECUTION_REQUEST_PLAYBOOK.md"]`.
+
+- Step 4 instruction: "For every prefilled test group, design and author harnesses for its obligations, dispatch them through the Phase-6 V7 lane (at most 3 rounds), triage every result from its assertion ledger, and record one outcome per obligation."
+- Step 5 instruction: "For every material candidate whose Phase-5 result is not REPRODUCED, run an attack test with a healthy-path control (at most 3 rounds) and record CONFIRMED, DISPROVEN or INCONCLUSIVE; record any new vulnerability found while testing."
+
+**B3. `phases/phase-6/resources/PHASE_06_WORK_FORM_TEMPLATE_v1.json`.** Add `actions.step-4` and `actions.step-5`, with one item per field and every field set to `"<REQUIRED>"`, using the B1 section names.
 
 **B4. `phases/phase-6/START_HERE.md`.**
-- Replace the paragraph starting "Phase 6 performs semantic security interpretation only." with: "Phase 6 interprets the Phase 0 deploy/config evidence and the Phase 5 candidate executions (Steps 1–3), and runs the agent-guided baseline testing of every Phase 6 test group (Step 4). All tests are designed by you; automation only executes and records them."
-- In Step 2, delete the sentences about `PHASE0-BASELINE-*` rows and raw transcripts, because Phase 0 telemetry is retired.
-- Add after Step 3:
+
+1. Change the title to "Phase 6 — Attacker Testing and Execution Interpretation".
+2. Replace the paragraph starting "Phase 6 performs semantic security interpretation only." with:
+
+   "You are the attacker reviewer. You already attacked this system in Phase 4. In Phase 6 you interpret the Phase 0 deploy/config evidence and the Phase 5 candidate runs (Steps 1–3), run the baseline property tests (Step 4), and prove or disprove candidates and record new findings (Step 5). You design every test; automation only executes and records it."
+3. In Step 2, delete the sentences about `PHASE0-BASELINE-*` rows and raw transcripts.
+4. Add after Step 3:
 
 > ## Step 4 — Agent-guided baseline testing
-> Follow [`shared/execution/AGENT_GUIDED_TESTING.md`](../../shared/execution/AGENT_GUIDED_TESTING.md). For each prefilled test group, in priority order: write a short `harnessDesign` (actors and roles, setup starting from the Phase 0 deployed state, properties and assertion names per obligation, fuzz bounds); author the harness with `npm run v7:harness:init` / `v7:harness:validate` conventions; commit the V7 request JSON under the group's `requestDirectory`; push the dispatch request `process/agent-upload/lite-v7-execution/<campaignId>-<testGroupId>-r<round>.json` with `phaseSequence: 6`; after ingestion read `controller/automation/<request>/ASSERTION_LEDGER_v1.json`; triage every failure (real property violation versus harness defect). At most 3 rounds per group. Record one outcome per obligation: `PASSED`, `PROPERTY_FAILED`, `INCONCLUSIVE` or `NOT_ACHIEVED` (reason `ROUNDS_EXHAUSTED`, `NO_EXECUTABLE_SETUP` or `TOOL_UNSUPPORTED`). Never record `PASSED` without a parsed ledger showing your named assertions passing. Every `PROPERTY_FAILED` becomes Phase 8 candidate `P6-PROP-<testGroupId>-<obligationId>`.
+> Follow [`shared/execution/AGENT_GUIDED_TESTING.md`](../../shared/execution/AGENT_GUIDED_TESTING.md). Work through the prefilled test groups in priority order. For each group:
+> - Write a short `harnessDesign`: actors and roles, setup starting from the Phase 0 deployed state, properties and assertion names per obligation, and fuzz bounds.
+> - Author the harness using the `v7:harness:init` / `v7:harness:validate` conventions.
+> - Commit the V7 request JSON under the group's `requestDirectory`.
+> - Push the dispatch request `process/agent-upload/lite-v7-execution/<campaignId>-<folder>-r<round>.json` with `phaseSequence: 6`.
+> - After ingestion, read `controller/automation/<request>/ASSERTION_LEDGER_v1.json` and triage every failure.
+>
+> You have at most 3 rounds per group. Record one outcome per obligation: `PASSED`, `PROPERTY_FAILED`, `NOT_APPLICABLE_CONFIRMED` (with anchors), `INCONCLUSIVE`, or `NOT_ACHIEVED` (with reason `ROUNDS_EXHAUSTED`, `NO_EXECUTABLE_SETUP` or `TOOL_UNSUPPORTED`). Never record `PASSED` without a parsed ledger showing your named assertions passing. Every `PROPERTY_FAILED` becomes Phase 8 candidate `P6-PROP-<testGroupId>-<obligationId>`.
+>
+> ## Step 5 — Prove or disprove candidates; record new findings
+> For every prefilled candidate:
+> - If `phase5Result` is `REPRODUCED`, record `PHASE5_DECISIVE`.
+> - Otherwise, write an attack test plus a healthy-path control under the candidate's `requestDirectory` (at most 3 rounds), then record one of these verdicts:
+>   - `CONFIRMED`: an attack assertion fails because the property is violated, and the controls pass.
+>   - `DISPROVEN`: the attack assertions pass because the attack is blocked, the controls pass, and you name the blocking control with an anchor.
+>   - `INCONCLUSIVE`: state the missing proof.
+>
+> A Phase 5 `NOT_REPRODUCED` alone is never a disproof. Add any vulnerability you discover while testing to `newCandidateRecords` as `P6-NEW-<n>`.
 
 ## Appendix C — New skill files
 
 Create these files in the v12 package with exactly this content.
 
-**C1. `discovery/LANE_A_START_HERE.md`**
+**C1. `discovery/FLOW_REVIEW_START_HERE.md`** (reviewer-2)
 
-> # Discovery Lane A — Requirement-driven review
-> You review one assignment at a time. Your assignment packet lists contexts (one declaration each) with line ranges, required defect classes and the review checks for each class. For every context: read the source and its dependency ranges; write a `summary`; for every required class write a check with `applicability`, `assessment` (`SUPPORTED`, `CONCERN`, `UNRESOLVED`, `NOT_APPLICABLE`), source-specific `evidence` and `anchors` (`path.sol:L<a>-L<b>`, inside the context or its dependency ranges). Every `CONCERN` needs a candidate in the same row. Use the requirements and hypotheses listed in the packet's `inputs`. Write `SUBMISSION_v1.json` at the packet's `submissionPath`, then push the boundary request shown in your wake message. If validation fails, fix only the listed items and push again with `attempt` increased. You have 3 validation attempts per assignment. Copy-pasted evidence across contexts is rejected. Use the GitHub connector app for all repository access.
+> # Flow Review Units
+> Each unit lists one or more flows. A flow is an entry point traced through every contract it touches. The unit also lists the primary contexts you must record, with their required defect classes and review checks. Read every context of every flow, across all contracts, before writing anything. You may read and cite any source file. For each flow, write a `flowNotes` entry describing how value and authority move through it, with anchors. For each primary context, write a `summary` and one check per required class: `applicability`, `assessment` (`SUPPORTED`, `CONCERN`, `UNRESOLVED` or `NOT_APPLICABLE`), source-specific `evidence`, and `anchors` (`path.sol:L<a>-L<b>`, any in-scope file). Every `CONCERN` needs a candidate. Residual units list contexts no flow reaches; review them the same way, with no flow notes. Write `SUBMISSION_v1.json` at the packet's `submissionPath`, then push the boundary request from your wake message. On failed validation, fix only the listed items and push again with `attempt` increased. You have 3 attempts per unit. Copy-pasted evidence across contexts is rejected. Use the GitHub connector app for all repository access.
 
-**C2. `discovery/LANE_B_START_HERE.md`.** Same as C1 except:
-- the title is "Discovery Lane B — Attacker-goal review";
-- the second sentence becomes: "Work top-down: for each protected asset in the packet inputs, ask how an attacker, a privileged-but-not-intended role, or a malicious token/adapter could take, freeze or misdirect it through these contexts, then record per-class checks as in Lane A.";
-- add: "You must not open any other file under `work/phase-04/discovery/` or any file under `work/phase-03/`; independence from Lane A is part of the audit evidence."
+**C2. `discovery/ATTACKER_START_HERE.md`** (attacker reviewer, `reviewer-3L` chat)
 
-**C3. `discovery/CHALLENGER_START_HERE.md`**
+> # Attacker Reviewer — Attack Units
+> You are the dedicated attacker. Each unit is one connected group of contracts, with all its flows, system facts (cross-contract calls, value flows, guard table rows without guards, sibling guard differences) and integration questions. Your goal is to take, freeze, misdirect or inflate the protected assets listed in the packet inputs, or to take control. Attack as:
+> - an unprivileged caller;
+> - a holder of a different role;
+> - a malicious token, adapter or callback;
+> - an MEV searcher;
+> - a careless admin.
+>
+> Every flow must appear in at least one attack path. Record blocked attempts too, naming the exact control that stops them, with an anchor. A `VIABLE` or `UNCERTAIN` path needs a candidate and a `simulationIdea` (transaction sequence and oracle). You will turn it into a real test in Phase 6. Answer every integration question with an assessment, reasoning and anchors. You may read any source file. Do not open `work/phase-03/`, `work/phase-04/` work forms or other units' folders: your independence from reviewer-2 is part of the audit evidence. Submit and resubmit exactly as described in your wake message. You have 3 attempts per unit.
 
-> # Discovery Challenger
-> For each challenge assignment you receive both lanes' accepted submissions for the same contexts (one may be missing). For every context decide `ACCEPT` or `DISPUTE` with a source-specific `reason` and anchors; state `laneComparison` (`AGREE`, `DISAGREE`, `SINGLE_LANE`); add `classDecisions` for every class where a lane said `NOT_APPLICABLE` or the lanes differ. Dispute any check whose evidence does not follow from the cited lines. You do not fix the lanes' work; disputes go to reviewer-2 and the master. Integration assignments: follow `INTEGRATION_START_HERE.md`.
+**C3. `discovery/RECONCILIATION_GUIDE.md`.** One paragraph repeating the A4 Step 1 rules.
 
-**C4. `discovery/INTEGRATION_START_HERE.md`**
+**C4. `shared/execution/AGENT_GUIDED_TESTING.md`**
 
-> # Discovery Integration Review
-> Each obligation asks a cross-contract question (call sequences, dependency assumptions, guard differences between sibling contracts, value flows, unguarded state changes, deployed configuration). For each obligation give `assessment` (`SUPPORTED`, `CONCERN`, `UNRESOLVED`), `reasoning` and anchors in the obligation's contracts. Every `CONCERN` needs a candidate.
-
-**C5. `discovery/RECONCILIATION_GUIDE.md`.** One paragraph repeating the A4 Step 1 rules.
-
-**C6. `shared/execution/AGENT_GUIDED_TESTING.md`**
-
-> # Agent-Guided Testing
-> Automation never designs tests. You design every harness from the obligation list and the Phase 0 deployed state; automation only stages, executes, records the assertion ledger and wakes you. Prefer one harness bundle per test group. Name every assertion so it can be matched in the ledger. Permission-matrix obligations test every actor and role against every state-changing entry point, including callers holding a different role. Reentrancy obligations use a malicious token or adapter. Token obligations cover fee-on-transfer, rebasing, no-return and reverting tokens. Invariant obligations state the conservation or bound being checked. Medusa may be used only through a `MEDUSA_PROPERTY` request you designed. A failing assertion is triaged: a real violation becomes `PROPERTY_FAILED`; a harness defect is fixed in the next round. Stop after 3 rounds per group and record `NOT_ACHIEVED` with the reason.
+> # Agent-Guided Testing (Attacker Reviewer)
+> Automation never designs tests. You design every harness from the obligations, the candidates and the Phase 0 deployed state. Automation only stages it, executes it, records the assertion ledger, and wakes you.
+>
+> Write one harness bundle per test group or candidate. Name every assertion so it can be matched in the ledger. For each obligation type:
+> - Permission-matrix obligations: test every actor and role against every state-changing entry point, including callers that hold a different role.
+> - Reentrancy obligations: use a malicious token or adapter.
+> - Token obligations: cover fee-on-transfer, rebasing, no-return and reverting tokens.
+> - Invariant obligations: state the conservation or bound being checked.
+> - Candidate tests: always pair the attack with a healthy-path control.
+>
+> Use Medusa only through a `MEDUSA_PROPERTY` request you designed. Triage every failing assertion: a real violation is recorded as a failure or confirmation; a harness defect is fixed in the next round. Stop after 3 rounds per folder and record the honest outcome.
 
 ## Appendix D — Edits to existing skill files (in the v12 copy)
 
-1. **`SKILL.md`:**
-   - Set `Release identity: \`Audit_Litemode_v12\`` and `Package revision: \`v12\``, keeping the exact line format, because `run-v1.sh` parses these lines.
-   - In the actor table, add the rows `discovery lane A`, `discovery lane B` and `challenger`, each with scope "Phase 4 discovery assignments (registered chats)".
-   - In the phase map row for Phases 2–5, add "Phase 4 starts with controller-run discovery lanes and challenge; reviewer-2 reconciles."
-   - Add the section "## Coverage model": coverage = contexts × applicable taxonomy classes (`CurveYield2/Contract-Automation/protocol/taxonomy/curveyield-defect-taxonomy-v1.json`) × detection method; gaps are recorded, never relabelled; the final verdict states `FULL_COVERAGE` or `PARTIAL_COVERAGE`.
-   - Add universal rule `[U-COVERAGE-001] Coverage is measured and gaps are disclosed` with that text.
-2. **`shared/policy/UNIVERSAL_RULE_REGISTRY.json`:** add `{"id": "U-COVERAGE-001", "title": "Coverage is measured and gaps are disclosed", "homepageSection": "Coverage model", "scope": "ALL_PHASES"}`.
-3. **`shared/controller/LITE_PHASE_SCHEMA_POLICY.md`:** at the end of hard rule 3, append "Discovery submissions under `work/phase-04/discovery/` are controller-validated assignment files defined by `discovery/*_START_HERE.md`; they are not phase schemas."
-4. **`shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md`:** at the end of "Prohibited bookkeeping sidecars", append "Discovery state, packets, submissions and the discovery summary are controller-owned assignment records, not bookkeeping sidecars."
-5. **`shared/controller/AI_Auditor_Controller.md`, `profiles/AUDIT_INDEPENDENT_REVIEW.md`, `LITE_ORCHESTRATOR_MODE.md`, `docs/USER_GUIDE.md`:** in each topology table or list, add the three discovery roles as in item 1.
-6. **`shared/lenses/SOLO_LENS_ISOLATION_PROTOCOL.md`:** replace the body with "Superseded in v12 by the Phase 4 discovery lanes (`discovery/`). Independence is procedural: separate registered chats, lane B without lane A material or Phase 3 hypotheses. Same-model lanes are disclosed as a limitation."
-7. **`shared/policy/ASSURANCE_PRECISION_CONTROLS.md`:** replace the "Security-surface reconciliation" paragraph with "Phase 0 records every reviewable declaration (review inventory). Phase 4 discovery must accept every context or record it as a gap; gaps are disclosed per contract and class and make the coverage label PARTIAL_COVERAGE."
-8. **`shared/execution/CONTRACT_AUTOMATION_CAPABILITY_MAP.md`:**
-   - mark the rows "Phase-0 broad Medusa randomized baseline" and "Phase-0 ABI accounting telemetry" as `RETIRED (2026-10-11)`;
-   - add the row "Agent-guided Phase 6 testing | DIRECT | reviewer-3L designs; V7 lane executes; assertion ledger recorded | design record, request, ledger".
-9. **`phases/phase-0/START_HERE.md` and `phases/phase-0/PHASE_CONTRACT.json`:**
-   - in step 4 and the evidence list, remove Medusa, telemetry and simulation-baseline items;
-   - describe step 4 as "fork deploy/config using the package's own scripts, then a read-only deployed-state snapshot";
-   - add the four review-inventory artifacts (00 §7.5);
-   - remove "exceeds 100,000 observed calls" from the completion condition;
-   - keep exactly nine steps in the contract, because the validator requires nine.
-10. **`phases/phase-5/PHASE_05_SCHEMA_v1.json` and `phases/phase-5/START_HERE.md`:**
-    - remove the `phase0BaselineSimulation` controller input and the paragraph telling reviewers to inspect it, because it is no longer produced;
-    - remove `\n` literal text artifacts in the Step 3 heading.
-11. **`phases/phase-8/START_HERE.md`:** in Step 2 add "Every Phase 6 `PROPERTY_FAILED` outcome is a candidate with key `P6-PROP-<testGroupId>-<obligationId>`; validate it like any other candidate."
-12. **`phases/phase-10/START_HERE.md`:** in Step 3 add "State the coverage label from `work/phase-10/COVERAGE_MATRIX_v1.json` (`FULL_COVERAGE` or `PARTIAL_COVERAGE`) and the detection-qualification status exactly as printed in the final evidence index."
-13. **`master-review/START_HERE.md`:** in Step 3 add the bullet "every coverage gap and dispute listed in the discovery summary and coverage matrix; a gap may be accepted only with a stated reason, or closed by ordering targeted tests."
-14. **`PACKAGE_PROVENANCE.md`:** append the section "## v12 detection rebuild", listing:
-    - discovery lanes and challenger;
-    - complete Phase 0 review inventory;
-    - candidate-independent baseline obligations tested in Phase 6 by the agent;
-    - coverage matrix and label;
-    - Phase 0 Medusa and telemetry retired;
-    - reversal of the v38.3.2 compressions "one principal multi-lens traversal" and "Phase 5 reopens only deltas" for Phase 4 discovery.
+1. **`SKILL.md`.**
+   - Set `Release identity: \`Audit_Litemode_v12\`` and `Package revision: \`v12\``. Keep the exact line format.
+   - In the actor table:
+     - rename the `reviewer-3L` row's role to "attacker reviewer";
+     - set its scope to "independent Phase 4 attack units; Phase 6 attacker testing (baseline properties, candidate proof/disproof, new findings); master-directed targeted tests".
+   - In the phase map, set the row for Phases 2–5 to add "Phase 4 starts with reviewer-2 flow-review units, then independent attacker units; reviewer-2 reconciles; the master challenges at segment review."
+   - Add a section "## Coverage model" stating:
+     - coverage = contexts × applicable taxonomy classes (`CurveYield2/Contract-Automation/protocol/taxonomy/curveyield-defect-taxonomy-v1.json`) × detection method;
+     - reviewers may read and cite any source file;
+     - gaps are recorded, never relabelled;
+     - the final verdict states `FULL_COVERAGE` or `PARTIAL_COVERAGE`.
+   - Add the universal rule `[U-COVERAGE-001] Coverage is measured and gaps are disclosed`.
+2. **`shared/policy/UNIVERSAL_RULE_REGISTRY.json`.** Add `{"id": "U-COVERAGE-001", "title": "Coverage is measured and gaps are disclosed", "homepageSection": "Coverage model", "scope": "ALL_PHASES"}`.
+3. **`shared/controller/LITE_PHASE_SCHEMA_POLICY.md`.** Append to hard rule 3: "Discovery unit submissions under `work/phase-04/discovery/` are controller-validated assignment files defined by `discovery/*_START_HERE.md`; they are not phase schemas."
+4. **`shared/controller/LITE_PHASE_RECEIPT_PROTOCOL.md`.** Append to "Prohibited bookkeeping sidecars": "Discovery state, unit packets, submissions and the discovery summary are controller-owned assignment records, not bookkeeping sidecars."
+5. **`shared/controller/AI_Auditor_Controller.md`, `profiles/AUDIT_INDEPENDENT_REVIEW.md` and `docs/USER_GUIDE.md`.** Make the same `reviewer-3L` rename and scope change as item 1. Add "The master acts as challenger for the reviewer-2 segment and receives the discovery summary."
+6. **`LITE_ORCHESTRATOR_MODE.md`.** Replace the section "Conditional final adversarial review" with: "## Mandatory attacker reviewer\nThe attacker reviewer (`reviewer-3L`) performs an independent attack pass in Phase 4 and owns Phase 6 testing. This replaces the former conditional final adversarial review." Apply the same rename in its topology table.
+7. **`shared/lenses/SOLO_LENS_ISOLATION_PROTOCOL.md`.** Replace the body with: "Superseded in v12. Independence comes from the attacker reviewer: a separate chat that never sees reviewer-2's Phase 3–4 conclusions before its attack units are sealed. Same-model use is disclosed as a limitation."
+8. **`shared/policy/ASSURANCE_PRECISION_CONTROLS.md`.** Replace "Security-surface reconciliation" with: "Phase 0 records every reviewable declaration and every end-to-end flow. Phase 4 flow review must accept every context or record it as a gap, and the attacker must attack every flow. Gaps are disclosed per contract and class and make the coverage label PARTIAL_COVERAGE."
+9. **`shared/execution/CONTRACT_AUTOMATION_CAPABILITY_MAP.md`.**
+   - Mark "Phase-0 broad Medusa randomized baseline" and "Phase-0 ABI accounting telemetry" as `RETIRED (2026-10-11)`.
+   - Add the row "Attacker-guided Phase 6 testing | DIRECT | attacker reviewer designs; V7 lane executes; assertion ledger recorded | design record, request, ledger".
+10. **`phases/phase-0/START_HERE.md` and `phases/phase-0/PHASE_CONTRACT.json`.**
+    - Remove the Medusa, telemetry and simulation-baseline items.
+    - Describe step 4 as "fork deploy/config using the package's own scripts, then a read-only deployed-state snapshot".
+    - Add the review-inventory artifacts and `FLOW_PLAN_v1.json` (00 §7.5).
+    - Remove "exceeds 100,000 observed calls".
+    - Keep exactly nine contract steps.
+11. **`phases/phase-5/PHASE_05_SCHEMA_v1.json` and `phases/phase-5/START_HERE.md`.**
+    - Remove the `phase0BaselineSimulation` input and its paragraph.
+    - Remove the literal `\n` artifacts in the Step 3 heading.
+    - Add to Step 3: "Attack paths marked VIABLE or UNCERTAIN in the discovery summary should receive target designs here; the attacker reviewer follows up in Phase 6."
+12. **`phases/phase-8/START_HERE.md`.** Add to Step 2: "Validate every Phase 6 `P6-PROP-*` and `P6-NEW-*` key and every Step 5 `CONFIRMED` or `INCONCLUSIVE` candidate like any other candidate."
+13. **`phases/phase-10/START_HERE.md`.** Add to Step 3: "State the coverage label from `work/phase-10/COVERAGE_MATRIX_v1.json` and the detection-qualification status exactly as printed in the final evidence index."
+14. **`master-review/START_HERE.md`.** Add a section "## Challenger duties (reviewer-2 segment)":
+
+    "Review every item in the discovery summary: attacker findings and contradictions, unresolved checks, not-applicable claims and coverage gaps. Amend reviewer-2's reconciliation where it is wrong, order targeted tests (to the attacker reviewer, `reviewer-3L`) where proof is missing, and accept a gap only with a stated reason."
+15. **`master-review/TARGETED_TEST_DIRECTIVE_v1.md`.** Change the sentence about `reviewer-3L` to: "`reviewer-3L` is the attacker reviewer and is the default executor of targeted tests, except for its own segment, where a different reviewer is required."
+16. **`PACKAGE_PROVENANCE.md`.** Append a section "## v12 detection rebuild" listing:
+    - complete Phase 0 review inventory and flow plan;
+    - reviewer-2 flow review with system-wide citations;
+    - the mandatory attacker reviewer (Phase 4 attack pass and Phase 6 testing), replacing the conditional final adversarial review that was removed during the Lite optimization;
+    - the master as challenger;
+    - candidate-independent baseline obligations;
+    - the coverage matrix and label;
+    - retirement of Phase 0 Medusa and telemetry.
 
 ## Appendix E — Self-check before opening the T8 AC PR
 

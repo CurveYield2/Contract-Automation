@@ -22,14 +22,22 @@ This plan fixes the system. It does not repair, rerun or measure any past campai
 |---|---|
 | D1 | **Coverage definition.** Coverage = every in-scope *context* (one declaration in one effective contract) × every applicable *defect class* from the taxonomy (T1) × at least one detection method. It is reported per contract and per class. |
 | D2 | **Phase 0 stays fully automated and deterministic.** It gains the review inventory, system facts, deployed-state snapshot, assignment plan and integration obligations (T2, T3). Phase 0 never runs fuzzing, Medusa, telemetry, fixture synthesis or anything that needs judgment. |
-| D3 | **Phase 4 discovery runs as two independent lanes plus a challenger.** Lane A works bottom-up from requirements. Lane B works top-down from attacker goals. Then the challenger reviews both lanes' rows and the integration obligations. Each role has **one pre-created chat** registered at initialization. Assignments run one at a time. reviewer-2 then finishes Phase 4 from the reconciled results (T4, T5). |
-| D4 | **Phase 6 becomes the AI-guided testing segment.** reviewer-3L designs harnesses for the baseline obligations, dispatches them through the existing V7 execution lane, and triages every result. No harness, fuzz campaign or telemetry run happens without an agent design record (T6, T7). |
+| D3 | **Phase 4 discovery uses the existing chats only. No chats are added and initialization is unchanged.** It runs in three stages (T4, T5). |
+| | (a) **Flow review:** reviewer-2 reviews the system flow by flow, in its own chat. Each unit is one or more end-to-end flows. A flow is an external entry point traced through every in-scope contract it touches. Every context in the unit gets structured per-class checks. |
+| | (b) **Independent attack pass:** the **attacker reviewer** (the existing `reviewer-3L` chat, renamed in the skill) attacks each connected group of contracts. It also answers every cross-contract integration question for that group. It never sees reviewer-2's Phase 3 or Phase 4 conclusions. |
+| | (c) **Reconciliation:** reviewer-2 reconciles both in Phase 4 Step 1. |
+| D4 | **Phase 6 is owned by the attacker reviewer and is fully agent-guided.** In it the attacker: |
+| | (a) designs and runs the candidate-independent baseline property tests; |
+| | (b) runs follow-up simulations that prove or disprove every material candidate whose Phase 5 result was not decisive; |
+| | (c) records any new vulnerability its tests reveal. |
+| | All runs go through the existing V7 lane, and each one has an agent design record (T6, T7). Master-directed targeted tests keep going to `reviewer-3L`, which is now the attacker. |
+| D11 | **Nothing is partitioned for reading.** Every reviewer may read and cite any in-scope or dependency source file. Units bound only the number of rows a submission must fill, so a cross-contract vulnerability can always be seen and cited. |
 | D5 | **Phase 5 is unchanged**, including the existing Phase 5 boundary candidate execution. |
 | D6 | **The skill is upgraded in place.** New package `Audit_Litemode_v12` replaces `Audit_Litemode_v11` in `Audit Skill - Current Authority`. v11 is moved to `audit-process/v7/frozen-authorities/Audit_Litemode_v11`. File names inside the package do not change (`PHASE_04_SCHEMA_v1.json` keeps its name); only the package directory carries the version (T8, T9). |
 | D7 | **The new behavior is keyed on the bound authority.** v12 `MANIFEST.json` carries `"detectionPolicy": "audit-detection-rebuild-v1"`. All new code paths run only when the campaign's bound authority manifest has exactly that value. Campaigns bound to v10.3 or v11 keep today's behavior byte-for-byte. |
 | D8 | **Activation is not blocked on qualification.** v12 becomes the default for new campaigns when T0–T9 are merged. Detection qualification (T10) runs later; its status appears in every final report. |
 | D9 | **Past campaigns are never used as fixtures or benchmarks.** `curveyield-dex-v17-source-r1` is retired by owner decision of 2026-10-12 (T0). |
-| D10 | **The master reviewer keeps its role.** At each segment it additionally receives the coverage-gap list. |
+| D10 | **The master reviewer is the challenger.** At the reviewer-2 segment review it receives the discovery summary, which lists every disagreement between reviewer-2 and the attacker, every unresolved check, every "not applicable" claim and every coverage gap. It must disposition each of them through its existing powers: amend, or order targeted tests. There is no separate challenger chat. |
 
 ## 3. Non-blocking rules (apply in every task)
 
@@ -84,11 +92,11 @@ This plan fixes the system. It does not repair, rerun or measure any past campai
 | T0 | 01 | CA (+AC state) | Verification workflow; retire v17 r1 | — |
 | T1 | 01 | CA | Defect taxonomy + coverage-matrix library | T0 |
 | T2 | 01 | CA | Phase 0 review inventory, system facts, deployed-state snapshot | T1 |
-| T3 | 01 | CA | Phase 0 assignment plan + integration obligations | T2 |
-| T4 | 02 | CA | Discovery submission, challenge and integration validators | T3 |
-| T5 | 02 | CA | Discovery routing: controller, workflow, initialization, wake messages | T4 |
+| T3 | 01 | CA | Phase 0 flow plan: flows, review units, attack units, integration questions | T2 |
+| T4 | 02 | CA | Flow-review and attack submission validators | T3 |
+| T5 | 02 | CA (+AC schema) | Discovery routing through the existing reviewer-2 and reviewer-3L chats | T4 |
 | T6 | 02 | CA | Baseline obligations + Phase 6 test groups | T5 |
-| T7 | 02 | CA | Phase 6 AI-guided testing path: dispatch, ingestion, assertion ledger, validation | T6 |
+| T7 | 02 | CA | Phase 6 attacker testing: dispatch, assertion ledger, baseline tests, candidate proof/disproof, new findings | T6 |
 | T8 | 03 | CA + AC | Validator update; v12 skill package authored in a staging folder | T7 |
 | T9 | 03 | CA + AC | Frozen-authority registry, v11 freeze, version-agnostic resolution, v12 swap, end-to-end test | T8 |
 | T10 | 03 | CA + AC | Qualification scorer (non-blocking), runner-pin docs, rejection-matrix test, handoff | T9 |
@@ -143,13 +151,22 @@ Every validator returns `{ok, errors, value}`:
   - It deliberately has no byte offsets, so it stays stable across versions.
   - If two declarations collide, append `-2`, `-3` in source order and record a limitation `SYMBOL_ID_COLLISION`.
 - `contextId` = `"CTX-"` + the same 16 hex characters as the declaration's `symbolId`. There is one context per reviewable declaration; the contracts it is effective in are listed in `effectiveIn` (T2).
-- Assignment IDs: `A-001`… (lane A), `B-001`… (lane B), `C-001`… (challenge), `I-001`… (integration). They are numbered in plan order.
-- Obligation IDs: `IOB-0001`… (integration), `BOB-0001`… (baseline).
+- Flow IDs: `FLOW-0001`….
+- Unit IDs:
+  - `F-001`… are reviewer-2 flow-review units;
+  - `R-001`… are reviewer-2 residual units, for contexts no flow reaches;
+  - `X-001`… are attacker units.
+  - Units run in that order: all F, then all R, then all X.
+- Obligation IDs: `IOB-0001`… (integration questions), `BOB-0001`… (baseline).
 - Test group IDs: `TG-001`….
 
 ### 7.4 Source anchors used by reviewers
 
-Reviewers never compute byte offsets. They cite anchors as `"<relative/path.sol>:L<start>-L<end>"`, or `"<relative/path.sol>:L<n>"` for one line. The controller accepts an anchor only if its file is in scope and its line range lies inside the cited context's line range or inside one of the dependency symbol ranges listed in the assignment packet.
+Reviewers never compute byte offsets. They cite anchors as `"<relative/path.sol>:L<start>-L<end>"`, or `"<relative/path.sol>:L<n>"` for one line. The controller accepts an anchor when:
+- the file is an `IN_SCOPE` or `DEPENDENCY` source unit in the review inventory; and
+- the line range lies inside that file.
+
+Anchors are deliberately **not** restricted to the reviewed context (D11).
 
 ### 7.5 Campaign paths (relative to the campaign `workspacePath`)
 
@@ -158,10 +175,10 @@ Reviewers never compute byte offsets. They cite anchors as `"<relative/path.sol>
 | `evidence/review-inventory/REVIEW_INVENTORY_v1.json` | controller | Phase 0 (T2) |
 | `evidence/review-inventory/SYSTEM_FACTS_v1.json` | controller | Phase 0 (T2) |
 | `evidence/review-inventory/DEPLOYED_STATE_SNAPSHOT_v1.json` | controller | Phase 0 (T2) |
-| `evidence/review-inventory/ASSIGNMENT_PLAN_v1.json` | controller | Phase 0 (T3) |
+| `evidence/review-inventory/FLOW_PLAN_v1.json` | controller | Phase 0 (T3) |
 | `work/phase-04/discovery/DISCOVERY_STATE_v1.json` | controller | Phase 3 PASS onward (T5) |
-| `work/phase-04/discovery/<assignmentId>/ASSIGNMENT_PACKET_v1.json` | controller | T5 |
-| `work/phase-04/discovery/<assignmentId>/SUBMISSION_v1.json` | reviewer (lane/challenger chat) | T5 |
+| `work/phase-04/discovery/<unitId>/ASSIGNMENT_PACKET_v1.json` | controller | T5 |
+| `work/phase-04/discovery/<unitId>/SUBMISSION_v1.json` | reviewer-2 (F, R units) or attacker reviewer (X units) | T5 |
 | `work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json` | controller | discovery complete (T5) |
 | `work/phase-06/BASELINE_OBLIGATIONS_v1.json` | controller | discovery complete (T6) |
 | `controller/phase6-tests/<testGroupId>/<requestName>.json` | reviewer-3L | Phase 6 (T7) |
@@ -176,7 +193,7 @@ Reviewers never compute byte offsets. They cite anchors as `"<relative/path.sol>
 | `scripts/lib/lite-phase-prefill-v1.mjs` (search `function sourceReviewScaffold`) | Phase 4 rows are built from ABI functions only | T2, T5 |
 | `scripts/lib/lite-phase-prefill-v1.mjs` (search `export function phase4CoverageFromForm`) | Coverage counts present record keys | T5 |
 | `.github/workflows/lite-phase-work-packet-controller-v1.yml` | One global concurrency group; exactly one request per push; publish pushes without rebase | T5 |
-| `.github/workflows/lite-audit-browser-orchestrator-v1.yml` and `browser-agent-wake.yml` | Only pre-created chats; reviewer ids `reviewer-1..4`; `mode` only `resume_existing` | T5 (registration extension, no new primitive) |
+| `.github/workflows/lite-audit-browser-orchestrator-v1.yml` and `browser-agent-wake.yml` | Only pre-created chats; reviewer ids `reviewer-1..4`; `mode` only `resume_existing` | T5 (uses the existing `agentChats["reviewer-2"]` and `agentChats["reviewer-3L"]`; no new chats, no new primitive) |
 | `.github/workflows/lite-v7-execution-dispatch-v1.yml` | Hard-gated to Phase 9 | T7 |
 | `scripts/lib/lite-phase-work-v1.mjs` (search `const LEGACY_V103_LOGICAL`), `scripts/prepare-lite-assignment-successor-v2.mjs` (search `const legacyLogicalRoot`), `scripts/lib/lite-master-review-v1.mjs` (search `const isV11=` and `const expectedRoot='Audit Skill - Current Authority/Audit_Litemode_v10.3'`), `scripts/lib/lite-post-completion-followup-v1.mjs` (search `Audit_Litemode_v11/SKILL.md`), `lite-phase-work-packet-controller-v1.yml` (search `Audit_Litemode_v11/master-review`) | Hardcoded authority versions; frozen resolver only knows v10.3 | T9 |
 | `scripts/validate-lite-authority-automation-sync-v1.mjs` | Not run by any workflow; still requires `PHASE0_MEDUSA_CALL_LIMIT_V1=125000` although Phase 0 Medusa is retired | T9 |
