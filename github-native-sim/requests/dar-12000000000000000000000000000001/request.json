@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "deep-assurance-github-request-v2",
+  "processId": "audit-v7-independent-review",
+  "contractAutomationRelease": {
+    "repository": "CurveYield2/Contract-Automation",
+    "branch": "recovery/v7-execution-layer-v1",
+    "commit": "612fa50264e587e3f24550bf4dae35719b04211c",
+    "contractVersion": "contract-automation-v7-relocated-v1"
+  },
+  "runnerRelease": {
+    "version": "deep-assurance-github-bridge-v1",
+    "manifestSha256": "2bebd99bb8ae770eb2feca0de7dc7e54596127a0c768922189e907e6658773dc"
+  },
+  "campaignId": "adversarial-kb-k12-pattern-0001",
+  "assignmentId": "k12-controlled-reproduction-green",
+  "phaseId": "build-and-test",
+  "gateId": "K12-GREEN-CONTROLLED-REPRODUCTION",
+  "profileId": "github-native-simulate-v2",
+  "source": {
+    "repository": "CurveYield2/Contract-Automation",
+    "commit": "295975e5d5b984c787bf1b42c6d113f494d3b719",
+    "projectPath": "packages/adversarial-simulation-kb/fixtures/pattern-0001-controlled-v1"
+  },
+  "configuration": {
+    "compilers": [
+      {"language": "solidity", "version": "0.8.24"}
+    ],
+    "timeoutMinutes": 10,
+    "analysis": {
+      "slither": false,
+      "medusa": false,
+      "nativeFuzz": {"enabled": true, "fuzzRuns": 1, "recoverableExitCodes": []}
+    },
+    "optimizer": {"enabled": true, "runs": 200},
+    "evmVersion": null,
+    "viaIR": false
+  },
+  "requestId": "dar-12000000000000000000000000000002",
+  "requestDigest": "d876308b6eafe727366da11ac59d9fc0eba0af6f6c5bc1298e9d4f5062d041ec"
+}

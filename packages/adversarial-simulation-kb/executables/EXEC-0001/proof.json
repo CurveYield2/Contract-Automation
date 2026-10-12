@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "adversarial-kb-proof-v1",
+  "proofId": "PROOF-0003",
+  "knowledgeRef": "EXEC-0001",
+  "proofTier": "CONTROLLED_REPRODUCTION",
+  "status": "ACTIVE",
+  "claim": "EXEC-0001 is a controlled Foundry reproduction of the generalized PATTERN-0001 / RECIPE-0001 mechanism. On the deliberately vulnerable fixture, the same assertion that failed against the protected negative fixture records account health 20000 to 14000 bps, attacker net value 100 to 110, and protocol liquidity 1000 to 890, proving the controlled post-action solvency violation and profitable attacker-controlled liquidation sequence.",
+  "evidenceRefs": [
+    "github-actions://CurveYield2/Contract-Automation/runs/32708603994",
+    "dar-12000000000000000000000000000002",
+    "packages/adversarial-simulation-kb/fixtures/pattern-0001-controlled-v1/test/Pattern0001ControlledReproduction.t.sol"
+  ],
+  "artifactDigests": [
+    "8458feed625a435ae4b46cb456e8f0fc47f80787bcd16296317df692239138b1",
+    "d8c9a0d29c6205219d7b6c8ab49203a0defc89cb85b797038ad1a508668325a5",
+    "2f4a1c689c110ac6058a2e50c2c807d02b87f6123e3a2ccac50938d5cc2536ac"
+  ],
+  "runIds": ["32708603994"],
+  "qualifiedAtCommit": "295975e5d5b984c787bf1b42c6d113f494d3b719",
+  "limitations": [
+    "This proof is CONTROLLED_REPRODUCTION only and is not a historical reproduction of EXP-2023-0001.",
+    "The controlled fixture is deliberately vulnerable and does not establish exploitability of any production target.",
+    "The canonical Phase 6 runner used an identity-normalized mutable fork as execution infrastructure, but EXEC-0001 itself does not require historical chain state or a fixed historical block.",
+    "Historical reproduction, generalized target variants, and qualification remain later proof tiers."
+  ]
+}

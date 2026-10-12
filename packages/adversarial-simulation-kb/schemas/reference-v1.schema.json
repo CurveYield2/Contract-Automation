@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://curveyield.dev/schemas/adversarial-kb/reference-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion","sourceId","revision","title","referenceType","confidence","url","chain","transactionHash","contractAddress","publisher","publishedAt","claims","contradicts","limitations","status"],
+  "properties": {
+    "schemaVersion": {"const":"adversarial-kb-reference-v1"},
+    "sourceId": {"type":"string","pattern":"^SOURCE-[0-9]{4}$"},
+    "revision": {"type":"integer","minimum":1},
+    "title": {"type":"string","minLength":1},
+    "referenceType": {"type":"string","enum":["OFFICIAL_POSTMORTEM","SECURITY_REPORT","PROTOCOL_GOVERNANCE","ONCHAIN_TRANSACTION","VERIFIED_CONTRACT_SOURCE","TRANSACTION_TRACE","REPRODUCTION_REPOSITORY","ACADEMIC_PAPER","INDEPENDENT_TECHNICAL_ANALYSIS"]},
+    "confidence": {"type":"string","enum":["PRIMARY_ONCHAIN","PRIMARY_PROTOCOL","PRIMARY_SECURITY_REPORT","SECONDARY_TECHNICAL","COMMUNITY_UNVERIFIED"]},
+    "url": {"type":"string","format":"uri"},
+    "chain": {"type":["string","null"]},
+    "transactionHash": {"type":["string","null"],"pattern":"^0x[0-9a-fA-F]{64}$"},
+    "contractAddress": {"type":["string","null"],"pattern":"^0x[0-9a-fA-F]{40}$"},
+    "publisher": {"type":"string","minLength":1},
+    "publishedAt": {"type":["string","null"]},
+    "claims": {"type":"array","items":{}},
+    "contradicts": {"type":"array","items":{"type":"string","pattern":"^SOURCE-[0-9]{4}$"}},
+    "limitations": {"type":"array","items":{}},
+    "status": {"type":"string","enum":["ACTIVE","SUPERSEDED","DISPUTED","REFERENCE_ONLY"]}
+  }
+}
