@@ -150,7 +150,7 @@ function bindingRecord({root,campaignPath,directory,predecessor,authorityRoot,re
   };
 }
 
-export const MASTER_OUTCOMES_V1=Object.freeze(['AMENDED','ACCEPT_WITHOUT_MODIFICATIONS']);
+export const MASTER_OUTCOMES_V1=Object.freeze(['AMENDED','ACCEPT_WITHOUT_MODIFICATIONS','REQUEST_TARGETED_TESTS']);
 export const SUPERSEDED_DIRECTORY_V1='superseded';
 
 function gitBlobSha1(bytes){return createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex');}
@@ -327,6 +327,8 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   if(segmentId&&segmentId!==pending.segmentId)throw new Error('submitted segment does not match pending master review');
   const segment=segmentForId(pending.segmentId);
   if(!segment)throw new Error('pending master review segment is unsupported');
+  if(pending.status!=='WAITING_FOR_MASTER_REVIEW'||directory.campaignStatus!=='WAITING_FOR_MASTER_REVIEW')
+    return {status:'MASTER_REVIEW_HELD',failures:['master is waiting for targeted-test evidence; neither PASS nor another directive is permitted'],pending};
   if(!MASTER_OUTCOMES_V1.includes(String(outcome??'')))return {status:'MASTER_REVIEW_INVALID',failures:['masterOutcome must be '+MASTER_OUTCOMES_V1.join(' or ')],pending};
   const record=readJson(requiredFile(root,pending.recordPath,'master review record'));
   const failures=[
@@ -342,7 +344,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   // the original sealed receipt under the existing supersession protocol.
   // Ordinary acceptance and every later master segment stay held.
   const machineRepairReplay=(pending.segmentId==='reviewer-2-phases-02-05'&&outcome==='AMENDED');
-  if(segment.boundaryPhase>=5&&!machineRepairReplay){
+  if(segment.boundaryPhase>=5&&!machineRepairReplay&&outcome!=='REQUEST_TARGETED_TESTS'){
     try{
       const prior=readJson(requiredFile(root,canonicalRel(campaignPath,5),'Phase-5 canonical data'));
       failures.push(...validateRecordedPhase5MachineEvidenceV1({
@@ -366,6 +368,10 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
     if(afterSha256!==sealed.sha256)changed.push({sealed,file,afterSha256});
   }
   if(failures.length)return {status:'MASTER_REVIEW_INVALID',failures,record,pending};
+  if(outcome==='REQUEST_TARGETED_TESTS')
+    return {status:'MASTER_TARGETED_TESTS_REQUEST_READY',failures:[],record,pending,segment,outcome};
+  if((pending.targetedTests??[]).some(x=>x.status!=='EVIDENCE_SUBMITTED'))
+    return {status:'MASTER_REVIEW_INVALID',failures:['required targeted-test assignment has not returned verified evidence'],record,pending};
   if(outcome==='ACCEPT_WITHOUT_MODIFICATIONS'){
     if(changed.length)return {status:'MASTER_REVIEW_INVALID',failures:['ACCEPT_WITHOUT_MODIFICATIONS was submitted but work forms changed; submit AMENDED instead: '+changed.map(x=>x.sealed.path).join(', ')],record,pending};
     return {status:'MASTER_REVIEW_ACCEPTED',failures:[],record,pending,segment,outcome,summary,amendedForms:[],successorPlan:pending.successorPlan};
