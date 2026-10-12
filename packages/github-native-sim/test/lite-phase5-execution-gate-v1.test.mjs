@@ -72,7 +72,7 @@ test('an orphan raw path, preflight failure, source mismatch, or missing reprodu
   assert.match(validatePhase5TargetExecutionGateV1(differentSource).join(' '),/source identity/);
   const fakeSuccess=structuredClone(args);
   fakeSuccess.executionResults[key].rawResult.reproduction=null;
-  assert.match(validatePhase5TargetExecutionGateV1(fakeSuccess).join(' '),/executed reproduction oracle/);
+  assert.match(validatePhase5TargetExecutionGateV1(fakeSuccess).join(' '),/completed, observed reproduction or non-reproduction/);
   const notExecuted=structuredClone(args);
   notExecuted.executionResults[key].rawResult.analysis.nativeFuzz.componentStatus='NOT_APPLICABLE';
   assert.match(validatePhase5TargetExecutionGateV1(notExecuted).join(' '),/never completed/);
