@@ -140,9 +140,46 @@ export function unresolvedFinalCandidateFailures({root,campaignPath,directory}){
       failures.push('Candidate '+c.candidateKey+' retains unresolved reachability/property/impact; no conclusive security disposition. Request further targeted tests through master-review, or promote a substantiated finding.');
     }
   }
+  // The sealed original cannot be rewritten. A candidate that was originally
+  // marked unconfirmed cannot be cleared by just changing descriptive fields.
+  // Require a matching conclusive delegated result and an explicit traceable
+  // reference to its raw machine evidence in the refreshed Phase-8 work form.
+  const pending=directory.pendingMasterReview;
+  const sealed8=(pending?.sealedWorkForms??[]).find(x=>Number(x.phase)===8);
+  if(pending?.segmentId==='reviewer-4-phases-08-10'&&!sealed8)
+    failures.push('Final master review lacks its immutable sealed Phase-8 original');
+  if(sealed8){
+    try{
+      const original=inside(root,sealed8.sealedOriginalPath,location(campaignPath,pending.segmentId)+'/sealed-originals/');
+      const originalBytes=fs.readFileSync(original);
+      if(sha(originalBytes)!==sealed8.sha256)throw new Error('sealed Phase-8 original SHA-256 mismatch');
+      const previous=JSON.parse(originalBytes.toString('utf8'))?.actions?.['step-2']?.outputs?.candidateValidations??[];
+      const resultByCandidate=new Map();
+      for(const entry of pending.targetedTests??[]){
+        if(entry.status!=='EVIDENCE_SUBMITTED')continue;
+        const result=readJson(requiredFile(root,entry.resultPath,'master delegated test result'));
+        for(const test of result.tests??[])resultByCandidate.set(test.candidateId,test);
+      }
+      for(const old of previous){
+        const originalUnresolved=[old.finalDisposition,old.outcome,old.propertyViolation,old.impact]
+          .some(v=>/UNCONFIRM|NOT_ESTABLISHED|NOT_DISPROVEN|INCONCLUSIVE|UNRESOLVED|UNKNOWN|UNQUANTIFIED|INSUFFICIENT_EVIDENCE/i.test(String(v??'')));
+        if(!originalUnresolved)continue;
+        const current=candidates.find(x=>x.candidateKey===old.candidateKey);
+        if(!current){failures.push('Previously unconfirmed candidate disappeared: '+old.candidateKey);continue;}
+        const resolved=resultByCandidate.get(old.candidateKey);
+        const expected=current.findingPromotion==='PROMOTE_FINDING'?'CONFIRMED':'DISPROVEN';
+        if(!resolved||resolved.disposition!==expected){
+          failures.push('Previously unconfirmed '+old.candidateKey+' requires a raw-evidence-bound delegated '+expected+' test result before closure');
+          continue;
+        }
+        const refs=String(current.evidenceRefs??'');
+        if(!(resolved.evidence??[]).some(ref=>refs.includes(ref.path)))
+          failures.push('Phase-8 '+old.candidateKey+' must cite the exact delegated raw evidence in evidenceRefs');
+      }
+    }catch(error){failures.push('Cannot verify the sealed original/follow-up linkage: '+String(error?.message??error));}
+  }
   // Submitted tests supplement but cannot replace a corrected, evidence-bound
   // phase-8 disposition. A narrative-only master PASS is never sufficient.
-  const pending=directory.pendingMasterReview;
   for(const assignment of pending?.targetedTests??[]){
     if(assignment.status!=='EVIDENCE_SUBMITTED')failures.push('Master targeted-test assignment '+assignment.requestId+' lacks verified raw evidence');
   }
