@@ -869,6 +869,14 @@ if(sequence===5){
         disposition:machine?.rawResult?.disposition??cli?.disposition??null,
         runnerError:machine?.rawResult?.error??cli?.error??null,
         preflight:machine?.rawResult?.preflight?.failureKind??null,
+        build:machine?.rawResult?.build?.status??null,
+        nativeFuzz:machine?.rawResult?.analysis?.nativeFuzz?{
+          status:machine.rawResult.analysis.nativeFuzz.componentStatus,
+          failureKind:machine.rawResult.analysis.nativeFuzz.failureKind??null,
+          exitCode:machine.rawResult.analysis.nativeFuzz.rawOutput?.exitCode??null,
+          outputTail:String(machine.rawResult.analysis.nativeFuzz.rawOutput?.stdout??'').slice(-3000),
+          errorTail:String(machine.rawResult.analysis.nativeFuzz.rawOutput?.stderr??'').slice(-1800)
+        }:null,
         failedSteps:failed,
         stderrTail:String(machine?.stderr??'').slice(-1500)
       };
