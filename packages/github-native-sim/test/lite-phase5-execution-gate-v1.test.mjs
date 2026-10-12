@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {writeV7RawResultV1,readV7RawResultV1} from '../src/v7-compact-result-v1.mjs';
 import {
   validatePhase5TargetCoverageV1,
   validatePhase5TargetExecutionGateV1,
@@ -259,4 +260,36 @@ test('only eligible candidates are reused in a mixed set of targets',async t=>{
   assert.equal(invoked,0,'an unbound new target must be blocked without spawning Anvil');
   assert.equal(results[key].reusedRecordedEvidence,true);
   assert.equal(results['P4-CAND-002'].status,'BLOCKED_REQUEST_TARGET_BINDING_MISMATCH');
+});
+
+test('oversized Phase5 raw machine evidence is losslessly compressed, verified and accepted by the exact gate',t=>{
+  const {args,controllerRoot,file}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
+  const raw={...args.executionResults[key].rawResult,analysis:{
+    nativeFuzz:{...args.executionResults[key].rawResult.analysis.nativeFuzz,
+      rawOutput:{exitCode:0,stdout:'source-bound-Foundry-trace '.repeat(450000),stderr:''}}
+  }};
+  const saved=writeV7RawResultV1({evidenceRoot:path.dirname(file),result:raw,compact:true});
+  assert.equal(saved.compact,true);
+  assert.ok(fs.statSync(file).size<100000000);
+  assert.deepEqual(readV7RawResultV1(file),raw);
+  args.executionResults[key].rawResult=raw;
+  assert.deepEqual(validatePhase5TargetExecutionGateV1(args),[]);
+  const replay=verifiedReusablePhase5ResultV1({controllerRoot,campaignPath,target,
+    expectedCampaignId:'test-audit-r1',expectedSourceSha256:sourceSha});
+  assert.equal(replay?.status,'PASS');
+});
+
+test('corrupted compressed evidence part is never accepted by Phase5 gate or reuse',t=>{
+  const {args,controllerRoot,file}=fixture();t.after(()=>fs.rmSync(controllerRoot,{recursive:true,force:true}));
+  const raw={...args.executionResults[key].rawResult,
+    machineTrace:'integrity-checked-source-bound-evidence '.repeat(300000)};
+  writeV7RawResultV1({evidenceRoot:path.dirname(file),result:raw,compact:true});
+  args.executionResults[key].rawResult=raw;
+  const manifest=JSON.parse(fs.readFileSync(file,'utf8'));
+  const part=path.join(path.dirname(file),manifest.parts[0].file);
+  const bytes=fs.readFileSync(part);bytes[0]^=1;fs.writeFileSync(part,bytes);
+  assert.throws(()=>readV7RawResultV1(file),/integrity check/);
+  assert.match(validatePhase5TargetExecutionGateV1(args).join(' '),/raw evidence is unreadable/);
+  assert.equal(verifiedReusablePhase5ResultV1({controllerRoot,campaignPath,target,
+    expectedCampaignId:'test-audit-r1',expectedSourceSha256:sourceSha}),null);
 });
