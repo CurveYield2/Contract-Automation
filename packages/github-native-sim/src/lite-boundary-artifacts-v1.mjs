@@ -273,9 +273,10 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
     if(expectedSourceSha256&&raw.source?.archiveSha256!==expectedSourceSha256){
       failures.push('Phase 5 mandatory '+key+' raw execution source identity differs from campaign source');
     }
-    if(!raw.build||typeof raw.build!=='object')failures.push('Phase 5 mandatory '+key+' has no successful source-build evidence');
+    if(raw.build?.status!=='completed')failures.push('Phase 5 mandatory '+key+' has no completed production-source compilation');
     if((raw.failedStepCount??0)>0||(raw.failedSteps?.length??0)>0)
       failures.push('Phase 5 mandatory '+key+' contains failed execution steps');
+    let requestedFuzzRuns=null;
     const boundRequest=validateTargetExecutionRequestBindingV1({
       controllerRoot,campaignPath,target,expectedSourceSha256
     });
@@ -284,6 +285,7 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
     }else{
       try{
         const req=JSON.parse(fs.readFileSync(path.join(controllerRoot,...campaignPath.split('/'),...boundRequest.requestRef.split('/')),'utf8'));
+        requestedFuzzRuns=Number(req.configuration?.analysis?.nativeFuzz?.fuzzRuns??0);
         if(raw.requestId!==req.requestId||raw.requestDigest!==req.requestDigest||
            raw.source?.commit!==req.source?.commit||
            raw.source?.archiveSha256!==req.source?.archiveSha256)
@@ -304,6 +306,16 @@ function validateExecutedPhase5TargetV1({controllerRoot,campaignPath,target,resu
       if(!component||component.toolInvoked===false||
          component.componentStatus!=='COMPLETED'){
         failures.push('Phase 5 mandatory '+key+' required '+type+' component never completed its execution');
+      }
+      if(type==='FOUNDRY_TEST'){
+        // Forge may return exit 0 with zero discovered tests.
+        const output=String(component?.rawOutput?.stdout??'')+'\n'+String(component?.rawOutput?.stderr??'');
+        const observedRuns=[...output.matchAll(/\bruns:\s*(\d+)/gi)].map(m=>Number(m[1]));
+        if(!Number.isInteger(requestedFuzzRuns)||requestedFuzzRuns<1||
+          component?.rawOutput?.exitCode!==0||
+          !observedRuns.some(n=>n>=requestedFuzzRuns)){
+          failures.push('Phase 5 mandatory '+key+' has no executed Foundry fuzz case at its request-bound fuzz-run count.');
+        }
       }
     }else if(type==='ANVIL_WORKFLOW'){
       if(!Array.isArray(raw.simulation?.steps)||raw.simulation.steps.length===0){
