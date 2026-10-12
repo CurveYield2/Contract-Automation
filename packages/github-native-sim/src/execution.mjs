@@ -35,7 +35,7 @@ export function safeRepositoryProjectPath(root, relativePath) {
   return resolved;
 }
 
-export function runProcess({ command, args = [], cwd, env = process.env, onStdout = null, timeoutMs = null }) {
+export function runProcess({ command, args = [], cwd, env = process.env, onStdout = null, onStderr = null, timeoutMs = null }) {
   return new Promise((resolve) => {
     let stdout = '';
     let stderr = '';
@@ -65,7 +65,7 @@ export function runProcess({ command, args = [], cwd, env = process.env, onStdou
         signal: signal ?? null, timedOut, stdout, stderr: error ? `${stderr}${error.message}` : stderr });
     };
     child.stdout?.on('data', (chunk) => { const text = chunk.toString(); stdout += text; if (onStdout) onStdout(text, child); });
-    child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.stderr?.on('data', (chunk) => { const text = chunk.toString(); stderr += text; if (onStderr) onStderr(text, child); });
     child.on('error', (error) => finish(-1, null, error));
     child.on('close', (code, signal) => finish(code, signal));
   });
