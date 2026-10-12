@@ -339,7 +339,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
 export async function writeReviewInventoryOutputsV1({outputDir,projectRoot,build,request,policy}) {
   if(policy!==POLICY)return;
   const campaign={campaignId:request?.campaignId,campaignGenerationId:request?.campaignGenerationId,
-    sourceSha256:request?.source?.archiveSha256,generatedAt:request?.generatedAt};
+    sourceSha256:request?.source?.archiveSha256,generatedAt:request?.generatedAt??new Date().toISOString()};
   try {
     const inventory=await buildReviewInventoryV1({projectRoot,build,campaign});
     const facts=buildSystemFactsV1({inventory});
