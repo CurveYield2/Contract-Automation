@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {renderDeployConfigMatrixV1,renderTargetedTestMatrixV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
+import {detectionPolicyForAuthorityV1,authorityRootFromHomepageV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
 const a={};for(let i=2;i<process.argv.length;i++){if(process.argv[i].startsWith('--'))a[process.argv[i].slice(2)]=process.argv[++i];}
 for(const k of ['controller-root','campaign-path','simulation-output'])if(!a[k])throw new Error('missing --'+k);
 const campaignRoot=path.join(path.resolve(a['controller-root']),...a['campaign-path'].split('/'));
@@ -18,6 +19,24 @@ if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||!
 const destination=path.join(campaignRoot,'evidence/phase0');
 await fs.mkdir(destination,{recursive:true});
 await fs.writeFile(path.join(destination,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),raw);
+try {
+  const receipt=JSON.parse(await fs.readFile(path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json'),'utf8'));
+  const controllerRoot=path.resolve(a['controller-root']);
+  const policy=await detectionPolicyForAuthorityV1({
+    repoRoot:controllerRoot,
+    authorityRoot:authorityRootFromHomepageV1(receipt.authority.homepagePath),
+    readJsonIfExists:async(rel)=>{
+      try {return JSON.parse(await fs.readFile(path.join(controllerRoot,...rel.split('/')),'utf8'));}
+      catch(error){if(error?.code==='ENOENT')return null;throw error;}
+    }
+  });
+  const snapshotFile=path.join(src,'DEPLOYED_STATE_SNAPSHOT_v1.json');
+  if(policy&&await fs.stat(snapshotFile).then(()=>true,()=>false)) {
+    const target=path.join(campaignRoot,'evidence/review-inventory');
+    await fs.mkdir(target,{recursive:true});
+    await fs.copyFile(snapshotFile,path.join(target,'DEPLOYED_STATE_SNAPSHOT_v1.json'));
+  }
+} catch { /* Snapshot must never block the existing Phase-0 deployment writer. */ }
 if(deploy.reconciliation)await fs.copyFile(rawPath,path.join(destination,'PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json'));
 const readiness=JSON.parse(await fs.readFile(path.join(campaignRoot,'evidence/readiness/PROJECT_READINESS_AUTOMATED_v1.json'),'utf8'));
 const work=path.join(campaignRoot,'work/phase-06');await fs.mkdir(work,{recursive:true});

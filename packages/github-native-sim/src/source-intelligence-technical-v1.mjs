@@ -65,6 +65,7 @@ async function sources(projectRoot) {
   out.sort((a,b)=>a.path.localeCompare(b.path));
   return out.map((x,i)=>({...x,sourceId:`SRC-${pad(i+1)}`}));
 }
+export const listAdmittedSourcesV1 = sources;
 function astIndex(sourceAsts, byPath, compilationUnits=[]) {
   const nodes=new Map(), contracts=new Map(), functions=new Map();
   const units=(Array.isArray(compilationUnits)&&compilationUnits.length)

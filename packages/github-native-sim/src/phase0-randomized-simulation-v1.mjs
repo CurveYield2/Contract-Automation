@@ -9,6 +9,7 @@ import {createHash} from 'node:crypto';
 import {startRpcIdentityProxy} from '../../runner/src/rpc-identity-proxy-v1.mjs';
 import {stageExactArchiveSource,runProcess} from './execution.mjs';
 import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
+import {captureDeployedStateSnapshotV1} from './adr-deployed-state-snapshot-v1.mjs';
 import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
@@ -2596,6 +2597,10 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       };
       deploymentEvidence=witness;
       await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(witness,null,2)+'\n');
+      let deployedStateSnapshot;
+      try { deployedStateSnapshot = await captureDeployedStateSnapshotV1({provider, deployedContracts: witness.deployedContracts ?? [], artifactByQualified}); }
+      catch (e) { deployedStateSnapshot = {schemaVersion:'curveyield-deployed-state-snapshot-v1', status:'ERROR', rows:[], error:String(e?.message ?? e).slice(0,2000)}; }
+      await fs.writeFile(path.join(outputRoot,'DEPLOYED_STATE_SNAPSHOT_v1.json'), JSON.stringify(deployedStateSnapshot,null,2)+'\n');
       await provider.destroy();
       return{deployEvidence:witness};
     }
