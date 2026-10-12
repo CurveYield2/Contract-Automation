@@ -191,10 +191,13 @@ const ownerTokenAbi = parseAbi([
 
 const asJson = (value) => JSON.parse(JSON.stringify(value, (_, v) => (typeof v === 'bigint' ? v.toString() : v)));
 
-function assertion(candidateId, label, ok, detail = null) {
-  result.assertions.push({ candidateId, label, ok, detail: asJson(detail) });
-  console.log(`${ok ? 'PASS' : 'FAIL'} [${candidateId}] ${label}${detail === null ? '' : ' :: ' + JSON.stringify(asJson(detail))}`);
+function assertion(candidateId, label, ok, detail = null, classification = 'control') {
+  result.assertions.push({ candidateId, label, ok, detail: asJson(detail), classification });
+  console.log(`${classification === 'candidate-observation' ? 'OBSERVED' : (ok ? 'PASS' : 'FAIL')} [${candidateId}] ${label}${detail === null ? '' : ' :: ' + JSON.stringify(asJson(detail))}`);
 }
+
+// Candidate observations are confirmed/disproven by the master, not health-check failures.
+const candidateObservation = (id, label, observed, detail = null) => assertion(id, label, observed, detail, 'candidate-observation');
 
 async function impersonateAll() {
   for (const [name, address] of Object.entries(actor)) {
@@ -352,7 +355,7 @@ async function findCreatorLots(startId, endId, sourcePool) {
 }
 
 
-async function observedTx(candidateId,label,wallet,address,abi,functionName,callArgs=[],expectSuccess=true){
+async function observedTx(candidateId,label,wallet,address,abi,functionName,callArgs=[],expectSuccess=true,isCandidateObservation=false){
   try{
     const hash=await wallet.writeContract({address,abi,functionName,args:callArgs,gas:8_000_000n,chain,account:wallet.account});
     const receipt=await publicClient.waitForTransactionReceipt({hash});
@@ -360,7 +363,7 @@ async function observedTx(candidateId,label,wallet,address,abi,functionName,call
     const row={candidateId,label,from:wallet.account,to:address,functionName,args:asJson(callArgs),hash,status:receipt.status,gasUsed:String(receipt.gasUsed),calldata:tx.input,blockNumber:String(receipt.blockNumber)};
     result.calls.push(row);result.rawReceipts.push({candidateId,label,transaction:asJson(tx),receipt:asJson(receipt)});
     result.candidates[candidateId].executedCalls++;
-    assertion(candidateId,label,expectSuccess?receipt.status==='success':receipt.status==='reverted',row);
+    (isCandidateObservation ? candidateObservation : assertion)(candidateId,label,expectSuccess?receipt.status==='success':receipt.status==='reverted',row);
     return row;
   } catch(e) {
     const error=String(e?.stack||e);
@@ -374,10 +377,10 @@ const balances=async(tokens,addresses)=>{
  const out={};for(const [label,address] of Object.entries(addresses)){out[label]={};for(const token of tokens)out[label][token]=String(await readAt(token,erc20Abi,'balanceOf',[address]));}
  return out;
 };
-async function daoObserved(candidateId,label,to,abi,functionName,callArgs=[],expectSuccess=false){
+async function daoObserved(candidateId,label,to,abi,functionName,callArgs=[],expectSuccess=false,isCandidateObservation=false){
  const data=encodeFunctionData({abi,functionName,args:callArgs});
  return observedTx(candidateId,label,wallets.deployer,report.aragon.adminPlugin,adminPluginAbi,
- 'executeProposal',[stringToHex(label),[{to,value:0n,data}],0n],expectSuccess);
+ 'executeProposal',[stringToHex(label),[{to,value:0n,data}],0n],expectSuccess,isCandidateObservation);
 }
 async function main() {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -556,15 +559,15 @@ async function main() {
       const rows=accruedCreator.map((fee,i)=>({token:poolTokens[i],fee:String(fee),personal:String(q[0][i]),adminCut:String(q[1][i]),permanent:String(q[2][i]),partner:String(q[3][i]),partnerAdminCut:String(q[4][i]),sum:String(q.reduce((s,col)=>s+col[i],0n))}));
       result.scenarioMeasurements.push({candidateId:creatorId,scenario:config.label,registryConfig:config,quotes:rows});
       if(config.label==='personal-only-no-partner'){
-        assertion(creatorId,'zero partner BPS quotes positive partner payout against real accrued creator fees',rows.some(x=>BigInt(x.partner)+BigInt(x.partnerAdminCut)>0n),rows);
-        assertion(creatorId,'personal-only quote breaches collected creator fees',rows.some(x=>BigInt(x.sum)>BigInt(x.fee)),rows);
+        candidateObservation(creatorId,'zero partner BPS quotes positive partner payout against real accrued creator fees',rows.some(x=>BigInt(x.partner)+BigInt(x.partnerAdminCut)>0n),rows);
+        candidateObservation(creatorId,'personal-only quote breaches collected creator fees',rows.some(x=>BigInt(x.sum)>BigInt(x.fee)),rows);
       }else if(config.label==='partner-only'){
-        assertion(creatorId,'partner-only configured positive BPS returns zero partner fees (candidate)',rows.every(x=>BigInt(x.partner)+BigInt(x.partnerAdminCut)===0n),rows);
+        candidateObservation(creatorId,'partner-only configured positive BPS returns zero partner fees (candidate)',rows.every(x=>BigInt(x.partner)+BigInt(x.partnerAdminCut)===0n),rows);
       }else{
         assertion(creatorId,config.label+' quoted splits do not exceed creator fees',rows.every(x=>BigInt(x.sum)<=BigInt(x.fee)),rows);
       }
       const pre=await balances(poolTokens,{creator:actor.receiverX,partner:actor.creatorPartner,treasury:report.treasuryReceiver||report.treasury||actor.deployer,router:deployments.FeeSettlementRouter,permanentVault:pv});
-      const settled=await observedTx(creatorId,config.label+' actual fee collection',wallets.outsider,deployments.FeeSettlementKeeper,keeperAbi,'collect',[sourcePool],config.expected==='SUCCESS');
+      const settled=await observedTx(creatorId,config.label+' actual fee collection',wallets.outsider,deployments.FeeSettlementKeeper,keeperAbi,'collect',[sourcePool],config.expected==='SUCCESS',config.label==='personal-only-no-partner');
       const post=await balances(poolTokens,{creator:actor.receiverX,partner:actor.creatorPartner,treasury:report.treasuryReceiver||report.treasury||actor.deployer,router:deployments.FeeSettlementRouter,permanentVault:pv});
       result.scenarioMeasurements.push({candidateId:creatorId,scenario:config.label,settled,balancesBefore:pre,balancesAfter:post});
     }
@@ -578,10 +581,10 @@ async function main() {
       const q=await readAt(deployments.AdminFeeSplitter,adminSplitterAbi,'quoteAdminAllocation',[sourcePool,accruedAdmin]);
       const rows=accruedAdmin.map((fee,i)=>({token:poolTokens[i],fee:String(fee),creator:String(q[0][i]),extra:String(q[1][i]),partner:String(q[2][i]),treasury:String(q[3][i]),sum:String(q.reduce((s,col)=>s+col[i],0n))}));
       result.scenarioMeasurements.push({candidateId:adminId,scenario:cfg.label,quotes:rows});
-      assertion(adminId,cfg.partner>0?'admin 10% partner plus 100% treasury exceeds real protocol fees':'zero-partner baseline is conserved',
+      (cfg.partner>0 ? candidateObservation : assertion)(adminId,cfg.partner>0?'admin 10% partner plus 100% treasury exceeds real protocol fees':'zero-partner baseline is conserved',
         cfg.partner>0?rows.some(x=>BigInt(x.sum)>BigInt(x.fee)):rows.every(x=>BigInt(x.sum)<=BigInt(x.fee)),rows);
       const pre=await balances(poolTokens,{partner:actor.adminPartner,router:deployments.FeeSettlementRouter,permanentVault:pv});
-      const settled=await observedTx(adminId,cfg.label+' authentic fee collection',wallets.outsider,deployments.FeeSettlementKeeper,keeperAbi,'collect',[sourcePool],cfg.expected==='SUCCESS');
+      const settled=await observedTx(adminId,cfg.label+' authentic fee collection',wallets.outsider,deployments.FeeSettlementKeeper,keeperAbi,'collect',[sourcePool],cfg.expected==='SUCCESS',cfg.partner>0);
       const post=await balances(poolTokens,{partner:actor.adminPartner,router:deployments.FeeSettlementRouter,permanentVault:pv});
       result.scenarioMeasurements.push({candidateId:adminId,scenario:cfg.label,settled,balancesBefore:pre,balancesAfter:post});
     }
@@ -602,11 +605,11 @@ async function main() {
       const expected=BigInt(quote.result);
       const requestedMin=expected*12n/10n+1n;
       const receiverBefore=await readAt(poolTokens[1],erc20Abi,'balanceOf',[actor.creatorA]);
-      const tx=await observedTx(swapId,'DAO-authorized adapter performs real under-minimum swap',wallets.creatorA,adapter,adapterAbi,'swap',[poolTokens[0],poolTokens[1],amountIn,requestedMin,swapRoute],true);
+      const tx=await observedTx(swapId,'DAO-authorized adapter performs real under-minimum swap',wallets.creatorA,adapter,adapterAbi,'swap',[poolTokens[0],poolTokens[1],amountIn,requestedMin,swapRoute],true,true);
       const receiverAfter=await readAt(poolTokens[1],erc20Abi,'balanceOf',[actor.creatorA]);
       const actual=receiverAfter-receiverBefore;
       result.scenarioMeasurements.push({candidateId:swapId,scenario:'DAO-authorized-adapter',amountIn:String(amountIn),quote:String(expected),requestedMinimum:String(requestedMin),recipientActualOut:String(actual),tx});
-      assertion(swapId,'direct authorized adapter recipient received less than requested minimum (interface deviation)',tx.status==='success'&&actual<requestedMin&&actual>0n,{requestedMin,actual});
+      candidateObservation(swapId,'direct authorized adapter recipient received less than requested minimum (interface deviation)',tx.status==='success'&&actual<requestedMin&&actual>0n,{requestedMin,actual});
       const permitAllowance=await readAt(report.permit2,permit2Abi,'allowance',[adapter,poolTokens[0],deployments.Router]);
       assertion(swapId,'adapter clears Permit2 allowance after successful real swap',permitAllowance[0]===0n,{permitAllowance});
     } catch(e) {
@@ -637,15 +640,15 @@ async function main() {
     await send(cancelId,wallets.creatorA,pv,permanentVaultAbi,'requestCreatorMigration',[cancelPlan]);
     await daoCall(cancelId,'DAO approves creator request once',pv,permanentVaultAbi,'approveCreatorMigration',[cancelRequest]);
     const requestBefore=await readAt(pv,permanentVaultAbi,'creatorMigrationRequests',[cancelRequest]);
-    const creatorCancel=await observedTx(cancelId,'distinct original creator cancellation attempt reverts',wallets.creatorA,pv,permanentVaultAbi,'cancelCreatorMigration',[cancelRequest],false);
-    const daoCancel=await daoObserved(cancelId,'distinct DAO owner cancellation attempt reverts',pv,permanentVaultAbi,'cancelCreatorMigration',[cancelRequest],false);
+    const creatorCancel=await observedTx(cancelId,'distinct original creator cancellation attempt reverts',wallets.creatorA,pv,permanentVaultAbi,'cancelCreatorMigration',[cancelRequest],false,true);
+    const daoCancel=await daoObserved(cancelId,'distinct DAO owner cancellation attempt reverts',pv,permanentVaultAbi,'cancelCreatorMigration',[cancelRequest],false,true);
     const outsiderCancel=await observedTx(cancelId,'unrelated address cancellation rejected',wallets.outsider,pv,permanentVaultAbi,'cancelCreatorMigration',[cancelRequest],false);
     const requestAfter=await readAt(pv,permanentVaultAbi,'creatorMigrationRequests',[cancelRequest]);
-    assertion(cancelId,'failed creator and DAO cancellation leaves approved request uncancelled',!requestAfter[5]&&requestBefore[5]===requestAfter[5],{requestBefore,requestAfter,creatorCancel,daoCancel,outsiderCancel});
+    candidateObservation(cancelId,'failed creator and DAO cancellation leaves approved request uncancelled',!requestAfter[5]&&requestBefore[5]===requestAfter[5],{requestBefore,requestAfter,creatorCancel,daoCancel,outsiderCancel});
     const lotBeforeCancelExecution=await readAt(pv,permanentVaultAbi,'liquidityLots',[lot.id]);
-    const executedAfterCancel=await observedTx(cancelId,'approved migration executes despite both failed cancellation attempts',wallets.outsider,pv,permanentVaultAbi,'executeCreatorMigration',[cancelRequest,cancelPlan,[]],true);
+    const executedAfterCancel=await observedTx(cancelId,'approved migration executes despite both failed cancellation attempts',wallets.outsider,pv,permanentVaultAbi,'executeCreatorMigration',[cancelRequest,cancelPlan,[]],true,true);
     const lotAfterCancelExecution=await readAt(pv,permanentVaultAbi,'liquidityLots',[lot.id]);
-    assertion(cancelId,'cancellation control failure causes real source BPT migration',executedAfterCancel.status==='success'&&lotAfterCancelExecution[3]===lotBeforeCancelExecution[3]-qCancel,{lotBeforeCancelExecution,lotAfterCancelExecution,qCancel});
+    candidateObservation(cancelId,'cancellation control failure causes real source BPT migration',executedAfterCancel.status==='success'&&lotAfterCancelExecution[3]===lotBeforeCancelExecution[3]-qCancel,{lotBeforeCancelExecution,lotAfterCancelExecution,qCancel});
     result.scenarioMeasurements.push({candidateId:cancelId,lotId:String(lot.id),requestId:String(cancelRequest),approvedAndCancelledState:asJson(requestAfter),qCancel:String(qCancel),owner:report.dao,requester:actor.creatorA,executeResult:executedAfterCancel});
 
     // Replay: fresh single DAO approval, remaining authentic BPT >= 3*q; execute same plan and requestId repeatedly.
@@ -662,7 +665,7 @@ async function main() {
     for(let n=1;n<=3;n++){
       const before=await readAt(pv,permanentVaultAbi,'liquidityLots',[lot.id]);
       const targetBefore=await readAt(pv,permanentVaultAbi,'totalBpt',[targetPool]);
-      const r=await observedTx(replayId,'same approved request execution number '+n,wallets.outsider,pv,permanentVaultAbi,'executeCreatorMigration',[replayRequest,replayPlan,[]],true);
+      const r=await observedTx(replayId,'same approved request execution number '+n,wallets.outsider,pv,permanentVaultAbi,'executeCreatorMigration',[replayRequest,replayPlan,[]],true,n>1);
       const after=await readAt(pv,permanentVaultAbi,'liquidityLots',[lot.id]);
       const targetAfter=await readAt(pv,permanentVaultAbi,'totalBpt',[targetPool]);
       replaySnapshots.push({iteration:n,before:String(before[3]),after:String(after[3]),targetBefore:String(targetBefore),targetAfter:String(targetAfter),result:r});
@@ -670,7 +673,7 @@ async function main() {
     }
     const state=await readAt(pv,permanentVaultAbi,'creatorMigrationRequests',[replayRequest]);
     result.scenarioMeasurements.push({candidateId:replayId,requestId:String(replayRequest),sourceLot:String(lot.id),authorizedAmount:String(qReplay),executionCount:replaySnapshots.filter(x=>x.result.status==='success').length,snapshots:replaySnapshots,requestState:asJson(state)});
-    assertion(replayId,'single approved request replayed and source BPT spent at least twice',
+    candidateObservation(replayId,'single approved request replayed and source BPT spent at least twice',
       replaySnapshots.length>=2&&replaySnapshots[0].result.status==='success'&&replaySnapshots[1].result.status==='success'&&BigInt(replaySnapshots[1].before)-BigInt(replaySnapshots[1].after)===qReplay,{replaySnapshots,executedFlag:state[4]});
     // Expired-plan control is a raw on-chain rejection, not hypothetical property.
     await testClient.increaseTime({seconds:12000});await testClient.mine({blocks:1});
@@ -679,7 +682,8 @@ async function main() {
     result.completedAt = new Date().toISOString();
     result.summary = {
       assertions: result.assertions.length,
-      failedAssertions: result.assertions.filter((row) => !row.ok).length,
+      failedAssertions: result.assertions.filter((row) => !row.ok && row.classification !== 'candidate-observation').length,
+      candidateObservations: result.assertions.filter((row) => row.classification === 'candidate-observation').length,
       measurementCount: result.scenarioMeasurements.length,
       executedCalls: Object.fromEntries(Object.entries(result.candidates).map(([id, row]) => [id, row.executedCalls])),
     };
