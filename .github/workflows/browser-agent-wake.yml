@@ -462,7 +462,7 @@ jobs:
           exit 1
 
       - name: Create watchdog state
-        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
+        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || steps.deliver.outputs.ok == 'true' || steps.deliver.outputs.send_attempted == 'true') }}
         env:
           CHAT_URL_RESOLVED: ${{ steps.deliver.outputs.chat_url }}
           PROVIDER: ${{ steps.deliver.outputs.provider }}
@@ -492,6 +492,12 @@ jobs:
         run: |
           set -euo pipefail
           safe_id="$(printf '%s' "$WAKE_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          # A substantive wake the reviewer has not acknowledged may never have reached it (a busy
+          # chat can drop it). Arm the watchdog anyway and make its poke repeat the whole wake, so
+          # the reviewer gets its instructions instead of a bare GET BACK TO WORK.
+          if [ -n "$WAKE_ACK_PATH" ] && [ "$ACKNOWLEDGEMENT_VERIFIED" != 'true' ]; then
+            cp /tmp/wake-message.txt /tmp/watchdog-message.txt
+          fi
           jq -n \
             --arg schemaVersion 'curveyield-browser-agent-watchdog-state-v1' \
             --arg wakeId "$WAKE_ID" \
@@ -558,7 +564,7 @@ jobs:
           echo "WATCHDOG_SAFE_ID=$safe_id" >> "$GITHUB_ENV"
 
       - name: Persist watchdog state
-        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
+        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || steps.deliver.outputs.ok == 'true' || steps.deliver.outputs.send_attempted == 'true') }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -751,7 +757,7 @@ jobs:
           fi
 
       - name: Arm immediate watchdog observation
-        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}
+        if: ${{ inputs.watchdog_enabled && (steps.receipt.outputs.verified == 'true' || steps.deliver.outputs.ok == 'true' || steps.deliver.outputs.send_attempted == 'true') }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
