@@ -43,11 +43,19 @@ test('Phase-0 Audit-Controller checkouts are campaign-scoped',async()=>{
   const root=path.resolve(path.dirname(new URL(import.meta.url).pathname),'../../..');
   const intelligence=await fs.readFile(path.join(root,'packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs'),'utf8');
   assert.match(intelligence,/sparsePatterns\}/);
-  for(const wf of ['lite-phase0-bootstrap-v1.yml','lite-phase0-randomized-simulation-v1.yml','lite-phase0-simulation-testing-v1.yml','phase0-deploy-only-regression-v1.yml']){
+  for(const wf of ['lite-phase0-bootstrap-v1.yml','lite-phase0-randomized-simulation-v1.yml','lite-phase0-simulation-testing-v1.yml']){
     const text=await fs.readFile(path.join(root,'.github/workflows',wf),'utf8');
     assert.match(text,/checkout-audit-controller-once-v1\.sh \.audit-controller \S+ branch \S/,wf);
   }
   const sync=await fs.readFile(path.join(root,'.github/workflows/sync-lite-authority-zip-v2.yml'),'utf8');
   assert.doesNotMatch(sync,/^\s+(push|schedule):/m);
   assert.match(sync,/workflow_dispatch:/);
+});
+
+test('Hardhat-native compilation units carry their own ASTs for the exact-build Slither export',async()=>{
+  const root=path.resolve(path.dirname(new URL(import.meta.url).pathname),'../../..');
+  const native=await fs.readFile(path.join(root,'packages/runner/src/native-build.mjs'),'utf8');
+  assert.match(native,/sourceAsts:Object\.fromEntries\(\(info\.sourceNames\?\?\[\]\)\.filter\(name=>sourceAsts\[name\]\)/);
+  const intel=await fs.readFile(path.join(root,'packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs'),'utf8');
+  assert.match(intel,/typeof buildUnit\.sourceContents\?\.\[sourceName\]==='string'/);
 });

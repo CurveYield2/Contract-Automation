@@ -41,7 +41,9 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(scripts/tests/adr-*.test.mjs packages/github-native-sim/test/adr-*.test.mjs)
+          # Also carries the master targeted-test and command-guard checks from the retired
+          # Lite Master Targeted Tests Regression workflow.
+          files=(scripts/tests/adr-*.test.mjs packages/github-native-sim/test/adr-*.test.mjs scripts/tests/lite-master-targeted-tests-v1.test.mjs test/audit-command-guard-v1.test.mjs)
           if [ "${#files[@]}" -eq 0 ]; then echo "No adr tests yet"; exit 0; fi
           timeout -k 10s 900s node --test "${files[@]}"
       - name: Validate V7 runner manifest pin

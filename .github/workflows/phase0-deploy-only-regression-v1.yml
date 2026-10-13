@@ -1,56 +1,45 @@
 name: Phase 0 Deployment Only Regression v1
+
+# Mandatory merge gate for main (required status check: "verify-deploy-only").
+# Runs on every pull request, with no path filter, so it is always reported.
 on:
-  push:
-    branches: [phase0-deployment-only-v1-20261011, main]
-    paths:
-      - '.github/workflows/phase0-deploy-only-regression-v1.yml'
-      - '.github/workflows/lite-phase0-*.yml'
-      - '.github/actions/setup-phase0-deployment-only-toolchain-v1/**'
-      - 'scripts/lite-phase0-*.mjs'
-      - 'scripts/run-phase0-fork-deploy-config-v1.mjs'
-      - 'scripts/write-phase0-fork-deploy-outputs-v1.mjs'
-      - 'scripts/reconcile-phase0-deploy-evidence-v1.mjs'
-      - 'scripts/lib/phase0-deploy-gate-v2.mjs'
-      - 'test/phase0-deploy-gate-v2.test.mjs'
-      - 'scripts/lib/lite-phase-prefill-v1.mjs'
-      - 'scripts/lite-phase-packet-controller-v1.mjs'
-      - 'packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs'
-      - 'packages/github-native-sim/test/phase0-*.test.mjs'
-      - 'packages/github-native-sim/test/lite-phase0-*.test.mjs'
-  workflow_dispatch:
   pull_request:
-    paths:
-      - '.github/workflows/lite-phase0-*.yml'
-      - 'scripts/lite-phase0-*.mjs'
-      - 'scripts/reconcile-phase0-deploy-evidence-v1.mjs'
-      - 'scripts/lib/phase0-deploy-gate-v2.mjs'
-      - 'test/phase0-deploy-gate-v2.test.mjs'
-      - 'packages/github-native-sim/test/phase0-*.test.mjs'
+  workflow_dispatch:
+
 permissions:
   contents: read
-  actions: read
+
+concurrency:
+  group: phase0-deploy-regression-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   verify-deploy-only:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: npm
-      - name: Install pinned dependencies inside GitHub runner
-        run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Check changed JS module syntax
+          persist-credentials: false
+
+      - name: Restore pinned Node dependencies
+        uses: ./.github/actions/setup-phase0-node-cache
+
+      - name: Enable pinned Forge and Cast
+        uses: ./.github/actions/setup-phase0-deployment-only-toolchain-v1
+
+      - name: Check Phase 0 module syntax
         run: |
           node --check packages/github-native-sim/src/phase0-randomized-simulation-v1.mjs
+          node --check packages/github-native-sim/src/phase0-deployment-profile-v1.mjs
           node --check scripts/run-phase0-fork-deploy-config-v1.mjs
           node --check scripts/write-phase0-fork-deploy-outputs-v1.mjs
           node --check scripts/lite-phase0-finalize-v1.mjs
           node --check scripts/lib/lite-phase-prefill-v1.mjs
           node --check scripts/reconcile-phase0-deploy-evidence-v1.mjs
           node --check scripts/lib/phase0-deploy-gate-v2.mjs
-      - name: Run Phase 0 deploy/config migration regression tests
+
+      - name: Phase 0 deploy/config unit and wiring tests
         run: |
           node --test test/phase0-deploy-gate-v2.test.mjs
           node --test \
@@ -60,42 +49,13 @@ jobs:
             packages/github-native-sim/test/phase0-telemetry-smoke-guardrails-v1.test.mjs \
             packages/github-native-sim/test/phase0-optimization4-v1.test.mjs \
             packages/github-native-sim/test/phase0-randomized-simulation-v1.test.mjs \
+            packages/github-native-sim/test/phase0-deployment-profile-v1.test.mjs \
+            packages/github-native-sim/test/sparse-source-checkout-v1.test.mjs \
             packages/github-native-sim/test/lite-phase-packet-controller-integration-v1.test.mjs
 
-  verify-original-blocker-reconciliation:
-    if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: Select private Audit-Controller credential
+      # Real forge scripts on real Anvil forks (local upstream; no secrets): legacy Ethereum
+      # adapter, Ethereum profile and Katana profile all deploy a tiny ERC20 and pass the gate.
+      - name: Phase 0 deploy lane end to end (ERC20 fixture)
         env:
-          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
-          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
-        run: bash scripts/select-audit-controller-token.sh
-      - name: Load original campaign and immutable deployment artifact
-        env:
-          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-        run: bash scripts/checkout-audit-controller-once-v1.sh .audit-controller main branch 'campaigns/CurveYield DEX v16 Source r4'
-      - name: Fetch prior failed run with read-only GitHub token
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir -p .phase0-regression-evidence
-          gh run download 38157021296 --repo "$GITHUB_REPOSITORY" \
-            --name phase0-deploy-config-curveyield-dex-v16-source-r4-38157021296 \
-            --dir .phase0-regression-evidence
-      - name: Source-verify all exclusions without executing a deployment
-        run: |
-          set -euo pipefail
-          node scripts/reconcile-phase0-deploy-evidence-v1.mjs \
-            --input .phase0-regression-evidence/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json \
-            --output .phase0-regression-reconciled/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json \
-            --campaign-root '.audit-controller/campaigns/CurveYield DEX v16 Source r4' \
-            --source-run-id 38157021296
-          node --input-type=module -e 'import fs from "node:fs";import {assertDeployGateEvidenceV2} from "./scripts/lib/phase0-deploy-gate-v2.mjs";const e=JSON.parse(fs.readFileSync(".phase0-regression-reconciled/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json","utf8"));assertDeployGateEvidenceV2(e);if(e.reconciliation.excludedScripts.length!==4)process.exit(3)'
+          PHASE0_E2E: '1'
+        run: timeout -k 10s 600s node --test packages/github-native-sim/test/phase0-erc20-deploy-e2e-v1.test.mjs
