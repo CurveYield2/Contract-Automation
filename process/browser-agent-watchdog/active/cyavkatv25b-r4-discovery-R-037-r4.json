@@ -48,12 +48,24 @@
     "enabled": false,
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2,
-    "consecutiveIdlePokes": 0,
+    "consecutiveIdlePokes": 1,
     "consecutiveUnviewable": 0
   },
   "watchdogRunId": "38478687989",
   "watchdogSweepStartedAt": "2026-10-13T22:35:09Z",
-  "lastDecision": "WAITING_NO_CHATGPT_READ",
+  "lastDecision": "TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ",
   "lastNoReadSweepAt": "2026-10-13T22:18:12Z",
-  "elapsedSinceLastPokeMinutes": 30
+  "elapsedSinceLastPokeMinutes": 30,
+  "lastStopClick": {
+    "x": null,
+    "y": null,
+    "darkPixels": 0,
+    "darkAround": null,
+    "onButton": false,
+    "clicked": false,
+    "areaChanged": null,
+    "status": "STOP_BUTTON_NOT_FOUND"
+  },
+  "lastPokedAt": "2026-10-13T22:35:51Z",
+  "pokeCount": 1
 }
