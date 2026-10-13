@@ -175,7 +175,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y x11vnc xclip xdotool scrot
+          sudo apt-get install -y x11vnc xclip xdotool scrot imagemagick
           command -v scrot >/dev/null
           command -v xclip >/dev/null
 
@@ -924,6 +924,9 @@ jobs:
             bash scripts/browser-deliver-message-v1.sh > "/tmp/$safe_id-poke.out" || true
             poke_ok="$(sed -n 's/^ok=//p' "/tmp/$safe_id-poke.out")"
             poke_skipped="$(sed -n 's/^skipped=//p' "/tmp/$safe_id-poke.out")"
+            stop_click="$(jq -c '.stopClick // null' "$WAKE_RESULT_PATH" 2>/dev/null || echo null)"
+            echo "Watchdog $WAKE_ID stop click: $stop_click" >> "$GITHUB_STEP_SUMMARY"
+            jq --argjson sc "${stop_click:-null}" '.lastStopClick=$sc' /tmp/watchdog-state.json > /tmp/watchdog-state-sc.json && mv /tmp/watchdog-state-sc.json /tmp/watchdog-state.json
 
             if [ "$poke_ok" = true ]; then
               jq --argjson interval "$poke_interval_minutes" \
