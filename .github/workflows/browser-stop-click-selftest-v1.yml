@@ -145,7 +145,7 @@ jobs:
             echo "- stop click: \`$(jq -c '.stopClick // null' "$WAKE_RESULT_PATH")\`"
             echo "- poke sent: $(sed -n 's/^ok=//p' /tmp/selftest-poke.out)"
           } >> "$GITHUB_STEP_SUMMARY"
-          test "$status" = STOP_CLICK_ON_BUTTON || { echo "::error::stop click verification failed: $status"; exit 1; }
+          test "$status" = STOP_CLICKED_BUTTON_CHANGED || { echo "::error::stop click verification failed: $status"; exit 1; }
           grep -qx 'ok=true' /tmp/selftest-poke.out || { echo "::error::poke was not sent after stopping"; exit 1; }
           echo "PASS: stop click landed on the button, changed it, and the poke was sent."
 

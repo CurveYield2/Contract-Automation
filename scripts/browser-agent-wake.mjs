@@ -633,8 +633,40 @@ async function runNormalChromeExistingSession(chromium) {
       throw new BrowserAgentError('X11_GEOMETRY_INVALID', 'Could not determine X11 display geometry', true);
     }
 
-    const composerX = Math.round(width * 0.63);
-    const composerY = Math.round(height - 72);
+    // Interrupt first, then write. A busy chat shows the stop button beside an empty
+    // composer: click it, wait for generation to halt, then click into the text box,
+    // type and press Return. On an idle chat the button beside an empty composer is the
+    // inactive send button, so the click does nothing. Located from an OS screenshot of
+    // the lower-right half by shape (60 px solid disc, any colour), never from the page.
+    let stopClick = null;
+    let discRow = null;
+    if (bool(env.STOP_BEFORE_SEND)) {
+      const searchX = Math.round(width * 0.40);
+      const searchY = Math.round(height * 0.50);
+      const search = await captureX11VisualEvidence('stop_search_area', [searchX, searchY, width - searchX, height - searchY].join(','), 64);
+      const disc = await x11FindButton(search, searchX, searchY);
+      stopClick = { x: disc?.x ?? null, y: disc?.y ?? null, darkPixels: disc?.darkPixels ?? 0, darkAround: disc?.darkAround ?? null, onButton: Boolean(disc), clicked: false, areaChanged: null };
+      if (disc) {
+        const area = [disc.x - 30, disc.y - 30, 60, 60].join(',');
+        const areaBefore = await captureX11VisualEvidence('stop_area_before', area, 64);
+        await x11Key(['mousemove', '--sync', String(disc.x), String(disc.y)], 'x11-stop-move');
+        await page.waitForTimeout(randomDelayMs(180, 360));
+        await x11Key(['click', '1'], 'x11-stop-click');
+        stopClick.clicked = true;
+        await page.waitForTimeout(4000);
+        const areaAfter = await captureX11VisualEvidence('stop_area_after', area, 64);
+        stopClick.areaChanged = !(await fs.readFile(areaBefore)).equals(await fs.readFile(areaAfter));
+        discRow = disc;
+      }
+      stopClick.status = !stopClick.onButton ? 'STOP_BUTTON_NOT_FOUND'
+        : stopClick.areaChanged ? 'STOP_CLICKED_BUTTON_CHANGED' : 'STOP_CLICKED_NO_CHANGE_IDLE';
+      console.log('[normal-chrome-watchdog] stop-before-write=' + JSON.stringify(stopClick));
+      await captureX11VisualEvidence('01b_after_stop_click');
+    }
+
+    // Text box: on the button's row, left of it, when the button was found.
+    const composerX = discRow ? Math.max(Math.round(width * 0.40), discRow.x - 300) : Math.round(width * 0.63);
+    const composerY = discRow ? discRow.y : Math.round(height - 72);
     await x11Key(['mousemove', '--sync', String(composerX), String(composerY)], 'x11-composer-move');
     await page.waitForTimeout(randomDelayMs(180, 360));
     await x11Key(['click', '1'], 'x11-composer-click');
@@ -663,43 +695,6 @@ async function runNormalChromeExistingSession(chromium) {
     }
 
     await page.waitForTimeout(randomDelayMs(350, 700));
-    let stopClick = null;
-    if (bool(env.STOP_BEFORE_SEND)) {
-      // Watchdog pokes only. A frozen chat shows the stop button where send normally
-      // is, and Return cannot submit. Human X11 click on that button, no page read:
-      // stop -> generation halts and the typed poke stays in the composer;
-      // send -> the poke is submitted and the Return below hits an empty composer.
-      // The composer already holds text, so the button is never the voice button.
-      // The button moves when the typed poke wraps the composer onto more lines, so it is
-      // located from a desktop screenshot of the composer's lower-right area, never the page.
-      // Lower half, right of centre: wide enough to survive layout/viewport offsets.
-      // The 60 px disc test (solid disc, clean surround) keeps this specific.
-      const searchX = Math.round(width * 0.40);
-      const searchY = Math.round(height * 0.50);
-      const searchW = width - searchX;
-      const searchH = height - searchY;
-      const search = await captureX11VisualEvidence('stop_search_area', [searchX, searchY, searchW, searchH].join(','), 64);
-      const disc = await x11FindButton(search, searchX, searchY);
-      const stopX = disc?.x ?? Math.round(width * 0.83);
-      const stopY = disc?.y ?? Math.round(height - 72);
-      const area = [stopX - 30, stopY - 30, 60, 60].join(',');
-      const areaBefore = await captureX11VisualEvidence('stop_area_before', area, 64);
-      const onButton = Boolean(disc);
-      stopClick = { x: stopX, y: stopY, darkPixels: disc?.darkPixels ?? 0, darkAround: disc?.darkAround ?? null, onButton, clicked: false, areaChanged: null };
-      if (onButton) {
-        await x11Key(['mousemove', '--sync', String(stopX), String(stopY)], 'x11-stop-move');
-        await page.waitForTimeout(randomDelayMs(180, 360));
-        await x11Key(['click', '1'], 'x11-stop-or-send-click');
-        stopClick.clicked = true;
-        await page.waitForTimeout(4000);
-        const areaAfter = await captureX11VisualEvidence('stop_area_after', area, 64);
-        stopClick.areaChanged = !(await fs.readFile(areaBefore)).equals(await fs.readFile(areaAfter));
-      }
-      stopClick.status = !onButton ? 'STOP_CLICK_MISSED_NOT_ON_BUTTON'
-        : stopClick.areaChanged ? 'STOP_CLICK_ON_BUTTON' : 'STOP_CLICK_NO_VISIBLE_CHANGE';
-      console.log('[normal-chrome-watchdog] stop-before-send=' + JSON.stringify(stopClick));
-      await captureX11VisualEvidence('03b_after_stop_click');
-    }
     console.log('[normal-chrome-watchdog] send=OS-X11-Return');
     await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-send-return');
     await page.waitForTimeout(5000);
