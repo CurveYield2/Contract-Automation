@@ -3,6 +3,7 @@ pragma solidity 0.8.30;
 
 // Test-only overlay compiled in GitHub Actions against unmodified, SHA-256-bound source.
 // These fixtures distinguish admitted-source semantics from unproven installed-runtime reachability.
+import {Vm} from "forge-std/Vm.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {QuestSigningLayerTest, MockIporFactoryBase} from "./QuestSigningLayer.t.sol";
 import {CurveYieldVaultBase1271} from "../../src/katana/CurveYieldVaultBase1271.sol";
