@@ -55,8 +55,8 @@
   "watchdogSweepStartedAt": "2026-10-13T20:43:12Z",
   "lastProgressAt": "2026-10-13T20:04:00Z",
   "lastDecision": "WAITING_NO_CHATGPT_READ",
-  "lastNoReadSweepAt": "2026-10-13T20:26:53Z",
-  "elapsedSinceLastPokeMinutes": 22,
+  "lastNoReadSweepAt": "2026-10-13T20:43:15Z",
+  "elapsedSinceLastPokeMinutes": 39,
   "lastStopClick": {
     "x": null,
     "y": null,
