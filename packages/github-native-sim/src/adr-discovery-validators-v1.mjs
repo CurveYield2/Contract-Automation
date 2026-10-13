@@ -5,6 +5,10 @@ const ATTACK_RESULTS=new Set(['BLOCKED','VIABLE','UNCERTAIN']);
 const ATTACK_ROLES=new Set(['UNPRIVILEGED','UNPRIVILEGED_CALLER','OTHER_ROLE','DIFFERENT_ROLE',
  'MALICIOUS_TOKEN','MALICIOUS_ADAPTER','MALICIOUS_TOKEN_OR_ADAPTER','MALICIOUS_CALLBACK',
  'MEV','MEV_SEARCHER','CARELESS_ADMIN','ADMIN','PRIVILEGED','PRIVILEGED_ROLE']);
+// Constants, immutables and auto-generated getters carry no logic: one per-contract confirmation
+// in trivialReviews covers them. Upgrade/storage is a contract property: answered once per
+// upgradeable contract in contractChecks. groupChecks cover functions sharing a modifier.
+export const TRIVIAL_KINDS_V1=new Set(['CONSTANT','IMMUTABLE','GENERATED_GETTER']);
 const blank=x=>typeof x!=='string'||!x.trim();
 const emptyEvidence=x=>blank(x)||['n/a','none','safe','no issue','reviewed'].includes(x.trim().toLowerCase());
 const keys=arr=>Array.isArray(arr)?arr.map(x=>typeof x==='string'?x:x?.contextId??x?.flowId??x?.obligationId):[];
@@ -21,6 +25,7 @@ const validAnchors=(anchors,inventory,errors,path)=>{
  }
  return accepted;
 };
+const arr2=x=>Array.isArray(x)?x:[];
 const packetIds=(packet,field)=>keys(packet?.[field]??[]);
 const requiredFor=(packet,id)=>{
  const direct=packet?.requiredClasses?.[id]??packet?.requiredClasses?.find?.(x=>x.contextId===id)?.classIds ??
@@ -69,22 +74,70 @@ export function validateFlowReviewSubmissionV1({packet,submission,inventory}={})
  }
  if(!packet||submission.unitId!==packet.unitId)err(errors,'UNIT_MISMATCH','unitId','Submission does not match assigned unit');
  const primary=packetIds(packet,'primaryContexts').length?packetIds(packet,'primaryContexts'):packetIds(packet,'primaryContextIds');
- const expected=new Set(primary),seen=new Set();
  const rows=Array.isArray(submission.rows)?submission.rows:[];
  const allCandidates=candidateRecords(submission);
  const repeats=new Map();
+ const ctxOf=id=>arr2(packet?.primaryContexts).find(c=>c?.contextId===id);
+ const assessmentErrors=(check,cp,needsClass=true)=>{
+  if(emptyEvidence(check?.evidence))err(errors,'EVIDENCE_EMPTY',cp+'.evidence','Evidence is blank or generic');
+  if(!REVIEW_RESULTS.has(check?.assessment))err(errors,'SUBMISSION_SCHEMA',cp+'.assessment','Unknown review assessment');
+  const count=validAnchors(check?.anchors,inventory,errors,cp+'.anchors');
+  if(['SUPPORTED','CONCERN','NOT_APPLICABLE'].includes(check?.assessment)&&count===0)
+   err(errors,'ANCHOR_REQUIRED',cp+'.anchors','Source anchor required for the assessment');
+  if(check?.assessment==='CONCERN'&&!hasCandidate(check,candidateRecords(submission,null,check)))
+   err(errors,'CONCERN_WITHOUT_CANDIDATE',cp,'Concern requires a candidate');
+  if(obj(check?.candidate))validateCandidate(check.candidate,inventory,errors,cp+'.candidate');
+ };
+ // trivialReviews: one confirmation per contract for its constants, immutables and getters.
+ const trivialCovered=new Set();
+ const trivial=arr2(packet?.trivialContextIds);
+ for(let i=0;i<arr2(submission.trivialReviews).length;i++){
+  const review=submission.trivialReviews[i],tp='trivialReviews['+i+']';
+  const covered=trivial.filter(id=>ctxOf(id)?.qualifiedContainer===review?.contract);
+  if(!covered.length)err(errors,'TRIVIAL_CONTRACT_UNKNOWN',tp+'.contract','No constants, immutables or getters of this contract in this unit');
+  assessmentErrors(review,tp);
+  covered.forEach(id=>trivialCovered.add(id));
+ }
+ // groupChecks: one check for several functions that share a modifier (verified from the inventory).
+ const groupCovered=new Map();
+ for(let i=0;i<arr2(submission.groupChecks).length;i++){
+  const group=submission.groupChecks[i],gp='groupChecks['+i+']',ids=arr2(group?.contextIds);
+  if(ids.length<2)err(errors,'GROUP_TOO_SMALL',gp+'.contextIds','A group check needs at least two contexts');
+  for(const id of ids){
+   if(!primary.includes(id))err(errors,'EXTRA_CONTEXT',gp+'.contextIds','Context is not primary in this unit: '+id);
+   else if(!requiredFor(packet,id).includes(group?.classId))err(errors,'CHECK_UNKNOWN_CLASS',gp+'.classId','Class not required for '+id);
+  }
+  const shared=ids.map(id=>new Set(arr2(ctxOf(id)?.modifiers))).reduce((a,b)=>new Set([...a].filter(x=>b.has(x))));
+  if(ids.length>=2&&!shared.size)err(errors,'GROUP_WITHOUT_SHARED_GUARD',gp+'.contextIds','Grouped contexts must share at least one modifier');
+  if((group?.assessment==='NOT_APPLICABLE')!==(group?.applicability==='NOT_APPLICABLE'))
+   err(errors,'NA_MISMATCH',gp+'.applicability','Applicability disagrees with assessment');
+  assessmentErrors(group,gp);
+  for(const id of ids){const set=groupCovered.get(id)??new Set();set.add(group?.classId);groupCovered.set(id,set);}
+ }
+ // contractChecks: every contract-level class assigned to this unit must be answered once.
+ for(const required of arr2(packet?.contractChecks)){
+  const index=arr2(submission.contractChecks).findIndex(x=>x?.contract===required.contract&&x?.classId===required.classId);
+  if(index<0){err(errors,'CONTRACT_CHECK_MISSING','contractChecks','Missing '+required.classId+' for '+required.contract);continue;}
+  const check=submission.contractChecks[index];
+  if((check?.assessment==='NOT_APPLICABLE')!==(check?.applicability==='NOT_APPLICABLE'))
+   err(errors,'NA_MISMATCH','contractChecks['+index+'].applicability','Applicability disagrees with assessment');
+  assessmentErrors(check,'contractChecks['+index+']');
+ }
+ const expected=new Set(primary.filter(id=>!trivialCovered.has(id))),seen=new Set();
  for(let i=0;i<rows.length;i++){
   const row=rows[i],p='rows['+i+']',id=row?.contextId;
-  if(!expected.has(id))err(errors,'EXTRA_CONTEXT',p+'.contextId','Context is not primary in this unit');
+  if(!expected.has(id)&&!trivialCovered.has(id))err(errors,'EXTRA_CONTEXT',p+'.contextId','Context is not primary in this unit');
   if(seen.has(id))err(errors,'DUPLICATE_CONTEXT',p+'.contextId','Context occurs more than once');
   seen.add(id);
   if(blank(row?.summary))err(errors,'SUMMARY_EMPTY',p+'.summary','Context summary is blank');
   if(!Array.isArray(row?.checks))err(errors,'SUBMISSION_SCHEMA',p+'.checks','Checks must be an array');
-  const checks=Array.isArray(row?.checks)?row.checks:[],required=requiredFor(packet,id);
+  const grouped=groupCovered.get(id)??new Set();
+  const checks=Array.isArray(row?.checks)?row.checks:[],required=trivialCovered.has(id)?[]:requiredFor(packet,id).filter(c=>!grouped.has(c));
   const allowed=new Set(required),observed=new Set();
   for(let j=0;j<checks.length;j++){
    const check=checks[j],cp=p+'.checks['+j+']',classId=check?.classId;
-   if(!allowed.has(classId))err(errors,'CHECK_UNKNOWN_CLASS',cp+'.classId','Class not required for this context');
+   if(grouped.has(classId))err(errors,'CHECK_DUPLICATE',cp+'.classId','Class already answered by a group check');
+   else if(!allowed.has(classId)&&!trivialCovered.has(id))err(errors,'CHECK_UNKNOWN_CLASS',cp+'.classId','Class not required for this context');
    if(observed.has(classId))err(errors,'CHECK_DUPLICATE',cp+'.classId','Class checked more than once');
    observed.add(classId);
    if(emptyEvidence(check?.evidence))err(errors,'EVIDENCE_EMPTY',cp+'.evidence','Evidence is blank or generic');

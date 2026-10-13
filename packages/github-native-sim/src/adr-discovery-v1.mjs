@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {classesForTriggersV1,loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
 import {buildCoverageMatrixV1} from './adr-coverage-matrix-v1.mjs';
 import {deriveBaselineObligationsV1} from './adr-baseline-obligations-v1.mjs';
-import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1} from './adr-discovery-validators-v1.mjs';
+import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1,TRIVIAL_KINDS_V1} from './adr-discovery-validators-v1.mjs';
 import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
 
@@ -39,7 +39,35 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  if(!unit)throw new Error('unknown discovery unit '+unitId);
  const role=unit.role==='ATTACK'?'ATTACK':'FLOW_REVIEW',primary=arr(unit.primaryContextIds);
  const contextIds=role==='ATTACK'?arr(inventory?.payload?.contexts).filter(c=>unit.contracts?.some(n=>c.qualifiedContainer===n||c.effectiveIn?.includes(n))).map(c=>c.contextId):primary;
- const requiredClasses=Object.fromEntries(contextIds.sort().map(id=>[id,classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[id]??[])]));
+ // Upgrade/storage is a contract property. A context whose only upgrade trigger is inheriting an
+ // upgradeable base (PROXY_PATTERN) is covered by its contract's single contractCheck instead.
+ const upgradeSpecific=new Set(['DELEGATECALL','INITIALIZER','STORAGE_GAP']);
+ const triggersOf=id=>inventory?.payload?.triggers?.[id]??[];
+ // Each upgradeable contract's contract-level check belongs to the first review unit holding it.
+ const ownerUnit=new Map();
+ for(const u of arr(plan?.payload?.reviewUnits))for(const id of arr(u.primaryContextIds)){
+  const c=contextFor(inventory,id);
+  if(c&&triggersOf(id).includes('PROXY_PATTERN')&&!ownerUnit.has(c.qualifiedContainer))ownerUnit.set(c.qualifiedContainer,u.unitId);
+ }
+ // The owner answers it unless its packet was issued before contract checks existed; then every
+ // function keeps the class so nothing goes unanswered.
+ const ownerAnswers=contract=>{
+  const owner=ownerUnit.get(contract);
+  if(!owner||owner===unitId)return Boolean(owner);
+  const issued=known(root,packetRel(campaignPath,owner));
+  return !issued||arr(issued.payload?.contractChecks).some(x=>x.contract===contract);
+ };
+ const contractLevelUpgrade=id=>{
+  const t=triggersOf(id),c=contextFor(inventory,id);
+  return role!=='ATTACK'&&t.includes('PROXY_PATTERN')&&!t.some(x=>upgradeSpecific.has(x))&&c?.kind!=='CONSTRUCTOR'&&ownerAnswers(c?.qualifiedContainer);
+ };
+ const requiredClasses=Object.fromEntries(contextIds.sort().map(id=>[id,classesForTriggersV1(taxonomy,
+  contractLevelUpgrade(id)?triggersOf(id).filter(x=>x!=='PROXY_PATTERN'):triggersOf(id))]));
+ const upgradeClass=arr(taxonomy?.classes).find(x=>x.classId==='UPGRADE_INIT_STORAGE');
+ const contractChecks=role==='ATTACK'?[]:[...new Set(primary.map(id=>contextFor(inventory,id)?.qualifiedContainer).filter(Boolean))]
+  .filter(name=>ownerUnit.get(name)===unitId).sort()
+  .map(contract=>({contract,classId:'UPGRADE_INIT_STORAGE',reviewChecks:arr(upgradeClass?.reviewChecks)}));
+ const trivialContextIds=role==='ATTACK'?[]:primary.filter(id=>TRIVIAL_KINDS_V1.has(contextFor(inventory,id)?.kind));
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
  const flows=arr(plan?.payload?.flows).filter(f=>arr(unit.flowIds).includes(f.flowId));
  const questions=arr(plan?.payload?.integrationQuestions).filter(q=>arr(unit.integrationQuestionIds).includes(q.obligationId));
@@ -53,6 +81,12 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
   primaryContextIds:primary,readContextIds:role==='ATTACK'?contextIds:arr(unit.readContextIds),
   requiredClasses,flows,flowIds:arr(unit.flowIds),integrationQuestions:questions,
   integrationQuestionIds:arr(unit.integrationQuestionIds),
+  ...(role==='ATTACK'?{}:{trivialContextIds,contractChecks,submissionGuide:[
+   'Each primaryContexts entry already lists its modifiers, state reads and writes, external and internal calls and sender checks: use them instead of re-deriving facts.',
+   'trivialReviews (optional): [{contract,assessment,evidence,anchors}] - one confirmation per contract covers all of its trivialContextIds in this unit (values, bounds, who reads them); those contexts then need no row.',
+   'groupChecks (optional): [{contextIds,classId,assessment,applicability,evidence,anchors}] - one check for two or more contexts that share a modifier; omit that class from their rows.',
+   'contractChecks (required when listed): [{contract,classId,assessment,applicability,evidence,anchors}] - answer each listed contract-level class once, covering every function of that contract.'
+  ]}),
   ...(role==='ATTACK'?{contracts:unit.contracts}:{}),
   ...(role==='ATTACK'?{systemFacts:{
    guardTable:arr(facts?.payload?.guardTable).filter(x=>unit.contracts?.includes(x.contract)),
@@ -118,6 +152,7 @@ export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campa
   if(last&&last.p===p&&last.to===n-1){last.to=n;last.toId=id;}else ranges.push({p,from:n,to:n,fromId:id,toId:id});}
  lines.push('Units to complete now ('+ids.length+'): '+ranges.map(r=>r.fromId===r.toId?r.fromId:r.fromId+' to '+r.toId).join(', ')+'.');
  lines.push('Discovery folder: '+link(pathJoin(campaignPath,''))+' . For each unit <id>, read <id>/ASSIGNMENT_PACKET_v1.json and write <id>/SUBMISSION_v1.json.');
+ if(role!=='ATTACK')lines.push('Each packet has a submissionGuide: use trivialReviews (one per contract for constants and getters), groupChecks (functions sharing a modifier) and the listed contractChecks to avoid repeating the same check.');
  lines.push('Complete all of them, then push ONE boundary request. The controller validates every unit with a new submission in a single run, then wakes you with rework or the next units. Do not push a request per unit.');
  lines.push('Boundary request location: process/agent-upload/lite-phase-boundary/');
  lines.push('Exact boundary request JSON: '+JSON.stringify({schemaVersion:'curveyield-lite-phase-boundary-request-v1',
@@ -154,7 +189,7 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
  return {completeImmediately:false,state,statePath:stateRel(campaignPath),wake:wakes[0]??null,wakes};
 }
 export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmissions,taxonomy,now}){
- const rows=arr(acceptedSubmissions),checks=new Map(),candidates=[],paths=[],answers=[],na=[];
+ const rows=arr(acceptedSubmissions),checks=new Map(),candidates=[],paths=[],answers=[],na=[],contractLevel=[];
  for(const {unitId,submission} of rows){
   const isAttacker=unitId.startsWith('X-');
   if(isAttacker){paths.push(...arr(submission?.attackPaths));answers.push(...arr(submission?.integrationAnswers));continue;}
@@ -168,7 +203,30 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    }
    checks.set(row.contextId,classMap);
   }
+  // Compact forms expand to the same per-context, per-class records the coverage matrix reads.
+  const set=(id,classId,check)=>{
+   const classMap=checks.get(id)??{};classMap[classId]=check.assessment;checks.set(id,classMap);
+   if(check.assessment==='NOT_APPLICABLE')na.push({contextId:id,classId,evidence:check.evidence,anchors:check.anchors});
+   if(check.candidate)candidates.push({...check.candidate,contextIds:[id],classId});
+  };
+  for(const group of arr(submission?.groupChecks))for(const id of arr(group?.contextIds))set(id,group.classId,group);
+  const unit=resolveUnit(plan,unitId);
+  for(const review of arr(submission?.trivialReviews))
+   for(const id of arr(unit?.primaryContextIds)){
+    const c=contextFor(inventory,id);
+    if(c?.qualifiedContainer!==review?.contract||!TRIVIAL_KINDS_V1.has(c.kind))continue;
+    for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[id]??[]))set(id,classId,review);
+    if(!checks.has(id))checks.set(id,{});
+   }
+  contractLevel.push(...arr(submission?.contractChecks));
  }
+ for(const check of contractLevel)
+  for(const c of arr(inventory?.payload?.contexts).filter(x=>x.qualifiedContainer===check?.contract)){
+   if(!classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[c.contextId]??[]).includes(check.classId))continue;
+   if(checks.get(c.contextId)?.[check.classId]===undefined){
+    const classMap=checks.get(c.contextId)??{};classMap[check.classId]=check.assessment;checks.set(c.contextId,classMap);
+   }
+  }
  const items=[],contradictions=[];
  const add=(origin,contextIds,anchor,reviewerFinding,attackerFinding)=>{
   const first=contextFor(inventory,contextIds?.[0]);
