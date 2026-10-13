@@ -235,7 +235,7 @@ async function main() {
   if (!isInstantConfigured) {
     assert(exactConfig(await readWithdrawConfig(), withdrawFusesBefore.map((fuse,index)=>({
       fuse,params:withdrawParamsBefore[index],
-    })), "Withdrawal order or params changed during configuration; aborting");
+    }))), "Withdrawal order or params changed during configuration; aborting");
     const tx = await writeVault.configureInstantWithdrawalFuses(withdrawNext);
     report(`Transaction submitted (instant-withdraw fallback): ${tx.hash}`);
     const receipt = await tx.wait(1);
