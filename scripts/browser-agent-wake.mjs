@@ -614,6 +614,21 @@ async function runNormalChromeExistingSession(chromium) {
     }
 
     await page.waitForTimeout(randomDelayMs(350, 700));
+    if (bool(env.STOP_BEFORE_SEND)) {
+      // Watchdog pokes only. A frozen chat shows the stop button where send normally
+      // is, and Return cannot submit. Human click on that fixed point, no page read:
+      // stop -> generation halts and the typed poke stays in the composer;
+      // send -> the poke is submitted and the Return below hits an empty composer.
+      // The composer already holds text, so the point is never the voice button.
+      const stopX = Math.round(width * Number(env.STOP_BUTTON_X_FRACTION || '0.755'));
+      const stopY = Math.round(height - Number(env.STOP_BUTTON_Y_FROM_BOTTOM || '72'));
+      await x11Key(['mousemove', '--sync', String(stopX), String(stopY)], 'x11-stop-move');
+      await page.waitForTimeout(randomDelayMs(180, 360));
+      await x11Key(['click', '1'], 'x11-stop-or-send-click');
+      console.log('[normal-chrome-watchdog] stop-before-send=OS-X11-click x=' + stopX + ' y=' + stopY);
+      await page.waitForTimeout(4000);
+      await captureX11VisualEvidence('03b_after_stop_click');
+    }
     console.log('[normal-chrome-watchdog] send=OS-X11-Return');
     await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-send-return');
     await page.waitForTimeout(5000);
@@ -1136,25 +1151,7 @@ async function runWithPage(providerName, connect) {
       }
     }
 
-    let before = await snapshot(page);
-
-    // Watchdog pokes: a chat stuck "generating" (e.g. a hung tool call) shows the
-    // stop button instead of send. Press stop to unfreeze it, then send normally.
-    if (before.generating && action === 'wake' && bool(env.STOP_BEFORE_SEND)) {
-      const stop = await firstVisible(page, [
-        'button[data-testid="stop-button"]',
-        'button[aria-label="Stop"]',
-        'button[aria-label*="Stop"]',
-        'button:has-text("Stop generating")'
-      ]);
-      if (stop) {
-        console.log('[github-playwright] stop-before-send=clicking-stop');
-        await humanShortPointerClick(page, stop);
-        await waitForChatIdle(page, 60000);
-        before = await snapshot(page);
-        console.log('[github-playwright] stop-before-send=stopped generating=' + before.generating);
-      }
-    }
+    const before = await snapshot(page);
 
     if (action === 'observe') {
       // A browser/security challenge or login wall is provider/session

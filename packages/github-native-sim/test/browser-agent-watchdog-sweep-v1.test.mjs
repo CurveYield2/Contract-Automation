@@ -34,7 +34,7 @@ test('watchdog never machine-reads ChatGPT and only pokes after the elapsed-time
   // A chat frozen on the stop button is stopped before the poke; wakes never set this.
   assert.match(watchdog, /STOP_BEFORE_SEND='true'/);
   assert.doesNotMatch(wake, /STOP_BEFORE_SEND/);
-  assert.match(fs.readFileSync('scripts/browser-agent-wake.mjs', 'utf8'), /before\.generating && action === 'wake' && bool\(env\.STOP_BEFORE_SEND\)/);
+  assert.match(fs.readFileSync('scripts/browser-agent-wake.mjs', 'utf8'), /if \(bool\(env\.STOP_BEFORE_SEND\)\) \{[\s\S]*?x11-stop-or-send-click/);
   assert.doesNotMatch(watchdog, /WAKE_ACTION=['"]observe['"]/);
   assert.doesNotMatch(watchdog, /assistantCount|lastAssistantHash|humanChallenge|loginPrompt|conversationUnavailable/);
 });
