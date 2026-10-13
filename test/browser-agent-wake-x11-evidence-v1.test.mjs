@@ -21,7 +21,8 @@ test('diagnostic-only captures X11 desktop without typing a message',()=>{
 test('wake workflow retains screenshot evidence and cannot arm state for unverified send',()=>{
  assert.match(yml,/sudo apt-get install -y x11vnc xclip xdotool scrot/);
  assert.match(yml,/WAKE_DIAGNOSTIC_ONLY/);
- assert.match(yml,/Browser result claimed an X11 send without input evidence/);
+ assert.match(yml,/bash scripts\/browser-deliver-message-v1\.sh/);
+ assert.match(fs.readFileSync('scripts/browser-deliver-message-v1.sh','utf8'),/Browser result claimed an X11 send without input evidence/);
  assert.match(yml,/steps.receipt.outputs.verified == 'true'/);
  assert.match(dispatch,/diagnosticOnly:\$diagnostic/);
 });

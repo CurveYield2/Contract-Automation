@@ -24,8 +24,17 @@ test('watchdog never machine-reads ChatGPT and only pokes after the elapsed-time
   assert.match(watchdog, /pokeIntervalMinutes \/\/ 20/);
   assert.match(watchdog, /WAITING_NO_CHATGPT_READ/);
   assert.match(watchdog, /TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ/);
-  assert.match(watchdog, /WAKE_ACTION='wake'/);
-  assert.match(watchdog, /node scripts\/browser-agent-wake\.mjs/);
+  // Pokes use the exact reviewer-wake delivery script; only the message differs.
+  assert.match(watchdog, /bash scripts\/browser-deliver-message-v1\.sh/);
+  assert.match(wake, /bash scripts\/browser-deliver-message-v1\.sh/);
+  const deliver = fs.readFileSync('scripts/browser-deliver-message-v1.sh', 'utf8');
+  assert.match(deliver, /WAKE_ACTION='wake'/);
+  assert.match(deliver, /node scripts\/browser-agent-wake\.mjs/);
+  assert.match(watchdog, /POKE_NOT_SENT_/);
+  // A chat frozen on the stop button is stopped before the poke; wakes never set this.
+  assert.match(watchdog, /STOP_BEFORE_SEND='true'/);
+  assert.doesNotMatch(wake, /STOP_BEFORE_SEND/);
+  assert.match(fs.readFileSync('scripts/browser-agent-wake.mjs', 'utf8'), /if \(bool\(env\.STOP_BEFORE_SEND\)\) \{[\s\S]*?x11-stop-or-send-click/);
   assert.doesNotMatch(watchdog, /WAKE_ACTION=['"]observe['"]/);
   assert.doesNotMatch(watchdog, /assistantCount|lastAssistantHash|humanChallenge|loginPrompt|conversationUnavailable/);
 });

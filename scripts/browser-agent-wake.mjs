@@ -614,6 +614,23 @@ async function runNormalChromeExistingSession(chromium) {
     }
 
     await page.waitForTimeout(randomDelayMs(350, 700));
+    if (bool(env.STOP_BEFORE_SEND)) {
+      // Watchdog pokes only. A frozen chat shows the stop button where send normally
+      // is, and Return cannot submit. Human click on that fixed point, no page read:
+      // stop -> generation halts and the typed poke stays in the composer;
+      // send -> the poke is submitted and the Return below hits an empty composer.
+      // The composer already holds text, so the point is never the voice button.
+      // Measured on a 1920px desktop with the sidebar open: button center x=1594,
+      // on the composer row (the same row the composer click uses).
+      const stopX = Math.round(width * Number(env.STOP_BUTTON_X_FRACTION || '0.83'));
+      const stopY = Math.round(height - Number(env.STOP_BUTTON_Y_FROM_BOTTOM || '72'));
+      await x11Key(['mousemove', '--sync', String(stopX), String(stopY)], 'x11-stop-move');
+      await page.waitForTimeout(randomDelayMs(180, 360));
+      await x11Key(['click', '1'], 'x11-stop-or-send-click');
+      console.log('[normal-chrome-watchdog] stop-before-send=OS-X11-click x=' + stopX + ' y=' + stopY);
+      await page.waitForTimeout(4000);
+      await captureX11VisualEvidence('03b_after_stop_click');
+    }
     console.log('[normal-chrome-watchdog] send=OS-X11-Return');
     await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-send-return');
     await page.waitForTimeout(5000);
