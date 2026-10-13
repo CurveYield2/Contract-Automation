@@ -2,7 +2,7 @@
   "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
   "campaignId": "cyavkatv25b-r4",
   "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd6126-ac44-83e8-a72e-a6664247d395",
+  "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6accaf3c-ffcc-83e8-aa29-6d2928c833c7",
   "browserRoutine": "",
   "agentChats": {
     "reviewer-1": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6accaf26-3df8-83e8-8fe9-eec03ae4fbbe",
@@ -22,17 +22,17 @@
     "url": ""
   },
   "activeChat": {
-    "name": "master-reviewer",
-    "url": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd6126-ac44-83e8-a72e-a6664247d395"
+    "name": "reviewer-2",
+    "url": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6accaf3c-ffcc-83e8-aa29-6d2928c833c7"
   },
-  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"cyavkatv25b-r4-reviewer-1-phase-01-master-reviewer/38359204569\"} as the whole file campaigns/cyavKATv25b r4/work/browser/WAKE_ACK_master-reviewer_v1.json on CurveYield2/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nMaster-directed targeted-test evidence failed exact revalidation: master test round 1: targeted-test raw evidence changed: campaigns/cyavKATv25b r4/evidence/master-targeted-tests/9d6bf84aa675f6811deed548b627d18afc520704e74aeb07e5dd3410084f9395/SOURCE_BINDING_v1.txt",
+  "wakeMessage": "",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
-    "phaseId": "master-review",
-    "milestoneId": "reviewer-1-phase-01",
+    "phaseId": "phase-2",
+    "milestoneId": "PHASE_2_WORK_PACKET",
     "workerRole": "reviewer",
-    "reviewer": "master-reviewer",
+    "reviewer": "reviewer-2",
     "thinkingEffort": "high"
   },
   "watchdog": {
@@ -44,8 +44,8 @@
       "repository": "CurveYield2/Audit-Controller",
       "ref": "main",
       "statePath": "Audit Campaign Directory/campaigns/cyavkatv25b.json",
-      "expectedPhaseId": "master-review",
-      "expectedMilestoneId": "reviewer-1-phase-01",
+      "expectedPhaseId": "phase-2",
+      "expectedMilestoneId": "PHASE_2_WORK_PACKET",
       "activePointerPath": "",
       "stopStates": [
         "STOPPED_BY_HUMAN"
@@ -61,7 +61,7 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-13T06:56:55Z",
+  "updatedAt": "2026-10-13T07:09:52Z",
   "wakeDelivery": {
     "milestoneId": "reviewer-1-phase-01",
     "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd6126-ac44-83e8-a72e-a6664247d395",
