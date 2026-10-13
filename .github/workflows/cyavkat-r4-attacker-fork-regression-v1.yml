@@ -55,12 +55,32 @@ jobs:
             node --version
             forge --version
           } > attacker-output/TOOLCHAIN_v1.txt 2>&1
+      - name: Prepare pinned source dependencies through proven native staging
+        shell: bash
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/attacker-stage"
+          python3 scripts/audit-command-guard-v1.py --label cyavkat-attacker-dependency-stage --wall 1700 --idle 900 --log attacker-output/NATIVE_STAGE_GUARD_v1.log -- node scripts/run-phase0-fork-deploy-config-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --output "$RUNNER_TEMP/attacker-stage/deploy" --fork-url https://katana.drpc.org/ > attacker-output/NATIVE_STAGE_v1.log 2>&1
+          code=$?
+          printf '%s\n' "$code" > attacker-output/NATIVE_STAGE_EXIT_v1.txt
+          SRC="$RUNNER_TEMP/attacker-stage/.phase0-simulation-work/archive-source/cyavKAT/upgrade"
+          if [ ! -f "$SRC/test/katana/QuestSigningLayer.t.sol" ]; then
+            echo "::error::Proven native staging did not produce admitted test sources"
+            tail -n 130 attacker-output/NATIVE_STAGE_v1.log
+            exit 1
+          fi
+          if [ ! -d "$SRC/../ipor-fusion/node_modules/@openzeppelin" ]; then
+            echo "::error::Source dependency tree did not stage; refuse to count Forge as executed"
+            tail -n 130 attacker-output/NATIVE_STAGE_v1.log
+            exit 1
+          fi
+          echo "Qualified staged source and packages exist; native replay runner exit code=$code" >> "$GITHUB_STEP_SUMMARY"
       - name: Execute test-only source-exact attacker harness on pinned fork
         id: tests
         shell: bash
         run: |
           set +e
-          SRC=".audit-controller/$CAMPAIGN_PATH/source/cyavKAT/upgrade"
+          SRC="$RUNNER_TEMP/attacker-stage/.phase0-simulation-work/archive-source/cyavKAT/upgrade"
           cp packages/github-native-sim/audit-harnesses/cyavkat-r4-attacker-fork-v1/AttackerForkConformance_v1.t.sol "$SRC/test/katana/AttackerForkConformance_v1.t.sol"
           (
             cd "$SRC"
