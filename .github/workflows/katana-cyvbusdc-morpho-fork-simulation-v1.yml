@@ -1,0 +1,71 @@
+name: Katana cyvbUSDC Morpho Venue Fork Simulation v1
+
+on:
+  push:
+    paths:
+      - '.github/workflows/katana-cyvbusdc-morpho-fork-simulation-v1.yml'
+      - 'test/katana/cyvbusdc-morpho-venue-fork-v1.mjs'
+      - 'scripts/katana/cyvbusdc-morpho-venue-v1.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: katana-cyvbusdc-morpho-fork-simulation
+  cancel-in-progress: false
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked repository dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+      - name: Start ephemeral Katana Anvil fork
+        shell: bash
+        run: |
+          set -euo pipefail
+          (timeout 13m anvil --fork-url https://katana.drpc.org/ --chain-id 747474 --port 8545 --host 127.0.0.1 > "$RUNNER_TEMP/anvil.log" 2>&1 &)
+          ready=0
+          for i in $(seq 1 100); do
+            if curl --fail --silent --max-time 2 -H 'Content-Type: application/json' \
+              --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
+              http://127.0.0.1:8545 | grep -q '"result":"0xb67d2"'; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            tail -80 "$RUNNER_TEMP/anvil.log"
+            echo '::error::Katana fork did not start with the requested chain ID'
+            exit 1
+          fi
+          echo 'Ephemeral Katana fork ready; no mainnet writes.'
+      - name: Inspect live config and simulate governance on fork
+        env:
+          KATANA_RPC_URL: http://127.0.0.1:8545
+        run: node test/katana/cyvbusdc-morpho-venue-fork-v1.mjs
+      - name: Upload simulation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyvbusdc-morpho-venue-fork-v1-${{ github.run_id }}
+          path: |
+            cyvbusdc-morpho-simulation-v1.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Print Anvil diagnostic tail on failure
+        if: failure()
+        shell: bash
+        run: tail -100 "$RUNNER_TEMP/anvil.log" || true
