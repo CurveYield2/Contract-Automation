@@ -163,7 +163,7 @@ test('long wake submission is verified through visible browser state only', () =
   assert.match(block, /Math\.round\(width \* 0\.63\)/);
   assert.match(block, /height - 72/);
   assert.match(block, /x11-composer-click/);
-  assert.match(block, /humanX11TypeText\(page, wakeMessage\)/);
+  assert.match(block, /humanX11PasteText\(page, wakeMessage\)/);
   assert.match(block, /x11-send-return/);
   assert.match(block, /phase1-fixed-x11-submit-no-chatgpt-page-read/);
   assert.doesNotMatch(block, /ensureComposer|boundingBox|document\.activeElement|page\.locator|snapshot\(|wakeMarkerVisible/);
