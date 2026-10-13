@@ -42,7 +42,7 @@ const morphoAbi = [
 ];
 const accessAbi = [
   "function getTargetFunctionRole(address,bytes4) view returns (uint64)",
-  "function getRoleMember(uint64,address) view returns (bool,uint32)",
+  "function hasRole(uint64,address) view returns (bool,uint32)",
   "function canCall(address,address,bytes4) view returns (bool,uint32)",
 ];
 
@@ -115,7 +115,7 @@ async function main() {
   const configuredRole = await access.getTargetFunctionRole(VAULT, selector);
   assert(configuredRole === FUSE_MANAGER_ROLE, `Unexpected role for grantMarketSubstrates: ${configuredRole}, expected 300`);
   const [roleMember, permission] = await Promise.all([
-    access.getRoleMember(FUSE_MANAGER_ROLE, signer.address),
+    access.hasRole(FUSE_MANAGER_ROLE, signer.address),
     access.canCall(signer.address, VAULT, selector),
   ]);
   const [immediate, delay] = permission;
