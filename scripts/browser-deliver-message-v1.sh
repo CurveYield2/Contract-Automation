@@ -8,6 +8,9 @@ export WAKE_ACTION='wake'
 export WAKE_MODE="${WAKE_MODE:-resume_existing}"
 # Same delivery semantics as the reviewer wake: no idle wait before sending.
 export WAKE_MESSAGE_PURPOSE="${WAKE_MESSAGE_PURPOSE:-initial_wake}"
+# Every delivery clears a frozen generation first: the composer already holds the
+# message, so the disc is either stop (busy chat) or send (idle chat); both are safe.
+export STOP_BEFORE_SEND="${STOP_BEFORE_SEND:-true}"
 set +e
 timeout -k 10s 360s node scripts/browser-agent-wake.mjs >&2
 rc=$?
