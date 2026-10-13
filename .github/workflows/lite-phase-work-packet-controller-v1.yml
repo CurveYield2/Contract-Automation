@@ -217,9 +217,11 @@ jobs:
         run: |
           set -euo pipefail
           ref="${{ steps.request.outputs.audit_controller_ref }}"
-          if [ "${{ steps.request.outputs.review_kind }}" = discovery ]; then
-            # Discovery validations run once per window; they read only the campaign folder,
-            # its directory entry and the bound authority, so a sparse checkout suffices.
+          case "${{ steps.request.outputs.review_kind }}" in phase|discovery|master|master-test-result) sparse=true;; *) sparse=false;; esac
+          if [ "$sparse" = true ]; then
+            # These reviews read only the campaign folder, its directory entry and the bound
+            # (or frozen) authority, so a sparse checkout suffices. Sealed rework and
+            # post-completion follow-up keep the full clone.
             campaign_id="${{ steps.request.outputs.campaign_id }}"
             [[ "$campaign_id" =~ ^(.+)-r[0-9]+$ ]] || { echo "::error::campaign_id must end in -rN"; exit 1; }
             directory_api="repos/CurveYield2/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/${BASH_REMATCH[1]}.json?ref=$ref"
