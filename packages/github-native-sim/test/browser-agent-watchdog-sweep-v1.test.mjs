@@ -92,3 +92,15 @@ test('watchdog workflow contains one complete sweep body and no duplicated corru
   assert.equal((watchdog.match(/launch_lite_successor\(\) \{/g) ?? []).length, 1);
   assert.equal((watchdog.match(/Watchdog sweep complete; active state remains for the next scheduled sweep\./g) ?? []).length, 1);
 });
+
+test('stop click is verified from desktop screenshots and has a live self-test on a scratch chat', () => {
+  const runtime = fs.readFileSync('scripts/browser-agent-wake.mjs', 'utf8');
+  assert.match(runtime, /x11MeanBrightness\(pointBefore\)/);
+  assert.match(runtime, /if \(onButton\) \{/);
+  assert.match(runtime, /STOP_CLICK_MISSED_NOT_ON_BUTTON/);
+  assert.match(watchdog, /\.lastStopClick=\$sc/);
+  const selftest = fs.readFileSync('.github/workflows/browser-stop-click-selftest-v1.yml', 'utf8');
+  assert.match(selftest, /Refuse registered audit chats/);
+  assert.match(selftest, /group: chatgpt-shared-browser-session-v1/);
+  assert.match(selftest, /test "\$status" = STOP_CLICK_ON_BUTTON/);
+});

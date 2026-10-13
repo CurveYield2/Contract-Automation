@@ -395,7 +395,15 @@ async function verifyX11VisibleChatAddress(requested) {
   return true;
 }
 
-async function captureX11VisualEvidence(label, cropRegion = '') {
+// Mean grey level (0 black .. 1 white) of an OS desktop screenshot file.
+async function x11MeanBrightness(file) {
+  const {stdout}=await runCapture('convert',[file,'-colorspace','Gray','-format','%[fx:mean]','info:']);
+  const value=Number.parseFloat(stdout);
+  if(!Number.isFinite(value))throw new BrowserAgentError('X11_BRIGHTNESS_UNREADABLE','Could not measure desktop screenshot brightness',true);
+  return value;
+}
+
+async function captureX11VisualEvidence(label, cropRegion = '', minBytes = 3000) {
   const root = '/tmp/browser-wake-evidence-v1';
   await fs.mkdir(root, {recursive:true});
   const name=String(label).replace(/[^a-z0-9_-]/gi,'_').slice(0,60);
@@ -405,7 +413,7 @@ async function captureX11VisualEvidence(label, cropRegion = '') {
   const args = cropRegion ? ['-o','-a',cropRegion,target] : ['-o',target];
   await runCapture('scrot',args,{env:{DISPLAY:env.DISPLAY||':99'}});
   const file=await fs.stat(target);
-  if(file.size<3000)throw new BrowserAgentError('X11_SCREENSHOT_EMPTY','Unable to capture visible desktop before declaring delivery',true);
+  if(file.size<minBytes)throw new BrowserAgentError('X11_SCREENSHOT_EMPTY','Unable to capture visible desktop before declaring delivery',true);
   console.log('[normal-chrome-watchdog] saved-desktop-visual='+name+' bytes='+file.size);
   return target;
 }
@@ -614,6 +622,7 @@ async function runNormalChromeExistingSession(chromium) {
     }
 
     await page.waitForTimeout(randomDelayMs(350, 700));
+    let stopClick = null;
     if (bool(env.STOP_BEFORE_SEND)) {
       // Watchdog pokes only. A frozen chat shows the stop button where send normally
       // is, and Return cannot submit. Human click on that fixed point, no page read:
@@ -624,11 +633,27 @@ async function runNormalChromeExistingSession(chromium) {
       // on the composer row (the same row the composer click uses).
       const stopX = Math.round(width * Number(env.STOP_BUTTON_X_FRACTION || '0.83'));
       const stopY = Math.round(height - Number(env.STOP_BUTTON_Y_FROM_BOTTOM || '72'));
-      await x11Key(['mousemove', '--sync', String(stopX), String(stopY)], 'x11-stop-move');
-      await page.waitForTimeout(randomDelayMs(180, 360));
-      await x11Key(['click', '1'], 'x11-stop-or-send-click');
-      console.log('[normal-chrome-watchdog] stop-before-send=OS-X11-click x=' + stopX + ' y=' + stopY);
-      await page.waitForTimeout(4000);
+      // Verify from OS screenshots only: the send/stop button is a solid dark disc on a
+      // light page. Click only if the point is dark; then confirm the button area changed.
+      const point = [stopX - 8, stopY - 8, 16, 16].join(',');
+      const area = [stopX - 30, stopY - 30, 60, 60].join(',');
+      const pointBefore = await captureX11VisualEvidence('stop_point_before', point, 64);
+      const areaBefore = await captureX11VisualEvidence('stop_area_before', area, 64);
+      const brightness = await x11MeanBrightness(pointBefore);
+      const onButton = brightness < Number(env.STOP_BUTTON_MAX_BRIGHTNESS || '0.35');
+      stopClick = { x: stopX, y: stopY, brightness: Number(brightness.toFixed(3)), onButton, clicked: false, areaChanged: null };
+      if (onButton) {
+        await x11Key(['mousemove', '--sync', String(stopX), String(stopY)], 'x11-stop-move');
+        await page.waitForTimeout(randomDelayMs(180, 360));
+        await x11Key(['click', '1'], 'x11-stop-or-send-click');
+        stopClick.clicked = true;
+        await page.waitForTimeout(4000);
+        const areaAfter = await captureX11VisualEvidence('stop_area_after', area, 64);
+        stopClick.areaChanged = !(await fs.readFile(areaBefore)).equals(await fs.readFile(areaAfter));
+      }
+      stopClick.status = !onButton ? 'STOP_CLICK_MISSED_NOT_ON_BUTTON'
+        : stopClick.areaChanged ? 'STOP_CLICK_ON_BUTTON' : 'STOP_CLICK_NO_VISIBLE_CHANGE';
+      console.log('[normal-chrome-watchdog] stop-before-send=' + JSON.stringify(stopClick));
       await captureX11VisualEvidence('03b_after_stop_click');
     }
     console.log('[normal-chrome-watchdog] send=OS-X11-Return');
@@ -649,6 +674,7 @@ async function runNormalChromeExistingSession(chromium) {
     const result = {
       ok: sendChanged, provider:'normal-system-chrome-x11-phase1-visual-evidence',
       action, wakeId, posted: sendChanged, sendAttempted: true, persisted:false,
+      ...(stopClick ? { stopClick } : {}),
       chatUrl:requestedUrl,
       verification:'X11_VISIBLE_COMPOSER_TRANSITION_ONLY',
       ...(!sendChanged ? {failures:[{provider:'normal-system-chrome-x11',
