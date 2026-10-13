@@ -34,6 +34,9 @@ const wi=new ethers.Interface([
   'function getRequestFee() view returns(uint256)',
   'function getLastReleaseFundsTimestamp() view returns(uint256)',
   'function releaseFunds(uint256,uint256)',
+  'function releaseFor(address,uint256,uint256) returns(uint256)',
+  'function controller() view returns(address)',
+  'function releasableShares() view returns(uint256)',
 ]);
 const ai=new ethers.Interface([
   'function hasRole(uint64,address) view returns(bool,uint32)',
@@ -61,15 +64,24 @@ async function before(){
  for(const user of USERS.slice(1))await tx('real_oldWM_requestShares:'+user,user,OLD,wi,'requestShares',[500000000000000000n]);
  const readReleased=await call('released_candidate_before',OLD,wi,'requestInfo',[USERS[1]]);
  const shareRelease=readReleased.success?BigInt(readReleased.result[0]):0n;
- const oldAdmin=await call('deployer_pre_existing_ALPHA',ACCESS,ai,'hasRole',[200,DEPLOYER]);
- if(!oldAdmin.success||!oldAdmin.result[0]) await tx('authorized_temp_ALPHA_grant_by_owner',DEPLOYER,ACCESS,ai,'grantRole',[200,DEPLOYER,0]);
+ const controller=await call('actual_configured_old_WM_controller',OLD,wi,'controller');
+ const expectedController=controller.success?controller.result[0]:null;
+ if(expectedController&&ethers.isAddress(expectedController)){
+   const controllerCode=await p.getCode(expectedController);
+   state.oldWMConfiguredController={address:expectedController,codehash:ethers.keccak256(controllerCode)};
+   state.events.push({kind:'AUTHENTIC_CONTROLLER_CONTEXT_LIMIT',detail:'The releaseFor probe uses Anvil contract-address impersonation for the exact configured controller identity. This establishes the manager authorization and release semantics, NOT existence of an exposed externally reachable controller method.'});save();
+   await p.send('anvil_setBalance',[expectedController,'0x3635c9adc5dea00000']);
+ }
  await p.send('evm_increaseTime',[2]);await p.send('evm_mine',[]);
- if(shareRelease>0n)await tx('real_oldWM_releaseFundedClaims',DEPLOYER,OLD,wi,'releaseFunds',[(await p.getBlock('latest')).timestamp-1,shareRelease*2n]);
+ if(shareRelease>0n && expectedController && ethers.isAddress(expectedController)){
+   await tx('authorized_real_WM_releaseFor_released_class',expectedController,OLD,wi,'releaseFor',[USERS[1],(await p.getBlock('latest')).timestamp-1,shareRelease]);
+   await tx('authorized_real_WM_releaseFor_healthy_control',expectedController,OLD,wi,'releaseFor',[USERS[3],(await p.getBlock('latest')).timestamp-1,shareRelease]);
+ }
  const oldReleasePost=await call('released_candidate_after',OLD,wi,'requestInfo',[USERS[1]]);
  // Old released-but-unredeemed class is preserved (user1). Separate pre-cutover healthy control user3 redeems tiny amount.
  const preControl=await call('healthy_old_control_requestInfo',OLD,wi,'requestInfo',[USERS[3]]);
  if(preControl.success&&preControl.result[2]===true){
-   const amount=500000000000000n;
+   const amount=1n;
    await tx('healthy_old_pre_cutover_redeem',USERS[3],VAULT,vi,'redeemFromRequest',[amount,USERS[3],USERS[3]],5000000n);
  }
  await tx('pending_after_release_oldWM_request',USERS[0],OLD,wi,'requestShares',[500000000000000000n]);
