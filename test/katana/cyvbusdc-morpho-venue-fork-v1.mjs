@@ -299,8 +299,16 @@ async function run() {
     const exitReceipt = await (await vault.connect(user).execute(exitAction)).wait();
     assert(exitReceipt?.status === 1, "Withdraw fuse execution failed on fork");
     const finalIdle = await token.balanceOf(VAULT);
-    assert(finalIdle >= idle, "Full Morpho exit failed to restore vault-held vbUSDC");
+    const residual = finalIdle>=idle ? 0n : idle-finalIdle;
+    report.details.supplyIdleVbUsdc = interim.toString();
+    report.details.exitIdleVbUsdc = finalIdle.toString();
+    report.details.withdrawalShortfallBaseUnits = residual.toString();
     report.txs.push({type:"fork-only supply",hash:supplyReceipt.hash},{type:"fork-only exit",hash:exitReceipt.hash});
+    log(`1-vbUSDC Morpho supply and full withdrawal: initial idle=${idle}; after supply=${interim}; after exit=${finalIdle}; residual=${residual} base units`);
+    // Morpho supply shares use down-rounding and withdrawals need not redeem the
+    // exact entry amount. 10 base units of a 6-decimal token = $0.00001,
+    // a bounded 0.001% tolerance for the 1-vbUSDC test amount.
+    assert(residual <= 10n, `Morpho withdrawal shortfall exceeded 10 vbUSDC base units: ${residual}`);
     report.checks.supplyAndWithdraw = "PASS";
   } else {
     report.checks.supplyAndWithdraw = "NOT_EXERCISED";
