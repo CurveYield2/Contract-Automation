@@ -55,26 +55,29 @@ jobs:
             node --version
             forge --version
           } > attacker-output/TOOLCHAIN_v1.txt 2>&1
-      - name: Prepare pinned source dependencies through proven native staging
+      - name: Extract exact admitted immutable source into isolated test workspace
         shell: bash
         run: |
-          set +e
-          mkdir -p "$RUNNER_TEMP/attacker-stage"
-          python3 scripts/audit-command-guard-v1.py --label cyavkat-attacker-dependency-stage --wall 1700 --idle 900 --log attacker-output/NATIVE_STAGE_GUARD_v1.log -- node scripts/run-phase0-fork-deploy-config-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --output "$RUNNER_TEMP/attacker-stage/deploy" --fork-url https://katana.drpc.org/ > attacker-output/NATIVE_STAGE_v1.log 2>&1
-          code=$?
-          printf '%s\n' "$code" > attacker-output/NATIVE_STAGE_EXIT_v1.txt
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/attacker-stage" attacker-output
+          node --input-type=module > attacker-output/SOURCE_STAGE_v1.log 2>&1 <<'NODE'
+          import path from 'node:path';
+          import {stageExactArchiveSource} from './packages/github-native-sim/src/execution.mjs';
+          const staged = await stageExactArchiveSource({
+            checkoutRoot: path.resolve('.audit-controller'),
+            workspaceRoot: path.join(process.env.RUNNER_TEMP, 'attacker-stage', '.phase0-simulation-work'),
+            archivePath: process.env.CAMPAIGN_PATH + '/source/cyavKATv25b.zip',
+            archiveSha256: process.env.SOURCE_SHA256,
+            projectPath: 'cyavKAT/upgrade'
+          });
+          if (staged.archiveSha256 !== process.env.SOURCE_SHA256) throw new Error('SHA mismatch');
+          console.log(JSON.stringify({status:'SOURCE_EXACT_ARCHIVE_STAGED',sha256:staged.archiveSha256,entryCount:staged.entryCount,extractedBytes:staged.extractedBytes,projectRoot:staged.projectRoot}));
+          NODE
           SRC="$RUNNER_TEMP/attacker-stage/.phase0-simulation-work/archive-source/cyavKAT/upgrade"
-          if [ ! -f "$SRC/test/katana/QuestSigningLayer.t.sol" ]; then
-            echo "::error::Proven native staging did not produce admitted test sources"
-            tail -n 130 attacker-output/NATIVE_STAGE_v1.log
-            exit 1
-          fi
-          if [ ! -d "$SRC/../ipor-fusion/node_modules/@openzeppelin" ]; then
-            echo "::error::Source dependency tree did not stage; refuse to count Forge as executed"
-            tail -n 130 attacker-output/NATIVE_STAGE_v1.log
-            exit 1
-          fi
-          echo "Qualified staged source and packages exist; native replay runner exit code=$code" >> "$GITHUB_STEP_SUMMARY"
+          test -f "$SRC/test/katana/QuestSigningLayer.t.sol"
+          test -d "$SRC/../ipor-fusion/node_modules/@openzeppelin"
+          printf '0\n' > attacker-output/SOURCE_STAGE_EXIT_v1.txt
+          echo "Exact admitted source archive staged independently of native deployment" >> "$GITHUB_STEP_SUMMARY"
       - name: Execute test-only source-exact attacker harness on pinned fork
         id: tests
         shell: bash
