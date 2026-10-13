@@ -131,6 +131,61 @@ jobs:
           tail -n 100 targeted-output/CONFORMANCE_v1.log
           exit 0
 
+      - name: Execute authentic legacy claims across unchanged cutover in single isolated Anvil
+        id: lifecycle
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          SRC=targeted-output/.phase0-simulation-work/archive-source/cyavKAT/upgrade
+          if [ ! -f "$SRC/scripts/deploy-cyavkat-unified-v1.cjs" ]; then
+            echo "missing qualified staged source" > targeted-output/LEGACY_LIFECYCLE_RUN_v1.log
+            printf "126\n" > targeted-output/LEGACY_EXEC_EXIT_v1.txt
+            exit 0
+          fi
+          node packages/github-native-sim/audit-harnesses/cyavkat-r4-targeted-round2-v1/R2PatchRunner_v1.mjs "$SRC" > targeted-output/R2_SOURCE_PATCH_BINDING_v1.json 2>&1
+          patch_code=$?
+          if [ "$patch_code" -ne 0 ]; then
+            printf "%s\n" "$patch_code" > targeted-output/LEGACY_EXEC_EXIT_v1.txt
+            cat targeted-output/R2_SOURCE_PATCH_BINDING_v1.json
+            exit 0
+          fi
+          node node_modules/@foundry-rs/anvil/bin.mjs --fork-url https://katana.drpc.org/ --fork-block-number 45121798 --chain-id 747474 --port 8655 --auto-impersonate > targeted-output/LEGACY_ANVIL_v1.log 2>&1 &
+          fork_pid=$!
+          trap 'kill "$fork_pid" 2>/dev/null || true' EXIT
+          up=0
+          for i in $(seq 1 45); do
+            if cast block-number --rpc-url http://127.0.0.1:8655 >/dev/null 2>&1; then up=1; break; fi
+            sleep 2
+          done
+          if [ "$up" -ne 1 ]; then
+            echo "Local Anvil failed to start" > targeted-output/LEGACY_LIFECYCLE_RUN_v1.log
+            tail -n 100 targeted-output/LEGACY_ANVIL_v1.log >> targeted-output/LEGACY_LIFECYCLE_RUN_v1.log
+            printf "125\n" > targeted-output/LEGACY_EXEC_EXIT_v1.txt
+            exit 0
+          fi
+          (
+            cd "$SRC"
+            R2_EVIDENCE_FILE="$GITHUB_WORKSPACE/targeted-output/LEGACY_REAL_LIFECYCLE_v1.json" \
+            NODE_PATH="$GITHUB_WORKSPACE/node_modules" \
+            LOCALHOST_RPC_URL="http://127.0.0.1:8655" \
+            ETH_RPC_URL="http://127.0.0.1:8655" \
+            KATANA_RPC_URL="http://127.0.0.1:8655" \
+            timeout 1500s npx --no-install hardhat run --no-compile scripts/r2-native-test-only-v1.cjs --network localhost
+          ) > targeted-output/LEGACY_LIFECYCLE_RUN_v1.log 2>&1
+          code=$?
+          printf "%s\n" "$code" > targeted-output/LEGACY_EXEC_EXIT_v1.txt
+          echo "lifecycle_exit=$code" >> "$GITHUB_OUTPUT"
+          tail -n 140 targeted-output/LEGACY_LIFECYCLE_RUN_v1.log
+          if [ -f "$SRC/unified-deploy-output-v1/CYAVKAT_UNIFIED_HARDHAT_DEPLOYMENT_v1.json" ]; then
+            cp "$SRC/unified-deploy-output-v1/CYAVKAT_UNIFIED_HARDHAT_DEPLOYMENT_v1.json" targeted-output/LEGACY_CUTOVER_NATIVE_REPORT_v1.json
+          fi
+          if [ -d "$SRC/unified-deploy-output-v1/phase-logs" ]; then
+            mkdir -p targeted-output/LEGACY_CUTOVER_PHASE_LOGS_v1
+            cp "$SRC/unified-deploy-output-v1/phase-logs/"*.log targeted-output/LEGACY_CUTOVER_PHASE_LOGS_v1/
+          fi
+          exit 0
+
       - name: Build raw manifest
         if: always()
         shell: bash
