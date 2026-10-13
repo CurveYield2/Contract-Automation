@@ -12,11 +12,11 @@ import {
 } from "ethers";
 
 const CHAIN_ID = 747474n;
-const VAULT = getAddress("0xDf9CbCB8b57A031e91CAe673a6A5786d85Ce2eC5");
-const VBUSDC = getAddress("0x203A662b0BD271A6ed5a60EdFbd04bFce608FD36");
-const MORPHO = getAddress("0xD50F2DffFd62f94Ee4AEd9ca05C61d0753268aBc");
-const SUPPLY_FUSE = getAddress("0xC66c3F5cC5e1550A0Ff960c06D630A2FBB80E19d");
-const BALANCE_FUSE = getAddress("0x83790D83C23461cd22429276406C4f09DB885A85");
+const VAULT = getAddress("0xdf9cbcb8b57a031e91cae673a6a5786d85ce2ec5");
+const VBUSDC = getAddress("0x203a662b0bd271a6ed5a60edfbd04bfce608fd36");
+const MORPHO = getAddress("0xd50f2dfffd62f94ee4aed9ca05c61d0753268abc");
+const SUPPLY_FUSE = getAddress("0xc66c3f5cc5e1550a0ff960c06d630a2fbb80e19d");
+const BALANCE_FUSE = getAddress("0x83790d83c23461cd22429276406c4f09db885a85");
 const IPOR_MARKET_ID = 14n;
 const BLUE_MARKET = "0xcfac40b9f06194a33d9526f73642f6849b908c2b6d8669ad9d2d4a3e7dcb017a";
 const FUSE_MANAGER_ROLE = 300n;
@@ -66,11 +66,11 @@ function report(line) {
 async function main() {
   assert(["inspect", "apply"].includes(MODE), "MODE must be inspect or apply");
   const key = process.env.DEPLOYER_FX;
-  assert(key && /^0x[0-9a-fA-F]{64}$/.test(key), "DEPLOYER_FX must be a 0x-prefixed 32-byte private key");
+  assert(key && /^(0x)?[0-9a-fA-F]{64}$/.test(key), "DEPLOYER_FX must be a 32-byte hexadecimal private key");
   const provider = new JsonRpcProvider(process.env.KATANA_RPC_URL || "https://rpc.katana.network/", undefined, { staticNetwork: false });
   const network = await provider.getNetwork();
   assert(network.chainId === CHAIN_ID, `Wrong chain: expected ${CHAIN_ID}, got ${network.chainId}`);
-  const signer = new Wallet(key, provider);
+  const signer = new Wallet(key.startsWith("0x") ? key : `0x${key}`, provider);
   const vault = new Contract(VAULT, vaultAbi, provider);
 
   await checkCode(provider, VAULT, "Vault");
