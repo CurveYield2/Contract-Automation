@@ -6,8 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       wake_id:
-        description: Active wake/watchdog identifier
-        required: true
+        description: Active wake/watchdog identifier (empty sweeps every active target)
+        required: false
+        default: ''
         type: string
 
 permissions:
@@ -31,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$REQUESTED_WAKE_ID" ]; then
             jq -cn --arg id "$REQUESTED_WAKE_ID" '[$id]' > /tmp/watchdog-targets.json
           else
             api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active?ref=main"
@@ -53,6 +54,30 @@ jobs:
           echo "targets=$targets" >> "$GITHUB_OUTPUT"
           echo "has_targets=$has_targets" >> "$GITHUB_OUTPUT"
           echo "watchdog_targets=$count" >> "$GITHUB_STEP_SUMMARY"
+
+  # GitHub drops scheduled runs under load (hours between cron sweeps), so while any
+  # target stays active the watchdog re-dispatches itself; one pending re-arm at a time.
+  rearm:
+    needs: [discover, supervise]
+    if: always() && needs.discover.outputs.has_targets == 'true'
+    concurrency:
+      group: browser-agent-watchdog-rearm
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait one sweep interval and re-dispatch while targets remain active
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 300
+          active="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active?ref=main" --jq '[.[]? | select(.type=="file" and (.name|endswith(".json")))] | length' 2>/dev/null || echo 0)"
+          if [ "$active" -gt 0 ]; then
+            gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main
+            echo "re-dispatched watchdog for $active active target(s)" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   supervise:
     needs: discover
