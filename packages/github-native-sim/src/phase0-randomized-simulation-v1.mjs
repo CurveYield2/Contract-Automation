@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { PHASE0_DEPLOYMENT_PROFILE_FRAMEWORKS, loadDeploymentProfile, phase0ForkChainForProfile, resolvePhase0ForkUrl } from './phase0-deployment-profile-v1.mjs';
 import fss from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -100,25 +101,30 @@ async function rpc(url,method,params=[]){
   if(body.error)throw new Error(`RPC ${method}: ${body.error.message??JSON.stringify(body.error)}`);
   return body.result;
 }
-async function startAnvil({forkUrl,projectRoot,evmVersion='cancun'}){
+export async function startAnvil({forkUrl,projectRoot,evmVersion='cancun',chainId=1,requireUpstreamChainId=false}){
   let identityProxy;
   try{
     const ethers=await import('ethers');
     const ephemeralWallet=ethers.Wallet.createRandom();
     const ephemeralMnemonic=ephemeralWallet.mnemonic?.phrase;
     if(!ephemeralMnemonic)throw new Error('Unable to generate ephemeral Anvil mnemonic');
-    identityProxy=await startRpcIdentityProxy({upstreamUrl:forkUrl,chainId:1});
+    identityProxy=await startRpcIdentityProxy({upstreamUrl:forkUrl,chainId});
     const normalizedChainId=Number(BigInt(await rpc(identityProxy.url,'eth_chainId',[])));
-    if(normalizedChainId!==1){
-      const e=new Error(`Phase-0 Ethereum RPC identity normalization failed; observed chainId=${normalizedChainId}`);
+    if(normalizedChainId!==chainId){
+      const e=new Error(`Phase-0 fork RPC identity normalization failed; expected chainId=${chainId} observed chainId=${normalizedChainId}`);
       e.code='PHASE0_ETHEREUM_IDENTITY_NORMALIZATION_FAILURE';throw e;
     }
     const observation=identityProxy.getUpstreamIdentityObservation?.();
     let upstreamChainId=null;
     try{if(observation?.chainId)upstreamChainId=Number(BigInt(observation.chainId));}catch{}
+    // A profile-declared chain forks that real chain: a wrong-chain secret is an infrastructure failure.
+    if(requireUpstreamChainId&&upstreamChainId!==chainId){
+      const e=new Error(`Phase-0 fork RPC reports chainId=${upstreamChainId}; the deployment profile requires chainId=${chainId}`);
+      e.code='PHASE0_FORK_RPC_WRONG_CHAIN';throw e;
+    }
     const port=8545,url='http://127.0.0.1:8545';
     const executable=path.resolve(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
-    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id','1','--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--auto-impersonate','--no-rate-limit','--silent'];
+    const args=[executable,'--host','127.0.0.1','--port',String(port),'--chain-id',String(chainId),'--hardfork',String(evmVersion||'cancun').toLowerCase(),'--fork-url',identityProxy.url,'--accounts','20','--mnemonic',ephemeralMnemonic,'--auto-impersonate','--no-rate-limit','--silent'];
     const child=spawn(process.execPath,args,{cwd:projectRoot,env:process.env,stdio:['ignore','ignore','pipe']});
     let stderr='';child.stderr?.on('data',x=>{stderr=(stderr+String(x)).slice(-8000);});
     const started=Date.now();
@@ -318,6 +324,55 @@ async function runDeploymentScriptV1(options){
     console.log(`[phase0-deployment] native script exited; elapsed=${Math.floor((Date.now()-startedAt)/1000)}s; exitCode=${result.exitCode}`);
     return result;
   }finally{clearInterval(heartbeat);}
+}
+// Runs only what audit-deployment.json declares, against the local fork, as the declared deployer:
+// either its Foundry scripts in order (stopping at the first failure) or its single Hardhat entrypoint.
+// The runner owns every command line; the profile loader refuses ffi/out-of-tree fs_permissions, and the
+// upstream RPC secret is never passed to the package (only the local Anvil URL).
+export async function executeDeploymentProfileV1({projectRoot,anvilUrl,profile,chain}){
+  await rpc(anvilUrl,'anvil_setBalance',[profile.deployer,'0x3635c9adc5dea00000']);
+  const localEnv={ETH_RPC_URL:anvilUrl,RPC_URL:anvilUrl,LOCALHOST_RPC_URL:anvilUrl,[chain.localRpcEnv]:anvilUrl};
+  if(profile.mode==='HARDHAT')return executeHardhatProfileV1({projectRoot,anvilUrl,profile,chain,localEnv});
+  const framework=PHASE0_DEPLOYMENT_PROFILE_FRAMEWORKS.FOUNDRY;
+  const cwd=profile.foundryRoot==='.'?projectRoot:path.join(projectRoot,...profile.foundryRoot.split('/'));
+  const attempts=[],scriptDispositions=[];
+  let failed=false;
+  for(const script of profile.scripts){
+    const row={scriptKey:`${framework}:${profile.foundryRoot}/${script.path}`,framework,path:`${profile.foundryRoot}/${script.path}`,script:script.entry,gapType:null,gapReason:null};
+    if(failed){scriptDispositions.push({...row,disposition:'NOT_EXECUTED_AFTER_FAILURE',attemptStatus:null});continue;}
+    const args=['script',script.entry,'--rpc-url',anvilUrl,'--broadcast','--unlocked','--sender',profile.deployer,'--slow','--non-interactive'];
+    const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
+    const r=await runDeploymentScriptV1({command:'timeout',args:[`${script.timeoutSeconds}s`,'forge',...args],cwd,env:scrubbedEnv({...script.env,...localEnv})});
+    const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
+    const status=r.exitCode===0?'PASS':'FAILED';
+    attempts.push({framework,path:row.path,entry:script.entry,scriptSha256:script.sha256,env:script.env,
+      command:['forge',...args].join(' '),sender:profile.deployer,chain:chain.chain,chainId:chain.chainId,exitCode:r.exitCode,status,blockRange:[before+1,after],
+      stdout:String(r.stdout??'').slice(-12000),stderr:String(r.stderr??'').slice(-12000)});
+    scriptDispositions.push({...row,disposition:status==='PASS'?'EXECUTED_PASS':'EXECUTED_FAILED',attemptStatus:status});
+    if(status!=='PASS')failed=true;
+  }
+  return{attempts,limitations:[],scriptDispositions,status:failed?'COMPLETE_WITH_FAILURES':'PASS'};
+}
+async function executeHardhatProfileV1({projectRoot,anvilUrl,profile,chain,localEnv}){
+  const framework=PHASE0_DEPLOYMENT_PROFILE_FRAMEWORKS.HARDHAT,h=profile.hardhat;
+  const cwd=h.root==='.'?projectRoot:path.join(projectRoot,...h.root.split('/'));
+  const rel=`${h.root}/${h.script}`;
+  const row={scriptKey:`${framework}:${rel}`,framework,path:rel,script:h.script,gapType:null,gapReason:null};
+  const install=await runProcess({command:'timeout',args:['300s','npm','ci','--ignore-scripts','--no-audit','--no-fund'],cwd,env:scrubbedEnv()});
+  const command=['npx','--no-install','hardhat','run','--no-compile',h.script,'--network',h.network];
+  if(install.exitCode!==0){
+    const attempt={framework,path:rel,entry:h.script,command:command.join(' '),exitCode:install.exitCode,status:'FAILED',failureStage:'LOCKED_DEPENDENCY_INSTALL',
+      sender:profile.deployer,chain:chain.chain,chainId:chain.chainId,blockRange:[],stdout:String(install.stdout??'').slice(-6000),stderr:String(install.stderr??'').slice(-6000)};
+    return{attempts:[attempt],limitations:[],scriptDispositions:[{...row,disposition:'EXECUTED_FAILED',attemptStatus:'FAILED'}],status:'COMPLETE_WITH_FAILURES'};
+  }
+  const before=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
+  const r=await runDeploymentScriptV1({command:'timeout',args:[`${h.timeoutSeconds}s`,...command],cwd,env:scrubbedEnv({...localEnv,DEPLOYER:profile.deployer})});
+  const after=Number(BigInt(await rpc(anvilUrl,'eth_blockNumber',[])));
+  const status=r.exitCode===0?'PASS':'FAILED';
+  const attempt={framework,path:rel,entry:h.script,scriptSha256:h.scriptSha256,config:h.config,configSha256:h.configSha256,command:command.join(' '),
+    sender:profile.deployer,chain:chain.chain,chainId:chain.chainId,exitCode:r.exitCode,status,blockRange:[before+1,after],
+    stdout:String(r.stdout??'').slice(-24000),stderr:String(r.stderr??'').slice(-12000)};
+  return{attempts:[attempt],limitations:[],scriptDispositions:[{...row,disposition:status==='PASS'?'EXECUTED_PASS':'EXECUTED_FAILED',attemptStatus:status}],status:status==='PASS'?'PASS':'COMPLETE_WITH_FAILURES'};
 }
 export async function executeDeploymentScripts({projectRoot,anvilUrl,account0,localSigner,detected}){
   const attempts=[],limitations=[];
@@ -2514,7 +2569,7 @@ function baselineTargetRows({medusa,telemetry}){
     {candidateKey:'PHASE0-BASELINE-ABI-TELEMETRY',executionEvidenceRefs:refs,oracleOutcome:'INVESTIGATIVE_BASELINE_TELEMETRY_GENERATED',reproductionStatus:telemetry.every(x=>x.status==='PASS')?'PASS':'INCOMPLETE',requestBindingStatus:'PHASE0_CONTROLLER_GENERATED',requestBindingEvidenceRef:'evidence/phase0/simulations/PHASE0_SIMULATION_RUN_INDEX_v1.json'}
   ];
 }
-export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl,medusaSmokeCalls=null,telemetrySmokeCalls=null,deploymentOnly=false}){
+export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPath,outputRoot,forkUrl,forkUrls={},medusaSmokeCalls=null,telemetrySmokeCalls=null,deploymentOnly=false}){
   // Smoke budgets are independent and never produce campaign evidence. Medusa-only preserves the prior smoke behavior.
   const medusaSmoke=Number.isInteger(medusaSmokeCalls)&&medusaSmokeCalls>0;
   const telemetrySmoke=Number.isInteger(telemetrySmokeCalls)&&telemetrySmokeCalls>0;
@@ -2530,6 +2585,10 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
   const archivePath=receipt.source.archivePath,archiveSha256=receipt.source.sha256,workspace=path.join(path.dirname(outputRoot),'.phase0-simulation-work');
   const staged=await stageExactArchiveSource({checkoutRoot:controllerRoot,workspaceRoot:workspace,archivePath,archiveSha256,projectPath:buildIdentity.discovery.projectPath});
   const cfg=buildIdentity.configurationDetection,pseudo={requestId:`phase0-sim-${receipt.campaign.campaignId}`,requestDigest:sha256(JSON.stringify(buildIdentity)),campaignId:receipt.campaign.campaignId,campaignGenerationId:receipt.campaign.campaignGenerationId,assignmentId:'phase0-simulation',phaseId:'phase-0',profileId:'github-native-compile-v2',source:{repository:'CurveYield2/Audit-Controller',commit:receipt.source.archiveCommit,projectPath:buildIdentity.discovery.projectPath,archivePath,archiveSha256},configuration:{compilers:[{language:'solidity',version:cfg.compilerVersion}],optimizer:cfg.optimizer,evmVersion:cfg.evmVersion,viaIR:cfg.viaIR}};
+  const deploymentProfile=await loadDeploymentProfile(staged.projectRoot);
+  if(deploymentProfile&&!deploymentOnly)throw new Error('audit-deployment.json is supported only by the Phase-0 deployment-only lane');
+  const forkChain=phase0ForkChainForProfile(deploymentProfile);
+  const effectiveForkUrl=resolvePhase0ForkUrl({profile:deploymentProfile,forkUrl,forkUrls});
   const detected=await detectDeploymentScripts(staged.projectRoot);
   const packageDependencyInstall=await installPackageRuntimeDependenciesV1(staged.projectRoot,detected);
   const build={
@@ -2561,15 +2620,17 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
     const artifactByQualified=new Map();
     for(const artifact of build.artifacts??[])artifactByQualified.set(`${artifact.sourceName}:${artifact.contractName}`,artifact);
     const artifacts=[...artifactByQualified.values()];
-    anvil=await startAnvil({forkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion});
+    anvil=await startAnvil({forkUrl:effectiveForkUrl,projectRoot:staged.projectRoot,evmVersion:cfg.evmVersion,chainId:forkChain.chainId,requireUpstreamChainId:Boolean(deploymentProfile)});
     const localRequest=new ethers.FetchRequest(anvil.url);
     localRequest.timeout=20000;
     // Keep a small representative actor set; Medusa's four separate actors are funded below.
     // The previous 20+4 actor set multiplied ERC20/Permit2 approvals by each deployed target.
-    const provider=new ethers.JsonRpcProvider(localRequest,1,{staticNetwork:true,cacheTimeout:-1});
+    const provider=new ethers.JsonRpcProvider(localRequest,forkChain.chainId,{staticNetwork:true,cacheTimeout:-1});
     const actors=(await provider.send('eth_accounts',[])).slice(0,4),initialBlock=Number(await provider.getBlockNumber());
     console.log('[phase0-smoke-progress] START native deployment scripts');
-    const deployment=await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],localSigner:anvil.localSigner,detected});
+    const deployment=deploymentProfile
+      ? await executeDeploymentProfileV1({projectRoot:staged.projectRoot,anvilUrl:anvil.url,profile:deploymentProfile,chain:forkChain})
+      : await executeDeploymentScripts({projectRoot:staged.projectRoot,anvilUrl:anvil.url,account0:actors[0],localSigner:anvil.localSigner,detected});
     console.log(`[phase0-smoke-progress] END native deployment scripts; attempts=${deployment.attempts.length}; failed=${deployment.attempts.filter(x=>x.status==='FAILED').length}`);
     const scriptEnd=Number(await provider.getBlockNumber());
     const discoveredScriptDeployments=scriptEnd>=initialBlock+1?await discoverDeployments({provider,artifacts,startBlock:initialBlock+1,endBlock:scriptEnd}):[];
@@ -2586,14 +2647,15 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
         schemaVersion:'curveyield-lite-phase0-deploy-config-execution-v3',
         executionMode:'ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY',status,
         campaignId:receipt.campaign.campaignId,sourceSha256:archiveSha256,
-        fork:{engine:'anvil',source:'RPC_ETHEREUM',chain:'ethereum',chainId:1,initialBlock,finalBlock:scriptEnd,upstreamChainId:anvil.upstreamChainId??null,identityNormalized:anvil.identityNormalized===true},
+        fork:{engine:'anvil',source:forkChain.rpcSecret,chain:forkChain.chain,chainId:forkChain.chainId,initialBlock,finalBlock:scriptEnd,upstreamChainId:anvil.upstreamChainId??null,identityNormalized:anvil.identityNormalized===true},
+        deploymentProfile:deploymentProfile?{file:deploymentProfile.file,fileSha256:deploymentProfile.fileSha256,mode:deploymentProfile.mode,chain:deploymentProfile.chain,chainId:deploymentProfile.chainId,deployer:deploymentProfile.deployer,...(deploymentProfile.mode==='HARDHAT'?{hardhat:deploymentProfile.hardhat}:{foundryRoot:deploymentProfile.foundryRoot,scripts:deploymentProfile.scripts.map(x=>({entry:x.entry,sha256:x.sha256,env:x.env,timeoutSeconds:x.timeoutSeconds}))})}:null,
         targetEvmChainIds:targetChainIds,
         policy:'PACKAGE_NATIVE_SCRIPT_EXECUTION_ONLY_NO_FALLBACK_NO_FUZZ_NO_MEDUSA_NO_ABI_TELEMETRY',
         packageDependencyInstall,detectedScripts:detected,scriptDispositions:dispositions,
         attempts:deployment.attempts,
         deployedContracts:[...new Map([...discoveredScriptDeployments,...reported.rows].map(row=>[String(row.address).toLowerCase(),row])).values()],
         gaps,limitations:gaps,
-        coverage:{detectedScripts:dispositions.length,executedScripts:deployment.attempts.length,passedScripts:deployment.attempts.filter(row=>row.status==='PASS').length,failedOrUnsupportedScripts:dispositions.filter(row=>row.disposition!=='EXECUTED_PASS').length}
+        coverage:{detectedScripts:dispositions.length,executedScripts:deployment.attempts.length,passedScripts:deployment.attempts.filter(row=>row.status==='PASS').length,failedOrUnsupportedScripts:dispositions.filter(row=>row.disposition!=='EXECUTED_PASS').length,excludedScripts:0}
       };
       deploymentEvidence=witness;
       await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(witness,null,2)+'\n');

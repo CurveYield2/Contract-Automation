@@ -58,7 +58,7 @@ const artifacts=read(evidence.executionBuildArtifacts);
 if(artifacts.schemaVersion!=='curveyield-phase0-execution-build-artifacts-v2'||artifacts.source?.archiveSha256!==sourceSha||artifacts.reuseContract?.secondBuildRequired!==false)throw new Error('reusable build artifact contract is missing');
 const deploy=read(evidence.deployConfigExecution);
 if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||deploy.executionMode!=='ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY')throw new Error('Phase-0 requires only source package forked deployment evidence');
-if(deploy.campaignId!==receipt.campaign.campaignId||deploy.sourceSha256!==sourceSha||deploy.fork?.engine!=='anvil'||deploy.fork?.chainId!==1)throw new Error('Phase-0 fork deployment identity mismatch');
+if(deploy.campaignId!==receipt.campaign.campaignId||deploy.sourceSha256!==sourceSha||deploy.fork?.engine!=='anvil')throw new Error('Phase-0 fork deployment identity mismatch');
 assertDeployGateEvidenceV2(deploy);
 if(deploy.reconciliation){
   const rawFile=required(path.join(campaignRoot,'evidence/phase0/PHASE0_DEPLOY_CONFIG_EXECUTION_RAW_v1.json'),'immutable original fork deploy evidence');

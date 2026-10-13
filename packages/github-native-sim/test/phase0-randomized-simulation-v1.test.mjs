@@ -77,9 +77,14 @@ test('Phase-0 canonical Ethereum baseline uses the qualified RPC identity proxy 
   const here=path.dirname(fileURLToPath(import.meta.url));
   const source=fs.readFileSync(path.resolve(here,'../src/phase0-randomized-simulation-v1.mjs'),'utf8');
   assert.match(source,/startRpcIdentityProxy/);
-  assert.match(source,/upstreamUrl:forkUrl,chainId:1/);
+  // The Ethereum lane defaults to chain 1 and normalizes virtualized upstreams; only an
+  // audit-deployment.json chain profile requires the real upstream chain to match.
+  assert.match(source,/function startAnvil\(\{forkUrl,projectRoot,evmVersion='cancun',chainId=1,requireUpstreamChainId=false\}\)/);
+  assert.match(source,/upstreamUrl:forkUrl,chainId\}/);
   assert.match(source,/--fork-url',identityProxy\.url/);
   assert.doesNotMatch(source,/if\(upstreamChainId!==1\)/);
+  assert.match(source,/if\(requireUpstreamChainId&&upstreamChainId!==chainId\)/);
+  assert.match(source,/requireUpstreamChainId:Boolean\(deploymentProfile\)/);
   assert.match(source,/identityNormalized:anvil\.identityNormalized===true/);
 });
 
