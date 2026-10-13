@@ -81,7 +81,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          SOURCE=.phase0-simulation-work/archive-source/cyavKAT/upgrade
+          SOURCE=targeted-output/.phase0-simulation-work/archive-source/cyavKAT/upgrade
           mkdir -p targeted-output/native
           for sub in unified-deploy-output-v1 broadcast deployments; do
             if [ -d "$SOURCE/$sub" ]; then
@@ -99,7 +99,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          SRC=.phase0-simulation-work/archive-source/cyavKAT/upgrade
+          SRC=targeted-output/.phase0-simulation-work/archive-source/cyavKAT/upgrade
           if [ ! -d "$SRC/test/katana" ]; then
             printf "Source staging missing after native replay; no ABI test executed\n" > targeted-output/CONFORMANCE_v1.log
             echo "exit=126" >> "$GITHUB_OUTPUT"
