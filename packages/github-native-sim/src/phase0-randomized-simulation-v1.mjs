@@ -536,7 +536,7 @@ async function reportedPackageDeployments({projectRoot,attempts,artifacts}){
   return{rows,limitations};
 }
 function deployedBytecodePrefix(a){return String(a?.bytecode??'').replace(/^0x/,'').toLowerCase();}
-async function discoverDeployments({provider,artifacts,startBlock,endBlock}){
+export async function discoverDeployments({provider,artifacts,startBlock,endBlock}){
   const rows=[];
   for(let n=startBlock;n<=endBlock;n++){
     const block=await provider.getBlock(n,true);if(!block)continue;
