@@ -416,12 +416,12 @@ async function x11FindButton(file, originX, originY) {
     x0=Math.max(0,x0);y0=Math.max(0,y0);x1=Math.min(w,x1);y1=Math.min(h,y1);
     return integral[y1*(w+1)+x1]-integral[y0*(w+1)+x1]-integral[y1*(w+1)+x0]+integral[y0*(w+1)+x0];
   };
-  const S=40,band=8;let best=null;
+  const S=60,band=8;let best=null;
   for(let y=0;y+S<=h;y+=2)for(let x=0;x+S<=w;x+=2){
     const count=box(x,y,x+S,y+S);
-    if(count<500||count>1350)continue;
+    if(count<1200||count>2700)continue;
     const around=box(x-band,y-band,x+S+band,y+S+band)-count;
-    if(around>60)continue;
+    if(around>120)continue;
     if(!best||count>best.count)best={x,y,count,around};
   }
   // Coarse map of the crop for the run log (8 px cells: ' ' none, '.' some, '+' half, '#' mostly
