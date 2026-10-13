@@ -849,7 +849,9 @@ if(reviewKind==='discovery'){
     process.exit(0);
   }
   directory.discovery.status=result.status==='DISCOVERY_COMPLETE'?'COMPLETE':'RUNNING';
-  directory.discovery.activeUnitId=readJson(repoFile(root,directory.discovery.statePath)).payload.activeUnitId;
+  const discoveryState=readJson(repoFile(root,directory.discovery.statePath)).payload;
+  directory.discovery.activeUnitId=discoveryState.activeUnitId;
+  directory.discovery.activeUnitIds=discoveryState.order.filter(id=>discoveryState.units[id]?.status==='ACTIVE');
   if(result.status==='DISCOVERY_COMPLETE'){
     const successor=preparePhaseWork({root,campaignPath,
       authorityRoot:authorityRootFromReceipt(sourceReceipt),sequence:4,reviewer:'reviewer-2',
@@ -1444,7 +1446,8 @@ else{
     const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
       now,auditControllerRef:a['audit-controller-ref']??'main'});
     directory.discovery={statePath:started.statePath,status:started.completeImmediately?'COMPLETE':'RUNNING',
-      activeUnitId:started.state.payload.activeUnitId};
+      activeUnitId:started.state.payload.activeUnitId,
+      activeUnitIds:started.state.payload.order.filter(id=>started.state.payload.units[id]?.status==='ACTIVE')};
     discoveryStarted=true;discoveryWake=started.wake;
     if(started.completeImmediately){
       const finished=completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
@@ -1453,7 +1456,7 @@ else{
         predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:[
           ...nextDerivedInputs,path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json')],
         status:'ACTIVE'});
-      directory.discovery.status='COMPLETE';directory.discovery.activeUnitId=null;discoveryWake=finished.wake;
+      directory.discovery.status='COMPLETE';directory.discovery.activeUnitId=null;directory.discovery.activeUnitIds=[];discoveryWake=finished.wake;
     }else{
       nextAssignment.status='WAITING_FOR_DISCOVERY';
     }

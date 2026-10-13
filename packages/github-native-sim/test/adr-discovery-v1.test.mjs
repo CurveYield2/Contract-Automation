@@ -72,9 +72,11 @@ test('start, F->R->X routing, sealed packet independence and completion',()=>{
   assert.equal(started.wake.chatKey,'reviewer-2');
   const a=packet(o,'F-001');assert.equal(a.primaryContexts[0].contextId,'CTX-A');
   submit(o,'F-001',validReview(a));
+  // F-001 and R-001 form one reviewer-2 window: accepting F-001 alone needs no wake.
+  assert.ok(fs.existsSync(repoFile(o.root,'campaigns/demo/work/phase-04/discovery/R-001/ASSIGNMENT_PACKET_v1.json')));
   const next=advanceDiscoveryV1({...o,unitId:'F-001'});
-  assert.equal(next.status,'DISCOVERY_NEXT');
-  assert.equal(next.wake.chatKey,'reviewer-2');
+  assert.equal(next.status,'DISCOVERY_PARTIAL');
+  assert.equal(next.wake,null);
   submit(o,'R-001',validReview(packet(o,'R-001')));
   const attacker=advanceDiscoveryV1({...o,unitId:'R-001'});
   assert.equal(attacker.status,'DISCOVERY_NEXT');
@@ -97,7 +99,7 @@ test('stale id and missing submission do not modify state or consume attempts',(
   startDiscoveryV1(o);
   const file=repoFile(o.root,'campaigns/demo/work/phase-04/discovery/DISCOVERY_STATE_v1.json');
   const before=fs.readFileSync(file,'utf8');
-  assert.equal(advanceDiscoveryV1({...o,unitId:'R-001'}).status,'DISCOVERY_STALE_REQUEST');
+  assert.equal(advanceDiscoveryV1({...o,unitId:'X-001'}).status,'DISCOVERY_STALE_REQUEST');
   assert.equal(fs.readFileSync(file,'utf8'),before);
   assert.equal(advanceDiscoveryV1({...o,unitId:'F-001'}).status,'DISCOVERY_REWORK');
   assert.equal(fs.readFileSync(file,'utf8'),before);
@@ -115,7 +117,7 @@ test('bad submissions are bounded, repeated bytes never increase attempt count',
   assert.equal(advanceDiscoveryV1({...o,unitId:'F-001'}).status,'DISCOVERY_REWORK');
   submit(o,'F-001',{schemaVersion:'third',unitId:'F-001',rows:[]});
   const third=advanceDiscoveryV1({...o,unitId:'F-001'});
-  assert.equal(third.status,'DISCOVERY_NEXT');
+  assert.equal(third.status,'DISCOVERY_PARTIAL');
   const state=readJson(file);
   assert.equal(state.payload.units['F-001'].status,'GAP_RECORDED');
   assert.ok(state.payload.gaps.some(x=>x.code==='VALIDATION_ATTEMPTS_EXHAUSTED'&&x.contextId==='CTX-A'));

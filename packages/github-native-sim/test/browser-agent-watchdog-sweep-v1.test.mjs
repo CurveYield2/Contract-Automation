@@ -31,10 +31,13 @@ test('watchdog never machine-reads ChatGPT and only pokes after the elapsed-time
   assert.match(deliver, /WAKE_ACTION='wake'/);
   assert.match(deliver, /node scripts\/browser-agent-wake\.mjs/);
   assert.match(watchdog, /POKE_NOT_SENT_/);
-  // A chat frozen on the stop button is stopped before the poke; wakes never set this.
+  // A frozen chat is stopped before a poke or repair notice; routine wakes never stop live work.
   assert.match(watchdog, /STOP_BEFORE_SEND='true'/);
   assert.doesNotMatch(wake, /STOP_BEFORE_SEND/);
-  assert.match(fs.readFileSync('scripts/browser-agent-wake.mjs', 'utf8'), /if \(bool\(env\.STOP_BEFORE_SEND\)\) \{[\s\S]*?x11-stop-or-send-click/);
+  assert.match(deliver, /repair_notice\) STOP_BEFORE_SEND=true;; \*\) STOP_BEFORE_SEND=false;;/);
+  const runtime = fs.readFileSync('scripts/browser-agent-wake.mjs', 'utf8');
+  // Owner's procedure: stop first, then click into the text box, then type and send.
+  assert.match(runtime, /if \(bool\(env\.STOP_BEFORE_SEND\)\) \{[\s\S]*?x11-stop-click[\s\S]*?x11-composer-click[\s\S]*?humanX11TypeText/);
   assert.doesNotMatch(watchdog, /WAKE_ACTION=['"]observe['"]/);
   assert.doesNotMatch(watchdog, /assistantCount|lastAssistantHash|humanChallenge|loginPrompt|conversationUnavailable/);
 });
@@ -96,14 +99,16 @@ test('watchdog workflow contains one complete sweep body and no duplicated corru
 test('stop click is verified from desktop screenshots and has a live self-test on a scratch chat', () => {
   const runtime = fs.readFileSync('scripts/browser-agent-wake.mjs', 'utf8');
   assert.match(runtime, /x11FindButton\(search, searchX, searchY\)/);
-  assert.match(runtime, /if\(count<500\|\|count>1350\)continue;/);
-  assert.match(runtime, /if \(onButton\) \{/);
-  assert.match(runtime, /STOP_CLICK_MISSED_NOT_ON_BUTTON/);
+  // 60 px solid disc of any colour (black or Plus blue), found by shape against the background.
+  assert.match(runtime, /if\(count<1200\|\|count>2700\)continue;/);
+  assert.match(runtime, /Math\.hypot\(r-bg\[0\],g-bg\[1\],b-bg\[2\]\)>110/);
+  assert.match(runtime, /if \(disc\) \{/);
+  assert.match(runtime, /STOP_BUTTON_NOT_FOUND/);
   assert.match(watchdog, /\.lastStopClick=\$sc/);
   const selftest = fs.readFileSync('.github/workflows/browser-stop-click-selftest-v1.yml', 'utf8');
   assert.match(selftest, /Refuse registered audit chats/);
   assert.match(selftest, /group: chatgpt-shared-browser-session-v1/);
-  assert.match(selftest, /test "\$status" = STOP_CLICK_ON_BUTTON/);
+  assert.match(selftest, /test "\$status" = STOP_CLICKED_BUTTON_CHANGED/);
 });
 
 test('targeted-test executor wake is scope-locked to running the plan', () => {

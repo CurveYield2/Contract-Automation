@@ -204,7 +204,7 @@ test('stale unit request leaves discovery state bytes unchanged',()=>{
  try{
    startDiscoveryV1(o);
    const file=repoFile(o.root,o.campaignPath+'/work/phase-04/discovery/DISCOVERY_STATE_v1.json'),before=fs.readFileSync(file,'utf8');
-   assert.equal(advanceDiscoveryV1({...o,unitId:'R-002'}).status,'DISCOVERY_STALE_REQUEST');
+   assert.equal(advanceDiscoveryV1({...o,unitId:'X-999'}).status,'DISCOVERY_STALE_REQUEST');
    assert.equal(fs.readFileSync(file,'utf8'),before);
  }finally{o.clean();}
 });
@@ -323,4 +323,21 @@ test('tampering frozen v11 SKILL file makes registry resolver fail closed',()=>{
 test('adjudicated Critical defect rated Medium remains a critical-high miss',()=>{
  const r=scoreQualificationV1({truth:[{caseId:'C-1',kind:'defect',severity:'CRITICAL',classId:'ACCESS_CONTROL',contract:'Vault'}],findings:[{findingId:'F-1',caseRefs:['C-1'],severity:'MEDIUM'}],adjudications:[{caseId:'C-1',findingId:'F-1',match:'MATCH',severityReadjudicated:false,reason:'Exact source match'}]});
  assert.deepEqual(r.criticalHighMisses.map(x=>x.caseId),['C-1']);
+});
+// Windowed discovery: one controller run validates a whole window of submissions.
+test('a window of 25 submissions is validated in one run and the next window is issued with one wake',()=>{
+ const o=discoveryFixture(30,false);
+ try{
+   const started=startDiscoveryV1(o);
+   const ids=n=>Array.from({length:n},(_,i)=>'R-'+String(i+1).padStart(3,'0'));
+   assert.deepEqual(started.state.payload.order.filter(id=>started.state.payload.units[id].status==='ACTIVE'),ids(25));
+   for(const id of ids(25))o.submit(id,validUnit(o.packet(id)));
+   const result=advanceDiscoveryV1({...o,unitId:'R-001'});
+   assert.equal(result.status,'DISCOVERY_NEXT');
+   const message=Buffer.from(result.wake.messageB64,'base64').toString('utf8');
+   assert.ok(message.includes('R-026')&&message.includes('R-030')&&!message.includes('R-025:'));
+   const state=readJson(repoFile(o.root,o.campaignPath+'/work/phase-04/discovery/DISCOVERY_STATE_v1.json')).payload;
+   assert.equal(ids(25).filter(id=>state.units[id].status==='ACCEPTED').length,25);
+   assert.equal(state.activeUnitId,'R-026');
+ }finally{o.clean();}
 });

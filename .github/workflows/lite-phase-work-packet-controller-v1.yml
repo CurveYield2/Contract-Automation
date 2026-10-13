@@ -216,6 +216,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          ref="${{ steps.request.outputs.audit_controller_ref }}"
+          if [ "${{ steps.request.outputs.review_kind }}" = discovery ]; then
+            # Discovery validations run once per window; they read only the campaign folder,
+            # its directory entry and the bound authority, so a sparse checkout suffices.
+            campaign_id="${{ steps.request.outputs.campaign_id }}"
+            [[ "$campaign_id" =~ ^(.+)-r[0-9]+$ ]] || { echo "::error::campaign_id must end in -rN"; exit 1; }
+            directory_api="repos/CurveYield2/Audit-Controller/contents/Audit%20Campaign%20Directory/campaigns/${BASH_REMATCH[1]}.json?ref=$ref"
+            campaign_path="$(gh api "$directory_api" --jq '.content' | base64 -d | jq -r '.workspacePath')"
+            timeout -k 10s 300s bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$ref" branch "$campaign_path"
+            exit 0
+          fi
           gh auth setup-git
           rm -rf .audit-controller
           timeout -k 10s 300s gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
@@ -238,8 +249,8 @@ jobs:
           if [ "${{ steps.request.outputs.review_kind }}" = phase ]; then
             test "$(jq -r '.currentAssignment.phaseSequence' "$directory_file")" = "${{ steps.request.outputs.phase_sequence }}"
           elif [ "${{ steps.request.outputs.review_kind }}" = discovery ]; then
-            active="$(jq -r '.discovery.activeUnitId // empty' "$directory_file")"
-            if [ "$active" != "${{ steps.request.outputs.unit_id }}" ]; then
+            # Any unit of the active window may name the request.
+            if ! jq -e --arg u "${{ steps.request.outputs.unit_id }}" '(.discovery.activeUnitIds // [.discovery.activeUnitId]) | index($u) != null' "$directory_file" >/dev/null; then
               echo "::notice::stale discovery request"
               stale=true
             fi
@@ -355,7 +366,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish validation response or successful phase transaction
-        if: ${{ steps.routing.outputs.stale != 'true' && steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' || steps.controller.outputs.status == 'FOLLOWUP_ADMITTED' || steps.controller.outputs.status == 'DISCOVERY_REWORK' || steps.controller.outputs.status == 'DISCOVERY_NEXT' || steps.controller.outputs.status == 'DISCOVERY_COMPLETE') }}
+        if: ${{ steps.routing.outputs.stale != 'true' && steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' || steps.controller.outputs.status == 'FOLLOWUP_ADMITTED' || steps.controller.outputs.status == 'DISCOVERY_REWORK' || steps.controller.outputs.status == 'DISCOVERY_NEXT' || steps.controller.outputs.status == 'DISCOVERY_PARTIAL' || steps.controller.outputs.status == 'DISCOVERY_COMPLETE') }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
