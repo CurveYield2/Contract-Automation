@@ -371,37 +371,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          export WAKE_ACTION='wake'
           export WAKE_MESSAGE="$(cat /tmp/wake-message.txt)"
           export WAKE_RESULT_PATH='/tmp/browser-agent-wake-result.json'
-          set +e
-          timeout -k 10s 360s node scripts/browser-agent-wake.mjs
-          rc=$?
-          set -e
-
-          if [ ! -s "$WAKE_RESULT_PATH" ]; then
-            jq -n --argjson rc "$rc" '{ok:false,wakeId:"unknown",failures:[{provider:"github-playwright",code:"NO_RESULT",retryable:false,error:("browser runtime exited without a result; rc="+($rc|tostring))}]}' > "$WAKE_RESULT_PATH"
-          fi
-
-          ok="$(jq -r '.ok // false' "$WAKE_RESULT_PATH")"
+          bash scripts/browser-deliver-message-v1.sh > /tmp/deliver.out
+          cat /tmp/deliver.out >> "$GITHUB_OUTPUT"
+          ok="$(sed -n 's/^ok=//p' /tmp/deliver.out)"
+          rc="$(sed -n 's/^rc=//p' /tmp/deliver.out)"
           retryable="$(jq -r '[.failures[]? | select(.retryable==true)] | length > 0' "$WAKE_RESULT_PATH")"
           retry_code="$(jq -r '[.failures[]? | select(.retryable==true) | .code][0] // empty' "$WAKE_RESULT_PATH")"
-          echo "ok=$ok" >> "$GITHUB_OUTPUT"
-          echo "send_attempted=$(jq -r '.sendAttempted // false' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "retryable=$retryable" >> "$GITHUB_OUTPUT"
           echo "retry_code=$retry_code" >> "$GITHUB_OUTPUT"
           echo "chat_url=$(jq -r '.chatUrl // .after.url // .url // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "provider=$(jq -r '.provider // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "assistant_count=$(jq -r '.after.assistantCount // .assistantCount // 0' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
           echo "last_hash=$(jq -r '.after.lastAssistantHash // .lastAssistantHash // empty' "$WAKE_RESULT_PATH")" >> "$GITHUB_OUTPUT"
-
-          # A visible send is an attempted submission. Durable delivery is
-          # separately established by the agent's GitHub acknowledgement.
-          if [ "$ok" = true ] && [ "$(jq -r '.sendAttempted // false' "$WAKE_RESULT_PATH")" != true ]; then
-            echo "::error::Browser result claimed an X11 send without input evidence"
-            echo 'ok=false' >> "$GITHUB_OUTPUT"
-            ok=false
-          fi
           if [ "$ok" != true ]; then
             echo "::warning::Browser wake did not complete on this runner (retryable=$retryable code=$retry_code rc=$rc)."
           fi

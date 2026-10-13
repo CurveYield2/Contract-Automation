@@ -137,7 +137,7 @@ test('audit browser wake and watchdog use visible Xvfb Chrome through the privat
     assert.match(workflow, /TAILSCALE_AUTHKEY/);
     assert.match(workflow, /tailscale set --exit-node=/);
     assert.match(workflow, /x11vnc/);
-    assert.match(workflow, /node scripts\/browser-agent-wake\.mjs/);
+    assert.match(workflow, /bash scripts\/browser-deliver-message-v1\.sh/);
     assert.doesNotMatch(workflow, /BROWSERLESS_|BROWSERBASE_/);
   }
 });

@@ -916,17 +916,24 @@ jobs:
             echo "Watchdog $WAKE_ID: elapsed-time gate reached; sending configured GET BACK TO WORK using the proven Phase-1 fixed X11 path."
             export WAKE_MODE='resume_existing'
             export CHAT_URL="$chat_url"
-            export WAKE_ACTION='wake'
             export WAKE_MESSAGE="$(jq -r '.idleMessage' /tmp/watchdog-state.json)"
             export WAKE_RESULT_PATH="/tmp/$safe_id-poke.json"
+            # Same delivery as the reviewer wake; only the message text differs.
+            bash scripts/browser-deliver-message-v1.sh > "/tmp/$safe_id-poke.out" || true
+            poke_ok="$(sed -n 's/^ok=//p' "/tmp/$safe_id-poke.out")"
+            poke_skipped="$(sed -n 's/^skipped=//p' "/tmp/$safe_id-poke.out")"
 
-            if node scripts/browser-agent-wake.mjs; then
+            if [ "$poke_ok" = true ]; then
               jq --argjson interval "$poke_interval_minutes" \
                 '.lastPokedAt=(now|todate)
                  | .pokeCount=((.pokeCount // 0)+1)
                  | .repair.consecutiveIdlePokes=((.repair.consecutiveIdlePokes // 0)+1)
                  | .lastDecision="TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ"
                  | .pokeIntervalMinutes=$interval' \
+                /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+            elif [ -n "$poke_skipped" ]; then
+              echo "::warning::Watchdog poke not sent ($poke_skipped); not counted as a poke."
+              jq --arg why "$poke_skipped" '.lastDecision=("POKE_NOT_SENT_"+$why) | .lastPokeSkippedAt=(now|todate)' \
                 /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
             else
               echo "::warning::Watchdog X11 poke transport failed; treating as infrastructure noise and not as reviewer failure."

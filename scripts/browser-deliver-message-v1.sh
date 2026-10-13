@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# One X11 delivery path for reviewer wakes and watchdog pokes; only WAKE_MESSAGE differs.
+# Prints ok/send_attempted/skipped lines (GITHUB_OUTPUT format) and leaves the browser
+# result at $WAKE_RESULT_PATH.
+set -euo pipefail
+: "${WAKE_MESSAGE:?}" "${WAKE_RESULT_PATH:?}"
+export WAKE_ACTION='wake'
+export WAKE_MODE="${WAKE_MODE:-resume_existing}"
+# Same delivery semantics as the reviewer wake: no idle wait before sending.
+export WAKE_MESSAGE_PURPOSE="${WAKE_MESSAGE_PURPOSE:-initial_wake}"
+set +e
+timeout -k 10s 360s node scripts/browser-agent-wake.mjs
+rc=$?
+set -e
+if [ ! -s "$WAKE_RESULT_PATH" ]; then
+  jq -n --argjson rc "$rc" '{ok:false,wakeId:"unknown",failures:[{provider:"github-playwright",code:"NO_RESULT",retryable:false,error:("browser runtime exited without a result; rc="+($rc|tostring))}]}' > "$WAKE_RESULT_PATH"
+fi
+ok="$(jq -r '.ok // false' "$WAKE_RESULT_PATH")"
+sent="$(jq -r '.sendAttempted // false' "$WAKE_RESULT_PATH")"
+skipped="$(jq -r '.skipped // empty' "$WAKE_RESULT_PATH")"
+# A visible send is required; a skipped send is not a delivery.
+if [ "$ok" = true ] && [ "$sent" != true ]; then
+  [ -n "$skipped" ] || echo "::error::Browser result claimed an X11 send without input evidence" >&2
+  ok=false
+fi
+echo "ok=$ok"
+echo "send_attempted=$sent"
+echo "skipped=$skipped"
+echo "rc=$rc"
