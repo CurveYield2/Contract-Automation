@@ -81,7 +81,8 @@ test('40 questions in one cluster produce exactly three X units',()=>{
  const guards=Array.from({length:40},(_,j)=>({contextId:a.contextId+'-'+j,contract:contract('A'),function:'f'+j+'()',hasGuard:false,txOriginLines:[]}));
  const p=plan(inp([a,b],[edge('A','B')],{guardTable:guards})).payload;
  assert.equal(p.attackUnits.length,3);
- assert.ok(p.attackUnits.every(x=>JSON.stringify(x.flowIds)===JSON.stringify(p.clusters[0].flowIds)));
+ // The cluster's flows are attacked once, in its first unit; follow-on units carry questions only.
+ assert.deepEqual(p.attackUnits.map(x=>x.flowIds),[p.clusters[0].flowIds,[],[]]);
  assert.deepEqual(p.attackUnits.map(x=>x.integrationQuestionIds.length),[15,15,11]); // plus contract-pair question
 });
 test('shuffling source contexts and cross-contract edges preserves digest',()=>{
