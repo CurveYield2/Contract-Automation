@@ -488,7 +488,7 @@ jobs:
         run: |
           set -euo pipefail
           guide="${{ steps.controller.outputs.authority_link_root }}/master-review/TARGETED_TEST_DIRECTIVE_v1.md"
-          message_b64="$({ printf 'AFTER YOUR MANDATORY WAKE RECEIPT, READ %s IN CurveYield2/Audit-Controller USING THE GITHUB CONNECTOR. Follow its executing-reviewer instructions exactly.\n\n' "$guide"; printf '%s' "${{ steps.controller.outputs.feedback_b64 }}" | base64 -d; } | base64 -w0)"
+          message_b64="$({ printf 'TARGETED TEST EXECUTOR: your only task is to run the tests in the plan named below and submit their results; you are not auditing. Read only that plan, the source files its tests need, and the "Instructions for the executing reviewer" section of %s in CurveYield2/Audit-Controller; do not open other phases, reports or authority files. Every later action must run a test, repair a test run, preserve its raw evidence or submit the result. A run that executed zero test assertions is a failure to repair, not progress.\n\n' "$guide"; printf '%s' "${{ steps.controller.outputs.feedback_b64 }}" | base64 -d; } | base64 -w0)"
           timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
             -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.test_request_id }}-test-reviewer" \
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" \

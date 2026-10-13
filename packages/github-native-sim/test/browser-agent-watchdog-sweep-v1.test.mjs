@@ -104,3 +104,10 @@ test('stop click is verified from desktop screenshots and has a live self-test o
   assert.match(selftest, /group: chatgpt-shared-browser-session-v1/);
   assert.match(selftest, /test "\$status" = STOP_CLICK_ON_BUTTON/);
 });
+
+test('targeted-test executor wake is scope-locked to running the plan', () => {
+  const controller = fs.readFileSync('.github/workflows/lite-phase-work-packet-controller-v1.yml', 'utf8');
+  assert.match(controller, /TARGETED TEST EXECUTOR: your only task is to run the tests in the plan/);
+  assert.match(controller, /do not open other phases, reports or authority files/);
+  assert.match(controller, /zero test assertions is a failure to repair, not progress/);
+});
