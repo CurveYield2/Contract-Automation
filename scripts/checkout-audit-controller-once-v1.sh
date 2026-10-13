@@ -57,14 +57,27 @@ if [ -n "$campaign_path" ]; then
   for p in "$directory_entry" "$authority_package"; do
     case "/$p/" in */../*|*/./*|//*) echo "unsafe receipt path: $p" >&2; exit 1;; esac
   done
+  # A superseded release leaves Current Authority; its frozen copy then resolves.
+  registry='audit-process/v7/frozen-authorities/FROZEN_AUTHORITY_REGISTRY_v1.json'
+  frozen_package=''
+  if ! git -C "$destination" cat-file -e "FETCH_HEAD:$authority_package/SKILL.md" 2>/dev/null; then
+    frozen_package="$(git -C "$destination" show "FETCH_HEAD:$registry" 2>/dev/null \
+      | jq -r --arg p "$authority_package" '.entries[] | select(.logicalRoot == $p) | .frozenRoot' | head -n1)"
+    [ -n "$frozen_package" ] || { echo "authority package missing and not frozen: $authority_package" >&2; exit 1; }
+    case "/$frozen_package/" in */../*|*/./*|//*) echo "unsafe frozen path: $frozen_package" >&2; exit 1;; esac
+  fi
   git -C "$destination" config core.sparseCheckout true
   git -C "$destination" config core.sparseCheckoutCone false
   {
     printf '%s/\n' "$(literal_pattern "$campaign_path")"
     printf '%s\n' "$(literal_pattern "$directory_entry")"
     printf '%s/\n' "$(literal_pattern "$authority_package")"
+    if [ -n "$frozen_package" ]; then
+      printf '%s\n' "$(literal_pattern "$registry")"
+      printf '%s/\n' "$(literal_pattern "$frozen_package")"
+    fi
   } > "$destination/.git/info/sparse-checkout"
-  echo "Sparse campaign checkout: $campaign_path, $directory_entry, $authority_package/"
+  echo "Sparse campaign checkout: $campaign_path, $directory_entry, $authority_package/${frozen_package:+ (frozen: $frozen_package/)}"
 fi
 if [ "$mode" = detach ]; then
   git -C "$destination" checkout --quiet --detach FETCH_HEAD
