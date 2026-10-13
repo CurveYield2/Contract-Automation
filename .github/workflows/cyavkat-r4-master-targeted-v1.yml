@@ -64,7 +64,10 @@ jobs:
             node node_modules/@foundry-rs/anvil/bin.mjs --version
           } > targeted-output/TOOLCHAIN_v1.txt 2>&1
 
+      # The unchanged admitted deployment was already executed and its raw evidence retained
+      # in run 38344320801; this bounded retry runs ONLY the previously blocked conformance tests.
       - name: Re-execute unchanged admitted unified deployment on fresh isolated Katana Anvil
+        if: ${{ false }}
         id: replay
         shell: bash
         run: |
