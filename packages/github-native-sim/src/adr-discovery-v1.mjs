@@ -78,14 +78,54 @@ export function discoveryWakeMessageV1({directory,auditControllerRef,packetPath,
  if(role==='ATTACK')lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any other unit's folder under work/phase-04/discovery/.");
  return lines.join('\n\n');
 }
-function wakeFor({directory,unitId,state,packet,campaignPath,auditControllerRef='main',feedbackText=null}){
- const role=packet.payload.role,attempt=(state.payload.units[unitId]?.attempts??0)+1;
- const message=discoveryWakeMessageV1({directory,auditControllerRef,packetPath:packetRel(campaignPath,unitId),
-  submissionPath:submissionRel(campaignPath,unitId),instructionsPath:packet.payload.instructionsPath,
-  boundaryRequestPath:packet.payload.boundaryRequestPath,unitId,role,attempt,feedbackText});
+// Units are issued in windows of up to DISCOVERY_WINDOW_V1 contiguous units for one reviewer
+// chat. Packets depend only on the Phase 0 inventory, flow plan and system facts, never on
+// earlier units, so a whole window can be issued at once and validated in one controller run.
+export const DISCOVERY_WINDOW_V1=25;
+const activeIdsOf=(state)=>state.payload.order.filter(id=>state.payload.units[id]?.status==='ACTIVE');
+function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now}){
+ const pending=state.payload.order.filter(id=>state.payload.units[id]?.status==='PENDING');
+ if(!pending.length)return [];
+ const chatKey=state.payload.units[pending[0]].chatKey,ids=[];
+ for(const id of pending){
+  if(state.payload.units[id].chatKey!==chatKey||ids.length>=DISCOVERY_WINDOW_V1)break;
+  ids.push(id);
+ }
+ for(const id of ids){
+  buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now});
+  state.payload.units[id].status='ACTIVE';
+ }
+ return ids;
+}
+export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText=null}){
+ const base='https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
+ const link=(p)=>base+p.split('/').map(encodeURIComponent).join('/');
+ const lines=[role==='ATTACK'?'You are the attacker reviewer. Campaign '+directory.campaignId:'You are reviewer-2. Campaign '+directory.campaignId,
+  'Use the GitHub connector app for every repository read and write.',
+  'Instructions: '+link(instructionsPath)];
+ if(feedbackText)lines.push('Controller feedback:\n'+feedbackText);
+ // Compact: one folder link plus unit-id ranges keeps the typed wake short.
+ const ranges=[];for(const id of ids){const [p,n]=[id[0],Number(id.slice(2))],last=ranges.at(-1);
+  if(last&&last.p===p&&last.to===n-1){last.to=n;last.toId=id;}else ranges.push({p,from:n,to:n,fromId:id,toId:id});}
+ lines.push('Units to complete now ('+ids.length+'): '+ranges.map(r=>r.fromId===r.toId?r.fromId:r.fromId+' to '+r.toId).join(', ')+'.');
+ lines.push('Discovery folder: '+link(pathJoin(campaignPath,''))+' . For each unit <id>, read <id>/ASSIGNMENT_PACKET_v1.json and write <id>/SUBMISSION_v1.json.');
+ lines.push('Complete all of them, then push ONE boundary request. The controller validates every unit with a new submission in a single run, then wakes you with rework or the next units. Do not push a request per unit.');
+ lines.push('Boundary request location: process/agent-upload/lite-phase-boundary/');
+ lines.push('Exact boundary request JSON: '+JSON.stringify({schemaVersion:'curveyield-lite-phase-boundary-request-v1',
+  campaignId:directory.campaignId,reviewKind:'discovery',unitId:ids[0],auditControllerRef:auditControllerRef??'main',attempt}));
+ lines.push('If no controller response arrives within 30 minutes of pushing the request, push the same request again with attempt increased by 1.');
+ if(role==='ATTACK')lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any unit folder under work/phase-04/discovery/ other than the ones listed above.");
+ return lines.join('\n\n');
+}
+function wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef='main',feedbackText=null}){
+ const role=state.payload.units[ids[0]].role==='ATTACK'?'ATTACK':'FLOW_REVIEW';
+ const round=state.payload.wakeRound=(state.payload.wakeRound??0)+1;
+ const attempt=Math.max(...ids.map(id=>state.payload.units[id]?.attempts??0))+1;
+ const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
+ const message=discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText});
  return {chatKey:role==='ATTACK'?'reviewer-3L':'reviewer-2',
-  wakeId:directory.campaignId+'-discovery-'+unitId+'-a'+attempt,
-  phaseId:'phase-4',milestoneId:'DISCOVERY_'+unitId,messageB64:Buffer.from(message).toString('base64')};
+  wakeId:directory.campaignId+'-discovery-'+ids[0]+'-r'+round,
+  phaseId:'phase-4',milestoneId:'DISCOVERY_'+ids[0],messageB64:Buffer.from(message).toString('base64')};
 }
 export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,now,auditControllerRef='main'}){
  const plan=known(root,asset(campaignPath,'FLOW_PLAN_v1.json'));
@@ -99,10 +139,11 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
  });
  writeJson(repoFile(root,stateRel(campaignPath)),state);
  if(missing)return {completeImmediately:true,state,statePath:stateRel(campaignPath),wake:null};
- const packet=buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:order[0],state,now});
- state.payload.units[order[0]].status='ACTIVE';
+ const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});
+ state.payload.activeUnitId=ids[0];
+ const wake=wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef});
  writeJson(repoFile(root,stateRel(campaignPath)),state);
- return {completeImmediately:false,state,statePath:stateRel(campaignPath),wake:wakeFor({directory,unitId:order[0],state,packet,campaignPath,auditControllerRef})};
+ return {completeImmediately:false,state,statePath:stateRel(campaignPath),wake};
 }
 export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmissions,taxonomy,now}){
  const rows=arr(acceptedSubmissions),checks=new Map(),candidates=[],paths=[],answers=[],na=[];
@@ -182,48 +223,73 @@ export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,a
 export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,now,auditControllerRef='main'}){
  const state=known(root,stateRel(campaignPath));
  if(!state)throw new Error('discovery state missing');
- const active=state.payload.activeUnitId;
- if(unitId!==active)return {status:'DISCOVERY_STALE_REQUEST',
-  feedbackText:'Unit '+unitId+' is not active; active is '+active+'. No action taken.',wake:null};
- const info=state.payload.units[unitId],relative=submissionRel(campaignPath,unitId),file=repoFile(root,relative);
- if(!fs.existsSync(file))return {status:'DISCOVERY_REWORK',
-  feedbackText:'Submission file not found at '+relative+'. Write it, then push the boundary request again.',wake:null};
- const bytes=fs.readFileSync(file),sha=hex(bytes);
- if(sha===info.lastValidatedSubmissionSha)return {status:'DISCOVERY_REWORK',
-  feedbackText:feedbackTextV1({errors:info.lastErrors},{attempt:info.attempts,maxAttempts:3,submissionPath:relative,unitId}),wake:null};
- const packet=known(root,packetRel(campaignPath,unitId)),inventory=getInputs({root,campaignPath,automationRoot}).inventory;
- let result;
- try {
-  const submission=JSON.parse(bytes.toString('utf8'));
-  result=info.role==='ATTACK'?validateAttackSubmissionV1({packet:packet.payload,submission,inventory}):
+ const active=activeIdsOf(state);
+ if(!active.includes(unitId))return {status:'DISCOVERY_STALE_REQUEST',
+  feedbackText:'Unit '+unitId+' is not active; active units are '+(active.join(', ')||'none')+'. No action taken.',wake:null};
+ const inventory=getInputs({root,campaignPath,automationRoot}).inventory;
+ const accepted=[],rework=[],exhausted=[],waiting=[],unchanged=[],feedback=[];
+ for(const id of active){
+  const info=state.payload.units[id],relative=submissionRel(campaignPath,id),file=repoFile(root,relative);
+  if(!fs.existsSync(file)){waiting.push(id);continue;}
+  const bytes=fs.readFileSync(file),sha=hex(bytes);
+  if(sha===info.lastValidatedSubmissionSha){
+   unchanged.push(feedbackTextV1({errors:info.lastErrors},{attempt:info.attempts,maxAttempts:3,submissionPath:relative,unitId:id}));
+   continue;
+  }
+  const packet=known(root,packetRel(campaignPath,id));
+  let result;
+  try {
+   const submission=JSON.parse(bytes.toString('utf8'));
+   result=info.role==='ATTACK'?validateAttackSubmissionV1({packet:packet.payload,submission,inventory}):
     validateFlowReviewSubmissionV1({packet:packet.payload,submission,inventory});
- }catch(error){result={ok:false,errors:[{code:'SUBMISSION_SCHEMA',path:'$',message:String(error.message).slice(0,1000)}],value:null};}
- info.lastValidatedSubmissionSha=sha;info.lastErrors=result.errors;
- if(result.ok){
-  fs.mkdirSync(path.dirname(repoFile(root,pathJoin(campaignPath,unitId+'/ACCEPTED_SUBMISSION_v1.json'))),{recursive:true});
-  fs.writeFileSync(repoFile(root,pathJoin(campaignPath,unitId+'/ACCEPTED_SUBMISSION_v1.json')),bytes);
-  info.status='ACCEPTED';info.acceptedSubmissionSha=sha;
- } else {
+  }catch(error){result={ok:false,errors:[{code:'SUBMISSION_SCHEMA',path:'$',message:String(error.message).slice(0,1000)}],value:null};}
+  info.lastValidatedSubmissionSha=sha;info.lastErrors=result.errors;
+  if(result.ok){
+   fs.mkdirSync(path.dirname(repoFile(root,pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json'))),{recursive:true});
+   fs.writeFileSync(repoFile(root,pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json')),bytes);
+   info.status='ACCEPTED';info.acceptedSubmissionSha=sha;accepted.push(id);
+   continue;
+  }
   info.attempts++;
   if(info.attempts<3){
-   writeJson(repoFile(root,stateRel(campaignPath)),state);
-   const feedback=feedbackTextV1(result,{attempt:info.attempts,maxAttempts:3,submissionPath:relative,unitId});
-   return {status:'DISCOVERY_REWORK',feedbackText:feedback,
-    wake:wakeFor({directory,unitId,state,packet,campaignPath,auditControllerRef,feedbackText:feedback})};
+   rework.push(id);
+   feedback.push(feedbackTextV1(result,{attempt:info.attempts,maxAttempts:3,submissionPath:relative,unitId:id}));
+   continue;
   }
-  info.status='GAP_RECORDED';
+  info.status='GAP_RECORDED';exhausted.push(id);
   const affected=info.role==='ATTACK'?arr(packet.payload.flowIds):arr(packet.payload.primaryContextIds);
-  for(const id of affected)state.payload.gaps.push({code:'VALIDATION_ATTEMPTS_EXHAUSTED',
-   ...(info.role==='ATTACK'?{flowId:id}:{contextId:id}),unitId});
+  for(const ctx of affected)state.payload.gaps.push({code:'VALIDATION_ATTEMPTS_EXHAUSTED',
+   ...(info.role==='ATTACK'?{flowId:ctx}:{contextId:ctx}),unitId:id});
  }
- const index=state.payload.order.indexOf(unitId);
- const next=state.payload.order[index+1];
- if(next){
-  state.payload.activeUnitId=next;state.payload.units[next].status='ACTIVE';
-  const following=buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:next,state,now});
+ // Nothing new to validate: report and leave state untouched.
+ if(!accepted.length&&!rework.length&&!exhausted.length)return {status:'DISCOVERY_REWORK',
+  feedbackText:unchanged.length?unchanged.join('\n\n'):'No new submission found for active units '+active.join(', ')+'. Write them, then push the boundary request again.',wake:null};
+ const summary=[accepted.length?'Accepted: '+accepted.join(', '):'',
+  exhausted.length?'Validation attempts exhausted, recorded as gaps: '+exhausted.join(', '):'',
+  waiting.length?'Still awaiting submission: '+waiting.join(', '):''].filter(Boolean).join('\n');
+ const remaining=activeIdsOf(state);
+ if(remaining.length){
+  state.payload.activeUnitId=remaining[0];
+  if(rework.length){
+   const text=[summary,...feedback,...unchanged].filter(Boolean).join('\n\n');
+   // Full feedback is durable in the discovery folder; the typed wake carries a bounded excerpt.
+   const feedbackRel=pathJoin(campaignPath,'DISCOVERY_FEEDBACK_v1.md');
+   fs.writeFileSync(repoFile(root,feedbackRel),text+'\n');
+   const excerpt=text.length>1500?text.slice(0,1500)+'\n… full feedback: '+feedbackRel:text+'\n(Also saved at '+feedbackRel+')';
+   const wake=wakeFor({directory,ids:remaining,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:excerpt});
+   writeJson(repoFile(root,stateRel(campaignPath)),state);
+   return {status:'DISCOVERY_REWORK',feedbackText:text,wake};
+  }
+  // Some units still unsubmitted and nothing failed: the reviewer is mid-window; no wake.
   writeJson(repoFile(root,stateRel(campaignPath)),state);
-  return {status:'DISCOVERY_NEXT',feedbackText:result.ok?'Accepted '+unitId:'Validation attempts exhausted for '+unitId,
-   wake:wakeFor({directory,unitId:next,state,packet:following,campaignPath,auditControllerRef})};
+  return {status:'DISCOVERY_PARTIAL',feedbackText:summary,wake:null};
+ }
+ const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});
+ if(ids.length){
+  state.payload.activeUnitId=ids[0];
+  const wake=wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:summary});
+  writeJson(repoFile(root,stateRel(campaignPath)),state);
+  return {status:'DISCOVERY_NEXT',feedbackText:summary,wake};
  }
  return completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});
 }

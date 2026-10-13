@@ -881,7 +881,24 @@ jobs:
             # state. Controller/campaign state above determines whether the phase is
             # still active. The browser is touched only when the elapsed-time gate
             # calls for a human-style Phase-1 X11 poke.
-            reference_at="$(jq -r '.lastPokedAt // .armedAt // empty' /tmp/watchdog-state.json)"
+            # Durable progress resets the clock: any new commit under the campaign folder means
+            # the reviewer (or its controller) is advancing, so no poke and no stop click.
+            if [ "$receipt_gate_mode" = "true" ] && [ -n "${campaign_root:-}" ] && [ -n "${AUDIT_CONTROLLER_GITHUB_TOKEN:-}" ]; then
+              encoded_root="$(printf '%s' "$campaign_root" | sed 's/ /%20/g')"
+              progress_at="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/commits?sha=$gate_ref&path=$encoded_root&per_page=1" --jq '.[0].commit.committer.date // empty' 2>/dev/null || true)"
+              previous_progress="$(jq -r '.lastProgressAt // empty' /tmp/watchdog-state.json)"
+              if [ -n "$progress_at" ] && [ "$progress_at" != "$previous_progress" ]; then
+                progress_epoch="$(date -u -d "$progress_at" +%s 2>/dev/null || echo 0)"
+                armed_epoch="$(date -u -d "$(jq -r '.lastPokedAt // .armedAt // empty' /tmp/watchdog-state.json)" +%s 2>/dev/null || echo 0)"
+                if [ "$progress_epoch" -gt "$armed_epoch" ]; then
+                  jq --arg at "$progress_at" '.lastProgressAt=$at | .repair.consecutiveIdlePokes=0 | .lastDecision="DURABLE_PROGRESS_RESETS_POKE_CLOCK"' \
+                    /tmp/watchdog-state.json > /tmp/watchdog-state-next.json
+                  mv /tmp/watchdog-state-next.json /tmp/watchdog-state.json
+                  persist_state || true
+                fi
+              fi
+            fi
+            reference_at="$(jq -r '[.lastPokedAt, .armedAt, .lastProgressAt] | map(select(. != null and . != "")) | max // empty' /tmp/watchdog-state.json)"
             poke_interval_minutes="$(jq -r '.pokeIntervalMinutes // 20' /tmp/watchdog-state.json)"
             [[ "$poke_interval_minutes" =~ ^[0-9]+$ ]] || poke_interval_minutes=20
             now_epoch="$(date -u +%s)"
