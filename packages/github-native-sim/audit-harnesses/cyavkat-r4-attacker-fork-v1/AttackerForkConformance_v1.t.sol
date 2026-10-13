@@ -5,6 +5,7 @@ pragma solidity 0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {FuseAction} from "../../src/interfaces/CurveYieldPhase2Interfaces.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {CurveYieldGateConfig, ICurveYieldConfigGate} from "../../src/governance/CurveYieldGateConfig.sol";
 import {CurveYieldAllocationController} from "../../src/allocation/CurveYieldAllocationController.sol";
 import {
