@@ -54,9 +54,9 @@
   "watchdogRunId": "38453826316",
   "watchdogSweepStartedAt": "2026-10-13T19:19:31Z",
   "lastProgressAt": "2026-10-13T18:18:21Z",
-  "lastDecision": "TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ",
-  "lastNoReadSweepAt": "2026-10-13T18:46:30Z",
-  "elapsedSinceLastPokeMinutes": 28,
+  "lastDecision": "WAITING_NO_CHATGPT_READ",
+  "lastNoReadSweepAt": "2026-10-13T19:19:35Z",
+  "elapsedSinceLastPokeMinutes": 16,
   "lastStopClick": {
     "x": null,
     "y": null,
