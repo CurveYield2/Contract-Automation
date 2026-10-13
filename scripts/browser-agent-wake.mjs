@@ -478,7 +478,16 @@ async function humanX11PasteText(page, text) {
   const file = path.join(os.tmpdir(), 'wake-paste-' + process.pid + '.txt');
   await fs.writeFile(file, String(text));
   try {
-    await runCapture('xclip', ['-selection', 'clipboard', '-i', file], {env:{DISPLAY:env.DISPLAY||':99'}});
+    // xclip forks a daemon that keeps serving the selection and inherits any stdio pipes, so wait
+    // for the parent's exit (not 'close') with stdio ignored, or the wake hangs until its timeout.
+    await new Promise((resolve, reject) => {
+      const child = spawn('xclip', ['-selection', 'clipboard', '-i', file], {
+        env: { ...process.env, DISPLAY: env.DISPLAY || ':99' },
+        stdio: 'ignore'
+      });
+      child.on('error', reject);
+      child.on('exit', code => code === 0 ? resolve() : reject(new Error('xclip failed (' + code + ')')));
+    });
     await page.waitForTimeout(randomDelayMs(250, 450));
     await x11Key(['key', '--clearmodifiers', 'ctrl+v'], 'x11-paste');
     await page.waitForTimeout(randomDelayMs(600, 1000));
