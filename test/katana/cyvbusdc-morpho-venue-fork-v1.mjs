@@ -46,6 +46,45 @@ const log = (s) => { report.notes.push(s); console.log(s); };
 async function rpc(provider, method, params) {
   return await provider.send(method, params);
 }
+async function locateRoleAdmin(provider, access, managerAddress, roleId, lastBlock) {
+  const event = new Interface(["event RoleGranted(uint64 indexed roleId,address indexed account,uint32 delay,uint48 since,bool newMember)"]);
+  const topic = event.getEvent("RoleGranted").topicHash;
+  const roleTopic = "0x" + roleId.toString(16).padStart(64,"0");
+  const candidates = new Set([MAINNET_ROLE_MANAGER]);
+  async function collect(fromBlock,toBlock) {
+    const logs = await provider.getLogs({ address:managerAddress, topics:[topic,roleTopic], fromBlock,toBlock });
+    for (const entry of logs) {
+      const parsed = event.parseLog(entry);
+      if (parsed) candidates.add(parsed.args.account);
+    }
+    return logs.length;
+  }
+  let fullScan = false;
+  try {
+    const count = await collect(0,lastBlock);
+    log(`Scanned entire manager history for RoleGranted(${roleId}); ${count} event(s)`);
+    fullScan = true;
+  } catch (error) {
+    log(`Full-range role event scan unavailable: ${String(error.shortMessage || error.message).slice(0,230)}`);
+  }
+  if (!fullScan) {
+    let windows=0;
+    // Finite bounded recent history probe; never substitute unverified addresses.
+    for(let high=lastBlock; high>=0 && windows<100; high-=2000) {
+      const low=Math.max(0,high-1999);
+      try { await collect(low,high); } catch { }
+      windows++;
+      if (low===0) break;
+    }
+    log(`Fallback scanned ${windows} recent two-thousand-block windows`);
+  }
+  for (const candidate of candidates) {
+    const role = await access.hasRole(roleId,candidate);
+    if (role[0] && role[1] === 0n) return address(candidate);
+  }
+  throw new Error(`No verified immediate role-${roleId} holder located; candidate count ${candidates.size}`);
+}
+
 async function run() {
   const url = process.env.KATANA_RPC_URL || "http://127.0.0.1:8545";
   assert(url === "http://127.0.0.1:8545", "Refusing nonlocal RPC for fork mutation");
@@ -114,19 +153,15 @@ async function run() {
   const beforePermission = await access.canCall(user.address, VAULT, selector);
   report.details.signerPermissionBefore = [beforePermission[0], beforePermission[1].toString()];
   if (!beforePermission[0]) {
-    // Try the known protocol governance Safe as a fork-only impersonated admin.
-    const adminMember = await access.hasRole(roleAdmin, MAINNET_ROLE_MANAGER);
-    report.details.knownGovernanceSafe = MAINNET_ROLE_MANAGER;
-    report.details.knownGovernanceSafeHasAdminRole = adminMember[0];
-    assert(adminMember[0] && adminMember[1] === 0n,
-      `Known governance Safe lacks immediate admin role ${roleAdmin}; cannot safely simulate granting role`);
-    await rpc(p, "anvil_setBalance", [MAINNET_ROLE_MANAGER, "0x3635c9adc5dea00000"]);
-    await rpc(p, "anvil_impersonateAccount", [MAINNET_ROLE_MANAGER]);
-    const adminSigner = await p.getSigner(MAINNET_ROLE_MANAGER);
+    const authorizedAdmin = await locateRoleAdmin(p, access, managerAddress, roleAdmin, report.details.forkBlock);
+    report.details.verifiedRoleAdminHolder = authorizedAdmin;
+    await rpc(p, "anvil_setBalance", [authorizedAdmin, "0x3635c9adc5dea00000"]);
+    await rpc(p, "anvil_impersonateAccount", [authorizedAdmin]);
+    const adminSigner = await p.getSigner(authorizedAdmin);
     const receipt = await (await access.connect(adminSigner).grantRole(role, user.address, 0)).wait();
     assert(receipt?.status === 1, "Fork-only simulated role assignment reverted");
     report.txs.push({type:"fork-only grantRole",hash:receipt.hash});
-    await rpc(p, "anvil_stopImpersonatingAccount", [MAINNET_ROLE_MANAGER]);
+    await rpc(p, "anvil_stopImpersonatingAccount", [authorizedAdmin]);
   }
   const can = await access.canCall(user.address, VAULT, selector);
   assert(can[0] && can[1] === 0n, "Simulated signer still not immediately authorized");
@@ -160,11 +195,11 @@ async function run() {
   assert(executeRole === 200n, "Vault execute unexpectedly not ALPHA_ROLE");
   if (idle > 0n && !granted) {
     const alphaAdminRole = await access.getRoleAdmin(200n);
-    const alphaAdmin = await access.hasRole(alphaAdminRole, MAINNET_ROLE_MANAGER);
-    assert(alphaAdmin[0] && alphaAdmin[1] === 0n, "Safe cannot grant ALPHA for supply/withdraw simulation");
-    await rpc(p, "anvil_impersonateAccount", [MAINNET_ROLE_MANAGER]);
-    await (await access.connect(await p.getSigner(MAINNET_ROLE_MANAGER)).grantRole(200n, user.address, 0)).wait();
-    await rpc(p, "anvil_stopImpersonatingAccount", [MAINNET_ROLE_MANAGER]);
+    const alphaAdmin = await access.hasRole(alphaAdminRole, report.details.verifiedRoleAdminHolder);
+    assert(alphaAdmin[0] && alphaAdmin[1] === 0n, "Verified admin cannot grant ALPHA for supply/withdraw simulation");
+    await rpc(p, "anvil_impersonateAccount", [report.details.verifiedRoleAdminHolder]);
+    await (await access.connect(await p.getSigner(report.details.verifiedRoleAdminHolder)).grantRole(200n, user.address, 0)).wait();
+    await rpc(p, "anvil_stopImpersonatingAccount", [report.details.verifiedRoleAdminHolder]);
     const amount = idle < 1_000_000n ? idle : 1_000_000n;
     const fuseIface = new Interface([
       "function enter((bytes32 morphoMarketId,uint256 amount))",
