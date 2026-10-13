@@ -156,8 +156,10 @@ export function buildFlowPlanV1({inventory,facts,snapshot=null,limits=DEFAULT_LI
  for(const cluster of clusters){
   const qs=questions.filter(q=>q.clusterId===cluster.clusterId);
   for(let i=0;i<Math.max(1,Math.ceil(qs.length/cfg.maxIntegrationQuestionsPerAttackUnit));i++)
+   // A cluster's flows are attacked once, in its first unit; follow-on units (split only by the
+   // integration-question cap) carry their questions alone instead of re-attacking every flow.
    attackUnits.push({unitId:'X-'+pad(++xi,3),role:'ATTACK',clusterId:cluster.clusterId,
-    flowIds:cluster.flowIds,contracts:cluster.contracts,
+    flowIds:i===0?cluster.flowIds:[],contracts:cluster.contracts,
     integrationQuestionIds:qs.slice(i*cfg.maxIntegrationQuestionsPerAttackUnit,(i+1)*cfg.maxIntegrationQuestionsPerAttackUnit).map(q=>q.obligationId)});
  }
  const gaps=[];
