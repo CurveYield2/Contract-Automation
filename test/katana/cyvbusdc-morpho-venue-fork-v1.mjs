@@ -1,6 +1,7 @@
 // Katana cyvbUSDC Morpho configuration fork simulation v1.
 // ALL writes go to an ephemeral Anvil fork, never the public Katana chain.
 import { writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { AbiCoder, Contract, Interface, JsonRpcProvider, Wallet, getAddress, keccak256, MaxUint256 } from "ethers";
 
 const address = (a) => getAddress(a.toLowerCase());
@@ -38,7 +39,7 @@ const fuseAbi = [
   "function MORPHO() view returns (address)",
 ];
 const morphoAbi = ["function idToMarketParams(bytes32) view returns (address loanToken,address collateralToken,address oracle,address irm,uint256 lltv)"];
-const tokenAbi = ["function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)"];
+const tokenAbi = ["function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)", "function transfer(address,uint256) returns (bool)"];
 const report = { version: "v1", mode: "EPHEMERAL_ANVIL_FORK_ONLY", status: "FAIL", checks: {}, details: {}, txs: [], notes: [] };
 const eq = (a,b) => String(a).toLowerCase() === String(b).toLowerCase();
 const assert = (condition, why) => { if(!condition) throw new Error(why); };
@@ -210,13 +211,25 @@ async function run() {
   const can = await access.canCall(user.address, VAULT, selector);
   assert(can[0] && can[1] === 0n, "Simulated signer still not immediately authorized");
   report.checks.forkOnlyRoleGrant = "PASS";
-  if (!granted) {
-    const predicted = await vault.connect(user).grantMarketSubstrates.staticCall(selected.id, next);
-    void predicted;
-    const receipt = await (await vault.connect(user).grantMarketSubstrates(selected.id, next)).wait();
-    assert(receipt?.status === 1, "Fork-only substrate grant reverted");
-    report.txs.push({type:"fork-only grantMarketSubstrates",hash:receipt.hash});
-  }
+  // Execute the actual production configuration program against the local fork,
+  // using the disposable signer granted role 300 above, never DEPLOYER_FX.
+  const config = spawnSync(process.execPath, ["scripts/katana/cyvbusdc-morpho-venue-v1.mjs"], {
+    env: {
+      ...process.env,
+      KATANA_RPC_URL: "http://127.0.0.1:8545",
+      DEPLOYER_FX: "0x" + "a1".repeat(32),
+      MODE: "apply",
+      APPLY_CONFIRMATION: "ENABLE_VBUSDC_YVAUSD",
+    },
+    encoding: "utf8",
+    timeout: 180000,
+  });
+  report.details.productionScriptExit = config.status;
+  report.details.productionScriptOutput = (config.stdout || "").slice(-4000);
+  assert(config.status===0, `Actual production configurator failed: ${config.stdout || ""} ${config.stderr || ""}`);
+  log("Actual production configuration script completed in apply mode against the fork");
+  const configTx = (config.stdout || "").match(/Transaction submitted: (0x[0-9a-fA-F]{64})/);
+  if(configTx) report.txs.push({type:"fork-only production configurator grantMarketSubstrates",hash:configTx[1]});
   const after = [...await vault.getMarketSubstrates(selected.id)];
   assert(after.length === next.length && after.every((s,i)=>eq(s,next[i])), "Other Morpho substrate permissions were changed");
   assert(await vault.isMarketSubstrateGranted(selected.id, MARKET), "Requested Morpho market not granted after simulation");
@@ -231,7 +244,26 @@ async function run() {
   // Supply and exit require ALPHA_ROLE; check the opportunity to run them on this fork
   // without representing a zero-token no-op as a successful lending test.
   const token = new Contract(VBUSDC, tokenAbi, p);
-  const idle = await token.balanceOf(VAULT);
+  const initialIdle = await token.balanceOf(VAULT);
+  let idle = initialIdle;
+  report.details.vaultIdleVbUsdcBefore = initialIdle.toString();
+  if(idle < 1_000_000n && !granted) {
+    // Only the fork is modified. Supply a small non-dust test amount by
+    // impersonating the Morpho protocol's own vbUSDC treasury balance.
+    // This is SYNTHETIC TEST FUNDING; it is NOT a legitimate production flow.
+    const donorBalance = await token.balanceOf(MORPHO);
+    const testAmount = 100_000_000n; // 100 vbUSDC (6 decimals).
+    assert(donorBalance >= testAmount, "Fork-only source lacks vbUSDC for synthetic lending test");
+    await rpc(p,"anvil_setBalance",[MORPHO,"0x3635c9adc5dea00000"]);
+    await rpc(p,"anvil_impersonateAccount",[MORPHO]);
+    const fundingReceipt = await (await token.connect(await p.getSigner(MORPHO)).transfer(VAULT,testAmount)).wait();
+    assert(fundingReceipt?.status===1, "Synthetic fork funding failed");
+    await rpc(p,"anvil_stopImpersonatingAccount",[MORPHO]);
+    report.txs.push({type:"fork-only SYNTHETIC vbUSDC funding",hash:fundingReceipt.hash});
+    idle = await token.balanceOf(VAULT);
+    report.details.syntheticForkFunding = testAmount.toString();
+    log(`Fork-only synthetic test liquidity: 100 vbUSDC; initial vault idle: ${initialIdle}`);
+  }
   report.details.vaultIdleVbUsdc = idle.toString();
   const execSelector = vault.interface.getFunction("execute").selector;
   const executeRole = await access.getTargetFunctionRole(VAULT, execSelector);
@@ -242,7 +274,10 @@ async function run() {
     const alphaAdmin = await access.hasRole(alphaAdminRole, report.details.verifiedRoleAdminHolder);
     assert(alphaAdmin[0] && alphaAdmin[1] === 0n, "Verified admin cannot grant ALPHA for supply/withdraw simulation");
     await rpc(p, "anvil_impersonateAccount", [report.details.verifiedRoleAdminHolder]);
-    await (await access.connect(await p.getSigner(report.details.verifiedRoleAdminHolder)).grantRole(200n, user.address, 0)).wait();
+    const alphaGrantReceipt = await (await access.connect(await p.getSigner(report.details.verifiedRoleAdminHolder)).grantRole(200n, user.address, 0)).wait();
+    assert(alphaGrantReceipt?.status===1, "Fork-only ALPHA grant failed");
+    report.txs.push({type:"fork-only grant ALPHA",hash:alphaGrantReceipt.hash});
+    log("Fork-only ALPHA_ROLE granted for lending supply and withdrawal test");
     await rpc(p, "anvil_stopImpersonatingAccount", [report.details.verifiedRoleAdminHolder]);
     const amount = idle < 1_000_000n ? idle : 1_000_000n;
     const fuseIface = new Interface([
@@ -250,11 +285,17 @@ async function run() {
       "function exit((bytes32 morphoMarketId,uint256 amount))",
     ]);
     const supplyAction = [{fuse: selected.supply, data: fuseIface.encodeFunctionData("enter", [[MARKET,amount]])}];
+    try { await vault.connect(user).execute.staticCall(supplyAction); } catch(error) {
+      throw new Error(`Supply eth_call reverted: ${error.shortMessage || error.message || String(error)}`);
+    }
     const supplyReceipt = await (await vault.connect(user).execute(supplyAction)).wait();
     assert(supplyReceipt?.status === 1, "Supply fuse execution failed on fork");
     const interim = await token.balanceOf(VAULT);
     assert(interim < idle, "Morpho supply did not decrease idle vbUSDC");
     const exitAction = [{fuse: selected.supply, data: fuseIface.encodeFunctionData("exit",[[MARKET,MaxUint256]])}];
+    try { await vault.connect(user).execute.staticCall(exitAction); } catch(error) {
+      throw new Error(`Withdraw eth_call reverted: ${error.shortMessage || error.message || String(error)}`);
+    }
     const exitReceipt = await (await vault.connect(user).execute(exitAction)).wait();
     assert(exitReceipt?.status === 1, "Withdraw fuse execution failed on fork");
     const finalIdle = await token.balanceOf(VAULT);
