@@ -6,9 +6,10 @@ import {buildCoverageMatrixV1} from './adr-coverage-matrix-v1.mjs';
 import {deriveBaselineObligationsV1} from './adr-baseline-obligations-v1.mjs';
 import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1} from './adr-discovery-validators-v1.mjs';
 import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
+import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
 
 const pathJoin=(campaign,relative)=>path.posix.join(campaign,'work/phase-04/discovery',relative);
-const asset=(campaign,name)=>path.posix.join(campaign,'evidence/review-inventory',name);
+const asset=(root,campaign,name)=>reviewInventoryRelV1(root,campaign,name);
 const known=(root,rel)=>{const file=repoFile(root,rel);return fs.existsSync(file)?readJson(file):null;};
 const hex=bytes=>createHash('sha256').update(bytes).digest('hex');
 const arr=x=>Array.isArray(x)?x:[];
@@ -18,9 +19,9 @@ const head=(directory,now,schemaVersion,payload)=>({schemaVersion,campaignId:dir
  taxonomyVersion:'curveyield-defect-taxonomy-v1',detectionPolicy:'audit-detection-rebuild-v1',generatedAt:now,payload});
 const unitSort=(a,b)=>'FRX'.indexOf(a.unitId[0])-'FRX'.indexOf(b.unitId[0])||sort(a.unitId,b.unitId);
 function getInputs({root,campaignPath,automationRoot}){
- return {inventory:known(root,asset(campaignPath,'REVIEW_INVENTORY_v1.json')),
-  plan:known(root,asset(campaignPath,'FLOW_PLAN_v1.json')),
-  facts:known(root,asset(campaignPath,'SYSTEM_FACTS_v1.json')),
+ return {inventory:known(root,asset(root,campaignPath,'REVIEW_INVENTORY_v1.json')),
+  plan:known(root,asset(root,campaignPath,'FLOW_PLAN_v1.json')),
+  facts:known(root,asset(root,campaignPath,'SYSTEM_FACTS_v1.json')),
   taxonomy:loadTaxonomyV1(automationRoot)};
 }
 const unitList=(plan)=>[...arr(plan?.payload?.reviewUnits),...arr(plan?.payload?.attackUnits)].sort(unitSort);
@@ -45,9 +46,9 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
   unitId,role,chatKey:role==='ATTACK'?'reviewer-3L':'reviewer-2',instructionsPath,
   submissionPath:submissionRel(campaignPath,unitId),boundaryRequestPath:'process/agent-upload/lite-phase-boundary/',
-  sourceRoot:campaignPath+'/source',sourceInventoryPath:asset(campaignPath,'REVIEW_INVENTORY_v1.json'),
-  flowPlanPath:asset(campaignPath,'FLOW_PLAN_v1.json'),
-  systemFactsPath:asset(campaignPath,'SYSTEM_FACTS_v1.json'),
+  sourceRoot:campaignPath+'/source',sourceInventoryPath:asset(root,campaignPath,'REVIEW_INVENTORY_v1.json'),
+  flowPlanPath:asset(root,campaignPath,'FLOW_PLAN_v1.json'),
+  systemFactsPath:asset(root,campaignPath,'SYSTEM_FACTS_v1.json'),
   primaryContexts:role==='ATTACK'?[]:primary.map(id=>contextFor(inventory,id)).filter(Boolean).map(c=>({...c,requiredClasses:requiredClasses[c.contextId]})),
   primaryContextIds:primary,readContextIds:role==='ATTACK'?contextIds:arr(unit.readContextIds),
   requiredClasses,flows,flowIds:arr(unit.flowIds),integrationQuestions:questions,
@@ -128,7 +129,7 @@ function wakeFor({directory,ids,state,campaignPath,authorityRoot,auditController
   phaseId:'phase-4',milestoneId:'DISCOVERY_'+ids[0],messageB64:Buffer.from(message).toString('base64')};
 }
 export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,now,auditControllerRef='main'}){
- const plan=known(root,asset(campaignPath,'FLOW_PLAN_v1.json'));
+ const plan=known(root,asset(root,campaignPath,'FLOW_PLAN_v1.json'));
  const units=unitList(plan),order=units.map(x=>x.unitId);
  const missing=!plan||!units.length;
  const state=head(directory,now,'curveyield-discovery-state-v1',{

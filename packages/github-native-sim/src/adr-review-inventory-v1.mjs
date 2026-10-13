@@ -1,9 +1,11 @@
 import fs from 'node:fs/promises';
+import {existsSync} from 'node:fs';
 import path from 'node:path';
 import {listAdmittedSourcesV1} from './source-intelligence-technical-v1.mjs';
 import {digestCanonicalV1} from './canonical-json-v1.mjs';
 import {buildSystemFactsV1} from './adr-system-facts-v1.mjs';
 import {loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
+import {loadAuditScope,sourceIsInScope,AUDIT_SCOPE_FILE} from './phase0-audit-scope-v1.mjs';
 
 const POLICY='audit-detection-rebuild-v1';
 const REVIEW_KINDS=new Set(['FUNCTION','CONSTRUCTOR','FALLBACK','RECEIVE','FREE_FUNCTION','MODIFIER','STATE_INITIALIZER','CONSTANT','IMMUTABLE','GENERATED_GETTER']);
@@ -22,9 +24,14 @@ function walk(n,fn,parent=null) {
   if(n.nodeType)fn(n,parent);
   for(const item of children(n))walk(item,fn,n);
 }
-function sourceTier(p) {
+// A package's audit-scope.json is authoritative: only its inScopePaths are reviewed, every other
+// compiled source is a dependency (reviewed only where in-scope contracts inherit it). Without the
+// file, path conventions apply at any depth (e.g. ipor-fusion/lib/forge-std is a dependency).
+export function sourceTierV1(p,scope=null) {
   if(/(^|\/)(test|tests|mock|mocks)\//.test(p)||p.endsWith('.t.sol'))return 'TEST_OR_MOCK';
-  if(/^(vendor|lib|node_modules|@)\//.test(p)||p.startsWith('@'))return 'DEPENDENCY';
+  if(p.endsWith('.s.sol')||/(^|\/)(script|scripts)\//.test(p))return 'SCRIPT';
+  if(scope?.source===AUDIT_SCOPE_FILE)return sourceIsInScope(p,scope)?'IN_SCOPE':'DEPENDENCY';
+  if(/(^|\/)(vendor|lib|node_modules)\//.test(p)||p.startsWith('@'))return 'DEPENDENCY';
   return 'IN_SCOPE';
 }
 function lines(bytes,src) {
@@ -57,9 +64,10 @@ const blankPayload=()=>({sourceUnits:[],declarations:[],contexts:[],triggers:{},
 export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   if(!projectRoot||!build||!campaign)throw new TypeError('projectRoot, build, campaign required');
   const sources=await listAdmittedSourcesV1(projectRoot), bySource=new Map();
+  const scope=await loadAuditScope(projectRoot);
   for(const s of sources) {
     const bytes=await fs.readFile(path.join(projectRoot,...s.path.split('/')));
-    bySource.set(s.path,{...s,bytes,tier:sourceTier(s.path)});
+    bySource.set(s.path,{...s,bytes,tier:sourceTierV1(s.path,scope)});
   }
   const asts=new Map();
   const units=(build.compilationUnits??[]).filter(u=>u.sourceAsts&&Object.keys(u.sourceAsts).length);
@@ -70,7 +78,9 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   const sourceUnits=sources.map(s=>({sourceId:s.sourceId,path:s.path,sha256:s.sha256,scopeTier:bySource.get(s.path).tier,
     lineCount:bySource.get(s.path).bytes.reduce((n,byte)=>n+(byte===10?1:0),1),
     astStatus:s.path.endsWith('.vy')?'UNSUPPORTED_LANGUAGE':asts.has(s.path)?'AVAILABLE':'MISSING'}));
-  const limitations=[{code:'DEPENDENCY_TIER_BY_PATH',path:'*',detail:'Dependency tier assigned by path prefix; modified vendored code must be moved out of vendor/ to be reviewed as in-scope.'}];
+  const limitations=[scope.source===AUDIT_SCOPE_FILE
+    ?{code:'SCOPE_FROM_AUDIT_SCOPE_FILE',path:AUDIT_SCOPE_FILE,detail:'In scope: '+scope.inScopePaths.join(', ')+'. Every other compiled source is a dependency, reviewed only where in-scope contracts inherit it.'}
+    :{code:'DEPENDENCY_TIER_BY_PATH',path:'*',detail:'Dependency tier assigned by path convention (vendor/, lib/, node_modules/ at any depth); modified vendored code must be moved out of those folders to be reviewed as in-scope.'}];
   const declarations=[],contexts=[],triggers={},nodeById=new Map(),contractById=new Map(),metadata=new Map(),contextBySymbol=new Map(),usedIds=new Map();
   for(const [file,ast] of asts) {
     const source=bySource.get(file);
@@ -356,4 +366,42 @@ export async function writeReviewInventoryOutputsV1({outputDir,projectRoot,build
         JSON.stringify(emptyArtifact(campaign,payload),null,2)+'\n');
     } catch { /* Phase 0 must continue even when inventory cannot be persisted. */ }
   }
+}
+
+// Re-applies a package's audit scope to an inventory that was built without it (campaigns whose
+// Phase 0 predates scope support). Keeps in-scope contexts, keeps dependency functions that
+// in-scope contracts inherit and expose as INHERITED_DEPENDENCY contexts, and drops the rest.
+export function applyAuditScopeToInventoryV1({inventory,scope,generatedAt}) {
+  if(scope?.source!==AUDIT_SCOPE_FILE)throw new Error('applyAuditScopeToInventoryV1 requires an '+AUDIT_SCOPE_FILE+' scope');
+  const payload=structuredClone(inventory.payload);
+  const tierOf=(p)=>sourceTierV1(p,scope);
+  const inScopeContainers=new Set(payload.contexts.filter(c=>tierOf(c.path)==='IN_SCOPE').map(c=>c.qualifiedContainer));
+  const contexts=[];
+  for(const c of payload.contexts) {
+    const tier=tierOf(c.path);
+    if(tier==='IN_SCOPE'){contexts.push({...c,scopeTier:'IN_SCOPE'});continue;}
+    if(tier==='DEPENDENCY'&&['FUNCTION','GENERATED_GETTER'].includes(c.kind)&&['public','external'].includes(c.visibility)&&
+      (c.effectiveIn??[]).some(q=>inScopeContainers.has(q)))
+      contexts.push({...c,kind:'INHERITED_DEPENDENCY',scopeTier:'INHERITED_DEPENDENCY'});
+  }
+  const kept=new Set(contexts.map(c=>c.contextId));
+  payload.contexts=contexts;
+  payload.triggers=Object.fromEntries(Object.entries(payload.triggers??{}).filter(([id])=>kept.has(id)));
+  payload.sourceUnits=(payload.sourceUnits??[]).map(u=>({...u,scopeTier:tierOf(u.path)}));
+  payload.limitations=[{code:'SCOPE_FROM_AUDIT_SCOPE_FILE',path:AUDIT_SCOPE_FILE,
+    detail:'Re-scoped after Phase 0. In scope: '+scope.inScopePaths.join(', ')+'. Every other compiled source is a dependency, reviewed only where in-scope contracts inherit it.'},
+    ...(payload.limitations??[]).filter(l=>l.code!=='DEPENDENCY_TIER_BY_PATH'&&!(l.code==='INVENTORY_INCOMPLETE'&&tierOf(l.path)!=='IN_SCOPE'))];
+  payload.complete=!payload.sourceUnits.some(u=>u.scopeTier==='IN_SCOPE'&&u.astStatus==='MISSING');
+  const byKind={};for(const c of contexts)byKind[c.kind]=(byKind[c.kind]??0)+1;
+  payload.counts={...(payload.counts??{}),sourceUnits:payload.sourceUnits.length,
+    inScopeUnits:payload.sourceUnits.filter(u=>u.scopeTier==='IN_SCOPE').length,contexts:contexts.length,byKind};
+  return {...inventory,generatedAt:generatedAt??inventory.generatedAt,payload};
+}
+
+// Sealed Phase 0 inventory files stay byte-exact (receipts bind their digests). A scope correction
+// is written beside them under scope-corrected/ and every reader prefers it when present.
+export const SCOPE_CORRECTED_DIR_V1='evidence/review-inventory/scope-corrected';
+export function reviewInventoryRelV1(root,campaignPath,name) {
+  const corrected=path.posix.join(campaignPath,SCOPE_CORRECTED_DIR_V1,name);
+  return existsSync(path.join(root,...corrected.split('/')))?corrected:path.posix.join(campaignPath,'evidence/review-inventory',name);
 }
