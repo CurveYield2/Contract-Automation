@@ -67,8 +67,8 @@ jobs:
           set -euo pipefail
           # Sparse: campaign folder, its directory entry and the receipt-bound authority package only.
           bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" branch "$CAMPAIGN_PATH"
-          test "$(jq -r '.campaignId' "${{ steps.directory.outputs.path }}")" = "$CAMPAIGN_ID"
-          test "$(jq -r '.workspacePath' "${{ steps.directory.outputs.path }}")" = "$CAMPAIGN_PATH"
+          test "$(jq -r '.campaignId' ".audit-controller/${{ steps.directory.outputs.path }}")" = "$CAMPAIGN_ID"
+          test "$(jq -r '.workspacePath' ".audit-controller/${{ steps.directory.outputs.path }}")" = "$CAMPAIGN_PATH"
 
       - name: Prepare current assignment and dynamic wake message
         id: successor
