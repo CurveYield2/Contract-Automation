@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: cyavkat-r4-master-targeted-reviewer3l-round2-v1
+  group: cyavkat-r4-master-targeted-reviewer3l-round2-recovery-v1
   cancel-in-progress: true
 
 jobs:
@@ -223,7 +223,7 @@ jobs:
             echo "::error::No verified archive and machine raw outputs to persist"
             exit 1
           fi
-          OUT=".audit-controller/$CAMPAIGN_PATH/evidence/master-targeted-tests/$REQUEST_ID"
+          OUT=".audit-controller/$CAMPAIGN_PATH/evidence/master-targeted-tests/$REQUEST_ID/runs/$GITHUB_RUN_ID"
           mkdir -p "$OUT"
           cp -a targeted-output/. "$OUT/"
           cd .audit-controller
