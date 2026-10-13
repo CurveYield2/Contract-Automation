@@ -80,8 +80,32 @@ async function locateRoleAdmin(provider, access, managerAddress, roleId, lastBlo
         else hi=mid;
       }
       log(`Access manager first code at historical block ${lo}`);
-      for(let start=lo;start<=Math.min(lastBlock,lo+12000);start+=1000) {
-        await collect(start,Math.min(start+999,lastBlock));
+      // Fork upstream refuses eth_getLogs even for old 1000-block windows.
+      // Transaction receipts carry the same indexed RoleGranted event bytes;
+      // scan only the bounded creation window, verifying each holder on-chain.
+      let seenTx=0, seenRoleEvents=0;
+      for(let blockNumber=lo;blockNumber<=Math.min(lastBlock,lo+250);blockNumber++) {
+        const block=await provider.getBlock(blockNumber);
+        if(!block) continue;
+        for(const transactionHash of block.transactions) {
+          const receipt=await provider.getTransactionReceipt(transactionHash);
+          if(!receipt) continue;
+          seenTx++;
+          for(const entry of receipt.logs) {
+            if(!eq(entry.address,managerAddress) ||
+               !eq(entry.topics[0],topic) || !eq(entry.topics[1],roleTopic)) continue;
+            const parsed=event.parseLog(entry);
+            if(parsed) {candidates.add(parsed.args.account); seenRoleEvents++;}
+          }
+        }
+        if(candidates.size>1) break;
+      }
+      log(`Creation-window receipt scan found ${seenRoleEvents} role grants in ${seenTx} transactions`);
+      if(candidates.size===1) {
+        for(let start=lo;start<=Math.min(lastBlock,lo+12000);start+=1000) {
+          try { await collect(start,Math.min(start+999,lastBlock)); } catch {}
+          if(candidates.size>1) break;
+        }
       }
       log(`Initial creation-window role-event candidates: ${candidates.size}`);
     } catch(error) {
