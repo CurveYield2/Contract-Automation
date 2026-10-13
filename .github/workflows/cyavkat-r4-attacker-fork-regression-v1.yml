@@ -84,7 +84,7 @@ jobs:
           cp packages/github-native-sim/audit-harnesses/cyavkat-r4-attacker-fork-v1/AttackerForkConformance_v1.t.sol "$SRC/test/katana/AttackerForkConformance_v1.t.sol"
           (
             cd "$SRC"
-            timeout 1200s forge test --match-path test/katana/AttackerForkConformance_v1.t.sol --fork-url https://katana.drpc.org/ --fork-block-number "$PINNED_KATANA_BLOCK" -vvvv
+            FOUNDRY_TEST=test/katana timeout 1200s forge test --match-path test/katana/AttackerForkConformance_v1.t.sol --fork-url https://katana.drpc.org/ --fork-block-number "$PINNED_KATANA_BLOCK" -vvvv
           ) > attacker-output/FOUNDRY_v1.log 2>&1
           code=$?
           printf '%s\n' "$code" > attacker-output/FOUNDRY_EXIT_v1.txt
