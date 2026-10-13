@@ -1,0 +1,20 @@
+// Test-only ephemeral patch. Original admitted scripts stay byte-identical.
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+const root=path.resolve(process.argv[2]||'');
+if(!root.endsWith('/cyavKAT/upgrade'))throw Error('Unexpected source root '+root);
+const real=path.join(root,'scripts','deploy-cyavkat-unified-v1.cjs');
+const raw=fs.readFileSync(real,'utf8');
+const sha=crypto.createHash('sha256').update(raw).digest('hex');
+if(sha!=='c92149dbc3535ac2c69d04c96a167d3d3314e539889fca21fdc65118d81793bb')throw Error('immutable native original entry digest mismatch');
+const original='      } else await broadcastPhase(phase,report);';
+if(raw.split(original).length!==2)throw Error('original native code anchor not unique');
+const hook='      } else {\n        if(phase===\'P2_03_Cutover\') await require(\'./R2LifecycleHook_v1.cjs\').before();\n        await broadcastPhase(phase,report);\n        if(phase===\'P2_03_Cutover\') {\n          await require(\'./R2LifecycleHook_v1.cjs\').after();\n          report.status=\'ROUND2_TEST_ONLY_CUTOVER_REACHED\';save(report);return;\n        }\n      }';
+const replaced=raw.replace(original,hook);
+const folder=path.join(root,'scripts');
+const runner=path.join(folder,'r2-native-test-only-v1.cjs');
+fs.writeFileSync(runner,replaced);
+const hookPath=path.resolve('packages/github-native-sim/audit-harnesses/cyavkat-r4-targeted-round2-v1/R2LifecycleHook_v1.cjs');
+fs.copyFileSync(hookPath,path.join(folder,'R2LifecycleHook_v1.cjs'));
+console.log(JSON.stringify({sourceOriginalSha256:sha,testOnlyCopiedScript:runner,testOnlySha256:crypto.createHash('sha256').update(replaced).digest('hex'),hookFile:hookPath}));
