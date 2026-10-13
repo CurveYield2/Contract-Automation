@@ -308,7 +308,7 @@ jobs:
               encoded_gate="${gate_path// /%20}"
               encoded="$(GH_TOKEN="$token" gh api "repos/CurveYield2/Audit-Controller/contents/$encoded_gate?ref=$gate_ref" --jq '.content' 2>/dev/null || true)"
               workspace="$(printf '%s' "$encoded" | base64 -d 2>/dev/null | jq -r --arg campaign "$CAMPAIGN_ID" 'select(.campaignId==$campaign) | .workspacePath // empty' 2>/dev/null || true)"
-              if [[ "$workspace" == campaigns/* ]] && [[ "$reviewer" =~ ^(reviewer-[1234]|reviewer-3L|master-reviewer)$ ]]; then
+              if [[ "$workspace" == campaigns/* ]] && [[ "$reviewer" =~ ^(reviewer-[1234]|reviewer-3L|master-reviewer|test-executor)$ ]]; then
                 ack_file="$workspace/work/browser/WAKE_ACK_${reviewer}_v1.json"
                 ack_id="$WAKE_ID/$GITHUB_RUN_ID"
                 # ackId already binds wake and run; the reviewer is bound by the file path.

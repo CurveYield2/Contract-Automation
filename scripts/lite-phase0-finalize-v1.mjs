@@ -175,6 +175,7 @@ const directoryV2={
   mode:'LITE',
   sourceSha256:sourceSha,
   masterReview:directory.masterReview,
+  ...(directory.testExecutor?{testExecutor:directory.testExecutor}:{}),
   lastSealedReceiptPath:sealedPhase0Receipt,
   campaignStatus:'WAITING_FOR_SUCCESSOR_AGENT',
   currentAssignment:assignment,
