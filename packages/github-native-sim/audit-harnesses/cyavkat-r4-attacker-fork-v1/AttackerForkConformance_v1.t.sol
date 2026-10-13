@@ -16,12 +16,12 @@ import {PlasmaVaultConfigLib} from "contracts/libraries/PlasmaVaultConfigLib.sol
 contract AttackerTestGate is ICurveYieldConfigGate {
     uint256 public immutable VALUE;
     constructor(uint256 value_) { VALUE = value_; }
-    function getMany(bytes32[] calldata keys) external view returns (uint256[] memory out) {
+    function getMany(bytes32[] calldata keys) external view override returns (uint256[] memory out) {
         out = new uint256[](keys.length);
         for (uint256 i; i < keys.length; ++i) out[i] = VALUE;
     }
-    function addr(bytes32) external pure returns (address) { return address(0xFEE1); }
-    function adminReceiver() external pure returns (address) { return address(0xFEE1); }
+    function addr(bytes32) external pure override returns (address) { return address(0xFEE1); }
+    function adminReceiver() external pure override returns (address) { return address(0xFEE1); }
 }
 contract AttackerTestToken is ERC20 {
     constructor() ERC20("Audit Test", "ATST") {}
