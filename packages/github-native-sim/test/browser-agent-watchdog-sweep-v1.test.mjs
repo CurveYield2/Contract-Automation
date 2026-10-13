@@ -112,3 +112,9 @@ test('targeted-test executor wake is scope-locked to running the plan', () => {
   assert.match(controller, /do not open other phases, reports or authority files/);
   assert.match(controller, /zero test assertions is a failure to repair, not progress/);
 });
+
+test('shared delivery keeps its stdout to key=value lines safe for GITHUB_OUTPUT', () => {
+  const deliver = fs.readFileSync('scripts/browser-deliver-message-v1.sh', 'utf8');
+  assert.match(deliver, /node scripts\/browser-agent-wake\.mjs >&2/);
+  for (const line of deliver.split('\n').filter(l => /^echo /.test(l))) assert.match(line, /^echo "(ok|send_attempted|skipped|rc)=/);
+});

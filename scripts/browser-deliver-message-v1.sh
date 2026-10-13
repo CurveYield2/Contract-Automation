@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One X11 delivery path for reviewer wakes and watchdog pokes; only WAKE_MESSAGE differs.
-# Prints ok/send_attempted/skipped lines (GITHUB_OUTPUT format) and leaves the browser
-# result at $WAKE_RESULT_PATH.
+# Stdout carries only ok/send_attempted/skipped/rc lines (GITHUB_OUTPUT format); the
+# browser runtime's own log goes to stderr. The full result is at $WAKE_RESULT_PATH.
 set -euo pipefail
 : "${WAKE_MESSAGE:?}" "${WAKE_RESULT_PATH:?}"
 export WAKE_ACTION='wake'
@@ -9,7 +9,7 @@ export WAKE_MODE="${WAKE_MODE:-resume_existing}"
 # Same delivery semantics as the reviewer wake: no idle wait before sending.
 export WAKE_MESSAGE_PURPOSE="${WAKE_MESSAGE_PURPOSE:-initial_wake}"
 set +e
-timeout -k 10s 360s node scripts/browser-agent-wake.mjs
+timeout -k 10s 360s node scripts/browser-agent-wake.mjs >&2
 rc=$?
 set -e
 if [ ! -s "$WAKE_RESULT_PATH" ]; then
