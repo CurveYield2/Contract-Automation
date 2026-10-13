@@ -114,9 +114,17 @@ jobs:
           cp packages/github-native-sim/audit-harnesses/cyavkat-r4-targeted-v1/MasterTargetedConformance_v1.t.sol "$SRC/test/katana/MasterTargetedConformance_v1.t.sol"
           (
             cd "$SRC"
-            timeout 1080s forge test --match-path test/katana/MasterTargetedConformance_v1.t.sol --show-progress -vvv
+            FOUNDRY_TEST=test/katana timeout 1080s forge test --match-path test/katana/MasterTargetedConformance_v1.t.sol --show-progress -vvv
           ) > targeted-output/CONFORMANCE_v1.log 2>&1
           code=$?
+          if grep -Eq 'Compiler run failed|Compilation failed|ParserError:|Error \\([0-9]+\\):' targeted-output/CONFORMANCE_v1.log; then
+            echo "::error::Conformance compilation failed despite any successful shell exit status"
+            code=1
+          fi
+          if ! grep -Eq 'Ran [1-9][0-9]* tests?|[1-9][0-9]* tests? passed' targeted-output/CONFORMANCE_v1.log; then
+            echo "::error::No positive observed Forge test count"
+            code=1
+          fi
           printf "%s\n" "$code" > targeted-output/CONFORMANCE_EXIT_v1.txt
           echo "exit=$code" >> "$GITHUB_OUTPUT"
           tail -n 100 targeted-output/CONFORMANCE_v1.log
