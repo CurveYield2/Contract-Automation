@@ -123,3 +123,9 @@ test('shared delivery keeps its stdout to key=value lines safe for GITHUB_OUTPUT
   assert.match(deliver, /node scripts\/browser-agent-wake\.mjs >&2/);
   for (const line of deliver.split('\n').filter(l => /^echo /.test(l))) assert.match(line, /^echo "(ok|send_attempted|skipped|rc)=/);
 });
+
+test('one watchdog target per campaign chat and a 40-minute progress-gated poke clock', () => {
+  assert.match(wake, /pokeIntervalMinutes:40/);
+  assert.match(wake, /superseded by \$WAKE_ID/);
+  assert.match(watchdog, /DURABLE_PROGRESS_RESETS_POKE_CLOCK/);
+});

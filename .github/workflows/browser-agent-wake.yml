@@ -525,7 +525,7 @@ jobs:
             --argjson assistantCount "${ASSISTANT_COUNT:-0}" \
             '{
               schemaVersion:$schemaVersion,wakeId:$wakeId,campaignId:$campaignId,phaseId:$phaseId,workerRole:$workerRole,
-              status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,pokeIntervalMinutes:20,
+              status:"ACTIVE",chatUrl:$chatUrl,lastProvider:$provider,armedAt:$armedAt,intervalMinutes:5,pokeIntervalMinutes:40,
               deliveryConfirmed:($acknowledgementVerified=="true"),ackPath:$ackPath,ackId:$ackId,
               idleMessage:$idleMessage,
               observation:{assistantCount:$assistantCount,lastAssistantHash:$lastHash,observedAt:$armedAt},
@@ -572,6 +572,19 @@ jobs:
           else
             gh api --method PUT "$api" -f message="chore(watchdog): arm $WAKE_ID" -f content="$content" -f branch=main >/dev/null
           fi
+          # One watchdog target per campaign chat: this wake supersedes older targets for the
+          # same campaign and chat, so a reviewer is never poked by several stale targets.
+          campaign="$(jq -r '.campaignId' "$WATCHDOG_STATE")"; chat="$(jq -r '.chatUrl' "$WATCHDOG_STATE")"
+          for name in $(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active?ref=main" --jq '.[].name' 2>/dev/null || true); do
+            [ "$name" != "$WATCHDOG_SAFE_ID.json" ] || continue
+            other_api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active/$name"
+            other="$(gh api "$other_api?ref=main" 2>/dev/null || true)"
+            [ -n "$other" ] || continue
+            body="$(printf '%s' "$other" | jq -r '.content' | base64 -d 2>/dev/null || true)"
+            if [ "$(printf '%s' "$body" | jq -r '.campaignId // empty')" = "$campaign" ] && [ "$(printf '%s' "$body" | jq -r '.chatUrl // empty')" = "$chat" ]; then
+              gh api --method DELETE "$other_api" -f message="chore(watchdog): superseded by $WAKE_ID" -f sha="$(printf '%s' "$other" | jq -r '.sha')" -f branch=main >/dev/null || true
+            fi
+          done
 
       - name: Persist existing-chat reviewer wake into campaign registration
         if: ${{ inputs.mode == 'resume_existing' && inputs.worker_role == 'reviewer' && env.WAKE_IS_POKE != 'true' && (steps.receipt.outputs.verified == 'true' || (env.WAKE_ACK_PATH == '' && steps.deliver.outputs.ok == 'true')) }}

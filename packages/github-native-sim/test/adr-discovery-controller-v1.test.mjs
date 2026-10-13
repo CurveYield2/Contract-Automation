@@ -30,7 +30,8 @@ test('discovery workflow preserves global concurrency, validates unit IDs and re
  assert.match(workflow,/Wake discovery chat/);
  assert.match(workflow,/mode=resume_existing/);
  assert.match(workflow,/group: lite-phase-boundary-controller-v1/);
- assert.match(workflow,/watchdog_enabled=false/);
+ // Discovery wakes are supervised by the progress-aware watchdog.
+ assert.match(workflow,/name: Wake discovery chat[\s\S]*?watchdog_enabled=true/);
 });
 test('Phase 4 discovery prefill does not replace the old sourceReviewScaffold without v12 field',()=>{
  const pref=file('scripts/lib/lite-phase-prefill-v1.mjs');
