@@ -37,7 +37,7 @@ test('watchdog never machine-reads ChatGPT and only pokes after the elapsed-time
   assert.match(deliver, /repair_notice\) STOP_BEFORE_SEND=true;; \*\) STOP_BEFORE_SEND=false;;/);
   const runtime = fs.readFileSync('scripts/browser-agent-wake.mjs', 'utf8');
   // Owner's procedure: stop first, then click into the text box, then type and send.
-  assert.match(runtime, /if \(bool\(env\.STOP_BEFORE_SEND\)\) \{[\s\S]*?x11-stop-click[\s\S]*?x11-composer-click[\s\S]*?humanX11TypeText/);
+  assert.match(runtime, /if \(bool\(env\.STOP_BEFORE_SEND\)\) \{[\s\S]*?x11-stop-click[\s\S]*?x11-composer-click[\s\S]*?humanX11PasteText/);
   assert.doesNotMatch(watchdog, /WAKE_ACTION=['"]observe['"]/);
   assert.doesNotMatch(watchdog, /assistantCount|lastAssistantHash|humanChallenge|loginPrompt|conversationUnavailable/);
 });

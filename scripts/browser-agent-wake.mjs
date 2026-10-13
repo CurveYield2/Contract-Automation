@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
@@ -471,6 +472,21 @@ async function humanX11TypeText(page, text) {
   }
 }
 
+// Paste like a person: put the text on the X11 clipboard, then Ctrl+V into the focused field.
+// No page reads. ChatGPT keeps pasted newlines as line breaks; nothing is sent until Return.
+async function humanX11PasteText(page, text) {
+  const file = path.join(os.tmpdir(), 'wake-paste-' + process.pid + '.txt');
+  await fs.writeFile(file, String(text));
+  try {
+    await runCapture('xclip', ['-selection', 'clipboard', '-i', file], {env:{DISPLAY:env.DISPLAY||':99'}});
+    await page.waitForTimeout(randomDelayMs(250, 450));
+    await x11Key(['key', '--clearmodifiers', 'ctrl+v'], 'x11-paste');
+    await page.waitForTimeout(randomDelayMs(600, 1000));
+  } finally {
+    await fs.rm(file, {force:true});
+  }
+}
+
 async function waitForCdp(port, timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -562,12 +578,23 @@ async function runNormalChromeExistingSession(chromium) {
 
     await x11Key(['key', '--clearmodifiers', 'ctrl+l'], 'x11-address-bar');
     await page.waitForTimeout(randomDelayMs(180, 320));
-    await humanX11TypeText(page, requestedUrl);
+    await humanX11PasteText(page, requestedUrl);
     await x11Key(['key', '--clearmodifiers', 'Return'], 'x11-navigate');
-    await page.waitForTimeout(15000);
+    await page.waitForTimeout(12000);
     await captureX11VisualEvidence('01_after_chat_navigation');
     if (!bool(env.WAKE_DIAGNOSTIC_ONLY)) {
-      await page.waitForTimeout(25000);
+      // Wait until the composer area of the desktop stops changing (two equal screenshots
+      // 2.5 s apart), at most 28 s more: the old fixed 40 s wait, ended early once loaded.
+      const [w, h] = (await x11Capture(['getdisplaygeometry'], 'x11-display-geometry')).stdout.trim().split(/\s+/).map(Number);
+      const settle = [Math.round(w * 0.30), Math.max(0, h - 260), Math.round(w * 0.65), 260].join(',');
+      let previous = null, settledAfterMs = null;
+      for (let waited = 0; waited < 28000; waited += 2500) {
+        const shot = await fs.readFile(await captureX11VisualEvidence('composer_settle', settle, 64));
+        if (previous && previous.equals(shot)) { settledAfterMs = 12000 + waited; break; }
+        previous = shot;
+        await page.waitForTimeout(2500);
+      }
+      console.log('[normal-chrome-watchdog] navigation-settled-ms=' + (settledAfterMs ?? 'max-40000'));
       await captureX11VisualEvidence('02_after_40s_navigation');
       await verifyX11VisibleChatAddress(requestedUrl);
     }
@@ -683,8 +710,8 @@ async function runNormalChromeExistingSession(chromium) {
     const crop = [cropX, cropY, cropWidth, cropHeight].join(',');
     const beforeInput = await captureX11VisualEvidence('composer_before_input', crop);
 
-    console.log('[normal-chrome-watchdog] wake-entry=OS-X11-skilled-typist phase1-proven-fixed-point');
-    await humanX11TypeText(page, wakeMessage);
+    console.log('[normal-chrome-watchdog] wake-entry=OS-X11-clipboard-paste phase1-proven-fixed-point');
+    await humanX11PasteText(page, wakeMessage);
     await captureX11VisualEvidence('03_after_text_entry');
     const afterInput = await captureX11VisualEvidence('composer_after_input', crop);
     const inputChanged = !(await fs.readFile(beforeInput)).equals(await fs.readFile(afterInput));

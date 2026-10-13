@@ -41,8 +41,8 @@ test('executed audit wake path has no synthetic ChatGPT write fallback', () => {
 test('executed audit wake verifies only the fixed X11 input sequence', () => {
   assert.match(source, /async function humanX11TypeText/);
   assert.match(source, /for \(const char of value\)/);
-  assert.match(fixedAuditWake, /humanX11TypeText\(page, wakeMessage\)/);
-  assert.match(fixedAuditWake, /wake-entry=OS-X11-skilled-typist/);
+  assert.match(fixedAuditWake, /humanX11PasteText\(page, wakeMessage\)/);
+  assert.match(fixedAuditWake, /wake-entry=OS-X11-clipboard-paste/);
   assert.match(fixedAuditWake, /sendAttempted: true, persisted:false/);
   assert.match(fixedAuditWake, /verification:'X11_VISIBLE_COMPOSER_TRANSITION_ONLY'/);
   assert.doesNotMatch(fixedAuditWake, /postWithVisibleVerification|wakeMarkerVisible|composerDiagnostics/);
