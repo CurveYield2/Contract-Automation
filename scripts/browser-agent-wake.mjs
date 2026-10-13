@@ -620,7 +620,9 @@ async function runNormalChromeExistingSession(chromium) {
       // stop -> generation halts and the typed poke stays in the composer;
       // send -> the poke is submitted and the Return below hits an empty composer.
       // The composer already holds text, so the point is never the voice button.
-      const stopX = Math.round(width * Number(env.STOP_BUTTON_X_FRACTION || '0.755'));
+      // Measured on a 1920px desktop with the sidebar open: button center x=1594,
+      // on the composer row (the same row the composer click uses).
+      const stopX = Math.round(width * Number(env.STOP_BUTTON_X_FRACTION || '0.83'));
       const stopY = Math.round(height - Number(env.STOP_BUTTON_Y_FROM_BOTTOM || '72'));
       await x11Key(['mousemove', '--sync', String(stopX), String(stopY)], 'x11-stop-move');
       await page.waitForTimeout(randomDelayMs(180, 360));
