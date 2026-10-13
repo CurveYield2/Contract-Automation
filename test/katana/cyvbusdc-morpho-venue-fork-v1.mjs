@@ -68,15 +68,35 @@ async function locateRoleAdmin(provider, access, managerAddress, roleId, lastBlo
     log(`Full-range role event scan unavailable: ${String(error.shortMessage || error.message).slice(0,230)}`);
   }
   if (!fullScan) {
-    let windows=0;
-    // Finite bounded recent history probe; never substitute unverified addresses.
-    for(let high=lastBlock; high>=0 && windows<100; high-=2000) {
-      const low=Math.max(0,high-1999);
-      try { await collect(low,high); } catch { }
-      windows++;
-      if (low===0) break;
+    // Access managers emit initial roles at deployment. Resolve creation height
+    // using historical code reads, then inspect the initial role-grant events.
+    try {
+      let lo=0,hi=lastBlock;
+      assert((await provider.getCode(managerAddress,hi)) !== "0x","Role manager lacks code");
+      while(lo<hi) {
+        const mid=Math.floor((lo+hi)/2);
+        const code=await provider.getCode(managerAddress,mid);
+        if (code==="0x") lo=mid+1;
+        else hi=mid;
+      }
+      log(`Access manager first code at historical block ${lo}`);
+      for(let start=lo;start<=Math.min(lastBlock,lo+12000);start+=1000) {
+        await collect(start,Math.min(start+999,lastBlock));
+      }
+      log(`Initial creation-window role-event candidates: ${candidates.size}`);
+    } catch(error) {
+      log(`Historical creation-window scan unavailable: ${String(error.shortMessage || error.message).slice(0,230)}`);
     }
-    log(`Fallback scanned ${windows} recent two-thousand-block windows`);
+    if(candidates.size===1) {
+      let windows=0;
+      for(let high=lastBlock; high>=0 && windows<100; high-=2000) {
+        const low=Math.max(0,high-1999);
+        try { await collect(low,high); } catch {}
+        windows++;
+        if(low===0) break;
+      }
+      log(`Fallback scanned ${windows} recent two-thousand-block windows`);
+    }
   }
   for (const candidate of candidates) {
     const role = await access.hasRole(roleId,candidate);
