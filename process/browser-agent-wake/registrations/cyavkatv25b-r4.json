@@ -25,7 +25,7 @@
     "name": "master-reviewer",
     "url": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd6126-ac44-83e8-a72e-a6664247d395"
   },
-  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"cyavkatv25b-r4-reviewer-1-phase-01-master-reviewer/38356426638\"} as the whole file campaigns/cyavKATv25b r4/work/browser/WAKE_ACK_master-reviewer_v1.json on CurveYield2/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nMASTER_TARGETED_TESTS_EVIDENCE_SUBMITTED: 9f283a35597d2032b3fb3159979405079eb7a6c6d3fe187ad33ec47f795853e9. Master must inspect raw evidence and amend the reviewer-owned work forms before acceptance. Unresolved candidates still block final COMPLETE.",
+  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"cyavkatv25b-r4-reviewer-1-phase-01-master-reviewer/38359204569\"} as the whole file campaigns/cyavKATv25b r4/work/browser/WAKE_ACK_master-reviewer_v1.json on CurveYield2/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nMaster-directed targeted-test evidence failed exact revalidation: master test round 1: targeted-test raw evidence changed: campaigns/cyavKATv25b r4/evidence/master-targeted-tests/9d6bf84aa675f6811deed548b627d18afc520704e74aeb07e5dd3410084f9395/SOURCE_BINDING_v1.txt",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
@@ -61,12 +61,12 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-13T06:28:17Z",
+  "updatedAt": "2026-10-13T06:56:55Z",
   "wakeDelivery": {
     "milestoneId": "reviewer-1-phase-01",
     "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd6126-ac44-83e8-a72e-a6664247d395",
-    "deliveredAt": "2026-10-13T06:28:16Z",
+    "deliveredAt": "2026-10-13T06:56:55Z",
     "verification": "REVIEWER_GITHUB_CHECK_IN",
-    "ackId": "cyavkatv25b-r4-reviewer-1-phase-01-master-reviewer/38356426638"
+    "ackId": "cyavkatv25b-r4-reviewer-1-phase-01-master-reviewer/38359204569"
   }
 }
