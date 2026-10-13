@@ -2,7 +2,7 @@
   "schemaVersion": "curveyield-browser-agent-watchdog-state-v1",
   "wakeId": "cyavkatv25b-r4-PHASE_2_WORK_PACKET-reviewer-2",
   "campaignId": "cyavkatv25b-r4",
-  "phaseId": "phase-2",
+  "phaseId": "phase-4",
   "workerRole": "reviewer",
   "status": "ACTIVE",
   "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6accaf3c-ffcc-83e8-aa29-6d2928c833c7",
@@ -24,8 +24,8 @@
     "repository": "CurveYield2/Audit-Controller",
     "ref": "main",
     "statePath": "Audit Campaign Directory/campaigns/cyavkatv25b.json",
-    "expectedPhaseId": "phase-2",
-    "expectedMilestoneId": "PHASE_2_WORK_PACKET",
+    "expectedPhaseId": "phase-4",
+    "expectedMilestoneId": "PHASE_4_WORK_PACKET",
     "activePointerPath": "",
     "interphase": {
       "handoffPath": "",
@@ -50,7 +50,7 @@
   },
   "watchdogRunId": "38363754457",
   "watchdogSweepStartedAt": "2026-10-13T07:47:27Z",
-  "lastDecision": "WAITING_NO_CHATGPT_READ",
+  "lastDecision": "ASSIGNMENT_PHASE_SYNC_phase-4",
   "lastNoReadSweepAt": "2026-10-13T07:18:53Z",
   "elapsedSinceLastPokeMinutes": 4
 }
