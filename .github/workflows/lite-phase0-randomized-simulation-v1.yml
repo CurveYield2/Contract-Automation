@@ -77,7 +77,9 @@ jobs:
         run: |
           set -euo pipefail
           file=.phase0-deploy-output/PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json
-          if jq -e '.status=="BLOCKED_SCRIPT_FAILURE"' "$file" >/dev/null; then
+          # Reconciliation covers reviewed Ethereum-lane exclusions only; profile-declared
+          # (e.g. Katana) deployments fail straight through to the gate with their own evidence.
+          if jq -e '.status=="BLOCKED_SCRIPT_FAILURE" and .fork.chainId==1' "$file" >/dev/null; then
             node scripts/reconcile-phase0-deploy-evidence-v1.mjs \
               --input "$file" --output "$file" \
               --campaign-root ".audit-controller/${{ inputs.campaign_path }}" \
