@@ -7,6 +7,7 @@ import {
   AbiCoder,
   Contract,
   JsonRpcProvider,
+  NonceManager,
   Wallet,
   getAddress,
   keccak256,
@@ -221,7 +222,7 @@ async function main() {
     const data = vault.interface.encodeFunctionData("configureInstantWithdrawalFuses", [withdrawNext]);
     await provider.call({ from: signer.address, to: VAULT, data });
   }
-  const writeVault = vault.connect(signer);
+  const writeVault = vault.connect(new NonceManager(signer));
   if (!isAlreadyGranted) {
     assert(exactArray([...await vault.getMarketSubstrates(IPOR_MARKET_ID)], existing),
       "Market substrates changed before broadcast");
