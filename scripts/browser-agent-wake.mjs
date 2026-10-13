@@ -1136,7 +1136,25 @@ async function runWithPage(providerName, connect) {
       }
     }
 
-    const before = await snapshot(page);
+    let before = await snapshot(page);
+
+    // Watchdog pokes: a chat stuck "generating" (e.g. a hung tool call) shows the
+    // stop button instead of send. Press stop to unfreeze it, then send normally.
+    if (before.generating && action === 'wake' && bool(env.STOP_BEFORE_SEND)) {
+      const stop = await firstVisible(page, [
+        'button[data-testid="stop-button"]',
+        'button[aria-label="Stop"]',
+        'button[aria-label*="Stop"]',
+        'button:has-text("Stop generating")'
+      ]);
+      if (stop) {
+        console.log('[github-playwright] stop-before-send=clicking-stop');
+        await humanShortPointerClick(page, stop);
+        await waitForChatIdle(page, 60000);
+        before = await snapshot(page);
+        console.log('[github-playwright] stop-before-send=stopped generating=' + before.generating);
+      }
+    }
 
     if (action === 'observe') {
       // A browser/security challenge or login wall is provider/session

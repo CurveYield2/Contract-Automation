@@ -918,6 +918,8 @@ jobs:
             export CHAT_URL="$chat_url"
             export WAKE_MESSAGE="$(jq -r '.idleMessage' /tmp/watchdog-state.json)"
             export WAKE_RESULT_PATH="/tmp/$safe_id-poke.json"
+            # A stalled chat still showing the stop button is stopped first so the poke lands.
+            export STOP_BEFORE_SEND='true'
             # Same delivery as the reviewer wake; only the message text differs.
             bash scripts/browser-deliver-message-v1.sh > "/tmp/$safe_id-poke.out" || true
             poke_ok="$(sed -n 's/^ok=//p' "/tmp/$safe_id-poke.out")"
