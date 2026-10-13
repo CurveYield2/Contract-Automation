@@ -8,15 +8,19 @@ import { checkoutExactSource } from '../src/execution.mjs';
 const COMMIT='a'.repeat(40);
 function recorder(){
   const calls=[];
-  return{calls,runCommand:async({command,args})=>{calls.push([command,...args]);return{exitCode:0,stdout:args[0]==='rev-parse'?COMMIT+'\n':'',stderr:''};}};
+  const envs=[];
+  return{calls,envs,runCommand:async({command,args,env})=>{calls.push([command,...args]);envs.push(env);return{exitCode:0,stdout:args[0]==='rev-parse'?COMMIT+'\n':'',stderr:''};}};
 }
 
 test('sparse checkout fetches blobs lazily and materializes only the listed paths',async()=>{
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'sparse-co-'));
-  const {calls,runCommand}=recorder();
+  const {calls,envs,runCommand}=recorder();
   const patterns=['/campaigns/cyavKATv25b r3/','/Audit Skill - Current Authority/*/'];
-  const result=await checkoutExactSource({repository:'CurveYield2/Audit-Controller',commit:COMMIT,destination:path.join(dir,'repo'),sparsePatterns:patterns},{runCommand,environment:{}});
+  const result=await checkoutExactSource({repository:'CurveYield2/Audit-Controller',commit:COMMIT,destination:path.join(dir,'repo'),sparsePatterns:patterns},{runCommand,environment:{AUDIT_CONTROLLER_GITHUB_TOKEN:'tok'}});
   assert.deepEqual(calls.find(c=>c[1]==='fetch'),['git','fetch','--depth','1','--filter=blob:none','origin',COMMIT]);
+  // Lazy blob download during checkout of a private repository must be authenticated.
+  const checkoutEnv=envs[calls.findIndex(c=>c[1]==='checkout')];
+  assert.match(String(checkoutEnv?.GIT_CONFIG_VALUE_0??''),/^AUTHORIZATION: basic /);
   assert.ok(calls.some(c=>c.join(' ')==='git config core.sparseCheckout true'));
   const fetchIndex=calls.findIndex(c=>c[1]==='fetch'),checkoutIndex=calls.findIndex(c=>c[1]==='checkout');
   assert.ok(calls.findIndex(c=>c[1]==='config')>fetchIndex&&calls.findIndex(c=>c[1]==='config')<checkoutIndex);
