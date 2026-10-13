@@ -95,8 +95,8 @@ test('watchdog workflow contains one complete sweep body and no duplicated corru
 
 test('stop click is verified from desktop screenshots and has a live self-test on a scratch chat', () => {
   const runtime = fs.readFileSync('scripts/browser-agent-wake.mjs', 'utf8');
-  assert.match(runtime, /x11FindDarkDisc\(search, searchX, searchY\)/);
-  assert.match(runtime, /disc\.darkCells >= 6 && disc\.darkCells <= 40/);
+  assert.match(runtime, /x11FindButton\(search, searchX, searchY\)/);
+  assert.match(runtime, /if\(count<500\|\|count>1350\)continue;/);
   assert.match(runtime, /if \(onButton\) \{/);
   assert.match(runtime, /STOP_CLICK_MISSED_NOT_ON_BUTTON/);
   assert.match(watchdog, /\.lastStopClick=\$sc/);
