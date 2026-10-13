@@ -51,3 +51,11 @@ test('Phase-0 Audit-Controller checkouts are campaign-scoped',async()=>{
   assert.doesNotMatch(sync,/^\s+(push|schedule):/m);
   assert.match(sync,/workflow_dispatch:/);
 });
+
+test('Hardhat-native compilation units carry their own ASTs for the exact-build Slither export',async()=>{
+  const root=path.resolve(path.dirname(new URL(import.meta.url).pathname),'../../..');
+  const native=await fs.readFile(path.join(root,'packages/runner/src/native-build.mjs'),'utf8');
+  assert.match(native,/sourceAsts:Object\.fromEntries\(\(info\.sourceNames\?\?\[\]\)\.filter\(name=>sourceAsts\[name\]\)/);
+  const intel=await fs.readFile(path.join(root,'packages/github-native-sim/src/lite-phase0-intelligence-v1.mjs'),'utf8');
+  assert.match(intel,/typeof buildUnit\.sourceContents\?\.\[sourceName\]==='string'/);
+});

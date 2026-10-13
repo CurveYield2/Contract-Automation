@@ -323,7 +323,9 @@ export async function compileRepoNativeHardhat({
       compilerInputSha256:info.compilerInputSha256,
       compilerOutputSha256:info.compilerOutputSha256,
       sourceContents:Object.fromEntries((info.sourceNames??[]).map(name=>[name,null])),
-      sourceAsts:{},
+      // Each unit carries the ASTs of its own sources so exact-build consumers (Slither export)
+      // work without recompiling; build-info ASTs are identical across units for a shared source.
+      sourceAsts:Object.fromEntries((info.sourceNames??[]).filter(name=>sourceAsts[name]).map(name=>[name,sourceAsts[name]])),
       artifacts:artifacts.filter(a=>(info.artifactQualifiedNames??[]).includes(`${a.sourceName}:${a.contractName}`))
     })),
     artifacts,

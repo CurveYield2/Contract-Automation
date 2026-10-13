@@ -171,7 +171,9 @@ async function writeCryticCompileExport({projectRoot,build,outDir}){
         unitId:unit.unitId??`unit-${index+1}`,
         compilerVersion:unit.compilerVersion??build.compilerVersion??'',
         settings:unit.settings??{},
-        sourceAsts:unit.sourceAsts??{},
+        // Older/native builds may keep ASTs only at build level: use those for this unit's sources.
+        sourceAsts:Object.keys(unit.sourceAsts??{}).length?unit.sourceAsts:Object.fromEntries(Object.entries(build?.sourceAsts??{}).filter(([name])=>
+          Object.prototype.hasOwnProperty.call(unit.sourceContents??{},name)||(unit.artifacts??[]).some(a=>a?.sourceName===name)||(build.compilationUnits.length===1))),
         sourceContents:unit.sourceContents??{},
         artifacts:Array.isArray(unit.artifacts)?unit.artifacts:[]
       }))
@@ -200,7 +202,8 @@ async function writeCryticCompileExport({projectRoot,build,outDir}){
     ])].sort();
     for(const sourceName of sourceNames){
       let absolute;
-      if(Object.prototype.hasOwnProperty.call(buildUnit.sourceContents??{},sourceName)){
+      // Only materialize real embedded contents; null placeholders resolve from the staged project.
+      if(typeof buildUnit.sourceContents?.[sourceName]==='string'){
         const safeName=sourceName.split('/').map(part=>part==='..'?'__parent__':part.replace(/[^A-Za-z0-9._@+-]/g,'_')).join('/');
         absolute=path.join(outDir,'materialized',buildUnit.unitId,...safeName.split('/'));
         await fs.mkdir(path.dirname(absolute),{recursive:true});
