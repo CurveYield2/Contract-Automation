@@ -266,3 +266,73 @@ contract AttackerRealVaultExposure_v1 is Test {
         }
     }
 }
+
+contract AttackerSeasoningRewardsStub_v1 {
+    function balanceOf() external pure returns (uint256) { return 0; }
+}
+contract AttackerSeasoningGate_v1 is ICurveYieldConfigGate {
+    uint256 public immutable DAYS;
+    address public immutable REWARDS;
+    constructor(uint256 days_, address rewards_) {
+        DAYS = days_;
+        REWARDS = rewards_;
+    }
+    function getMany(bytes32[] calldata keys) external view override returns (uint256[] memory v) {
+        v = new uint256[](keys.length);
+        for (uint256 i; i < keys.length; i++) v[i] = DAYS;
+    }
+    function addr(bytes32) external view override returns (address) { return REWARDS; }
+    function adminReceiver() external view override returns (address) { return REWARDS; }
+}
+contract AttackerSeasoningProof_v1 is Test {
+    function _fixture(uint256 days_) internal returns (CurveYieldAllocationController alloc, AttackerTestToken token) {
+        token = new AttackerTestToken();
+        AttackerSeasoningRewardsStub_v1 rewards = new AttackerSeasoningRewardsStub_v1();
+        AttackerSeasoningGate_v1 gate = new AttackerSeasoningGate_v1(days_, address(rewards));
+        alloc = new CurveYieldAllocationController(address(this), address(0xDA1), address(token), address(gate));
+    }
+
+    function test_SEASONING_uncheckpointedGapCountsJustDepositedCapitalAsAged() public {
+        assertEq(block.chainid, 747474);
+        assertEq(block.number, 45121798);
+        (CurveYieldAllocationController alloc, AttackerTestToken token) = _fixture(3);
+        uint256 dayStart = (block.timestamp / 1 days) * 1 days;
+        vm.warp(dayStart + 1 hours);
+        token.mint(address(0xDA1), 100 ether);
+        alloc.checkpoint();
+        uint256 oldDay = block.timestamp / 1 days;
+        assertEq(alloc.dailyLow(oldDay), 100 ether);
+        vm.warp(dayStart + 4 days + 2 hours);
+        token.mint(address(0xDA1), 100 ether); // new deposit aged zero days
+        alloc.checkpoint(); // permissionless; fills three missed days
+        assertEq(alloc.dailyLow(oldDay + 1), 200 ether, "missed day incorrectly gets NEW capital");
+        assertEq(alloc.dailyLow(oldDay + 2), 200 ether);
+        assertEq(alloc.dailyLow(oldDay + 3), 200 ether);
+        assertEq(alloc.seasonedManagedAvkat(), 200 ether, "deposit just now is incorrectly seasoned");
+        emit log_string("CONFIRMED_SEASONING_MISSED_DAY_GAP_COUNTS_FRESH_CAPITAL");
+        emit log_named_uint("legitimate_old_seasoned_amount", 100 ether);
+        emit log_named_uint("fresh_deposit_amount", 100 ether);
+        emit log_named_uint("current_seasoned_reported", alloc.seasonedManagedAvkat());
+    }
+
+    function test_SEASONING_sameDayHighReplacesLowAndSkipsFullDay() public {
+        assertEq(block.chainid, 747474);
+        assertEq(block.number, 45121798);
+        (CurveYieldAllocationController alloc, AttackerTestToken token) = _fixture(1);
+        uint256 dayStart = (block.timestamp / 1 days) * 1 days;
+        vm.warp(dayStart + 1 hours);
+        token.mint(address(0xDA1), 100 ether);
+        alloc.checkpoint();
+        uint256 day = block.timestamp / 1 days;
+        vm.warp(dayStart + 23 hours);
+        token.mint(address(0xDA1), 100 ether);
+        alloc.checkpoint(); // raises "daily low" after a deposit on the same day
+        assertEq(alloc.dailyLow(day), 200 ether, "daily low overwritten by daily high");
+        vm.warp(dayStart + 1 days + 1 minutes);
+        assertEq(alloc.seasonedManagedAvkat(), 200 ether, "fresh capital passes full-day seasoning");
+        emit log_string("CONFIRMED_SEASONING_DAILY_LOW_IS_MAXIMUM_NOT_MINIMUM");
+        emit log_named_uint("same_day_original_managed", 100 ether);
+        emit log_named_uint("same_day_final_managed", 200 ether);
+        emit log_named_uint("next_day_credited_managed", alloc.seasonedManagedAvkat());
+    }
+}
