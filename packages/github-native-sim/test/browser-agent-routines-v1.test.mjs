@@ -378,7 +378,8 @@ test('existing-chat reviewer initial wake is idempotent per campaign milestone',
   assert.match(wake, /INITIAL_WAKE_DEDUPED=true/);
   assert.match(wake, /Persist existing-chat reviewer wake into campaign registration/);
   assert.match(wake, /wakeDelivery=\{milestoneId:\$milestoneId,chatUrl:\$url,deliveredAt:\$deliveredAt,verification:"REVIEWER_GITHUB_CHECK_IN",ackId:\$ackId\}/);
-  assert.ok(wake.includes('DO THIS FIRST, RIGHT NOW'));
+  assert.ok(wake.includes('FIRST, before anything else: write exactly $ack_payload'));
+  assert.ok(wake.includes(`'{ack:$id}'`) && wake.includes(`'.ack==$id'`));
   assert.ok(wake.includes('for i in $(seq 0 10); do'));
   assert.ok(wake.includes('if [ "$i" -lt 10 ]; then sleep 30; fi'));
   assert.ok(wake.includes('WAKE_ACK_PATH'));
