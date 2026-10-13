@@ -50,9 +50,9 @@
   },
   "watchdogRunId": "38374806470",
   "watchdogSweepStartedAt": "2026-10-13T09:14:29Z",
-  "lastDecision": "TIME_GATED_PHASE1_X11_POKE_SENT_NO_CHATGPT_READ",
-  "lastNoReadSweepAt": "2026-10-13T08:40:54Z",
-  "elapsedSinceLastPokeMinutes": 17,
+  "lastDecision": "WAITING_NO_CHATGPT_READ",
+  "lastNoReadSweepAt": "2026-10-13T09:14:33Z",
+  "elapsedSinceLastPokeMinutes": 16,
   "lastStopClick": {
     "x": 1594,
     "y": 1008,
