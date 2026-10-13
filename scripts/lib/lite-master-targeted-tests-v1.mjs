@@ -6,6 +6,10 @@ import {readJson,requiredFile} from './lite-phase-work-v1.mjs';
 const SHA=/^[0-9a-f]{64}$/;
 const ID=/^[A-Za-z0-9._-]+$/;
 const REVIEWERS=new Set(['reviewer-1','reviewer-2','reviewer-3L','reviewer-4']);
+// A campaign with a dedicated test-executor chat runs every targeted-test round there:
+// it never owns a review segment, so it is always independent of the reviewed work.
+const TEST_EXECUTOR='test-executor';
+const hasTestExecutor=directory=>typeof directory?.testExecutor?.chatUrl==='string'&&directory.testExecutor.chatUrl.length>0;
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
 const substantial=s=>typeof s==='string'&&s.trim().length>=24;
 const inside=(root,rel,prefix)=>{
@@ -34,8 +38,10 @@ export function registerMasterTargetedTests({root,campaignPath,directory,planPat
   const plan=JSON.parse(bytes.toString('utf8'));
   if(plan.schemaVersion!=='curveyield-lite-master-targeted-tests-v1'||plan.campaignId!==directory.campaignId||plan.segmentId!==pending.segmentId||plan.sourceSha256!==directory.sourceSha256)
     throw new Error('targeted-test plan campaign/segment/source binding mismatch');
-  if(!REVIEWERS.has(plan.assignedReviewer)||plan.assignedReviewer===pending.reviewerId)
-    throw new Error('targeted tests must be assigned to a different registered reviewer');
+  const dedicated=hasTestExecutor(directory);
+  if(plan.assignedReviewer===TEST_EXECUTOR?!dedicated:(!REVIEWERS.has(plan.assignedReviewer)||plan.assignedReviewer===pending.reviewerId))
+    throw new Error('targeted tests must be assigned to the test executor or a different registered reviewer');
+  const assignedReviewer=dedicated?TEST_EXECUTOR:plan.assignedReviewer;
   if(!Array.isArray(plan.tests)||plan.tests.length===0)throw new Error('targeted-test plan requires at least one decisive test');
   const ids=new Set();
   for(const test of plan.tests){
@@ -45,7 +51,7 @@ export function registerMasterTargetedTests({root,campaignPath,directory,planPat
       if(!substantial(test[key]))throw new Error('targeted test '+test.candidateId+' requires concrete '+key);
   }
   const requestId=sha(bytes);
-  const assignment={requestId,round,planPath,planSha256:requestId,assignedReviewer:plan.assignedReviewer,candidateIds:[...ids],status:'AWAITING_EXECUTION',requestedAt:now,resultPath:resultRel(campaignPath,pending.segmentId,requestId)};
+  const assignment={requestId,round,planPath,planSha256:requestId,assignedReviewer,...(assignedReviewer!==plan.assignedReviewer?{plannedReviewer:plan.assignedReviewer}:{}),candidateIds:[...ids],status:'AWAITING_EXECUTION',requestedAt:now,resultPath:resultRel(campaignPath,pending.segmentId,requestId)};
   pending.targetedTests=[...(pending.targetedTests??[]),assignment];
   pending.status='WAITING_FOR_TARGETED_TESTS';
   pending.updatedAt=now;
@@ -84,6 +90,13 @@ export function acceptMasterTargetedTestResults({root,campaignPath,directory,res
     }
     if(test.disposition!=='INCONCLUSIVE'&&test.executedCalls===0)
       throw new Error('conclusive test requires observed execution, not only requested counts: '+test.candidateId);
+    if(entry.assignedReviewer===TEST_EXECUTOR){
+      // A green workflow that ran no assertions is not a test.
+      if(typeof test.executedAssertions!=='number'||!Number.isInteger(test.executedAssertions)||test.executedAssertions<0)
+        throw new Error('executedAssertions must be the observed count of test assertions that ran: '+test.candidateId);
+      if(test.disposition!=='INCONCLUSIVE'&&test.executedAssertions===0)
+        throw new Error('conclusive test requires executed assertions, not only a successful run: '+test.candidateId);
+    }
     if(test.disposition==='INCONCLUSIVE'&&!substantial(test.remainingUncertainty))
       throw new Error('inconclusive test must state the blocker and next feasible recovery step: '+test.candidateId);
   }

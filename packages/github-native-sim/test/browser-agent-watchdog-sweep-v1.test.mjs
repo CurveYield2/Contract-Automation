@@ -95,7 +95,8 @@ test('watchdog workflow contains one complete sweep body and no duplicated corru
 
 test('stop click is verified from desktop screenshots and has a live self-test on a scratch chat', () => {
   const runtime = fs.readFileSync('scripts/browser-agent-wake.mjs', 'utf8');
-  assert.match(runtime, /x11MeanBrightness\(pointBefore\)/);
+  assert.match(runtime, /x11FindDarkDisc\(search, searchX, searchY\)/);
+  assert.match(runtime, /disc\.darkCells >= 6 && disc\.darkCells <= 40/);
   assert.match(runtime, /if \(onButton\) \{/);
   assert.match(runtime, /STOP_CLICK_MISSED_NOT_ON_BUTTON/);
   assert.match(watchdog, /\.lastStopClick=\$sc/);
@@ -103,4 +104,11 @@ test('stop click is verified from desktop screenshots and has a live self-test o
   assert.match(selftest, /Refuse registered audit chats/);
   assert.match(selftest, /group: chatgpt-shared-browser-session-v1/);
   assert.match(selftest, /test "\$status" = STOP_CLICK_ON_BUTTON/);
+});
+
+test('targeted-test executor wake is scope-locked to running the plan', () => {
+  const controller = fs.readFileSync('.github/workflows/lite-phase-work-packet-controller-v1.yml', 'utf8');
+  assert.match(controller, /TARGETED TEST EXECUTOR: your only task is to run the tests in the plan/);
+  assert.match(controller, /do not open other phases, reports or authority files/);
+  assert.match(controller, /zero test assertions is a failure to repair, not progress/);
 });

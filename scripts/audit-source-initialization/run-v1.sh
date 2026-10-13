@@ -15,6 +15,7 @@ source "$ROOT/scripts/audit-source-initialization/extract-v1.sh"
 : "${AGENT_CHAT_3_URL:?AGENT_CHAT_3_URL is required}"
 : "${AGENT_CHAT_4_URL:?AGENT_CHAT_4_URL is required}"
 : "${MASTER_CHAT_URL:?MASTER_CHAT_URL is required}"
+: "${TEST_EXECUTOR_CHAT_URL:?TEST_EXECUTOR_CHAT_URL is required}"
 
 safe_request="$(printf '%s' "$REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
 report_path="process/audit-source-initialization/reports/$safe_request.json"
@@ -29,7 +30,7 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   jq -e \
     --arg u "$SOURCE_URL" \
     --arg c1 "$AGENT_CHAT_1_URL" --arg c2 "$AGENT_CHAT_2_URL" \
-    --arg c3 "$AGENT_CHAT_3_URL" --arg c4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" \
+    --arg c3 "$AGENT_CHAT_3_URL" --arg c4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
     '.schemaVersion=="curveyield-audit-source-initialization-report-v1"
      and .status=="PASS"
      and .request.sourceUrl==$u
@@ -37,7 +38,8 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
      and .request.agentChats["reviewer-2"]==$c2
      and .request.agentChats["reviewer-3L"]==$c3
      and .request.agentChats["reviewer-4"]==$c4
-     and .request.masterChatUrl==$master' \
+     and .request.masterChatUrl==$master
+     and .request.testExecutorChatUrl==$tester' \
     /tmp/prior-source-init.json >/dev/null
   campaign_id="$(jq -r '.campaign.campaignId' /tmp/prior-source-init.json)"
   generation_id="$(jq -r '.campaign.campaignGenerationId' /tmp/prior-source-init.json)"
@@ -131,7 +133,7 @@ else
     SOURCE_FILENAME="$filename" SOURCE_SHA="$source_sha" SOURCE_SIZE="$source_size" SOURCE_PATH="$source_path" \
     SOURCE_DIR="$source_dir" ADMISSION_COMMIT="$admission_commit" SOURCE_BLOB="$source_blob" TREE_SHA="$tree_sha" \
     CREATED_AT="$created_at" SKILL_RELEASE="$skill_release" SKILL_REVISION="$skill_revision" SKILL_HOME="$skill_home" \
-    MASTER_CHAT_URL="$MASTER_CHAT_URL" \
+    MASTER_CHAT_URL="$MASTER_CHAT_URL" TEST_EXECUTOR_CHAT_URL="$TEST_EXECUTOR_CHAT_URL" \
     SKILL_SHA="$skill_sha" SKILL_BLOB="$skill_blob" SKILL_REPO_PATH="$skill_repo_path" \
     RECEIPTS_DIR="$receipts_dir" CAMPAIGN_DIRECTORY_PATH="$campaign_directory_path" \
       python3 "$ROOT/scripts/audit-source-initialization/write-phase0-receipt-v1.py"
@@ -159,7 +161,7 @@ else
     --arg admission "$admission_commit" --arg blob "$source_blob" --arg tree "$tree_sha" \
     --arg init "$init_commit" --arg run "$GITHUB_RUN_ID" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
-    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg masterChat "$MASTER_CHAT_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg masterChat "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
     '{
       schemaVersion:"curveyield-audit-source-initialization-report-v1",
       request:{
@@ -171,7 +173,8 @@ else
           "reviewer-3L":$chat3,
           "reviewer-4":$chat4
         },
-        masterChatUrl:$masterChat
+        masterChatUrl:$masterChat,
+        testExecutorChatUrl:$tester
       },
       status:"PASS",
       source:{
@@ -211,7 +214,7 @@ if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
   jq \
     --arg campaignId "$campaign_id" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
-    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
     '.schemaVersion="curveyield-browser-agent-wake-registration-v1"
      | .campaignId=$campaignId
      | .agentChats={
@@ -219,7 +222,8 @@ if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
          "reviewer-2":$chat2,
          "reviewer-3L":$chat3,
          "reviewer-4":$chat4,
-         "master-reviewer":$master
+         "master-reviewer":$master,
+         "test-executor":$tester
        }
      | .masterReviewer={chatUrl:$master,reasoning:"MAXIMUM",repairModel:"SOL",repairReasoning:"HIGH"}
      | .browserInteractionPolicy=(.browserInteractionPolicy // "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1")
@@ -231,7 +235,7 @@ else
   jq -n \
     --arg campaignId "$campaign_id" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
-    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
     '{
       schemaVersion:"curveyield-browser-agent-wake-registration-v1",
       campaignId:$campaignId,
@@ -243,7 +247,8 @@ else
         "reviewer-2":$chat2,
         "reviewer-3L":$chat3,
         "reviewer-4":$chat4,
-        "master-reviewer":$master
+        "master-reviewer":$master,
+        "test-executor":$tester
       },
       masterReviewer:{chatUrl:$master,reasoning:"MAXIMUM",repairModel:"SOL",repairReasoning:"HIGH"},
       chatgptProject:{name:"",url:""},

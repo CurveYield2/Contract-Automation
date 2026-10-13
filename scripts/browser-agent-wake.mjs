@@ -395,12 +395,30 @@ async function verifyX11VisibleChatAddress(requested) {
   return true;
 }
 
-// Mean grey level (0 black .. 1 white) of an OS desktop screenshot file.
-async function x11MeanBrightness(file) {
-  const {stdout}=await runCapture('convert',[file,'-colorspace','Gray','-format','%[fx:mean]','info:']);
-  const value=Number.parseFloat(stdout);
-  if(!Number.isFinite(value))throw new BrowserAgentError('X11_BRIGHTNESS_UNREADABLE','Could not measure desktop screenshot brightness',true);
-  return value;
+// Find the send/stop button in an OS desktop screenshot crop: the darkest 16x16 px
+// patch (8 px cells) whose dark area is button-sized, not a text line or image.
+async function x11FindDarkDisc(file, originX, originY) {
+  const {stdout}=await runCapture('convert',[file,'-colorspace','Gray','-depth','8','-scale','12.5%','txt:-']);
+  const cells=new Map();let w=0,h=0;
+  for(const line of stdout.split('\n')){
+    const m=line.match(/^(\d+),(\d+):.*#([0-9A-Fa-f]{2})/);if(!m)continue;
+    const x=+m[1],y=+m[2];cells.set(x+','+y,parseInt(m[3],16)/255);w=Math.max(w,x+1);h=Math.max(h,y+1);
+  }
+  const at=(x,y)=>cells.get(x+','+y)??1;
+  let best=null;
+  for(let y=0;y<h-1;y++)for(let x=0;x<w-1;x++){
+    const v=(at(x,y)+at(x+1,y)+at(x,y+1)+at(x+1,y+1))/4;
+    if(!best||v<best.v)best={x,y,v};
+  }
+  if(!best)return null;
+  // Size of the connected dark area around it (a ~36 px disc is about 20 cells).
+  const seen=new Set(),stack=[[best.x,best.y]];let area=0;
+  while(stack.length&&area<200){
+    const [x,y]=stack.pop(),k=x+','+y;
+    if(seen.has(k)||x<0||y<0||x>=w||y>=h||at(x,y)>=0.5)continue;
+    seen.add(k);area++;stack.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]);
+  }
+  return {x:originX+best.x*8+8,y:originY+best.y*8+8,brightness:Number(best.v.toFixed(3)),darkCells:area};
 }
 
 async function captureX11VisualEvidence(label, cropRegion = '', minBytes = 3000) {
@@ -625,23 +643,25 @@ async function runNormalChromeExistingSession(chromium) {
     let stopClick = null;
     if (bool(env.STOP_BEFORE_SEND)) {
       // Watchdog pokes only. A frozen chat shows the stop button where send normally
-      // is, and Return cannot submit. Human click on that fixed point, no page read:
+      // is, and Return cannot submit. Human X11 click on that button, no page read:
       // stop -> generation halts and the typed poke stays in the composer;
       // send -> the poke is submitted and the Return below hits an empty composer.
-      // The composer already holds text, so the point is never the voice button.
-      // Measured on a 1920px desktop with the sidebar open: button center x=1594,
-      // on the composer row (the same row the composer click uses).
-      const stopX = Math.round(width * Number(env.STOP_BUTTON_X_FRACTION || '0.83'));
-      const stopY = Math.round(height - Number(env.STOP_BUTTON_Y_FROM_BOTTOM || '72'));
-      // Verify from OS screenshots only: the send/stop button is a solid dark disc on a
-      // light page. Click only if the point is dark; then confirm the button area changed.
-      const point = [stopX - 8, stopY - 8, 16, 16].join(',');
+      // The composer already holds text, so the button is never the voice button.
+      // The button moves when the typed poke wraps the composer onto more lines, so it is
+      // located from a desktop screenshot of the composer's lower-right area, never the page.
+      const searchX = Math.round(width * 0.55);
+      const searchY = Math.max(0, height - 170);
+      const searchW = Math.round(width * 0.40);
+      const searchH = height - searchY;
+      const search = await captureX11VisualEvidence('stop_search_area', [searchX, searchY, searchW, searchH].join(','), 64);
+      const disc = await x11FindDarkDisc(search, searchX, searchY);
+      const stopX = disc?.x ?? Math.round(width * 0.83);
+      const stopY = disc?.y ?? Math.round(height - 72);
       const area = [stopX - 30, stopY - 30, 60, 60].join(',');
-      const pointBefore = await captureX11VisualEvidence('stop_point_before', point, 64);
       const areaBefore = await captureX11VisualEvidence('stop_area_before', area, 64);
-      const brightness = await x11MeanBrightness(pointBefore);
-      const onButton = brightness < Number(env.STOP_BUTTON_MAX_BRIGHTNESS || '0.35');
-      stopClick = { x: stopX, y: stopY, brightness: Number(brightness.toFixed(3)), onButton, clicked: false, areaChanged: null };
+      const brightness = disc?.brightness ?? 1;
+      const onButton = Boolean(disc) && brightness < Number(env.STOP_BUTTON_MAX_BRIGHTNESS || '0.35') && disc.darkCells >= 6 && disc.darkCells <= 40;
+      stopClick = { x: stopX, y: stopY, brightness, darkCells: disc?.darkCells ?? 0, onButton, clicked: false, areaChanged: null };
       if (onButton) {
         await x11Key(['mousemove', '--sync', String(stopX), String(stopY)], 'x11-stop-move');
         await page.waitForTimeout(randomDelayMs(180, 360));

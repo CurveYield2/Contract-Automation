@@ -46,7 +46,7 @@ test('directive refuses original reviewer and incomplete test design',t=>{
   const f=setup(t);
   f.plan.assignedReviewer='reviewer-4';
   f.put(f.planPath,f.plan);
-  assert.throws(()=>registerMasterTargetedTests({root:f.root,campaignPath:camp,directory:f.directory,planPath:f.planPath,now:'x'}),/different registered reviewer/);
+  assert.throws(()=>registerMasterTargetedTests({root:f.root,campaignPath:camp,directory:f.directory,planPath:f.planPath,now:'x'}),/test executor or a different registered reviewer/);
   f.plan.assignedReviewer='reviewer-3L';
   f.plan.tests[0].decisiveAssertions='TBD';
   f.put(f.planPath,f.plan);
@@ -195,4 +195,30 @@ test('controller CLI holds master review, admits reviewer results and returns to
   assert.equal(after.pendingMasterReview.targetedTests[0].status,'EVIDENCE_SUBMITTED');
   assert.equal(after.currentAssignment,null);
   assert.deepEqual(verifyMasterTargetedTestEvidence({root:f.root,campaignPath:camp,directory:after}),[]);
+});
+test('a campaign with a dedicated test executor routes every round to it and requires executed assertions',t=>{
+  const f=setup(t);
+  f.directory.testExecutor={chatUrl:'https://chatgpt.com/c/tester'};
+  const entry=registerMasterTargetedTests({root:f.root,campaignPath:camp,directory:f.directory,planPath:f.planPath,now:'x'});
+  assert.equal(entry.assignedReviewer,'test-executor');
+  assert.equal(entry.plannedReviewer,'reviewer-3L');
+  const ev=camp+'/evidence/master-targeted-tests/'+entry.requestId+'/raw-result.json';
+  const raw='{"tests":3,"assertions":7}\n';f.put(ev,raw);
+  const row={candidateId:'P4-CAND-001',disposition:'DISPROVEN',
+    executionNarrative:'Executed five observable contract calls against actual representative dependencies.',
+    observedAssertions:'Healthy controls passed, attack condition failed, token accounting conserved.',
+    impactAssessment:'Exact measured token deltas were zero across the tested reachable sequence.',
+    executedCalls:5,evidence:[{path:ev,sha256:sha(raw)}]};
+  const result={schemaVersion:'curveyield-lite-master-targeted-test-result-v1',campaignId:f.directory.campaignId,segmentId:segment,requestId:entry.requestId,sourceSha256:source,reviewer:'test-executor',tests:[row]};
+  const submit=()=>{f.put(entry.resultPath,result);return acceptMasterTargetedTestResults({root:f.root,campaignPath:camp,directory:f.directory,resultPath:entry.resultPath,now:'y'});};
+  assert.throws(submit,/executedAssertions must be the observed count/);
+  row.executedAssertions=0;
+  assert.throws(submit,/requires executed assertions, not only a successful run/);
+  row.executedAssertions=7;
+  assert.equal(submit().status,'EVIDENCE_SUBMITTED');
+});
+test('test-executor cannot be named in a campaign without a dedicated executor chat',t=>{
+  const f=setup(t);
+  f.plan.assignedReviewer='test-executor';f.put(f.planPath,f.plan);
+  assert.throws(()=>registerMasterTargetedTests({root:f.root,campaignPath:camp,directory:f.directory,planPath:f.planPath,now:'x'}),/test executor or a different registered reviewer/);
 });
