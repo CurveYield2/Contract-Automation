@@ -1,11 +1,11 @@
-name: Katana cyvbUSDC Morpho Venue Fork Simulation v1
+name: Katana cyvbUSDC Morpho Venue Fork Simulation v2
 
 on:
   push:
     paths:
-      - '.github/workflows/katana-cyvbusdc-morpho-fork-simulation-v1.yml'
-      - 'test/katana/cyvbusdc-morpho-venue-fork-v1.mjs'
-      - 'scripts/katana/cyvbusdc-morpho-venue-v1.mjs'
+      - '.github/workflows/katana-cyvbusdc-morpho-fork-simulation-v2.yml'
+      - 'test/katana/cyvbusdc-morpho-venue-fork-v2.mjs'
+      - 'scripts/katana/cyvbusdc-morpho-venue-v2.mjs'
   workflow_dispatch:
 
 permissions:
@@ -28,7 +28,7 @@ jobs:
           node-version: '22'
       - name: Install locked repository dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
-      - uses: foundry-rs/foundry-toolchain@v1
+      - uses: foundry-rs/foundry-toolchain@v2
         with:
           version: stable
       - name: Start ephemeral Katana Anvil fork
@@ -55,14 +55,14 @@ jobs:
       - name: Inspect live config and simulate governance on fork
         env:
           KATANA_RPC_URL: http://127.0.0.1:8545
-        run: node test/katana/cyvbusdc-morpho-venue-fork-v1.mjs
+        run: node test/katana/cyvbusdc-morpho-venue-fork-v2.mjs
       - name: Upload simulation evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cyvbusdc-morpho-venue-fork-v1-${{ github.run_id }}
+          name: cyvbusdc-morpho-venue-fork-v2-${{ github.run_id }}
           path: |
-            cyvbusdc-morpho-simulation-v1.json
+            cyvbusdc-morpho-simulation-v2.json
           if-no-files-found: warn
           retention-days: 14
       - name: Print Anvil diagnostic tail on failure

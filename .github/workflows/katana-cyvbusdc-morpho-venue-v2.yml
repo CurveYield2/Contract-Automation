@@ -1,11 +1,11 @@
-name: Katana cyvbUSDC Morpho Lending Venue v1
+name: Katana cyvbUSDC Morpho Lending Venue v2
 
 # Manual-only. No push/schedule/automatic deployment.
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'inspect = read-only checks; apply = add the requested substrate on Katana'
+        description: 'inspect = read-only checks; apply = add lending venue plus automatic instant-withdraw fallback on Katana'
         required: true
         type: choice
         options:
@@ -13,7 +13,7 @@ on:
           - apply
         default: inspect
       apply_confirmation:
-        description: 'For apply only, enter ENABLE_VBUSDC_YVAUSD'
+        description: 'For apply only, enter ENABLE_VBUSDC_YVAUSD_INSTANT'
         required: false
         type: string
         default: ''
@@ -22,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: katana-cyvbusdc-morpho-market-config-v1
+  group: katana-cyvbusdc-morpho-market-config-v2
   cancel-in-progress: false
 
 jobs:
@@ -42,8 +42,8 @@ jobs:
           CONFIRMATION: ${{ inputs.apply_confirmation }}
         run: |
           set -euo pipefail
-          if [ "$CONFIRMATION" != 'ENABLE_VBUSDC_YVAUSD' ]; then
-            echo '::error::Apply requires exact ENABLE_VBUSDC_YVAUSD confirmation.'
+          if [ "$CONFIRMATION" != 'ENABLE_VBUSDC_YVAUSD_INSTANT' ]; then
+            echo '::error::Apply requires exact ENABLE_VBUSDC_YVAUSD_INSTANT confirmation.'
             exit 1
           fi
 
@@ -64,4 +64,4 @@ jobs:
           APPLY_CONFIRMATION: ${{ inputs.apply_confirmation }}
         run: |
           set -euo pipefail
-          node scripts/katana/cyvbusdc-morpho-venue-v1.mjs
+          node scripts/katana/cyvbusdc-morpho-venue-v2.mjs

@@ -1,4 +1,4 @@
-// Katana cyvbUSDC Morpho configuration fork simulation v1.
+// Katana cyvbUSDC Morpho configuration fork simulation v2.
 // ALL writes go to an ephemeral Anvil fork, never the public Katana chain.
 import { writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
@@ -23,6 +23,9 @@ const vaultAbi = [
   "function getMarketSubstrates(uint256) view returns (bytes32[])",
   "function isMarketSubstrateGranted(uint256,bytes32) view returns (bool)",
   "function getInstantWithdrawalFuses() view returns (address[])",
+  "function getInstantWithdrawalFusesParams(address,uint256) view returns(bytes32[])",
+  "function configureInstantWithdrawalFuses((address fuse,bytes32[] params)[])",
+  "function withdraw(uint256,address,address) returns(uint256)",
   "function grantMarketSubstrates(uint256,bytes32[])",
   "function execute((address fuse,bytes data)[] calls_)",
   "function totalAssets() view returns (uint256)",
@@ -40,7 +43,7 @@ const fuseAbi = [
 ];
 const morphoAbi = ["function idToMarketParams(bytes32) view returns (address loanToken,address collateralToken,address oracle,address irm,uint256 lltv)"];
 const tokenAbi = ["function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)", "function transfer(address,uint256) returns (bool)"];
-const report = { version: "v1", mode: "EPHEMERAL_ANVIL_FORK_ONLY", status: "FAIL", checks: {}, details: {}, txs: [], notes: [] };
+const report = { version: "v2", mode: "EPHEMERAL_ANVIL_FORK_ONLY", status: "FAIL", checks: {}, details: {}, txs: [], notes: [] };
 const eq = (a,b) => String(a).toLowerCase() === String(b).toLowerCase();
 const assert = (condition, why) => { if(!condition) throw new Error(why); };
 const log = (s) => { report.notes.push(s); console.log(s); };
@@ -174,6 +177,7 @@ async function run() {
   report.details.accessManager = managerAddress;
   const original = [...await vault.getMarketSubstrates(selected.id)];
   const originalWithdraw = [...await vault.getInstantWithdrawalFuses()];
+  const originalParams=await Promise.all(originalWithdraw.map((fuse,i)=>vault.getInstantWithdrawalFusesParams(fuse,i).then(x=>[...x])));
   report.details.substratesBefore = original;
   report.details.withdrawalFusesBefore = originalWithdraw;
   const granted = await vault.isMarketSubstrateGranted(selected.id, MARKET);
@@ -183,6 +187,8 @@ async function run() {
   const selector = vault.interface.getFunction("grantMarketSubstrates").selector;
   const role = await access.getTargetFunctionRole(VAULT, selector);
   const roleAdmin = await access.getRoleAdmin(role);
+  const instantSelector=vault.interface.getFunction("configureInstantWithdrawalFuses").selector;
+  assert((await access.getTargetFunctionRole(VAULT,instantSelector))===900n,"Unexpected instant withdrawal role");
   report.details.role = role.toString();
   report.details.roleAdmin = roleAdmin.toString();
   report.checks.roleMapping = role === 300n ? "PASS" : "UNEXPECTED";
@@ -206,6 +212,9 @@ async function run() {
     const receipt = await (await access.connect(adminSigner).grantRole(role, user.address, 0)).wait();
     assert(receipt?.status === 1, "Fork-only simulated role assignment reverted");
     report.txs.push({type:"fork-only grantRole",hash:receipt.hash});
+    const nextRoleReceipt=await (await access.connect(adminSigner).grantRole(900n,user.address,0)).wait();
+    assert(nextRoleReceipt?.status===1,"Fork-only instant-config role grant failed");
+    report.txs.push({type:"fork-only configure role",hash:nextRoleReceipt.hash});
     await rpc(p, "anvil_stopImpersonatingAccount", [authorizedAdmin]);
   }
   const can = await access.canCall(user.address, VAULT, selector);
@@ -213,13 +222,13 @@ async function run() {
   report.checks.forkOnlyRoleGrant = "PASS";
   // Execute the actual production configuration program against the local fork,
   // using the disposable signer granted role 300 above, never DEPLOYER_FX.
-  const config = spawnSync(process.execPath, ["scripts/katana/cyvbusdc-morpho-venue-v1.mjs"], {
+  const config = spawnSync(process.execPath, ["scripts/katana/cyvbusdc-morpho-venue-v2.mjs"], {
     env: {
       ...process.env,
       KATANA_RPC_URL: "http://127.0.0.1:8545",
       DEPLOYER_FX: "0x" + "a1".repeat(32),
       MODE: "apply",
-      APPLY_CONFIRMATION: "ENABLE_VBUSDC_YVAUSD",
+      APPLY_CONFIRMATION: "ENABLE_VBUSDC_YVAUSD_INSTANT",
     },
     encoding: "utf8",
     timeout: 180000,
@@ -234,11 +243,27 @@ async function run() {
   assert(after.length === next.length && after.every((s,i)=>eq(s,next[i])), "Other Morpho substrate permissions were changed");
   assert(await vault.isMarketSubstrateGranted(selected.id, MARKET), "Requested Morpho market not granted after simulation");
   const withdrawAfter = [...await vault.getInstantWithdrawalFuses()];
-  assert(withdrawAfter.length === originalWithdraw.length && withdrawAfter.every((s,i)=>eq(s,originalWithdraw[i])),
-    "Instant withdrawal fuse ordering changed");
+  const afterParams=await Promise.all(withdrawAfter.map((fuse,i)=>
+    vault.getInstantWithdrawalFusesParams(fuse,i).then(x=>[...x])));
+  assert(withdrawAfter.length === originalWithdraw.length+1,
+    "The new instant-withdraw fallback was not appended exactly once");
+  for(let i=0;i<originalWithdraw.length;i++) {
+    assert(eq(withdrawAfter[i],originalWithdraw[i]),"Existing fuse order changed");
+    assert(originalParams[i].length===afterParams[i].length &&
+      originalParams[i].every((v,j)=>eq(v,afterParams[i][j])),
+      "Existing withdrawal parameters changed");
+  }
+  const last=withdrawAfter.length-1;
+  assert(eq(withdrawAfter[last],selected.supply),"New fallback fuse mismatch");
+  assert(afterParams[last].length===2 &&
+    BigInt(afterParams[last][0])===0n && eq(afterParams[last][1],MARKET),
+    "New fallback must carry [zero amount placeholder, Morpho market ID]");
+  report.details.withdrawalPathsAfter=withdrawAfter;
+  report.details.withdrawalParamsAfter=afterParams;
   report.checks.configurationTransaction = "PASS";
   report.checks.previousVenuesPreserved = "PASS";
   report.checks.instantWithdrawConfigPreserved = "PASS";
+  report.checks.fourthInstantWithdrawalPath = "PASS";
   report.details.substratesAfter = after;
 
   // Supply and exit require ALPHA_ROLE; check the opportunity to run them on this fork
@@ -322,6 +347,6 @@ try { await run(); } catch(error) {
   console.error("FAIL:",report.error);
   process.exitCode=1;
 } finally {
-  await writeFile("cyvbusdc-morpho-simulation-v1.json", JSON.stringify(report,null,2)+"\n");
+  await writeFile("cyvbusdc-morpho-simulation-v2.json", JSON.stringify(report,null,2)+"\n");
   console.log("Summary:",JSON.stringify(report));
 }

@@ -1,6 +1,7 @@
-// Katana cyvbUSDC Morpho venue configuration v1.
+// Katana cyvbUSDC Morpho venue configuration v2.
 // Grant the specific Morpho Blue market as a *lending supply* venue.
-// This file never allocates assets, changes other market settings, or configures withdrawal ordering.
+// Preserves existing venues and withdrawal paths; appends target as final automatic withdrawal fallback.
+// The PlasmaVault user withdraw/redeem is atomic; the two independent governance writes are not.
 import { appendFile } from "node:fs/promises";
 import {
   AbiCoder,
@@ -9,6 +10,7 @@ import {
   Wallet,
   getAddress,
   keccak256,
+  ZeroHash,
 } from "ethers";
 
 const CHAIN_ID = 747474n;
@@ -20,8 +22,9 @@ const BALANCE_FUSE = getAddress("0x83790d83c23461cd22429276406c4f09db885a85");
 const IPOR_MARKET_ID = 14n;
 const BLUE_MARKET = "0xcfac40b9f06194a33d9526f73642f6849b908c2b6d8669ad9d2d4a3e7dcb017a";
 const FUSE_MANAGER_ROLE = 300n;
+const CONFIG_INSTANT_WITHDRAWAL_FUSES_ROLE = 900n;
 const MODE = process.env.MODE || "inspect";
-const CONFIRMATION = "ENABLE_VBUSDC_YVAUSD";
+const CONFIRMATION = "ENABLE_VBUSDC_YVAUSD_INSTANT";
 
 const vaultAbi = [
   "function asset() view returns (address)",
@@ -31,6 +34,8 @@ const vaultAbi = [
   "function getMarketSubstrates(uint256) view returns (bytes32[])",
   "function isMarketSubstrateGranted(uint256,bytes32) view returns (bool)",
   "function getInstantWithdrawalFuses() view returns (address[])",
+  "function getInstantWithdrawalFusesParams(address,uint256) view returns (bytes32[])",
+  "function configureInstantWithdrawalFuses((address fuse,bytes32[] params)[])",
   "function grantMarketSubstrates(uint256,bytes32[])",
 ];
 const fuseAbi = [
@@ -112,20 +117,63 @@ async function main() {
   await checkCode(provider, managerAddress, "Vault access manager");
   const access = new Contract(managerAddress, accessAbi, provider);
   const selector = vault.interface.getFunction("grantMarketSubstrates").selector;
+  const instantSelector = vault.interface.getFunction("configureInstantWithdrawalFuses").selector;
   const configuredRole = await access.getTargetFunctionRole(VAULT, selector);
   assert(configuredRole === FUSE_MANAGER_ROLE, `Unexpected role for grantMarketSubstrates: ${configuredRole}, expected 300`);
+  const withdrawConfiguredRole = await access.getTargetFunctionRole(VAULT, instantSelector);
+  assert(withdrawConfiguredRole === CONFIG_INSTANT_WITHDRAWAL_FUSES_ROLE,
+    `Unexpected role for configureInstantWithdrawalFuses: ${withdrawConfiguredRole}, expected 900`);
   const [roleMember, permission] = await Promise.all([
     access.hasRole(FUSE_MANAGER_ROLE, signer.address),
     access.canCall(signer.address, VAULT, selector),
   ]);
   const [immediate, delay] = permission;
+  const [withdrawMember, withdrawPermission] = await Promise.all([
+    access.hasRole(CONFIG_INSTANT_WITHDRAWAL_FUSES_ROLE, signer.address),
+    access.canCall(signer.address, VAULT, instantSelector),
+  ]);
+  const [withdrawImmediate, withdrawDelay] = withdrawPermission;
   const existing = [...await vault.getMarketSubstrates(IPOR_MARKET_ID)];
   const isAlreadyGranted = await vault.isMarketSubstrateGranted(IPOR_MARKET_ID, BLUE_MARKET);
   assert(existing.length === new Set(existing.map(x => x.toLowerCase())).size, "Existing substrate list has duplicates; abort to preserve exactly");
   assert(isAlreadyGranted === existing.some(x => x.toLowerCase() === BLUE_MARKET), "Substrate list and grant flag disagree");
   const next = isAlreadyGranted ? existing : [...existing, BLUE_MARKET];
+  const withdrawFusesBefore = [...await vault.getInstantWithdrawalFuses()];
+  const withdrawParamsBefore = await Promise.all(withdrawFusesBefore.map(
+    (fuse, index) => vault.getInstantWithdrawalFusesParams(fuse, index).then(params => [...params]),
+  ));
+  assert(withdrawFusesBefore.length === withdrawParamsBefore.length, "Withdrawal configuration getter mismatch");
+  for (const params of withdrawParamsBefore) assert(params.length >= 2, "Existing withdrawal path is missing the market ID");
+  const matching = withdrawFusesBefore.map((fuse, index) =>
+    same(fuse, SUPPLY_FUSE) && withdrawParamsBefore[index][1].toLowerCase() === BLUE_MARKET ? index : -1
+  ).filter(index => index >= 0);
+  assert(matching.length <= 1, "Target market has duplicate instant-withdraw paths");
+  const isInstantConfigured = matching.length === 1;
+  if (isInstantConfigured) {
+    const index = matching[0];
+    assert(withdrawParamsBefore[index].length === 2 && withdrawParamsBefore[index][0] === ZeroHash,
+      "Existing target instant-withdraw path has unexpected params");
+  }
+  const withdrawNext = withdrawFusesBefore.map((fuse, index) => ({
+    fuse, params: withdrawParamsBefore[index],
+  }));
+  if (!isInstantConfigured) withdrawNext.push({
+    fuse: SUPPLY_FUSE, params: [ZeroHash, BLUE_MARKET],
+  });
+  async function readWithdrawConfig() {
+    const fuses = [...await vault.getInstantWithdrawalFuses()];
+    const params = await Promise.all(fuses.map((fuse, index) =>
+      vault.getInstantWithdrawalFusesParams(fuse, index).then(row => [...row]),
+    ));
+    return fuses.map((fuse, index) => ({ fuse, params: params[index] }));
+  }
+  function exactConfig(a, b) {
+    return a.length === b.length && a.every((entry, index) =>
+      same(entry.fuse, b[index].fuse) && exactArray(entry.params, b[index].params),
+    );
+  }
 
-  report("# cyvbUSDC Morpho lending venue v1");
+  report("# cyvbUSDC Morpho lending venue + automatic instant withdrawal v2");
   report(`Mode: ${MODE}`);
   report(`Chain: ${network.chainId}; vault: ${VAULT}`);
   report(`DEPLOYER_FX signer address: ${signer.address}`);
@@ -135,7 +183,9 @@ async function main() {
   report(`Morpho collateral token: ${params.collateralToken}; loan/supply token: ${params.loanToken}`);
   report(`Installed supply fuse: ${SUPPLY_FUSE}; balance fuse: ${BALANCE_FUSE}; IPOR market: ${IPOR_MARKET_ID}`);
   report(`Existing Morpho substrates: ${existing.length}; requested substrate already granted: ${isAlreadyGranted}`);
-  report(`Existing instant-withdraw fuse entries (unchanged): ${(await vault.getInstantWithdrawalFuses()).length}`);
+  report(`Required additional role: CONFIG_INSTANT_WITHDRAWAL_FUSES_ROLE = 900 (immediate authorization: ${withdrawImmediate}; member active: ${withdrawMember[0]}; execution delay: ${withdrawDelay}s)`);
+  report(`Existing instant-withdraw entries: ${withdrawFusesBefore.length}; target fallback installed: ${isInstantConfigured}`);
+  report(`Final instant-withdraw entries after apply: ${withdrawNext.length}; target is appended last when missing`);
 
   if (MODE === "inspect") {
     report("INSPECT_ONLY: no transactions sent and no chain configuration changed.");
@@ -144,37 +194,65 @@ async function main() {
 
   assert(process.env.APPLY_CONFIRMATION === CONFIRMATION,
     `Apply requires confirmation value ${CONFIRMATION}`);
-  if (isAlreadyGranted) {
-    report("NO_OP: target market already granted; no transaction sent.");
+  if (isAlreadyGranted && isInstantConfigured) {
+    report("NO_OP: market and automatic instant-withdraw entry already configured.");
     return;
   }
-  assert(roleMember[0] && immediate && delay === 0n,
-    "Signer lacks immediately executable FUSE_MANAGER_ROLE (300), or is subject to an execution delay");
-  // A grant overwrites every substrate for the IPOR market. Abort if another manager changes
-  // the set while this workflow is preparing its transaction.
-  const current = [...await vault.getMarketSubstrates(IPOR_MARKET_ID)];
-  assert(exactArray(current, existing), "Market substrates changed during preflight; refusing a stale overwrite");
-  const calldata = vault.interface.encodeFunctionData("grantMarketSubstrates", [IPOR_MARKET_ID, next]);
-  // eth_call simulates the stateful governance transaction without broadcasting.
-  await provider.call({ from: signer.address, to: VAULT, data: calldata });
-
-  // Recheck as close to broadcast as possible (still not atomic with competing writers).
+  if (!isAlreadyGranted) {
+    assert(roleMember[0] && immediate && delay === 0n,
+      "Signer needs immediately executable FUSE_MANAGER_ROLE (300)");
+  }
+  if (!isInstantConfigured) {
+    assert(withdrawMember[0] && withdrawImmediate && withdrawDelay === 0n,
+      "Signer needs immediately executable CONFIG_INSTANT_WITHDRAWAL_FUSES_ROLE (900)");
+  }
+  // Preflight BOTH operations before sending the first transaction to avoid
+  // leaving a partially configured governance state on predictable errors.
   assert(exactArray([...await vault.getMarketSubstrates(IPOR_MARKET_ID)], existing),
-    "Market substrates changed before broadcast");
+    "Morpho allowlist changed before preflight");
+  assert(exactConfig(await readWithdrawConfig(), withdrawFusesBefore.map((fuse,index)=>({
+    fuse, params:withdrawParamsBefore[index],
+  }))), "Instant-withdraw config changed before preflight");
+  if (!isAlreadyGranted) {
+    const data = vault.interface.encodeFunctionData("grantMarketSubstrates", [IPOR_MARKET_ID, next]);
+    await provider.call({ from: signer.address, to: VAULT, data });
+  }
+  if (!isInstantConfigured) {
+    const data = vault.interface.encodeFunctionData("configureInstantWithdrawalFuses", [withdrawNext]);
+    await provider.call({ from: signer.address, to: VAULT, data });
+  }
   const writeVault = vault.connect(signer);
-  const transaction = await writeVault.grantMarketSubstrates(IPOR_MARKET_ID, next);
-  report(`Transaction submitted: ${transaction.hash}`);
-  const receipt = await transaction.wait(1);
-  assert(receipt && receipt.status === 1, `Transaction failed: ${transaction.hash}`);
+  if (!isAlreadyGranted) {
+    assert(exactArray([...await vault.getMarketSubstrates(IPOR_MARKET_ID)], existing),
+      "Market substrates changed before broadcast");
+    const tx = await writeVault.grantMarketSubstrates(IPOR_MARKET_ID, next);
+    report(`Transaction submitted (substrate grant): ${tx.hash}`);
+    const receipt = await tx.wait(1);
+    assert(receipt?.status === 1, `Substrate grant failed: ${tx.hash}`);
+  }
+  // The two governance calls are separate transactions; there is no native
+  // vault multicall for an atomic pair. A failed second call must be retried.
+  if (!isInstantConfigured) {
+    assert(exactConfig(await readWithdrawConfig(), withdrawFusesBefore.map((fuse,index)=>({
+      fuse,params:withdrawParamsBefore[index],
+    })), "Withdrawal order or params changed during configuration; aborting");
+    const tx = await writeVault.configureInstantWithdrawalFuses(withdrawNext);
+    report(`Transaction submitted (instant-withdraw fallback): ${tx.hash}`);
+    const receipt = await tx.wait(1);
+    assert(receipt?.status === 1, `Instant-withdraw configuration failed: ${tx.hash}`);
+  }
   const finalSubstrates = [...await vault.getMarketSubstrates(IPOR_MARKET_ID)];
-  assert(exactArray(finalSubstrates, next), "Post-transaction substrate list does not exactly match preserved existing list plus new market");
+  assert(exactArray(finalSubstrates, next), "Substrate list differs from expected preserved list");
   assert(await vault.isMarketSubstrateGranted(IPOR_MARKET_ID, BLUE_MARKET),
-    "Post-transaction market permission is not active");
+    "Requested Morpho venue not active");
+  assert(exactConfig(await readWithdrawConfig(),withdrawNext),
+    "Automatic instant-withdraw fuse list or parameters differ after configuration");
   assert(await vault.isFuseSupported(SUPPLY_FUSE) &&
     await vault.isBalanceFuseSupported(IPOR_MARKET_ID, BALANCE_FUSE),
-    "Installed Morpho fuse/balance-fuse binding changed after grant");
-  report(`SUCCESS: market enabled without disturbing ${existing.length} previously configured substrate(s). Tx: ${transaction.hash}`);
-  report("No vbUSDC was deposited, withdrawn, approved, or transferred by this configuration workflow.");
+    "Supported Morpho supply/balance fuse binding changed");
+  report(`SUCCESS: lending venue and automatic instant withdrawal enabled, preserving ${existing.length} existing substrates and ${withdrawFusesBefore.length} existing withdrawal paths.`);
+  report("User withdraw/redeem executes the entire configured path atomically inside the vault transaction.");
+  report("No vbUSDC was deposited, withdrawn, approved, or transferred by this governance workflow.");
 }
 try {
   await main();
