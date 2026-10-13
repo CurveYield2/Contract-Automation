@@ -1,0 +1,183 @@
+name: cyavKAT r4 Master Targeted Native Evidence Round 2 v1
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/cyavkat-r4-master-targeted-round2-v1.yml'
+      - 'packages/github-native-sim/audit-harnesses/cyavkat-r4-targeted-round2-v1/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cyavkat-r4-master-targeted-reviewer3l-round2-v1
+  cancel-in-progress: true
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CAMPAIGN_PATH: campaigns/cyavKATv25b r4
+      REQUEST_ID: 9f283a35597d2032b3fb3159979405079eb7a6c6d3fe187ad33ec47f795853e9
+      SOURCE_SHA256: 7c620ff30c79ceff532af3ad0977d184e66d76a4e00b600d61050799f5b9c8be
+      ENTRY_SHA256: c92149dbc3535ac2c69d04c96a167d3d3314e539889fca21fdc65118d81793bb
+      KATANA_FORK_RPC_URL: https://katana.drpc.org/
+    steps:
+      - name: Checkout trusted Contract-Automation branch for test-only runner
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Restore qualified Phase-0 Node toolchain
+        uses: ./.github/actions/setup-phase0-node-cache
+
+      - name: Restore qualified native deployment toolchain
+        uses: ./.github/actions/setup-phase0-deployment-only-toolchain-v1
+
+      - name: Select cross-repository Audit-Controller credential
+        env:
+          AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          PREFLIGHTSIM_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_TOKEN_REQUIRED: 'true'
+        run: bash scripts/select-audit-controller-token.sh
+
+      - name: Resolve and verify exact admitted immutable source archive
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/checkout-audit-controller-once-v1.sh .audit-controller main branch "$CAMPAIGN_PATH"
+          SOURCE=.audit-controller/"$CAMPAIGN_PATH"/source/cyavKATv25b.zip
+          test -s "$SOURCE"
+          echo "$SOURCE_SHA256  $SOURCE" | sha256sum --check --status
+          test -s ".audit-controller/$CAMPAIGN_PATH/source/cyavKAT/upgrade/scripts/deploy-cyavkat-unified-v1.cjs"
+          echo "$ENTRY_SHA256  .audit-controller/$CAMPAIGN_PATH/source/cyavKAT/upgrade/scripts/deploy-cyavkat-unified-v1.cjs" | sha256sum --check --status
+          mkdir -p targeted-output
+          printf "campaign=cyavkatv25b-r4\nrequestId=%s\nsourceSha256=%s\nentrySha256=%s\ncontrollerCommit=%s\nrunnerCommit=%s\nrunId=%s\nrunUrl=%s\n" "$REQUEST_ID" "$SOURCE_SHA256" "$ENTRY_SHA256" "$(git -C .audit-controller rev-parse HEAD)" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > targeted-output/SOURCE_BINDING_v1.txt
+          {
+            node --version
+            npm --version
+            forge --version
+            node node_modules/@foundry-rs/anvil/bin.mjs --version
+          } > targeted-output/TOOLCHAIN_v1.txt 2>&1
+
+      # Verified source staging is required for native fork conformance; no admitted production file edits.
+      - name: Re-execute unchanged admitted unified deployment on fresh isolated Katana Anvil
+        id: replay
+        shell: bash
+        run: |
+          set +e
+          python3 scripts/audit-command-guard-v1.py --label cyavkat-source-native --wall 2400 --idle 1000 --log targeted-output/DEPLOY_GUARD_v1.log -- node scripts/run-phase0-fork-deploy-config-v1.mjs --controller-root .audit-controller --campaign-path "$CAMPAIGN_PATH" --output targeted-output/deploy --fork-url https://katana.drpc.org/ > targeted-output/NATIVE_DEPLOY_REPLAY_v1.log 2>&1
+          code=$?
+          echo "exit=$code" >> "$GITHUB_OUTPUT"
+          printf "%s\n" "$code" > targeted-output/NATIVE_DEPLOY_EXIT_v1.txt
+          echo "Native replay exit code $code" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Preserve unmodified native per-phase logs, receipts and deploy state
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          SOURCE=targeted-output/.phase0-simulation-work/archive-source/cyavKAT/upgrade
+          mkdir -p targeted-output/native
+          for sub in unified-deploy-output-v1 broadcast deployments; do
+            if [ -d "$SOURCE/$sub" ]; then
+              cp -a "$SOURCE/$sub" targeted-output/native/
+            fi
+          done
+          if [ -f "$SOURCE/scripts/deploy-cyavkat-unified-v1.cjs" ]; then
+            sha256sum "$SOURCE/scripts/deploy-cyavkat-unified-v1.cjs" > targeted-output/NATIVE_STAGE_ENTRY_DIGEST_v1.txt
+          fi
+          find targeted-output/native -type f | sort > targeted-output/NATIVE_PRESERVED_FILES_v1.txt
+          exit 0
+
+      - name: Execute preexisting unit controls and test-only conformance overlay
+        id: conformance
+        shell: bash
+        run: |
+          set +e
+          SRC=targeted-output/.phase0-simulation-work/archive-source/cyavKAT/upgrade
+          if [ ! -d "$SRC/test/katana" ]; then
+            echo "::warning::Native stage has no test/katana; recover from already SHA-256-verified campaign source"
+            SRC=".audit-controller/$CAMPAIGN_PATH/source/cyavKAT/upgrade"
+          fi
+          if [ ! -f "$SRC/test/katana/QuestSigningLayer.t.sol" ]; then
+            echo "::error::Neither native stage nor verified campaign source has the required native conformance fixtures"
+            echo "exit=126" >> "$GITHUB_OUTPUT"
+            printf 'Missing verified QuestSigningLayer native test fixture at %s\n' "$SRC" > targeted-output/CONFORMANCE_v1.log
+            exit 1
+          fi
+          printf 'Round2 admitted-source native fork tests; pinned upstream 45121798; source %s\n' "$SRC" > targeted-output/CONFORMANCE_SOURCE_v2.txt
+          cp packages/github-native-sim/audit-harnesses/cyavkat-r4-targeted-round2-v1/Round2Native_v1.t.sol "$SRC/test/katana/Round2Native_v1.t.sol"
+          (
+            cd "$SRC"
+            FOUNDRY_TEST=test/katana timeout 1080s forge test --match-path test/katana/Round2Native_v1.t.sol --fork-url https://katana.drpc.org/ --fork-block-number 45121798 -vvvvv
+          ) > targeted-output/CONFORMANCE_v1.log 2>&1
+          code=$?
+          if grep -Eq 'Compiler run failed|Compilation failed|ParserError:|Error \\([0-9]+\\):' targeted-output/CONFORMANCE_v1.log; then
+            echo "::error::Conformance compilation failed despite any successful shell exit status"
+            code=1
+          fi
+          if ! grep -Eq 'Ran [2-9] tests?|[2-9] tests? passed|[1-9][0-9]+ tests? passed' targeted-output/CONFORMANCE_v1.log; then
+            echo "::error::No positive observed Forge test count"
+            code=1
+          fi
+          printf "%s\n" "$code" > targeted-output/CONFORMANCE_EXIT_v1.txt
+          echo "exit=$code" >> "$GITHUB_OUTPUT"
+          tail -n 100 targeted-output/CONFORMANCE_v1.log
+          exit 0
+
+      - name: Build raw manifest
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          find targeted-output -type f ! -name RAW_SHA256_v1.txt -print0 | sort -z | xargs -0 -r sha256sum > targeted-output/RAW_SHA256_v1.txt
+          {
+            echo "## cyavKAT r4 targeted execution v1"
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Native replay exit: ${{ steps.replay.outputs.exit || 'not-run' }}"
+            echo "Conformance exit: ${{ steps.conformance.outputs.exit || 'not-run' }}"
+            echo "Evidence is observational. Nonzero replay or fixture test is not an audit PASS."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload machine-produced raw evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyavkat-r4-targeted-reviewer3l-round2-v1-${{ github.run_id }}
+          path: targeted-output/
+          include-hidden-files: true
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Persist raw evidence directly into exact campaign folder only
+        if: always()
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d .audit-controller/.git ] || [ ! -s targeted-output/RAW_SHA256_v1.txt ]; then
+            echo "::error::No verified archive and machine raw outputs to persist"
+            exit 1
+          fi
+          OUT=".audit-controller/$CAMPAIGN_PATH/evidence/master-targeted-tests/$REQUEST_ID"
+          mkdir -p "$OUT"
+          cp -a targeted-output/. "$OUT/"
+          cd .audit-controller
+          git config user.name "CurveYield2 CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add -- "$CAMPAIGN_PATH/evidence/master-targeted-tests/$REQUEST_ID"
+          git diff --cached --quiet && exit 0
+          git commit -m "evidence: preserve cyavKAT r4 reviewer-3L targeted raw v1"
+          for attempt in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep $((attempt * 3))
+          done
+          echo "::error::Raw evidence commit failed after bounded retries"
+          exit 1
