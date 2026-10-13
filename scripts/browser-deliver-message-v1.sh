@@ -8,9 +8,13 @@ export WAKE_ACTION='wake'
 export WAKE_MODE="${WAKE_MODE:-resume_existing}"
 # Same delivery semantics as the reviewer wake: no idle wait before sending.
 export WAKE_MESSAGE_PURPOSE="${WAKE_MESSAGE_PURPOSE:-initial_wake}"
-# Every delivery clears a frozen generation first: the composer already holds the
-# message, so the disc is either stop (busy chat) or send (idle chat); both are safe.
-export STOP_BEFORE_SEND="${STOP_BEFORE_SEND:-true}"
+# Stop-first only when the reviewer has stopped advancing (watchdog pokes set it
+# explicitly; repair notices here). A routine controller wake must never stop a
+# reviewer that is already working on its next unit.
+if [ -z "${STOP_BEFORE_SEND:-}" ]; then
+  case "$WAKE_MESSAGE_PURPOSE" in repair_notice) STOP_BEFORE_SEND=true;; *) STOP_BEFORE_SEND=false;; esac
+fi
+export STOP_BEFORE_SEND
 set +e
 timeout -k 10s 360s node scripts/browser-agent-wake.mjs >&2
 rc=$?
