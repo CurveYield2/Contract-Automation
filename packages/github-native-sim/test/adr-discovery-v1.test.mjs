@@ -69,7 +69,8 @@ test('start, F->R->X routing, sealed packet independence and completion',()=>{
  try{
   const started=startDiscoveryV1(o);
   assert.equal(started.state.payload.activeUnitId,'F-001');
-  assert.equal(started.wake.chatKey,'reviewer-2');
+  // Reviewer-2 and the attacker start their windows in parallel.
+  assert.deepEqual(started.wakes.map(w=>w.chatKey),['reviewer-2','reviewer-3L']);
   const a=packet(o,'F-001');assert.equal(a.primaryContexts[0].contextId,'CTX-A');
   submit(o,'F-001',validReview(a));
   // F-001 and R-001 form one reviewer-2 window: accepting F-001 alone needs no wake.
@@ -78,9 +79,9 @@ test('start, F->R->X routing, sealed packet independence and completion',()=>{
   assert.equal(next.status,'DISCOVERY_PARTIAL');
   assert.equal(next.wake,null);
   submit(o,'R-001',validReview(packet(o,'R-001')));
-  const attacker=advanceDiscoveryV1({...o,unitId:'R-001'});
-  assert.equal(attacker.status,'DISCOVERY_NEXT');
-  assert.equal(attacker.wake.chatKey,'reviewer-3L');
+  const reviewerDone=advanceDiscoveryV1({...o,unitId:'R-001'});
+  assert.equal(reviewerDone.status,'DISCOVERY_PARTIAL');
+  assert.equal(reviewerDone.wakes.length,0);
   const x=packet(o,'X-001');
   assert.equal(JSON.stringify(x).includes('hypotheses'),false);
   assert.equal(JSON.stringify(x).includes('work/phase-03'),false);
@@ -99,7 +100,7 @@ test('stale id and missing submission do not modify state or consume attempts',(
   startDiscoveryV1(o);
   const file=repoFile(o.root,'campaigns/demo/work/phase-04/discovery/DISCOVERY_STATE_v1.json');
   const before=fs.readFileSync(file,'utf8');
-  assert.equal(advanceDiscoveryV1({...o,unitId:'X-001'}).status,'DISCOVERY_STALE_REQUEST');
+  assert.equal(advanceDiscoveryV1({...o,unitId:'X-999'}).status,'DISCOVERY_STALE_REQUEST');
   assert.equal(fs.readFileSync(file,'utf8'),before);
   assert.equal(advanceDiscoveryV1({...o,unitId:'F-001'}).status,'DISCOVERY_REWORK');
   assert.equal(fs.readFileSync(file,'utf8'),before);
@@ -153,4 +154,18 @@ test('wake includes precise URLs and X restrictions',()=>{
   unitId:'X-001',role:'ATTACK',attempt:2});
  assert.match(text,/You are the attacker reviewer/);assert.match(text,/reviewKind":"discovery"/);
  assert.match(text,/Do not open work\/phase-03\//);
+});
+test('reviewer and attacker windows run in parallel and the last one to finish completes discovery',()=>{
+ const o=setup();
+ try{
+  startDiscoveryV1(o);
+  const x=packet(o,'X-001');
+  submit(o,'X-001',validAttack(x));
+  // The attacker finishes first; reviewer-2 is still working, so discovery is not complete.
+  const attackerDone=advanceDiscoveryV1({...o,unitId:'X-001'});
+  assert.equal(attackerDone.status,'DISCOVERY_PARTIAL');
+  submit(o,'F-001',validReview(packet(o,'F-001')));
+  submit(o,'R-001',validReview(packet(o,'R-001')));
+  assert.equal(advanceDiscoveryV1({...o,unitId:'F-001'}).status,'DISCOVERY_COMPLETE');
+ }finally{fs.rmSync(o.root,{force:true,recursive:true});}
 });

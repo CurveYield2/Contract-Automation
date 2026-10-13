@@ -83,20 +83,28 @@ export function discoveryWakeMessageV1({directory,auditControllerRef,packetPath,
 // chat. Packets depend only on the Phase 0 inventory, flow plan and system facts, never on
 // earlier units, so a whole window can be issued at once and validated in one controller run.
 export const DISCOVERY_WINDOW_V1=25;
-const activeIdsOf=(state)=>state.payload.order.filter(id=>state.payload.units[id]?.status==='ACTIVE');
-function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now}){
- const pending=state.payload.order.filter(id=>state.payload.units[id]?.status==='PENDING');
- if(!pending.length)return [];
- const chatKey=state.payload.units[pending[0]].chatKey,ids=[];
- for(const id of pending){
-  if(state.payload.units[id].chatKey!==chatKey||ids.length>=DISCOVERY_WINDOW_V1)break;
-  ids.push(id);
- }
+// Reviewer-2 (flow and residual units) and the attacker (attack units) work their windows in
+// parallel: attack packets never contain reviewer-2 work, so independence is unaffected.
+const activeIdsOf=(state,chatKey=null)=>state.payload.order.filter(id=>state.payload.units[id]?.status==='ACTIVE'&&(!chatKey||state.payload.units[id].chatKey===chatKey));
+const pendingIdsOf=(state,chatKey)=>state.payload.order.filter(id=>state.payload.units[id]?.status==='PENDING'&&state.payload.units[id].chatKey===chatKey);
+const chatKeysOf=(state)=>[...new Set(state.payload.order.map(id=>state.payload.units[id]?.chatKey).filter(Boolean))];
+function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey}){
+ const ids=pendingIdsOf(state,chatKey).slice(0,DISCOVERY_WINDOW_V1);
  for(const id of ids){
   buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now});
   state.payload.units[id].status='ACTIVE';
  }
  return ids;
+}
+// Opens a window for every chat that has pending units but nothing active, returning its wakes.
+export function openIdleChatWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,auditControllerRef,except=null}){
+ const wakes=[];
+ for(const chatKey of chatKeysOf(state)){
+  if(chatKey===except||activeIdsOf(state,chatKey).length||!pendingIdsOf(state,chatKey).length)continue;
+  const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey});
+  wakes.push(wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef}));
+ }
+ return wakes;
 }
 export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText=null}){
  const base='https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
@@ -140,11 +148,10 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
  });
  writeJson(repoFile(root,stateRel(campaignPath)),state);
  if(missing)return {completeImmediately:true,state,statePath:stateRel(campaignPath),wake:null};
- const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});
- state.payload.activeUnitId=ids[0];
- const wake=wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef});
+ const wakes=openIdleChatWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,auditControllerRef});
+ state.payload.activeUnitId=activeIdsOf(state)[0]??null;
  writeJson(repoFile(root,stateRel(campaignPath)),state);
- return {completeImmediately:false,state,statePath:stateRel(campaignPath),wake};
+ return {completeImmediately:false,state,statePath:stateRel(campaignPath),wake:wakes[0]??null,wakes};
 }
 export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmissions,taxonomy,now}){
  const rows=arr(acceptedSubmissions),checks=new Map(),candidates=[],paths=[],answers=[],na=[];
@@ -224,9 +231,10 @@ export function completeDiscoveryV1({root,campaignPath,directory,authorityRoot,a
 export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId,now,auditControllerRef='main'}){
  const state=known(root,stateRel(campaignPath));
  if(!state)throw new Error('discovery state missing');
- const active=activeIdsOf(state);
+ const chatKey=state.payload.units[unitId]?.chatKey;
+ const active=chatKey?activeIdsOf(state,chatKey):[];
  if(!active.includes(unitId))return {status:'DISCOVERY_STALE_REQUEST',
-  feedbackText:'Unit '+unitId+' is not active; active units are '+(active.join(', ')||'none')+'. No action taken.',wake:null};
+  feedbackText:'Unit '+unitId+' is not active; active units are '+(activeIdsOf(state).join(', ')||'none')+'. No action taken.',wake:null,wakes:[]};
  const inventory=getInputs({root,campaignPath,automationRoot}).inventory;
  const accepted=[],rework=[],exhausted=[],waiting=[],unchanged=[],feedback=[];
  for(const id of active){
@@ -264,33 +272,33 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
  }
  // Nothing new to validate: report and leave state untouched.
  if(!accepted.length&&!rework.length&&!exhausted.length)return {status:'DISCOVERY_REWORK',
-  feedbackText:unchanged.length?unchanged.join('\n\n'):'No new submission found for active units '+active.join(', ')+'. Write them, then push the boundary request again.',wake:null};
+  feedbackText:unchanged.length?unchanged.join('\n\n'):'No new submission found for active units '+active.join(', ')+'. Write them, then push the boundary request again.',wake:null,wakes:[]};
  const summary=[accepted.length?'Accepted: '+accepted.join(', '):'',
   exhausted.length?'Validation attempts exhausted, recorded as gaps: '+exhausted.join(', '):'',
   waiting.length?'Still awaiting submission: '+waiting.join(', '):''].filter(Boolean).join('\n');
- const remaining=activeIdsOf(state);
+ const others=openIdleChatWindowsV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,auditControllerRef,except:chatKey});
+ const finish=(status,feedbackText,wake)=>{
+  state.payload.activeUnitId=activeIdsOf(state)[0]??null;
+  writeJson(repoFile(root,stateRel(campaignPath)),state);
+  const wakes=[...(wake?[wake]:[]),...others];
+  return {status,feedbackText,wake:wakes[0]??null,wakes};
+ };
+ const remaining=activeIdsOf(state,chatKey);
  if(remaining.length){
-  state.payload.activeUnitId=remaining[0];
   if(rework.length){
    const text=[summary,...feedback,...unchanged].filter(Boolean).join('\n\n');
    // Full feedback is durable in the discovery folder; the typed wake carries a bounded excerpt.
    const feedbackRel=pathJoin(campaignPath,'DISCOVERY_FEEDBACK_v1.md');
    fs.writeFileSync(repoFile(root,feedbackRel),text+'\n');
    const excerpt=text.length>1500?text.slice(0,1500)+'\n… full feedback: '+feedbackRel:text+'\n(Also saved at '+feedbackRel+')';
-   const wake=wakeFor({directory,ids:remaining,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:excerpt});
-   writeJson(repoFile(root,stateRel(campaignPath)),state);
-   return {status:'DISCOVERY_REWORK',feedbackText:text,wake};
+   return finish('DISCOVERY_REWORK',text,wakeFor({directory,ids:remaining,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:excerpt}));
   }
   // Some units still unsubmitted and nothing failed: the reviewer is mid-window; no wake.
-  writeJson(repoFile(root,stateRel(campaignPath)),state);
-  return {status:'DISCOVERY_PARTIAL',feedbackText:summary,wake:null};
+  return finish('DISCOVERY_PARTIAL',summary,null);
  }
- const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});
- if(ids.length){
-  state.payload.activeUnitId=ids[0];
-  const wake=wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:summary});
-  writeJson(repoFile(root,stateRel(campaignPath)),state);
-  return {status:'DISCOVERY_NEXT',feedbackText:summary,wake};
- }
+ const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey});
+ if(ids.length)return finish('DISCOVERY_NEXT',summary,wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:summary}));
+ // This reviewer's discovery share is done; the other reviewer may still be working.
+ if(activeIdsOf(state).length)return finish('DISCOVERY_PARTIAL',summary+'\nAll of your discovery units are complete; the other discovery reviewer is still working.',null);
  return completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});
 }
