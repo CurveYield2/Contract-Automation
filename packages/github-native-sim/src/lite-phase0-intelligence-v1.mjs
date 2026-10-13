@@ -6,6 +6,7 @@ import unzipper from 'unzipper';
 import { checkoutExactSource, runProcess } from './execution.mjs';
 import { buildProject } from '../../runner/src/build-dispatch.mjs';
 import { runSlitherAnalysis } from './analysis.mjs';
+import { resolveCompiledSourceFile } from './phase0-compiled-source-resolve-v1.mjs';
 import { generateBuildSbomV1 } from './sbom-v1.mjs';
 import { generateSourceIntelligenceTechnicalBundleV1 } from './source-intelligence-technical-v1.mjs';
 import { writeReviewInventoryOutputsV1 } from './adr-review-inventory-v1.mjs';
@@ -151,16 +152,6 @@ async function detectBuildConfig(projectRoot){
 }
 
 
-async function resolveCompiledSourceFile(projectRoot, sourceName){
-  const candidates=[
-    path.resolve(projectRoot, sourceName),
-    path.resolve(projectRoot, 'node_modules', sourceName)
-  ];
-  for(const candidate of candidates){
-    if(await exists(candidate))return candidate;
-  }
-  throw new Error(`compiled source is missing from staged project: ${sourceName}`);
-}
 function sourceIsDependency(sourceName,scope){
   return !sourceIsInScope(sourceName,scope);
 }
