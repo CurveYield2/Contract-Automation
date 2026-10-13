@@ -61,7 +61,7 @@ jobs:
             node --version
             npm --version
             forge --version
-            anvil --version
+            node node_modules/@foundry-rs/anvil/bin.mjs --version
           } > targeted-output/TOOLCHAIN_v1.txt 2>&1
 
       - name: Re-execute unchanged admitted unified deployment on fresh isolated Katana Anvil
