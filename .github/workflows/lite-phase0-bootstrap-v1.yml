@@ -86,7 +86,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF"
+          bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" branch "$CAMPAIGN_PATH"
 
       - name: Finalize machine Phase 0 receipt
         id: finalize

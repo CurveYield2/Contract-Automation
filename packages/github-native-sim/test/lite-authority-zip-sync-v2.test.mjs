@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-test('authority zip sync v2 keeps deterministic packaging without noisy qualification-completion triggers', () => {
+test('authority zip sync v2 keeps deterministic packaging and runs only on explicit request', () => {
   const workflow=fs.readFileSync('.github/workflows/sync-lite-authority-zip-v2.yml','utf8');
   const script=fs.readFileSync('scripts/sync-lite-authority-zip-v1.py','utf8');
   assert.match(workflow,/workflow_dispatch:/);
-  assert.match(workflow,/schedule:/);
+  // Manual only: no schedule, push or workflow_run trigger.
+  assert.doesNotMatch(workflow,/^\s+(schedule|push):/m);
   assert.doesNotMatch(workflow,/^\s+workflow_run:/m);
   assert.match(workflow,/git diff --quiet --/);
   assert.match(workflow,/CurveYield2\/Audit-Controller/);

@@ -50,7 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF"
+          bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" branch "${{ inputs.campaign_path }}"
 
       - name: Run package deployment and configuration scripts on isolated Anvil fork
         env:

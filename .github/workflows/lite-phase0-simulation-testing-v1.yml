@@ -77,7 +77,7 @@ jobs:
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
           AUDIT_CONTROLLER_REF: ${{ steps.request.outputs.controller_ref }}
-        run: bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF"
+        run: bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" branch "${{ steps.request.outputs.campaign_path }}"
       - name: Run native deploy/config scripts on Anvil and validate evidence
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
