@@ -39,6 +39,7 @@ interface IRealOldWmR2 {
 }
 interface IAccessR2 {function hasRole(uint64,address) external view returns(bool,uint32);}
 interface IOriginalBaseR2 {function ORIGINAL_BASE() external view returns(address);}
+interface ISafeTxR2 {function isOwner(address) external view returns(bool);function getThreshold() external view returns(uint256);function execTransaction(address,uint256,bytes calldata,uint8,uint256,uint256,uint256,address,address,bytes calldata) external returns(bool);}
 
 contract Round2Native_v1 is Test {
     address constant VAULT = 0xEd83daf48429cfb2C650Fd721b9241e180fd4548;
@@ -64,9 +65,24 @@ contract Round2Native_v1 is Test {
         emit log_named_string("R2_CALL",label);
         emit log_named_address("actor",who);
         emit log_named_address("target",target);
-        emit log_named_bytes4("selector",bytes4(callData));
+        emit log_named_bytes("calldata",callData);
         emit log_named_string("success",ok?"true":"false");
         emit log_named_bytes("return_or_revert",ret);
+    }
+    function _safeExec(string memory label,bytes memory data) internal returns(bool) {
+        bytes memory prevalidated = abi.encodePacked(bytes32(uint256(uint160(DEPLOYER))),bytes32(0),uint8(1));
+        emit log_named_string("R2_SAFE_OWNER_OPERATION",label);
+        emit log_named_uint("safe_threshold",ISafeTxR2(SAFE).getThreshold());
+        emit log_named_string("deployer_is_safe_owner",ISafeTxR2(SAFE).isOwner(DEPLOYER)?"true":"false");
+        vm.prank(DEPLOYER);
+        try ISafeTxR2(SAFE).execTransaction(VAULT,0,data,0,0,0,0,address(0),address(0),prevalidated)
+          returns(bool success) {
+            emit log_named_string("safe_authorized_exec",success?"true":"false");
+            return success;
+        } catch(bytes memory failure) {
+            emit log_named_bytes("safe_exec_revert",failure);
+            return false;
+        }
     }
     function _nativeSnapshot(string memory label,address owner) internal {
         emit log_named_string("R2_NATIVE_SNAPSHOT",label);
@@ -117,8 +133,7 @@ contract Round2Native_v1 is Test {
         assertEq(vault.nonces(user),1,"healthy native nonce must increment");
         CurveYieldSignatureFuse uninstallFuse = new CurveYieldSignatureFuse(7,VAULT,PRESERVED);
         address[] memory u = new address[](1);u[0]=address(uninstallFuse);
-        (bool reg,)=_probe("authorized_add_uninstaller",SAFE,VAULT,
-            abi.encodeCall(INativeVaultR2.addFuses,(u)));
+        bool reg=_safeExec("authorized_add_uninstaller",abi.encodeCall(INativeVaultR2.addFuses,(u)));
         emit log_named_string("uninstall_registry_access",reg?"AUTHORIZED":"BLOCKED");
         if(!reg)return;
         FuseAction[] memory act=new FuseAction[](1);
@@ -139,8 +154,7 @@ contract Round2Native_v1 is Test {
         emit log_named_bytes32("admitted_wrapper_runtime_hash",address(admitted).codehash);
         CurveYieldSignatureFuse installer=new CurveYieldSignatureFuse(7,VAULT,address(admitted));
         u[0]=address(installer);
-        (bool registered,)=_probe("authorized_add_admitted_installer",SAFE,VAULT,
-            abi.encodeCall(INativeVaultR2.addFuses,(u)));
+        bool registered=_safeExec("authorized_add_admitted_installer",abi.encodeCall(INativeVaultR2.addFuses,(u)));
         if(!registered){emit log_string("R2_SOURCE_INSTALL_BLOCKED_ADD_FUSE");return;}
         act[0]=FuseAction(address(installer),abi.encodeCall(CurveYieldSignatureFuse.install,()));
         (bool installed,)=_probe("authorized_install_admitted_source",DEPLOYER,VAULT,
@@ -186,12 +200,23 @@ contract Round2Native_v1 is Test {
             emit log_named_uint("share_owner_balance",shares);
             emit log_named_uint("asset_owner_balance",assets);
             if(donors[i]==VAULT || donors[i]==OLD_WM || donors[i].code.length>0)continue;
-            if(shares>=1e8 && funded<3){
+            if(shares<3e8 && assets>=3e8){
+                uint256 input=assets/1000;if(input>3e18)input=3e18;
+                (bool approved,)=_probe("real_asset_holder_vault_deposit_approve",donors[i],vault.asset(),
+                    abi.encodeWithSignature("approve(address,uint256)",VAULT,input));
+                if(approved){
+                    (bool deposited,)=_probe("real_asset_holder_vault_deposit",donors[i],VAULT,
+                        abi.encodeCall(INativeVaultR2.deposit,(input,donors[i])));
+                    if(deposited)shares=vault.balanceOf(donors[i]);
+                }
+            }
+            if(shares>=3e8 && funded<3){
                 uint256 amount=shares/1000;if(amount>1e18)amount=1e18;
-                if(amount==0)continue;
-                (bool moved,)=_probe("real_owner_share_transfer_to_test_claimant",donors[i],VAULT,
-                  abi.encodeCall(INativeVaultR2.transfer,(claimants[funded],amount)));
-                if(moved){emit log_named_uint("actually_transferred_shares",amount);funded++;}
+                for(uint256 j=0;j<3 && funded<3;j++){
+                    (bool moved,)=_probe("real_owner_share_transfer_to_test_claimant",donors[i],VAULT,
+                        abi.encodeCall(INativeVaultR2.transfer,(claimants[funded],amount)));
+                    if(moved){emit log_named_uint("actually_transferred_shares",amount);funded++;}
+                }
             }
         }
         emit log_named_uint("funded_test_claimant_classes",funded);
