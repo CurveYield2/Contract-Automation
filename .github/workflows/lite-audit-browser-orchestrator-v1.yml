@@ -65,12 +65,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh auth setup-git
-          rm -rf .audit-controller
-          gh repo clone CurveYield2/Audit-Controller .audit-controller -- --filter=blob:none --no-checkout
-          cd .audit-controller
-          git fetch origin "$AUDIT_CONTROLLER_REF"
-          git checkout -B "$AUDIT_CONTROLLER_REF" "origin/$AUDIT_CONTROLLER_REF"
+          # Sparse: campaign folder, its directory entry and the receipt-bound authority package only.
+          bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF" branch "$CAMPAIGN_PATH"
           test "$(jq -r '.campaignId' "${{ steps.directory.outputs.path }}")" = "$CAMPAIGN_ID"
           test "$(jq -r '.workspacePath' "${{ steps.directory.outputs.path }}")" = "$CAMPAIGN_PATH"
 
