@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "curveyield-browser-agent-watchdog-state-v1",
+  "wakeId": "cyavkatv25b-r4-discovery-X-001-r2c",
+  "campaignId": "cyavkatv25b-r4",
+  "phaseId": "phase-4",
+  "workerRole": "reviewer",
+  "status": "ACTIVE",
+  "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd60e8-51b4-83e8-a07e-a47ef93f14bb",
+  "lastProvider": "normal-system-chrome-x11-phase1-visual-evidence",
+  "armedAt": "2026-10-13T18:06:33Z",
+  "intervalMinutes": 5,
+  "pokeIntervalMinutes": 40,
+  "deliveryConfirmed": true,
+  "ackPath": "campaigns/cyavKATv25b r4/work/browser/WAKE_ACK_reviewer-3L_v1.json",
+  "ackId": "cyavkatv25b-r4-discovery-X-001-r2c/38443835276",
+  "idleMessage": "GET BACK TO WORK",
+  "observation": {
+    "assistantCount": 0,
+    "lastAssistantHash": "",
+    "observedAt": "2026-10-13T18:06:33Z"
+  },
+  "gate": {
+    "mode": "LITE",
+    "repository": "CurveYield2/Audit-Controller",
+    "ref": "main",
+    "statePath": "Audit Campaign Directory/campaigns/cyavkatv25b.json",
+    "expectedPhaseId": "phase-4",
+    "expectedMilestoneId": "DISCOVERY_X-001",
+    "activePointerPath": "",
+    "interphase": {
+      "handoffPath": "",
+      "workPacketPath": "",
+      "completionPath": "",
+      "workPacketSha256": ""
+    },
+    "stopStates": [
+      "WAITING_FOR_HUMAN_RESPONSE",
+      "WAITING_FOR_SUCCESSOR_AGENT",
+      "CLOSED",
+      "STOPPED_BY_HUMAN"
+    ],
+    "stopCampaignStatuses": [
+      "COMPLETE",
+      "STOPPED_BY_HUMAN"
+    ]
+  },
+  "repair": {
+    "enabled": false,
+    "idlePokeThreshold": 3,
+    "unviewableThreshold": 2,
+    "consecutiveIdlePokes": 0,
+    "consecutiveUnviewable": 0
+  }
+}
