@@ -395,30 +395,36 @@ async function verifyX11VisibleChatAddress(requested) {
   return true;
 }
 
-// Find the send/stop button in an OS desktop screenshot crop: the darkest 16x16 px
-// patch (8 px cells) whose dark area is button-sized, not a text line or image.
-async function x11FindDarkDisc(file, originX, originY) {
-  const {stdout}=await runCapture('convert',[file,'-colorspace','Gray','-depth','8','-scale','12.5%','txt:-']);
-  const cells=new Map();let w=0,h=0;
+// Find the send/stop button in an OS desktop screenshot crop. The button is a dark
+// disc with a white icon (stop square or send arrow), so dark pixels are counted at
+// full resolution rather than averaged: a 40x40 px window holding 500-1350 dark
+// pixels with an almost empty 8 px band around it. Text has too few dark pixels; a
+// dark block or code panel fills the window or its surrounding band.
+async function x11FindButton(file, originX, originY) {
+  const {stdout}=await runCapture('convert',[file,'-colorspace','Gray','-depth','8','txt:-']);
+  let w=0,h=0;const dark=[];
   for(const line of stdout.split('\n')){
     const m=line.match(/^(\d+),(\d+):.*#([0-9A-Fa-f]{2})/);if(!m)continue;
-    const x=+m[1],y=+m[2];cells.set(x+','+y,parseInt(m[3],16)/255);w=Math.max(w,x+1);h=Math.max(h,y+1);
+    const x=+m[1],y=+m[2];w=Math.max(w,x+1);h=Math.max(h,y+1);
+    if(parseInt(m[3],16)<90)dark.push([x,y]);
   }
-  const at=(x,y)=>cells.get(x+','+y)??1;
-  let best=null;
-  for(let y=0;y<h-1;y++)for(let x=0;x<w-1;x++){
-    const v=(at(x,y)+at(x+1,y)+at(x,y+1)+at(x+1,y+1))/4;
-    if(!best||v<best.v)best={x,y,v};
+  const integral=new Int32Array((w+1)*(h+1));
+  for(const [x,y] of dark)integral[(y+1)*(w+1)+x+1]+=1;
+  for(let y=1;y<=h;y++)for(let x=1;x<=w;x++)
+    integral[y*(w+1)+x]+=integral[(y-1)*(w+1)+x]+integral[y*(w+1)+x-1]-integral[(y-1)*(w+1)+x-1];
+  const box=(x0,y0,x1,y1)=>{
+    x0=Math.max(0,x0);y0=Math.max(0,y0);x1=Math.min(w,x1);y1=Math.min(h,y1);
+    return integral[y1*(w+1)+x1]-integral[y0*(w+1)+x1]-integral[y1*(w+1)+x0]+integral[y0*(w+1)+x0];
+  };
+  const S=40,band=8;let best=null;
+  for(let y=0;y+S<=h;y+=2)for(let x=0;x+S<=w;x+=2){
+    const count=box(x,y,x+S,y+S);
+    if(count<500||count>1350)continue;
+    const around=box(x-band,y-band,x+S+band,y+S+band)-count;
+    if(around>60)continue;
+    if(!best||count>best.count)best={x,y,count,around};
   }
-  if(!best)return null;
-  // Size of the connected dark area around it (a ~36 px disc is about 20 cells).
-  const seen=new Set(),stack=[[best.x,best.y]];let area=0;
-  while(stack.length&&area<200){
-    const [x,y]=stack.pop(),k=x+','+y;
-    if(seen.has(k)||x<0||y<0||x>=w||y>=h||at(x,y)>=0.5)continue;
-    seen.add(k);area++;stack.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]);
-  }
-  return {x:originX+best.x*8+8,y:originY+best.y*8+8,brightness:Number(best.v.toFixed(3)),darkCells:area};
+  return best?{x:originX+best.x+S/2,y:originY+best.y+S/2,darkPixels:best.count,darkAround:best.around}:null;
 }
 
 async function captureX11VisualEvidence(label, cropRegion = '', minBytes = 3000) {
@@ -654,14 +660,13 @@ async function runNormalChromeExistingSession(chromium) {
       const searchW = Math.round(width * 0.40);
       const searchH = height - searchY;
       const search = await captureX11VisualEvidence('stop_search_area', [searchX, searchY, searchW, searchH].join(','), 64);
-      const disc = await x11FindDarkDisc(search, searchX, searchY);
+      const disc = await x11FindButton(search, searchX, searchY);
       const stopX = disc?.x ?? Math.round(width * 0.83);
       const stopY = disc?.y ?? Math.round(height - 72);
       const area = [stopX - 30, stopY - 30, 60, 60].join(',');
       const areaBefore = await captureX11VisualEvidence('stop_area_before', area, 64);
-      const brightness = disc?.brightness ?? 1;
-      const onButton = Boolean(disc) && brightness < Number(env.STOP_BUTTON_MAX_BRIGHTNESS || '0.35') && disc.darkCells >= 6 && disc.darkCells <= 40;
-      stopClick = { x: stopX, y: stopY, brightness, darkCells: disc?.darkCells ?? 0, onButton, clicked: false, areaChanged: null };
+      const onButton = Boolean(disc);
+      stopClick = { x: stopX, y: stopY, darkPixels: disc?.darkPixels ?? 0, darkAround: disc?.darkAround ?? null, onButton, clicked: false, areaChanged: null };
       if (onButton) {
         await x11Key(['mousemove', '--sync', String(stopX), String(stopY)], 'x11-stop-move');
         await page.waitForTimeout(randomDelayMs(180, 360));
