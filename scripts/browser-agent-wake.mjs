@@ -401,13 +401,21 @@ async function verifyX11VisibleChatAddress(requested) {
 // pixels with an almost empty 8 px band around it. Text has too few dark pixels; a
 // dark block or code panel fills the window or its surrounding band.
 async function x11FindButton(file, originX, originY) {
-  const {stdout}=await runCapture('convert',[file,'-colorspace','Gray','-depth','8','txt:-']);
-  let w=0,h=0;const dark=[];
+  // Colour-blind: a pixel counts when it differs strongly from the crop's dominant
+  // (background) colour, so a black, blue or dark-mode button all register.
+  const {stdout}=await runCapture('convert',[file,'-alpha','off','-colorspace','sRGB','-depth','8','txt:-'],{maxBuffer:1<<28});
+  let w=0,h=0;const px=[];const hist=new Map();
   for(const line of stdout.split('\n')){
-    const m=line.match(/^(\d+),(\d+):.*#([0-9A-Fa-f]{2})/);if(!m)continue;
-    const x=+m[1],y=+m[2];w=Math.max(w,x+1);h=Math.max(h,y+1);
-    if(parseInt(m[3],16)<90)dark.push([x,y]);
+    const m=line.match(/^(\d+),(\d+):.*?#([0-9A-Fa-f]{6})/);if(!m)continue;
+    const x=+m[1],y=+m[2],v=parseInt(m[3],16),r=v>>16,g=(v>>8)&255,b=v&255;
+    w=Math.max(w,x+1);h=Math.max(h,y+1);px.push([x,y,r,g,b]);
+    const q=(r>>4)<<8|(g>>4)<<4|(b>>4);hist.set(q,(hist.get(q)||0)+1);
   }
+  let bgq=0,bgn=-1;for(const [q,n] of hist)if(n>bgn){bgq=q;bgn=n;}
+  const bg=[((bgq>>8)<<4)+8,(((bgq>>4)&15)<<4)+8,((bgq&15)<<4)+8];
+  const dark=[];
+  for(const [x,y,r,g,b] of px)
+    if(Math.hypot(r-bg[0],g-bg[1],b-bg[2])>110)dark.push([x,y]);
   const integral=new Int32Array((w+1)*(h+1));
   for(const [x,y] of dark)integral[(y+1)*(w+1)+x+1]+=1;
   for(let y=1;y<=h;y++)for(let x=1;x<=w;x++)
