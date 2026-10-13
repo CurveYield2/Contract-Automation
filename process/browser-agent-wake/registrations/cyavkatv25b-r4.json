@@ -26,12 +26,12 @@
     "name": "reviewer-2",
     "url": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6accaf3c-ffcc-83e8-aa29-6d2928c833c7"
   },
-  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"cyavkatv25b-r4-discovery-F-006-a1/38433905672\"} as the whole file campaigns/cyavKATv25b r4/work/browser/WAKE_ACK_reviewer-2_v1.json on CurveYield2/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nYou are reviewer-2. Campaign cyavkatv25b-r4\n\nUse the GitHub connector app for every repository read and write.\n\nInstructions: https://github.com/CurveYield2/Audit-Controller/blob/main/Audit%20Skill%20-%20Current%20Authority/Audit_Litemode_v12/discovery/FLOW_REVIEW_START_HERE.md\n\nAssignment packet: https://github.com/CurveYield2/Audit-Controller/blob/main/campaigns/cyavKATv25b%20r4/work/phase-04/discovery/F-006/ASSIGNMENT_PACKET_v1.json\n\nSubmission path: https://github.com/CurveYield2/Audit-Controller/blob/main/campaigns/cyavKATv25b%20r4/work/phase-04/discovery/F-006/SUBMISSION_v1.json\n\nBoundary request location: process/agent-upload/lite-phase-boundary/\n\nExact boundary request JSON: {\"schemaVersion\":\"curveyield-lite-phase-boundary-request-v1\",\"campaignId\":\"cyavkatv25b-r4\",\"reviewKind\":\"discovery\",\"unitId\":\"F-006\",\"auditControllerRef\":\"main\",\"attempt\":1}\n\nIf no controller response arrives within 30 minutes of pushing the request, push the same request again with attempt increased by 1.",
+  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"cyavkatv25b-r4-discovery-F-008-a1/38435670041\"} as the whole file campaigns/cyavKATv25b r4/work/browser/WAKE_ACK_reviewer-2_v1.json on CurveYield2/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nYou are reviewer-2. Campaign cyavkatv25b-r4\n\nUse the GitHub connector app for every repository read and write.\n\nInstructions: https://github.com/CurveYield2/Audit-Controller/blob/main/Audit%20Skill%20-%20Current%20Authority/Audit_Litemode_v12/discovery/FLOW_REVIEW_START_HERE.md\n\nAssignment packet: https://github.com/CurveYield2/Audit-Controller/blob/main/campaigns/cyavKATv25b%20r4/work/phase-04/discovery/F-008/ASSIGNMENT_PACKET_v1.json\n\nSubmission path: https://github.com/CurveYield2/Audit-Controller/blob/main/campaigns/cyavKATv25b%20r4/work/phase-04/discovery/F-008/SUBMISSION_v1.json\n\nBoundary request location: process/agent-upload/lite-phase-boundary/\n\nExact boundary request JSON: {\"schemaVersion\":\"curveyield-lite-phase-boundary-request-v1\",\"campaignId\":\"cyavkatv25b-r4\",\"reviewKind\":\"discovery\",\"unitId\":\"F-008\",\"auditControllerRef\":\"main\",\"attempt\":1}\n\nIf no controller response arrives within 30 minutes of pushing the request, push the same request again with attempt increased by 1.",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
     "phaseId": "phase-4",
-    "milestoneId": "DISCOVERY_F-006",
+    "milestoneId": "DISCOVERY_F-008",
     "workerRole": "reviewer",
     "reviewer": "reviewer-2",
     "thinkingEffort": "high"
@@ -46,7 +46,7 @@
       "ref": "main",
       "statePath": "Audit Campaign Directory/campaigns/cyavkatv25b.json",
       "expectedPhaseId": "phase-4",
-      "expectedMilestoneId": "DISCOVERY_F-006",
+      "expectedMilestoneId": "DISCOVERY_F-008",
       "activePointerPath": "",
       "stopStates": [
         "STOPPED_BY_HUMAN"
@@ -62,12 +62,12 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-13T16:57:05Z",
+  "updatedAt": "2026-10-13T17:12:18Z",
   "wakeDelivery": {
-    "milestoneId": "DISCOVERY_F-006",
+    "milestoneId": "DISCOVERY_F-008",
     "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6accaf3c-ffcc-83e8-aa29-6d2928c833c7",
-    "deliveredAt": "2026-10-13T16:57:05Z",
+    "deliveredAt": "2026-10-13T17:12:18Z",
     "verification": "REVIEWER_GITHUB_CHECK_IN",
-    "ackId": "cyavkatv25b-r4-discovery-F-006-a1/38433905672"
+    "ackId": "cyavkatv25b-r4-discovery-F-008-a1/38435670041"
   }
 }
