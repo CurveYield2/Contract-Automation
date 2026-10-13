@@ -45,7 +45,7 @@
     "enabled": true,
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2,
-    "consecutiveIdlePokes": 1,
+    "consecutiveIdlePokes": 2,
     "consecutiveUnviewable": 0
   },
   "watchdogRunId": "38368588871",
@@ -63,6 +63,6 @@
     "areaChanged": null,
     "status": "STOP_CLICK_MISSED_NOT_ON_BUTTON"
   },
-  "lastPokedAt": "2026-10-13T07:48:50Z",
-  "pokeCount": 1
+  "lastPokedAt": "2026-10-13T08:23:01Z",
+  "pokeCount": 2
 }
