@@ -426,13 +426,13 @@ async function x11FindButton(file, originX, originY) {
   }
   // Coarse map of the crop for the run log (8 px cells: ' ' none, '.' some, '+' half, '#' mostly
   // dark), so a miss can be diagnosed from the log without downloading screenshots.
-  const map=[];
-  for(let y=0;y<h;y+=8){
+  const map=[];const C=16;
+  for(let y=0;y<h;y+=C){
     let row='';
-    for(let x=0;x<w;x+=8){const c=box(x,y,x+8,y+8);row+=c===0?' ':c<16?'.':c<40?'+':'#';}
+    for(let x=0;x<w;x+=C){const c=box(x,y,x+C,y+C);row+=c===0?' ':c<C*C/16?'.':c<C*C/2?'+':'#';}
     map.push(row.replace(/\s+$/,''));
   }
-  console.log('[normal-chrome-watchdog] stop-search-map origin='+originX+','+originY+' cell=8px\n'+map.map(r=>'|'+r).join('\n'));
+  console.log('[normal-chrome-watchdog] stop-search-map origin='+originX+','+originY+' size='+w+'x'+h+' cell='+C+'px\n'+map.map(r=>'|'+r).join('\n'));
   return best?{x:originX+best.x+S/2,y:originY+best.y+S/2,darkPixels:best.count,darkAround:best.around}:null;
 }
 
@@ -664,9 +664,11 @@ async function runNormalChromeExistingSession(chromium) {
       // The composer already holds text, so the button is never the voice button.
       // The button moves when the typed poke wraps the composer onto more lines, so it is
       // located from a desktop screenshot of the composer's lower-right area, never the page.
-      const searchX = Math.round(width * 0.55);
-      const searchY = Math.max(0, height - 170);
-      const searchW = Math.round(width * 0.40);
+      // Lower half, right of centre: wide enough to survive layout/viewport offsets.
+      // The 60 px disc test (solid disc, clean surround) keeps this specific.
+      const searchX = Math.round(width * 0.40);
+      const searchY = Math.round(height * 0.50);
+      const searchW = width - searchX;
       const searchH = height - searchY;
       const search = await captureX11VisualEvidence('stop_search_area', [searchX, searchY, searchW, searchH].join(','), 64);
       const disc = await x11FindButton(search, searchX, searchY);
