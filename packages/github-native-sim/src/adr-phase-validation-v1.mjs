@@ -3,6 +3,7 @@ import path from 'node:path';
 import {repoFile,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 import {buildCoverageMatrixV1,renderCoverageMarkdownV1} from './adr-coverage-matrix-v1.mjs';
 import {loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
+import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
 
 const arr=x=>Array.isArray(x)?x:[];
 const obj=x=>x&&typeof x==='object'&&!Array.isArray(x);
@@ -132,7 +133,7 @@ export function appendAdrCoverageSectionV1({root,campaignPath,automationRoot,tex
  try{
   const discovery=read(rootFile(root,campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json'));
   if(!discovery)return text;
-  const inventory=read(rootFile(root,campaignPath,'evidence/review-inventory/REVIEW_INVENTORY_v1.json'));
+  const inventory=read(repoFile(root,reviewInventoryRelV1(root,campaignPath,'REVIEW_INVENTORY_v1.json')));
   if(!inventory)return text;
   const p6=read(rootFile(root,campaignPath,'derived/phase-6/PHASE_06_CANONICAL_DATA_v1.json'));
   const baseline=read(rootFile(root,campaignPath,'work/phase-06/BASELINE_OBLIGATIONS_v1.json'));
