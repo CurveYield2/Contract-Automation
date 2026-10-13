@@ -28,7 +28,7 @@ interface INativeVaultR2 {
     function convertToAssets(uint256) external view returns (uint256);
 }
 interface IRealOldWmR2 {
-    struct Request {uint256 shares;uint256 endWithdrawWindowTimestamp;bool canWithdraw;uint256 withdrawWindowInSeconds;}
+    struct Request {uint256 shares;uint256 endWithdrawWindowTimestamp;bool canWithdraw;uint256 withdrawWindowInSeconds;uint256 refundableFeeShares;}
     function requestShares(uint256) external;
     function requestInfo(address) external view returns (Request memory);
     function getRequestFee() external view returns(uint256);
@@ -134,7 +134,9 @@ contract Round2Native_v1 is Test {
         CurveYieldSignatureFuse uninstallFuse = new CurveYieldSignatureFuse(7,VAULT,PRESERVED);
         address[] memory u = new address[](1);u[0]=address(uninstallFuse);
         bool reg=_safeExec("authorized_add_uninstaller",abi.encodeCall(INativeVaultR2.addFuses,(u)));
-        emit log_named_string("uninstall_registry_access",reg?"AUTHORIZED":"BLOCKED");
+        emit log_named_string("safe_uninstall_registry_access",reg?"AUTHORIZED":"BLOCKED");
+        if(!reg){(reg,)=_probe("operator_add_uninstaller",DEPLOYER,VAULT,abi.encodeCall(INativeVaultR2.addFuses,(u)));}
+        emit log_named_string("operator_or_safe_uninstaller_registered",reg?"YES":"NO");
         if(!reg)return;
         FuseAction[] memory act=new FuseAction[](1);
         act[0]=FuseAction(address(uninstallFuse),abi.encodeCall(CurveYieldSignatureFuse.uninstall,()));
@@ -155,6 +157,7 @@ contract Round2Native_v1 is Test {
         CurveYieldSignatureFuse installer=new CurveYieldSignatureFuse(7,VAULT,address(admitted));
         u[0]=address(installer);
         bool registered=_safeExec("authorized_add_admitted_installer",abi.encodeCall(INativeVaultR2.addFuses,(u)));
+        if(!registered){(registered,)=_probe("operator_add_admitted_installer",DEPLOYER,VAULT,abi.encodeCall(INativeVaultR2.addFuses,(u)));}
         if(!registered){emit log_string("R2_SOURCE_INSTALL_BLOCKED_ADD_FUSE");return;}
         act[0]=FuseAction(address(installer),abi.encodeCall(CurveYieldSignatureFuse.install,()));
         (bool installed,)=_probe("authorized_install_admitted_source",DEPLOYER,VAULT,
@@ -231,7 +234,40 @@ contract Round2Native_v1 is Test {
             emit log_named_address("claimant",claimants[i]);
             emit log_named_uint("old_real_request_shares",info.shares);
             emit log_named_uint("old_window_end",info.endWithdrawWindowTimestamp);
+            emit log_named_uint("old_refundable_fee_shares",info.refundableFeeShares);
             emit log_named_string("old_claim_can_withdraw",info.canWithdraw?"true":"false");
+        }
+        if(funded==3){
+            IRealOldWmR2.Request memory pending=oldWm.requestInfo(claimants[0]);
+            IRealOldWmR2.Request memory toRelease=oldWm.requestInfo(claimants[1]);
+            IRealOldWmR2.Request memory feeCase=oldWm.requestInfo(claimants[2]);
+            emit log_named_uint("pending_before_release",pending.shares);
+            emit log_named_uint("release_before",toRelease.shares);
+            emit log_named_uint("fee_request_refundable",feeCase.refundableFeeShares);
+            emit log_named_uint("fee_escrow_before_release",vault.balanceOf(OLD_WM));
+            // Genuine protocol release window; virtual-time increment is two seconds, far below expiry.
+            vm.warp(block.timestamp+2);
+            (bool released,bytes memory releaseRaw)=_probe("authorized_controller_oldWM_releaseFunds",CONTROLLER,OLD_WM,
+                abi.encodeCall(IRealOldWmR2.releaseFunds,(block.timestamp-1,toRelease.shares)));
+            if(!released){
+                (released,releaseRaw)=_probe("authorized_deployer_oldWM_releaseFunds",DEPLOYER,OLD_WM,
+                    abi.encodeCall(IRealOldWmR2.releaseFunds,(block.timestamp-1,toRelease.shares)));
+            }
+            emit log_named_string("real_oldWM_release_success",released?"true":"false");
+            emit log_named_bytes("real_oldWM_release_raw",releaseRaw);
+            emit log_named_uint("real_oldWM_total_released",oldWm.getSharesToRelease());
+            emit log_named_uint("fee_escrow_after_release",vault.balanceOf(OLD_WM));
+            IRealOldWmR2.Request memory afterReleased=oldWm.requestInfo(claimants[1]);
+            emit log_named_uint("released_owner_remaining_shares",afterReleased.shares);
+            emit log_named_string("released_owner_can_withdraw",afterReleased.canWithdraw?"true":"false");
+            emit log_named_uint("pending_other_owner_remains",oldWm.requestInfo(claimants[0]).shares);
+            if(released && afterReleased.canWithdraw){
+                uint256 amount=toRelease.shares>1e12?1e12:toRelease.shares;
+                (bool normalOk,bytes memory normalRaw)=_probe("healthy_pre_cutover_real_redeemFromRequest",claimants[1],VAULT,
+                    abi.encodeCall(INativeVaultR2.redeemFromRequest,(amount,claimants[1],claimants[1])));
+                emit log_named_string("healthy_pre_cutover_redeem",normalOk?"SUCCESS":"REVERT");
+                emit log_named_bytes("healthy_redeem_raw",normalRaw);
+            }
         }
         // Always report actual role/allowance state; do not fabricate nonzero classes.
         (bool alphaOld,)=IAccessR2(ACCESS).hasRole(200,OLD_WM);
