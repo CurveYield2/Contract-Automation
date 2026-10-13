@@ -101,10 +101,16 @@ jobs:
           set +e
           SRC=targeted-output/.phase0-simulation-work/archive-source/cyavKAT/upgrade
           if [ ! -d "$SRC/test/katana" ]; then
-            printf "Source staging missing after native replay; no ABI test executed\n" > targeted-output/CONFORMANCE_v1.log
-            echo "exit=126" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::warning::Native stage has no test/katana; recover from already SHA-256-verified campaign source"
+            SRC=".audit-controller/$CAMPAIGN_PATH/source/cyavKAT/upgrade"
           fi
+          if [ ! -f "$SRC/test/katana/QuestSigningLayer.t.sol" ]; then
+            echo "::error::Neither native stage nor verified campaign source has the required native conformance fixtures"
+            echo "exit=126" >> "$GITHUB_OUTPUT"
+            printf 'Missing verified QuestSigningLayer native test fixture at %s\n' "$SRC" > targeted-output/CONFORMANCE_v1.log
+            exit 1
+          fi
+          printf 'Executing source-bound conformance tests using %s\n' "$SRC" > targeted-output/CONFORMANCE_SOURCE_v2.txt
           cp packages/github-native-sim/audit-harnesses/cyavkat-r4-targeted-v1/MasterTargetedConformance_v1.t.sol "$SRC/test/katana/MasterTargetedConformance_v1.t.sol"
           (
             cd "$SRC"
