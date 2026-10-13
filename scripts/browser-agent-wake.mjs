@@ -401,13 +401,21 @@ async function verifyX11VisibleChatAddress(requested) {
 // pixels with an almost empty 8 px band around it. Text has too few dark pixels; a
 // dark block or code panel fills the window or its surrounding band.
 async function x11FindButton(file, originX, originY) {
-  const {stdout}=await runCapture('convert',[file,'-colorspace','Gray','-depth','8','txt:-']);
-  let w=0,h=0;const dark=[];
+  // Colour-blind: a pixel counts when it differs strongly from the crop's dominant
+  // (background) colour, so a black, blue or dark-mode button all register.
+  const {stdout}=await runCapture('convert',[file,'-alpha','off','-colorspace','sRGB','-depth','8','txt:-'],{maxBuffer:1<<28});
+  let w=0,h=0;const px=[];const hist=new Map();
   for(const line of stdout.split('\n')){
-    const m=line.match(/^(\d+),(\d+):.*#([0-9A-Fa-f]{2})/);if(!m)continue;
-    const x=+m[1],y=+m[2];w=Math.max(w,x+1);h=Math.max(h,y+1);
-    if(parseInt(m[3],16)<90)dark.push([x,y]);
+    const m=line.match(/^(\d+),(\d+):.*?#([0-9A-Fa-f]{6})/);if(!m)continue;
+    const x=+m[1],y=+m[2],v=parseInt(m[3],16),r=v>>16,g=(v>>8)&255,b=v&255;
+    w=Math.max(w,x+1);h=Math.max(h,y+1);px.push([x,y,r,g,b]);
+    const q=(r>>4)<<8|(g>>4)<<4|(b>>4);hist.set(q,(hist.get(q)||0)+1);
   }
+  let bgq=0,bgn=-1;for(const [q,n] of hist)if(n>bgn){bgq=q;bgn=n;}
+  const bg=[((bgq>>8)<<4)+8,(((bgq>>4)&15)<<4)+8,((bgq&15)<<4)+8];
+  const dark=[];
+  for(const [x,y,r,g,b] of px)
+    if(Math.hypot(r-bg[0],g-bg[1],b-bg[2])>110)dark.push([x,y]);
   const integral=new Int32Array((w+1)*(h+1));
   for(const [x,y] of dark)integral[(y+1)*(w+1)+x+1]+=1;
   for(let y=1;y<=h;y++)for(let x=1;x<=w;x++)
@@ -416,23 +424,23 @@ async function x11FindButton(file, originX, originY) {
     x0=Math.max(0,x0);y0=Math.max(0,y0);x1=Math.min(w,x1);y1=Math.min(h,y1);
     return integral[y1*(w+1)+x1]-integral[y0*(w+1)+x1]-integral[y1*(w+1)+x0]+integral[y0*(w+1)+x0];
   };
-  const S=40,band=8;let best=null;
+  const S=60,band=8;let best=null;
   for(let y=0;y+S<=h;y+=2)for(let x=0;x+S<=w;x+=2){
     const count=box(x,y,x+S,y+S);
-    if(count<500||count>1350)continue;
+    if(count<1200||count>2700)continue;
     const around=box(x-band,y-band,x+S+band,y+S+band)-count;
-    if(around>60)continue;
+    if(around>120)continue;
     if(!best||count>best.count)best={x,y,count,around};
   }
   // Coarse map of the crop for the run log (8 px cells: ' ' none, '.' some, '+' half, '#' mostly
   // dark), so a miss can be diagnosed from the log without downloading screenshots.
-  const map=[];
-  for(let y=0;y<h;y+=8){
+  const map=[];const C=16;
+  for(let y=0;y<h;y+=C){
     let row='';
-    for(let x=0;x<w;x+=8){const c=box(x,y,x+8,y+8);row+=c===0?' ':c<16?'.':c<40?'+':'#';}
+    for(let x=0;x<w;x+=C){const c=box(x,y,x+C,y+C);row+=c===0?' ':c<C*C/16?'.':c<C*C/2?'+':'#';}
     map.push(row.replace(/\s+$/,''));
   }
-  console.log('[normal-chrome-watchdog] stop-search-map origin='+originX+','+originY+' cell=8px\n'+map.map(r=>'|'+r).join('\n'));
+  console.log('[normal-chrome-watchdog] stop-search-map origin='+originX+','+originY+' size='+w+'x'+h+' cell='+C+'px\n'+map.map(r=>'|'+r).join('\n'));
   return best?{x:originX+best.x+S/2,y:originY+best.y+S/2,darkPixels:best.count,darkAround:best.around}:null;
 }
 
@@ -664,9 +672,11 @@ async function runNormalChromeExistingSession(chromium) {
       // The composer already holds text, so the button is never the voice button.
       // The button moves when the typed poke wraps the composer onto more lines, so it is
       // located from a desktop screenshot of the composer's lower-right area, never the page.
-      const searchX = Math.round(width * 0.55);
-      const searchY = Math.max(0, height - 170);
-      const searchW = Math.round(width * 0.40);
+      // Lower half, right of centre: wide enough to survive layout/viewport offsets.
+      // The 60 px disc test (solid disc, clean surround) keeps this specific.
+      const searchX = Math.round(width * 0.40);
+      const searchY = Math.round(height * 0.50);
+      const searchW = width - searchX;
       const searchH = height - searchY;
       const search = await captureX11VisualEvidence('stop_search_area', [searchX, searchY, searchW, searchH].join(','), 64);
       const disc = await x11FindButton(search, searchX, searchY);
