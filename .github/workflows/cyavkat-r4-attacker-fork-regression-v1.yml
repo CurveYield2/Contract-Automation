@@ -97,7 +97,7 @@ jobs:
         run: |
           set +e
           test "$(cat attacker-output/FOUNDRY_EXIT_v1.txt)" = "0" &&
-          grep -Eq '8 tests? passed|Ran 8 tests' attacker-output/FOUNDRY_v1.log &&
+          grep -Eq '10 tests? passed|Ran 10 tests' attacker-output/FOUNDRY_v1.log &&
           grep -q 'CONFIRMED_UNPRIVILEGED_GATE_REPLACEMENT' attacker-output/FOUNDRY_v1.log &&
           grep -q 'CONFIRMED_OUTSIDER_GATE_SETTER_CAN_CAUSE_VIEW_DOS' attacker-output/FOUNDRY_v1.log &&
           grep -q 'CONFIRMED_FUSE_BALANCE_OVERPAYMENT' attacker-output/FOUNDRY_v1.log &&
@@ -105,11 +105,13 @@ jobs:
           grep -q 'NEGATIVE_CONTROL_UNGRANTED_RECIPIENT_BLOCKED' attacker-output/FOUNDRY_v1.log &&
           grep -q 'NATIVE_PRESERVED_STATE_SNAPSHOT' attacker-output/FOUNDRY_v1.log &&
           grep -q 'NATIVE_OUTSIDER_FUSE_AND_SUBSTRATE_MUTATIONS_BLOCKED' attacker-output/FOUNDRY_v1.log &&
-          grep -q 'authorized_add_source_fuse' attacker-output/FOUNDRY_v1.log
+          grep -q 'authorized_add_source_fuse' attacker-output/FOUNDRY_v1.log &&
+          grep -q 'CONFIRMED_SEASONING_MISSED_DAY_GAP_COUNTS_FRESH_CAPITAL' attacker-output/FOUNDRY_v1.log &&
+          grep -q 'CONFIRMED_SEASONING_DAILY_LOW_IS_MAXIMUM_NOT_MINIMUM' attacker-output/FOUNDRY_v1.log
           code=$?
           printf '%s\n' "$code" > attacker-output/ASSERTIONS_EXIT_v1.txt
           if [ "$code" -eq 0 ]; then
-            echo 'ATTACKER_REGRESSION_PASS_WITH_EIGHT_REAL_TESTS' >> "$GITHUB_STEP_SUMMARY"
+            echo 'ATTACKER_REGRESSION_PASS_WITH_TEN_REAL_TESTS' >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'ATTACKER_REGRESSION_INCOMPLETE_OR_FAILED (do not treat workflow as successful tests)' >> "$GITHUB_STEP_SUMMARY"
           fi
