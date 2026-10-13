@@ -2,7 +2,7 @@
   "schemaVersion": "curveyield-browser-agent-wake-registration-v1",
   "campaignId": "cyavkatv25b-r4",
   "mode": "resume_existing",
-  "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd60e8-51b4-83e8-a07e-a47ef93f14bb",
+  "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd6126-ac44-83e8-a72e-a6664247d395",
   "browserRoutine": "",
   "agentChats": {
     "reviewer-1": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6accaf26-3df8-83e8-8fe9-eec03ae4fbbe",
@@ -22,17 +22,17 @@
     "url": ""
   },
   "activeChat": {
-    "name": "reviewer-3L",
-    "url": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd60e8-51b4-83e8-a07e-a47ef93f14bb"
+    "name": "master-reviewer",
+    "url": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd6126-ac44-83e8-a72e-a6664247d395"
   },
-  "wakeMessage": "DO THIS FIRST, RIGHT NOW, BEFORE ANY OTHER TASK OR INSTRUCTION.\nMANDATORY REVIEWER WAKE RECEIPT: Your first action: fetch the exact acknowledgement file named below from the specified GitHub repository and branch. If it exists, use the GitHub update_file operation with its current file SHA to replace the complete contents with the provided JSON. If and only if that exact file returns HTTP 404 Not Found, use create_file at the exact same path with the provided JSON. On any other error, stop without writing.\nRepository: CurveYield2/Audit-Controller\nBranch: main\nExact campaign file: campaigns/cyavKATv25b r4/work/browser/WAKE_ACK_reviewer-3L_v1.json\nWrite the following JSON as the entire file, preserving the values exactly:\n{\"schemaVersion\":\"curveyield-browser-wake-ack-v1\",\"ackId\":\"cyavkatv25b-r4-9d6bf84aa675f6811deed548b627d18afc520704e74aeb07e5dd3410084f9395-test-reviewer/38341055769\",\"wakeId\":\"cyavkatv25b-r4-9d6bf84aa675f6811deed548b627d18afc520704e74aeb07e5dd3410084f9395-test-reviewer\",\"runId\":\"38341055769\",\"phaseId\":\"master-targeted-tests\",\"reviewer\":\"reviewer-3L\"}\nDo not read the audit skill, analyze contracts, edit work forms, or perform any other action until the GitHub write succeeds. This is only a delivery check-in, not audit bookkeeping. After the write, immediately follow the complete audit instructions below. Do not ask for confirmation.\n\nAFTER YOUR MANDATORY WAKE RECEIPT, READ Audit Skill - Current Authority/Audit_Litemode_v12/master-review/TARGETED_TEST_DIRECTIVE_v1.md IN CurveYield2/Audit-Controller USING THE GITHUB CONNECTOR. Follow its executing-reviewer instructions exactly.\n\nMASTER_TARGETED_TESTS_REQUIRED: Execute the exact plan at campaigns/cyavKATv25b r4/work/master-review/reviewer-1-phase-01/TARGETED_TEST_REQUEST_v1.json for cyavkatv25b-r4. Reviewer reviewer-3L must run decisive tests, retain raw evidence under campaign evidence/master-targeted-tests/9d6bf84aa675f6811deed548b627d18afc520704e74aeb07e5dd3410084f9395, submit a digest-bound RESULT_v1.json at campaigns/cyavKATv25b r4/work/master-review/reviewer-1-phase-01/targeted-tests/9d6bf84aa675f6811deed548b627d18afc520704e74aeb07e5dd3410084f9395/RESULT_v1.json and then submit a master-test-result boundary request. Do not edit any sealed phase or controller bookkeeping. Master acceptance and campaign COMPLETE remain held.",
+  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"cyavkatv25b-r4-reviewer-1-phase-01-master-reviewer/38356426638\"} as the whole file campaigns/cyavKATv25b r4/work/browser/WAKE_ACK_master-reviewer_v1.json on CurveYield2/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nMASTER_TARGETED_TESTS_EVIDENCE_SUBMITTED: 9f283a35597d2032b3fb3159979405079eb7a6c6d3fe187ad33ec47f795853e9. Master must inspect raw evidence and amend the reviewer-owned work forms before acceptance. Unresolved candidates still block final COMPLETE.",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
-    "phaseId": "master-targeted-tests",
-    "milestoneId": "9d6bf84aa675f6811deed548b627d18afc520704e74aeb07e5dd3410084f9395",
+    "phaseId": "master-review",
+    "milestoneId": "reviewer-1-phase-01",
     "workerRole": "reviewer",
-    "reviewer": "reviewer-3L",
+    "reviewer": "master-reviewer",
     "thinkingEffort": "high"
   },
   "watchdog": {
@@ -44,8 +44,8 @@
       "repository": "CurveYield2/Audit-Controller",
       "ref": "main",
       "statePath": "Audit Campaign Directory/campaigns/cyavkatv25b.json",
-      "expectedPhaseId": "master-targeted-tests",
-      "expectedMilestoneId": "9d6bf84aa675f6811deed548b627d18afc520704e74aeb07e5dd3410084f9395",
+      "expectedPhaseId": "master-review",
+      "expectedMilestoneId": "reviewer-1-phase-01",
       "activePointerPath": "",
       "stopStates": [
         "STOPPED_BY_HUMAN"
@@ -61,12 +61,12 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-13T03:25:29Z",
+  "updatedAt": "2026-10-13T06:28:17Z",
   "wakeDelivery": {
-    "milestoneId": "9d6bf84aa675f6811deed548b627d18afc520704e74aeb07e5dd3410084f9395",
-    "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd60e8-51b4-83e8-a07e-a47ef93f14bb",
-    "deliveredAt": "2026-10-13T03:25:29Z",
+    "milestoneId": "reviewer-1-phase-01",
+    "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6acd6126-ac44-83e8-a72e-a6664247d395",
+    "deliveredAt": "2026-10-13T06:28:16Z",
     "verification": "REVIEWER_GITHUB_CHECK_IN",
-    "ackId": "cyavkatv25b-r4-9d6bf84aa675f6811deed548b627d18afc520704e74aeb07e5dd3410084f9395-test-reviewer/38341055769"
+    "ackId": "cyavkatv25b-r4-reviewer-1-phase-01-master-reviewer/38356426638"
   }
 }
