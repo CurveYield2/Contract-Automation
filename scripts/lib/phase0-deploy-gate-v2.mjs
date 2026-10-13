@@ -1,9 +1,10 @@
 import {createHash} from 'node:crypto';
+import {assertPhase0ForkIdentity} from '../../packages/github-native-sim/src/phase0-deployment-profile-v1.mjs';
 export const EXCLUSIONS_V2=new Set(['EXCLUDED_DUPLICATE_FRAMEWORK','EXCLUDED_NON_DEPLOYMENT_UTILITY','EXCLUDED_OTHER_CHAIN']);
 export const digestV2=value=>createHash('sha256').update(value).digest('hex');
 export function assertDeployGateEvidenceV2(e){
   if(e?.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||e.executionMode!=='ANVIL_FORK_PACKAGE_DEPLOY_CONFIG_ONLY')throw new Error('Invalid Phase 0 deploy evidence schema/mode');
-  if(e.fork?.engine!=='anvil'||e.fork?.chainId!==1||e.fork?.identityNormalized!==true)throw new Error('Invalid Ethereum Anvil fork identity');
+  assertPhase0ForkIdentity(e);
   if(e.status==='NOT_APPLICABLE_NO_DEPLOYMENT_SCRIPT'){
     // No deployment script is a machine-discovered negative, never an agent
     // choice that can hide failed or unexecuted source-native deployment.

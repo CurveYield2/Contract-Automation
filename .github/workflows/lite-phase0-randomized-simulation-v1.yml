@@ -52,9 +52,12 @@ jobs:
           set -euo pipefail
           bash scripts/checkout-audit-controller-once-v1.sh .audit-controller "$AUDIT_CONTROLLER_REF"
 
-      - name: Run package deployment and configuration scripts on isolated Ethereum Anvil fork
+      - name: Run package deployment and configuration scripts on isolated Anvil fork
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+          # Used only when the source package's audit-deployment.json declares chain "katana";
+          # the runner verifies the upstream reports chain 747474 and never passes it to package scripts.
+          KATANA_FORK_RPC_URL: ${{ secrets.RPC_KATANA }}
           CAMPAIGN_PATH: ${{ inputs.campaign_path }}
         shell: bash
         run: |
