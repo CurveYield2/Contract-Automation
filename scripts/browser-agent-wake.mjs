@@ -694,6 +694,17 @@ async function runNormalChromeExistingSession(chromium) {
         await page.waitForTimeout(4000);
         const areaAfter = await captureX11VisualEvidence('stop_area_after', area, 64);
         stopClick.areaChanged = !(await fs.readFile(areaBefore)).equals(await fs.readFile(areaAfter));
+        // The button click takes focus out of the text box. Click back into the box (left of
+        // the button, on the same row) so the Return below submits the typed message. If the
+        // click above already sent it (idle chat), the box is empty and Return does nothing;
+        // never click the button again, which would stop the reply just sent.
+        const refocusX = Math.max(Math.round(width * 0.40), stopX - 300);
+        await x11Key(['mousemove', '--sync', String(refocusX), String(stopY)], 'x11-refocus-move');
+        await page.waitForTimeout(randomDelayMs(180, 360));
+        await x11Key(['click', '1'], 'x11-refocus-click');
+        await x11Key(['key', '--clearmodifiers', 'End'], 'x11-refocus-end');
+        stopClick.refocus = { x: refocusX, y: stopY };
+        await page.waitForTimeout(randomDelayMs(400, 800));
       }
       stopClick.status = !onButton ? 'STOP_CLICK_MISSED_NOT_ON_BUTTON'
         : stopClick.areaChanged ? 'STOP_CLICK_ON_BUTTON' : 'STOP_CLICK_NO_VISIBLE_CHANGE';
