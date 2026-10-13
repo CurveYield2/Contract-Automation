@@ -72,6 +72,10 @@ if [ -n "$campaign_path" ]; then
     printf '%s/\n' "$(literal_pattern "$campaign_path")"
     printf '%s\n' "$(literal_pattern "$directory_entry")"
     printf '%s/\n' "$(literal_pattern "$authority_package")"
+    # Phase, master and discovery controller logic imports this library from the
+    # private Audit-Controller worktree after semantic validation. It must be
+    # present even when only a campaign and its frozen authority are materialized.
+    printf '%s\n' "$(literal_pattern "packages/controller-core/src/lite-phase-receipt-v1.mjs")"
     if [ -n "$frozen_package" ]; then
       printf '%s\n' "$(literal_pattern "$registry")"
       printf '%s/\n' "$(literal_pattern "$frozen_package")"
