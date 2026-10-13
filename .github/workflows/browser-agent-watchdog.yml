@@ -56,7 +56,7 @@ jobs:
           echo "watchdog_targets=$count" >> "$GITHUB_STEP_SUMMARY"
 
   # GitHub drops scheduled runs under load (hours between cron sweeps), so while any
-  # target stays active the watchdog re-dispatches itself; one pending re-arm at a time.
+  # target stays active the watchdog re-dispatches itself every 15 minutes; one pending re-arm at a time.
   rearm:
     needs: [discover, supervise]
     if: always() && needs.discover.outputs.has_targets == 'true'
@@ -64,15 +64,15 @@ jobs:
       group: browser-agent-watchdog-rearm
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - name: Wait one sweep interval and re-dispatch while targets remain active
+      - name: Wait 15 minutes and re-dispatch while targets remain active
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          sleep 300
+          sleep 900
           active="$(gh api "repos/$GITHUB_REPOSITORY/contents/process/browser-agent-watchdog/active?ref=main" --jq '[.[]? | select(.type=="file" and (.name|endswith(".json")))] | length' 2>/dev/null || echo 0)"
           if [ "$active" -gt 0 ]; then
             gh workflow run browser-agent-watchdog.yml --repo "$GITHUB_REPOSITORY" --ref main
