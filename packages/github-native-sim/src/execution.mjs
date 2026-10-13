@@ -133,7 +133,13 @@ export async function checkoutExactSource({ repository, commit, destination, spa
     await fs.mkdir(path.join(resolvedDestination, '.git', 'info'), { recursive: true });
     await fs.writeFile(path.join(resolvedDestination, '.git', 'info', 'sparse-checkout'), `${sparsePatterns.join('\n')}\n`);
   }
-  const checkout = await runCommand({ command: 'git', args: ['checkout', '--detach', 'FETCH_HEAD'], cwd: resolvedDestination });
+  // A blobless (sparse) fetch downloads file contents during checkout, so checkout needs the same credentials.
+  const checkout = await runCommand({
+    command: 'git',
+    args: ['checkout', '--detach', 'FETCH_HEAD'],
+    cwd: resolvedDestination,
+    ...(sparse ? { env: authenticatedGitEnvironment(environment) } : {})
+  });
   await requireSuccess(checkout, 'SOURCE_CHECKOUT_FAILURE', 'git', ['checkout', '--detach', 'FETCH_HEAD']);
   const rev = await runCommand({ command: 'git', args: ['rev-parse', 'HEAD'], cwd: resolvedDestination });
   await requireSuccess(rev, 'SOURCE_CHECKOUT_FAILURE', 'git', ['rev-parse', 'HEAD']);
