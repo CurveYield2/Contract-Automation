@@ -424,6 +424,15 @@ async function x11FindButton(file, originX, originY) {
     if(around>60)continue;
     if(!best||count>best.count)best={x,y,count,around};
   }
+  // Coarse map of the crop for the run log (8 px cells: ' ' none, '.' some, '+' half, '#' mostly
+  // dark), so a miss can be diagnosed from the log without downloading screenshots.
+  const map=[];
+  for(let y=0;y<h;y+=8){
+    let row='';
+    for(let x=0;x<w;x+=8){const c=box(x,y,x+8,y+8);row+=c===0?' ':c<16?'.':c<40?'+':'#';}
+    map.push(row.replace(/\s+$/,''));
+  }
+  console.log('[normal-chrome-watchdog] stop-search-map origin='+originX+','+originY+' cell=8px\n'+map.map(r=>'|'+r).join('\n'));
   return best?{x:originX+best.x+S/2,y:originY+best.y+S/2,darkPixels:best.count,darkAround:best.around}:null;
 }
 
