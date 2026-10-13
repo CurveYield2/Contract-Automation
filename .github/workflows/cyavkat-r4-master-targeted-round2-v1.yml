@@ -113,6 +113,7 @@ jobs:
           fi
           printf 'Round2 admitted-source native fork tests; pinned upstream 45121798; source %s\n' "$SRC" > targeted-output/CONFORMANCE_SOURCE_v2.txt
           cp packages/github-native-sim/audit-harnesses/cyavkat-r4-targeted-round2-v1/Round2Native_v1.t.sol "$SRC/test/katana/Round2Native_v1.t.sol"
+          echo "Verified local Anvil fork chainId=747474 via Node fetch; process=$fork_pid" >> targeted-output/LEGACY_ANVIL_v1.log
           (
             cd "$SRC"
             FOUNDRY_TEST=test/katana timeout 1080s forge test --match-path test/katana/Round2Native_v1.t.sol --fork-url https://katana.drpc.org/ --fork-block-number 45121798 -vvvvv
@@ -155,7 +156,8 @@ jobs:
           trap 'kill "$fork_pid" 2>/dev/null || true' EXIT
           up=0
           for i in $(seq 1 45); do
-            if cast block-number --rpc-url http://127.0.0.1:8655 >/dev/null 2>&1; then up=1; break; fi
+            if ! kill -0 "$fork_pid" 2>/dev/null; then echo "Anvil child terminated before RPC readiness"; break; fi
+            if node -e 'fetch("http://127.0.0.1:8655",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({jsonrpc:"2.0",id:1,method:"eth_chainId",params:[]}),signal:AbortSignal.timeout(3500)}).then(r=>r.json()).then(j=>{if(BigInt(j.result)!==747474n)process.exit(2)}).catch(e=>{console.error("RPC not yet ready:",String(e.cause?.code||e.message));process.exit(1)})' >> targeted-output/LEGACY_ANVIL_v1.log 2>&1; then up=1; break; fi
             sleep 2
           done
           if [ "$up" -ne 1 ]; then
