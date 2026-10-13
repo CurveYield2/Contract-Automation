@@ -94,7 +94,7 @@ function authenticatedGitEnvironment(environment) {
   };
 }
 
-export async function checkoutExactSource({ repository, commit, destination }, {
+export async function checkoutExactSource({ repository, commit, destination, sparsePatterns = null }, {
   runCommand = runProcess,
   environment = process.env
 } = {}) {
@@ -113,7 +113,12 @@ export async function checkoutExactSource({ repository, commit, destination }, {
   const remote = `https://github.com/${repository}.git`;
   const addRemote = await runCommand({ command: 'git', args: ['remote', 'add', 'origin', remote], cwd: resolvedDestination });
   await requireSuccess(addRemote, 'SOURCE_CHECKOUT_FAILURE', 'git', ['remote', 'add', 'origin', remote]);
-  const fetchArgs = ['fetch', '--depth', '1', 'origin', commit];
+  // Optional no-cone sparse patterns: fetch blobs lazily and materialize only the listed paths.
+  const sparse = Array.isArray(sparsePatterns) && sparsePatterns.length > 0;
+  if (sparse && sparsePatterns.some((p) => typeof p !== 'string' || !p.startsWith('/') || /[\r\n]/.test(p) || p.split('/').includes('..'))) {
+    throw new V7ExecutionError('SOURCE_INTEGRITY_FAILURE', 'sparse patterns must be anchored single-line repository paths');
+  }
+  const fetchArgs = sparse ? ['fetch', '--depth', '1', '--filter=blob:none', 'origin', commit] : ['fetch', '--depth', '1', 'origin', commit];
   const fetch = await runCommand({
     command: 'git',
     args: fetchArgs,
@@ -121,6 +126,13 @@ export async function checkoutExactSource({ repository, commit, destination }, {
     env: authenticatedGitEnvironment(environment)
   });
   await requireSuccess(fetch, 'SOURCE_CHECKOUT_FAILURE', 'git', fetchArgs);
+  if (sparse) {
+    for (const args of [['config', 'core.sparseCheckout', 'true'], ['config', 'core.sparseCheckoutCone', 'false']]) {
+      await requireSuccess(await runCommand({ command: 'git', args, cwd: resolvedDestination }), 'SOURCE_CHECKOUT_FAILURE', 'git', args);
+    }
+    await fs.mkdir(path.join(resolvedDestination, '.git', 'info'), { recursive: true });
+    await fs.writeFile(path.join(resolvedDestination, '.git', 'info', 'sparse-checkout'), `${sparsePatterns.join('\n')}\n`);
+  }
   const checkout = await runCommand({ command: 'git', args: ['checkout', '--detach', 'FETCH_HEAD'], cwd: resolvedDestination });
   await requireSuccess(checkout, 'SOURCE_CHECKOUT_FAILURE', 'git', ['checkout', '--detach', 'FETCH_HEAD']);
   const rev = await runCommand({ command: 'git', args: ['rev-parse', 'HEAD'], cwd: resolvedDestination });
@@ -132,7 +144,7 @@ export async function checkoutExactSource({ repository, commit, destination }, {
       actualCommit: resolvedCommit
     });
   }
-  return { repository, commit: resolvedCommit, destination: resolvedDestination };
+  return { repository, commit: resolvedCommit, destination: resolvedDestination, sparsePatterns: sparse ? [...sparsePatterns] : null };
 }
 
 export async function sha256File(filePath) {

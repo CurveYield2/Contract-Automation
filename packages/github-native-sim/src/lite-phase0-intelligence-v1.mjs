@@ -652,7 +652,14 @@ async function main(){
 
   const out=path.resolve(args.output), work=path.join(out,'work'); await fs.rm(out,{recursive:true,force:true}); await fs.mkdir(work,{recursive:true});
   const checkoutRoot=path.join(work,'source-repo');
-  const checkout=await withProgressStage('exact-source-checkout',()=>checkoutExactSource({repository:request.source.repository,commit:request.source.commit,destination:checkoutRoot},{environment:process.env}));
+  // Phase 0 reads only its campaign (which holds the source archive) and, at write-back, the current
+  // authority package. Materialize just those paths instead of the whole controller repository.
+  const literal=p=>'/'+p.replace(/[[\]*?!#\\]/g,'\\$&');
+  const campaignPath=request.destination.campaignPath.replace(/\/+$/,'');
+  const sparsePatterns=request.source.repository===request.destination.repository&&request.source.archivePath.startsWith(campaignPath+'/')
+    ? [literal(campaignPath)+'/','/Audit Skill - Current Authority/*/']
+    : null;
+  const checkout=await withProgressStage('exact-source-checkout',()=>checkoutExactSource({repository:request.source.repository,commit:request.source.commit,destination:checkoutRoot,sparsePatterns},{environment:process.env}));
   const archiveAbs=path.join(checkoutRoot,...request.source.archivePath.split('/'));
   const archiveBytes=await fs.readFile(archiveAbs); const observed=sha256(archiveBytes);
   if(observed!==request.source.archiveSha256)throw new Error(`source archive SHA mismatch expected ${request.source.archiveSha256} observed ${observed}`);

@@ -80,7 +80,7 @@ jobs:
       - name: Load original campaign and immutable deployment artifact
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-        run: bash scripts/checkout-audit-controller-once-v1.sh .audit-controller main
+        run: bash scripts/checkout-audit-controller-once-v1.sh .audit-controller main branch 'campaigns/CurveYield DEX v16 Source r4'
       - name: Fetch prior failed run with read-only GitHub token
         env:
           GH_TOKEN: ${{ github.token }}

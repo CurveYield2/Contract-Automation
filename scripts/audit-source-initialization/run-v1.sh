@@ -59,8 +59,12 @@ else
 
   repo='/tmp/audit-controller-source-init'
   rm -rf "$repo"
-  gh repo clone CurveYield2/Audit-Controller "$repo" -- --branch main
+  # Materialize only what initialization reads or writes: the current authority package, the
+  # campaign directory entries, and (added below) the new campaign folder. Everything else in
+  # Audit-Controller stays unfetched; revision and collision checks read the Git tree instead.
+  gh repo clone CurveYield2/Audit-Controller "$repo" -- --branch main --depth 1 --filter=blob:none --sparse
   cd "$repo"
+  git sparse-checkout set --no-cone '/Audit Skill - Current Authority/*/' '/Audit Campaign Directory/campaigns/'
   git config user.name 'CurveYield Audit Source Initialization'
   git config user.email 'audit-source-initialization@users.noreply.github.com'
 
@@ -78,7 +82,7 @@ else
 
   success=false
   for attempt in 1 2 3 4 5; do
-    git fetch origin main
+    git fetch --depth 1 --filter=blob:none origin main
     git reset --hard origin/main
     git clean -fdx
 
@@ -88,7 +92,14 @@ else
       if [[ "$id" =~ ^${slug}-r([0-9]+)$ ]] && [ "${BASH_REMATCH[1]}" -gt "$max" ]; then
         max="${BASH_REMATCH[1]}"
       fi
-    done < <(find campaigns 'Audit Campaign Directory/campaigns' -type f -name '*.json' -print 2>/dev/null | LC_ALL=C sort)
+    done < <(find 'Audit Campaign Directory/campaigns' -type f -name '*.json' -print 2>/dev/null | LC_ALL=C sort)
+    # Campaign folders are not materialized; take existing revisions from the tree's folder names.
+    while IFS= read -r folder; do
+      suffix="${folder#"campaigns/$display_base r"}"
+      if [ "$suffix" != "$folder" ] && [[ "$suffix" =~ ^[0-9]+$ ]] && [ "$suffix" -gt "$max" ]; then
+        max="$suffix"
+      fi
+    done < <(git ls-tree -d --name-only HEAD -- campaigns/)
 
     revision=$((max + 1))
     campaign_id="$slug-r$revision"
@@ -102,7 +113,9 @@ else
     compact="$(date -u +%Y%m%dT%H%M%SZ)"
     generation_id="$campaign_id-g1-$compact"
 
-    [ ! -e "$campaign_root" ] || { echo "::error::Campaign path collision: $campaign_root"; exit 1; }
+    ! git cat-file -e "HEAD:$campaign_root" 2>/dev/null || { echo "::error::Campaign path collision: $campaign_root"; exit 1; }
+    literal_root="$(printf '%s' "$campaign_root" | sed -e 's/[][*?!#\\]/\\&/g')"
+    git sparse-checkout add "/$literal_root/"
 
     mkdir -p "$source_dir" "$receipts_dir" "Audit Campaign Directory/campaigns"
     cp "$work/$filename" "$source_path"

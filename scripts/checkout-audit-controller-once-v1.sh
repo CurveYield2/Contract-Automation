@@ -1,14 +1,31 @@
 #!/usr/bin/env bash
 # Single shallow private Audit-Controller fetch. Keep exact ref and its worktree;
 # never mirror private repository contents through public workflow artifacts.
+#
+# With a campaign path, materialize ONLY what campaign automation reads:
+#   1. the campaign folder;
+#   2. its Audit Campaign Directory entry; and
+#   3. the frozen authority package named by the campaign's Phase-0 receipt.
+# Without one, the whole tree is checked out (legacy behavior).
 set -euo pipefail
-if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
-  echo 'usage: checkout-audit-controller-once-v1.sh <relative-destination> <ref> [branch|detach]' >&2
+if [ "$#" -lt 2 ] || [ "$#" -gt 4 ]; then
+  echo 'usage: checkout-audit-controller-once-v1.sh <relative-destination> <ref> [branch|detach] [campaign-path]' >&2
   exit 2
 fi
 destination="$1"
 ref="$2"
 mode="${3:-branch}"
+campaign_path="${4:-}"
+if [ -n "$campaign_path" ]; then
+  case "$campaign_path" in
+    campaigns/*) ;;
+    *) echo 'campaign path must be under campaigns/' >&2; exit 2;;
+  esac
+  case "/$campaign_path/" in
+    */../*|*/./*|*//*) echo 'unsafe campaign path' >&2; exit 2;;
+  esac
+  campaign_path="${campaign_path%/}"
+fi
 case "$destination" in
   .audit-controller|.audit-controller-output|.controller-under-test) ;;
   *) echo 'unsupported private checkout destination' >&2; exit 2;;
@@ -27,6 +44,28 @@ git init --quiet "$destination"
 git -C "$destination" remote add origin https://github.com/CurveYield2/Audit-Controller.git
 git -C "$destination" fetch --no-tags --depth=1 --filter=blob:none origin "$ref"
 expected="$(git -C "$destination" rev-parse FETCH_HEAD)"
+if [ -n "$campaign_path" ]; then
+  # gitignore-style no-cone pattern for one literal repository path.
+  literal_pattern() { printf '/%s' "$(printf '%s' "$1" | sed -e 's/[][*?!#\\]/\\&/g')"; }
+  receipt="$campaign_path/receipts/PHASE_00_RECEIPT_v1.json"
+  receipt_json="$(git -C "$destination" show "FETCH_HEAD:$receipt")" || { echo "campaign Phase-0 receipt missing: $receipt" >&2; exit 1; }
+  directory_entry="$(printf '%s' "$receipt_json" | jq -r '.campaign.campaignDirectoryEntryPath // empty')"
+  homepage="$(printf '%s' "$receipt_json" | jq -r '.authority.homepagePath // empty')"
+  [ -n "$directory_entry" ] || { echo 'receipt lacks campaign.campaignDirectoryEntryPath' >&2; exit 1; }
+  [ -n "$homepage" ] || { echo 'receipt lacks authority.homepagePath' >&2; exit 1; }
+  authority_package="$(dirname -- "$homepage")"
+  for p in "$directory_entry" "$authority_package"; do
+    case "/$p/" in */../*|*/./*|//*) echo "unsafe receipt path: $p" >&2; exit 1;; esac
+  done
+  git -C "$destination" config core.sparseCheckout true
+  git -C "$destination" config core.sparseCheckoutCone false
+  {
+    printf '%s/\n' "$(literal_pattern "$campaign_path")"
+    printf '%s\n' "$(literal_pattern "$directory_entry")"
+    printf '%s/\n' "$(literal_pattern "$authority_package")"
+  } > "$destination/.git/info/sparse-checkout"
+  echo "Sparse campaign checkout: $campaign_path, $directory_entry, $authority_package/"
+fi
 if [ "$mode" = detach ]; then
   git -C "$destination" checkout --quiet --detach FETCH_HEAD
 else
