@@ -881,11 +881,30 @@ jobs:
             # state. Controller/campaign state above determines whether the phase is
             # still active. The browser is touched only when the elapsed-time gate
             # calls for a human-style Phase-1 X11 poke.
-            # Durable progress resets the clock: any new commit under the campaign folder means
-            # the reviewer (or its controller) is advancing, so no poke and no stop click.
+            # Durable progress resets this chat's own clock. Each watched chat keeps a separate
+            # timer: only commits to paths this chat writes count (its wake check-in file and the
+            # work/submission folders of the phase it is on), so another reviewer's commits in the
+            # same campaign never hide a stalled chat.
             if [ "$receipt_gate_mode" = "true" ] && [ -n "${campaign_root:-}" ] && [ -n "${AUDIT_CONTROLLER_GITHUB_TOKEN:-}" ]; then
-              encoded_root="$(printf '%s' "$campaign_root" | sed 's/ /%20/g')"
-              progress_at="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/commits?sha=$gate_ref&path=$encoded_root&per_page=1" --jq '.[0].commit.committer.date // empty' 2>/dev/null || true)"
+              chat_paths=()
+              ack_path="$(jq -r '.ackPath // empty' /tmp/watchdog-state.json)"
+              [ -n "$ack_path" ] && chat_paths+=("$ack_path")
+              phase_n="$(jq -r '.gate.expectedPhaseId // .phaseId // empty' /tmp/watchdog-state.json | sed -n 's/^phase-\([0-9][0-9]*\)$/\1/p')"
+              if [ -n "$phase_n" ]; then
+                phase_dir="$(printf 'work/phase-%02d' "$phase_n")"
+                if [[ "$(jq -r '.gate.expectedMilestoneId // empty' /tmp/watchdog-state.json)" == DISCOVERY_* ]]; then
+                  chat_paths+=("$campaign_root/$phase_dir/discovery")
+                else
+                  chat_paths+=("$campaign_root/$phase_dir" "$campaign_root/submissions")
+                fi
+              fi
+              [ "${#chat_paths[@]}" -gt 0 ] || chat_paths=("$campaign_root")
+              progress_at=""
+              for chat_path in "${chat_paths[@]}"; do
+                encoded_path="$(printf '%s' "$chat_path" | sed 's/ /%20/g')"
+                at="$(GH_TOKEN="$AUDIT_CONTROLLER_GITHUB_TOKEN" gh api "repos/$gate_repo/commits?sha=$gate_ref&path=$encoded_path&per_page=1" --jq '.[0].commit.committer.date // empty' 2>/dev/null || true)"
+                if [ -n "$at" ] && { [ -z "$progress_at" ] || [ "$(date -u -d "$at" +%s)" -gt "$(date -u -d "$progress_at" +%s)" ]; }; then progress_at="$at"; fi
+              done
               previous_progress="$(jq -r '.lastProgressAt // empty' /tmp/watchdog-state.json)"
               if [ -n "$progress_at" ] && [ "$progress_at" != "$previous_progress" ]; then
                 progress_epoch="$(date -u -d "$progress_at" +%s 2>/dev/null || echo 0)"
