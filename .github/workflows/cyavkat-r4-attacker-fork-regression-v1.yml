@@ -78,6 +78,53 @@ jobs:
           test -d "$SRC/../ipor-fusion/node_modules/@openzeppelin"
           printf '0\n' > attacker-output/SOURCE_STAGE_EXIT_v1.txt
           echo "Exact admitted source archive staged independently of native deployment" >> "$GITHUB_STEP_SUMMARY"
+      - name: Independently verify deployment addresses against current public Katana head (read only)
+        shell: bash
+        run: |
+          set +e
+          node --input-type=module > attacker-output/PUBLIC_CHAIN_HEAD_PROBE_v1.log 2>&1 <<'NODE'
+          import fs from 'node:fs';
+          const targets = [
+            ['allocation','0xaeA961347C49CE1c3b05D443E6d1A84098EaC78F'],
+            ['executor','0xc3CD95d239C1CF53B9Ad89Ab130727792E1495E4'],
+            ['loop','0x5A4E14b0C0C098dE06d55068d91d554dAF767108'],
+            ['router','0x779E94f2b14D9F7032a205Af67Cf67329f7559C9'],
+            ['transferFuseSnapshot','0x8C0F5b69953e060a242D41e9972593F485514B47'],
+            ['authenticVault','0xEd83daf48429cfb2C650Fd721b9241e180fd4548']
+          ];
+          const endpoints = ['https://katana.drpc.org/','https://rpc.katana.network/'];
+          const rpc = async(url,method,params) => {
+            const reply=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(25000)});
+            if(!reply.ok)throw Error('RPC_HTTP_'+reply.status);
+            const j=await reply.json();
+            if(j.error||typeof j.result!=='string')throw Error('RPC_JSON_'+JSON.stringify(j.error||j));
+            return j.result;
+          };
+          let status='UNAVAILABLE',lastError='',report;
+          for(const endpoint of endpoints) {
+            try {
+              const chainId=parseInt(await rpc(endpoint,'eth_chainId',[]),16);
+              if(chainId!==747474)throw Error('WRONG_CHAIN_ID_'+chainId);
+              const blockHex=await rpc(endpoint,'eth_blockNumber',[]);
+              const records=[];
+              for(const [name,address] of targets) {
+                const code=await rpc(endpoint,'eth_getCode',[address,blockHex]);
+                if(!/^0x(?:[a-fA-F0-9]{2})*$/.test(code))throw Error('INVALID_CODE_RESULT_'+name);
+                records.push({name,address,bytes:(code.length-2)/2,hasRuntimeCode:code.length>2});
+              }
+              report={schemaVersion:'cyavkat-attacker-live-head-code-v1',status:'VERIFIED',chainId,blockNumber:Number.parseInt(blockHex,16),blockHex,checkedAtUtc:new Date().toISOString(),endpoint,records};
+              status='VERIFIED';
+              break;
+            } catch(e) {lastError=String(e?.message||e); console.error('Provider failed',endpoint,lastError);}
+          }
+          if(status!=='VERIFIED')report={schemaVersion:'cyavkat-attacker-live-head-code-v1',status:'UNAVAILABLE',error:lastError,checkedAtUtc:new Date().toISOString(),records:[]};
+          fs.writeFileSync('attacker-output/PUBLIC_CHAIN_HEAD_CODE_v1.json',JSON.stringify(report,null,2)+'\n');
+          console.log(JSON.stringify(report));
+          process.exit(status==='VERIFIED'?0:1);
+          NODE
+          code=$?
+          printf '%s\n' "$code" > attacker-output/PUBLIC_CHAIN_HEAD_CODE_EXIT_v1.txt
+          exit 0
       - name: Execute test-only source-exact attacker harness on pinned fork
         id: tests
         shell: bash
@@ -171,3 +218,4 @@ jobs:
         run: |
           set -euo pipefail
           test "$(cat attacker-output/ASSERTIONS_EXIT_v1.txt)" = "0"
+          test "$(cat attacker-output/PUBLIC_CHAIN_HEAD_CODE_EXIT_v1.txt)" = "0"
