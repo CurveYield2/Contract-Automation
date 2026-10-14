@@ -52,5 +52,7 @@
     "consecutiveUnviewable": 0
   },
   "watchdogRunId": "38492087214",
-  "watchdogSweepStartedAt": "2026-10-14T00:50:10Z"
+  "watchdogSweepStartedAt": "2026-10-14T00:50:10Z",
+  "lastProgressAt": "2026-10-14T00:45:34Z",
+  "lastDecision": "DURABLE_PROGRESS_RESETS_POKE_CLOCK"
 }
