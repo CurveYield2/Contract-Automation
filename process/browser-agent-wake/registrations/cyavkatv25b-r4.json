@@ -26,12 +26,12 @@
     "name": "reviewer-2",
     "url": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6accaf3c-ffcc-83e8-aa29-6d2928c833c7"
   },
-  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"cyavkatv25b-r4-discovery-complete/38479284652\"} as the whole file campaigns/cyavKATv25b r4/work/browser/WAKE_ACK_reviewer-2_v1.json on CurveYield2/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nCONTROLLER: Phase 4 discovery is complete. Phase 4 is now ACTIVE for reviewer-2. Follow phases/phase-4/START_HERE.md of the bound authority: Step 1 reconciles every record prefilled from work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json, then complete Steps 2 and 3 and invoke controller validation as usual.",
+  "wakeMessage": "FIRST, before anything else: write exactly {\"ack\":\"cyavkatv25b-r4-phase-5-continue-r2/38490323476\"} as the whole file campaigns/cyavKATv25b r4/work/browser/WAKE_ACK_reviewer-2_v1.json on CurveYield2/Audit-Controller branch main (update with its current SHA if it exists, create it only on 404, stop on any other error).\nDo nothing else until that write succeeds, then follow the instructions below.\n\nCONTROLLER_PHASE_PASS. Phase 4 is sealed. Proceed now to Phase 5 using the new Audit Campaign Directory assignment and its schema-governed work form. Do not re-check Phase 4 bookkeeping.",
   "thinkingEffort": "high",
   "browserInteractionPolicy": "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1",
   "activeAssignment": {
-    "phaseId": "phase-4",
-    "milestoneId": "PHASE_4_WORK_PACKET",
+    "phaseId": "phase-5",
+    "milestoneId": "PHASE_5_WORK_PACKET",
     "workerRole": "reviewer",
     "reviewer": "reviewer-2",
     "thinkingEffort": "high"
@@ -45,8 +45,8 @@
       "repository": "CurveYield2/Audit-Controller",
       "ref": "main",
       "statePath": "Audit Campaign Directory/campaigns/cyavkatv25b.json",
-      "expectedPhaseId": "phase-4",
-      "expectedMilestoneId": "PHASE_4_WORK_PACKET",
+      "expectedPhaseId": "phase-5",
+      "expectedMilestoneId": "PHASE_5_WORK_PACKET",
       "activePointerPath": "",
       "stopStates": [
         "STOPPED_BY_HUMAN"
@@ -62,12 +62,12 @@
     "idlePokeThreshold": 3,
     "unviewableThreshold": 2
   },
-  "updatedAt": "2026-10-13T22:41:55Z",
+  "updatedAt": "2026-10-14T00:29:57Z",
   "wakeDelivery": {
-    "milestoneId": "PHASE_4_WORK_PACKET",
+    "milestoneId": "PHASE_5_WORK_PACKET",
     "chatUrl": "https://chatgpt.com/g/g-p-6accaeff83e48191bd6467b98a5aac1c-dex-audit-v17/c/6accaf3c-ffcc-83e8-aa29-6d2928c833c7",
-    "deliveredAt": "2026-10-13T22:41:55Z",
+    "deliveredAt": "2026-10-14T00:29:57Z",
     "verification": "REVIEWER_GITHUB_CHECK_IN",
-    "ackId": "cyavkatv25b-r4-discovery-complete/38479284652"
+    "ackId": "cyavkatv25b-r4-phase-5-continue-r2/38490323476"
   }
 }
