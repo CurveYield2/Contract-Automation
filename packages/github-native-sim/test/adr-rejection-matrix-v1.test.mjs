@@ -324,20 +324,20 @@ test('adjudicated Critical defect rated Medium remains a critical-high miss',()=
  const r=scoreQualificationV1({truth:[{caseId:'C-1',kind:'defect',severity:'CRITICAL',classId:'ACCESS_CONTROL',contract:'Vault'}],findings:[{findingId:'F-1',caseRefs:['C-1'],severity:'MEDIUM'}],adjudications:[{caseId:'C-1',findingId:'F-1',match:'MATCH',severityReadjudicated:false,reason:'Exact source match'}]});
  assert.deepEqual(r.criticalHighMisses.map(x=>x.caseId),['C-1']);
 });
-// Windowed discovery: one controller run validates a whole window of submissions.
-test('a window of 25 submissions is validated in one run and the next window is issued with one wake',()=>{
+// One-round discovery: a chat receives its entire workload at once and one controller run
+// validates every submission.
+test('a chat receives its entire discovery workload at once and one run validates all of it',()=>{
  const o=discoveryFixture(30,false);
  try{
    const started=startDiscoveryV1(o);
    const ids=n=>Array.from({length:n},(_,i)=>'R-'+String(i+1).padStart(3,'0'));
-   assert.deepEqual(started.state.payload.order.filter(id=>started.state.payload.units[id].status==='ACTIVE'),ids(25));
-   for(const id of ids(25))o.submit(id,validUnit(o.packet(id)));
+   assert.deepEqual(started.state.payload.order.filter(id=>started.state.payload.units[id].status==='ACTIVE'),ids(30));
+   const message=Buffer.from(started.wake.messageB64,'base64').toString('utf8');
+   assert.ok(message.includes('R-001 to R-030')&&message.includes('entire discovery workload'));
+   for(const id of ids(30))o.submit(id,validUnit(o.packet(id)));
    const result=advanceDiscoveryV1({...o,unitId:'R-001'});
-   assert.equal(result.status,'DISCOVERY_NEXT');
-   const message=Buffer.from(result.wake.messageB64,'base64').toString('utf8');
-   assert.ok(message.includes('R-026')&&message.includes('R-030')&&!message.includes('R-025:'));
+   assert.equal(result.status,'DISCOVERY_COMPLETE');
    const state=readJson(repoFile(o.root,o.campaignPath+'/work/phase-04/discovery/DISCOVERY_STATE_v1.json')).payload;
-   assert.equal(ids(25).filter(id=>state.units[id].status==='ACCEPTED').length,25);
-   assert.equal(state.activeUnitId,'R-026');
+   assert.equal(ids(30).filter(id=>state.units[id].status==='ACCEPTED').length,30);
  }finally{o.clean();}
 });

@@ -113,17 +113,17 @@ export function discoveryWakeMessageV1({directory,auditControllerRef,packetPath,
  if(role==='ATTACK')lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any other unit's folder under work/phase-04/discovery/.");
  return lines.join('\n\n');
 }
-// Units are issued in windows of up to DISCOVERY_WINDOW_V1 contiguous units for one reviewer
-// chat. Packets depend only on the Phase 0 inventory, flow plan and system facts, never on
-// earlier units, so a whole window can be issued at once and validated in one controller run.
-export const DISCOVERY_WINDOW_V1=25;
+// Each reviewer chat receives its entire discovery workload in one window and completes it in
+// one round. Packets depend only on the Phase 0 inventory, flow plan and system facts, never on
+// earlier units, so every unit can be issued at once and validated in one controller run; only
+// units that fail validation come back as rework.
 // Reviewer-2 (flow and residual units) and the attacker (attack units) work their windows in
 // parallel: attack packets never contain reviewer-2 work, so independence is unaffected.
 const activeIdsOf=(state,chatKey=null)=>state.payload.order.filter(id=>state.payload.units[id]?.status==='ACTIVE'&&(!chatKey||state.payload.units[id].chatKey===chatKey));
 const pendingIdsOf=(state,chatKey)=>state.payload.order.filter(id=>state.payload.units[id]?.status==='PENDING'&&state.payload.units[id].chatKey===chatKey);
 const chatKeysOf=(state)=>[...new Set(state.payload.order.map(id=>state.payload.units[id]?.chatKey).filter(Boolean))];
 function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey}){
- const ids=pendingIdsOf(state,chatKey).slice(0,DISCOVERY_WINDOW_V1);
+ const ids=pendingIdsOf(state,chatKey);
  for(const id of ids){
   buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now});
   state.payload.units[id].status='ACTIVE';
@@ -153,7 +153,8 @@ export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campa
  lines.push('Units to complete now ('+ids.length+'): '+ranges.map(r=>r.fromId===r.toId?r.fromId:r.fromId+' to '+r.toId).join(', ')+'.');
  lines.push('Discovery folder: '+link(pathJoin(campaignPath,''))+' . For each unit <id>, read <id>/ASSIGNMENT_PACKET_v1.json and write <id>/SUBMISSION_v1.json.');
  if(role!=='ATTACK')lines.push('Each packet has a submissionGuide: use trivialReviews (one per contract for constants and getters), groupChecks (functions sharing a modifier) and the listed contractChecks to avoid repeating the same check.');
- lines.push('Complete all of them, then push ONE boundary request. The controller validates every unit with a new submission in a single run, then wakes you with rework or the next units. Do not push a request per unit.');
+ lines.push(feedbackText?'Fix every unit listed in the feedback, then push ONE boundary request.':'This is your entire discovery workload for this phase. Complete every unit in one continuous pass without stopping or asking to continue, then push ONE boundary request.');
+ lines.push('The controller validates every unit with a new submission in a single run and wakes you only if a unit needs rework. Do not push a request per unit.');
  lines.push('Boundary request location: process/agent-upload/lite-phase-boundary/');
  lines.push('Exact boundary request JSON: '+JSON.stringify({schemaVersion:'curveyield-lite-phase-boundary-request-v1',
   campaignId:directory.campaignId,reviewKind:'discovery',unitId:ids[0],auditControllerRef:auditControllerRef??'main',attempt}));
