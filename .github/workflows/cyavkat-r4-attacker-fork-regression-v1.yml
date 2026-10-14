@@ -100,7 +100,7 @@ jobs:
         run: |
           set +e
           test "$(cat attacker-output/FOUNDRY_EXIT_v1.txt)" = "0" &&
-          grep -Eq '14 tests? passed|Ran 14 tests' attacker-output/FOUNDRY_v1.log &&
+          grep -Eq '16 tests? passed|Ran 16 tests' attacker-output/FOUNDRY_v1.log &&
           grep -q 'CONFIRMED_UNPRIVILEGED_GATE_REPLACEMENT' attacker-output/FOUNDRY_v1.log &&
           grep -q 'CONFIRMED_OUTSIDER_GATE_SETTER_CAN_CAUSE_VIEW_DOS' attacker-output/FOUNDRY_v1.log &&
           grep -q 'CONFIRMED_FUSE_BALANCE_OVERPAYMENT' attacker-output/FOUNDRY_v1.log &&
@@ -114,11 +114,13 @@ jobs:
           grep -q 'CONFIRMED_LOOP_PLANNER_WINDUP_LIMIT_DOUBLED_FROM_UNSEASONED_DEPOSIT' attacker-output/FOUNDRY_v1.log &&
           grep -q 'CONFIRMED_UNPRIVILEGED_LOOP_GATE_TAKEOVER_RAISES_PLANNER_CAP' attacker-output/FOUNDRY_v1.log &&
           grep -q 'snapshot_allocation_runtime_bytes' attacker-output/FOUNDRY_v1.log &&
-          grep -Eq 'PINNED_ALLOCATION_REPORT_ADDRESS_HAS_(NO_ONCHAIN_CODE|RUNTIME_CODE)' attacker-output/FOUNDRY_v1.log
+          grep -Eq 'PINNED_ALLOCATION_REPORT_ADDRESS_HAS_(NO_ONCHAIN_CODE|RUNTIME_CODE)' attacker-output/FOUNDRY_v1.log &&
+          grep -q 'NATIVE_REAL_ALPHA_AND_FUNDED_HOLDER_PROBED' attacker-output/FOUNDRY_v1.log &&
+          grep -Eq 'CONFIRMED_ACTUAL_FUNDED_IPOR_VAULT_FUSE_CAP_BYPASS|NATIVE_(ACTUAL_FUNDED_VAULT_EXECUTE_BLOCKED_BY_REVERT|REAL_FUSE_VALID_ALPHA_NOT_FOUND_UNDER_KNOWN_ACTORS)' attacker-output/FOUNDRY_v1.log
           code=$?
           printf '%s\n' "$code" > attacker-output/ASSERTIONS_EXIT_v1.txt
           if [ "$code" -eq 0 ]; then
-            echo 'ATTACKER_REGRESSION_PASS_WITH_FOURTEEN_REAL_TESTS' >> "$GITHUB_STEP_SUMMARY"
+            echo 'ATTACKER_REGRESSION_PASS_WITH_SIXTEEN_REAL_TESTS' >> "$GITHUB_STEP_SUMMARY"
           else
             echo 'ATTACKER_REGRESSION_INCOMPLETE_OR_FAILED (do not treat workflow as successful tests)' >> "$GITHUB_STEP_SUMMARY"
           fi
