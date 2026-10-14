@@ -6,6 +6,9 @@ import {Test} from "forge-std/Test.sol";
 import {FuseAction} from "../../src/interfaces/CurveYieldPhase2Interfaces.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {CurveYieldMorphoLoopController} from "../../src/morpho/CurveYieldMorphoLoopController.sol";
+import {CyLoopEnv} from "../../src/morpho/CurveYieldMorphoLoopLib.sol";
+import {CurveYieldConfigKeys as K} from "../../src/governance/CurveYieldGateConfig.sol";
 import {CurveYieldGateConfig, ICurveYieldConfigGate} from "../../src/governance/CurveYieldGateConfig.sol";
 import {CurveYieldAllocationController} from "../../src/allocation/CurveYieldAllocationController.sol";
 import {
@@ -334,5 +337,132 @@ contract AttackerSeasoningProof_v1 is Test {
         emit log_named_uint("same_day_original_managed", 100 ether);
         emit log_named_uint("same_day_final_managed", 200 ether);
         emit log_named_uint("next_day_credited_managed", alloc.seasonedManagedAvkat());
+    }
+}
+
+contract AttackerLoopBridgeGate_v1 is ICurveYieldConfigGate {
+    uint256 public immutable SEASONING_DAYS;
+    uint256 public immutable ALLOCATION_BPS;
+    address public immutable REWARDS;
+    constructor(uint256 seasoningDays_, uint256 allocationBps_, address rewards_) {
+        SEASONING_DAYS = seasoningDays_;
+        ALLOCATION_BPS = allocationBps_;
+        REWARDS = rewards_;
+    }
+    function getMany(bytes32[] calldata keys) external view override returns (uint256[] memory out) {
+        out = new uint256[](keys.length);
+        for (uint256 i; i < keys.length; ++i) {
+            if (keys[i] == K.ALLOC_SEASONING_DAYS) out[i] = SEASONING_DAYS;
+            if (keys[i] == K.LOOP_ALLOCATION_BPS) out[i] = ALLOCATION_BPS;
+        }
+    }
+    function addr(bytes32) external view override returns (address) { return REWARDS; }
+    function adminReceiver() external view override returns (address) { return REWARDS; }
+}
+contract AttackerLoopCapBridge_v1 is Test {
+    address constant VAULT = address(0xDA1);
+    address constant OUTSIDER = address(0xA77AC);
+
+    function _setup(uint256 days_, uint256 allocationBps_)
+        internal returns (CurveYieldAllocationController alloc, CurveYieldMorphoLoopController loop, AttackerTestToken token)
+    {
+        token = new AttackerTestToken();
+        AttackerSeasoningRewardsStub_v1 rewards = new AttackerSeasoningRewardsStub_v1();
+        AttackerLoopBridgeGate_v1 gate = new AttackerLoopBridgeGate_v1(days_, allocationBps_, address(rewards));
+        alloc = new CurveYieldAllocationController(address(this), VAULT, address(token), address(gate));
+        CyLoopEnv memory env;
+        env.vault = VAULT;
+        env.morpho = address(0xB001);
+        env.marketId = bytes32(uint256(1));
+        env.avkat = address(token);
+        env.kat = address(0xCA7);
+        env.collateralFuse = address(0xF001);
+        env.borrowFuse = address(0xF002);
+        env.flashLoanFuse = address(0xF003);
+        env.swapFuse = address(0xF004);
+        env.router = address(0xF005);
+        env.guardFuse = address(0xF006);
+        env.withdrawManager = address(0xF007);
+        loop = new CurveYieldMorphoLoopController(address(this), env, address(gate));
+        loop.setAllocation(address(alloc));
+    }
+
+    function test_LOOP_realPlannerWindupLimitDoublesOnFreshDepositWithoutSeasoning() public {
+        assertEq(block.chainid, 747474);
+        assertEq(block.number, 45121798);
+        (CurveYieldAllocationController alloc, CurveYieldMorphoLoopController loop, AttackerTestToken token) = _setup(3, 7500);
+        uint256 dayStart = block.timestamp / 1 days * 1 days;
+        vm.warp(dayStart + 1 hours);
+        token.mint(VAULT, 100 ether);
+        alloc.checkpoint();
+        assertEq(loop.windupLimit(), 75 ether, "genuine seasoned baseline 75% of 100");
+        vm.warp(dayStart + 4 days + 1 hours);
+        token.mint(VAULT, 100 ether); // fresh same-block capital
+        alloc.checkpoint();
+        assertEq(alloc.seasonedManagedAvkat(), 200 ether, "fresh capital treated as 3-day aged");
+        assertEq(loop.windupLimit(), 150 ether, "exact MorphoLoop planner permits twice baseline");
+        emit log_string("CONFIRMED_LOOP_PLANNER_WINDUP_LIMIT_DOUBLED_FROM_UNSEASONED_DEPOSIT");
+        emit log_named_uint("baseline_limit", 75 ether);
+        emit log_named_uint("inflated_limit", loop.windupLimit());
+    }
+
+    function test_LOOP_unprivilegedGateTakeoverRaisesSourceExactPlannerLimit() public {
+        assertEq(block.chainid, 747474);
+        assertEq(block.number, 45121798);
+        (CurveYieldAllocationController alloc, CurveYieldMorphoLoopController loop, AttackerTestToken token) = _setup(3, 7500);
+        token.mint(VAULT, 100 ether);
+        alloc.checkpoint();
+        assertEq(loop.windupLimit(), 75 ether);
+        AttackerLoopBridgeGate_v1 hostile = new AttackerLoopBridgeGate_v1(0, 10000, address(0xFEE1));
+        vm.prank(OUTSIDER);
+        loop.setConfigGate(address(hostile));
+        assertEq(loop.windupLimit(), 100 ether, "unauthorized adjustment raises cap to 100%");
+        assertEq(loop.owner(), address(this), "owner stays unchanged");
+        emit log_string("CONFIRMED_UNPRIVILEGED_LOOP_GATE_TAKEOVER_RAISES_PLANNER_CAP");
+        emit log_named_uint("original_limit", 75 ether);
+        emit log_named_uint("forged_limit", loop.windupLimit());
+    }
+}
+contract AttackerDeploymentAddressProbe_v1 is Test {
+    address constant SOURCE_DEPLOYED_ALLOCATION = 0xaeA961347C49CE1c3b05D443E6d1A84098EaC78F;
+    address constant SOURCE_DEPLOYED_EXECUTOR = 0xc3CD95d239C1CF53B9Ad89Ab130727792E1495E4;
+    address constant SOURCE_DEPLOYED_LOOP = 0x5A4E14b0C0C098dE06d55068d91d554dAF767108;
+    address constant SOURCE_DEPLOYED_ROUTER = 0x779E94f2b14D9F7032a205Af67Cf67329f7559C9;
+    address constant OUTSIDER = address(0xA77AC);
+
+    function test_DEPLOYED_snapshotAddressesPresenceAtPinnedKatanaBlock() public {
+        assertEq(block.chainid, 747474);
+        assertEq(block.number, 45121798);
+        emit log_named_uint("snapshot_allocation_runtime_bytes", SOURCE_DEPLOYED_ALLOCATION.code.length);
+        emit log_named_uint("snapshot_executor_runtime_bytes", SOURCE_DEPLOYED_EXECUTOR.code.length);
+        emit log_named_uint("snapshot_loop_runtime_bytes", SOURCE_DEPLOYED_LOOP.code.length);
+        emit log_named_uint("snapshot_router_runtime_bytes", SOURCE_DEPLOYED_ROUTER.code.length);
+        if (SOURCE_DEPLOYED_ALLOCATION.code.length == 0) emit log_string("PINNED_ALLOCATION_REPORT_ADDRESS_HAS_NO_ONCHAIN_CODE");
+        else emit log_string("PINNED_ALLOCATION_REPORT_ADDRESS_HAS_RUNTIME_CODE");
+        if (SOURCE_DEPLOYED_LOOP.code.length == 0) emit log_string("PINNED_LOOP_REPORT_ADDRESS_HAS_NO_ONCHAIN_CODE");
+        else emit log_string("PINNED_LOOP_REPORT_ADDRESS_HAS_RUNTIME_CODE");
+    }
+
+    function test_DEPLOYED_ifAllocationExistsOutsiderCanOrCannotChangeGate() public {
+        assertEq(block.chainid, 747474);
+        assertEq(block.number, 45121798);
+        if (SOURCE_DEPLOYED_ALLOCATION.code.length == 0) {
+            emit log_string("REAL_INSTALLED_ALLOCATION_GATE_TEST_NOT_APPLICABLE_ADDRESS_ABSENT");
+            return;
+        }
+        (bool preOk, bytes memory prev) = SOURCE_DEPLOYED_ALLOCATION.staticcall(abi.encodeWithSignature("configGate()"));
+        assertTrue(preOk && prev.length == 32, "real configGate baseline");
+        address original = abi.decode(prev, (address));
+        vm.prank(OUTSIDER);
+        (bool ok, bytes memory returned) = SOURCE_DEPLOYED_ALLOCATION.call(abi.encodeWithSignature("setConfigGate(address)", address(0xFEE1)));
+        emit log_named_string("pinned_allocation_outsider_setGate", ok ? "SUCCESS" : "BLOCKED");
+        emit log_named_bytes("pinned_allocation_outsider_setGate_returndata", returned);
+        (bool afterOk, bytes memory ret) = SOURCE_DEPLOYED_ALLOCATION.staticcall(abi.encodeWithSignature("configGate()"));
+        assertTrue(afterOk && ret.length == 32, "configGate still readable");
+        address updated = abi.decode(ret, (address));
+        emit log_named_address("pinned_original_gate", original);
+        emit log_named_address("pinned_updated_gate", updated);
+        if (ok && updated == address(0xFEE1)) emit log_string("CONFIRMED_PINNED_ALLOCATION_INSTANCE_GATE_TAKEOVER");
+        else emit log_string("PINNED_ALLOCATION_INSTANCE_GATE_TAKEOVER_BLOCKED_OR_NOT_EFFECTIVE");
     }
 }
