@@ -149,6 +149,7 @@ export function scoreSeededCampaignV1({
     schemaVersion:'curveyield-seeded-detection-score-v1',
     caught:matched,partial:partial.size,missed:missed.length,
     defectCount:defects.length,decoysFlagged:decoys.length,
+    cleanControlCriticalHighFalsePositiveCount:scored.cleanControlCriticalHighFalsePositives.length,
     bySeverity,byClassId,byContract,byLeakStage,
     severityAgreement:scored.severityAgreement,
     criticalHighMisses:scored.criticalHighMisses,
