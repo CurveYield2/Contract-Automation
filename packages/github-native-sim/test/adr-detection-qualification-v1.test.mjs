@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {scoreQualificationV1 as score} from '../src/adr-detection-qualification-v1.mjs';
+import {scoreQualificationV1 as score,scoreSeededCampaignV1} from '../src/adr-detection-qualification-v1.mjs';
 const defect=(caseId,severity='HIGH',classId='ACCESS_CONTROL',contract='Vault')=>({caseId,kind:'defect',severity,classId,contract});
 const decoy=caseId=>({caseId,kind:'decoy',severity:'LOW',classId:'ACCESS_CONTROL',contract:'Vault'});
 const clean=caseId=>({caseId,kind:'clean_control',severity:'LOW',classId:'NONE',contract:'Vault'});
@@ -68,4 +68,27 @@ test('zero defects with decoys still have NOT_EVALUATED recall and zero true pre
  assert.equal(r.recall.overall,'NOT_EVALUATED');
  assert.deepEqual(r.precision,{matched:0,total:1});
  assert.deepEqual(r.decoyHits,['d1']);
+});
+
+test('private seeded-package gate reproduces r4: 14 caught, 1 partial, 26 missed, 0 decoys',()=>{
+ const truth=Array.from({length:41},(_,i)=>defect('X'+String(i+1).padStart(2,'0')));
+ truth.push(decoy('D-1'));
+ const findings=truth.slice(0,14).map((x,i)=>finding('F-'+i,[x.caseId]));
+ const adjudications=truth.slice(0,14).map((x,i)=>match(x.caseId,'F-'+i));
+ const result=scoreSeededCampaignV1({truth,findings,adjudications,
+   partialCases:['X15'],missStageByCase:{X16:'REVIEW_VERDICT_MISSED'}});
+ assert.deepEqual([result.caught,result.partial,result.missed,result.decoysFlagged],[14,1,26,0]);
+ assert.equal(result.gate.passed,false);
+ assert.deepEqual(result.byLeakStage.REVIEW_VERDICT_MISSED,['X16']);
+ assert.equal(result.bySeverity.HIGH.total,41);
+ assert.equal(result.bySeverity.HIGH.missed,26);
+});
+test('seeded-package activation requires >=30 of 41 and no decoy hits',()=>{
+ const truth=[...Array.from({length:41},(_,i)=>defect('X'+String(i+1).padStart(2,'0'))),decoy('D-1')];
+ const findings=truth.slice(0,30).map((x,i)=>finding('F-'+i,[x.caseId]));
+ const adjudications=truth.slice(0,30).map((x,i)=>match(x.caseId,'F-'+i));
+ assert.equal(scoreSeededCampaignV1({truth,findings,adjudications}).gate.passed,true);
+ const decoyHit=finding('BAD',['D-1']);
+ assert.equal(scoreSeededCampaignV1({truth,findings:[...findings,decoyHit],
+  adjudications:[...adjudications,match('D-1','BAD')]}).gate.passed,false);
 });
