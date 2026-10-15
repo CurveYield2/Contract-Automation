@@ -191,7 +191,7 @@ test('v13 correctness verdicts keep class coverage and row-local candidates with
 test('v13 discovery state routes independent attacker to reviewer-3, while v12 keeps reviewer-3L',()=>{
  const o=setup();
  try{
-  const a=startDiscoveryV1({...o,authorityRoot:'Audit Skill - Current Authority/Audit_Litemode_v13'});
+  const a=startDiscoveryV1({...o,authorityRoot:'Audit Skill - Current Authority/Audit_Litemode_v13',qualificationVerifier:()=>({status:'QUALIFIED'})});
   assert.equal(a.state.payload.reviewPolicy,'correctness-verdict-v13');
   assert.equal(a.state.payload.units['X-001'].chatKey,'reviewer-3');
   assert.ok(a.wakes.some(w=>w.chatKey==='reviewer-3'));
