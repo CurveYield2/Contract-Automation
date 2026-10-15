@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
-import {validateDeepAssuranceRequestV2,V2_AUTOMATION_RELEASE,V2_RUNNER_RELEASE}
-  from '../../packages/github-native-sim/src/schema.mjs';
+import {V2_AUTOMATION_RELEASE,V2_RUNNER_RELEASE} from '../../packages/github-native-sim/src/schema.mjs';
+import {validateDeepAssuranceRequestWithV26V1} from '../../packages/github-native-sim/src/schema-v26.mjs';
 
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const nonempty=x=>typeof x==='string'&&x.trim()&&!/^<(?:REQUIRED|TBD)>$/.test(x);
@@ -63,7 +63,7 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
    campaignId,assignmentId:'phase5-target-'+key,phaseId,gateId:'phase5-target-execution',
    profileId:'github-native-simulate-v2',source,configuration,
    requestId:'dar-'+id.slice(0,32),requestDigest:id};
- try{validateDeepAssuranceRequestV2(request);}
+ try{validateDeepAssuranceRequestWithV26V1(request);}
  catch(error){
    return {status:'REWORK_REQUIRED',candidateKey:key,
      missing:[{field:'executionBlueprint.configuration',reason:String(error?.message??error)}]};
