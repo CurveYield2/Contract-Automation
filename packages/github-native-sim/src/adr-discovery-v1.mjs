@@ -155,11 +155,32 @@ export function openIdleChatWindowsV1({root,campaignPath,directory,authorityRoot
  for(const chatKey of chatKeysOf(state)){
   if(chatKey===except||activeIdsOf(state,chatKey).length||!pendingIdsOf(state,chatKey).length)continue;
   const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey});
-  wakes.push(wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef}));
+  wakes.push(wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef}));
  }
  return wakes;
 }
-export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText=null}){
+function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
+  if(ids.length<40)return null;
+  const dir=pathJoin(campaignPath,'index/'+(role==='ATTACK'?'attacker':'flow-review'));
+  const pages=[];
+  for(let i=0;i<ids.length;i+=25){
+    const chunk=ids.slice(i,i+25);
+    const file='PART_'+String(pages.length+1).padStart(4,'0')+'_v1.json';
+    const rel=path.posix.join(dir,file);
+    const payload={schemaVersion:'curveyield-discovery-unit-index-page-v1',
+      unitIds:chunk,units:chunk.map(unitId=>({unitId,
+        packetPath:packetRel(campaignPath,unitId),submissionPath:submissionRel(campaignPath,unitId)}))};
+    if(Buffer.byteLength(JSON.stringify(payload))>32*1024)throw new Error('discovery window page exceeds 32 KiB');
+    writeJson(repoFile(root,rel),payload);
+    pages.push({path:rel,unitCount:chunk.length});
+  }
+  const indexRel=path.posix.join(dir,'INDEX_v1.json');
+  const index={schemaVersion:'curveyield-discovery-unit-index-v1',role,unitCount:ids.length,pages};
+  if(Buffer.byteLength(JSON.stringify(index))>32*1024)throw new Error('discovery window index exceeds 32 KiB');
+  writeJson(repoFile(root,indexRel),index);
+  return indexRel;
+}
+export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText=null,indexPath=null}){
  const base='https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
  const link=(p)=>base+p.split('/').map(encodeURIComponent).join('/');
  const lines=[role==='ATTACK'?'You are the attacker reviewer. Campaign '+directory.campaignId:'You are reviewer-2. Campaign '+directory.campaignId,
@@ -170,7 +191,8 @@ export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campa
  const ranges=[];for(const id of ids){const [p,n]=[id[0],Number(id.slice(2))],last=ranges.at(-1);
   if(last&&last.p===p&&last.to===n-1){last.to=n;last.toId=id;}else ranges.push({p,from:n,to:n,fromId:id,toId:id});}
  lines.push('Units to complete now ('+ids.length+'): '+ranges.map(r=>r.fromId===r.toId?r.fromId:r.fromId+' to '+r.toId).join(', ')+'.');
- lines.push('Discovery folder: '+link(pathJoin(campaignPath,''))+' . For each unit <id>, read <id>/ASSIGNMENT_PACKET_v1.json and write <id>/SUBMISSION_v1.json.');
+ if(indexPath)lines.push('Complete assignment index: '+link(indexPath)+'. Read each page and save each unit submission without stopping or waiting for a controller message.');
+ else lines.push('Discovery folder: '+link(pathJoin(campaignPath,''))+' . For each unit <id>, read <id>/ASSIGNMENT_PACKET_v1.json and write <id>/SUBMISSION_v1.json.');
  if(role!=='ATTACK')lines.push('Each packet has a submissionGuide: use trivialReviews (one per contract for constants and getters), groupChecks (functions sharing a modifier) and the listed contractChecks to avoid repeating the same check.');
  lines.push(feedbackText?'Fix every unit listed in the feedback, then push ONE boundary request.':'This is your entire discovery workload for this phase. Complete every unit in one continuous pass without stopping or asking to continue, then push ONE boundary request.');
  lines.push('The controller validates every unit with a new submission in a single run and wakes you only if a unit needs rework. Do not push a request per unit.');
@@ -181,12 +203,13 @@ export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campa
  if(role==='ATTACK')lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any unit folder under work/phase-04/discovery/ other than the ones listed above.");
  return lines.join('\n\n');
 }
-function wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef='main',feedbackText=null}){
+function wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef='main',feedbackText=null}){
  const role=state.payload.units[ids[0]].role==='ATTACK'?'ATTACK':'FLOW_REVIEW';
  const round=state.payload.wakeRound=(state.payload.wakeRound??0)+1;
  const attempt=Math.max(...ids.map(id=>state.payload.units[id]?.attempts??0))+1;
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
- const message=discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText});
+ const indexPath=writeDiscoveryWindowIndexV1({root,campaignPath,ids,role});
+ const message=discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText,indexPath});
  return {chatKey:role==='ATTACK'?'reviewer-3L':'reviewer-2',
   wakeId:directory.campaignId+'-discovery-'+ids[0]+'-r'+round,
   phaseId:'phase-4',milestoneId:'DISCOVERY_'+ids[0],messageB64:Buffer.from(message).toString('base64')};
@@ -369,13 +392,13 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
    const feedbackRel=pathJoin(campaignPath,'DISCOVERY_FEEDBACK_v1.md');
    fs.writeFileSync(repoFile(root,feedbackRel),text+'\n');
    const excerpt=text.length>1500?text.slice(0,1500)+'\n… full feedback: '+feedbackRel:text+'\n(Also saved at '+feedbackRel+')';
-   return finish('DISCOVERY_REWORK',text,wakeFor({directory,ids:remaining,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:excerpt}));
+   return finish('DISCOVERY_REWORK',text,wakeFor({root,directory,ids:remaining,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:excerpt}));
   }
   // Some units still unsubmitted and nothing failed: the reviewer is mid-window; no wake.
   return finish('DISCOVERY_PARTIAL',summary,null);
  }
  const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey});
- if(ids.length)return finish('DISCOVERY_NEXT',summary,wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:summary}));
+ if(ids.length)return finish('DISCOVERY_NEXT',summary,wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:summary}));
  // This reviewer's discovery share is done; the other reviewer may still be working.
  if(activeIdsOf(state).length)return finish('DISCOVERY_PARTIAL',summary+'\nAll of your discovery units are complete; the other discovery reviewer is still working.',null);
  return completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});
