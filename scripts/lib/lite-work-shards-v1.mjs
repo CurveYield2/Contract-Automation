@@ -136,3 +136,26 @@ export function materializeShardedWorkFormV1({root,formRel,refreshDigests=true})
  fs.writeFileSync(relfile(root,formRel),content);
  return true;
 }
+
+export function shardFailureIndexV1({root,indexRel,deficiencies=[]}={}){
+ if(!indexRel)return {shards:[],unmapped:deficiencies};
+ const index=JSON.parse(fs.readFileSync(relfile(root,indexRel),'utf8'));
+ const matches=new Map(),unmapped=[];
+ for(const description of deficiencies){
+  const message=String(description);
+  const ref=message.match(/(step-[0-9]+)\.outputs\.([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/);
+  const loose=message.match(/targetDesigns\[([0-9]+)\]/);
+  const indexInArray=ref?Number(ref[3]):loose?Number(loose[1]):null;
+  const step=ref?.[1]??'step-3',field=ref?.[2]??'targetDesigns';
+  if(indexInArray===null){unmapped.push(message);continue;}
+  const shard=index.shards.find(s=>s.path.includes(step)&&s.path.includes(field)&&
+    indexInArray>=s.startIndex&&indexInArray<s.startIndex+s.recordKeys.length);
+  if(!shard){unmapped.push(message);continue;}
+  const rel=path.posix.join(path.posix.dirname(indexRel),shard.file);
+  const item=matches.get(rel)??{path:rel,recordKeys:[],defects:[]};
+  const key=shard.recordKeys[indexInArray-shard.startIndex];
+  if(!item.recordKeys.includes(key))item.recordKeys.push(key);
+  item.defects.push(message);matches.set(rel,item);
+ }
+ return {shards:[...matches.values()].sort((a,b)=>a.path.localeCompare(b.path)),unmapped};
+}
