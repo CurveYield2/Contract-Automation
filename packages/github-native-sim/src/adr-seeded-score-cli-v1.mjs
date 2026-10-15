@@ -27,6 +27,7 @@ export function scoreFilesV1({privateManifestPath,findingsPath,adjudicationsPath
     schemaVersion:result.schemaVersion,defectCount:result.defectCount,
     caught:result.caught,partial:result.partial,missed:result.missed,
     decoysFlagged:result.decoysFlagged,
+    cleanControlCriticalHighFalsePositiveCount:result.cleanControlCriticalHighFalsePositiveCount,
     bySeverity:result.bySeverity,byClassId:result.byClassId,byContract:result.byContract,
     leakStageCounts:Object.fromEntries(Object.entries(result.byLeakStage).map(([key,ids])=>[key,ids.length])),
     criticalHighMissCount:result.criticalHighMisses.length,
