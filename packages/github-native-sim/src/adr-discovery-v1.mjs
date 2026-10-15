@@ -76,6 +76,18 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
   .filter(g=>arr(g.members).some(m=>primary.some(id=>contextFor(inventory,id)?.qualifiedContainer===m.contract)))
   .map(g=>({pattern:g.pattern??'shared modifier or pattern',
     members:arr(g.members).map(m=>({contract:m.contract,name:m.name??m.signature??m.function??''}))})):[];
+ const documentationItems=verdictV13&&role!=='ATTACK'?primary.flatMap(id=>{
+  const c=contextFor(inventory,id);
+  if(!c)return [];
+  const rules=[];
+  if(typeof c.natSpec==='string'&&c.natSpec.trim())
+    rules.push({ruleId:'NATSPEC:'+id,sourceAnchor:contextAnchor(c),
+      rule:c.natSpec.slice(0,1200),type:'NATSPEC'});
+  if(typeof c.declaredValue==='string'&&c.declaredValue!=='UNINITIALIZED'&&c.declaredValue.trim())
+    rules.push({ruleId:'DECLARED_VALUE:'+id,sourceAnchor:contextAnchor(c),
+      rule:c.declaredValue.slice(0,300),type:'LITERAL_OR_INITIALIZED_STORAGE'});
+  return rules.map(x=>({contextId:id,...x}));
+ }):[];
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
   unitId,role,chatKey:role==='ATTACK'?(verdictV13?'reviewer-3':'reviewer-3L'):'reviewer-2',instructionsPath,
   submissionPath:submissionRel(campaignPath,unitId),boundaryRequestPath:'process/agent-upload/lite-phase-boundary/',
@@ -88,10 +100,10 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
   integrationQuestionIds:arr(unit.integrationQuestionIds),
   ...(verdictV13&&role!=='ATTACK'?{
     reviewPolicy:'correctness-verdict-v13',
-    siblingChecks,
+    siblingChecks,documentationItems,
     specificationReview:{sourcePaths:[...new Set(primary.map(id=>contextFor(inventory,id)?.path).filter(Boolean))],
       inspect:['NatSpec','inline comments','README and docs','named constants','paired parameters'],
-      requirement:'List each applicable stated rule and whether implementation matches'},
+      requirement:'For each documentationItems ruleId, report a MATCH/MISMATCH/UNRESOLVED comparison. Also explicitly inspect comments and README/docs from sourceRoot. If none are applicable, state NO_DOCUMENTED_RULES; the absence of entries alone is not proof.'},
     submissionGuide:[
       'For EVERY primary context, give verdict CORRECT or DEFECT, intent, reason and source anchors. UNRESOLVED requires a named decisive test and an exact expected observation.',
       'Class checks are prompts only: no per-class response is graded. The correctness verdict cannot be inferred from checklist completion.',
