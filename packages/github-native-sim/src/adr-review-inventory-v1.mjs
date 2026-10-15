@@ -324,6 +324,39 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
     const needed=loadTaxonomyV1(new URL('../../../',import.meta.url).pathname).classes.filter(x=>x.testRequired).flatMap(x=>x.triggers);
     triggers[ctx.contextId]=distinct(needed);
   }
+  // Script/config/handover text surfaces are review units in v13 even when
+  // Solidity compilation cannot produce an AST (JS, shell, YAML, JSON).
+  // Older frozen authorities retain their historical compiled-only inventory.
+  if(includeScripts){
+    const skip=new Set(['.git','node_modules','out','dist','build','artifacts','cache','.audit-hermetic-build']);
+    const textExt=/\.(?:mjs|cjs|js|ts|sh|json|ya?ml)$/i;
+    const scriptDirectory=/(^|\/)(?:script|scripts|deploy|deployment|configure|config|handover)\//i;
+    let n=0;
+    async function addTextScripts(dir){
+      for(const entry of await fs.readdir(dir,{withFileTypes:true})){
+        if(skip.has(entry.name))continue;
+        const abs=path.join(dir,entry.name);
+        if(entry.isDirectory()){await addTextScripts(abs);continue;}
+        if(!entry.isFile())continue;
+        const rel=path.relative(projectRoot,abs).split(path.sep).join('/');
+        if(!scriptDirectory.test(rel)||!textExt.test(rel)||sourceExplicitlyExcludedV1(rel,scope))continue;
+        if(++n>1000)throw new Error('v13 deployment script review inventory exceeds 1000 files; explicitly narrow excludedPaths');
+        const content=await fs.readFile(abs);
+        const hash=digestCanonicalV1({path:rel,bytes:content.toString('utf8')});
+        const symbolId='SYM-'+digestCanonicalV1({path:rel,kind:'SCRIPT_FILE'}).slice(0,16);
+        const ctx={contextId:symbolId.replace('SYM-','CTX-'),symbolId,path:rel,qualifiedContainer:rel,
+          kind:'SCRIPT_FILE',canonicalSignature:'script-file()',visibility:'internal',
+          lineStart:1,lineEnd:content.toString('utf8').split('\n').length,effectiveIn:[rel],
+          scopeTier:'IN_SCOPE',dependencySymbolIds:[],stateReads:[],stateWrites:[],
+          internalCalls:[],modifiers:[],externalCalls:[]};
+        sourceUnits.push({sourceId:'SRC-SCRIPT-'+String(n).padStart(3,'0'),path:rel,sha256:hash,
+          scopeTier:'IN_SCOPE',lineCount:ctx.lineEnd,astStatus:'SCRIPT_TEXT_REVIEW'});
+        declarations.push({...ctx,name:rel,containerKind:'file',hasBody:true});
+        contexts.push(ctx);triggers[ctx.contextId]=new Set(['SCRIPT_EXECUTION']);
+      }
+    }
+    await addTextScripts(projectRoot);
+  }
   for (const ctx of contexts) {
     const t=temp.get(ctx.contextId), contract=t?.meta?.contract;
     if(contract) {
