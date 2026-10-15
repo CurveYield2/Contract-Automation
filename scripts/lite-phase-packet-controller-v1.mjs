@@ -6,6 +6,7 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {readV7RawResultV1} from '../packages/github-native-sim/src/v7-compact-result-v1.mjs';
 import {pathToFileURL} from 'node:url';
+import {storeControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,loadPhaseSchema,
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
@@ -735,6 +736,16 @@ if(!['phase','master','master-test-result','sealed-rework','post-completion-foll
 const root=path.resolve(a['controller-root']);
 const expectedCampaignId=a['campaign-id'];
 const campaignPath=a['campaign-path']; const campaignRoot=repoFile(root,campaignPath);
+// All externally visible exits write synchronously: process.exit() cannot drop
+// buffered output. Nested transaction children retain their private full response.
+const internalTransaction=a['master-transaction-child']==='true'||Boolean(masterAmendmentRefreshSha);
+process.stdout.write=(chunk)=>{
+  const line=Buffer.isBuffer(chunk)?chunk.toString('utf8'):String(chunk);
+  const result=JSON.parse(line.trim());
+  const displayed=internalTransaction?result:storeControllerResultV1({root,campaignPath,response:result});
+  fs.writeSync(1,JSON.stringify(displayed)+'\n');
+  return true;
+};
 const sequence=reviewKind==='master'?null:Number(a['phase-sequence']);
 const directoryRel=a['campaign-directory-path']; const directoryFile=requiredFile(root,directoryRel,'campaign directory entry');
 const directory=readJson(directoryFile);
