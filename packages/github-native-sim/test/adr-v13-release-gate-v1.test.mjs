@@ -40,6 +40,11 @@ test('v13 release gate refuses missing live qualification file and false partial
   fs.writeFileSync(scoreFile,bytes);
   fs.writeFileSync(file,JSON.stringify({...qualified(),scoreSha256:sha,caught:31}));
   assert.throws(()=>verifyV13ReleaseV1({repoRoot:root}),/score does not substantiate/);
+  const forbiddenBytes=JSON.stringify({...score,byContract:{HIDDEN_SENSITIVE_VAULT:{caught:30}}})+'\n';
+  const forbiddenSha=createHash('sha256').update(forbiddenBytes).digest('hex');
+  fs.writeFileSync(file,JSON.stringify({...qualified(),scoreSha256:forbiddenSha}));
+  fs.writeFileSync(scoreFile,forbiddenBytes);
+  assert.throws(()=>verifyV13ReleaseV1({repoRoot:root}),/forbidden private score fields/);
  }finally{fs.rmSync(root,{force:true,recursive:true});}
 });
 
