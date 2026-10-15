@@ -34,10 +34,15 @@ test('real GitHub-installed Anvil preserves deployed code and pinned state witho
  assert.ok(fs.existsSync(executable),'GitHub CI must install pinned @foundry-rs/anvil, never use host Anvil');
  const child=spawn(process.execPath,[executable,'--host','127.0.0.1','--port',String(port),
    '--chain-id','1','--hardfork','cancun','--silent'],{
-   cwd:process.cwd(),env:process.env,stdio:['ignore','ignore','pipe']
+   cwd:process.cwd(),env:process.env,stdio:['ignore','ignore','pipe'],detached:true
  });
  let stderr='';child.stderr.on('data',data=>{stderr=(stderr+String(data)).slice(-3000);});
- t.after(()=>{if(child.exitCode===null)child.kill('SIGKILL');});
+ t.after(()=>{
+   // The npm wrapper spawns the native Anvil binary. Kill its *process group*
+   // so a detached grandchild cannot retain the node:test stderr pipe forever.
+   try{if(child.pid)process.kill(-child.pid,'SIGKILL');}catch{}
+   try{child.stderr?.destroy();}catch{}
+ });
  let ready=false;
  for(let i=0;i<120;i++){
    try{if(await rpc(url,'eth_chainId')==='0x1'){ready=true;break;}}catch{}
