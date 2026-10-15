@@ -199,6 +199,7 @@ export async function runGitHubNativeJobV2(input, {
   // the private Phase-0 SHA/campaign/source may authorize restored execution.
   const executionEnvironment={...environment};
   delete executionEnvironment.V7_PHASE0_FORK_STATE_PATH;
+  delete executionEnvironment.V7_PHASE0_FORK_FINAL_BLOCK;
   const stateRef=v26Request.configuration?.v26?.phase0ForkState;
   let verifiedState=null;
   if(stateRef){
@@ -209,6 +210,7 @@ export async function runGitHubNativeJobV2(input, {
         workspaceRoot:path.join(workspaceRoot,'fork-state-staging')
       });
       executionEnvironment.V7_PHASE0_FORK_STATE_PATH=verifiedState.loadStatePath;
+      executionEnvironment.V7_PHASE0_FORK_FINAL_BLOCK=String(verifiedState.finalBlock);
     }catch(error){
       const preflight={status:'FAIL',failureKind:'PHASE0_FORK_STATE_VERIFICATION_FAILED',
         reason:String(error?.message??error).slice(0,500),nextState:'PHASE7_FORK_PREFLIGHT'};
