@@ -1,6 +1,13 @@
 const RUNTIME_ACTIONS = Object.freeze(['deploy','call','staticCall','expectRevert','setBalance','transferNative','mine','increaseTime','snapshot','revertSnapshot','assertBalance','assertCall']);
 
 const BASE_RECIPES = {
+  'phase0-snapshot-targeted-v1': {
+    purpose: 'Source-bound tests against a verified post-deployment Anvil snapshot; deployment is already completed.',
+    allowedActions:['snapshot','call','staticCall','expectRevert','assertCall','assertBalance',
+      'setBalance','transferNative','mine','increaseTime','revertSnapshot'],
+    requiresFreshDeployment:false,
+    requiredLabels:['pin persisted Phase 0 baseline']
+  },
   'external-readiness-v1': {
     purpose: 'Pinned external dependency identity and state assertions.',
     allowedActions: ['staticCall', 'assertCall', 'snapshot'],
