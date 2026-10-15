@@ -505,7 +505,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          shard_index="$(jq -r '.currentAssignment.workShardIndexPath // empty' ".audit-controller/${{ steps.routing.outputs.campaign_directory_path }}")"
           msg="CONTROLLER_PHASE_PASS. Phase ${{ steps.request.outputs.phase_sequence }} is sealed. Proceed now to Phase ${{ steps.controller.outputs.next_phase }} using the new Audit Campaign Directory assignment and its schema-governed work form. Do not re-check Phase ${{ steps.request.outputs.phase_sequence }} bookkeeping."
+          if [ -n "$shard_index" ]; then
+            msg="$msg Read only the work shard INDEX at $shard_index, then work through BASE_v1.json and each listed shard in order; write all shards sequentially without a controller wait, submit ONE boundary request after the final shard."
+          fi
           b64="$(printf '%s' "$msg" | base64 -w0)"
           timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-phase-${{ steps.controller.outputs.next_phase }}-continue"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=true             -f worker_role=reviewer             -f gate_mode=LITE             -f gate_repository=CurveYield2/Audit-Controller             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}"             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"             -f gate_expected_phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f gate_expected_milestone_id="PHASE_${{ steps.controller.outputs.next_phase }}_WORK_PACKET"
 
