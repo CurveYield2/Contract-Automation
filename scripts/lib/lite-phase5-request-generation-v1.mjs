@@ -45,6 +45,10 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
    need('executionBlueprint.usePhase0ForkState',type==='ANVIL_WORKFLOW',
      'Phase-0 state reuse is only supported for Anvil workflows');
    const reuse=phase0Source?.reusableForkState;
+   need('executionBlueprint.configuration.simulation.block',
+     Number.isSafeInteger(blueprint.configuration?.simulation?.block)&&
+     blueprint.configuration.simulation.block===reuse?.finalBlock,
+     'must equal the exact retained post-deployment state block');
    need('phase0Source.reusableForkState',reuse?.status==='CAPTURED'&&
      reuse?.sourceSha256===sourceSha256&&reuse?.campaignId===campaignId,
      'no exact source/campaign bound reusable Phase-0 state is available');
