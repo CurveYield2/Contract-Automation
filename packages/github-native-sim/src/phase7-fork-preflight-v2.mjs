@@ -29,6 +29,38 @@ export async function runPhase7ForkPreflightV2(options) {
     };
   }
 
+
+  // Never allow the non-redeployment recipe against a fresh or unverified fork.
+  // Anvil's code probe checks this literal, source-planned contract before
+  // execution, so a misbound or zero-code address fails rather than faking PASS.
+  if(recipeId==='phase0-snapshot-targeted-v1'){
+    const verified=typeof options?.environment?.V7_PHASE0_FORK_STATE_PATH==='string'&&
+      options.environment.V7_PHASE0_FORK_STATE_PATH.length>0&&
+      Number.isSafeInteger(Number(options.environment.V7_PHASE0_FORK_FINAL_BLOCK));
+    const callActions=new Set(['call','staticCall','assertCall','expectRevert']);
+    const hasLiteralTarget=(workflow?.steps??[]).some(step=>
+      callActions.has(step?.action)&&/^0x[0-9a-fA-F]{40}$/.test(step?.target??''));
+    if(!verified||!hasLiteralTarget){
+      return{schemaVersion:'audit-v7-phase7-fork-preflight-v2',
+        status:'FAIL',failureKind:'PHASE0_SNAPSHOT_RECIPE_UNBOUND',
+        requestId:request.requestId,chain:request.configuration?.simulation?.chain??null,
+        pinnedBlock:request.configuration?.simulation?.block??null,
+        checks:{snapshotRecipe:{status:'FAIL',
+          reason:!verified?'No verified bound Phase-0 state':'No literal deployed contract target for pre-execution code proof'}},
+        nextState:'PHASE7_FORK_PREFLIGHT'};
+    }
+  }
+  // Snapshot-proven, non-redeployment execution is a separate mode. Legacy
+  // lifecycle recipes retain the requirement to freshly deploy audited aliases.
+  if(options?.environment?.V7_PHASE0_FORK_STATE_PATH&&
+     recipeId!=='phase0-snapshot-targeted-v1'){
+    return{schemaVersion:'audit-v7-phase7-fork-preflight-v2',
+      status:'FAIL',failureKind:'SNAPSHOT_RECIPE_MISMATCH',
+      requestId:request.requestId,
+      checks:{snapshotRecipe:{status:'FAIL',reason:'Only saved-state targeted recipe is permitted'}},
+      nextState:'PHASE7_FORK_PREFLIGHT'};
+  }
+
   const recipe = validateWorkflowAgainstV7RecipeV1(recipeId, workflow);
   if (recipe.status !== 'SUPPORTED') {
     return {
