@@ -54,3 +54,29 @@ export async function verifyPhase0ForkStateV1({root,manifest}={}){
  JSON.parse(expanded.toString('utf8'));
  return {status:'VERIFIED',sha256:manifest.sha256,bytes:data.length};
 }
+
+export async function stageVerifiedPhase0ForkStateV1({
+ controllerRoot,manifestRef,expected,workspaceRoot
+}={}){
+ if(!controllerRoot||!path.isAbsolute(controllerRoot)||!workspaceRoot||
+   !/^campaigns\/[^/]+\/evidence\/phase0\/PHASE0_FORK_STATE_MANIFEST_v1\.json$/.test(manifestRef??''))
+   throw new Error('unsafe or missing Phase-0 state manifest reference');
+ const absolute=path.join(controllerRoot,...manifestRef.split('/'));
+ const manifest=JSON.parse(await fs.readFile(absolute,'utf8'));
+ if(manifest.campaignId!==expected?.campaignId||
+    manifest.sourceSha256!==expected?.sourceSha256||
+    manifest.sha256!==expected?.sha256||
+    manifest.chainId!==expected?.chainId||
+    manifest.finalBlock!==expected?.finalBlock)
+   throw new Error('Phase-0 fork state failed campaign/source/chain identity binding');
+ const sourceRoot=path.dirname(absolute);
+ await verifyPhase0ForkStateV1({root:sourceRoot,manifest});
+ const bytes=await fs.readFile(path.join(sourceRoot,manifest.stateFile));
+ const decoded=gunzipSync(bytes,{maxOutputLength:256*1024*1024});
+ JSON.parse(decoded.toString('utf8'));
+ const out=path.join(workspaceRoot,'phase0-reuse','state.json');
+ await fs.mkdir(path.dirname(out),{recursive:true});
+ await fs.writeFile(out,decoded,{mode:0o600});
+ return {loadStatePath:out,sha256:manifest.sha256,chainId:manifest.chainId,
+   finalBlock:manifest.finalBlock,sourceSha256:manifest.sourceSha256};
+}
