@@ -41,6 +41,15 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
  need('phase0Source.archivePath',okPath(phase0Source?.archivePath));
  need('sourceSha256',/^[0-9a-f]{64}$/.test(sourceSha256??''));
  need('phase0Source.sha256',phase0Source?.sha256===sourceSha256,'must match the exact frozen source digest');
+ if(blueprint?.usePhase0ForkState===true){
+   need('executionBlueprint.usePhase0ForkState',type==='ANVIL_WORKFLOW',
+     'Phase-0 state reuse is only supported for Anvil workflows');
+   const reuse=phase0Source?.reusableForkState;
+   need('phase0Source.reusableForkState',reuse?.status==='CAPTURED'&&
+     reuse?.sourceSha256===sourceSha256&&reuse?.campaignId===campaignId,
+     'no exact source/campaign bound reusable Phase-0 state is available');
+ }
+
  if(blueprint?.projectPath&&phase0Source?.extractedContentPath)
    need('executionBlueprint.projectPath',
      blueprint.projectPath===phase0Source.extractedContentPath||
@@ -52,9 +61,18 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
    archivePath:phase0Source.archivePath,archiveSha256:sourceSha256,
    projectPath:blueprint.projectPath};
  const configuration=structuredClone(blueprint.configuration);
+ if(configuration.v26?.phase0ForkState)delete configuration.v26.phase0ForkState;
  configuration.v26={...(configuration.v26??{}),reproduction:{
    candidateId:key,reproductionType:type,expectedObservation:structuredClone(target.expectedMachineObservation)
  }};
+ if(blueprint.usePhase0ForkState===true){
+   const reuse=phase0Source.reusableForkState;
+   configuration.v26.phase0ForkState={
+     manifestRef:reuse.manifestRef,sha256:reuse.sha256,
+     sourceSha256:reuse.sourceSha256,campaignId:reuse.campaignId,
+     chainId:reuse.chainId,finalBlock:reuse.finalBlock
+   };
+ }
  const basis={campaignId,candidateKey:key,source,configuration,phaseId};
  const id=hash(basis);
  const request={schemaVersion:'deep-assurance-github-request-v2',
