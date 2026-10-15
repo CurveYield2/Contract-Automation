@@ -73,6 +73,7 @@ jobs:
             packages/github-native-sim/test/native-fuzz-v1.test.mjs \
             packages/github-native-sim/test/medusa-cli-output-v1.test.mjs \
             packages/github-native-sim/test/medusa-no-tests-real-output-v2.test.mjs \
+            packages/github-native-sim/test/phase0-fork-state-actual-anvil-v1.test.mjs \
             packages/github-native-sim/test/phase0-optimization4-v1.test.mjs \
             packages/github-native-sim/test/phase0-compiler-watchdog-30m-v1.test.mjs \
             packages/github-native-sim/test/phase0-private-build-cache-v1.test.mjs \
