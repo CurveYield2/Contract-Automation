@@ -48,8 +48,21 @@ function latestReceipt(root,campaignPath,phase,{allowTerminalComplete=false}={})
   return {...found,receipt};
 }
 function canonicalRel(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNumber(phase)+'_CANONICAL_DATA_v1.json');}
-function segmentForBoundary(boundaryPhase){return MASTER_REVIEW_SEGMENTS_V1.find(x=>x.boundaryPhase===Number(boundaryPhase))??null;}
-function segmentForId(segmentId){return MASTER_REVIEW_SEGMENTS_V1.find(x=>x.segmentId===segmentId)??null;}
+export const MASTER_REVIEW_SEGMENTS_V13=Object.freeze([
+  Object.freeze({segmentId:'reviewer-1-phase-01',reviewerId:'reviewer-1',phases:Object.freeze([1]),boundaryPhase:1}),
+  Object.freeze({segmentId:'reviewer-2-phases-02-04',reviewerId:'reviewer-2',phases:Object.freeze([2,3,4]),boundaryPhase:4}),
+  Object.freeze({segmentId:'reviewer-3-phases-05-07',reviewerId:'reviewer-3',phases:Object.freeze([5,6,7]),boundaryPhase:7}),
+  Object.freeze({segmentId:'reviewer-4-phases-08-10',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10}),
+  Object.freeze({segmentId:'reviewer-4-followup-v1',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10})
+]);
+export const isV13AuthorityV1=authorityRoot=>/Audit_Litemode_v13(?:\\/|$)/.test(String(authorityRoot??''));
+export const segmentsForAuthorityV1=authorityRoot=>isV13AuthorityV1(authorityRoot)?MASTER_REVIEW_SEGMENTS_V13:MASTER_REVIEW_SEGMENTS_V1;
+function segmentForBoundary(boundaryPhase,authorityRoot=null){
+  return segmentsForAuthorityV1(authorityRoot).find(x=>x.boundaryPhase===Number(boundaryPhase))??null;
+}
+function segmentForId(segmentId){
+  return [...MASTER_REVIEW_SEGMENTS_V13,...MASTER_REVIEW_SEGMENTS_V1].find(x=>x.segmentId===segmentId)??null;
+}
 
 export function validateMasterReviewConfiguration(directory,{required=false}={}){
   const cfg=directory?.masterReview;
@@ -165,7 +178,7 @@ function sealedOriginalSnapshotPath(campaignPath,segmentId,sealed){
 export function stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase,segmentId=null,lastSealedReceiptPath,nextSequence,nextDerivedInputPaths=[],successorPrefillContext={},now}){
   const cfg=validateMasterReviewConfiguration(directory,{required:true});
   if(directory.pendingMasterReview)throw new Error('campaign already has pendingMasterReview');
-  const segment=segmentId?segmentForId(segmentId):segmentForBoundary(boundaryPhase);
+  const segment=segmentId?segmentForId(segmentId):segmentForBoundary(boundaryPhase,authorityRoot);
   if(segment&&segment.boundaryPhase!==boundaryPhase)throw new Error('master segment boundary mismatches requested phase');
   if(!segment)throw new Error('unsupported master review boundary '+boundaryPhase);
   const reviewedArtifacts=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:predecessor.authority});
@@ -374,7 +387,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   // MUST rerun Phase 5 and satisfy the fail-closed Phase-5 gate, preserving
   // the original sealed receipt under the existing supersession protocol.
   // Ordinary acceptance and every later master segment stay held.
-  const machineRepairReplay=(pending.segmentId==='reviewer-2-phases-02-05'&&outcome==='AMENDED');
+  const machineRepairReplay=(['reviewer-2-phases-02-05','reviewer-3-phases-05-07'].includes(pending.segmentId)&&outcome==='AMENDED');
   const isPostCompletionFollowup=pending.segmentId==='reviewer-4-followup-v1'&&
     pending.postCompletionFollowup?.schemaVersion==='curveyield-lite-post-completion-followup-admission-v1';
   if(isPostCompletionFollowup&&outcome==='ACCEPT_WITHOUT_MODIFICATIONS')
