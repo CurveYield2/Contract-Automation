@@ -42,3 +42,38 @@ test('must not invent build identity, override frozen source, or fabricate expec
  assert.equal(x.status,'REWORK_REQUIRED');
  assert.ok(x.missing.some(v=>v.field==='executionBlueprint.projectPath'));
 });
+
+test('D5 generated Anvil requests reuse only exact Phase-0 campaign snapshot and block',()=>{
+ const block=25819000,sha='b'.repeat(64);
+ const t=target();
+ t.reproductionType='ANVIL_WORKFLOW';
+ t.expectedMachineObservation={stepLabel:'saved deployment baseline',stepStatus:'completed'};
+ t.executionBlueprint={usePhase0ForkState:true,projectPath:'campaigns/demo r1/source',
+  configuration:{compilers:[{language:'solidity',version:'0.8.28'}],timeoutMinutes:20,
+   deploymentGas:{deployableContracts:[{sourceName:'contracts/Vault.sol',contractName:'Vault'}]},
+   simulation:{chain:'ethereum',block,
+    workflow:{steps:[{action:'snapshot',alias:'baseline',label:'saved deployment baseline'}]}}}};
+ const boundSource={...source,reusableForkState:{
+  status:'CAPTURED',sha256:sha,sourceSha256:digest,campaignId:'demo-r1',
+  chainId:1,finalBlock:block,
+  manifestRef:'campaigns/demo r1/evidence/phase0/PHASE0_FORK_STATE_MANIFEST_v1.json'}};
+ const success=generateV7ExecutionRequestV1({
+  campaignId:'demo-r1',sourceSha256:digest,phase0Source:boundSource,target:t});
+ assert.equal(success.status,'GENERATED',JSON.stringify(success.missing));
+ assert.equal(success.request.configuration.v26.phase0ForkState.sha256,sha);
+ assert.equal(success.request.configuration.v26.phase0ForkState.finalBlock,block);
+ assert.deepEqual(validateDeepAssuranceRequestWithV26V1(success.request),success.request);
+ const mismatch=structuredClone(t);
+ mismatch.executionBlueprint.configuration.simulation.block=block-1;
+ const failed=generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,
+  phase0Source:boundSource,target:mismatch});
+ assert.equal(failed.status,'REWORK_REQUIRED');
+ assert.ok(failed.missing.some(x=>x.field==='executionBlueprint.configuration.simulation.block'));
+ const forged=structuredClone(t);
+ forged.executionBlueprint.configuration.v26={phase0ForkState:{sha256:'f'.repeat(64)}};
+ const expected=generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,
+  phase0Source:boundSource,target:forged});
+ assert.equal(expected.status,'GENERATED',JSON.stringify(expected.missing));
+ assert.equal(expected.request.configuration.v26.phase0ForkState.sha256,sha,
+  'agent cannot override controller-verifiable Phase-0 state digest');
+});
