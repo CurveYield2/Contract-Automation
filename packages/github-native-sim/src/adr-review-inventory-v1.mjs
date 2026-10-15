@@ -391,10 +391,11 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
       declarations:declarations.length,contexts:contexts.length,byKind:Object.fromEntries(Object.entries(byKind).sort(([a],[b])=>a.localeCompare(b))) }});
 }
 
-export async function writeReviewInventoryOutputsV1({outputDir,projectRoot,build,request,policy}) {
+export async function writeReviewInventoryOutputsV1({outputDir,projectRoot,build,request,policy,reviewPolicy=null}) {
   if(policy!==POLICY)return;
   const campaign={campaignId:request?.campaignId,campaignGenerationId:request?.campaignGenerationId,
-    sourceSha256:request?.source?.archiveSha256,generatedAt:request?.generatedAt??new Date().toISOString()};
+    sourceSha256:request?.source?.archiveSha256,generatedAt:request?.generatedAt??new Date().toISOString(),
+    ...(reviewPolicy==='correctness-verdict-v13'?{detectionReviewPolicy:reviewPolicy}:{})};
   try {
     const inventory=await buildReviewInventoryV1({projectRoot,build,campaign});
     const facts=buildSystemFactsV1({inventory});
