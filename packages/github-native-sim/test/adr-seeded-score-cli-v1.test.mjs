@@ -37,6 +37,8 @@ test('private manifest scorer reproduces 14/1/26/0, never returns manifest path 
         cwd:root,env:{...process.env,PRIVATE_SEEDED_TRUTH_FILE:manifestPath},encoding:'utf8'});
     }catch(error){out=error.stdout;assert.equal(error.status,2);}
     const cli=JSON.parse(out);
-    assert.equal(cli.caught,14);assert.ok(!out.includes(manifestPath));
+    assert.equal(cli.caught,14);
+    assert.equal(cli.cleanControlCriticalHighFalsePositiveCount,0);
+    assert.ok(!out.includes(manifestPath));
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
