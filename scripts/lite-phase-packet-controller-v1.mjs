@@ -22,7 +22,7 @@ import {
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
-import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
+import {MASTER_REVIEW_SEGMENTS_V1,isV13AuthorityV1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
 import {registerMasterTargetedTests,acceptMasterTargetedTestResults,verifyMasterTargetedTestEvidence,unresolvedFinalCandidateFailures} from './lib/lite-master-targeted-tests-v1.mjs';
 import {admitPostCompletionFollowupV1} from './lib/lite-post-completion-followup-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
@@ -120,8 +120,21 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,repla
   return {graphRel,ledgerRel,invalidRel};
 }
 function receiptRef(root,campaignPath,rel,role){return {role,path:path.posix.relative(campaignPath,rel),sha256:shaFile(repoFile(root,rel))};}
-function assignmentReviewer(sequence){if(sequence===1)return'reviewer-1';if(sequence>=2&&sequence<=5)return'reviewer-2';if(sequence===6)return'reviewer-3L';if(sequence>=8&&sequence<=10)return'reviewer-4';throw new Error('no agent reviewer for phase '+sequence);}
-function isFreshBoundary(next){return next===2||next===6||next===8;}
+function assignmentReviewer(sequence,authorityRoot=null){
+  if(sequence===1)return 'reviewer-1';
+  if(isV13AuthorityV1(authorityRoot)){
+    if(sequence>=2&&sequence<=4)return 'reviewer-2';
+    if(sequence>=5&&sequence<=7)return 'reviewer-3';
+  }else{
+    if(sequence>=2&&sequence<=5)return 'reviewer-2';
+    if(sequence===6)return 'reviewer-3L';
+  }
+  if(sequence>=8&&sequence<=10)return 'reviewer-4';
+  throw new Error('no agent reviewer for phase '+sequence);
+}
+function isFreshBoundary(next,authorityRoot=null){
+  return isV13AuthorityV1(authorityRoot)?[2,5,8].includes(next):[2,6,8].includes(next);
+}
 function maybeFile(root,rel){const f=repoFile(root,rel);return fs.existsSync(f)&&fs.statSync(f).isFile()?f:null;}
 function maybeJson(root,rel){const f=maybeFile(root,rel);if(!f)return null;try{return readJson(f);}catch{return null;}}
 function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNum(phase)+'_CANONICAL_DATA_v1.json');}
@@ -964,7 +977,7 @@ if(reviewKind==='master'){
     if(plan.nextPhaseSequence===null||plan.nextPhaseSequence===undefined){
       directory.campaignStatus='COMPLETE';directory.currentAssignment=null;
     }else{
-      nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:plan.nextPhaseSequence,reviewer:assignmentReviewer(plan.nextPhaseSequence),predecessorReceiptPath:pending.lastSealedReceiptPath,derivedInputPaths:plan.derivedInputPaths??[],status:'WAITING_FOR_SUCCESSOR_AGENT',prefillContext:plan.prefillContext??{}});
+      nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:plan.nextPhaseSequence,reviewer:assignmentReviewer(plan.nextPhaseSequence,masterAuthorityRoot),predecessorReceiptPath:pending.lastSealedReceiptPath,derivedInputPaths:plan.derivedInputPaths??[],status:'WAITING_FOR_SUCCESSOR_AGENT',prefillContext:plan.prefillContext??{}});
       directory.currentAssignment=nextAssignment;directory.campaignStatus='WAITING_FOR_SUCCESSOR_AGENT';
     }
     directory.lastSealedReceiptPath=pending.lastSealedReceiptPath;
@@ -1385,7 +1398,10 @@ let fresh=false;let nextAssignment=null;let nextDerivedInputs=[];
 let discoveryStarted=false,discoveryWake=null,discoveryWakes=[];
 let handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};
 if(sequence===1){nextSequence=2;fresh=true;handoff={required:true,boundary:'P1_TO_P2',incomingReviewer:'reviewer-2',assignedWork:'Combined Lite Phases 2-5',nextPhaseSequence:2,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
-if(sequence===5){nextSequence=6;fresh=true;handoff={required:true,boundary:'P5_TO_P6',incomingReviewer:'reviewer-3L',assignedWork:'Merged Lite Phases 6-7',nextPhaseSequence:6,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
+if(isV13AuthorityV1(authorityRoot)&&sequence===4){
+  nextSequence=5;fresh=true;handoff={required:true,boundary:'P4_TO_P5',incomingReviewer:'reviewer-3',assignedWork:'Phases 5-7 (Phase 7 automatic)',nextPhaseSequence:5,sameReviewer:false,status:'SUCCESSOR_PENDING'};
+}
+if(sequence===5&&!isV13AuthorityV1(authorityRoot)){nextSequence=6;fresh=true;handoff={required:true,boundary:'P5_TO_P6',incomingReviewer:'reviewer-3L',assignedWork:'Merged Lite Phases 6-7',nextPhaseSequence:6,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
 if(sequence===6){nextSequence=8;}
 if(sequence===8){nextSequence=hasRemediation(campaignRoot)?9:10;handoff={required:false,boundary:null,incomingReviewer:'reviewer-4',assignedWork:'Phase '+nextSequence,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};}
 if(sequence===9){nextSequence=10;}
@@ -1442,7 +1458,7 @@ if(sequence===8&&nextSequence===10){
   skipped.sealedAt=now;if(masterAmendmentRefreshSha)skipped.masterAmendment=masterAmendmentReceipt(skippedRevision-1);writeJson(repoFile(root,skippedRel),skipped);sealedReceiptRel=skippedRel;
 }
 directory.lastSealedReceiptPath=sealedReceiptRel;
-const masterBoundary=sequence===1?1:sequence===5?5:sequence===6?7:sequence===10?10:null;
+const masterBoundary=isV13AuthorityV1(authorityRoot)?(sequence===1?1:sequence===4?4:sequence===6?7:sequence===10?10:null):(sequence===1?1:sequence===5?5:sequence===6?7:sequence===10?10:null);
 if(gatedMasterReview&&masterBoundary!==null){
   const staged=stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase:masterBoundary,lastSealedReceiptPath:sealedReceiptRel,nextSequence,nextDerivedInputPaths:nextDerivedInputs,successorPrefillContext,now});
   writeJson(directoryFile,directory);
@@ -1451,7 +1467,7 @@ if(gatedMasterReview&&masterBoundary!==null){
     rel.split('/').map(encodeURIComponent).join('/');
   const extraLines=[];
   if(activeDetectionPolicyV1(predecessor)){
-    if(staged.segment.segmentId==='reviewer-2-phases-02-05')
+    if(['reviewer-2-phases-02-05','reviewer-2-phases-02-04'].includes(staged.segment.segmentId))
       extraLines.push('As challenger, review every item in '+blob(path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json'))+': attacker findings and contradictions, unresolved checks, not-applicable claims and coverage gaps. Amend reviewer work or order targeted tests through the existing directive; accept a gap only with a stated reason.');
     if(staged.segment.segmentId==='reviewer-4-phases-08-10')
       extraLines.push('Check the coverage label and every gap in '+blob(path.posix.join(campaignPath,'work/phase-10/COVERAGE_MATRIX_v1.json'))+' before accepting.');
@@ -1465,8 +1481,8 @@ if(sequence===10){
   directory.currentAssignment=null;directory.updatedAt=now;
 }
 else{
-  const nextReviewer=assignmentReviewer(nextSequence);
-  const nextStatus=fresh||isFreshBoundary(nextSequence)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
+  const nextReviewer=assignmentReviewer(nextSequence,authorityRoot);
+  const nextStatus=fresh||isFreshBoundary(nextSequence,authorityRoot)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
   nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
   if(sequence===3&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
     const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),
