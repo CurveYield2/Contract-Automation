@@ -227,7 +227,7 @@ function runMaster(f,outcome,segmentId='reviewer-1-phase-01'){
   const args=['scripts/lite-phase-packet-controller-v1.mjs','--controller-root',f.root,'--campaign-id','demo-r1','--campaign-path',f.campaign,'--campaign-directory-path',f.dirRel,'--review-kind','master','--segment-id',segmentId];
   if(outcome)args.push('--master-outcome',outcome,'--master-summary-b64',Buffer.from('Master reviewed the whole segment.').toString('base64'));
   const out=execFileSync(process.execPath,args,{encoding:'utf8'});
-  return JSON.parse(out.trim());
+  return restoreControllerResultV1({root:f.root,campaignPath:f.campaign,envelope:JSON.parse(out.trim())});
 }
 
 function fileSha(file){return createHash('sha256').update(fs.readFileSync(file)).digest('hex');}
@@ -479,7 +479,7 @@ test('typed held revision2-to-revision3 admission regenerates controller product
     evidenceInvalidation:{eventId:'INV-P1-REWORK-002',ruleId:'EIM-013',requiredPriorStatus:'SEALED_REVISION_2',resolveTo:'RESOLVED_BY_PHASE_1_REVISION_3'},holdSuccessorDelivery:true
   });
   const out=execFileSync(process.execPath,['scripts/lite-phase-packet-controller-v1.mjs','--controller-root',f.root,'--campaign-id','demo-r1','--campaign-path',f.campaign,'--campaign-directory-path',f.dirRel,'--review-kind','sealed-rework','--phase-sequence','1','--rework-request-path',requestRel],{encoding:'utf8'});
-  const result=JSON.parse(out.trim());
+  const result=restoreControllerResultV1({root:f.root,campaignPath:f.campaign,envelope:JSON.parse(out.trim())});
   assert.equal(result.status,'PASS');
   assert.equal(result.sealedRework,true);
   const persistentHold=readJson(path.join(f.root,f.campaign,'controller/SUCCESSOR_DELIVERY_HOLD_v1.json'));
