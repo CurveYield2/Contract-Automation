@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {buildMasterDepthSpotCheckV1,validateMasterDepthSpotCheckV1} from './lite-master-depth-spotcheck-v1.mjs';
 import {readJson,writeJson,repoFile,requiredFile,loadPhaseSchema,getByPath} from './lite-phase-work-v1.mjs';
 import {validatePhaseScaffold} from './lite-phase-prefill-v1.mjs';
 import {validateRecordedPhase5MachineEvidenceV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
@@ -198,6 +199,10 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
     }
     return {phase:x.phase,path:x.path,sha256:x.sha256,gitBlobSha1:gitBlobSha1(bytes),sealedOriginalPath};
   });
+  const depthSpotCheck=(isV13AuthorityV1(authorityRoot)&&boundaryPhase===4)
+    ?buildMasterDepthSpotCheckV1({root,campaignPath,campaignId:directory.campaignId,
+      sourceSha256:directory.sourceSha256,segmentId:segment.segmentId})
+    :null;
   const recordRel=path.posix.join(campaignPath,'work/master-review',segment.segmentId,'MASTER_REVIEW_RECORD_v1.json');
   const record={
     schemaVersion:'curveyield-lite-master-review-record-v1',
@@ -210,6 +215,7 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
     masterIdentity:{chatUrl:cfg.chatUrl,reasoning:'MAXIMUM'},
     bindings,
     reviewedArtifacts,
+    ...(depthSpotCheck?{depthSpotCheck}:{}),
     decision:null,
     createdAt:now,
     updatedAt:now
@@ -226,6 +232,7 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
     masterChatUrl:cfg.chatUrl,
     manifestSha256:bindings.segmentManifestSha256,
     bindingsSha256:digestJson(bindings),
+    ...(depthSpotCheck?{depthSpotCheckAssignmentSha256:depthSpotCheck.assignmentSha256}:{}),
     sealedWorkForms,
     lastSealedReceiptPath,
     successorPlan:{
@@ -267,6 +274,9 @@ function validateLockedRecord(record,pending,directory,cfg){
   if(record.bindings?.source?.sha256!==directory.sourceSha256)failures.push('master source binding does not match current campaign directory');
   if(digestJson(record.bindings)!==pending.bindingsSha256)failures.push('master source/build/authority bindings were modified');
   if(digestJson(record.reviewedArtifacts)!==pending.manifestSha256)failures.push('master reviewedArtifacts were modified');
+  if(pending.depthSpotCheckAssignmentSha256&&
+    record.depthSpotCheck?.assignmentSha256!==pending.depthSpotCheckAssignmentSha256)
+    failures.push('master depth sample assignment was modified');
   return failures;
 }
 function currentArtifactFailures(root,campaignPath,rows){
@@ -415,6 +425,8 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
       }));
     }catch(error){failures.push('Required Phase-5 machine evidence validation failed: '+String(error?.message??error));}
   }
+  if(!failures.length&&record.depthSpotCheck&&outcome!=='REQUEST_TARGETED_TESTS')
+    failures.push(...validateMasterDepthSpotCheckV1({root,campaignPath,assignment:record.depthSpotCheck}));
   if(failures.length)return {status:'MASTER_REVIEW_HELD',failures,record,pending};
   const sealedByPath=new Map((pending.sealedWorkForms??[]).map(x=>[x.path,x]));
   // Only reviewer work forms may change; every report, canonical record, receipt
