@@ -45,7 +45,7 @@ test('real GitHub-installed Anvil preserves deployed code and pinned state witho
    await sleep(100);
  }
  assert.ok(ready,'Anvil not ready: '+stderr);
- assert.equal(await rpc(url,'anvil_setCode',[target,code]),true);
+ await rpc(url,'anvil_setCode',[target,code]); // success replies may be null; bytecode check is authoritative
  await rpc(url,'evm_mine');
  const block=Number(BigInt(await rpc(url,'eth_blockNumber')));
  assert.equal(await rpc(url,'eth_getCode',[target,'latest']),code);
