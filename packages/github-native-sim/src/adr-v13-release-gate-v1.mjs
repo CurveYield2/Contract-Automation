@@ -59,10 +59,22 @@ export function verifyV13ReleaseV1({repoRoot,receipt=null}={}){
    let score;
    try{score=JSON.parse(bytes.toString('utf8'));}
    catch{throw new Error('V13_QUALIFICATION_REQUIRED: aggregate score JSON invalid');}
+   const publicKeys=['caught','cleanControlCriticalHighFalsePositiveCount',
+     'decoysFlagged','defectCount','gate','schemaVersion'].sort();
+   const gateKeys=['maxDecoys','passed','requiredCaught'].sort();
+   // Reject a raw private scorer report masquerading as the public artifact:
+   // even aggregate contract/class or leak-stage names disclose hidden seeds.
+   const publicOnly=score&&typeof score==='object'&&!Array.isArray(score)&&
+     JSON.stringify(Object.keys(score).sort())===JSON.stringify(publicKeys)&&
+     score.gate&&typeof score.gate==='object'&&!Array.isArray(score.gate)&&
+     JSON.stringify(Object.keys(score.gate).sort())===JSON.stringify(gateKeys);
+   if(!publicOnly)
+     throw new Error('V13_QUALIFICATION_REQUIRED: forbidden private score fields');
    if(score?.schemaVersion!=='curveyield-seeded-detection-score-v1'||
      score?.defectCount!==41||score.caught!==row.caught||
      score.decoysFlagged!==0||score.cleanControlCriticalHighFalsePositiveCount!==0||
-     score.gate?.passed!==true||score.gate?.requiredCaught<30||
+     score.gate?.passed!==true||!Number.isSafeInteger(score.gate?.requiredCaught)||
+     score.gate.requiredCaught<30||score.gate.requiredCaught>41||
      score.gate?.maxDecoys!==0)
      throw new Error('V13_QUALIFICATION_REQUIRED: score does not substantiate a qualifying pass');
  }
