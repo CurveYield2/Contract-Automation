@@ -45,6 +45,9 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
    need('executionBlueprint.usePhase0ForkState',type==='ANVIL_WORKFLOW',
      'Phase-0 state reuse is only supported for Anvil workflows');
    const reuse=phase0Source?.reusableForkState;
+   need('executionBlueprint.configuration.harness.recipeId',
+     blueprint.configuration?.harness?.recipeId==='phase0-snapshot-targeted-v1',
+     'verified Phase-0 state requires the dedicated non-redeployment targeted-test recipe');
    need('executionBlueprint.configuration.evmVersion',
      String(blueprint.configuration?.evmVersion??'').toLowerCase()===String(reuse?.hardfork??'').toLowerCase(),
      'must equal retained Anvil state hardfork');
