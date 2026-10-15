@@ -63,8 +63,16 @@ export function shardWorkFormV1({root,formRel,phase,retireFull=true,force=false}
      const rel=path.posix.join(path.posix.dirname(baseRel),file),content=pretty(shard);
      if(Buffer.byteLength(content)>MAX_SHARD)throw new Error('oversized work shard');
      fs.writeFileSync(relfile(root,rel),content);
-     shards.push({file,path:tokens,startIndex:start,recordKeys:entries.map(x=>x.key),
-       sha256:digest(content),bytes:Buffer.byteLength(content)});
+     // The array path already occurs once in the descriptor. Repeating it in
+     // every record key made a 323-row form exceed the entire 32-KiB index.
+     // Store only the identity suffix; preserve the full canonical key in the
+     // record shard, with independent content SHA-256 on both sides.
+     const prefix=JSON.stringify(tokens)+':';
+     shards.push({file,path:tokens,startIndex:start,
+       recordKeys:entries.map(x=> {
+         if(!x.key.startsWith(prefix))throw new Error('record key array-path mismatch');
+         return x.key.slice(prefix.length);
+       }),sha256:digest(content),bytes:Buffer.byteLength(content)});
    }
  }
  const index={schemaVersion:'curveyield-work-shard-index-v1',phase,formRel,
@@ -106,7 +114,9 @@ export function restoreWorkShardsV1({root,indexRel,refreshDigests=false}){
   const occupied=ranges.get(arrayId)??new Set();
   for(const [j,item] of shard.entries.entries()){
    const i=spec.startIndex+j,key=recordKey(spec.path,item.value,i);
-   if(key!==item.key||key!==spec.recordKeys[j]||keys.has(key)||occupied.has(i))
+   const stored=spec.recordKeys[j],fullIndexKey=stored.startsWith('[')?
+     stored:JSON.stringify(spec.path)+':'+stored;
+   if(key!==item.key||key!==fullIndexKey||keys.has(key)||occupied.has(i))
      throw new Error('missing, duplicated or changed work record key: '+key);
    keys.add(key);occupied.add(i);target[i]=item.value;
   }
