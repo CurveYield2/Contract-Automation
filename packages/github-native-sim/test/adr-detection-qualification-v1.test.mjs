@@ -77,7 +77,7 @@ test('private seeded-package gate reproduces r4: 14 caught, 1 partial, 26 missed
  const adjudications=truth.slice(0,14).map((x,i)=>match(x.caseId,'F-'+i));
  const result=scoreSeededCampaignV1({truth,findings,adjudications,
    partialCases:['X15'],missStageByCase:{X16:'REVIEW_VERDICT_MISSED'}});
- assert.deepEqual([result.caught,result.partial,result.missed,result.decoysFlagged],[14,1,26,0]);
+ assert.deepEqual([result.caught,result.partial,result.missed,result.decoysFlagged,result.cleanControlCriticalHighFalsePositiveCount],[14,1,26,0,0]);
  assert.equal(result.gate.passed,false);
  assert.deepEqual(result.byLeakStage.REVIEW_VERDICT_MISSED,['X16']);
  assert.equal(result.bySeverity.HIGH.total,41);
