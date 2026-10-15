@@ -134,6 +134,7 @@ export async function runPhase7ForkPreflightV1({
       chain: simulation.chain,
       pinnedBlock: simulation.block,
       evmVersion: request.configuration.evmVersion,
+      loadStatePath:environment?.V7_PHASE0_FORK_STATE_PATH??null,
       checks: { archiveRpcSecret, workflowActions },
       nextState: archiveRpcSecret.status !== 'PASS' ? 'PHASE7_FORK_PREFLIGHT' : 'RUNNER_REPAIR_REBIND',
     };
