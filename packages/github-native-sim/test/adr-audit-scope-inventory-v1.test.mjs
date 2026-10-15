@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {sourceTierV1,applyAuditScopeToInventoryV1,reviewInventoryRelV1,buildReviewInventoryV1} from '../src/adr-review-inventory-v1.mjs';
+import {sourceTierV1,applyAuditScopeToInventoryV1,reviewInventoryRelV1,buildReviewInventoryV1,writeReviewInventoryOutputsV1} from '../src/adr-review-inventory-v1.mjs';
 import {parseAuditScope} from '../src/phase0-audit-scope-v1.mjs';
 
 const scope=parseAuditScope(JSON.stringify({schemaVersion:'curveyield-audit-scope-v1',inScopePaths:['upgrade/src/']}));
@@ -70,5 +70,27 @@ test('v13 adds text deploy/config scripts as residual review units while v12 doe
   assert.equal(v13.payload.contexts.find(c=>c.path==='upgrade/script/deploy.ts').kind,'SCRIPT_FILE');
   assert.ok(!v13.payload.contexts.some(c=>c.path==='upgrade/script/skip.ts'));
   assert.equal(v13.payload.sourceUnits.find(s=>s.path==='upgrade/script/deploy.ts').scopeTier,'IN_SCOPE');
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('Phase-0 intelligence writer activates script units only under verified v13 review policy',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-script-policy-'));
+ try{
+  fs.mkdirSync(path.join(root,'upgrade/script'),{recursive:true});
+  fs.writeFileSync(path.join(root,'upgrade/script/configure.ts'),'const requiredAdmin = "0x0";\n');
+  fs.writeFileSync(path.join(root,'audit-scope.json'),JSON.stringify({
+   schemaVersion:'curveyield-audit-scope-v1',inScopePaths:['upgrade/src/']}));
+  const request={campaignId:'demo-r1',campaignGenerationId:'demo-r1-g1',
+   source:{archiveSha256:'a'.repeat(64)}};
+  const out=path.join(root,'out-policy');
+  await writeReviewInventoryOutputsV1({projectRoot:root,outputDir:out,build:{sourceAsts:{}},
+   request,policy:'audit-detection-rebuild-v1',reviewPolicy:'correctness-verdict-v13'});
+  const written=JSON.parse(fs.readFileSync(path.join(out,'REVIEW_INVENTORY_v1.json'),'utf8'));
+  assert.ok(written.payload.contexts.some(c=>c.path==='upgrade/script/configure.ts'&&c.kind==='SCRIPT_FILE'));
+  const legacy=path.join(root,'out-legacy');
+  await writeReviewInventoryOutputsV1({projectRoot:root,outputDir:legacy,build:{sourceAsts:{}},
+   request,policy:'audit-detection-rebuild-v1'});
+  const frozen=JSON.parse(fs.readFileSync(path.join(legacy,'REVIEW_INVENTORY_v1.json'),'utf8'));
+  assert.ok(!frozen.payload.contexts.some(c=>c.path==='upgrade/script/configure.ts'));
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
