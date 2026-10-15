@@ -359,10 +359,39 @@ jobs:
           if [ "${{ steps.request.outputs.review_kind }}" = sealed-rework ] || [ "${{ steps.request.outputs.review_kind }}" = post-completion-followup ]; then
             args+=(--rework-request-path "${{ steps.request.outputs.rework_request_path }}")
           fi
-          timeout -k 30s 5100s node scripts/lite-phase-packet-controller-v1.mjs "${args[@]}" | tee /tmp/lite-phase-packet-result.json
+          timeout -k 30s 5100s node scripts/lite-phase-packet-controller-v1.mjs "${args[@]}" | tee /tmp/lite-phase-packet-envelope.json
+          # Reject empty, malformed, multi-line, oversized and unknown-status stdout.
+          test "$(wc -c < /tmp/lite-phase-packet-envelope.json)" -le 8192
+          jq -es '
+            length==1 and
+            .[0].schemaVersion=="curveyield-lite-controller-envelope-v1" and
+            (.[0].status | IN("PASS","WAITING_FOR_MASTER_REVIEW","NEEDS_REWORK",
+              "MASTER_TESTS_REQUESTED","FOLLOWUP_ADMITTED","DISCOVERY_REWORK",
+              "DISCOVERY_NEXT","DISCOVERY_PARTIAL","DISCOVERY_COMPLETE",
+              "DISCOVERY_STALE_REQUEST","MASTER_REVIEW_INVALID","MASTER_REVIEW_HELD",
+              "ALREADY_ACCEPTED","CONTROLLER_ERROR")) and
+            (.[0].detailRef|type=="string") and
+            (.[0].sha256|test("^[a-f0-9]{64}$"))
+          ' /tmp/lite-phase-packet-envelope.json >/dev/null
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import {restoreControllerResultV1} from "./scripts/lib/lite-boundary-result-v1.mjs";
+            const [root,campaignPath]=process.argv.slice(1);
+            const envelope=JSON.parse(fs.readFileSync("/tmp/lite-phase-packet-envelope.json","utf8"));
+            const full=restoreControllerResultV1({root,campaignPath,envelope});
+            fs.writeFileSync("/tmp/lite-phase-packet-result.json",JSON.stringify(full)+"\\n");
+          ' .audit-controller "${{ steps.routing.outputs.campaign_path }}"
+          # Wake feedback references the full private result when it exceeds the
+          # safe GitHub Actions output size; no diagnostic is discarded.
+          jq -r --arg ref "$(jq -r '.detailRef' /tmp/lite-phase-packet-envelope.json)" '
+            if ((.feedbackB64 // "")|length)>4096 then
+              .feedbackB64=(("Controller details exceed wake size; read campaign " + $ref + " and repair every listed item.")|@base64)
+            else . end
+          ' /tmp/lite-phase-packet-result.json > /tmp/lite-phase-packet-delivery.json
           {
+
             echo "status=$(jq -r '.status' /tmp/lite-phase-packet-result.json)"
-            echo "feedback_b64=$(jq -r '.feedbackB64 // empty' /tmp/lite-phase-packet-result.json)"
+            echo "feedback_b64=$(jq -r '.feedbackB64 // empty' /tmp/lite-phase-packet-delivery.json)"
             echo "fresh=$(jq -r '.freshSuccessorRequired // false' /tmp/lite-phase-packet-result.json)"
             echo "same=$(jq -r '.sameReviewerAdvanced // false' /tmp/lite-phase-packet-result.json)"
             echo "next_phase=$(jq -r '.nextAssignment.phaseSequence // empty' /tmp/lite-phase-packet-result.json)"
