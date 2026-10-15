@@ -15,7 +15,7 @@ export function verifyV13ReleaseV1({repoRoot,receipt=null}={}){
  })();
  if(row?.schemaVersion!=='curveyield-adr-v13-qualification-pass-v1'||
     row?.status!=='QUALIFIED'||row?.seededDefects!==41||
-    row?.baselineCaught!==14||row?.caught<30||row?.caught>41||
+    row?.baselineCaught!==14||!Number.isSafeInteger(row?.caught)||row.caught<30||row.caught>41||
     row?.decoysFlagged!==0||row?.cleanControlCriticalHighFalsePositives!==0||
     typeof row?.independentRunId!=='string'||!row.independentRunId.trim()||
     !sha.test(row?.scoreSha256??'')||
