@@ -8,7 +8,7 @@ const [root,campaignPath,campaignId,sourceSha256]=process.argv.slice(2);
 if(!root||!/^campaigns\//.test(campaignPath??'')||!campaignId||!/^[a-f0-9]{64}$/i.test(sourceSha256??''))
   throw new Error('Usage: node scripts/lite-phase5-preflight-v1.mjs ROOT campaigns/PATH CAMPAIGN_ID SOURCE_SHA256');
 const read=rel=>JSON.parse(fs.readFileSync(path.join(root,campaignPath,rel),'utf8'));
-materializeShardedWorkFormV1({root,formRel:path.posix.join(campaignPath,'work/phase-05/PHASE_05_WORK_FORM_v1.json'),refreshDigests:false});
+materializeShardedWorkFormV1({root,formRel:path.posix.join(campaignPath,'work/phase-05/PHASE_05_WORK_FORM_v1.json'),refreshDigests:true});
 const form=read('work/phase-05/PHASE_05_WORK_FORM_v1.json');
 const designs=form?.actions?.['step-3']?.outputs?.targetDesigns;
 const failures=[],ready=[];
