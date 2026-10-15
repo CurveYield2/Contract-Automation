@@ -298,12 +298,17 @@ jobs:
           set -euo pipefail
           source_sha="$(jq -r '.sourceSha256' ".audit-controller/${{ steps.routing.outputs.campaign_directory_path }}")"
           if ! node scripts/lite-phase5-preflight-v1.mjs .audit-controller "${{ steps.routing.outputs.campaign_path }}" "${{ steps.request.outputs.campaign_id }}" "$source_sha" > /tmp/lite-phase5-preflight.json; then
-            jq -r '.failures[] | "::error::" + .path + ": " + .reason + " (" + ((.details // []) | join("; ")) + ")"' /tmp/lite-phase5-preflight.json
-            echo "::error::Phase 5 requires valid requests before toolchain/RPC. No machine execution started."
-            exit 1
+            # A valid design rework goes back to the reviewer without spending on
+            # toolchain/Anvil/RPC; malformed preflight crashes still fail closed.
+            jq -e '.status=="REWORK_REQUIRED" and (.failures|type=="array") and (.failures|length)>0' /tmp/lite-phase5-preflight.json >/dev/null
+            jq -r '.failures[] | "::warning::" + .path + ": " + .reason + " (shard: " + (.shardPath // "unsharded") + ")"' /tmp/lite-phase5-preflight.json
           fi
+          report_path=".audit-controller/${{ steps.routing.outputs.campaign_path }}/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json"
+          mkdir -p "$(dirname "$report_path")"
+          cp /tmp/lite-phase5-preflight.json "$report_path"
           echo "runnable=$(jq -r '.runnable' /tmp/lite-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
-          jq . /tmp/lite-phase5-preflight.json
+          echo "rework=$(jq -r '.status=="REWORK_REQUIRED"' /tmp/lite-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
+          jq '{status,designCount,readyCount,failureCount:(.failures|length),generatedCount:(.generated|length)}' /tmp/lite-phase5-preflight.json
 
       - name: Install locked Node dependencies for controller validation
         if: steps.routing.outputs.stale != 'true'
@@ -335,7 +340,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if { [ "${{ steps.request.outputs.review_kind }}" = phase ] && [ "${{ steps.request.outputs.phase_sequence }}" = 5 ]; } ||
+          if { [ "${{ steps.request.outputs.review_kind }}" = phase ] && [ "${{ steps.request.outputs.phase_sequence }}" = 5 ] && [ "${{ steps.phase5_preflight.outputs.runnable }}" = true ]; } ||
              { [ "${{ steps.phase5_plan.outputs.requires_execution }}" = true ]; }; then
             test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::RPC_ETHEREUM secret missing for Phase-5 V7 fork preflight"; exit 1; }
           fi
