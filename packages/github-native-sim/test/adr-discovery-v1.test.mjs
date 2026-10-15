@@ -197,3 +197,32 @@ test('v13 discovery state routes independent attacker to reviewer-3, while v12 k
   assert.ok(a.wakes.some(w=>w.chatKey==='reviewer-3'));
  }finally{fs.rmSync(o.root,{recursive:true,force:true});}
 });
+
+test('200-unit discovery window uses bounded index pages and one wake below 8 KiB',()=>{
+ const o=setup();
+ try{
+  const many=structuredClone(plan);
+  many.payload.reviewUnits=Array.from({length:200},(_,i)=>({
+   unitId:'R-'+String(i+1).padStart(3,'0'),role:'RESIDUAL_REVIEW',
+   primaryContextIds:['CTX-A'],readContextIds:['CTX-A']
+  }));
+  many.payload.attackUnits=[];
+  writeJson(repoFile(o.root,o.campaignPath+'/evidence/review-inventory/FLOW_PLAN_v1.json'),many);
+  const result=startDiscoveryV1(o);
+  assert.equal(result.wakes.length,1);
+  assert.ok(Buffer.from(result.wakes[0].messageB64,'base64').length<8192);
+  const indexRel=o.campaignPath+'/index/flow-review/INDEX_v1.json';
+  const index=readJson(repoFile(o.root,indexRel));
+  assert.equal(index.unitCount,200);
+  assert.equal(index.pages.length,8);
+  let count=0;
+  for(const page of index.pages){
+    const file=repoFile(o.root,page.path);
+    assert.ok(fs.statSync(file).size<=32*1024);
+    const body=readJson(file);
+    assert.equal(body.units.length,25);
+    count+=body.units.length;
+  }
+  assert.equal(count,200);
+ }finally{fs.rmSync(o.root,{force:true,recursive:true});}
+});
