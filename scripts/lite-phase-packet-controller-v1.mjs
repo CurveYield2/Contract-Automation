@@ -554,6 +554,7 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
         if(generated?.phaseSequence!==phase)throw new Error('master amendment refresh dependency chain did not prepare Phase '+phase);
         predecessorReceiptPath=generated.predecessorReceiptPath;
         derivedInputPaths=generated.derivedInputPaths??[];
+        if(generated.workShardIndexPath)materializeShardedWorkFormV1({root:shadowRoot,formRel:generated.workFormPath,refreshDigests:false});
         const fresh=readJson(requiredFile(shadowRoot,generated.workFormPath,'refreshed Phase '+phase+' scaffold'));
         const trustedPrefill=structuredClone(fresh);
         const amendedDisposition=(amendedForms.get(row.path)?.changedFields??[]).some(x=>x.endsWith('.obligationDispositions'));
