@@ -1045,6 +1045,22 @@ try{
 
   deficiencies.push(...validateWorkForm(schema,form));
   deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+  if(sequence===5){
+    const reportRel=path.posix.join(campaignPath,'controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json');
+    const preflight=maybeJson(root,reportRel);
+    if(preflight){
+      if(preflight.schemaVersion!=='curveyield-phase5-request-preflight-v1'||
+        preflight.campaignId!==directory.campaignId||preflight.sourceSha256!==directory.sourceSha256)
+        deficiencies.push('Phase 5 preflight identity mismatch: '+reportRel);
+      else if(preflight.status==='REWORK_REQUIRED'){
+        for(const f of preflight.failures??[])
+          deficiencies.push('Phase 5 preflight candidate '+String(f.candidateKey??'UNKNOWN')+
+            ', field '+String(f.path??'UNKNOWN')+', shard '+String(f.shardPath??'UNSHARDED')+
+            ': '+String(f.reason??'missing executable test input'));
+      }else if(preflight.status!=='PREFLIGHT_PASS')
+        deficiencies.push('Phase 5 preflight unrecognized status: '+reportRel);
+    }
+  }
   if(activeDetectionPolicyV1(predecessor)){
     const fn=({6:validatePhase6AttackerWorkV1,8:validatePhase8LinkageV1,10:validatePhase10CoverageLabelV1})[sequence];
     if(fn)deficiencies.push(...fn({root,campaignPath,form}));
