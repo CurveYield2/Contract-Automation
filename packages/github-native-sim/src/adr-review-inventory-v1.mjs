@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {listAdmittedSourcesV1} from './source-intelligence-technical-v1.mjs';
 import {digestCanonicalV1} from './canonical-json-v1.mjs';
 import {buildSystemFactsV1} from './adr-system-facts-v1.mjs';
@@ -342,7 +343,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
         if(!scriptDirectory.test(rel)||!textExt.test(rel)||sourceExplicitlyExcludedV1(rel,scope))continue;
         if(++n>1000)throw new Error('v13 deployment script review inventory exceeds 1000 files; explicitly narrow excludedPaths');
         const content=await fs.readFile(abs);
-        const hash=digestCanonicalV1({path:rel,bytes:content.toString('utf8')});
+        const hash=createHash('sha256').update(content).digest('hex');
         const symbolId='SYM-'+digestCanonicalV1({path:rel,kind:'SCRIPT_FILE'}).slice(0,16);
         const ctx={contextId:symbolId.replace('SYM-','CTX-'),symbolId,path:rel,qualifiedContainer:rel,
           kind:'SCRIPT_FILE',canonicalSignature:'script-file()',visibility:'internal',
@@ -373,6 +374,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
       ctx.txOriginLines=distinct(sourceSlice.split('\n').flatMap((line,i)=>/tx\.origin/.test(line)?[firstLine+i]:[])).map(Number);
     }
   }
+  sourceUnits.sort((a,b)=>a.path.localeCompare(b.path));
   const triggerObj={};for(const c of [...contexts].sort(byPosition))triggerObj[c.contextId]=distinct([...(triggers[c.contextId]??[])]);
   contexts.sort(byPosition);declarations.sort((a,b)=>a.path.localeCompare(b.path)||a.lineStart-b.lineStart||a.symbolId.localeCompare(b.symbolId));
   limitations.sort((a,b)=>a.path.localeCompare(b.path)||a.code.localeCompare(b.code));
