@@ -1,3 +1,4 @@
+import {restoreControllerResultV1} from '../lib/lite-boundary-result-v1.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -165,7 +166,10 @@ test('controller CLI holds master review, admits reviewer results and returns to
   const controller=path.resolve('scripts/lite-phase-packet-controller-v1.mjs');
   const args=['--controller-root',f.root,'--campaign-id',f.directory.campaignId,'--campaign-path',camp,
     '--campaign-directory-path',dirPath,'--audit-controller-ref','main'];
-  const invoke=tail=>JSON.parse(execFileSync(process.execPath,[controller,...args,...tail],{encoding:'utf8'}));
+  const invoke=tail=>{
+    const envelope=JSON.parse(execFileSync(process.execPath,[controller,...args,...tail],{encoding:'utf8'}));
+    return restoreControllerResultV1({root:f.root,campaignPath:camp,envelope});
+  };
   const request=invoke(['--review-kind','master','--segment-id',segment,'--master-outcome','REQUEST_TARGETED_TESTS','--test-plan-path',f.planPath]);
   assert.equal(request.status,'MASTER_TESTS_REQUESTED',request.feedbackText??JSON.stringify(request));
   assert.equal(request.testReviewer,'reviewer-3L');
