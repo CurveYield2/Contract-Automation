@@ -1,10 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 
 // A v13 authority is not eligible for production until an independent private
 // seed evaluation is recorded. This tiny release decision is not a reviewer
 // work form and never includes the sealed answer-key manifest.
 export const ADR_V13_RELEASE_RECEIPT_V1='process/qualification/adr-v13/QUALIFICATION_PASS_v1.json';
+export const ADR_V13_RELEASE_SCORE_V1='process/qualification/adr-v13/QUALIFICATION_SCORE_v1.json';
 const sha=/^[0-9a-f]{64}$/;
 export function verifyV13ReleaseV1({repoRoot,receipt=null}={}){
  const row=receipt??(()=>{
@@ -21,6 +23,25 @@ export function verifyV13ReleaseV1({repoRoot,receipt=null}={}){
     !sha.test(row?.scoreSha256??'')||
     typeof row?.reviewedBy!=='string'||!row.reviewedBy.trim())
     throw new Error('V13_QUALIFICATION_REQUIRED: missing or failed independent 41-defect / zero-decoy release decision');
+ if(repoRoot){
+   // A signed-off receipt is never enough by itself. Its published, aggregate
+   // result must exist and agree byte-for-byte with the reviewed score digest.
+   const scoreFile=path.join(repoRoot,...ADR_V13_RELEASE_SCORE_V1.split('/'));
+   if(!fs.existsSync(scoreFile))
+     throw new Error('V13_QUALIFICATION_REQUIRED: aggregate score evidence is missing');
+   const bytes=fs.readFileSync(scoreFile);
+   if(createHash('sha256').update(bytes).digest('hex')!==row.scoreSha256)
+     throw new Error('V13_QUALIFICATION_REQUIRED: score SHA-256 does not match review decision');
+   let score;
+   try{score=JSON.parse(bytes.toString('utf8'));}
+   catch{throw new Error('V13_QUALIFICATION_REQUIRED: aggregate score JSON invalid');}
+   if(score?.schemaVersion!=='curveyield-seeded-detection-score-v1'||
+     score?.defectCount!==41||score.caught!==row.caught||
+     score.decoysFlagged!==0||score.cleanControlCriticalHighFalsePositiveCount!==0||
+     score.gate?.passed!==true||score.gate?.requiredCaught<30||
+     score.gate?.maxDecoys!==0)
+     throw new Error('V13_QUALIFICATION_REQUIRED: score does not substantiate a qualifying pass');
+ }
  return {status:'QUALIFIED',seededDefects:41,caught:row.caught,
    decoysFlagged:0,independentRunId:row.independentRunId,scoreSha256:row.scoreSha256};
 }
