@@ -47,12 +47,15 @@ test('D5 generated Anvil requests reuse only exact Phase-0 campaign snapshot and
  const block=25819000,sha='b'.repeat(64);
  const t=target();
  t.reproductionType='ANVIL_WORKFLOW';
- t.expectedMachineObservation={stepLabel:'saved deployment baseline',stepStatus:'completed'};
+ t.expectedMachineObservation={stepLabel:'pin persisted Phase 0 baseline',stepStatus:'completed'};
  t.executionBlueprint={usePhase0ForkState:true,projectPath:'campaigns/demo r1/source',
   configuration:{compilers:[{language:'solidity',version:'0.8.28'}],timeoutMinutes:20,evmVersion:'cancun',
+   harness:{recipeId:'phase0-snapshot-targeted-v1'},
    deploymentGas:{deployableContracts:[{sourceName:'contracts/Vault.sol',contractName:'Vault'}]},
    simulation:{chain:'ethereum',block,
-    workflow:{steps:[{action:'snapshot',alias:'baseline',label:'saved deployment baseline'}]}}}};
+    workflow:{steps:[{action:'snapshot',alias:'baseline',label:'pin persisted Phase 0 baseline'},
+     {action:'staticCall',target:'0x000000000000000000000000000000000000bEEF',
+       function:'owner() view returns (address)',args:[],label:'verify saved deployment owner'}]}}}};
  const boundSource={...source,reusableForkState:{
   status:'CAPTURED',sha256:sha,sourceSha256:digest,campaignId:'demo-r1',
   chainId:1,finalBlock:block,hardfork:'cancun',
