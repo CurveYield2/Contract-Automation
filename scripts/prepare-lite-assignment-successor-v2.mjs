@@ -14,7 +14,8 @@ if(directory.campaignStatus!=='WAITING_FOR_SUCCESSOR_AGENT') throw new Error('ca
 const assignment=directory.currentAssignment;
 if(!assignment||assignment.status!=='WAITING_FOR_SUCCESSOR_AGENT') throw new Error('current assignment is not waiting for successor');
 requiredFile(root,assignment.workSchemaPath,'incoming phase schema');
-requiredFile(root,assignment.workFormPath,'incoming phase work form');
+if(assignment.workShardIndexPath) requiredFile(root,assignment.workShardIndexPath,'incoming phase shard index');
+else requiredFile(root,assignment.workFormPath,'incoming phase work form');
 if(assignment.finalReportPath){
   const expectedPrefix=directory.workspacePath.replace(/\/+$/,'')+'/work/phase-'+String(assignment.phaseSequence).padStart(2,'0')+'/';
   if(!assignment.finalReportPath.startsWith(expectedPrefix)) throw new Error('incoming phase final report path is outside the assigned phase work directory');
@@ -42,6 +43,10 @@ const lines=[
   'The Audit Skill Authority above is the ultimate authority for this audit. Follow every instruction it gives, in order, precisely, with no deviation. Use the GitHub connector app exactly as required by that authority.',
   '',
   'Start '+assignment.phaseId+' now. Use the sealed predecessor evidence and controller-derived inputs already present in the campaign. Do not redo sealed earlier phases.',
+  ...(assignment.workShardIndexPath?[
+  'Sharded work assignment. Start with the INDEX only: '+controllerBlobUrl(assignment.workShardIndexPath),
+  'Read BASE_v1.json and every shard listed in the index. Edit each shard and save it separately, in index order. Complete every shard without waiting for a controller response; submit exactly ONE phase boundary request after the final shard. The controller reconstructs the canonical form and validates every record and digest. Do not edit the generated full form directly.'
+]:[]),
   'Submit the boundary validation request using schema curveyield-lite-phase-boundary-request-v1 under process/agent-upload/lite-phase-boundary/ for the exact campaign and phase; do not bookkeep receipts yourself.'
 ];
 const wakeMessage=lines.join('\n');
