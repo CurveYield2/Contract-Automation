@@ -231,6 +231,7 @@ export async function runGitHubNativeJobV2(input, {
     workspaceRoot: path.join(workspaceRoot, 'execution'),
     environment:executionEnvironment,
     ...delegateOptions,
+    verifiedPhase0ForkState:verifiedState,
   });
   result = { ...result, preflight, ...(verifiedState?{phase0ForkStateReuse:{
     status:'VERIFIED',sha256:verifiedState.sha256,chainId:verifiedState.chainId,
