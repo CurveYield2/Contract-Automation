@@ -49,13 +49,13 @@ test('D5 generated Anvil requests reuse only exact Phase-0 campaign snapshot and
  t.reproductionType='ANVIL_WORKFLOW';
  t.expectedMachineObservation={stepLabel:'saved deployment baseline',stepStatus:'completed'};
  t.executionBlueprint={usePhase0ForkState:true,projectPath:'campaigns/demo r1/source',
-  configuration:{compilers:[{language:'solidity',version:'0.8.28'}],timeoutMinutes:20,
+  configuration:{compilers:[{language:'solidity',version:'0.8.28'}],timeoutMinutes:20,evmVersion:'cancun',
    deploymentGas:{deployableContracts:[{sourceName:'contracts/Vault.sol',contractName:'Vault'}]},
    simulation:{chain:'ethereum',block,
     workflow:{steps:[{action:'snapshot',alias:'baseline',label:'saved deployment baseline'}]}}}};
  const boundSource={...source,reusableForkState:{
   status:'CAPTURED',sha256:sha,sourceSha256:digest,campaignId:'demo-r1',
-  chainId:1,finalBlock:block,
+  chainId:1,finalBlock:block,hardfork:'cancun',
   manifestRef:'campaigns/demo r1/evidence/phase0/PHASE0_FORK_STATE_MANIFEST_v1.json'}};
  const success=generateV7ExecutionRequestV1({
   campaignId:'demo-r1',sourceSha256:digest,phase0Source:boundSource,target:t});
