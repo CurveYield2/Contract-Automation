@@ -77,7 +77,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
   .map(g=>({pattern:g.pattern??'shared modifier or pattern',
     members:arr(g.members).map(m=>({contract:m.contract,name:m.name??m.signature??m.function??''}))})):[];
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
-  unitId,role,chatKey:role==='ATTACK'?'reviewer-3L':'reviewer-2',instructionsPath,
+  unitId,role,chatKey:role==='ATTACK'?(verdictV13?'reviewer-3':'reviewer-3L'):'reviewer-2',instructionsPath,
   submissionPath:submissionRel(campaignPath,unitId),boundaryRequestPath:'process/agent-upload/lite-phase-boundary/',
   sourceRoot:campaignPath+'/source',sourceInventoryPath:asset(root,campaignPath,'REVIEW_INVENTORY_v1.json'),
   flowPlanPath:asset(root,campaignPath,'FLOW_PLAN_v1.json'),
