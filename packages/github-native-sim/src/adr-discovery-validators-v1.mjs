@@ -104,12 +104,37 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
      if(!hasCandidate(row,{classId:row?.classId??'OTHER'},candidateRecords(submission,row)))
        err(errors,'DEFECT_WITHOUT_CANDIDATE',p+'.candidate','DEFECT requires an actionable candidate');
    }
-   if(row?.documentedRules!==undefined){
-     if(!Array.isArray(row.documentedRules)||row.documentedRules.some(x=>
-       blank(x?.rule)||!['MATCH','MISMATCH','UNRESOLVED'].includes(x?.comparison)))
-       err(errors,'SPEC_CHECK_INVALID',p+'.documentedRules',
-         'List each applicable documented rule/constant and MATCH/MISMATCH/UNRESOLVED comparison');
+   // A checklist cannot silently replace this specification-vs-code pass.
+   // Explicit negatives are required even when no NatSpec is present.
+   const rules=arr2(packet?.documentationItems).filter(x=>x.contextId===id);
+   const inspected=row?.specInspection;
+   if(!inspected||!['MATCH','MISMATCH','UNRESOLVED','NO_DOCUMENTED_RULES'].includes(inspected.status)||
+      blank(inspected.docsAndCommentsChecked)||blank(inspected.namedConstantsChecked))
+     err(errors,'SPEC_INSPECTION_REQUIRED',p+'.specInspection',
+       'State comparison, checked README/docs/comments and named-constant search for this context');
+   if(inspected?.status==='NO_DOCUMENTED_RULES'&&rules.length)
+     err(errors,'SPEC_FALSE_ABSENCE',p+'.specInspection.status','Packet includes documented rules for this context');
+   if(!Array.isArray(row?.documentedRules)){
+     err(errors,'SPEC_CHECK_REQUIRED',p+'.documentedRules','Document all packet rules, even when the set is empty');
+   }else{
+     const expectedRules=new Map(rules.map(x=>[x.ruleId,x]));
+     const reviewed=new Set();
+     for(const [j,item] of row.documentedRules.entries()){
+       const cp=p+'.documentedRules['+j+']';
+       if(!expectedRules.has(item?.ruleId)||reviewed.has(item?.ruleId))
+         err(errors,'SPEC_RULE_UNMATCHED',cp+'.ruleId','Documented rule is unknown or repeated');
+       reviewed.add(item?.ruleId);
+       if(blank(item?.rule)||!['MATCH','MISMATCH','UNRESOLVED'].includes(item?.comparison)||
+         blank(item?.reason))err(errors,'SPEC_CHECK_INVALID',cp,'Compare exact documented value/rule with observed implementation');
+     }
+     for(const id of expectedRules.keys())if(!reviewed.has(id))
+       err(errors,'SPEC_RULE_MISSING',p+'.documentedRules','Not compared: '+id);
    }
+   const siblings=arr2(packet?.siblingChecks).filter(x=>
+     arr2(x?.members).some(m=>m.contract===arr2(packet?.primaryContexts).find(c=>c?.contextId===id)?.qualifiedContainer));
+   if(siblings.length&&(!Array.isArray(row?.siblingComparisons)||!row.siblingComparisons.length))
+     err(errors,'SIBLING_CHECK_REQUIRED',p+'.siblingComparisons',
+       'Compare sibling functions sharing guards, patterns or paired parameters');
    if(row?.siblingComparisons!==undefined&&(!Array.isArray(row.siblingComparisons)||
        row.siblingComparisons.some(x=>blank(x?.sibling)||blank(x?.comparison))))
      err(errors,'SIBLING_CHECK_INVALID',p+'.siblingComparisons',
