@@ -27,7 +27,7 @@ const shardFor=(index,key)=>{
   return null;
 };
 const index=sharded?JSON.parse(fs.readFileSync(indexFile,'utf8')):null;
-let modified=false;
+
 if(!Array.isArray(designs)||!designs.length)
   failures.push({path:'actions.step-3.outputs.targetDesigns',reason:'Missing target designs'});
 else for(const [i,target] of designs.entries()){
@@ -47,24 +47,26 @@ else for(const [i,target] of designs.entries()){
       continue;
     }
     const safe=key.replace(/[^A-Za-z0-9._-]/g,'_');
-    const rel='work/phase-05/execution-requests/'+safe+'_v1.json';
+    const rel='work/phase-05/execution-requests/'+safe+'.json';
     const out=path.join(root,campaignPath,rel);
     fs.mkdirSync(path.dirname(out),{recursive:true});
     const content=JSON.stringify(generatedRequest.request,null,2)+'\n';
     if(!fs.existsSync(out)||fs.readFileSync(out,'utf8')!==content)
       fs.writeFileSync(out,content);
-    target.executionRequestRef=rel;
-    target.automationResolvedExecutionRequest=true;
-    modified=true;
+    // Do not change reviewer work or its controller prefill digest in preflight.
+    // The existing controller resolver owns the executionRequestRef mutation.
     generated.push({candidateKey:key,executionRequestRef:rel,shardPath});
   }
+  const candidateRef=target.executionRequestRef||(generated.some(x=>x.candidateKey===key)?
+    generated.find(x=>x.candidateKey===key).executionRequestRef:null);
   const binding=validateTargetExecutionRequestBindingV1({controllerRoot:root,campaignPath,
-    target,expectedCampaignId:campaignId,expectedSourceSha256:sourceSha256});
+    target:{...target,executionRequestRef:candidateRef},expectedCampaignId:campaignId,
+    expectedSourceSha256:sourceSha256});
   if(!binding.status.startsWith('PASS_'))
     fail(prefix+'.executionRequestRef',binding.status,binding.reasons);
   else ready.push(key);
 }
-if(modified)fs.writeFileSync(fullFile,JSON.stringify(form,null,2)+'\n');
+
 if(sharded)shardWorkFormV1({root,formRel:fullRel,phase:5,retireFull:true,force:true});
 const report={status:failures.length?'REWORK_REQUIRED':'PREFLIGHT_PASS',runnable:ready.length>0,
   designCount:designs?.length??0,readyCount:ready.length,generated,failures,
