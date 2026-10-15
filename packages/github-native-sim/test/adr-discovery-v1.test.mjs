@@ -211,7 +211,7 @@ test('200-unit discovery window uses bounded index pages and one wake below 8 Ki
   const result=startDiscoveryV1(o);
   assert.equal(result.wakes.length,1);
   assert.ok(Buffer.from(result.wakes[0].messageB64,'base64').length<8192);
-  const indexRel=o.campaignPath+'/index/flow-review/INDEX_v1.json';
+  const indexRel=o.campaignPath+'/work/phase-04/discovery/index/flow-review/INDEX_v1.json';
   const index=readJson(repoFile(o.root,indexRel));
   assert.equal(index.unitCount,200);
   assert.equal(index.pages.length,8);
