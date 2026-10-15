@@ -13,7 +13,10 @@ export function validateDeepAssuranceRequestWithV26V1(input){
   const forkState=validated.configuration.v26?.phase0ForkState;
   if(forkState&&(
     forkState.campaignId!==validated.campaignId||
-    forkState.sourceSha256!==validated.source.archiveSha256))
+    forkState.sourceSha256!==validated.source.archiveSha256||
+    forkState.finalBlock!==validated.configuration.simulation?.block||
+    forkState.chainId!==(validated.configuration.simulation?.chain==='ethereum'?1:8453)||
+    String(forkState.hardfork).toLowerCase()!==String(validated.configuration.evmVersion??'').toLowerCase()))
     throw new Error('Phase-0 fork state campaign and exact source mismatch');
 
   return validated;
