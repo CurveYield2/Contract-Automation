@@ -7,6 +7,7 @@ import {createHash} from 'node:crypto';
 import {readV7RawResultV1} from '../packages/github-native-sim/src/v7-compact-result-v1.mjs';
 import {pathToFileURL} from 'node:url';
 import {storeControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
+import {materializeShardedWorkFormV1,shardWorkFormV1} from './lib/lite-work-shards-v1.mjs';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,loadPhaseSchema,
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
@@ -1009,6 +1010,10 @@ const packet=buildControllerPacket({directory,assignment,existing:existingPacket
 let deficiencies=ensurePacketShape({packet,directory,assignment});
 let form=null;
 try{
+  // Agent edits live shards; reconstruct the legacy form for existing validators.
+  // Digest/key checks run before any reviewer work can reach bookkeeping.
+  if(assignment.workShardIndexPath)
+    materializeShardedWorkFormV1({root,formRel:assignment.workFormPath,refreshDigests:true});
   form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
 
   // v10.3 stores the authoritative prefill digest outside the reviewer-editable
@@ -1043,6 +1048,12 @@ try{
   }
 }catch(e){deficiencies.push(String(e.message||e));}
 
+function persistReviewerReworkShardsV1(){
+  if(!assignment.workShardIndexPath)return;
+  const full=repoFile(root,assignment.workFormPath);
+  if(fs.existsSync(full))
+    shardWorkFormV1({root,formRel:assignment.workFormPath,phase:sequence,retireFull:true,force:true});
+}
 function materialPhase5Candidates({root,campaignPath,form}){
   const prior=canonicalFor(root,campaignPath,4);
   const phase4=phaseOutput(prior,'step-3','candidateRecords')??[];
@@ -1145,6 +1156,7 @@ if([6,8].includes(sequence)&&deficiencies.length===0){
 }
 
 if(deficiencies.length){
+  persistReviewerReworkShardsV1();
   packet.status='REWORK_REQUIRED';
   packet.controllerValidation={status:'FAIL',validatedAt:now,deficiencies};
   directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
@@ -1213,6 +1225,7 @@ if(sequence===5){
   }));
   if(deficiencies.length){
     // Evidence and diagnostic matrix may persist; receipt and graph cannot.
+    persistReviewerReworkShardsV1();
     packet.status='REWORK_REQUIRED';
     packet.controllerValidation={status:'FAIL',machineExecutionGate:'BLOCKED',validatedAt:now,deficiencies};
     directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
