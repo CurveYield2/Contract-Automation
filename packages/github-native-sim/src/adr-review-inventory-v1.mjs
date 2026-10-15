@@ -318,18 +318,25 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   let complete=true;
   for(const s of sourceUnits) {
     if(s.astStatus==='AVAILABLE'||s.scopeTier!=='IN_SCOPE'&&s.astStatus!=='UNSUPPORTED_LANGUAGE')continue;
-    if(s.astStatus==='MISSING'&&s.scopeTier==='IN_SCOPE')complete=false;
-    const source=bySource.get(s.path),n=source.bytes;
-    const symbolId='SYM-'+digestCanonicalV1({path:s.path,qualifiedContainer:s.path,kind:'FILE_FALLBACK',canonicalSignature:'file()'}).slice(0,16);
-    const ctx={contextId:symbolId.replace(/^SYM-/,'CTX-'),symbolId,path:s.path,qualifiedContainer:s.path,kind:'FILE_FALLBACK',
-      canonicalSignature:'file()',visibility:'internal',lineStart:1,lineEnd:lines(n,'0:'+n.length).lineEnd,effectiveIn:[],
-      scopeTier:s.scopeTier,dependencySymbolIds:[],stateReads:[],stateWrites:[],internalCalls:[],modifiers:[],externalCalls:[],orphan:true};
+    const scriptWithoutAst=includeScripts&&s.astStatus==='MISSING'&&
+      (/(^|\/)(script|scripts|deploy|deployment|configure|config|handover)\//i.test(s.path)||s.path.endsWith('.s.sol'));
+    if(s.astStatus==='MISSING'&&s.scopeTier==='IN_SCOPE'&&!scriptWithoutAst)complete=false;
+    const source=bySource.get(s.path),n=source.bytes,kind=scriptWithoutAst?'SCRIPT_FILE':'FILE_FALLBACK';
+    const symbolId='SYM-'+digestCanonicalV1({path:s.path,qualifiedContainer:s.path,kind,canonicalSignature:'file()'}).slice(0,16);
+    const ctx={contextId:symbolId.replace(/^SYM-/,'CTX-'),symbolId,path:s.path,qualifiedContainer:s.path,kind,
+      canonicalSignature:'file()',visibility:'internal',lineStart:1,lineEnd:lines(n,'0:'+n.length).lineEnd,
+      effectiveIn:scriptWithoutAst?[s.path]:[],
+      scopeTier:s.scopeTier,dependencySymbolIds:[],stateReads:[],stateWrites:[],internalCalls:[],modifiers:[],externalCalls:[],
+      ...(!scriptWithoutAst?{orphan:true}:{})};
     contexts.push(ctx);
-    declarations.push({symbolId,path:s.path,qualifiedContainer:s.path,containerKind:'file',kind:'FILE_FALLBACK',name:s.path,
+    declarations.push({symbolId,path:s.path,qualifiedContainer:s.path,containerKind:'file',kind,name:s.path,
       canonicalSignature:'file()',visibility:'internal',stateMutability:'nonpayable',lineStart:1,lineEnd:ctx.lineEnd,hasBody:false});
-    if(s.astStatus==='MISSING')limitations.push({code:'INVENTORY_INCOMPLETE',path:s.path,detail:'In-scope Solidity source has no admitted AST'});
+    if(scriptWithoutAst)limitations.push({code:'SCRIPT_TEXT_REVIEW_NO_AST',path:s.path,
+      detail:'No admitted AST; entire deployment/configuration script requires a correctness verdict.'});
+    else if(s.astStatus==='MISSING')limitations.push({code:'INVENTORY_INCOMPLETE',path:s.path,detail:'In-scope Solidity source has no admitted AST'});
     else limitations.push({code:'UNSUPPORTED_LANGUAGE_FILE_FALLBACK',path:s.path,detail:'Vyper requires file-level review'});
-    const needed=loadTaxonomyV1(new URL('../../../',import.meta.url).pathname).classes.filter(x=>x.testRequired).flatMap(x=>x.triggers);
+    const needed=scriptWithoutAst?['SCRIPT_EXECUTION']:
+      loadTaxonomyV1(new URL('../../../',import.meta.url).pathname).classes.filter(x=>x.testRequired).flatMap(x=>x.triggers);
     triggers[ctx.contextId]=distinct(needed);
   }
   // Script/config/handover text surfaces are review units in v13 even when
