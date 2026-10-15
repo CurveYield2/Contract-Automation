@@ -127,7 +127,14 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
               const c={contextId:'CTX-'+core+suffix,symbolId,path:file,qualifiedContainer,kind:d.kind,
                 canonicalSignature:d.canonicalSignature,visibility:d.visibility,stateMutability:d.stateMutability,
                 lineStart:d.lineStart,lineEnd:d.lineEnd,effectiveIn:[],scopeTier:'IN_SCOPE',
-                dependencySymbolIds:[],stateReads:[],stateWrites:[],internalCalls:[],modifiers:[],externalCalls:[]};
+                dependencySymbolIds:[],stateReads:[],stateWrites:[],internalCalls:[],modifiers:[],externalCalls:[],
+                ...(includeScripts?{
+                  natSpec:typeof node.documentation==='string'?node.documentation.slice(0,2500):
+                    typeof node.documentation?.text==='string'?node.documentation.text.slice(0,2500):'',
+                  ...(['CONSTANT','IMMUTABLE','STATE_INITIALIZER'].includes(d.kind)?{
+                    declaredValue:node.value?sourceText(source.bytes,node.value.src).slice(0,300):'UNINITIALIZED'
+                  }:{})
+                }:{})};
               contexts.push(c);contextBySymbol.set(symbolId,c);
             }
           }
