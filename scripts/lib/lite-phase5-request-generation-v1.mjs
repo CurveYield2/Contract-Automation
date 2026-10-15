@@ -1,0 +1,72 @@
+import {createHash} from 'node:crypto';
+import {validateDeepAssuranceRequestV2,V2_AUTOMATION_RELEASE,V2_RUNNER_RELEASE}
+  from '../../packages/github-native-sim/src/schema.mjs';
+
+const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
+const nonempty=x=>typeof x==='string'&&x.trim()&&!/^<(?:REQUIRED|TBD)>$/.test(x);
+const okPath=x=>nonempty(x)&&!x.startsWith('/')&&!x.split('/').some(y=>!y||y==='.'||y==='..');
+const validType=new Set(['ANVIL_WORKFLOW','FOUNDRY_TEST','MEDUSA_PROPERTY']);
+
+export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Source,target}={}){
+ const missing=[],key=String(target?.candidateKey??'').trim(),type=target?.reproductionType;
+ const need=(field,valid,reason='required')=>{if(!valid)missing.push({field,reason});};
+ need('candidateKey',nonempty(key));
+ need('reproductionType',validType.has(type),'must be ANVIL_WORKFLOW, FOUNDRY_TEST or MEDUSA_PROPERTY');
+ need('setup',nonempty(target?.setup));
+ need('prerequisites',nonempty(target?.prerequisites)||Array.isArray(target?.prerequisites)&&target.prerequisites.length>0);
+ need('transactionSequence',nonempty(target?.transactionSequence)||
+   Array.isArray(target?.transactionSequence)&&target.transactionSequence.length>0);
+ need('oracle',nonempty(target?.oracle));
+ need('fuzzVariablesAndBounds',nonempty(target?.fuzzVariablesAndBounds)||
+   Array.isArray(target?.fuzzVariablesAndBounds)&&target.fuzzVariablesAndBounds.length>0);
+ need('snapshotReuseSafety',nonempty(target?.snapshotReuseSafety));
+ need('expectedSecurityProperty',nonempty(target?.expectedSecurityProperty));
+ need('expectedMachineObservation',target?.expectedMachineObservation&&
+   typeof target.expectedMachineObservation==='object'&&!Array.isArray(target.expectedMachineObservation));
+ const blueprint=target?.executionBlueprint;
+ need('executionBlueprint',blueprint&&typeof blueprint==='object'&&!Array.isArray(blueprint),
+   'provide concrete trusted runner configuration: exact source root, compiler, harness/simulation');
+ if(blueprint){
+  need('executionBlueprint.projectPath',okPath(blueprint.projectPath));
+  need('executionBlueprint.configuration',blueprint.configuration&&typeof blueprint.configuration==='object'&&!Array.isArray(blueprint.configuration));
+  need('executionBlueprint.configuration.compilers',Array.isArray(blueprint.configuration?.compilers)&&blueprint.configuration.compilers.length>0);
+  if(type==='ANVIL_WORKFLOW'){
+    need('executionBlueprint.configuration.simulation',!!blueprint.configuration?.simulation);
+    need('executionBlueprint.configuration.deploymentGas',!!blueprint.configuration?.deploymentGas);
+  }else need('executionBlueprint.configuration.harness',!!blueprint.configuration?.harness,
+    'exact runner-owned harness/recipe required; prose test designs are not executable');
+ }
+ need('phase0Source.archiveRepository',nonempty(phase0Source?.archiveRepository));
+ need('phase0Source.archiveCommit',/^[0-9a-f]{40}$/.test(phase0Source?.archiveCommit??''));
+ need('phase0Source.archivePath',okPath(phase0Source?.archivePath));
+ need('sourceSha256',/^[0-9a-f]{64}$/.test(sourceSha256??''));
+ need('phase0Source.sha256',phase0Source?.sha256===sourceSha256,'must match the exact frozen source digest');
+ if(blueprint?.projectPath&&phase0Source?.extractedContentPath)
+   need('executionBlueprint.projectPath',
+     blueprint.projectPath===phase0Source.extractedContentPath||
+     blueprint.projectPath.startsWith(phase0Source.extractedContentPath+'/'),
+     'must be under exact Phase-0 extracted source tree');
+ if(missing.length)return {status:'REWORK_REQUIRED',candidateKey:key,missing};
+ const phaseId=type==='ANVIL_WORKFLOW'?'fork-simulation-lifecycle':'build-and-test';
+ const source={repository:phase0Source.archiveRepository,commit:phase0Source.archiveCommit,
+   archivePath:phase0Source.archivePath,archiveSha256:sourceSha256,
+   projectPath:blueprint.projectPath};
+ const configuration=structuredClone(blueprint.configuration);
+ configuration.v26={...(configuration.v26??{}),reproduction:{
+   candidateId:key,reproductionType:type,expectedObservation:structuredClone(target.expectedMachineObservation)
+ }};
+ const basis={campaignId,candidateKey:key,source,configuration,phaseId};
+ const id=hash(basis);
+ const request={schemaVersion:'deep-assurance-github-request-v2',
+   processId:'audit-v7-independent-review',
+   contractAutomationRelease:V2_AUTOMATION_RELEASE,runnerRelease:V2_RUNNER_RELEASE,
+   campaignId,assignmentId:'phase5-target-'+key,phaseId,gateId:'phase5-target-execution',
+   profileId:'github-native-simulate-v2',source,configuration,
+   requestId:'dar-'+id.slice(0,32),requestDigest:id};
+ try{validateDeepAssuranceRequestV2(request);}
+ catch(error){
+   return {status:'REWORK_REQUIRED',candidateKey:key,
+     missing:[{field:'executionBlueprint.configuration',reason:String(error?.message??error)}]};
+ }
+ return {status:'GENERATED',candidateKey:key,request};
+}
