@@ -63,3 +63,28 @@ test('shuffled contexts, contradictions and gaps have deterministic digest',()=>
  const b=buildCoverageMatrixV1({inventory,taxonomy,discoveryState:d,phase6Results:phase6});
  assert.equal(digestCanonicalV1(a),digestCanonicalV1(b));
 });
+
+test('two obligations on same context cannot conceal an open sibling',()=>{
+ const inventory=baseInventory();
+ inventory.payload.baselineObligations=[
+  {obligationId:'OBL-1',contextId:'CTX-a',classId:'ACCESS_CONTROL'},
+  {obligationId:'OBL-2',contextIds:['CTX-a'],classId:'ACCESS_CONTROL'}
+ ];
+ const results={...passes(inventory),'OBL-1':'PASSED','OBL-2':'PENDING'};
+ const m=buildCoverageMatrixV1({inventory,taxonomy,discoveryState:discovery(),phase6Results:results});
+ assert.equal(m.rows.find(r=>r.contextId==='CTX-a'&&r.classId==='ACCESS_CONTROL').testStatus,'PENDING');
+ assert.equal(m.label,'PARTIAL_COVERAGE');
+ results['OBL-2']='PASSED';
+ const closed=buildCoverageMatrixV1({inventory,taxonomy,discoveryState:discovery(),phase6Results:results});
+ assert.equal(closed.rows.find(r=>r.contextId==='CTX-a'&&r.classId==='ACCESS_CONTROL').testStatus,'PASSED');
+});
+test('missing individual obligation cannot borrow shared context PASS',()=>{
+ const inventory=baseInventory();
+ inventory.payload.baselineObligations=[
+  {obligationId:'OBL-A',contextId:'CTX-a',classId:'ACCESS_CONTROL'},
+  {obligationId:'OBL-B',contextId:'CTX-a',classId:'ACCESS_CONTROL'}
+ ];
+ const results={...passes(inventory),'OBL-A':'PASSED'};
+ const m=buildCoverageMatrixV1({inventory,taxonomy,discoveryState:discovery(),phase6Results:results});
+ assert.notEqual(m.rows.find(r=>r.contextId==='CTX-a'&&r.classId==='ACCESS_CONTROL').testStatus,'PASSED');
+});
