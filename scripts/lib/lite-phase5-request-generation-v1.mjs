@@ -45,6 +45,9 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
    need('executionBlueprint.usePhase0ForkState',type==='ANVIL_WORKFLOW',
      'Phase-0 state reuse is only supported for Anvil workflows');
    const reuse=phase0Source?.reusableForkState;
+   need('executionBlueprint.configuration.evmVersion',
+     String(blueprint.configuration?.evmVersion??'').toLowerCase()===String(reuse?.hardfork??'').toLowerCase(),
+     'must equal retained Anvil state hardfork');
    need('executionBlueprint.configuration.simulation.block',
      Number.isSafeInteger(blueprint.configuration?.simulation?.block)&&
      blueprint.configuration.simulation.block===reuse?.finalBlock,
@@ -74,7 +77,7 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
    configuration.v26.phase0ForkState={
      manifestRef:reuse.manifestRef,sha256:reuse.sha256,
      sourceSha256:reuse.sourceSha256,campaignId:reuse.campaignId,
-     chainId:reuse.chainId,finalBlock:reuse.finalBlock
+     chainId:reuse.chainId,finalBlock:reuse.finalBlock,hardfork:reuse.hardfork
    };
  }
  const basis={campaignId,candidateKey:key,source,configuration,phaseId};
