@@ -507,6 +507,46 @@ jobs:
             return 0
           }
 
+          dispatch_registered_backup() {
+            # One standby is consumed once, and only after repeated missed wakes.
+            # All GitHub reads/writes here are registry bookkeeping; the actual
+            # ChatGPT message is still delivered by the existing human-style sender.
+            [ "$worker_role" = reviewer ] && [ "$gate_mode" = LITE ] || return 1
+            [ "$gate_repo" = 'CurveYield2/Audit-Controller' ] || return 1
+            [ -s /tmp/audit-campaign-directory.json ] || return 1
+            local safe_campaign registration api sha planned updated backup message
+            safe_campaign="$(printf '%s' "$campaign_id" | tr -c 'A-Za-z0-9._-' '_')"
+            api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
+            registration="$(gh api "$api?ref=main" 2>/dev/null || true)"
+            [ -n "$registration" ] || return 1
+            printf '%s' "$registration" | jq -r '.content' | base64 -d > /tmp/failover-registration.json || return 1
+            planned="$(node scripts/browser-backup-failover-v1.mjs /tmp/failover-registration.json /tmp/audit-campaign-directory.json "$chat_url")" || return 1
+            if [ "$(printf '%s' "$planned" | jq -r '.status')" != ELIGIBLE ]; then
+              echo "No eligible pre-registered backup: $(printf '%s' "$planned" | jq -r '.reason')"
+              return 1
+            fi
+            backup="$(printf '%s' "$planned" | jq -r '.backupChatUrl')"
+            message="$(printf '%s' "$planned" | jq -r '.message')"
+            printf '%s' "$planned" | jq '.registration' > /tmp/failover-registration-next.json
+            updated="$(base64 -w0 /tmp/failover-registration-next.json)"
+            sha="$(printf '%s' "$registration" | jq -r '.sha')"
+            # SHA conditional ensures another watchdog cannot steal the standby.
+            gh api --method PUT "$api" -f message="fix(watchdog): rebind $campaign_id to one-time backup chat" \
+              -f content="$updated" -f sha="$sha" -f branch=main >/dev/null || return 1
+            gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              -f wake_id="$campaign_id-$gate_expected_milestone-backup" \
+              -f campaign_id="$campaign_id" -f phase_id="$gate_expected_phase" \
+              -f mode=resume_existing -f chat_url="$backup" \
+              -f wake_message_b64="$(printf '%s' "$message" | base64 -w0)" \
+              -f watchdog_enabled=true -f worker_role=reviewer -f gate_mode=LITE \
+              -f gate_repository="$gate_repo" -f gate_ref="$gate_ref" \
+              -f gate_state_path="$gate_path" \
+              -f gate_expected_phase_id="$gate_expected_phase" \
+              -f gate_expected_milestone_id="$gate_expected_milestone" || return 1
+            echo "Backup chat accepted one-time $campaign_id/$gate_expected_milestone handoff." >> "$GITHUB_STEP_SUMMARY"
+            return 0
+          }
+
           dispatch_reviewer_repair() {
             local reason="$1"
             [ "$(jq -r '.repair.enabled // false' /tmp/watchdog-state.json)" = "true" ] || return 1
@@ -943,6 +983,10 @@ jobs:
             prior_idle_pokes="$(jq -r '.repair.consecutiveIdlePokes // 0' /tmp/watchdog-state.json)"
             idle_threshold="$(jq -r '.repair.idlePokeThreshold // 3' /tmp/watchdog-state.json)"
             if [ "$prior_idle_pokes" -ge "$idle_threshold" ]; then
+              if dispatch_registered_backup; then
+                retire_state "BACKUP_CHAT_REBOUND_AFTER_${prior_idle_pokes}_NO_READ_POKES"
+                exit 0
+              fi
               if dispatch_reviewer_repair "NO_CONTROLLER_ADVANCE_AFTER_${prior_idle_pokes}_PHASE1_X11_POKES"; then
                 retire_state "REVIEWER_REPAIR_DISPATCHED_AFTER_${prior_idle_pokes}_NO_READ_POKES"
                 exit 0
