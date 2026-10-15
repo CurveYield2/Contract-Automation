@@ -71,6 +71,11 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
  const flows=arr(plan?.payload?.flows).filter(f=>arr(unit.flowIds).includes(f.flowId));
  const questions=arr(plan?.payload?.integrationQuestions).filter(q=>arr(unit.integrationQuestionIds).includes(q.obligationId));
+ const verdictV13=/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot);
+ const siblingChecks=verdictV13&&role!=='ATTACK'?arr(facts?.payload?.siblingGroups)
+  .filter(g=>arr(g.members).some(m=>primary.some(id=>contextFor(inventory,id)?.qualifiedContainer===m.contract)))
+  .map(g=>({pattern:g.pattern??'shared modifier or pattern',
+    members:arr(g.members).map(m=>({contract:m.contract,name:m.name??m.signature??m.function??''}))})):[];
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
   unitId,role,chatKey:role==='ATTACK'?'reviewer-3L':'reviewer-2',instructionsPath,
   submissionPath:submissionRel(campaignPath,unitId),boundaryRequestPath:'process/agent-upload/lite-phase-boundary/',
@@ -81,12 +86,26 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
   primaryContextIds:primary,readContextIds:role==='ATTACK'?contextIds:arr(unit.readContextIds),
   requiredClasses,flows,flowIds:arr(unit.flowIds),integrationQuestions:questions,
   integrationQuestionIds:arr(unit.integrationQuestionIds),
-  ...(role==='ATTACK'?{}:{trivialContextIds,contractChecks,submissionGuide:[
+  ...(verdictV13&&role!=='ATTACK'?{
+    reviewPolicy:'correctness-verdict-v13',
+    siblingChecks,
+    specificationReview:{sourcePaths:[...new Set(primary.map(id=>contextFor(inventory,id)?.path).filter(Boolean))],
+      inspect:['NatSpec','inline comments','README and docs','named constants','paired parameters'],
+      requirement:'List each applicable stated rule and whether implementation matches'},
+    submissionGuide:[
+      'For EVERY primary context, give verdict CORRECT or DEFECT, intent, reason and source anchors. UNRESOLVED requires a named decisive test and an exact expected observation.',
+      'Class checks are prompts only: no per-class response is graded. The correctness verdict cannot be inferred from checklist completion.',
+      'Compare implementation with NatSpec, comments, README/docs and named constants. Report every mismatch as a candidate.',
+      'Compare sibling functions and paired parameters, documenting asymmetry. Storage initializers and locks never qualify for trivialReviews.',
+      'Finish all assigned units before a single boundary request; do not pause for controller after each unit.'
+    ]
+  }:{}),
+  ...(role==='ATTACK'?{}:{trivialContextIds,contractChecks,...(verdictV13?{}:{submissionGuide:[
    'Each primaryContexts entry already lists its modifiers, state reads and writes, external and internal calls and sender checks: use them instead of re-deriving facts.',
    'trivialReviews (optional): [{contract,assessment,evidence,anchors}] - one confirmation per contract covers all of its trivialContextIds in this unit (values, bounds, who reads them); those contexts then need no row.',
    'groupChecks (optional): [{contextIds,classId,assessment,applicability,evidence,anchors}] - one check for two or more contexts that share a modifier; omit that class from their rows.',
    'contractChecks (required when listed): [{contract,classId,assessment,applicability,evidence,anchors}] - answer each listed contract-level class once, covering every function of that contract.'
-  ]}),
+  ]})}),
   ...(role==='ATTACK'?{contracts:unit.contracts}:{}),
   ...(role==='ATTACK'?{systemFacts:{
    guardTable:arr(facts?.payload?.guardTable).filter(x=>unit.contracts?.includes(x.contract)),
