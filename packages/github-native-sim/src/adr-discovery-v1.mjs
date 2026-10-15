@@ -261,10 +261,6 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
      if(!assessment)throw new Error('accepted v13 discovery row has no correctness verdict');
      for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[row.contextId]??[]))
        classMap[classId]=assessment;
-     if(assessment==='UNRESOLVED'&&!arr(row.candidates).length)
-       candidates.push({tempKey:'UNRESOLVED-'+row.contextId,
-        description:row.reason,sourceAnchor:arr(row.anchors)[0],contextIds:[row.contextId],
-        securityRationale:'Unresolved source-anchored correctness obligation',status:'UNRESOLVED'});
      for(const c of arr(row.candidates))
        candidates.push({...c,contextIds:[...new Set([...(c.contextIds??[]),row.contextId])]});
      if(row.candidate&&typeof row.candidate==='object')
@@ -289,7 +285,9 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    for(const id of arr(unit?.primaryContextIds)){
     const c=contextFor(inventory,id);
     if(c?.qualifiedContainer!==review?.contract||!TRIVIAL_KINDS_V1.has(c.kind))continue;
-    for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[id]??[]))set(id,classId,review);
+    for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[id]??[]))
+      set(id,classId,state?.payload?.reviewPolicy==='correctness-verdict-v13'
+        ?{...review,assessment:'SUPPORTED'}:review);
     if(!checks.has(id))checks.set(id,{});
    }
   contractLevel.push(...arr(submission?.contractChecks));
