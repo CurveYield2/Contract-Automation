@@ -37,8 +37,21 @@ function validateAttestation(a){
 
 export function validateV26RequestConfigurationV1(v26,{phaseId}={}){
   if(v26===undefined) return undefined; obj(v26,'configuration.v26');
-  only(v26,new Set(['phaseContractDigest','phase6CampaignPlan','foundryCoverageObligations','foundryRefinementRequired','foundryRunType','foundryRefinementOf','foundryBasisEvidenceIds','sbomRequired','liveDeploymentAttestation','simulationLedgerRequired','reproduction']),'configuration.v26');
+  only(v26,new Set(['phaseContractDigest','phase6CampaignPlan','foundryCoverageObligations','foundryRefinementRequired','foundryRunType','foundryRefinementOf','foundryBasisEvidenceIds','sbomRequired','liveDeploymentAttestation','simulationLedgerRequired','reproduction','phase0ForkState']),'configuration.v26');
   if(v26.phaseContractDigest!==undefined) digest(v26.phaseContractDigest,'configuration.v26.phaseContractDigest');
+  if(v26.phase0ForkState!==undefined){
+    const p='configuration.v26.phase0ForkState',state=obj(v26.phase0ForkState,p);
+    only(state,new Set(['manifestRef','sha256','sourceSha256','campaignId','chainId','finalBlock']),p);
+    if(phaseId!=='fork-simulation-lifecycle')throw new Error('Phase-0 fork state reuse requires Anvil workflow');
+    if(!/^campaigns\\/[^/]+\\/evidence\\/phase0\\/PHASE0_FORK_STATE_MANIFEST_v1\\.json$/.test(state.manifestRef??''))
+      throw new Error(p+'.manifestRef must be a campaign-bound state manifest');
+    digest(state.sha256,p+'.sha256');digest(state.sourceSha256,p+'.sourceSha256');
+    string(state.campaignId,p+'.campaignId');
+    if(!Number.isSafeInteger(state.chainId)||state.chainId<1||
+      !Number.isSafeInteger(state.finalBlock)||state.finalBlock<0)
+      throw new Error(p+' requires valid chainId and finalBlock');
+  }
+
   if(v26.sbomRequired!==undefined){bool(v26.sbomRequired,'configuration.v26.sbomRequired');if(v26.sbomRequired&&phaseId!=='build-and-test')throw new Error('v26 SBOM generation is build-and-test only');}
   if(v26.simulationLedgerRequired!==undefined){bool(v26.simulationLedgerRequired,'configuration.v26.simulationLedgerRequired');if(v26.simulationLedgerRequired&&phaseId!=='fork-simulation-lifecycle')throw new Error('v26 simulation ledger is Phase 7 only');}
   if(v26.foundryRefinementRequired!==undefined){bool(v26.foundryRefinementRequired,'configuration.v26.foundryRefinementRequired');if(phaseId!=='build-and-test')throw new Error('v26 Foundry refinement evidence is Phase 6 only');}
