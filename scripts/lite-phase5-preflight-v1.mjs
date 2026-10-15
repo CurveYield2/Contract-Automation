@@ -6,6 +6,7 @@ import path from 'node:path';
 import {generateV7ExecutionRequestV1} from './lib/lite-phase5-request-generation-v1.mjs';
 import {materializeShardedWorkFormV1,shardWorkFormV1} from './lib/lite-work-shards-v1.mjs';
 import {validateTargetExecutionRequestBindingV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
+import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 
 const [root,campaignPath,campaignId,sourceSha256]=process.argv.slice(2);
 if(!root||!/^campaigns\//.test(campaignPath??'')||!campaignId||!/^[a-f0-9]{64}$/i.test(sourceSha256??''))
@@ -18,6 +19,19 @@ const sharded=fs.existsSync(indexFile);
 if(sharded)materializeShardedWorkFormV1({root,formRel:fullRel,refreshDigests:true});
 const read=rel=>JSON.parse(fs.readFileSync(path.join(root,campaignPath,rel),'utf8'));
 const phase0=read('receipts/PHASE_00_RECEIPT_v1.json');
+const phase0Source={...phase0.source};
+const stateManifestRef=path.posix.join(campaignPath,'evidence/phase0/PHASE0_FORK_STATE_MANIFEST_v1.json');
+const stateRoot=path.join(root,...campaignPath.split('/'),'evidence','phase0');
+if(fs.existsSync(path.join(root,...stateManifestRef.split('/')))){
+  try{
+    const manifest=JSON.parse(fs.readFileSync(path.join(root,...stateManifestRef.split('/')),'utf8'));
+    await verifyPhase0ForkStateV1({root:stateRoot,manifest});
+    if(manifest.sourceSha256!==sourceSha256||manifest.campaignId!==campaignId)
+      throw new Error('Phase-0 state does not match current campaign/source');
+    phase0Source.reusableForkState={...manifest,manifestRef};
+  }catch(error){phase0Source.reusableForkState={status:'INVALID',reason:String(error?.message??error)};}
+}
+
 const form=read('work/phase-05/PHASE_05_WORK_FORM_v1.json');
 const designs=form?.actions?.['step-3']?.outputs?.targetDesigns;
 const failures=[],ready=[],generated=[];
@@ -41,7 +55,7 @@ else for(const [i,target] of designs.entries()){
   if(method!=='V7_REQUEST'){fail(prefix+'.executionMethod','Unsupported method');continue;}
   if(!target.executionRequestRef){
     const generatedRequest=generateV7ExecutionRequestV1({
-      campaignId,sourceSha256,phase0Source:phase0.source,target});
+      campaignId,sourceSha256,phase0Source,target});
     if(generatedRequest.status!=='GENERATED'){
       for(const item of generatedRequest.missing)fail(prefix+'.'+item.field,item.reason);
       continue;
