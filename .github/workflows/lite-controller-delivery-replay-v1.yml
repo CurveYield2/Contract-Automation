@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       detail_ref:
-        description: Published controller result relative path: controller/results/<hash>/INDEX_v1.json
+        description: 'Published controller result relative path: controller/results/<hash>/INDEX_v1.json'
         required: true
         type: string
       audit_controller_ref:
