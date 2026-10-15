@@ -50,18 +50,28 @@ node packages/github-native-sim/src/adr-seeded-score-cli-v1.mjs \
   /private/review/adjudications.json \
   /private/review/partial.json \
   /private/review/leak-stages.json \
-  > /private/review/QUALIFICATION_SCORE_v1.json
+  > /private/review/PRIVATE_SEEDED_SCORE_v1.json
 ```
 
 Exit status **0** means the aggregate gate passed, **2** means a correctly evaluated but failed threshold, and **3** means an invalid input or another scorer failure. The scorer emits no raw private cases, source code, manifest path, private per-case IDs, or private case-level leak-stage references. It does emit totals by severity/class/contract, an aggregate critical/high miss count, and aggregate counts by leak stage.
 
 A separate human review must verify the frozen source identity, complete/unchanged campaign, independent adjudication, actual score, decoys, clean controls, and materiality before signing off. **Do not create a qualification receipt just because a fixture test passes.**
 
+**Never commit the private scorer's full output.** It contains aggregated *contract names, taxonomy class names and leak-stage labels* that could reveal clues about hidden seeded cases. Convert it to a release-safe, count-only JSON artifact:
+
+```bash
+node scripts/adr-v13-public-score-v1.mjs \
+  /private/review/PRIVATE_SEEDED_SCORE_v1.json \
+  /private/review/QUALIFICATION_SCORE_v1.json
+```
+
+The exporter refuses failed qualifications and strips the private breakdowns. Inspect its small public output before publishing. Keep the rich private score and underlying truth/adjudications in the sealed evaluation environment only.
+
 ## Minimal public production artifacts — only after success
 
 Publish only two current live files in `process/qualification/adr-v13/`:
 
-1. `QUALIFICATION_SCORE_v1.json`: exact unmodified UTF-8 bytes produced by the private scorer, with `schemaVersion: "curveyield-seeded-detection-score-v1"`, 41 defects, at least 30 caught, `decoysFlagged: 0`, `cleanControlCriticalHighFalsePositiveCount: 0`, and `gate.passed: true`.
+1. `QUALIFICATION_SCORE_v1.json`: exact unmodified UTF-8 bytes produced by the **public count-only exporter** (not the private scorer), with `schemaVersion: "curveyield-seeded-detection-score-v1"`, 41 defects, at least 30 caught, `decoysFlagged: 0`, `cleanControlCriticalHighFalsePositiveCount: 0`, and `gate.passed: true`.
 2. `QUALIFICATION_PASS_v1.json`: a human-reviewed decision using this exact schema, with `scoreSha256` equal to the SHA-256 of the **whole score file bytes** (including newline):
 
 ```json
@@ -79,7 +89,7 @@ Publish only two current live files in `process/qualification/adr-v13/`:
 }
 ```
 
-The numbers shown are the minimum qualifying example, **not** evidence that v13 passed. Do not publish placeholder receipts. The gate verifies both the receipt and score file, recomputes the score hash, verifies their counters match, and fails closed on missing, mismatched, malformed, fractional, or subthreshold values. The score file is an evidence artifact; it does not become another reviewer work form.
+The numbers shown are the minimum qualifying example, **not** evidence that v13 passed. Do not publish placeholder receipts. The gate verifies both the receipt and score file, recomputes the score hash, verifies their counters match, and fails closed on missing, mismatched, malformed, fractional, or subthreshold values. The score file is an evidence artifact; it does not become another reviewer work form. The public score must not include the private `byContract`, `byClassId`, `byLeakStage`, case IDs, or stage-name breakdowns.
 
 ## Verification before enabling v13
 
