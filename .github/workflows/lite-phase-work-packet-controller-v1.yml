@@ -379,7 +379,7 @@ jobs:
             const [root,campaignPath]=process.argv.slice(1);
             const envelope=JSON.parse(fs.readFileSync("/tmp/lite-phase-packet-envelope.json","utf8"));
             const full=restoreControllerResultV1({root,campaignPath,envelope});
-            fs.writeFileSync("/tmp/lite-phase-packet-result.json",JSON.stringify(full)+"\\n");
+            fs.writeFileSync("/tmp/lite-phase-packet-result.json",JSON.stringify(full)+"\n");
           ' .audit-controller "${{ steps.routing.outputs.campaign_path }}"
           # Wake feedback references the full private result when it exceeds the
           # safe GitHub Actions output size; no diagnostic is discarded.
