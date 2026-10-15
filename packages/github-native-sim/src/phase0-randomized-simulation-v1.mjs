@@ -2664,7 +2664,7 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       try { deployedStateSnapshot = await captureDeployedStateSnapshotV1({provider, deployedContracts: witness.deployedContracts ?? [], artifactByQualified}); }
       catch (e) { deployedStateSnapshot = {schemaVersion:'curveyield-deployed-state-snapshot-v1', status:'ERROR', rows:[], error:String(e?.message ?? e).slice(0,2000)}; }
       await fs.writeFile(path.join(outputRoot,'DEPLOYED_STATE_SNAPSHOT_v1.json'), JSON.stringify(deployedStateSnapshot,null,2)+'\n');
-      if(status==='PASS'&&process.env.PHASE0_FORK_STATE_REUSE_V1==='true'){
+      if(status==='PASS'&&(process.env.PHASE0_FORK_STATE_REUSE_V1==='true'||/Audit_Litemode_v13(?:\/|$)/.test(receipt.authority?.homepagePath??''))){
         try{
           const retained=await capturePhase0ForkStateV1({
             rpc:(method,params)=>rpc(anvil.url,method,params),outputDir:outputRoot,
