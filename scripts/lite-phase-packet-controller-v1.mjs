@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 import {readV7RawResultV1} from '../packages/github-native-sim/src/v7-compact-result-v1.mjs';
 import {pathToFileURL} from 'node:url';
 import {storeControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
-import {materializeShardedWorkFormV1,shardWorkFormV1} from './lib/lite-work-shards-v1.mjs';
+import {materializeShardedWorkFormV1,shardWorkFormV1,shardFailureIndexV1} from './lib/lite-work-shards-v1.mjs';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,loadPhaseSchema,
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
@@ -1084,6 +1084,16 @@ function persistReviewerReworkShardsV1(){
   if(fs.existsSync(full))
     shardWorkFormV1({root,formRel:assignment.workFormPath,phase:sequence,retireFull:true,force:true});
 }
+function annotateShardReworkV1(packet,errors){
+ if(!assignment.workShardIndexPath)return '';
+ const map=shardFailureIndexV1({root,indexRel:assignment.workShardIndexPath,deficiencies:errors});
+ packet.controllerValidation.shardRework={indexPath:assignment.workShardIndexPath,
+   shards:map.shards.map(s=>({path:s.path,recordKeys:s.recordKeys,defectCount:s.defects.length})),
+   unmappedCount:map.unmapped.length};
+ if(!map.shards.length)return '';
+ return '\nSHARD_REWORK: edit the listed shard records only; original full diagnostics are in controller result pages.\n'+
+  map.shards.map(s=>s.path+' : '+s.recordKeys.join(', ')).join('\n');
+}
 function materialPhase5Candidates({root,campaignPath,form}){
   const prior=canonicalFor(root,campaignPath,4);
   const phase4=phaseOutput(prior,'step-3','candidateRecords')??[];
@@ -1191,7 +1201,9 @@ if(deficiencies.length){
   packet.controllerValidation={status:'FAIL',validatedAt:now,deficiencies};
   directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
   writeJson(packetFile,packet);writeJson(directoryFile,directory);
-  const feedback=feedbackText(sequence,deficiencies).replace('resubmit the same phase packet','repair the substantive fields and invoke controller validation again; the controller will rebuild the packet');
+  const shardGuidance=annotateShardReworkV1(packet,deficiencies);
+  writeJson(packetFile,packet);
+  const feedback=feedbackText(sequence,deficiencies).replace('resubmit the same phase packet','repair the substantive fields and invoke controller validation again; the controller will rebuild the packet')+shardGuidance;
   process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer:assignment.reviewer,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
   process.exit(0);
 }
@@ -1260,10 +1272,12 @@ if(sequence===5){
     packet.controllerValidation={status:'FAIL',machineExecutionGate:'BLOCKED',validatedAt:now,deficiencies};
     directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
     writeJson(packetFile,packet);writeJson(directoryFile,directory);
+    const shardGuidance=annotateShardReworkV1(packet,deficiencies);
+    writeJson(packetFile,packet);
     const feedback=['Phase 5 execution gate BLOCKED: no receipt, PASS or handoff was issued.',
       'Repair the exact runner, harness or machine-evidence defect, then invoke the same phase controller again.',
       ...deficiencies.map(x=>'- '+x),
-      'Machine failure is not a vulnerability finding.'].join('\n');
+      'Machine failure is not a vulnerability finding.'].join('\n')+shardGuidance;
     process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',campaignId:directory.campaignId,
       campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-5',
       reviewer:assignment.reviewer,feedbackText:feedback,
