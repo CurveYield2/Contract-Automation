@@ -8,6 +8,30 @@ import {createHash} from 'node:crypto';
 export const ADR_V13_RELEASE_RECEIPT_V1='process/qualification/adr-v13/QUALIFICATION_PASS_v1.json';
 export const ADR_V13_RELEASE_SCORE_V1='process/qualification/adr-v13/QUALIFICATION_SCORE_v1.json';
 const sha=/^[0-9a-f]{64}$/;
+
+/**
+ * Reduce the adjudicator's PRIVATE score to a public, identity-free release
+ * proof. Class/contract names, per-stage labels, case IDs, all raw findings
+ * and hidden truth never enter the GitHub authority checkout.
+ */
+export function publicV13QualificationScoreV1(privateScore){
+ if(privateScore?.schemaVersion!=='curveyield-seeded-detection-score-v1'||
+    privateScore?.defectCount!==41||
+    !Number.isSafeInteger(privateScore?.caught)||privateScore.caught<30||
+    privateScore.caught>41||privateScore.decoysFlagged!==0||
+    privateScore.cleanControlCriticalHighFalsePositiveCount!==0||
+    privateScore.gate?.passed!==true||
+    !Number.isSafeInteger(privateScore.gate?.requiredCaught)||
+    privateScore.gate.requiredCaught<30||privateScore.gate.maxDecoys!==0)
+    throw new Error('V13_QUALIFICATION_REQUIRED: private report fails release thresholds');
+ return{
+  schemaVersion:'curveyield-seeded-detection-score-v1',
+  defectCount:41,caught:privateScore.caught,
+  decoysFlagged:0,cleanControlCriticalHighFalsePositiveCount:0,
+  gate:{passed:true,requiredCaught:privateScore.gate.requiredCaught,maxDecoys:0}
+ };
+}
+
 export function verifyV13ReleaseV1({repoRoot,receipt=null}={}){
  const row=receipt??(()=>{
    if(!repoRoot)throw new Error('v13 qualification requires automation repository root');
