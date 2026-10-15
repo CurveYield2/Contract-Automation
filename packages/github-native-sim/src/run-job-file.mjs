@@ -147,7 +147,7 @@ async function executePhase7Simulation({ request, build, environment, startSimul
   }
   let engine;
   try {
-    engine = await startSimulationEngine({ artifacts: buildArtifactAccessor(build?.artifacts ?? []), workflow: simulation.workflow, chainId: chain.chainId, forkUrl, block: simulation.block, evmVersion: request.configuration.evmVersion });
+    engine = await startSimulationEngine({ artifacts: buildArtifactAccessor(build?.artifacts ?? []), workflow: simulation.workflow, chainId: chain.chainId, forkUrl, block: simulation.block, evmVersion: request.configuration.evmVersion,loadStatePath:environment?.V7_PHASE0_FORK_STATE_PATH??null });
     if (engine?.engine !== 'anvil') {
       const error = new Error(`Phase 7 authoritative fork engine must be Anvil; received ${engine?.engine ?? 'unknown'}`);
       error.kind = 'FORK_ENGINE_POLICY_FAILURE';
