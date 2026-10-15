@@ -64,6 +64,66 @@ export function parseAnchorV1(text,inventory) {
  if(!file||!Number.isInteger(file.lineCount)||lineEnd>file.lineCount)return null;
  return {path,lineStart,lineEnd};
 }
+
+// Opt-in for new v13-bound campaigns only. Historical v12 packets continue
+// through the original per-class validator and produce identical decisions.
+function validateVerdictSubmissionV13({packet,submission,inventory}){
+ const errors=[];
+ const primary=packetIds(packet,'primaryContexts').length?
+   packetIds(packet,'primaryContexts'):packetIds(packet,'primaryContextIds');
+ const trivial=new Set(packetIds(packet,'trivialContextIds'));
+ const covered=new Set(),seen=new Set(),allCandidates=candidateRecords(submission);
+ const reviews=arr2(submission?.trivialReviews);
+ for(const [i,review] of reviews.entries()){
+   const contexts=arr2(packet.primaryContexts).filter(x=>x.qualifiedContainer===review?.contract&&
+     trivial.has(x.contextId));
+   if(!contexts.length)err(errors,'TRIVIAL_CONTRACT_UNKNOWN','trivialReviews['+i+']',
+     'Only literal constants/immutables and generated getters may be reviewed as trivial');
+   if(blank(review?.reason??review?.evidence))err(errors,'EVIDENCE_EMPTY','trivialReviews['+i+'].reason','Explain exact literal/getter correctness');
+   for(const c of contexts)covered.add(c.contextId);
+ }
+ for(const [i,row] of arr2(submission?.rows).entries()){
+   const p='rows['+i+']',id=row?.contextId;
+   if(!primary.includes(id)||covered.has(id))err(errors,'EXTRA_CONTEXT',p+'.contextId','Unassigned or trivially completed row');
+   if(seen.has(id))err(errors,'DUPLICATE_CONTEXT',p+'.contextId','Duplicate context verdict');
+   seen.add(id);
+   if(!['CORRECT','DEFECT','UNRESOLVED'].includes(row?.verdict))
+     err(errors,'VERDICT_REQUIRED',p+'.verdict','A correctness verdict (CORRECT/DEFECT) or justified UNRESOLVED is mandatory');
+   if(blank(row?.intent)||emptyEvidence(row?.intent))err(errors,'INTENT_REQUIRED',p+'.intent',
+     'State what the behavior should do, grounded in source or specification');
+   if(blank(row?.reason)||emptyEvidence(row?.reason))err(errors,'REASON_REQUIRED',p+'.reason',
+     'Explain actual behavior versus intent with source-line evidence');
+   const anchors=validAnchors(row?.anchors,inventory,errors,p+'.anchors');
+   if(anchors===0)err(errors,'ANCHOR_REQUIRED',p+'.anchors','Verdict requires source anchor');
+   if(row?.verdict==='UNRESOLVED'){
+     if(blank(row?.decidingTest?.name)||blank(row?.decidingTest?.expectedObservation))
+       err(errors,'UNRESOLVED_TEST_REQUIRED',p+'.decidingTest',
+         'Name a decisive test and exact observation that resolves correctness');
+   }
+   if(row?.verdict==='DEFECT'){
+     if(!hasCandidate(row,{classId:row?.classId??'OTHER'},candidateRecords(submission,row)))
+       err(errors,'DEFECT_WITHOUT_CANDIDATE',p+'.candidate','DEFECT requires an actionable candidate');
+   }
+   if(row?.documentedRules!==undefined){
+     if(!Array.isArray(row.documentedRules)||row.documentedRules.some(x=>
+       blank(x?.rule)||!['MATCH','MISMATCH','UNRESOLVED'].includes(x?.comparison)))
+       err(errors,'SPEC_CHECK_INVALID',p+'.documentedRules',
+         'List each applicable documented rule/constant and MATCH/MISMATCH/UNRESOLVED comparison');
+   }
+   if(row?.siblingComparisons!==undefined&&(!Array.isArray(row.siblingComparisons)||
+       row.siblingComparisons.some(x=>blank(x?.sibling)||blank(x?.comparison))))
+     err(errors,'SIBLING_CHECK_INVALID',p+'.siblingComparisons',
+       'Sibling or paired-parameter checks need explicit comparison');
+   for(const [j,c] of arr2(row?.candidates).entries())validateCandidate(c,inventory,errors,p+'.candidates['+j+']');
+ }
+ for(const id of primary)if(!seen.has(id)&&!covered.has(id))
+   err(errors,'MISSING_CONTEXT','rows','Primary context has no correctness verdict: '+id);
+ // The legacy per-class checklist is visible in the packet only as a prompt.
+ // It is never accepted as a substitute for a function correctness verdict.
+ for(const [i,c] of allCandidates.entries())validateCandidate(c,inventory,errors,'candidates['+i+']');
+ return finish(errors,submission);
+}
+
 export function validateFlowReviewSubmissionV1({packet,submission,inventory}={}) {
  const errors=[];
  if(!checkSchema(submission,FLOW_SCHEMA)||!Array.isArray(submission?.rows)||
@@ -73,6 +133,13 @@ export function validateFlowReviewSubmissionV1({packet,submission,inventory}={})
    if(!obj(submission)||!Array.isArray(submission?.rows))return finish(errors,submission);
  }
  if(!packet||submission.unitId!==packet.unitId)err(errors,'UNIT_MISMATCH','unitId','Submission does not match assigned unit');
+ if(packet?.reviewPolicy==='correctness-verdict-v13'){
+   const v13=validateVerdictSubmissionV13({packet,submission,inventory});
+   v13.errors.unshift(...errors);
+   v13.ok=v13.errors.length===0;
+   v13.value=v13.ok?submission:null;
+   return v13;
+ }
  const primary=packetIds(packet,'primaryContexts').length?packetIds(packet,'primaryContexts'):packetIds(packet,'primaryContextIds');
  const rows=Array.isArray(submission.rows)?submission.rows:[];
  const allCandidates=candidateRecords(submission);
