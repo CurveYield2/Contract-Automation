@@ -133,13 +133,13 @@ function phase7ForkUrl(simulation, environment = {}) {
   return environment?.[rpcEnv];
 }
 
-async function executePhase7Simulation({ request, build, environment, startSimulationEngine, executeSimulationWorkflow }) {
+async function executePhase7Simulation({ request, build, environment, verifiedPhase0ForkState, startSimulationEngine, executeSimulationWorkflow }) {
   if (request.phaseId !== 'fork-simulation-lifecycle') return null;
   const simulation = request.configuration.simulation;
   const chain = CHAINS[simulation.chain];
   const rpcEnv = phase7RpcEnv(simulation);
   const forkUrl = phase7ForkUrl(simulation, environment);
-  if (!forkUrl) {
+  if (!forkUrl&&!verifiedPhase0ForkState) {
     const error = new Error(`Runner RPC profile ${rpcEnv} is not configured for the pinned ${simulation.chain} fork`);
     error.kind = 'RPC_CONFIGURATION_FAILURE';
     error.simulationEvidence = simulationFailure({ request, kind: error.kind, error });
@@ -147,7 +147,7 @@ async function executePhase7Simulation({ request, build, environment, startSimul
   }
   let engine;
   try {
-    engine = await startSimulationEngine({ artifacts: buildArtifactAccessor(build?.artifacts ?? []), workflow: simulation.workflow, chainId: chain.chainId, forkUrl, block: simulation.block, evmVersion: request.configuration.evmVersion,loadStatePath:environment?.V7_PHASE0_FORK_STATE_PATH??null });
+    engine = await startSimulationEngine({ artifacts: buildArtifactAccessor(build?.artifacts ?? []), workflow: simulation.workflow, chainId: chain.chainId, forkUrl, block: simulation.block, evmVersion: request.configuration.evmVersion,loadStatePath:verifiedPhase0ForkState?.loadStatePath??null });
     if (engine?.engine !== 'anvil') {
       const error = new Error(`Phase 7 authoritative fork engine must be Anvil; received ${engine?.engine ?? 'unknown'}`);
       error.kind = 'FORK_ENGINE_POLICY_FAILURE';
@@ -229,6 +229,7 @@ export async function runGitHubNativeJob(input, {
   runCommand,
   environment = process.env,
   phase6MutableRpc = null,
+  verifiedPhase0ForkState = null,
   startSimulationEngine = startCompatibleForkEngine,
   executeSimulationWorkflow = executeWorkflow,
   now = () => new Date()
@@ -339,7 +340,7 @@ export async function runGitHubNativeJob(input, {
 
   if (request.phaseId === 'fork-simulation-lifecycle') {
     try {
-      simulation = await executePhase7Simulation({ request, build, environment, startSimulationEngine, executeSimulationWorkflow });
+      simulation = await executePhase7Simulation({ request, build, environment, verifiedPhase0ForkState, startSimulationEngine, executeSimulationWorkflow });
     } catch (error) {
       simulation = error.simulationEvidence ?? simulation;
       const failedSteps = simulation?.steps?.filter((step) => step.status === 'failed') ?? [];
