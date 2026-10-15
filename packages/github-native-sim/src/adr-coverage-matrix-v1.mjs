@@ -19,7 +19,7 @@ function statusFor(phase6Results, inventory, contextId, classId) {
   if (!matches.length) return normalize(fallback);
   // Each matching obligation must be satisfied. A passing sibling cannot mask an
   // open, failed or unexecuted obligation on the same context and detection class.
-  const statuses = matches.map(o => normalize(phase6Results[o.obligationId] ?? fallback));
+  const statuses = matches.map(o => normalize(phase6Results[o.obligationId]));
   for (const status of ['PROPERTY_FAILED','NOT_ACHIEVED','INCONCLUSIVE','PENDING','NOT_REQUIRED'])
     if (statuses.includes(status)) return status === 'NOT_REQUIRED' ? 'NOT_ACHIEVED' : status;
   if (statuses.every(s => s === 'PASSED')) return 'PASSED';
