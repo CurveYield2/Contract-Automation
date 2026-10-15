@@ -12,7 +12,7 @@ function normalizePrefix(value){
   if(typeof value!=='string'||!value.trim())throw new Error(`${AUDIT_SCOPE_FILE}: inScopePaths entries must be non-empty strings`);
   const normalized=value.trim().replaceAll('\\','/').replace(/^\.\//,'');
   if(normalized.startsWith('/')||normalized.split('/').some(part=>part==='..'))throw new Error(`${AUDIT_SCOPE_FILE}: unsafe in-scope path ${value}`);
-  return normalized.endsWith('.sol')||normalized.endsWith('/')?normalized:`${normalized}/`;
+  return /\.(?:sol|vy|js|mjs|cjs|ts|mts|cts|sh|json|ya?ml)$/i.test(normalized)||normalized.endsWith('/')?normalized:`${normalized}/`;
 }
 
 export function parseAuditScope(text){
