@@ -94,3 +94,23 @@ test('Phase-0 intelligence writer activates script units only under verified v13
   assert.ok(!frozen.payload.contexts.some(c=>c.path==='upgrade/script/configure.ts'));
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('v13 covers uncompiled Solidity deploy script as one explicit source-backed review unit',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'v13-script-fallback-'));
+ try{
+  fs.mkdirSync(path.join(root,'upgrade/script'),{recursive:true});
+  fs.writeFileSync(path.join(root,'upgrade/script/configure.s.sol'),
+   'pragma solidity ^0.8.28;\ncontract Configure { function run() external {} }\n');
+  fs.writeFileSync(path.join(root,'audit-scope.json'),JSON.stringify({
+    schemaVersion:'curveyield-audit-scope-v1',inScopePaths:['upgrade/src/']}));
+  const campaign={campaignId:'demo-r1',sourceSha256:'a'.repeat(64),
+    detectionReviewPolicy:'correctness-verdict-v13'};
+  const v13=await buildReviewInventoryV1({projectRoot:root,build:{sourceAsts:{}},campaign});
+  assert.equal(v13.payload.complete,true,
+    'uncompiled deployment script remains a visible file-level review, not a missing compiled contract');
+  const ctx=v13.payload.contexts.find(c=>c.path==='upgrade/script/configure.s.sol');
+  assert.equal(ctx.kind,'SCRIPT_FILE');
+  assert.deepEqual(v13.payload.triggers[ctx.contextId],['SCRIPT_EXECUTION']);
+  assert.ok(v13.payload.limitations.some(x=>x.code==='SCRIPT_TEXT_REVIEW_NO_AST'));
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
