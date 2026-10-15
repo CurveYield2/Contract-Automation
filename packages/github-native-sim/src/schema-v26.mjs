@@ -10,5 +10,11 @@ export function validateDeepAssuranceRequestWithV26V1(input){
   delete legacy.configuration.v26;
   const validated=validateDeepAssuranceRequestV2(legacy);
   validated.configuration.v26=validateV26RequestConfigurationV1(v26,{phaseId:input.phaseId});
+  const forkState=validated.configuration.v26?.phase0ForkState;
+  if(forkState&&(
+    forkState.campaignId!==validated.campaignId||
+    forkState.sourceSha256!==validated.source.archiveSha256))
+    throw new Error('Phase-0 fork state campaign and exact source mismatch');
+
   return validated;
 }
