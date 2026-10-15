@@ -5,7 +5,7 @@ import {listAdmittedSourcesV1} from './source-intelligence-technical-v1.mjs';
 import {digestCanonicalV1} from './canonical-json-v1.mjs';
 import {buildSystemFactsV1} from './adr-system-facts-v1.mjs';
 import {loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
-import {loadAuditScope,sourceIsInScope,AUDIT_SCOPE_FILE} from './phase0-audit-scope-v1.mjs';
+import {loadAuditScope,sourceIsInScope,sourceExplicitlyExcludedV1,AUDIT_SCOPE_FILE} from './phase0-audit-scope-v1.mjs';
 
 const POLICY='audit-detection-rebuild-v1';
 const REVIEW_KINDS=new Set(['FUNCTION','CONSTRUCTOR','FALLBACK','RECEIVE','FREE_FUNCTION','MODIFIER','STATE_INITIALIZER','CONSTANT','IMMUTABLE','GENERATED_GETTER']);
@@ -27,9 +27,10 @@ function walk(n,fn,parent=null) {
 // A package's audit-scope.json is authoritative: only its inScopePaths are reviewed, every other
 // compiled source is a dependency (reviewed only where in-scope contracts inherit it). Without the
 // file, path conventions apply at any depth (e.g. ipor-fusion/lib/forge-std is a dependency).
-export function sourceTierV1(p,scope=null) {
+export function sourceTierV1(p,scope=null,{includeScripts=false}={}) {
   if(/(^|\/)(test|tests|mock|mocks)\//.test(p)||p.endsWith('.t.sol'))return 'TEST_OR_MOCK';
-  if(p.endsWith('.s.sol')||/(^|\/)(script|scripts)\//.test(p))return 'SCRIPT';
+  if(p.endsWith('.s.sol')||/(^|\/)(script|scripts|deploy|deployment|config|configure|handover)\//.test(p))
+    return includeScripts&&!sourceExplicitlyExcludedV1(p,scope)?'IN_SCOPE':'SCRIPT';
   if(scope?.source===AUDIT_SCOPE_FILE)return sourceIsInScope(p,scope)?'IN_SCOPE':'DEPENDENCY';
   if(/(^|\/)(vendor|lib|node_modules)\//.test(p)||p.startsWith('@'))return 'DEPENDENCY';
   return 'IN_SCOPE';
@@ -65,9 +66,10 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   if(!projectRoot||!build||!campaign)throw new TypeError('projectRoot, build, campaign required');
   const sources=await listAdmittedSourcesV1(projectRoot), bySource=new Map();
   const scope=await loadAuditScope(projectRoot);
+  const includeScripts=campaign?.detectionReviewPolicy==='correctness-verdict-v13';
   for(const s of sources) {
     const bytes=await fs.readFile(path.join(projectRoot,...s.path.split('/')));
-    bySource.set(s.path,{...s,bytes,tier:sourceTierV1(s.path,scope)});
+    bySource.set(s.path,{...s,bytes,tier:sourceTierV1(s.path,scope,{includeScripts})});
   }
   const asts=new Map();
   const units=(build.compilationUnits??[]).filter(u=>u.sourceAsts&&Object.keys(u.sourceAsts).length);
