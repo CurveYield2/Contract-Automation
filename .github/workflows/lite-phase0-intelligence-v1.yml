@@ -96,6 +96,11 @@ jobs:
           fi
           [ "$adr_policy" = "audit-detection-rebuild-v1" ] || adr_policy=""
           echo "ADR_DETECTION_POLICY=$adr_policy" >> "$GITHUB_ENV"
+          review_policy=""
+          if [ "$adr_policy" = "audit-detection-rebuild-v1" ] && [[ "$homepage" == *"/Audit_Litemode_v13/SKILL.md" ]]; then
+            review_policy="correctness-verdict-v13"
+          fi
+          echo "ADR_DETECTION_REVIEW_POLICY=$review_policy" >> "$GITHUB_ENV"
 
       - name: Resolve exactly one lean Phase-0 request
         id: request
