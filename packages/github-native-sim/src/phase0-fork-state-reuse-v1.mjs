@@ -67,7 +67,8 @@ export async function stageVerifiedPhase0ForkStateV1({
     manifest.sourceSha256!==expected?.sourceSha256||
     manifest.sha256!==expected?.sha256||
     manifest.chainId!==expected?.chainId||
-    manifest.finalBlock!==expected?.finalBlock)
+    manifest.finalBlock!==expected?.finalBlock||
+    manifest.hardfork!==expected?.hardfork)
    throw new Error('Phase-0 fork state failed campaign/source/chain identity binding');
  const sourceRoot=path.dirname(absolute);
  await verifyPhase0ForkStateV1({root:sourceRoot,manifest});
