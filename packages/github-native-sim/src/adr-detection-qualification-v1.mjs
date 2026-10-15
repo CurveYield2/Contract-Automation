@@ -103,3 +103,57 @@ export function scoreQualificationV1({truth,findings,adjudications}={}){
     criticalHighMisses:criticalHighMisses.sort((a,b)=>a.caseId.localeCompare(b.caseId))
   };
 }
+
+/**
+ * Private seeded-package release scoring. The answer-key manifest is an input,
+ * never committed, copied into packets or written to the campaign workspace.
+ * Partial identification is tracked but does not increase the caught count.
+ */
+export function scoreSeededCampaignV1({
+  truth,findings,adjudications,partialCases=[],missStageByCase={},
+  baselineCaught=14,minCaught=30,expectedDefects=41
+}={}){
+  const scored=scoreQualificationV1({truth,findings,adjudications});
+  const defects=truth.filter(x=>x.kind==='defect');
+  if(defects.length!==expectedDefects)throw new Error('seeded manifest defect count mismatch');
+  const matched=scored.recall.overall.matched;
+  const matchedIds=new Set();
+  const decisions=new Set(adjudications.filter(x=>x.match==='MATCH').map(x=>x.caseId));
+  for(const row of defects)if(decisions.has(row.caseId))matchedIds.add(row.caseId);
+  if(matched!==matchedIds.size)throw new Error('seeded adjudication identity mismatch');
+  const partial=new Set(partialCases);
+  for(const id of partial){
+    if(!defects.some(x=>x.caseId===id)||matchedIds.has(id))
+      throw new Error('partial case unknown or already caught: '+id);
+  }
+  const missed=defects.filter(x=>!matchedIds.has(x.caseId)&&!partial.has(x.caseId));
+  const bySeverity={},byClassId={},byContract={},byLeakStage={};
+  for(const row of defects){
+    const hit=matchedIds.has(row.caseId),part=partial.has(row.caseId);
+    for(const [bucket,name] of [[bySeverity,row.severity],[byClassId,row.classId],[byContract,row.contract]]){
+      const stats=bucket[name]??={caught:0,partial:0,missed:0,total:0};
+      stats.total++;
+      stats[hit?'caught':part?'partial':'missed']++;
+    }
+    if(!hit){
+      const stage=String(missStageByCase[row.caseId]??'UNCLASSIFIED').trim();
+      byLeakStage[stage]??=[];
+      byLeakStage[stage].push(row.caseId);
+    }
+  }
+  for(const ids of Object.values(byLeakStage))ids.sort();
+  const decoys=scored.decoyHits;
+  const passed=matched>=Math.max(minCaught,baselineCaught)&&decoys.length===0&&
+    scored.cleanControlCriticalHighFalsePositives.length===0;
+  return {
+    schemaVersion:'curveyield-seeded-detection-score-v1',
+    caught:matched,partial:partial.size,missed:missed.length,
+    defectCount:defects.length,decoysFlagged:decoys.length,
+    bySeverity,byClassId,byContract,byLeakStage,
+    severityAgreement:scored.severityAgreement,
+    criticalHighMisses:scored.criticalHighMisses,
+    // Do not include full truth or leaked manifest paths in this report.
+    gate:{passed,requiredCaught:Math.max(minCaught,baselineCaught),
+      maxDecoys:0,activation:passed?'ELIGIBLE_FOR_HUMAN_QUALIFICATION_REVIEW':'BLOCKED'}
+  };
+}
