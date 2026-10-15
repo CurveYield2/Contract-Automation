@@ -15,6 +15,9 @@ test('v13 release gate refuses missing live qualification file and false partial
  try{
   assert.throws(()=>verifyV13ReleaseV1({repoRoot:root}),/V13_QUALIFICATION_REQUIRED/);
   assert.throws(()=>verifyV13ReleaseV1({receipt:{...qualified(),caught:29}}),/V13_QUALIFICATION_REQUIRED/);
+  assert.throws(()=>verifyV13ReleaseV1({receipt:{...qualified(),caught:undefined}}),/V13_QUALIFICATION_REQUIRED/);
+  assert.throws(()=>verifyV13ReleaseV1({receipt:{...qualified(),caught:'35'}}),/V13_QUALIFICATION_REQUIRED/);
+  assert.throws(()=>verifyV13ReleaseV1({receipt:{...qualified(),caught:30.5}}),/V13_QUALIFICATION_REQUIRED/);
   assert.throws(()=>verifyV13ReleaseV1({receipt:{...qualified(),decoysFlagged:1}}),/V13_QUALIFICATION_REQUIRED/);
   assert.throws(()=>verifyV13ReleaseV1({receipt:{...qualified(),cleanControlCriticalHighFalsePositives:1}}),/V13_QUALIFICATION_REQUIRED/);
   assert.throws(()=>verifyV13ReleaseV1({receipt:{...qualified(),scoreSha256:'missing'}}),/V13_QUALIFICATION_REQUIRED/);
