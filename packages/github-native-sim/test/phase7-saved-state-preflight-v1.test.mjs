@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {runPhase7ForkPreflightV1} from '../src/phase7-fork-preflight-v1.mjs';
+import {runPhase7ForkPreflightV2} from '../src/phase7-fork-preflight-v2.mjs';
 
 const expectedBlock=25819000;
 const request=()=>({
@@ -22,7 +23,8 @@ function makeEngine({chainId='0x1',block=expectedBlock}={}){
       throw Error('unexpected RPC '+method);
     },
     async getBlock(n){return{number:n,hash:'0x'+'ab'.repeat(32)};},
-    async getBalance(){return 10n**18n;}
+    async getBalance(){return 10n**18n;},
+    async getCode(){return '0x6000';}
   },close:async()=>{}};
 }
 test('saved state preflight uses no remote RPC, binds pinned block and still checks impersonation',async()=>{
@@ -55,4 +57,28 @@ test('saved state never silently downgrades wrong pinned block or wrong chain',a
  const wrongChain=await runPhase7ForkPreflightV1({request:request(),environment:savedEnv,startEngine});
  assert.equal(wrongChain.status,'FAIL');
  assert.equal(wrongChain.checks.chainIdentity.status,'FAIL');
+});
+
+test('v26 snapshot recipe accepts literal deployed target but refuses missing state or wrong mode',async()=>{
+ const r=request();
+ r.configuration.harness={recipeId:'phase0-snapshot-targeted-v1'};
+ r.configuration.simulation.workflow={steps:[
+   {action:'snapshot',alias:'baseline',label:'pin persisted Phase 0 baseline'},
+   {action:'staticCall',target:'0x000000000000000000000000000000000000bEEF',
+    function:'owner() view returns (address)',args:[],label:'check deployed owner'}
+ ]};
+ const options={request:r,environment:savedEnv,startEngine:async()=>makeEngine()};
+ const pass=await runPhase7ForkPreflightV2(options);
+ assert.equal(pass.status,'PASS',JSON.stringify(pass));
+ assert.equal(pass.checks.targetCode.status,'PASS');
+ assert.equal(pass.checks.lifecycleRecipe.status,'PASS');
+ const missing=await runPhase7ForkPreflightV2({...options,environment:{}});
+ assert.equal(missing.failureKind,'PHASE0_SNAPSHOT_RECIPE_UNBOUND');
+ const wrong=structuredClone(r);wrong.configuration.harness.recipeId='external-readiness-v1';
+ const rejected=await runPhase7ForkPreflightV2({...options,request:wrong});
+ assert.equal(rejected.failureKind,'SNAPSHOT_RECIPE_MISMATCH');
+ const noTarget=structuredClone(r);
+ noTarget.configuration.simulation.workflow.steps.pop();
+ const rejectedTarget=await runPhase7ForkPreflightV2({...options,request:noTarget});
+ assert.equal(rejectedTarget.failureKind,'PHASE0_SNAPSHOT_RECIPE_UNBOUND');
 });
