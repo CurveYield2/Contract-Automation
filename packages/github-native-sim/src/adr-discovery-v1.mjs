@@ -224,7 +224,7 @@ function wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditContr
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
  const indexPath=writeDiscoveryWindowIndexV1({root,campaignPath,ids,role});
  const message=discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText,indexPath});
- return {chatKey:role==='ATTACK'?'reviewer-3L':'reviewer-2',
+ return {chatKey:state.payload.units[ids[0]].chatKey,
   wakeId:directory.campaignId+'-discovery-'+ids[0]+'-r'+round,
   phaseId:'phase-4',milestoneId:'DISCOVERY_'+ids[0],messageB64:Buffer.from(message).toString('base64')};
 }
@@ -234,7 +234,8 @@ export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,auto
  const missing=!plan||!units.length;
  const state=head(directory,now,'curveyield-discovery-state-v1',{
   status:missing?'COMPLETE':'RUNNING',order,activeUnitId:missing?null:order[0],
-  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?'reviewer-3L':'reviewer-2',
+  ...( /Audit_Litemode_v13(?:\/|$)/.test(authorityRoot)?{reviewPolicy:'correctness-verdict-v13'}:{}),
+  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?( /Audit_Litemode_v13(?:\/|$)/.test(authorityRoot)?'reviewer-3':'reviewer-3L'):'reviewer-2',
    status:'PENDING',attempts:0,lastValidatedSubmissionSha:null,lastErrors:[],acceptedSubmissionSha:null}])),
   gaps:missing?[{code:'INVENTORY_INCOMPLETE',detail:'No flow plan'}]:structuredClone(arr(plan.payload.gaps))
  });
@@ -253,6 +254,22 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   candidates.push(...arr(submission?.candidates));
   for(const row of arr(submission?.rows)){
    const classMap=checks.get(row.contextId)??{};
+   if(state?.payload?.reviewPolicy==='correctness-verdict-v13'){
+     // The v13 security review is function-wide, not individual checklist rows.
+     // Every triggered class is tracked under the explicit source-anchored verdict.
+     const assessment={CORRECT:'SUPPORTED',DEFECT:'CONCERN',UNRESOLVED:'UNRESOLVED'}[row.verdict];
+     if(!assessment)throw new Error('accepted v13 discovery row has no correctness verdict');
+     for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[row.contextId]??[]))
+       classMap[classId]=assessment;
+     if(assessment==='UNRESOLVED'&&!arr(row.candidates).length)
+       candidates.push({tempKey:'UNRESOLVED-'+row.contextId,
+        description:row.reason,sourceAnchor:arr(row.anchors)[0],contextIds:[row.contextId],
+        securityRationale:'Unresolved source-anchored correctness obligation',status:'UNRESOLVED'});
+     for(const c of arr(row.candidates))
+       candidates.push({...c,contextIds:[...new Set([...(c.contextIds??[]),row.contextId])]});
+     if(row.candidate&&typeof row.candidate==='object')
+       candidates.push({...row.candidate,contextIds:[...new Set([...(row.candidate.contextIds??[]),row.contextId])]});
+   }
    for(const check of arr(row?.checks)){
     classMap[check.classId]=check.assessment;
     if(check.assessment==='NOT_APPLICABLE')na.push({contextId:row.contextId,classId:check.classId,evidence:check.evidence,anchors:check.anchors});
