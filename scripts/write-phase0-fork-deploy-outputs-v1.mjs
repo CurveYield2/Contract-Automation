@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import {verifyPhase0ForkStateV1} from '../packages/github-native-sim/src/phase0-fork-state-reuse-v1.mjs';
 import {renderDeployConfigMatrixV1,renderTargetedTestMatrixV1} from '../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 import {detectionPolicyForAuthorityV1,authorityRootFromHomepageV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
 const a={};for(let i=2;i<process.argv.length;i++){if(process.argv[i].startsWith('--'))a[process.argv[i].slice(2)]=process.argv[++i];}
@@ -19,6 +20,21 @@ if(deploy.schemaVersion!=='curveyield-lite-phase0-deploy-config-execution-v3'||!
 const destination=path.join(campaignRoot,'evidence/phase0');
 await fs.mkdir(destination,{recursive:true});
 await fs.writeFile(path.join(destination,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),raw);
+// An opt-in reused fork state is admitted only with exact source/campaign/chain
+// and digest proof. Otherwise the historical deployment-only gate is unchanged.
+if(deploy.reusableForkState?.status==='CAPTURED'){
+  const manifestFile=path.join(src,'PHASE0_FORK_STATE_MANIFEST_v1.json');
+  const manifest=JSON.parse(await fs.readFile(manifestFile,'utf8'));
+  if(manifest.campaignId!==deploy.campaignId||
+    manifest.sourceSha256!==deploy.sourceSha256||
+    manifest.chainId!==deploy.fork?.chainId||
+    manifest.finalBlock!==deploy.fork?.finalBlock||
+    manifest.sha256!==deploy.reusableForkState.sha256)
+    throw new Error('Reusable fork-state identity differs from Phase-0 deployment proof');
+  await verifyPhase0ForkStateV1({root:src,manifest});
+  await fs.copyFile(manifestFile,path.join(destination,'PHASE0_FORK_STATE_MANIFEST_v1.json'));
+  await fs.copyFile(path.join(src,manifest.stateFile),path.join(destination,manifest.stateFile));
+}
 try {
   const receipt=JSON.parse(await fs.readFile(path.join(campaignRoot,'receipts/PHASE_00_RECEIPT_v1.json'),'utf8'));
   const controllerRoot=path.resolve(a['controller-root']);
