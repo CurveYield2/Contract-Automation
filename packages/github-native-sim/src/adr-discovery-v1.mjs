@@ -158,6 +158,8 @@ function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,
  for(const id of ids){
   buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now});
   state.payload.units[id].status='ACTIVE';
+  if(/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot))
+    state.payload.units[id].openedAt??=now;
  }
  return ids;
 }
@@ -369,7 +371,9 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   if(result.ok){
    fs.mkdirSync(path.dirname(repoFile(root,pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json'))),{recursive:true});
    fs.writeFileSync(repoFile(root,pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json')),bytes);
-   info.status='ACCEPTED';info.acceptedSubmissionSha=sha;accepted.push(id);
+   info.status='ACCEPTED';info.acceptedSubmissionSha=sha;
+   if(packet.payload?.reviewPolicy==='correctness-verdict-v13')info.acceptedAt=now;
+   accepted.push(id);
    continue;
   }
   info.attempts++;
