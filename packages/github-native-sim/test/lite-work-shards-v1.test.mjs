@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {shardWorkFormV1,restoreWorkShardsV1,materializeShardedWorkFormV1}
+import {shardWorkFormV1,restoreWorkShardsV1,materializeShardedWorkFormV1,shardFailureIndexV1}
   from '../../../scripts/lib/lite-work-shards-v1.mjs';
 const fixture=()=> {
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'lite-shards-'));
@@ -51,5 +51,18 @@ test('edited values update digest; missing and duplicated record keys fail close
   shard.entries.pop();
   fs.writeFileSync(file,JSON.stringify(shard,null,2)+'\n');
   assert.throws(()=>restoreWorkShardsV1({root:x.root,indexRel:done.indexRel,refreshDigests:true}),/structure mismatch/);
+ }finally{fs.rmSync(x.root,{recursive:true,force:true});}
+});
+
+test('per-record rework maps to one exact shard key without losing unmapped errors',()=>{
+ const x=fixture();
+ try{
+  const done=shardWorkFormV1({root:x.root,formRel:x.formRel,phase:5});
+  const result=shardFailureIndexV1({root:x.root,indexRel:done.indexRel,
+    deficiencies:['actions.step-3.outputs.targetDesigns[111].oracle is missing','Unbound source identity']});
+  assert.equal(result.shards.length,1);
+  assert.equal(result.shards[0].defects.length,1);
+  assert.match(result.shards[0].recordKeys[0],/CAND-111/);
+  assert.deepEqual(result.unmapped,['Unbound source identity']);
  }finally{fs.rmSync(x.root,{recursive:true,force:true});}
 });
