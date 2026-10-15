@@ -68,7 +68,8 @@ else for(const [i,target] of designs.entries()){
 }
 
 if(sharded)shardWorkFormV1({root,formRel:fullRel,phase:5,retireFull:true,force:true});
-const report={status:failures.length?'REWORK_REQUIRED':'PREFLIGHT_PASS',runnable:ready.length>0,
+const report={schemaVersion:'curveyield-phase5-request-preflight-v1',campaignId,sourceSha256,
+  status:failures.length?'REWORK_REQUIRED':'PREFLIGHT_PASS',runnable:ready.length>0,
   designCount:designs?.length??0,readyCount:ready.length,generated,failures,
   ...(sharded?{workShardIndexPath:indexRel}:{})};
 process.stdout.write(JSON.stringify(report)+'\n');
