@@ -41,12 +41,13 @@ export function validateV26RequestConfigurationV1(v26,{phaseId}={}){
   if(v26.phaseContractDigest!==undefined) digest(v26.phaseContractDigest,'configuration.v26.phaseContractDigest');
   if(v26.phase0ForkState!==undefined){
     const p='configuration.v26.phase0ForkState',state=obj(v26.phase0ForkState,p);
-    only(state,new Set(['manifestRef','sha256','sourceSha256','campaignId','chainId','finalBlock']),p);
+    only(state,new Set(['manifestRef','sha256','sourceSha256','campaignId','chainId','finalBlock','hardfork']),p);
     if(phaseId!=='fork-simulation-lifecycle')throw new Error('Phase-0 fork state reuse requires Anvil workflow');
     if(!/^campaigns\/[^/]+\/evidence\/phase0\/PHASE0_FORK_STATE_MANIFEST_v1\.json$/.test(state.manifestRef??''))
       throw new Error(p+'.manifestRef must be a campaign-bound state manifest');
     digest(state.sha256,p+'.sha256');digest(state.sourceSha256,p+'.sourceSha256');
     string(state.campaignId,p+'.campaignId');
+    string(state.hardfork,p+'.hardfork');
     if(!Number.isSafeInteger(state.chainId)||state.chainId<1||
       !Number.isSafeInteger(state.finalBlock)||state.finalBlock<0)
       throw new Error(p+' requires valid chainId and finalBlock');
