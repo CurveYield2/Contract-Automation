@@ -55,7 +55,7 @@ export const MASTER_REVIEW_SEGMENTS_V13=Object.freeze([
   Object.freeze({segmentId:'reviewer-4-phases-08-10',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10}),
   Object.freeze({segmentId:'reviewer-4-followup-v1',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10})
 ]);
-export const isV13AuthorityV1=authorityRoot=>/Audit_Litemode_v13(?:\\/|$)/.test(String(authorityRoot??''));
+export const isV13AuthorityV1=authorityRoot=>/Audit_Litemode_v13(?:\/|$)/.test(String(authorityRoot??''));
 export const segmentsForAuthorityV1=authorityRoot=>isV13AuthorityV1(authorityRoot)?MASTER_REVIEW_SEGMENTS_V13:MASTER_REVIEW_SEGMENTS_V1;
 function segmentForBoundary(boundaryPhase,authorityRoot=null){
   return segmentsForAuthorityV1(authorityRoot).find(x=>x.boundaryPhase===Number(boundaryPhase))??null;
