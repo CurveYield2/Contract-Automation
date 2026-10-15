@@ -66,3 +66,16 @@ test('Anvil runtime is isolated from the Ganache-bearing engine module', () => {
   assert.doesNotMatch(sharedRuntime, /\bganache\b/i);
   assert.match(sharedRuntime, /export class WorkflowRuntime/);
 });
+
+test('verified Phase-0 state uses Anvil --load-state without a fresh upstream fork',()=>{
+ const file=path.resolve('/tmp/phase0-verified-state.json');
+ const args=buildAnvilArgs({chainId:1,forkUrl:null,block:100,port:19545,
+  hardfork:'cancun',loadStatePath:file});
+ assert.ok(args.includes('--load-state'));
+ assert.ok(args.includes(file));
+ assert.ok(args.includes('--auto-impersonate'));
+ assert.ok(!args.includes('--fork-url'));
+ assert.ok(!args.includes('--fork-block-number'));
+ assert.throws(()=>buildAnvilArgs({chainId:1,port:19545,hardfork:'cancun',
+  loadStatePath:'../../untrusted.json'}),/absolute JSON/);
+});
