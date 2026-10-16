@@ -31,6 +31,10 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
  need('expectedSecurityProperty',nonempty(target?.expectedSecurityProperty));
  need('expectedMachineObservation',target?.expectedMachineObservation&&
    typeof target.expectedMachineObservation==='object'&&!Array.isArray(target.expectedMachineObservation)&&noPlaceholders(target.expectedMachineObservation));
+ const observation=target?.expectedMachineObservation;
+ if(observation&&Object.prototype.hasOwnProperty.call(observation,'candidateId'))
+  need('expectedMachineObservation.candidateId',observation.candidateId===key,
+    'must match the candidateKey; candidate identity is carried by the reproduction metadata');
  const blueprint=target?.executionBlueprint;
  need('executionBlueprint',blueprint&&typeof blueprint==='object'&&!Array.isArray(blueprint),
    'provide concrete trusted runner configuration: exact source root, compiler, harness/simulation');
@@ -99,6 +103,10 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
  const source={repository:phase0Source.archiveRepository,commit:phase0Source.archiveCommit,
    archivePath:phase0Source.archivePath,archiveSha256:sourceSha256,
    projectPath:blueprint.projectPath};
+ const machineObservation=structuredClone(target.expectedMachineObservation);
+ // Candidate identity belongs in metadata; the machine observation schema is
+ // type-specific and correctly excludes redundant candidateId.
+ delete machineObservation.candidateId;
  const configuration=structuredClone(blueprint.configuration);
  // Preserve test intent in a non-executable, controller-owned sidecar emitted
  // with the machine request; the V7 configuration schema forbids arbitrary fields.
@@ -109,7 +117,7 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
    expectedSecurityProperty:target.expectedSecurityProperty};
  if(configuration.v26?.phase0ForkState)delete configuration.v26.phase0ForkState;
  configuration.v26={...(configuration.v26??{}),reproduction:{
-   candidateId:key,reproductionType:type,expectedObservation:structuredClone(target.expectedMachineObservation)
+   candidateId:key,reproductionType:type,expectedObservation:machineObservation
  }};
  if(blueprint.usePhase0ForkState===true){
    const reuse=phase0Source.reusableForkState;
