@@ -319,7 +319,7 @@ jobs:
 
       - name: Determine whether master amendment needs Phase-5 execution
         id: phase5_plan
-        if: steps.routing.outputs.stale != 'true' && steps.request.outputs.review_kind == 'master' && steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' && steps.request.outputs.master_outcome == 'AMENDED'
+        if: steps.routing.outputs.stale != 'true' && steps.request.outputs.review_kind == 'master' && (steps.request.outputs.segment_id == 'reviewer-2-phases-02-05' || steps.request.outputs.segment_id == 'reviewer-3-phases-05-07') && steps.request.outputs.master_outcome == 'AMENDED'
         shell: bash
         run: |
           set -euo pipefail
@@ -456,7 +456,7 @@ jobs:
             jq -c ".[$index]" /tmp/discovery-wakes.json > /tmp/discovery-wake.json
             reviewer="$(jq -r '.chatKey' /tmp/discovery-wake.json)"
             case "$reviewer" in reviewer-2|reviewer-3|reviewer-3L) ;; *) echo "::error::Wrong discovery reviewer"; exit 1;; esac
-            chat="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // (if $reviewer == "reviewer-3" then .agentChats["reviewer-3L"] else empty end) // empty' /tmp/discovery-registration.json)"
+            chat="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // empty' /tmp/discovery-registration.json)"
             [[ "$chat" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$chat" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || { echo "::error::No assigned discovery chat"; exit 1; }
             # Progress-aware watchdog: any campaign commit resets its clock, so it only pokes a stalled chat.
             timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
@@ -549,7 +549,7 @@ jobs:
           encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content')"
           printf '%s' "$encoded" | base64 -d > /tmp/master-test-registration.json
           reviewer="${{ steps.controller.outputs.test_reviewer }}"
-          chat="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // (if $reviewer == "reviewer-3" then .agentChats["reviewer-3L"] else empty end) // empty' /tmp/master-test-registration.json)"
+          chat="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // empty' /tmp/master-test-registration.json)"
           [[ "$chat" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$chat" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || { echo "::error::No preassigned test reviewer chat"; exit 1; }
           echo "url=$chat" >> "$GITHUB_OUTPUT"
 
