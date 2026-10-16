@@ -16,7 +16,15 @@ const fullFile=path.join(root,...fullRel.split('/'));
 const indexRel=path.posix.join(campaignPath,'work/phase-05/shards/INDEX_v1.json');
 const indexFile=path.join(root,...indexRel.split('/'));
 const sharded=fs.existsSync(indexFile);
-if(sharded)materializeShardedWorkFormV1({root,formRel:fullRel,refreshDigests:true});
+if(sharded){
+  try{materializeShardedWorkFormV1({root,formRel:fullRel,refreshDigests:true});}
+  catch(error){
+    process.stdout.write(JSON.stringify({schemaVersion:'curveyield-phase5-request-preflight-v1',campaignId,sourceSha256,
+      status:'REWORK_REQUIRED',runnable:false,designCount:0,readyCount:0,generated:[],
+      failures:[{path:indexRel,reason:'Work shard integrity: '+String(error?.message??error),shardPath:indexRel}]})+'\n');
+    process.exit(2);
+  }
+}
 const read=rel=>JSON.parse(fs.readFileSync(path.join(root,campaignPath,rel),'utf8'));
 const phase0=read('receipts/PHASE_00_RECEIPT_v1.json');
 const phase0Source={...phase0.source};
@@ -36,7 +44,10 @@ const form=read('work/phase-05/PHASE_05_WORK_FORM_v1.json');
 const designs=form?.actions?.['step-3']?.outputs?.targetDesigns;
 const failures=[],ready=[],generated=[];
 const shardFor=(index,key)=>{
-  for(const s of index?.shards??[])if(s.recordKeys.some(x=>x.includes('candidateKey='+key)))
+  const descriptors=index?.schemaVersion==='curveyield-work-shard-index-v13'
+    ?index.pages.flatMap(p=>JSON.parse(fs.readFileSync(path.join(root,...path.posix.dirname(indexRel).split('/'),p.file),'utf8')).shards)
+    :(index?.shards??[]);
+  for(const s of descriptors)if(s.recordKeys.some(x=>x.includes('candidateKey='+key)))
     return path.posix.join(path.posix.dirname(indexRel),s.file);
   return null;
 };
