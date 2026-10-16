@@ -8,11 +8,13 @@ export function planBackupChatFailoverV1({registration,directory,failedChatUrl,n
  if(!registration||!directory||directory.campaignId!==registration.campaignId)
   return fail('campaign binding mismatch');
  const assignment=directory.currentAssignment;
- if(!assignment||!['ACTIVE','WAITING_FOR_SUCCESSOR_AGENT'].includes(directory.campaignStatus)||
-    !['ACTIVE','WAITING_FOR_SUCCESSOR_AGENT'].includes(assignment.status))
+ const delegatedRole=registration.activeChat?.name;
+ const privileged=['master-reviewer','test-executor'].includes(delegatedRole);
+ if(!assignment||!['ACTIVE','WAITING_FOR_SUCCESSOR_AGENT','WAITING_FOR_MASTER_REVIEW'].includes(directory.campaignStatus)||
+    (!privileged&&!['ACTIVE','WAITING_FOR_SUCCESSOR_AGENT'].includes(assignment.status)))
   return fail('no active reviewer assignment');
- const role=assignment.reviewer;
- if(!/^reviewer-[1-4](?:L)?$/.test(String(role??'')))return fail('invalid reviewer role');
+ const role=privileged?delegatedRole:assignment.reviewer;
+ if(!/^(?:reviewer-[1-4](?:L)?|master-reviewer|test-executor)$/.test(String(role??'')))return fail('invalid reviewer role');
  const current=registration.agentChats?.[role];
  if(!allowed.test(idOf(current))||current!==failedChatUrl)
   return fail('failed chat no longer bound to current reviewer role');
@@ -30,14 +32,18 @@ export function planBackupChatFailoverV1({registration,directory,failedChatUrl,n
   'Campaign '+directory.campaignId+', role '+role+', current phase '+assignment.phaseSequence+'.',
   'Read the bound authority from the Phase-0 receipt; preserve frozen authority and sealed earlier phases.',
   nextWork,
-  'Do not author tests as the test executor; continue only this reviewer role. Do not repeat earlier bookkeeping.'].join('\n');
+  role==='test-executor'
+    ?'Execute only the authorized targeted-test plan, preserve raw evidence and submit results. Never change reviewer findings.'
+    :role==='master-reviewer'
+      ?'Perform the pending whole-segment master review. Never execute tests or duplicate earlier bookkeeping.'
+      :'Do not author tests as the test executor; continue only this reviewer role. Do not repeat earlier bookkeeping.'].join('\n');
  const updated=structuredClone(registration);
  updated.retiredChats={...(registration.retiredChats??{}),[role]:failedChatUrl};
  updated.agentChats={...registration.agentChats,[role]:backup};
  if(updated.agentChats.backup===backup)delete updated.agentChats.backup;
  updated.activeChat={...(updated.activeChat??{}),name:role,url:backup};
  updated.activeAssignment={...(updated.activeAssignment??{}),phaseId:'phase-'+assignment.phaseSequence,
-  milestoneId:'PHASE_'+assignment.phaseSequence+'_WORK_PACKET',reviewer:role,workerRole:'reviewer'};
+  milestoneId:'PHASE_'+assignment.phaseSequence+'_WORK_PACKET',reviewer:role,workerRole:role==='test-executor'?'test-executor':role==='master-reviewer'?'master-reviewer':'reviewer'};
  updated.backupFailover={status:'USED',role,failedChatUrl,backupChatUrl:backup,
   assignedPhaseSequence:assignment.phaseSequence,usedAt:now};
  updated.updatedAt=now;
