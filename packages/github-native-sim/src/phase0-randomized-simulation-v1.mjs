@@ -11,6 +11,7 @@ import {startRpcIdentityProxy} from '../../runner/src/rpc-identity-proxy-v1.mjs'
 import {stageExactArchiveSource,runProcess} from './execution.mjs';
 import {deploySourceKnownPlanV1} from './source-known-deployment-plan-v1.mjs';
 import {captureDeployedStateSnapshotV1} from './adr-deployed-state-snapshot-v1.mjs';
+import {capturePhase0ForkStateV1} from './phase0-fork-state-reuse-v1.mjs';
 import {validateExecutionInputJoinV2} from './phase0-execution-input-v2.mjs';
 import {generateTypedValueV2,qualifyRecipeV2,classifySemanticFamilyV2,classifyExecutionOutcomeV2,observationDeltaV2,validateTelemetryCountersV2,assessMedusaV2,CAPABILITY_CONTRACT_VERSION_V2} from './phase0-execution-contract-v2.mjs';
 import {parseMedusaOutput} from './analysis.mjs';
@@ -2663,6 +2664,23 @@ export async function runPhase0RandomizedSimulationV1({controllerRoot,campaignPa
       try { deployedStateSnapshot = await captureDeployedStateSnapshotV1({provider, deployedContracts: witness.deployedContracts ?? [], artifactByQualified}); }
       catch (e) { deployedStateSnapshot = {schemaVersion:'curveyield-deployed-state-snapshot-v1', status:'ERROR', rows:[], error:String(e?.message ?? e).slice(0,2000)}; }
       await fs.writeFile(path.join(outputRoot,'DEPLOYED_STATE_SNAPSHOT_v1.json'), JSON.stringify(deployedStateSnapshot,null,2)+'\n');
+      if(status==='PASS'&&(process.env.PHASE0_FORK_STATE_REUSE_V1==='true'||/Audit_Litemode_v13(?:\/|$)/.test(receipt.authority?.homepagePath??''))){
+        try{
+          const retained=await capturePhase0ForkStateV1({
+            rpc:(method,params)=>rpc(anvil.url,method,params),outputDir:outputRoot,
+            campaignId:receipt.campaign.campaignId,sourceSha256:archiveSha256,
+            chainId:forkChain.chainId,hardfork:cfg.evmVersion,finalBlock:scriptEnd
+          });
+          witness.reusableForkState={status:retained.status,
+            ...(retained.status==='CAPTURED'?{
+              manifestRef:'PHASE0_FORK_STATE_MANIFEST_v1.json',sha256:retained.sha256,bytes:retained.bytes,
+              chainId:retained.chainId,finalBlock:retained.finalBlock}:{
+              reason:'Anvil fork-state exceeds bounded evidence storage',bytes:retained.bytes})};
+        }catch(error){
+          witness.reusableForkState={status:'UNAVAILABLE',reason:String(error?.message??error).slice(0,300)};
+        }
+        await fs.writeFile(path.join(outputRoot,'PHASE0_DEPLOY_CONFIG_EXECUTION_v1.json'),JSON.stringify(witness,null,2)+'\n');
+      }
       await provider.destroy();
       return{deployEvidence:witness};
     }

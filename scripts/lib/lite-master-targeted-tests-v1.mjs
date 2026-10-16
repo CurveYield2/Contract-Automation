@@ -5,7 +5,7 @@ import {readJson,requiredFile} from './lite-phase-work-v1.mjs';
 
 const SHA=/^[0-9a-f]{64}$/;
 const ID=/^[A-Za-z0-9._-]+$/;
-const REVIEWERS=new Set(['reviewer-1','reviewer-2','reviewer-3L','reviewer-4']);
+const REVIEWERS=new Set(['reviewer-1','reviewer-2','reviewer-3','reviewer-3L','reviewer-4']);
 // A campaign with a dedicated test-executor chat runs every targeted-test round there:
 // it never owns a review segment, so it is always independent of the reviewed work.
 const TEST_EXECUTOR='test-executor';
@@ -39,6 +39,8 @@ export function registerMasterTargetedTests({root,campaignPath,directory,planPat
   if(plan.schemaVersion!=='curveyield-lite-master-targeted-tests-v1'||plan.campaignId!==directory.campaignId||plan.segmentId!==pending.segmentId||plan.sourceSha256!==directory.sourceSha256)
     throw new Error('targeted-test plan campaign/segment/source binding mismatch');
   const dedicated=hasTestExecutor(directory);
+  if(pending.segmentId==='reviewer-3-phases-05-07'&&!dedicated)
+    throw new Error('v13 phase-5-to-7 master test directives require a registered independent test-executor chat');
   if(plan.assignedReviewer===TEST_EXECUTOR?!dedicated:(!REVIEWERS.has(plan.assignedReviewer)||plan.assignedReviewer===pending.reviewerId))
     throw new Error('targeted tests must be assigned to the test executor or a different registered reviewer');
   const assignedReviewer=dedicated?TEST_EXECUTOR:plan.assignedReviewer;

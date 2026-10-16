@@ -5,6 +5,7 @@ import { runGitHubNativeJob as runGitHubNativeJobV1 } from './run-job-file.mjs';
 import { runPhase6ExecutionPreflightV1 } from './phase6-execution-preflight-v1.mjs';
 import { createPhase6MutableRpcSession, phase6MutableRpcRuntime } from './phase6-mutable-rpc-v1.mjs';
 import { runPhase7ForkPreflightV2 } from './phase7-fork-preflight-v2.mjs';
+import {stageVerifiedPhase0ForkStateV1} from './phase0-fork-state-reuse-v1.mjs';
 import { stagePhase6Snapshot, copyPhase6SnapshotForExecution } from './phase6-staged-snapshot-v1.mjs';
 import { attachExecutionDisposition } from './execution-disposition-v1.mjs';
 import { stripV26RequestExtensionV1, enrichPhase6V26EvidenceV1, enrichPhase7V26EvidenceV1, attachReproductionEvidenceV1 } from './v26-execution-evidence-v1.mjs';
@@ -194,9 +195,32 @@ export async function runGitHubNativeJobV2(input, {
   }
 
   const request = stripV26RequestExtensionV1(v26Request);
+  // Never honor a caller-supplied state file. Only a V26 descriptor matching
+  // the private Phase-0 SHA/campaign/source may authorize restored execution.
+  const executionEnvironment={...environment};
+  delete executionEnvironment.V7_PHASE0_FORK_STATE_PATH;
+  delete executionEnvironment.V7_PHASE0_FORK_FINAL_BLOCK;
+  const stateRef=v26Request.configuration?.v26?.phase0ForkState;
+  let verifiedState=null;
+  if(stateRef){
+    try{
+      verifiedState=await stageVerifiedPhase0ForkStateV1({
+        controllerRoot:executionEnvironment.PHASE5_CONTROLLER_ROOT,
+        manifestRef:stateRef.manifestRef,expected:stateRef,
+        workspaceRoot:path.join(workspaceRoot,'fork-state-staging')
+      });
+      executionEnvironment.V7_PHASE0_FORK_STATE_PATH=verifiedState.loadStatePath;
+      executionEnvironment.V7_PHASE0_FORK_FINAL_BLOCK=String(verifiedState.finalBlock);
+    }catch(error){
+      const preflight={status:'FAIL',failureKind:'PHASE0_FORK_STATE_VERIFICATION_FAILED',
+        reason:String(error?.message??error).slice(0,500),nextState:'PHASE7_FORK_PREFLIGHT'};
+      return attachExecutionDisposition({request:v26Request,
+        result:preflightFailure(v26Request,preflight),requestPath});
+    }
+  }
   let preflight = null;
   if (v26Request.phaseId === 'fork-simulation-lifecycle') {
-    preflight = await runPhase7ForkPreflightV2({ request, environment });
+    preflight = await runPhase7ForkPreflightV2({ request, environment:executionEnvironment });
   }
 
   if (preflight && preflight.status !== 'PASS') {
@@ -205,10 +229,13 @@ export async function runGitHubNativeJobV2(input, {
 
   let result = await runGitHubNativeJobV1(request, {
     workspaceRoot: path.join(workspaceRoot, 'execution'),
-    environment,
+    environment:executionEnvironment,
     ...delegateOptions,
+    verifiedPhase0ForkState:verifiedState,
   });
-  result = { ...result, preflight };
+  result = { ...result, preflight, ...(verifiedState?{phase0ForkStateReuse:{
+    status:'VERIFIED',sha256:verifiedState.sha256,chainId:verifiedState.chainId,
+    finalBlock:verifiedState.finalBlock}}:{}) };
 
   if (v26Request.phaseId === 'fork-simulation-lifecycle') {
     result = await enrichPhase7V26EvidenceV1({ request: v26Request, result, environment, fetchImpl: delegateOptions.fetchImpl ?? globalThis.fetch });

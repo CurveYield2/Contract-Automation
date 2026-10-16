@@ -1,11 +1,12 @@
 import fs from 'node:fs/promises';
 import {existsSync} from 'node:fs';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import {listAdmittedSourcesV1} from './source-intelligence-technical-v1.mjs';
 import {digestCanonicalV1} from './canonical-json-v1.mjs';
 import {buildSystemFactsV1} from './adr-system-facts-v1.mjs';
 import {loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
-import {loadAuditScope,sourceIsInScope,AUDIT_SCOPE_FILE} from './phase0-audit-scope-v1.mjs';
+import {loadAuditScope,sourceIsInScope,sourceExplicitlyExcludedV1,AUDIT_SCOPE_FILE} from './phase0-audit-scope-v1.mjs';
 
 const POLICY='audit-detection-rebuild-v1';
 const REVIEW_KINDS=new Set(['FUNCTION','CONSTRUCTOR','FALLBACK','RECEIVE','FREE_FUNCTION','MODIFIER','STATE_INITIALIZER','CONSTANT','IMMUTABLE','GENERATED_GETTER']);
@@ -27,9 +28,10 @@ function walk(n,fn,parent=null) {
 // A package's audit-scope.json is authoritative: only its inScopePaths are reviewed, every other
 // compiled source is a dependency (reviewed only where in-scope contracts inherit it). Without the
 // file, path conventions apply at any depth (e.g. ipor-fusion/lib/forge-std is a dependency).
-export function sourceTierV1(p,scope=null) {
+export function sourceTierV1(p,scope=null,{includeScripts=false}={}) {
   if(/(^|\/)(test|tests|mock|mocks)\//.test(p)||p.endsWith('.t.sol'))return 'TEST_OR_MOCK';
-  if(p.endsWith('.s.sol')||/(^|\/)(script|scripts)\//.test(p))return 'SCRIPT';
+  if(p.endsWith('.s.sol')||/(^|\/)(script|scripts|deploy|deployment|config|configure|handover)\//.test(p))
+    return includeScripts&&!sourceExplicitlyExcludedV1(p,scope)?'IN_SCOPE':'SCRIPT';
   if(scope?.source===AUDIT_SCOPE_FILE)return sourceIsInScope(p,scope)?'IN_SCOPE':'DEPENDENCY';
   if(/(^|\/)(vendor|lib|node_modules)\//.test(p)||p.startsWith('@'))return 'DEPENDENCY';
   return 'IN_SCOPE';
@@ -65,9 +67,10 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   if(!projectRoot||!build||!campaign)throw new TypeError('projectRoot, build, campaign required');
   const sources=await listAdmittedSourcesV1(projectRoot), bySource=new Map();
   const scope=await loadAuditScope(projectRoot);
+  const includeScripts=campaign?.detectionReviewPolicy==='correctness-verdict-v13';
   for(const s of sources) {
     const bytes=await fs.readFile(path.join(projectRoot,...s.path.split('/')));
-    bySource.set(s.path,{...s,bytes,tier:sourceTierV1(s.path,scope)});
+    bySource.set(s.path,{...s,bytes,tier:sourceTierV1(s.path,scope,{includeScripts})});
   }
   const asts=new Map();
   const units=(build.compilationUnits??[]).filter(u=>u.sourceAsts&&Object.keys(u.sourceAsts).length);
@@ -124,7 +127,14 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
               const c={contextId:'CTX-'+core+suffix,symbolId,path:file,qualifiedContainer,kind:d.kind,
                 canonicalSignature:d.canonicalSignature,visibility:d.visibility,stateMutability:d.stateMutability,
                 lineStart:d.lineStart,lineEnd:d.lineEnd,effectiveIn:[],scopeTier:'IN_SCOPE',
-                dependencySymbolIds:[],stateReads:[],stateWrites:[],internalCalls:[],modifiers:[],externalCalls:[]};
+                dependencySymbolIds:[],stateReads:[],stateWrites:[],internalCalls:[],modifiers:[],externalCalls:[],
+                ...(includeScripts?{
+                  natSpec:typeof node.documentation==='string'?node.documentation.slice(0,2500):
+                    typeof node.documentation?.text==='string'?node.documentation.text.slice(0,2500):'',
+                  ...(['CONSTANT','IMMUTABLE','STATE_INITIALIZER'].includes(d.kind)?{
+                    declaredValue:node.value?sourceText(source.bytes,node.value.src).slice(0,300):'UNINITIALIZED'
+                  }:{})
+                }:{})};
               contexts.push(c);contextBySymbol.set(symbolId,c);
             }
           }
@@ -308,19 +318,59 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   let complete=true;
   for(const s of sourceUnits) {
     if(s.astStatus==='AVAILABLE'||s.scopeTier!=='IN_SCOPE'&&s.astStatus!=='UNSUPPORTED_LANGUAGE')continue;
-    if(s.astStatus==='MISSING'&&s.scopeTier==='IN_SCOPE')complete=false;
-    const source=bySource.get(s.path),n=source.bytes;
-    const symbolId='SYM-'+digestCanonicalV1({path:s.path,qualifiedContainer:s.path,kind:'FILE_FALLBACK',canonicalSignature:'file()'}).slice(0,16);
-    const ctx={contextId:symbolId.replace(/^SYM-/,'CTX-'),symbolId,path:s.path,qualifiedContainer:s.path,kind:'FILE_FALLBACK',
-      canonicalSignature:'file()',visibility:'internal',lineStart:1,lineEnd:lines(n,'0:'+n.length).lineEnd,effectiveIn:[],
-      scopeTier:s.scopeTier,dependencySymbolIds:[],stateReads:[],stateWrites:[],internalCalls:[],modifiers:[],externalCalls:[],orphan:true};
+    const scriptWithoutAst=includeScripts&&s.astStatus==='MISSING'&&
+      (/(^|\/)(script|scripts|deploy|deployment|configure|config|handover)\//i.test(s.path)||s.path.endsWith('.s.sol'));
+    if(s.astStatus==='MISSING'&&s.scopeTier==='IN_SCOPE'&&!scriptWithoutAst)complete=false;
+    const source=bySource.get(s.path),n=source.bytes,kind=scriptWithoutAst?'SCRIPT_FILE':'FILE_FALLBACK';
+    const symbolId='SYM-'+digestCanonicalV1({path:s.path,qualifiedContainer:s.path,kind,canonicalSignature:'file()'}).slice(0,16);
+    const ctx={contextId:symbolId.replace(/^SYM-/,'CTX-'),symbolId,path:s.path,qualifiedContainer:s.path,kind,
+      canonicalSignature:'file()',visibility:'internal',lineStart:1,lineEnd:lines(n,'0:'+n.length).lineEnd,
+      effectiveIn:scriptWithoutAst?[s.path]:[],
+      scopeTier:s.scopeTier,dependencySymbolIds:[],stateReads:[],stateWrites:[],internalCalls:[],modifiers:[],externalCalls:[],
+      ...(!scriptWithoutAst?{orphan:true}:{})};
     contexts.push(ctx);
-    declarations.push({symbolId,path:s.path,qualifiedContainer:s.path,containerKind:'file',kind:'FILE_FALLBACK',name:s.path,
+    declarations.push({symbolId,path:s.path,qualifiedContainer:s.path,containerKind:'file',kind,name:s.path,
       canonicalSignature:'file()',visibility:'internal',stateMutability:'nonpayable',lineStart:1,lineEnd:ctx.lineEnd,hasBody:false});
-    if(s.astStatus==='MISSING')limitations.push({code:'INVENTORY_INCOMPLETE',path:s.path,detail:'In-scope Solidity source has no admitted AST'});
+    if(scriptWithoutAst)limitations.push({code:'SCRIPT_TEXT_REVIEW_NO_AST',path:s.path,
+      detail:'No admitted AST; entire deployment/configuration script requires a correctness verdict.'});
+    else if(s.astStatus==='MISSING')limitations.push({code:'INVENTORY_INCOMPLETE',path:s.path,detail:'In-scope Solidity source has no admitted AST'});
     else limitations.push({code:'UNSUPPORTED_LANGUAGE_FILE_FALLBACK',path:s.path,detail:'Vyper requires file-level review'});
-    const needed=loadTaxonomyV1(new URL('../../../',import.meta.url).pathname).classes.filter(x=>x.testRequired).flatMap(x=>x.triggers);
+    const needed=scriptWithoutAst?['SCRIPT_EXECUTION']:
+      loadTaxonomyV1(new URL('../../../',import.meta.url).pathname).classes.filter(x=>x.testRequired).flatMap(x=>x.triggers);
     triggers[ctx.contextId]=distinct(needed);
+  }
+  // Script/config/handover text surfaces are review units in v13 even when
+  // Solidity compilation cannot produce an AST (JS, shell, YAML, JSON).
+  // Older frozen authorities retain their historical compiled-only inventory.
+  if(includeScripts){
+    const skip=new Set(['.git','node_modules','out','dist','build','artifacts','cache','.audit-hermetic-build']);
+    const textExt=/\.(?:mjs|cjs|js|ts|sh|json|ya?ml)$/i;
+    const scriptDirectory=/(^|\/)(?:script|scripts|deploy|deployment|configure|config|handover)\//i;
+    let n=0;
+    async function addTextScripts(dir){
+      for(const entry of await fs.readdir(dir,{withFileTypes:true})){
+        if(skip.has(entry.name))continue;
+        const abs=path.join(dir,entry.name);
+        if(entry.isDirectory()){await addTextScripts(abs);continue;}
+        if(!entry.isFile())continue;
+        const rel=path.relative(projectRoot,abs).split(path.sep).join('/');
+        if(!scriptDirectory.test(rel)||!textExt.test(rel)||sourceExplicitlyExcludedV1(rel,scope))continue;
+        if(++n>1000)throw new Error('v13 deployment script review inventory exceeds 1000 files; explicitly narrow excludedPaths');
+        const content=await fs.readFile(abs);
+        const hash=createHash('sha256').update(content).digest('hex');
+        const symbolId='SYM-'+digestCanonicalV1({path:rel,kind:'SCRIPT_FILE'}).slice(0,16);
+        const ctx={contextId:symbolId.replace('SYM-','CTX-'),symbolId,path:rel,qualifiedContainer:rel,
+          kind:'SCRIPT_FILE',canonicalSignature:'script-file()',visibility:'internal',
+          lineStart:1,lineEnd:content.toString('utf8').split('\n').length,effectiveIn:[rel],
+          scopeTier:'IN_SCOPE',dependencySymbolIds:[],stateReads:[],stateWrites:[],
+          internalCalls:[],modifiers:[],externalCalls:[]};
+        sourceUnits.push({sourceId:'SRC-SCRIPT-'+String(n).padStart(3,'0'),path:rel,sha256:hash,
+          scopeTier:'IN_SCOPE',lineCount:ctx.lineEnd,astStatus:'SCRIPT_TEXT_REVIEW'});
+        declarations.push({...ctx,name:rel,containerKind:'file',hasBody:true});
+        contexts.push(ctx);triggers[ctx.contextId]=new Set(['SCRIPT_EXECUTION']);
+      }
+    }
+    await addTextScripts(projectRoot);
   }
   for (const ctx of contexts) {
     const t=temp.get(ctx.contextId), contract=t?.meta?.contract;
@@ -338,6 +388,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
       ctx.txOriginLines=distinct(sourceSlice.split('\n').flatMap((line,i)=>/tx\.origin/.test(line)?[firstLine+i]:[])).map(Number);
     }
   }
+  sourceUnits.sort((a,b)=>a.path.localeCompare(b.path));
   const triggerObj={};for(const c of [...contexts].sort(byPosition))triggerObj[c.contextId]=distinct([...(triggers[c.contextId]??[])]);
   contexts.sort(byPosition);declarations.sort((a,b)=>a.path.localeCompare(b.path)||a.lineStart-b.lineStart||a.symbolId.localeCompare(b.symbolId));
   limitations.sort((a,b)=>a.path.localeCompare(b.path)||a.code.localeCompare(b.code));
@@ -347,10 +398,11 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
       declarations:declarations.length,contexts:contexts.length,byKind:Object.fromEntries(Object.entries(byKind).sort(([a],[b])=>a.localeCompare(b))) }});
 }
 
-export async function writeReviewInventoryOutputsV1({outputDir,projectRoot,build,request,policy}) {
+export async function writeReviewInventoryOutputsV1({outputDir,projectRoot,build,request,policy,reviewPolicy=null}) {
   if(policy!==POLICY)return;
   const campaign={campaignId:request?.campaignId,campaignGenerationId:request?.campaignGenerationId,
-    sourceSha256:request?.source?.archiveSha256,generatedAt:request?.generatedAt??new Date().toISOString()};
+    sourceSha256:request?.source?.archiveSha256,generatedAt:request?.generatedAt??new Date().toISOString(),
+    ...(reviewPolicy==='correctness-verdict-v13'?{detectionReviewPolicy:reviewPolicy}:{})};
   try {
     const inventory=await buildReviewInventoryV1({projectRoot,build,campaign});
     const facts=buildSystemFactsV1({inventory});

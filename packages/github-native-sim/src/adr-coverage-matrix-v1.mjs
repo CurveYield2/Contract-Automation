@@ -8,12 +8,24 @@ function statusFor(phase6Results, inventory, contextId, classId) {
   if (!phase6Results) return 'PENDING';
   const key = contextId + ':' + classId;
   const obligations = inventory.payload?.baselineObligations ?? phase6Results.baselineObligations ?? [];
-  const obligation = obligations.find(o => (o.contextId === contextId || (o.contextIds ?? []).includes(contextId)) && o.classId === classId);
-  const id = obligation?.obligationId;
-  const value = (id && phase6Results[id]) ?? phase6Results[key] ??
+  const matches = obligations.filter(o =>
+    (o.contextId === contextId || (o.contextIds ?? []).includes(contextId)) && o.classId === classId);
+  const fallback = phase6Results[key] ??
     phase6Results.byContextClass?.[contextId]?.[classId] ?? phase6Results.byContextClass?.[key];
-  const status = typeof value === 'string' ? value : value?.testStatus ?? value?.status;
-  return TEST_STATUSES.has(status) ? status : 'NOT_ACHIEVED';
+  const normalize = value => {
+    const status = typeof value === 'string' ? value : value?.testStatus ?? value?.status;
+    return TEST_STATUSES.has(status) ? status : 'NOT_ACHIEVED';
+  };
+  if (!matches.length) return normalize(fallback);
+  // Each matching obligation must be satisfied. A passing sibling cannot mask an
+  // open, failed or unexecuted obligation on the same context and detection class.
+  const statuses = matches.map(o => normalize(phase6Results[o.obligationId]));
+  for (const status of ['PROPERTY_FAILED','NOT_ACHIEVED','INCONCLUSIVE','PENDING','NOT_REQUIRED'])
+    if (statuses.includes(status)) return status === 'NOT_REQUIRED' ? 'NOT_ACHIEVED' : status;
+  if (statuses.every(s => s === 'PASSED')) return 'PASSED';
+  if (statuses.every(s => s === 'NOT_APPLICABLE_CONFIRMED')) return 'NOT_APPLICABLE_CONFIRMED';
+  // Mixed PASS/N-A never proves the collective obligation.
+  return 'NOT_ACHIEVED';
 }
 
 function summary(rows) {

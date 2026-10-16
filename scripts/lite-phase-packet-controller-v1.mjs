@@ -6,6 +6,8 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {readV7RawResultV1} from '../packages/github-native-sim/src/v7-compact-result-v1.mjs';
 import {pathToFileURL} from 'node:url';
+import {storeControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
+import {materializeShardedWorkFormV1,shardWorkFormV1,shardFailureIndexV1} from './lib/lite-work-shards-v1.mjs';
 import {
   readJson,writeJson,writeText,repoFile,requiredFile,authorityRootFromReceipt,loadPhaseSchema,
   validateWorkForm,validateFinalReport,ensurePacketShape,buildDerivedOutputs,preparePhaseWork,getByPath
@@ -20,7 +22,7 @@ import {
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
-import {MASTER_REVIEW_SEGMENTS_V1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
+import {MASTER_REVIEW_SEGMENTS_V1,isV13AuthorityV1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
 import {registerMasterTargetedTests,acceptMasterTargetedTestResults,verifyMasterTargetedTestEvidence,unresolvedFinalCandidateFailures} from './lib/lite-master-targeted-tests-v1.mjs';
 import {admitPostCompletionFollowupV1} from './lib/lite-post-completion-followup-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
@@ -118,8 +120,21 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,repla
   return {graphRel,ledgerRel,invalidRel};
 }
 function receiptRef(root,campaignPath,rel,role){return {role,path:path.posix.relative(campaignPath,rel),sha256:shaFile(repoFile(root,rel))};}
-function assignmentReviewer(sequence){if(sequence===1)return'reviewer-1';if(sequence>=2&&sequence<=5)return'reviewer-2';if(sequence===6)return'reviewer-3L';if(sequence>=8&&sequence<=10)return'reviewer-4';throw new Error('no agent reviewer for phase '+sequence);}
-function isFreshBoundary(next){return next===2||next===6||next===8;}
+function assignmentReviewer(sequence,authorityRoot=null){
+  if(sequence===1)return 'reviewer-1';
+  if(isV13AuthorityV1(authorityRoot)){
+    if(sequence>=2&&sequence<=4)return 'reviewer-2';
+    if(sequence>=5&&sequence<=7)return 'reviewer-3';
+  }else{
+    if(sequence>=2&&sequence<=5)return 'reviewer-2';
+    if(sequence===6)return 'reviewer-3L';
+  }
+  if(sequence>=8&&sequence<=10)return 'reviewer-4';
+  throw new Error('no agent reviewer for phase '+sequence);
+}
+function isFreshBoundary(next,authorityRoot=null){
+  return isV13AuthorityV1(authorityRoot)?[2,5,8].includes(next):[2,6,8].includes(next);
+}
 function maybeFile(root,rel){const f=repoFile(root,rel);return fs.existsSync(f)&&fs.statSync(f).isFile()?f:null;}
 function maybeJson(root,rel){const f=maybeFile(root,rel);if(!f)return null;try{return readJson(f);}catch{return null;}}
 function canonicalRelFor(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNum(phase)+'_CANONICAL_DATA_v1.json');}
@@ -552,6 +567,7 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
         if(generated?.phaseSequence!==phase)throw new Error('master amendment refresh dependency chain did not prepare Phase '+phase);
         predecessorReceiptPath=generated.predecessorReceiptPath;
         derivedInputPaths=generated.derivedInputPaths??[];
+        if(generated.workShardIndexPath)materializeShardedWorkFormV1({root:shadowRoot,formRel:generated.workFormPath,refreshDigests:false});
         const fresh=readJson(requiredFile(shadowRoot,generated.workFormPath,'refreshed Phase '+phase+' scaffold'));
         const trustedPrefill=structuredClone(fresh);
         const amendedDisposition=(amendedForms.get(row.path)?.changedFields??[]).some(x=>x.endsWith('.obligationDispositions'));
@@ -735,6 +751,16 @@ if(!['phase','master','master-test-result','sealed-rework','post-completion-foll
 const root=path.resolve(a['controller-root']);
 const expectedCampaignId=a['campaign-id'];
 const campaignPath=a['campaign-path']; const campaignRoot=repoFile(root,campaignPath);
+// All externally visible exits write synchronously: process.exit() cannot drop
+// buffered output. Nested transaction children retain their private full response.
+const internalTransaction=a['master-transaction-child']==='true'||Boolean(masterAmendmentRefreshSha);
+process.stdout.write=(chunk)=>{
+  const line=Buffer.isBuffer(chunk)?chunk.toString('utf8'):String(chunk);
+  const result=JSON.parse(line.trim());
+  const displayed=internalTransaction?result:storeControllerResultV1({root,campaignPath,response:result});
+  fs.writeSync(1,JSON.stringify(displayed)+'\n');
+  return true;
+};
 const sequence=reviewKind==='master'?null:Number(a['phase-sequence']);
 const directoryRel=a['campaign-directory-path']; const directoryFile=requiredFile(root,directoryRel,'campaign directory entry');
 const directory=readJson(directoryFile);
@@ -951,7 +977,7 @@ if(reviewKind==='master'){
     if(plan.nextPhaseSequence===null||plan.nextPhaseSequence===undefined){
       directory.campaignStatus='COMPLETE';directory.currentAssignment=null;
     }else{
-      nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:plan.nextPhaseSequence,reviewer:assignmentReviewer(plan.nextPhaseSequence),predecessorReceiptPath:pending.lastSealedReceiptPath,derivedInputPaths:plan.derivedInputPaths??[],status:'WAITING_FOR_SUCCESSOR_AGENT',prefillContext:plan.prefillContext??{}});
+      nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:plan.nextPhaseSequence,reviewer:assignmentReviewer(plan.nextPhaseSequence,masterAuthorityRoot),predecessorReceiptPath:pending.lastSealedReceiptPath,derivedInputPaths:plan.derivedInputPaths??[],status:'WAITING_FOR_SUCCESSOR_AGENT',prefillContext:plan.prefillContext??{}});
       directory.currentAssignment=nextAssignment;directory.campaignStatus='WAITING_FOR_SUCCESSOR_AGENT';
     }
     directory.lastSealedReceiptPath=pending.lastSealedReceiptPath;
@@ -998,6 +1024,10 @@ const packet=buildControllerPacket({directory,assignment,existing:existingPacket
 let deficiencies=ensurePacketShape({packet,directory,assignment});
 let form=null;
 try{
+  // Agent edits live shards; reconstruct the legacy form for existing validators.
+  // Digest/key checks run before any reviewer work can reach bookkeeping.
+  if(assignment.workShardIndexPath)
+    materializeShardedWorkFormV1({root,formRel:assignment.workFormPath,refreshDigests:true});
   form=readJson(requiredFile(root,assignment.workFormPath,'phase work form'));
 
   // v10.3 stores the authoritative prefill digest outside the reviewer-editable
@@ -1015,6 +1045,22 @@ try{
 
   deficiencies.push(...validateWorkForm(schema,form));
   deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
+  if(sequence===5){
+    const reportRel=path.posix.join(campaignPath,'controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json');
+    const preflight=maybeJson(root,reportRel);
+    if(preflight){
+      if(preflight.schemaVersion!=='curveyield-phase5-request-preflight-v1'||
+        preflight.campaignId!==directory.campaignId||preflight.sourceSha256!==directory.sourceSha256)
+        deficiencies.push('Phase 5 preflight identity mismatch: '+reportRel);
+      else if(preflight.status==='REWORK_REQUIRED'){
+        for(const f of preflight.failures??[])
+          deficiencies.push('Phase 5 preflight candidate '+String(f.candidateKey??'UNKNOWN')+
+            ', field '+String(f.path??'UNKNOWN')+', shard '+String(f.shardPath??'UNSHARDED')+
+            ': '+String(f.reason??'missing executable test input'));
+      }else if(preflight.status!=='PREFLIGHT_PASS')
+        deficiencies.push('Phase 5 preflight unrecognized status: '+reportRel);
+    }
+  }
   if(activeDetectionPolicyV1(predecessor)){
     const fn=({6:validatePhase6AttackerWorkV1,8:validatePhase8LinkageV1,10:validatePhase10CoverageLabelV1})[sequence];
     if(fn)deficiencies.push(...fn({root,campaignPath,form}));
@@ -1032,6 +1078,22 @@ try{
   }
 }catch(e){deficiencies.push(String(e.message||e));}
 
+function persistReviewerReworkShardsV1(){
+  if(!assignment.workShardIndexPath)return;
+  const full=repoFile(root,assignment.workFormPath);
+  if(fs.existsSync(full))
+    shardWorkFormV1({root,formRel:assignment.workFormPath,phase:sequence,retireFull:true,force:true});
+}
+function annotateShardReworkV1(packet,errors){
+ if(!assignment.workShardIndexPath)return '';
+ const map=shardFailureIndexV1({root,indexRel:assignment.workShardIndexPath,deficiencies:errors});
+ packet.controllerValidation.shardRework={indexPath:assignment.workShardIndexPath,
+   shards:map.shards.map(s=>({path:s.path,recordKeys:s.recordKeys,defectCount:s.defects.length})),
+   unmappedCount:map.unmapped.length};
+ if(!map.shards.length)return '';
+ return '\nSHARD_REWORK: edit the listed shard records only; original full diagnostics are in controller result pages.\n'+
+  map.shards.map(s=>s.path+' : '+s.recordKeys.join(', ')).join('\n');
+}
 function materialPhase5Candidates({root,campaignPath,form}){
   const prior=canonicalFor(root,campaignPath,4);
   const phase4=phaseOutput(prior,'step-3','candidateRecords')??[];
@@ -1134,11 +1196,14 @@ if([6,8].includes(sequence)&&deficiencies.length===0){
 }
 
 if(deficiencies.length){
+  persistReviewerReworkShardsV1();
   packet.status='REWORK_REQUIRED';
   packet.controllerValidation={status:'FAIL',validatedAt:now,deficiencies};
   directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
   writeJson(packetFile,packet);writeJson(directoryFile,directory);
-  const feedback=feedbackText(sequence,deficiencies).replace('resubmit the same phase packet','repair the substantive fields and invoke controller validation again; the controller will rebuild the packet');
+  const shardGuidance=annotateShardReworkV1(packet,deficiencies);
+  writeJson(packetFile,packet);
+  const feedback=feedbackText(sequence,deficiencies).replace('resubmit the same phase packet','repair the substantive fields and invoke controller validation again; the controller will rebuild the packet')+shardGuidance;
   process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',campaignId:directory.campaignId,campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-'+sequence,reviewer:assignment.reviewer,feedbackText:feedback,feedbackB64:Buffer.from(feedback).toString('base64'),packetPath:assignment.packetPath,directoryPath:directoryRel})+'\n');
   process.exit(0);
 }
@@ -1202,14 +1267,17 @@ if(sequence===5){
   }));
   if(deficiencies.length){
     // Evidence and diagnostic matrix may persist; receipt and graph cannot.
+    persistReviewerReworkShardsV1();
     packet.status='REWORK_REQUIRED';
     packet.controllerValidation={status:'FAIL',machineExecutionGate:'BLOCKED',validatedAt:now,deficiencies};
     directory.currentAssignment.status='REWORK_REQUIRED';directory.campaignStatus='ACTIVE';directory.updatedAt=now;
     writeJson(packetFile,packet);writeJson(directoryFile,directory);
+    const shardGuidance=annotateShardReworkV1(packet,deficiencies);
+    writeJson(packetFile,packet);
     const feedback=['Phase 5 execution gate BLOCKED: no receipt, PASS or handoff was issued.',
       'Repair the exact runner, harness or machine-evidence defect, then invoke the same phase controller again.',
       ...deficiencies.map(x=>'- '+x),
-      'Machine failure is not a vulnerability finding.'].join('\n');
+      'Machine failure is not a vulnerability finding.'].join('\n')+shardGuidance;
     process.stdout.write(JSON.stringify({authorityLinkRoot,status:'NEEDS_REWORK',campaignId:directory.campaignId,
       campaignName:directory.campaignName,phaseSequence:sequence,phaseId:'phase-5',
       reviewer:assignment.reviewer,feedbackText:feedback,
@@ -1360,7 +1428,10 @@ let fresh=false;let nextAssignment=null;let nextDerivedInputs=[];
 let discoveryStarted=false,discoveryWake=null,discoveryWakes=[];
 let handoff={required:false,boundary:null,incomingReviewer:null,assignedWork:null,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};
 if(sequence===1){nextSequence=2;fresh=true;handoff={required:true,boundary:'P1_TO_P2',incomingReviewer:'reviewer-2',assignedWork:'Combined Lite Phases 2-5',nextPhaseSequence:2,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
-if(sequence===5){nextSequence=6;fresh=true;handoff={required:true,boundary:'P5_TO_P6',incomingReviewer:'reviewer-3L',assignedWork:'Merged Lite Phases 6-7',nextPhaseSequence:6,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
+if(isV13AuthorityV1(authorityRoot)&&sequence===4){
+  nextSequence=5;fresh=true;handoff={required:true,boundary:'P4_TO_P5',incomingReviewer:'reviewer-3',assignedWork:'Phases 5-7 (Phase 7 automatic)',nextPhaseSequence:5,sameReviewer:false,status:'SUCCESSOR_PENDING'};
+}
+if(sequence===5&&!isV13AuthorityV1(authorityRoot)){nextSequence=6;fresh=true;handoff={required:true,boundary:'P5_TO_P6',incomingReviewer:'reviewer-3L',assignedWork:'Merged Lite Phases 6-7',nextPhaseSequence:6,sameReviewer:false,status:'SUCCESSOR_PENDING'};}
 if(sequence===6){nextSequence=8;}
 if(sequence===8){nextSequence=hasRemediation(campaignRoot)?9:10;handoff={required:false,boundary:null,incomingReviewer:'reviewer-4',assignedWork:'Phase '+nextSequence,nextPhaseSequence:nextSequence,sameReviewer:true,status:'NOT_APPLICABLE'};}
 if(sequence===9){nextSequence=10;}
@@ -1406,7 +1477,7 @@ if(sequence===6){
   const markerRevision=masterAmendmentRefreshSha?phaseRevision:1;
   const markerRel=receiptLib.phaseReceiptPath(campaignPath,7,markerRevision);
   const markerEvidence=[receiptRef(root,campaignPath,form7Rel,'AUTOMATIC_PHASE7_WORK_FORM'),receiptRef(root,campaignPath,canonical7Rel,'AUTOMATIC_PHASE7_CANONICAL_DATA'),...derived7.map(x=>receiptRef(root,campaignPath,x,'DERIVED_DOWNSTREAM_DATA'))];
-  const markerHandoff=gatedMasterReview?{required:true,boundary:'MASTER_REVIEW_SEGMENT_06_07',incomingReviewer:'master-reviewer',assignedWork:'Review reviewer-3L segment Phases 6-7',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'}:{required:true,boundary:'P67_TO_P8',incomingReviewer:'reviewer-4',assignedWork:'Combined Lite Phases 8-10',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'};
+  const markerHandoff=gatedMasterReview?{required:true,boundary:'MASTER_REVIEW_SEGMENT_06_07',incomingReviewer:'master-reviewer',assignedWork:'Review reviewer-3 segment Phases 5-7 (legacy reviewer-3L uses Phases 6-7)',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'}:{required:true,boundary:'P67_TO_P8',incomingReviewer:'reviewer-4',assignedWork:'Combined Lite Phases 8-10',nextPhaseSequence:8,sameReviewer:false,status:'SUCCESSOR_PENDING'};
   const marker=receiptLib.createLitePhaseReceiptV1({campaignId:directory.campaignId,campaignGenerationId:directory.campaignGenerationId,campaignName:directory.campaignName,workspacePath:campaignPath,campaignDirectoryEntryPath:directoryRel,sequence:7,executorType:'GITHUB_ACTIONS',executorLineage:'phase7-automation',revision:markerRevision,authority:predecessor.authority,sourceSha256:directory.sourceSha256,source:predecessor.source,status:'SEALED',inputs:[{role:'PREDECESSOR_RECEIPT',path:receiptRel}],evidence:markerEvidence,outputs:markerEvidence,globalControls:receipt.globalControls,validation:{status:'PASS',validatedAt:now,failures:[]},handoff:markerHandoff,now});
   marker.sealedAt=now;if(masterAmendmentRefreshSha)marker.masterAmendment=masterAmendmentReceipt(markerRevision-1);writeJson(repoFile(root,markerRel),marker);sealedReceiptRel=markerRel;fresh=true;nextSequence=8;nextDerivedInputs=resolveInputsForTarget({root,campaignPath,target:8,immediate:[...derivedRels,...derived7,...boundaryArtifactRels]});
 }
@@ -1417,7 +1488,7 @@ if(sequence===8&&nextSequence===10){
   skipped.sealedAt=now;if(masterAmendmentRefreshSha)skipped.masterAmendment=masterAmendmentReceipt(skippedRevision-1);writeJson(repoFile(root,skippedRel),skipped);sealedReceiptRel=skippedRel;
 }
 directory.lastSealedReceiptPath=sealedReceiptRel;
-const masterBoundary=sequence===1?1:sequence===5?5:sequence===6?7:sequence===10?10:null;
+const masterBoundary=isV13AuthorityV1(authorityRoot)?(sequence===1?1:sequence===4?4:sequence===6?7:sequence===10?10:null):(sequence===1?1:sequence===5?5:sequence===6?7:sequence===10?10:null);
 if(gatedMasterReview&&masterBoundary!==null){
   const staged=stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase:masterBoundary,lastSealedReceiptPath:sealedReceiptRel,nextSequence,nextDerivedInputPaths:nextDerivedInputs,successorPrefillContext,now});
   writeJson(directoryFile,directory);
@@ -1426,7 +1497,7 @@ if(gatedMasterReview&&masterBoundary!==null){
     rel.split('/').map(encodeURIComponent).join('/');
   const extraLines=[];
   if(activeDetectionPolicyV1(predecessor)){
-    if(staged.segment.segmentId==='reviewer-2-phases-02-05')
+    if(['reviewer-2-phases-02-05','reviewer-2-phases-02-04'].includes(staged.segment.segmentId))
       extraLines.push('As challenger, review every item in '+blob(path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json'))+': attacker findings and contradictions, unresolved checks, not-applicable claims and coverage gaps. Amend reviewer work or order targeted tests through the existing directive; accept a gap only with a stated reason.');
     if(staged.segment.segmentId==='reviewer-4-phases-08-10')
       extraLines.push('Check the coverage label and every gap in '+blob(path.posix.join(campaignPath,'work/phase-10/COVERAGE_MATRIX_v1.json'))+' before accepting.');
@@ -1440,8 +1511,8 @@ if(sequence===10){
   directory.currentAssignment=null;directory.updatedAt=now;
 }
 else{
-  const nextReviewer=assignmentReviewer(nextSequence);
-  const nextStatus=fresh||isFreshBoundary(nextSequence)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
+  const nextReviewer=assignmentReviewer(nextSequence,authorityRoot);
+  const nextStatus=fresh||isFreshBoundary(nextSequence,authorityRoot)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
   nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
   if(sequence===3&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
     const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot:process.cwd(),

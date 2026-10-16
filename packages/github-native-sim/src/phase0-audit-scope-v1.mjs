@@ -12,7 +12,7 @@ function normalizePrefix(value){
   if(typeof value!=='string'||!value.trim())throw new Error(`${AUDIT_SCOPE_FILE}: inScopePaths entries must be non-empty strings`);
   const normalized=value.trim().replaceAll('\\','/').replace(/^\.\//,'');
   if(normalized.startsWith('/')||normalized.split('/').some(part=>part==='..'))throw new Error(`${AUDIT_SCOPE_FILE}: unsafe in-scope path ${value}`);
-  return normalized.endsWith('.sol')||normalized.endsWith('/')?normalized:`${normalized}/`;
+  return /\.(?:sol|vy|js|mjs|cjs|ts|mts|cts|sh|json|ya?ml)$/i.test(normalized)||normalized.endsWith('/')?normalized:`${normalized}/`;
 }
 
 export function parseAuditScope(text){
@@ -20,14 +20,15 @@ export function parseAuditScope(text){
   try{parsed=JSON.parse(text);}catch(error){throw new Error(`${AUDIT_SCOPE_FILE}: invalid JSON (${error.message})`);}
   if(parsed?.schemaVersion!==AUDIT_SCOPE_SCHEMA)throw new Error(`${AUDIT_SCOPE_FILE}: schemaVersion must be ${AUDIT_SCOPE_SCHEMA}`);
   if(!Array.isArray(parsed.inScopePaths)||!parsed.inScopePaths.length)throw new Error(`${AUDIT_SCOPE_FILE}: inScopePaths must be a non-empty array`);
-  return{source:AUDIT_SCOPE_FILE,inScopePaths:[...new Set(parsed.inScopePaths.map(normalizePrefix))].sort()};
+  return{source:AUDIT_SCOPE_FILE,inScopePaths:[...new Set(parsed.inScopePaths.map(normalizePrefix))].sort(),
+    excludedPaths:Array.isArray(parsed.excludedPaths)?[...new Set(parsed.excludedPaths.map(normalizePrefix))].sort():[]};
 }
 
 export async function loadAuditScope(projectRoot){
   let text;
   try{text=await fs.readFile(path.join(projectRoot,AUDIT_SCOPE_FILE),'utf8');}
   catch(error){
-    if(error?.code==='ENOENT')return{source:'default',inScopePaths:[...DEFAULT_IN_SCOPE_PATHS]};
+    if(error?.code==='ENOENT')return{source:'default',inScopePaths:[...DEFAULT_IN_SCOPE_PATHS],excludedPaths:[]};
     throw error;
   }
   return parseAuditScope(text);
@@ -35,5 +36,12 @@ export async function loadAuditScope(projectRoot){
 
 export function sourceIsInScope(sourceName,scope){
   const name=String(sourceName).replaceAll('\\','/');
-  return (scope?.inScopePaths??DEFAULT_IN_SCOPE_PATHS).some(prefix=>prefix.endsWith('/')?name.startsWith(prefix):name===prefix);
+  const matches=prefixes=>prefixes.some(prefix=>prefix.endsWith('/')?name.startsWith(prefix):name===prefix);
+  return !matches(scope?.excludedPaths??[])&&matches(scope?.inScopePaths??DEFAULT_IN_SCOPE_PATHS);
+}
+
+export function sourceExplicitlyExcludedV1(sourceName,scope){
+  const name=String(sourceName).replaceAll('\\','/');
+  return (scope?.excludedPaths??[]).some(prefix=>
+    prefix.endsWith('/')?name.startsWith(prefix):name===prefix);
 }

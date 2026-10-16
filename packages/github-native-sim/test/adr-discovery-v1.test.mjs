@@ -169,3 +169,60 @@ test('reviewer and attacker windows run in parallel and the last one to finish c
   assert.equal(advanceDiscoveryV1({...o,unitId:'F-001'}).status,'DISCOVERY_COMPLETE');
  }finally{fs.rmSync(o.root,{force:true,recursive:true});}
 });
+
+test('v13 correctness verdicts keep class coverage and row-local candidates without a graded checklist',()=>{
+ const state={...directory,generatedAt:'2026-10-14T00:00:00Z',payload:{gaps:[],reviewPolicy:'correctness-verdict-v13'}};
+ const review={unitId:'F-001',submission:{rows:[
+  {contextId:'CTX-A',verdict:'DEFECT',reason:'State update violates spec',anchors:['contracts/A.sol:L2'],
+   candidates:[{tempKey:'V13-CAND',title:'Broken state update',description:'The update exceeds the declared limit',anchors:['contracts/A.sol:L2']}]},
+  {contextId:'CTX-B',verdict:'CORRECT',reason:'Consistent role checks',anchors:['contracts/B.sol:L2']},
+  {contextId:'CTX-C',verdict:'UNRESOLVED',reason:'Decisive limit test required',anchors:['contracts/C.sol:L2']}
+ ]}};
+ const taxonomy={classes:[{classId:'STATE_MACHINE',triggers:['STATE_WRITE'],testRequired:true}]};
+ const result=buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmissions:[review],taxonomy});
+ assert.equal(result.payload.perContext['CTX-A'].STATE_MACHINE,'CONCERN');
+ assert.equal(result.payload.perContext['CTX-B'].STATE_MACHINE,'SUPPORTED');
+ assert.equal(result.payload.perContext['CTX-C'].STATE_MACHINE,'UNRESOLVED');
+ assert.ok(result.payload.reconciliationItems.some(x=>x.origin==='REVIEWER_CANDIDATE'&&
+   x.contextIds.includes('CTX-A')));
+ assert.ok(result.payload.reconciliationItems.some(x=>x.origin==='REVIEWER_UNRESOLVED'&&
+   x.contextIds.includes('CTX-C')));
+});
+test('v13 discovery state routes independent attacker to reviewer-3, while v12 keeps reviewer-3L',()=>{
+ const o=setup();
+ try{
+  const a=startDiscoveryV1({...o,authorityRoot:'Audit Skill - Current Authority/Audit_Litemode_v13',qualificationVerifier:()=>({status:'QUALIFIED'})});
+  assert.equal(a.state.payload.reviewPolicy,'correctness-verdict-v13');
+  assert.equal(a.state.payload.units['X-001'].chatKey,'reviewer-3');
+  assert.ok(a.wakes.some(w=>w.chatKey==='reviewer-3'));
+ }finally{fs.rmSync(o.root,{recursive:true,force:true});}
+});
+
+test('200-unit discovery window uses bounded index pages and one wake below 8 KiB',()=>{
+ const o=setup();
+ try{
+  const many=structuredClone(plan);
+  many.payload.reviewUnits=Array.from({length:200},(_,i)=>({
+   unitId:'R-'+String(i+1).padStart(3,'0'),role:'RESIDUAL_REVIEW',
+   primaryContextIds:['CTX-A'],readContextIds:['CTX-A']
+  }));
+  many.payload.attackUnits=[];
+  writeJson(repoFile(o.root,o.campaignPath+'/evidence/review-inventory/FLOW_PLAN_v1.json'),many);
+  const result=startDiscoveryV1(o);
+  assert.equal(result.wakes.length,1);
+  assert.ok(Buffer.from(result.wakes[0].messageB64,'base64').length<8192);
+  const indexRel=o.campaignPath+'/work/phase-04/discovery/index/flow-review/INDEX_v1.json';
+  const index=readJson(repoFile(o.root,indexRel));
+  assert.equal(index.unitCount,200);
+  assert.equal(index.pages.length,8);
+  let count=0;
+  for(const page of index.pages){
+    const file=repoFile(o.root,page.path);
+    assert.ok(fs.statSync(file).size<=32*1024);
+    const body=readJson(file);
+    assert.equal(body.units.length,25);
+    count+=body.units.length;
+  }
+  assert.equal(count,200);
+ }finally{fs.rmSync(o.root,{force:true,recursive:true});}
+});

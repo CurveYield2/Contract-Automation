@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {sourceTierV1,applyAuditScopeToInventoryV1,reviewInventoryRelV1} from '../src/adr-review-inventory-v1.mjs';
+import {sourceTierV1,applyAuditScopeToInventoryV1,reviewInventoryRelV1,buildReviewInventoryV1,writeReviewInventoryOutputsV1} from '../src/adr-review-inventory-v1.mjs';
 import {parseAuditScope} from '../src/phase0-audit-scope-v1.mjs';
 
 const scope=parseAuditScope(JSON.stringify({schemaVersion:'curveyield-audit-scope-v1',inScopePaths:['upgrade/src/']}));
@@ -43,4 +43,74 @@ test('readers prefer a scope-corrected copy and leave the sealed file untouched'
     fs.writeFileSync(path.join(root,'campaigns/c/evidence/review-inventory/scope-corrected/FLOW_PLAN_v1.json'),'{}');
     assert.equal(reviewInventoryRelV1(root,'campaigns/c','FLOW_PLAN_v1.json'),'campaigns/c/evidence/review-inventory/scope-corrected/FLOW_PLAN_v1.json');
   }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('v13 reviews deploy scripts unless explicitly excluded, regardless of src-only scope',()=>{
+ const policyScope=parseAuditScope(JSON.stringify({schemaVersion:'curveyield-audit-scope-v1',
+  inScopePaths:['upgrade/src/'],excludedPaths:['upgrade/script/skip.s.sol']}));
+ assert.equal(sourceTierV1('upgrade/script/deploy.s.sol',policyScope),'SCRIPT');
+ assert.equal(sourceTierV1('upgrade/script/deploy.s.sol',policyScope,{includeScripts:true}),'IN_SCOPE');
+ assert.equal(sourceTierV1('upgrade/script/skip.s.sol',policyScope,{includeScripts:true}),'SCRIPT');
+ assert.equal(sourceTierV1('upgrade/src/Vault.sol',policyScope,{includeScripts:true}),'IN_SCOPE');
+ assert.equal(sourceTierV1('vendor/script/thirdparty.s.sol',policyScope,{includeScripts:true}),'IN_SCOPE');
+});
+test('v13 adds text deploy/config scripts as residual review units while v12 does not',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'script-inventory-'));
+ try{
+  fs.mkdirSync(path.join(root,'upgrade/script'),{recursive:true});
+  fs.writeFileSync(path.join(root,'upgrade/script/deploy.ts'),'const owner = "wrong";\n');
+  fs.writeFileSync(path.join(root,'upgrade/script/skip.ts'),'const ignored = true;\n');
+  fs.writeFileSync(path.join(root,'audit-scope.json'),JSON.stringify({schemaVersion:'curveyield-audit-scope-v1',
+   inScopePaths:['upgrade/src/'],excludedPaths:['upgrade/script/skip.ts']}));
+  const campaign={campaignId:'fixture',campaignGenerationId:'fixture-r1',sourceSha256:'a'.repeat(64)};
+  const legacy=await buildReviewInventoryV1({projectRoot:root,build:{sourceAsts:{}},campaign});
+  assert.ok(!legacy.payload.contexts.some(c=>c.path==='upgrade/script/deploy.ts'));
+  const v13=await buildReviewInventoryV1({projectRoot:root,build:{sourceAsts:{}},
+   campaign:{...campaign,detectionReviewPolicy:'correctness-verdict-v13'}});
+  assert.equal(v13.payload.contexts.find(c=>c.path==='upgrade/script/deploy.ts').kind,'SCRIPT_FILE');
+  assert.ok(!v13.payload.contexts.some(c=>c.path==='upgrade/script/skip.ts'));
+  assert.equal(v13.payload.sourceUnits.find(s=>s.path==='upgrade/script/deploy.ts').scopeTier,'IN_SCOPE');
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('Phase-0 intelligence writer activates script units only under verified v13 review policy',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-script-policy-'));
+ try{
+  fs.mkdirSync(path.join(root,'upgrade/script'),{recursive:true});
+  fs.writeFileSync(path.join(root,'upgrade/script/configure.ts'),'const requiredAdmin = "0x0";\n');
+  fs.writeFileSync(path.join(root,'audit-scope.json'),JSON.stringify({
+   schemaVersion:'curveyield-audit-scope-v1',inScopePaths:['upgrade/src/']}));
+  const request={campaignId:'demo-r1',campaignGenerationId:'demo-r1-g1',
+   source:{archiveSha256:'a'.repeat(64)}};
+  const out=path.join(root,'out-policy');
+  await writeReviewInventoryOutputsV1({projectRoot:root,outputDir:out,build:{sourceAsts:{}},
+   request,policy:'audit-detection-rebuild-v1',reviewPolicy:'correctness-verdict-v13'});
+  const written=JSON.parse(fs.readFileSync(path.join(out,'REVIEW_INVENTORY_v1.json'),'utf8'));
+  assert.ok(written.payload.contexts.some(c=>c.path==='upgrade/script/configure.ts'&&c.kind==='SCRIPT_FILE'));
+  const legacy=path.join(root,'out-legacy');
+  await writeReviewInventoryOutputsV1({projectRoot:root,outputDir:legacy,build:{sourceAsts:{}},
+   request,policy:'audit-detection-rebuild-v1'});
+  const frozen=JSON.parse(fs.readFileSync(path.join(legacy,'REVIEW_INVENTORY_v1.json'),'utf8'));
+  assert.ok(!frozen.payload.contexts.some(c=>c.path==='upgrade/script/configure.ts'));
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('v13 covers uncompiled Solidity deploy script as one explicit source-backed review unit',async()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'v13-script-fallback-'));
+ try{
+  fs.mkdirSync(path.join(root,'upgrade/script'),{recursive:true});
+  fs.writeFileSync(path.join(root,'upgrade/script/configure.s.sol'),
+   'pragma solidity ^0.8.28;\ncontract Configure { function run() external {} }\n');
+  fs.writeFileSync(path.join(root,'audit-scope.json'),JSON.stringify({
+    schemaVersion:'curveyield-audit-scope-v1',inScopePaths:['upgrade/src/']}));
+  const campaign={campaignId:'demo-r1',sourceSha256:'a'.repeat(64),
+    detectionReviewPolicy:'correctness-verdict-v13'};
+  const v13=await buildReviewInventoryV1({projectRoot:root,build:{sourceAsts:{}},campaign});
+  assert.equal(v13.payload.complete,true,
+    'uncompiled deployment script remains a visible file-level review, not a missing compiled contract');
+  const ctx=v13.payload.contexts.find(c=>c.path==='upgrade/script/configure.s.sol');
+  assert.equal(ctx.kind,'SCRIPT_FILE');
+  assert.deepEqual(v13.payload.triggers[ctx.contextId],['SCRIPT_EXECUTION']);
+  assert.ok(v13.payload.limitations.some(x=>x.code==='SCRIPT_TEXT_REVIEW_NO_AST'));
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
 });

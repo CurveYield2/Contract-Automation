@@ -11,19 +11,23 @@ export function selectForkEngineName(_evmVersion) {
   return 'anvil';
 }
 
-export function buildAnvilArgs({ chainId, forkUrl, block = 'latest', port, hardfork }) {
+export function buildAnvilArgs({ chainId, forkUrl, block = 'latest', port, hardfork, loadStatePath = null }) {
   if (!Number.isSafeInteger(chainId) || chainId < 1) throw new Error('Anvil chainId must be a positive safe integer');
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error('Anvil port must be 1-65535');
-  if (typeof forkUrl !== 'string' || forkUrl.length === 0) throw new Error('Anvil fork URL is required');
+  if (!loadStatePath&&(typeof forkUrl !== 'string' || forkUrl.length === 0)) throw new Error('Anvil fork URL is required');
+  if(loadStatePath&&(!path.isAbsolute(loadStatePath)||!loadStatePath.endsWith('.json')))throw new Error('snapshot loadStatePath must be absolute JSON');
   if (typeof hardfork !== 'string' || hardfork.length === 0) throw new Error('Anvil hardfork is required');
   const args = [
     '--host', '127.0.0.1',
     '--port', String(port),
     '--chain-id', String(chainId),
-    '--hardfork', hardfork,
-    '--fork-url', forkUrl
+    '--hardfork', hardfork
   ];
-  if (block !== 'latest') args.push('--fork-block-number', String(block));
+  if(loadStatePath)args.push('--load-state',loadStatePath,'--auto-impersonate');
+  else{
+    args.push('--fork-url',forkUrl);
+    if(block!=='latest')args.push('--fork-block-number',String(block));
+  }
   args.push('--accounts', '20', '--silent');
   return args;
 }
@@ -132,6 +136,7 @@ export async function startAnvilEngine({
   forkUrl,
   block = 'latest',
   evmVersion = 'cancun',
+  loadStatePath = null,
   quiet = true,
   spawnImpl = spawn,
   fetchImpl = globalThis.fetch,
@@ -142,11 +147,12 @@ export async function startAnvilEngine({
   let child = null;
   let provider = null;
   try {
-    identityProxy = await startRpcIdentityProxy({ upstreamUrl: forkUrl, chainId, fetchImpl });
+    if(!loadStatePath)identityProxy = await startRpcIdentityProxy({ upstreamUrl: forkUrl, chainId, fetchImpl });
     const port = await reserveLoopbackPort();
     const anvilArgs = buildAnvilArgs({
       chainId,
-      forkUrl: identityProxy.url,
+      forkUrl: identityProxy?.url ?? forkUrl,
+      loadStatePath,
       block,
       port,
       hardfork: String(evmVersion).toLowerCase()

@@ -7,6 +7,7 @@ import {deriveBaselineObligationsV1} from './adr-baseline-obligations-v1.mjs';
 import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1,TRIVIAL_KINDS_V1} from './adr-discovery-validators-v1.mjs';
 import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
+import {verifyV13ReleaseV1} from './adr-v13-release-gate-v1.mjs';
 
 const pathJoin=(campaign,relative)=>path.posix.join(campaign,'work/phase-04/discovery',relative);
 const asset=(root,campaign,name)=>reviewInventoryRelV1(root,campaign,name);
@@ -71,8 +72,25 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
  const flows=arr(plan?.payload?.flows).filter(f=>arr(unit.flowIds).includes(f.flowId));
  const questions=arr(plan?.payload?.integrationQuestions).filter(q=>arr(unit.integrationQuestionIds).includes(q.obligationId));
+ const verdictV13=/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot);
+ const siblingChecks=verdictV13&&role!=='ATTACK'?arr(facts?.payload?.siblingGroups)
+  .filter(g=>arr(g.members).some(m=>primary.some(id=>contextFor(inventory,id)?.qualifiedContainer===m.contract)))
+  .map(g=>({pattern:g.pattern??'shared modifier or pattern',
+    members:arr(g.members).map(m=>({contract:m.contract,name:m.name??m.signature??m.function??''}))})):[];
+ const documentationItems=verdictV13&&role!=='ATTACK'?primary.flatMap(id=>{
+  const c=contextFor(inventory,id);
+  if(!c)return [];
+  const rules=[];
+  if(typeof c.natSpec==='string'&&c.natSpec.trim())
+    rules.push({ruleId:'NATSPEC:'+id,sourceAnchor:contextAnchor(c),
+      rule:c.natSpec.slice(0,1200),type:'NATSPEC'});
+  if(typeof c.declaredValue==='string'&&c.declaredValue!=='UNINITIALIZED'&&c.declaredValue.trim())
+    rules.push({ruleId:'DECLARED_VALUE:'+id,sourceAnchor:contextAnchor(c),
+      rule:c.declaredValue.slice(0,300),type:'LITERAL_OR_INITIALIZED_STORAGE'});
+  return rules.map(x=>({contextId:id,...x}));
+ }):[];
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
-  unitId,role,chatKey:role==='ATTACK'?'reviewer-3L':'reviewer-2',instructionsPath,
+  unitId,role,chatKey:role==='ATTACK'?(verdictV13?'reviewer-3':'reviewer-3L'):'reviewer-2',instructionsPath,
   submissionPath:submissionRel(campaignPath,unitId),boundaryRequestPath:'process/agent-upload/lite-phase-boundary/',
   sourceRoot:campaignPath+'/source',sourceInventoryPath:asset(root,campaignPath,'REVIEW_INVENTORY_v1.json'),
   flowPlanPath:asset(root,campaignPath,'FLOW_PLAN_v1.json'),
@@ -81,12 +99,26 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
   primaryContextIds:primary,readContextIds:role==='ATTACK'?contextIds:arr(unit.readContextIds),
   requiredClasses,flows,flowIds:arr(unit.flowIds),integrationQuestions:questions,
   integrationQuestionIds:arr(unit.integrationQuestionIds),
-  ...(role==='ATTACK'?{}:{trivialContextIds,contractChecks,submissionGuide:[
+  ...(verdictV13&&role!=='ATTACK'?{
+    reviewPolicy:'correctness-verdict-v13',
+    siblingChecks,documentationItems,
+    specificationReview:{sourcePaths:[...new Set(primary.map(id=>contextFor(inventory,id)?.path).filter(Boolean))],
+      inspect:['NatSpec','inline comments','README and docs','named constants','paired parameters'],
+      requirement:'For each documentationItems ruleId, report a MATCH/MISMATCH/UNRESOLVED comparison. Also explicitly inspect comments and README/docs from sourceRoot. If none are applicable, state NO_DOCUMENTED_RULES; the absence of entries alone is not proof.'},
+    submissionGuide:[
+      'For EVERY primary context, give verdict CORRECT or DEFECT, intent, reason and source anchors. UNRESOLVED requires a named decisive test and an exact expected observation.',
+      'Class checks are prompts only: no per-class response is graded. The correctness verdict cannot be inferred from checklist completion.',
+      'Compare implementation with NatSpec, comments, README/docs and named constants. Report every mismatch as a candidate.',
+      'Compare sibling functions and paired parameters, documenting asymmetry. Storage initializers and locks never qualify for trivialReviews.',
+      'Finish all assigned units before a single boundary request; do not pause for controller after each unit.'
+    ]
+  }:{}),
+  ...(role==='ATTACK'?{}:{trivialContextIds,contractChecks,...(verdictV13?{}:{submissionGuide:[
    'Each primaryContexts entry already lists its modifiers, state reads and writes, external and internal calls and sender checks: use them instead of re-deriving facts.',
    'trivialReviews (optional): [{contract,assessment,evidence,anchors}] - one confirmation per contract covers all of its trivialContextIds in this unit (values, bounds, who reads them); those contexts then need no row.',
    'groupChecks (optional): [{contextIds,classId,assessment,applicability,evidence,anchors}] - one check for two or more contexts that share a modifier; omit that class from their rows.',
    'contractChecks (required when listed): [{contract,classId,assessment,applicability,evidence,anchors}] - answer each listed contract-level class once, covering every function of that contract.'
-  ]}),
+  ]})}),
   ...(role==='ATTACK'?{contracts:unit.contracts}:{}),
   ...(role==='ATTACK'?{systemFacts:{
    guardTable:arr(facts?.payload?.guardTable).filter(x=>unit.contracts?.includes(x.contract)),
@@ -127,6 +159,8 @@ function openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,
  for(const id of ids){
   buildUnitPacketV1({root,campaignPath,directory,authorityRoot,automationRoot,unitId:id,state,now});
   state.payload.units[id].status='ACTIVE';
+  if(/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot))
+    state.payload.units[id].openedAt??=now;
  }
  return ids;
 }
@@ -136,11 +170,32 @@ export function openIdleChatWindowsV1({root,campaignPath,directory,authorityRoot
  for(const chatKey of chatKeysOf(state)){
   if(chatKey===except||activeIdsOf(state,chatKey).length||!pendingIdsOf(state,chatKey).length)continue;
   const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey});
-  wakes.push(wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef}));
+  wakes.push(wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef}));
  }
  return wakes;
 }
-export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText=null}){
+function writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}){
+  if(ids.length<40)return null;
+  const dir=pathJoin(campaignPath,'index/'+(role==='ATTACK'?'attacker':'flow-review'));
+  const pages=[];
+  for(let i=0;i<ids.length;i+=25){
+    const chunk=ids.slice(i,i+25);
+    const file='PART_'+String(pages.length+1).padStart(4,'0')+'_v1.json';
+    const rel=path.posix.join(dir,file);
+    const payload={schemaVersion:'curveyield-discovery-unit-index-page-v1',
+      unitIds:chunk,units:chunk.map(unitId=>({unitId,
+        packetPath:packetRel(campaignPath,unitId),submissionPath:submissionRel(campaignPath,unitId)}))};
+    if(Buffer.byteLength(JSON.stringify(payload))>32*1024)throw new Error('discovery window page exceeds 32 KiB');
+    writeJson(repoFile(root,rel),payload);
+    pages.push({path:rel,unitCount:chunk.length});
+  }
+  const indexRel=path.posix.join(dir,'INDEX_v1.json');
+  const index={schemaVersion:'curveyield-discovery-unit-index-v1',role,unitCount:ids.length,pages};
+  if(Buffer.byteLength(JSON.stringify(index))>32*1024)throw new Error('discovery window index exceeds 32 KiB');
+  writeJson(repoFile(root,indexRel),index);
+  return indexRel;
+}
+export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText=null,indexPath=null}){
  const base='https://github.com/CurveYield2/Audit-Controller/blob/'+encodeURIComponent(auditControllerRef??'main')+'/';
  const link=(p)=>base+p.split('/').map(encodeURIComponent).join('/');
  const lines=[role==='ATTACK'?'You are the attacker reviewer. Campaign '+directory.campaignId:'You are reviewer-2. Campaign '+directory.campaignId,
@@ -151,7 +206,8 @@ export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campa
  const ranges=[];for(const id of ids){const [p,n]=[id[0],Number(id.slice(2))],last=ranges.at(-1);
   if(last&&last.p===p&&last.to===n-1){last.to=n;last.toId=id;}else ranges.push({p,from:n,to:n,fromId:id,toId:id});}
  lines.push('Units to complete now ('+ids.length+'): '+ranges.map(r=>r.fromId===r.toId?r.fromId:r.fromId+' to '+r.toId).join(', ')+'.');
- lines.push('Discovery folder: '+link(pathJoin(campaignPath,''))+' . For each unit <id>, read <id>/ASSIGNMENT_PACKET_v1.json and write <id>/SUBMISSION_v1.json.');
+ if(indexPath)lines.push('Complete assignment index: '+link(indexPath)+'. Read each page and save each unit submission without stopping or waiting for a controller message.');
+ else lines.push('Discovery folder: '+link(pathJoin(campaignPath,''))+' . For each unit <id>, read <id>/ASSIGNMENT_PACKET_v1.json and write <id>/SUBMISSION_v1.json.');
  if(role!=='ATTACK')lines.push('Each packet has a submissionGuide: use trivialReviews (one per contract for constants and getters), groupChecks (functions sharing a modifier) and the listed contractChecks to avoid repeating the same check.');
  lines.push(feedbackText?'Fix every unit listed in the feedback, then push ONE boundary request.':'This is your entire discovery workload for this phase. Complete every unit in one continuous pass without stopping or asking to continue, then push ONE boundary request.');
  lines.push('The controller validates every unit with a new submission in a single run and wakes you only if a unit needs rework. Do not push a request per unit.');
@@ -162,23 +218,26 @@ export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campa
  if(role==='ATTACK')lines.push("You may read any source file. Do not open work/phase-03/, work/phase-04/ work forms, or any unit folder under work/phase-04/discovery/ other than the ones listed above.");
  return lines.join('\n\n');
 }
-function wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef='main',feedbackText=null}){
+function wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef='main',feedbackText=null}){
  const role=state.payload.units[ids[0]].role==='ATTACK'?'ATTACK':'FLOW_REVIEW';
  const round=state.payload.wakeRound=(state.payload.wakeRound??0)+1;
  const attempt=Math.max(...ids.map(id=>state.payload.units[id]?.attempts??0))+1;
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
- const message=discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText});
- return {chatKey:role==='ATTACK'?'reviewer-3L':'reviewer-2',
+ const indexPath=writeDiscoveryWindowIndexV1({root,campaignPath,ids,role});
+ const message=discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText,indexPath});
+ return {chatKey:state.payload.units[ids[0]].chatKey,
   wakeId:directory.campaignId+'-discovery-'+ids[0]+'-r'+round,
   phaseId:'phase-4',milestoneId:'DISCOVERY_'+ids[0],messageB64:Buffer.from(message).toString('base64')};
 }
-export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,now,auditControllerRef='main'}){
+export function startDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,now,auditControllerRef='main',qualificationVerifier=verifyV13ReleaseV1}){
+ if(/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot))qualificationVerifier({repoRoot:automationRoot});
  const plan=known(root,asset(root,campaignPath,'FLOW_PLAN_v1.json'));
  const units=unitList(plan),order=units.map(x=>x.unitId);
  const missing=!plan||!units.length;
  const state=head(directory,now,'curveyield-discovery-state-v1',{
   status:missing?'COMPLETE':'RUNNING',order,activeUnitId:missing?null:order[0],
-  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?'reviewer-3L':'reviewer-2',
+  ...( /Audit_Litemode_v13(?:\/|$)/.test(authorityRoot)?{reviewPolicy:'correctness-verdict-v13'}:{}),
+  units:Object.fromEntries(units.map(x=>[x.unitId,{role:x.role,chatKey:x.role==='ATTACK'?( /Audit_Litemode_v13(?:\/|$)/.test(authorityRoot)?'reviewer-3':'reviewer-3L'):'reviewer-2',
    status:'PENDING',attempts:0,lastValidatedSubmissionSha:null,lastErrors:[],acceptedSubmissionSha:null}])),
   gaps:missing?[{code:'INVENTORY_INCOMPLETE',detail:'No flow plan'}]:structuredClone(arr(plan.payload.gaps))
  });
@@ -197,6 +256,18 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
   candidates.push(...arr(submission?.candidates));
   for(const row of arr(submission?.rows)){
    const classMap=checks.get(row.contextId)??{};
+   if(state?.payload?.reviewPolicy==='correctness-verdict-v13'){
+     // The v13 security review is function-wide, not individual checklist rows.
+     // Every triggered class is tracked under the explicit source-anchored verdict.
+     const assessment={CORRECT:'SUPPORTED',DEFECT:'CONCERN',UNRESOLVED:'UNRESOLVED'}[row.verdict];
+     if(!assessment)throw new Error('accepted v13 discovery row has no correctness verdict');
+     for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[row.contextId]??[]))
+       classMap[classId]=assessment;
+     for(const c of arr(row.candidates))
+       candidates.push({...c,contextIds:[...new Set([...(c.contextIds??[]),row.contextId])]});
+     if(row.candidate&&typeof row.candidate==='object')
+       candidates.push({...row.candidate,contextIds:[...new Set([...(row.candidate.contextIds??[]),row.contextId])]});
+   }
    for(const check of arr(row?.checks)){
     classMap[check.classId]=check.assessment;
     if(check.assessment==='NOT_APPLICABLE')na.push({contextId:row.contextId,classId:check.classId,evidence:check.evidence,anchors:check.anchors});
@@ -216,7 +287,9 @@ export function buildDiscoverySummaryV1({state,inventory,plan,acceptedSubmission
    for(const id of arr(unit?.primaryContextIds)){
     const c=contextFor(inventory,id);
     if(c?.qualifiedContainer!==review?.contract||!TRIVIAL_KINDS_V1.has(c.kind))continue;
-    for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[id]??[]))set(id,classId,review);
+    for(const classId of classesForTriggersV1(taxonomy,inventory?.payload?.triggers?.[id]??[]))
+      set(id,classId,state?.payload?.reviewPolicy==='correctness-verdict-v13'
+        ?{...review,assessment:'SUPPORTED'}:review);
     if(!checks.has(id))checks.set(id,{});
    }
   contractLevel.push(...arr(submission?.contractChecks));
@@ -315,7 +388,9 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
   if(result.ok){
    fs.mkdirSync(path.dirname(repoFile(root,pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json'))),{recursive:true});
    fs.writeFileSync(repoFile(root,pathJoin(campaignPath,id+'/ACCEPTED_SUBMISSION_v1.json')),bytes);
-   info.status='ACCEPTED';info.acceptedSubmissionSha=sha;accepted.push(id);
+   info.status='ACCEPTED';info.acceptedSubmissionSha=sha;
+   if(packet.payload?.reviewPolicy==='correctness-verdict-v13')info.acceptedAt=now;
+   accepted.push(id);
    continue;
   }
   info.attempts++;
@@ -350,13 +425,13 @@ export function advanceDiscoveryV1({root,campaignPath,directory,authorityRoot,au
    const feedbackRel=pathJoin(campaignPath,'DISCOVERY_FEEDBACK_v1.md');
    fs.writeFileSync(repoFile(root,feedbackRel),text+'\n');
    const excerpt=text.length>1500?text.slice(0,1500)+'\n… full feedback: '+feedbackRel:text+'\n(Also saved at '+feedbackRel+')';
-   return finish('DISCOVERY_REWORK',text,wakeFor({directory,ids:remaining,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:excerpt}));
+   return finish('DISCOVERY_REWORK',text,wakeFor({root,directory,ids:remaining,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:excerpt}));
   }
   // Some units still unsubmitted and nothing failed: the reviewer is mid-window; no wake.
   return finish('DISCOVERY_PARTIAL',summary,null);
  }
  const ids=openWindowV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now,chatKey});
- if(ids.length)return finish('DISCOVERY_NEXT',summary,wakeFor({directory,ids,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:summary}));
+ if(ids.length)return finish('DISCOVERY_NEXT',summary,wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditControllerRef,feedbackText:summary}));
  // This reviewer's discovery share is done; the other reviewer may still be working.
  if(activeIdsOf(state).length)return finish('DISCOVERY_PARTIAL',summary+'\nAll of your discovery units are complete; the other discovery reviewer is still working.',null);
  return completeDiscoveryV1({root,campaignPath,directory,authorityRoot,automationRoot,state,now});

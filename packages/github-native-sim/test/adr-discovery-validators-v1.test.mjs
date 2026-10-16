@@ -154,3 +154,56 @@ test('feedback text is bounded to 60 errors and includes repair instructions',()
  assert.match(msg,/Repair only these items in SUBMISSION_v1.json/);
  assert.equal(msg.split('\n').length,63);
 });
+
+test('v13 requires correctness verdict and named decisive test for unresolved row',()=>{
+ const packet={...flowPacket,reviewPolicy:'correctness-verdict-v13'};
+ const submission={...flowSubmission(),rows:[{contextId:'CTX-A',intent:'Only authorized owner may change vault roles',
+  reason:'The function reads and changes the owner with a required caller guard at B.sol L2',
+  anchors:[anchor],specInspection:{status:'MATCH',docsAndCommentsChecked:'README and NatSpec inspected',
+    namedConstantsChecked:'Named constants inspected'},documentedRules:[]}]};
+ has(flow(packet,submission),'VERDICT_REQUIRED');
+ submission.rows[0].verdict='UNRESOLVED';
+ has(flow(packet,submission),'UNRESOLVED_TEST_REQUIRED');
+ submission.rows[0].decidingTest={name:'owner writes',expectedObservation:'Nonowner write reverts with Unauthorized'};
+ assert.equal(flow(packet,submission).ok,true,JSON.stringify(flow(packet,submission).errors));
+ submission.rows[0].verdict='CORRECT';
+ assert.equal(flow(packet,submission).ok,true,JSON.stringify(flow(packet,submission).errors));
+});
+test('v13 class checklist is never accepted as a correctness verdict',()=>{
+ const packet={...flowPacket,reviewPolicy:'correctness-verdict-v13'};
+ const sub=flowSubmission();
+ has(flow(packet,sub),'VERDICT_REQUIRED');
+ has(flow(packet,sub),'INTENT_REQUIRED');
+ has(flow(packet,sub),'REASON_REQUIRED');
+});
+test('v13 storage initializer cannot be covered by trivialReviews',()=>{
+ const packet={...flowPacket,reviewPolicy:'correctness-verdict-v13',primaryContexts:[
+   {contextId:'CTX-A',qualifiedContainer:'contracts/A.sol:A',kind:'STATE_INITIALIZER'}
+  ],trivialContextIds:[]};
+ const sub={...flowSubmission(),rows:[],trivialReviews:[
+   {contract:'contracts/A.sol:A',reason:'assumed trivial state initializer'}
+  ]};
+ has(flow(packet,sub),'TRIVIAL_CONTRACT_UNKNOWN');
+ has(flow(packet,sub),'MISSING_CONTEXT');
+});
+
+test('v13 requires each packet NatSpec and literal rule to be compared, and sibling asymmetry checked',()=>{
+ const packet={...flowPacket,reviewPolicy:'correctness-verdict-v13',
+  documentationItems:[{contextId:'CTX-A',ruleId:'NATSPEC:CTX-A',rule:'Only owner may set fee'}],
+  siblingChecks:[{pattern:'owner guard',members:[{contract:'contracts/A.sol:A',name:'setFee'},
+    {contract:'contracts/A.sol:A',name:'setLimit'}]}],
+  primaryContexts:[{contextId:'CTX-A',qualifiedContainer:'contracts/A.sol:A'}]};
+ const sub={...flowSubmission(),rows:[{contextId:'CTX-A',verdict:'CORRECT',
+  intent:'Only owner should change the fee and setter must apply declared fee limits',
+  reason:'Only owner modifier validates signer before fee setter B.sol L3',
+  anchors:[anchor],documentedRules:[],specInspection:{status:'NO_DOCUMENTED_RULES',
+    docsAndCommentsChecked:'README reviewed',namedConstantsChecked:'No named constants found'}}]};
+ has(flow(packet,sub),'SPEC_FALSE_ABSENCE');
+ has(flow(packet,sub),'SPEC_RULE_MISSING');
+ has(flow(packet,sub),'SIBLING_CHECK_REQUIRED');
+ sub.rows[0].documentedRules=[{ruleId:'NATSPEC:CTX-A',rule:'Only owner may set fee',
+   comparison:'MATCH',reason:'onlyOwner checks msg.sender'}];
+ sub.rows[0].specInspection.status='MATCH';
+ sub.rows[0].siblingComparisons=[{sibling:'setLimit',comparison:'Both check owner; no fee-limit asymmetry'}];
+ assert.equal(flow(packet,sub).ok,true,JSON.stringify(flow(packet,sub).errors));
+});

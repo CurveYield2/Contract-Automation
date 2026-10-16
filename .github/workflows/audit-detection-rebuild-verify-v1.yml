@@ -60,6 +60,22 @@ jobs:
             esac
           done < <(git grep -l "no""-telemetry" || true)
           test "$unresolved" = 0
+      - name: Focused controller replay, shard and saved-state regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 10s 180s node --test \
+            scripts/tests/lite-controller-delivery-replay-v1.test.mjs \
+            packages/github-native-sim/test/lite-phase5-request-generation-v1.test.mjs \
+            packages/github-native-sim/test/phase0-fork-state-reuse-v1.test.mjs \
+            packages/github-native-sim/test/phase7-saved-state-preflight-v1.test.mjs \
+            packages/github-native-sim/test/lite-work-shards-v1.test.mjs \
+            packages/runner/test/anvil-engine-v1.test.mjs
+      - name: Isolated real Anvil saved-state roundtrip (bounded)
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 5s 90s node --test packages/github-native-sim/test/phase0-fork-state-actual-anvil-v1.test.mjs
       - name: Existing controller regression tests
         shell: bash
         run: |

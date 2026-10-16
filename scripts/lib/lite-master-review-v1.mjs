@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {buildMasterDepthSpotCheckV1,validateMasterDepthSpotCheckV1} from './lite-master-depth-spotcheck-v1.mjs';
 import {readJson,writeJson,repoFile,requiredFile,loadPhaseSchema,getByPath} from './lite-phase-work-v1.mjs';
 import {validatePhaseScaffold} from './lite-phase-prefill-v1.mjs';
 import {validateRecordedPhase5MachineEvidenceV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
@@ -48,8 +49,21 @@ function latestReceipt(root,campaignPath,phase,{allowTerminalComplete=false}={})
   return {...found,receipt};
 }
 function canonicalRel(campaignPath,phase){return path.posix.join(campaignPath,'derived/phase-'+phase,'PHASE_'+phaseNumber(phase)+'_CANONICAL_DATA_v1.json');}
-function segmentForBoundary(boundaryPhase){return MASTER_REVIEW_SEGMENTS_V1.find(x=>x.boundaryPhase===Number(boundaryPhase))??null;}
-function segmentForId(segmentId){return MASTER_REVIEW_SEGMENTS_V1.find(x=>x.segmentId===segmentId)??null;}
+export const MASTER_REVIEW_SEGMENTS_V13=Object.freeze([
+  Object.freeze({segmentId:'reviewer-1-phase-01',reviewerId:'reviewer-1',phases:Object.freeze([1]),boundaryPhase:1}),
+  Object.freeze({segmentId:'reviewer-2-phases-02-04',reviewerId:'reviewer-2',phases:Object.freeze([2,3,4]),boundaryPhase:4}),
+  Object.freeze({segmentId:'reviewer-3-phases-05-07',reviewerId:'reviewer-3',phases:Object.freeze([5,6,7]),boundaryPhase:7}),
+  Object.freeze({segmentId:'reviewer-4-phases-08-10',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10}),
+  Object.freeze({segmentId:'reviewer-4-followup-v1',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10})
+]);
+export const isV13AuthorityV1=authorityRoot=>/Audit_Litemode_v13(?:\/|$)/.test(String(authorityRoot??''));
+export const segmentsForAuthorityV1=authorityRoot=>isV13AuthorityV1(authorityRoot)?MASTER_REVIEW_SEGMENTS_V13:MASTER_REVIEW_SEGMENTS_V1;
+function segmentForBoundary(boundaryPhase,authorityRoot=null){
+  return segmentsForAuthorityV1(authorityRoot).find(x=>x.boundaryPhase===Number(boundaryPhase))??null;
+}
+function segmentForId(segmentId){
+  return [...MASTER_REVIEW_SEGMENTS_V13,...MASTER_REVIEW_SEGMENTS_V1].find(x=>x.segmentId===segmentId)??null;
+}
 
 export function validateMasterReviewConfiguration(directory,{required=false}={}){
   const cfg=directory?.masterReview;
@@ -165,7 +179,7 @@ function sealedOriginalSnapshotPath(campaignPath,segmentId,sealed){
 export function stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase,segmentId=null,lastSealedReceiptPath,nextSequence,nextDerivedInputPaths=[],successorPrefillContext={},now}){
   const cfg=validateMasterReviewConfiguration(directory,{required:true});
   if(directory.pendingMasterReview)throw new Error('campaign already has pendingMasterReview');
-  const segment=segmentId?segmentForId(segmentId):segmentForBoundary(boundaryPhase);
+  const segment=segmentId?segmentForId(segmentId):segmentForBoundary(boundaryPhase,authorityRoot);
   if(segment&&segment.boundaryPhase!==boundaryPhase)throw new Error('master segment boundary mismatches requested phase');
   if(!segment)throw new Error('unsupported master review boundary '+boundaryPhase);
   const reviewedArtifacts=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:predecessor.authority});
@@ -185,6 +199,10 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
     }
     return {phase:x.phase,path:x.path,sha256:x.sha256,gitBlobSha1:gitBlobSha1(bytes),sealedOriginalPath};
   });
+  const depthSpotCheck=(isV13AuthorityV1(authorityRoot)&&boundaryPhase===4)
+    ?buildMasterDepthSpotCheckV1({root,campaignPath,campaignId:directory.campaignId,
+      sourceSha256:directory.sourceSha256,segmentId:segment.segmentId})
+    :null;
   const recordRel=path.posix.join(campaignPath,'work/master-review',segment.segmentId,'MASTER_REVIEW_RECORD_v1.json');
   const record={
     schemaVersion:'curveyield-lite-master-review-record-v1',
@@ -197,6 +215,7 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
     masterIdentity:{chatUrl:cfg.chatUrl,reasoning:'MAXIMUM'},
     bindings,
     reviewedArtifacts,
+    ...(depthSpotCheck?{depthSpotCheck}:{}),
     decision:null,
     createdAt:now,
     updatedAt:now
@@ -213,6 +232,7 @@ export function stageMasterReview({root,campaignPath,directory,predecessor,autho
     masterChatUrl:cfg.chatUrl,
     manifestSha256:bindings.segmentManifestSha256,
     bindingsSha256:digestJson(bindings),
+    ...(depthSpotCheck?{depthSpotCheckAssignmentSha256:depthSpotCheck.assignmentSha256}:{}),
     sealedWorkForms,
     lastSealedReceiptPath,
     successorPlan:{
@@ -254,6 +274,9 @@ function validateLockedRecord(record,pending,directory,cfg){
   if(record.bindings?.source?.sha256!==directory.sourceSha256)failures.push('master source binding does not match current campaign directory');
   if(digestJson(record.bindings)!==pending.bindingsSha256)failures.push('master source/build/authority bindings were modified');
   if(digestJson(record.reviewedArtifacts)!==pending.manifestSha256)failures.push('master reviewedArtifacts were modified');
+  if(pending.depthSpotCheckAssignmentSha256&&
+    record.depthSpotCheck?.assignmentSha256!==pending.depthSpotCheckAssignmentSha256)
+    failures.push('master depth sample assignment was modified');
   return failures;
 }
 function currentArtifactFailures(root,campaignPath,rows){
@@ -374,7 +397,7 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
   // MUST rerun Phase 5 and satisfy the fail-closed Phase-5 gate, preserving
   // the original sealed receipt under the existing supersession protocol.
   // Ordinary acceptance and every later master segment stay held.
-  const machineRepairReplay=(pending.segmentId==='reviewer-2-phases-02-05'&&outcome==='AMENDED');
+  const machineRepairReplay=(['reviewer-2-phases-02-05','reviewer-3-phases-05-07'].includes(pending.segmentId)&&outcome==='AMENDED');
   const isPostCompletionFollowup=pending.segmentId==='reviewer-4-followup-v1'&&
     pending.postCompletionFollowup?.schemaVersion==='curveyield-lite-post-completion-followup-admission-v1';
   if(isPostCompletionFollowup&&outcome==='ACCEPT_WITHOUT_MODIFICATIONS')
@@ -402,6 +425,8 @@ export function processMasterReviewSubmission({root,campaignPath,directory,autho
       }));
     }catch(error){failures.push('Required Phase-5 machine evidence validation failed: '+String(error?.message??error));}
   }
+  if(!failures.length&&record.depthSpotCheck&&outcome!=='REQUEST_TARGETED_TESTS')
+    failures.push(...validateMasterDepthSpotCheckV1({root,campaignPath,assignment:record.depthSpotCheck}));
   if(failures.length)return {status:'MASTER_REVIEW_HELD',failures,record,pending};
   const sealedByPath=new Map((pending.sealedWorkForms??[]).map(x=>[x.path,x]));
   // Only reviewer work forms may change; every report, canonical record, receipt
