@@ -983,12 +983,14 @@ jobs:
             prior_idle_pokes="$(jq -r '.repair.consecutiveIdlePokes // 0' /tmp/watchdog-state.json)"
             idle_threshold="$(jq -r '.repair.idlePokeThreshold // 3' /tmp/watchdog-state.json)"
             if [ "$prior_idle_pokes" -ge "$idle_threshold" ]; then
-              if dispatch_registered_backup; then
-                retire_state "BACKUP_CHAT_REBOUND_AFTER_${prior_idle_pokes}_NO_READ_POKES"
-                exit 0
-              fi
+              # First repair the currently registered reviewer. Standby is
+              # consumed only after the repair dispatch itself has failed.
               if dispatch_reviewer_repair "NO_CONTROLLER_ADVANCE_AFTER_${prior_idle_pokes}_PHASE1_X11_POKES"; then
                 retire_state "REVIEWER_REPAIR_DISPATCHED_AFTER_${prior_idle_pokes}_NO_READ_POKES"
+                exit 0
+              fi
+              if dispatch_registered_backup; then
+                retire_state "BACKUP_CHAT_REBOUND_AFTER_REPAIR_DISPATCH_FAILURE_${prior_idle_pokes}"
                 exit 0
               fi
             fi
