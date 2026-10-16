@@ -68,11 +68,12 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const contractChecks=role==='ATTACK'?[]:[...new Set(primary.map(id=>contextFor(inventory,id)?.qualifiedContainer).filter(Boolean))]
   .filter(name=>ownerUnit.get(name)===unitId).sort()
   .map(contract=>({contract,classId:'UPGRADE_INIT_STORAGE',reviewChecks:arr(upgradeClass?.reviewChecks)}));
- const trivialContextIds=role==='ATTACK'?[]:primary.filter(id=>TRIVIAL_KINDS_V1.has(contextFor(inventory,id)?.kind));
+ const verdictV13=/Audit_Litemode_v13(?:\\/|$)/.test(authorityRoot);
+ const trivialContextIds=role==='ATTACK'?[]:primary.filter(id=>verdictV13?
+   isLiteralConstantV13(contextFor(inventory,id)):TRIVIAL_KINDS_V1.has(contextFor(inventory,id)?.kind));
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
  const flows=arr(plan?.payload?.flows).filter(f=>arr(unit.flowIds).includes(f.flowId));
  const questions=arr(plan?.payload?.integrationQuestions).filter(q=>arr(unit.integrationQuestionIds).includes(q.obligationId));
- const verdictV13=/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot);
  const siblingChecks=verdictV13&&role!=='ATTACK'?arr(facts?.payload?.siblingGroups)
   .filter(g=>arr(g.members).some(m=>primary.some(id=>contextFor(inventory,id)?.qualifiedContainer===m.contract)))
   .map(g=>({pattern:g.pattern??'shared modifier or pattern',
