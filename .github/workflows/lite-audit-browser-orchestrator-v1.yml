@@ -140,7 +140,7 @@ jobs:
             *) echo "::error::Unsupported reviewer identity: $reviewer. Expected reviewer-1 through reviewer-4."; exit 1 ;;
           esac
 
-          chat_url="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // empty' /tmp/existing-registration.json)"
+          chat_url="$(jq -r --arg reviewer "$reviewer" '.agentChats[$reviewer] // (if $reviewer == "reviewer-3" then .agentChats["reviewer-3L"] else empty end) // empty' /tmp/existing-registration.json)"
           [[ "$chat_url" =~ ^https://chatgpt\.com/c/[A-Za-z0-9_-]+/?$ || "$chat_url" =~ ^https://chatgpt\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || {
             echo "::error::No valid pre-created ChatGPT chat is bound for $reviewer."
             exit 1
