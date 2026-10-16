@@ -3,7 +3,15 @@ import {V2_AUTOMATION_RELEASE,V2_RUNNER_RELEASE} from '../../packages/github-nat
 import {validateDeepAssuranceRequestWithV26V1} from '../../packages/github-native-sim/src/schema-v26.mjs';
 
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
-const nonempty=x=>typeof x==='string'&&x.trim()&&!/^<(?:REQUIRED|TBD)>$/.test(x);
+const nonempty=x=>typeof x==='string'&&x.trim()&&!/(?:<[^>]*>|\\b(?:TODO|TBD)\\b)/i.test(x);
+const complete=x=>Array.isArray(x)?x.length>0&&x.every(complete):nonempty(x);
+const noPlaceholders=x=>{
+ if(typeof x==='string')return !/(?:<[^>]*>|\\b(?:TODO|TBD)\\b)/i.test(x);
+ if(Array.isArray(x))return x.every(noPlaceholders);
+ if(x&&typeof x==='object')return Object.values(x).every(noPlaceholders);
+ return true;
+};
+const MIN_FUZZ_RUNS=100000;
 const okPath=x=>nonempty(x)&&!x.startsWith('/')&&!x.split('/').some(y=>!y||y==='.'||y==='..');
 const validType=new Set(['ANVIL_WORKFLOW','FOUNDRY_TEST','MEDUSA_PROPERTY']);
 
@@ -13,16 +21,14 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
  need('candidateKey',nonempty(key));
  need('reproductionType',validType.has(type),'must be ANVIL_WORKFLOW, FOUNDRY_TEST or MEDUSA_PROPERTY');
  need('setup',nonempty(target?.setup));
- need('prerequisites',nonempty(target?.prerequisites)||Array.isArray(target?.prerequisites)&&target.prerequisites.length>0);
- need('transactionSequence',nonempty(target?.transactionSequence)||
-   Array.isArray(target?.transactionSequence)&&target.transactionSequence.length>0);
+ need('prerequisites',complete(target?.prerequisites));
+ need('transactionSequence',complete(target?.transactionSequence));
  need('oracle',nonempty(target?.oracle));
- need('fuzzVariablesAndBounds',nonempty(target?.fuzzVariablesAndBounds)||
-   Array.isArray(target?.fuzzVariablesAndBounds)&&target.fuzzVariablesAndBounds.length>0);
+ need('fuzzVariablesAndBounds',complete(target?.fuzzVariablesAndBounds));
  need('snapshotReuseSafety',nonempty(target?.snapshotReuseSafety));
  need('expectedSecurityProperty',nonempty(target?.expectedSecurityProperty));
  need('expectedMachineObservation',target?.expectedMachineObservation&&
-   typeof target.expectedMachineObservation==='object'&&!Array.isArray(target.expectedMachineObservation));
+   typeof target.expectedMachineObservation==='object'&&!Array.isArray(target.expectedMachineObservation)&&noPlaceholders(target.expectedMachineObservation));
  const blueprint=target?.executionBlueprint;
  need('executionBlueprint',blueprint&&typeof blueprint==='object'&&!Array.isArray(blueprint),
    'provide concrete trusted runner configuration: exact source root, compiler, harness/simulation');
@@ -30,11 +36,23 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
   need('executionBlueprint.projectPath',okPath(blueprint.projectPath));
   need('executionBlueprint.configuration',blueprint.configuration&&typeof blueprint.configuration==='object'&&!Array.isArray(blueprint.configuration));
   need('executionBlueprint.configuration.compilers',Array.isArray(blueprint.configuration?.compilers)&&blueprint.configuration.compilers.length>0);
+  need('executionBlueprint.configuration',noPlaceholders(blueprint.configuration),'placeholder values are forbidden');
+  need('executionBlueprint.configuration.analysis',!!blueprint.configuration?.analysis,
+    'explicit native fuzz and Medusa settings required');
+  need('executionBlueprint.configuration.analysis.nativeFuzz.fuzzRuns',
+    Number.isInteger(blueprint.configuration?.analysis?.nativeFuzz?.fuzzRuns)&&
+    blueprint.configuration.analysis.nativeFuzz.fuzzRuns>=MIN_FUZZ_RUNS,
+    'minimum 100000 real fuzz executions; do not reduce the budget');
   if(type==='ANVIL_WORKFLOW'){
     need('executionBlueprint.configuration.simulation',!!blueprint.configuration?.simulation);
     need('executionBlueprint.configuration.deploymentGas',!!blueprint.configuration?.deploymentGas);
-  }else need('executionBlueprint.configuration.harness',!!blueprint.configuration?.harness,
-    'exact runner-owned harness/recipe required; prose test designs are not executable');
+  }else {
+    need('executionBlueprint.configuration.harness',!!blueprint.configuration?.harness,
+      'exact runner-owned harness/recipe required; prose test designs are not executable');
+    need('executionBlueprint.configuration.harness.bundleId',
+      nonempty(blueprint.configuration?.harness?.bundleId),
+      'require an existing audited harness bundle ID, not a placeholder');
+  }
  }
  need('phase0Source.archiveRepository',nonempty(phase0Source?.archiveRepository));
  need('phase0Source.archiveCommit',/^[0-9a-f]{40}$/.test(phase0Source?.archiveCommit??''));
@@ -71,6 +89,13 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
    archivePath:phase0Source.archivePath,archiveSha256:sourceSha256,
    projectPath:blueprint.projectPath};
  const configuration=structuredClone(blueprint.configuration);
+ // Preserve test intent in a non-executable, controller-owned sidecar emitted
+ // with the machine request; the V7 configuration schema forbids arbitrary fields.
+ const designEvidence={setup:target.setup,prerequisites:target.prerequisites,
+   transactionSequence:target.transactionSequence,oracle:target.oracle,
+   fuzzVariablesAndBounds:target.fuzzVariablesAndBounds,
+   snapshotReuseSafety:target.snapshotReuseSafety,
+   expectedSecurityProperty:target.expectedSecurityProperty};
  if(configuration.v26?.phase0ForkState)delete configuration.v26.phase0ForkState;
  configuration.v26={...(configuration.v26??{}),reproduction:{
    candidateId:key,reproductionType:type,expectedObservation:structuredClone(target.expectedMachineObservation)
@@ -93,8 +118,9 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
    requestId:'dar-'+id.slice(0,32),requestDigest:id};
  try{validateDeepAssuranceRequestWithV26V1(request);}
  catch(error){
+   const detail=String(error?.message??error),attribute=detail.match(/configuration\\.[a-zA-Z0-9_.\\[\\]]+/)?.[0];
    return {status:'REWORK_REQUIRED',candidateKey:key,
-     missing:[{field:'executionBlueprint.configuration',reason:String(error?.message??error)}]};
+     missing:[{field:attribute?('executionBlueprint.'+attribute):'executionBlueprint.configuration',reason:detail}]};
  }
- return {status:'GENERATED',candidateKey:key,request};
+ return {status:'GENERATED',candidateKey:key,request,designEvidence};
 }
