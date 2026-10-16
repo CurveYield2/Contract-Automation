@@ -77,6 +77,6 @@ test('verified Phase-0 state layers Anvil --load-state on a pinned upstream fork
  assert.ok(args.includes('--fork-url'));
  assert.ok(args.includes('--fork-block-number'));
  assert.ok(args.includes('100'));
- assert.throws(()=>buildAnvilArgs({chainId:1,port:19545,hardfork:'cancun',
+ assert.throws(()=>buildAnvilArgs({chainId:1,forkUrl:'http://127.0.0.1:8545',port:19545,hardfork:'cancun',
   loadStatePath:'../../untrusted.json'}),/absolute JSON/);
 });
