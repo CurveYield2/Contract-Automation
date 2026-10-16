@@ -293,7 +293,7 @@ export function secureRestoreWorkFormV13({root,indexRel}){
    seenFiles.add(desc.file);
    if(!/^shard-[0-9]{4}_v1\.json$/.test(desc.file))throw new Error('invalid v13 shard filename');
    const rel=path.posix.join(workDir,desc.file);
-   const raw=fs.readFileSync(rel,'utf8');
+   const raw=fs.readFileSync(relfile(root,rel),'utf8');
    if(Buffer.byteLength(raw)>MAX_SHARD)throw new Error('v13 shard exceeds 64 KiB: '+desc.file);
    const item=JSON.parse(raw);
    if(item.schemaVersion!=='curveyield-work-shard-v13'||item.kind!==desc.kind||
