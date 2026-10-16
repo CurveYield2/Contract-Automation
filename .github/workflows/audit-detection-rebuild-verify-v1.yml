@@ -70,6 +70,7 @@ jobs:
             packages/github-native-sim/test/phase0-fork-state-reuse-v1.test.mjs \
             packages/github-native-sim/test/phase7-saved-state-preflight-v1.test.mjs \
             packages/github-native-sim/test/lite-work-shards-v1.test.mjs \
+            scripts/tests/lite-v13-protected-shards-v1.test.mjs \
             packages/runner/test/anvil-engine-v1.test.mjs
       - name: Isolated real Anvil saved-state roundtrip (bounded)
         shell: bash
@@ -109,6 +110,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install validator dependencies before cross-repository authority checks
+        run: timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
       - name: Select Audit-Controller credential
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}

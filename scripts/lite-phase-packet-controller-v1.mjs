@@ -1011,6 +1011,7 @@ const existingPacket=fs.existsSync(packetFile)?readJson(packetFile):null;
 const packet=buildControllerPacket({directory,assignment,existing:existingPacket,now});
 let deficiencies=ensurePacketShape({packet,directory,assignment});
 let form=null;
+let workShardIntegrityFailed=false;
 try{
   // Agent edits live shards; reconstruct the legacy form for existing validators.
   // Digest/key checks run before any reviewer work can reach bookkeeping.
@@ -1064,9 +1065,14 @@ try{
       deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
     }
   }
-}catch(e){deficiencies.push(String(e.message||e));}
+}catch(e){
+  workShardIntegrityFailed=Boolean(assignment.workShardIndexPath);
+  deficiencies.push(String(e.message||e));
+}
 
 function persistReviewerReworkShardsV1(){
+  // A failed integrity check must never re-seal a stale or corrupt agent shard.
+  if(workShardIntegrityFailed)return;
   if(!assignment.workShardIndexPath)return;
   const full=repoFile(root,assignment.workFormPath);
   if(fs.existsSync(full))
@@ -1074,7 +1080,13 @@ function persistReviewerReworkShardsV1(){
 }
 function annotateShardReworkV1(packet,errors){
  if(!assignment.workShardIndexPath)return '';
- const map=shardFailureIndexV1({root,indexRel:assignment.workShardIndexPath,deficiencies:errors});
+ let map;
+ try{map=shardFailureIndexV1({root,indexRel:assignment.workShardIndexPath,deficiencies:errors});}
+ catch(error){
+   // Never allow reviewer-tampered index pages to crash the boundary controller.
+   packet.controllerValidation.shardRework={indexPath:assignment.workShardIndexPath,shards:[],unmappedCount:errors.length};
+   return '\\nSHARD_REWORK: restore the controller-owned index and listed shard records. '+String(error?.message??error);
+ }
  packet.controllerValidation.shardRework={indexPath:assignment.workShardIndexPath,
    shards:map.shards.map(s=>({path:s.path,recordKeys:s.recordKeys,defectCount:s.defects.length})),
    unmappedCount:map.unmapped.length};

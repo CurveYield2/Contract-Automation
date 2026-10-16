@@ -386,11 +386,22 @@ jobs:
             const full=restoreControllerResultV1({root,campaignPath,envelope});
             fs.writeFileSync("/tmp/lite-phase-packet-result.json",JSON.stringify(full)+"\n");
           ' .audit-controller "${{ steps.routing.outputs.campaign_path }}"
-          # Wake feedback references the full private result when it exceeds the
-          # safe GitHub Actions output size; no diagnostic is discarded.
-          jq -r --arg ref "$(jq -r '.detailRef' /tmp/lite-phase-packet-envelope.json)" '
+          # Always retain a bounded list of failing shard files and keys in
+          # the wake even when the full diagnostic pages exceed the output cap.
+          packet_ref="$(jq -r '.packetPath // empty' /tmp/lite-phase-packet-result.json)"
+          shard_brief=""
+          if [[ -n "$packet_ref" && -f ".audit-controller/$packet_ref" ]]; then
+            shard_brief="$(jq -r '
+              [.controllerValidation.shardRework.shards[:12][]? |
+                .path + " [" + ((.recordKeys[:3] // [])|join(",")) + "]"] | join("; ")
+            ' ".audit-controller/$packet_ref" | cut -c1-1600)"
+          fi
+          jq -r --arg ref "$(jq -r '.detailRef' /tmp/lite-phase-packet-envelope.json)" \
+            --arg shard_brief "$shard_brief" '
             if ((.feedbackB64 // "")|length)>4096 then
-              .feedbackB64=(("Controller details exceed wake size; read campaign " + $ref + " and repair every listed item.")|@base64)
+              .feedbackB64=(("Controller details exceed wake size. Failing shards/keys: " +
+                (if $shard_brief=="" then "see result pages" else $shard_brief end) +
+                ". Complete diagnostics: " + $ref)|@base64)
             else . end
           ' /tmp/lite-phase-packet-result.json > /tmp/lite-phase-packet-delivery.json
           {
