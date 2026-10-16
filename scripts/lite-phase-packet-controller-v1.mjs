@@ -1080,7 +1080,13 @@ function persistReviewerReworkShardsV1(){
 }
 function annotateShardReworkV1(packet,errors){
  if(!assignment.workShardIndexPath)return '';
- const map=shardFailureIndexV1({root,indexRel:assignment.workShardIndexPath,deficiencies:errors});
+ let map;
+ try{map=shardFailureIndexV1({root,indexRel:assignment.workShardIndexPath,deficiencies:errors});}
+ catch(error){
+   // Never allow reviewer-tampered index pages to crash the boundary controller.
+   packet.controllerValidation.shardRework={indexPath:assignment.workShardIndexPath,shards:[],unmappedCount:errors.length};
+   return '\\nSHARD_REWORK: restore the controller-owned index and listed shard records. '+String(error?.message??error);
+ }
  packet.controllerValidation.shardRework={indexPath:assignment.workShardIndexPath,
    shards:map.shards.map(s=>({path:s.path,recordKeys:s.recordKeys,defectCount:s.defects.length})),
    unmappedCount:map.unmapped.length};
