@@ -449,7 +449,7 @@ export function applyAuditScopeToInventoryV1({inventory,scope,generatedAt,includ
   payload.limitations=[{code:'SCOPE_FROM_AUDIT_SCOPE_FILE',path:AUDIT_SCOPE_FILE,
     detail:'Re-scoped after Phase 0. In scope: '+scope.inScopePaths.join(', ')+'. Every other compiled source is a dependency, reviewed only where in-scope contracts inherit it.'},
     ...(payload.limitations??[]).filter(l=>l.code!=='DEPENDENCY_TIER_BY_PATH'&&!(l.code==='INVENTORY_INCOMPLETE'&&tierOf(l.path)!=='IN_SCOPE'))];
-  payload.complete=!payload.sourceUnits.some(u=>u.scopeTier==='IN_SCOPE'&&u.astStatus==='MISSING'&&!(includeScripts&&u.kind==='SCRIPT_FILE'));
+  payload.complete=!payload.sourceUnits.some(u=>u.scopeTier==='IN_SCOPE'&&u.astStatus==='MISSING'&&!(includeScripts&&payload.contexts.some(c=>c.kind==='SCRIPT_FILE'&&c.path===u.path)));
   const byKind={};for(const c of contexts)byKind[c.kind]=(byKind[c.kind]??0)+1;
   payload.counts={...(payload.counts??{}),sourceUnits:payload.sourceUnits.length,
     inScopeUnits:payload.sourceUnits.filter(u=>u.scopeTier==='IN_SCOPE').length,contexts:contexts.length,byKind};
