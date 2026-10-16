@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {detectionPolicyForAuthorityV1} from '../../packages/github-native-sim/src/adr-policy-v1.mjs';
+import {boundReviewerForPhaseV1} from './lite-master-review-v1.mjs';
 
 function repoFile(root,rel){return path.join(root,...String(rel).split('/'));}
 function readJsonIf(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
@@ -327,13 +328,15 @@ function machineLimitations(deployRows,targetRows){
   }
   return out.length?uniq(out):['NONE_IDENTIFIED'];
 }
-function reviewerForRequiredPhase(phase){
-  const n=Number(phase);
-  if(n===1)return'reviewer-1';
-  if(n>=2&&n<=5)return'reviewer-2';
-  if(n===6)return'reviewer-3L';
-  if(n>=8&&n<=10)return'reviewer-4';
-  return n===7?'phase7-automation':'UNRESOLVED_REVIEWER';
+function reviewerForRequiredPhase(phase,root=null,authorityRoot=null){
+ const n=Number(phase);
+ if(n===7)return 'phase7-automation';
+ if(root&&authorityRoot)return boundReviewerForPhaseV1({root,authorityRoot,phase:n});
+ if(n===1)return 'reviewer-1';
+ if(n>=2&&n<=5)return 'reviewer-2';
+ if(n===6)return 'reviewer-3L';
+ if(n>=8&&n<=10)return 'reviewer-4';
+ return 'UNRESOLVED_REVIEWER';
 }
 function evidenceList(value){
   if(Array.isArray(value)) return value.filter(x=>typeof x==='string'&&x&&!x.startsWith('<')&&x!=='NONE_IDENTIFIED');
@@ -345,7 +348,7 @@ function obligationIdFor(item,originPhase,index){
   if(raw.startsWith('OBL-')) return raw;
   return 'OBL-P'+String(originPhase)+'-'+safeSegment(raw,'AUTO-'+String(index+1).padStart(3,'0'));
 }
-export function normalizeFormalObligationsIntoLedger({ledger,items=[],originPhase,canonicalRel,now}){
+export function normalizeFormalObligationsIntoLedger({ledger,items=[],originPhase,canonicalRel,now,root=null,authorityRoot=null}){
   ledger.obligations??=[];
   const byId=new Map(ledger.obligations.map((o,i)=>[String(o?.obligationId??''),i]).filter(([id])=>id));
   let created=0;
@@ -361,7 +364,7 @@ export function normalizeFormalObligationsIntoLedger({ledger,items=[],originPhas
       existing.originatingFactIds=uniq([...(existing.originatingFactIds??[]),...(item.originFactKeys??item.originatingFactIds??[])]);
       existing.originatingEvidenceRefs=uniq([...(existing.originatingEvidenceRefs??[]),canonicalRel,...(item.originatingEvidenceRefs??[])]);
       existing.requiredPhase=existing.requiredPhase??requiredPhase;
-      existing.requiredReviewer=existing.requiredReviewer??reviewerForRequiredPhase(existing.requiredPhase);
+      existing.requiredReviewer=existing.requiredReviewer??reviewerForRequiredPhase(existing.requiredPhase,root,authorityRoot);
       existing.requiredAction=existing.requiredAction??item.requiredAction;
       existing.completionCondition=existing.completionCondition??item.completionCondition;
       existing.updatedAt=now;
@@ -373,7 +376,7 @@ export function normalizeFormalObligationsIntoLedger({ledger,items=[],originPhas
       originatingFactIds:uniq([...(item.originFactKeys??item.originatingFactIds??[])]),
       originatingEvidenceRefs:uniq([canonicalRel,...(item.originatingEvidenceRefs??[])]),
       requiredPhase,
-      requiredReviewer:reviewerForRequiredPhase(requiredPhase),
+      requiredReviewer:reviewerForRequiredPhase(requiredPhase,root,authorityRoot),
       requiredAction:item.requiredAction,
       completionCondition:item.completionCondition,
       mandatory:item.mandatory!==false,
