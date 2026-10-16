@@ -20,7 +20,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: lite-phase-boundary-controller-v1
+  group: lite-controller-delivery-replay-${{ inputs.campaign_id }}
   cancel-in-progress: false
 
 jobs:
@@ -68,6 +68,7 @@ jobs:
             echo "milestone=$(jq -r '.milestoneId' /tmp/replay.json)"
             echo "role=$(jq -r '.role' /tmp/replay.json)"
             echo "wake_id=$(jq -r '.wakeId' /tmp/replay.json)"
+            echo "result_sha256=$(jq -r '.sourceResultSha256' /tmp/replay.json)"
             echo "wake_b64=$(jq -r '.messageB64' /tmp/replay.json)"
             echo "campaign_path=$campaign_path"
             echo "directory=$directory"
@@ -107,7 +108,7 @@ jobs:
         run: |
           set -euo pipefail
           timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            -f wake_id="$WAKE_ID" -f campaign_id="$CAMPAIGN_ID" -f phase_id="$PHASE_ID" \
+            -f wake_id="$WAKE_ID" -f delivery_result_sha256="${{ steps.replay.outputs.result_sha256 }}" -f campaign_id="$CAMPAIGN_ID" -f phase_id="$PHASE_ID" \
             -f mode=resume_existing -f chat_url="$CHAT_URL" \
             -f wake_message_b64="$WAKE_B64" -f watchdog_enabled=true -f worker_role=reviewer \
             -f gate_mode=LITE -f gate_repository=CurveYield2/Audit-Controller -f gate_ref="$CONTROLLER_REF" \
