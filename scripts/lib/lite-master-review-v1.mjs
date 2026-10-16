@@ -4,6 +4,8 @@ import {createHash} from 'node:crypto';
 import {buildMasterDepthSpotCheckV1,validateMasterDepthSpotCheckV1} from './lite-master-depth-spotcheck-v1.mjs';
 import {readJson,writeJson,repoFile,requiredFile,loadPhaseSchema,getByPath} from './lite-phase-work-v1.mjs';
 import {validatePhaseScaffold} from './lite-phase-prefill-v1.mjs';
+import {isV13AuthorityV1,boundReviewerLineupV13,boundReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
+export {isV13AuthorityV1,boundReviewerLineupV13,boundReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
 import {validateRecordedPhase5MachineEvidenceV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 
 export const MASTER_REVIEW_SEGMENTS_V1=Object.freeze([
@@ -56,35 +58,6 @@ export const MASTER_REVIEW_SEGMENTS_V13=Object.freeze([
   Object.freeze({segmentId:'reviewer-4-phases-08-10',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10}),
   Object.freeze({segmentId:'reviewer-4-followup-v1',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10})
 ]);
-export const isV13AuthorityV1=authorityRoot=>/Audit_Litemode_v13(?:\/|$)/.test(String(authorityRoot??''));
-/** The admitted AC v13 manifest is the role-lineup authority for runtime.
- * Frozen v12 releases retain their historical literal routing unchanged.
- */
-export function boundReviewerLineupV13({root,authorityRoot}={}){
- if(!isV13AuthorityV1(authorityRoot))return null;
- if(!root)throw new Error('v13 reviewer mapping requires bound Audit-Controller root');
- const manifest=JSON.parse(fs.readFileSync(path.join(root,...authorityRoot.split('/'),'MANIFEST.json'),'utf8'));
- const lineup=manifest.reviewerLineup;
- if(manifest.release!=='Audit_Litemode_v13'||lineup?.schemaVersion!=='curveyield-v13-reviewer-lineup-v1')
-   throw new Error('v13 role authority manifest is missing or mismatched');
- for(let n=1;n<=10;n++)if(!/^reviewer-[1-4]$/.test(lineup.phaseReviewers?.[String(n)]??''))
-   throw new Error('missing bound v13 reviewer for phase '+n);
- if(!Array.isArray(lineup.masterSegments)||lineup.masterSegments.length!==4||
-   lineup.discoveryAttacker!=='reviewer-3'||lineup.testExecutor!=='test-executor')
-   throw new Error('invalid bound v13 segment and executor identities');
- return lineup;
-}
-export function boundReviewerForPhaseV1({root,authorityRoot,phase}={}){
- if(isV13AuthorityV1(authorityRoot))
-   return boundReviewerLineupV13({root,authorityRoot}).phaseReviewers[String(phase)];
- const n=Number(phase);
- if(n===1)return 'reviewer-1';
- if(n>=2&&n<=5)return 'reviewer-2';
- if(n===6||n===7)return 'reviewer-3L';
- if(n>=8&&n<=10)return 'reviewer-4';
- throw new Error('unknown phase reviewer '+phase);
-}
-
 export const segmentsForAuthorityV1=(authorityRoot,root=null)=>isV13AuthorityV1(authorityRoot)
  ?(root?boundReviewerLineupV13({root,authorityRoot}).masterSegments:MASTER_REVIEW_SEGMENTS_V13)
  :MASTER_REVIEW_SEGMENTS_V1;
