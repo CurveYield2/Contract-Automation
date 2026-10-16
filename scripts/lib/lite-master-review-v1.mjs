@@ -57,9 +57,39 @@ export const MASTER_REVIEW_SEGMENTS_V13=Object.freeze([
   Object.freeze({segmentId:'reviewer-4-followup-v1',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10})
 ]);
 export const isV13AuthorityV1=authorityRoot=>/Audit_Litemode_v13(?:\/|$)/.test(String(authorityRoot??''));
-export const segmentsForAuthorityV1=authorityRoot=>isV13AuthorityV1(authorityRoot)?MASTER_REVIEW_SEGMENTS_V13:MASTER_REVIEW_SEGMENTS_V1;
-function segmentForBoundary(boundaryPhase,authorityRoot=null){
-  return segmentsForAuthorityV1(authorityRoot).find(x=>x.boundaryPhase===Number(boundaryPhase))??null;
+/** The admitted AC v13 manifest is the role-lineup authority for runtime.
+ * Frozen v12 releases retain their historical literal routing unchanged.
+ */
+export function boundReviewerLineupV13({root,authorityRoot}={}){
+ if(!isV13AuthorityV1(authorityRoot))return null;
+ if(!root)throw new Error('v13 reviewer mapping requires bound Audit-Controller root');
+ const manifest=JSON.parse(fs.readFileSync(path.join(root,...authorityRoot.split('/'),'MANIFEST.json'),'utf8'));
+ const lineup=manifest.reviewerLineup;
+ if(manifest.release!=='Audit_Litemode_v13'||lineup?.schemaVersion!=='curveyield-v13-reviewer-lineup-v1')
+   throw new Error('v13 role authority manifest is missing or mismatched');
+ for(let n=1;n<=10;n++)if(!/^reviewer-[1-4]$/.test(lineup.phaseReviewers?.[String(n)]??''))
+   throw new Error('missing bound v13 reviewer for phase '+n);
+ if(!Array.isArray(lineup.masterSegments)||lineup.masterSegments.length!==4||
+   lineup.discoveryAttacker!=='reviewer-3'||lineup.testExecutor!=='test-executor')
+   throw new Error('invalid bound v13 segment and executor identities');
+ return lineup;
+}
+export function boundReviewerForPhaseV1({root,authorityRoot,phase}={}){
+ if(isV13AuthorityV1(authorityRoot))
+   return boundReviewerLineupV13({root,authorityRoot}).phaseReviewers[String(phase)];
+ const n=Number(phase);
+ if(n===1)return 'reviewer-1';
+ if(n>=2&&n<=5)return 'reviewer-2';
+ if(n===6||n===7)return 'reviewer-3L';
+ if(n>=8&&n<=10)return 'reviewer-4';
+ throw new Error('unknown phase reviewer '+phase);
+}
+
+export const segmentsForAuthorityV1=(authorityRoot,root=null)=>isV13AuthorityV1(authorityRoot)
+ ?(root?boundReviewerLineupV13({root,authorityRoot}).masterSegments:MASTER_REVIEW_SEGMENTS_V13)
+ :MASTER_REVIEW_SEGMENTS_V1;
+function segmentForBoundary(boundaryPhase,authorityRoot=null,root=null){
+  return segmentsForAuthorityV1(authorityRoot,root).find(x=>x.boundaryPhase===Number(boundaryPhase))??null;
 }
 function segmentForId(segmentId){
   return [...MASTER_REVIEW_SEGMENTS_V13,...MASTER_REVIEW_SEGMENTS_V1].find(x=>x.segmentId===segmentId)??null;
@@ -179,7 +209,7 @@ function sealedOriginalSnapshotPath(campaignPath,segmentId,sealed){
 export function stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase,segmentId=null,lastSealedReceiptPath,nextSequence,nextDerivedInputPaths=[],successorPrefillContext={},now}){
   const cfg=validateMasterReviewConfiguration(directory,{required:true});
   if(directory.pendingMasterReview)throw new Error('campaign already has pendingMasterReview');
-  const segment=segmentId?segmentForId(segmentId):segmentForBoundary(boundaryPhase,authorityRoot);
+  const segment=segmentId?segmentForId(segmentId):segmentForBoundary(boundaryPhase,authorityRoot,root);
   if(segment&&segment.boundaryPhase!==boundaryPhase)throw new Error('master segment boundary mismatches requested phase');
   if(!segment)throw new Error('unsupported master review boundary '+boundaryPhase);
   const reviewedArtifacts=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:predecessor.authority});
