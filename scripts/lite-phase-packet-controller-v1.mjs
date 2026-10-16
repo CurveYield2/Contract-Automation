@@ -22,7 +22,7 @@ import {
   populatePhase9RerunEvidenceRefs,refreshControllerPrefillDigest,
   normalizeFormalObligationsIntoLedger,applyObligationDispositionsToLedger
 } from './lib/lite-phase-prefill-v1.mjs';
-import {MASTER_REVIEW_SEGMENTS_V1,isV13AuthorityV1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
+import {MASTER_REVIEW_SEGMENTS_V1,boundReviewerForPhaseV1,segmentsForAuthorityV1,isV13AuthorityV1,masterReviewRequired,stageMasterReview,processMasterReviewSubmission,masterWakeMessage,admitSealedPhaseRework,collectSegmentArtifacts,SUPERSEDED_DIRECTORY_V1} from './lib/lite-master-review-v1.mjs';
 import {registerMasterTargetedTests,acceptMasterTargetedTestResults,verifyMasterTargetedTestEvidence,unresolvedFinalCandidateFailures} from './lib/lite-master-targeted-tests-v1.mjs';
 import {admitPostCompletionFollowupV1} from './lib/lite-post-completion-followup-v1.mjs';
 import {detectionPolicyForAuthorityV1} from '../packages/github-native-sim/src/adr-policy-v1.mjs';
@@ -71,7 +71,7 @@ function receiptObligationSummary({ledger,canonical,form,sequence,now}){
   const due=dueIds.map(id=>byId.get(String(id))??{obligationId:id,status:'UNRESOLVED_LEDGER_REFERENCE'});
   return {due,created,closed,carriedForward};
 }
-function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,replacePhase=false}){
+function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,authorityRoot,replacePhase=false}){
   const controlDir=path.posix.join(campaignPath,'controller');
   const graphRel=path.posix.join(controlDir,'SECURITY_TRACEABILITY_GRAPH_v1.json');
   const ledgerRel=path.posix.join(controlDir,'CARRIED_FORWARD_OBLIGATION_LEDGER_v1.json');
@@ -96,7 +96,7 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,repla
   invalid.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:invalidationRecords,importedAt:now});
 
   for(const record of obligationRecords){
-    normalizeFormalObligationsIntoLedger({ledger,items:record.value,originPhase:schema.phase,canonicalRel,now});
+    normalizeFormalObligationsIntoLedger({ledger,items:record.value,originPhase:schema.phase,canonicalRel,now,root,authorityRoot});
   }
 
   const identityComparison=canonical?.automationInputs?.identityComparison;
@@ -111,7 +111,7 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,repla
     if(registry){
       graph.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry',value:{path:domainRegistryPath,decisions:registry.decisions??[]}}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
       ledger.controllerImports.push({phase:schema.phase,canonicalDataPath:canonicalRel,records:[{path:'controllerDomainRegistry.generatedObligations',value:registry.generatedObligations??[]}],importedAt:now,owner:'CONTROLLER_AUTOMATION'});
-      normalizeFormalObligationsIntoLedger({ledger,items:registry.generatedObligations??[],originPhase:schema.phase,canonicalRel,now});
+      normalizeFormalObligationsIntoLedger({ledger,items:registry.generatedObligations??[],originPhase:schema.phase,canonicalRel,now,root,authorityRoot});
     }
   }
 
@@ -120,17 +120,8 @@ function syncControls({root,campaignPath,schema,canonical,canonicalRel,now,repla
   return {graphRel,ledgerRel,invalidRel};
 }
 function receiptRef(root,campaignPath,rel,role){return {role,path:path.posix.relative(campaignPath,rel),sha256:shaFile(repoFile(root,rel))};}
-function assignmentReviewer(sequence,authorityRoot=null){
-  if(sequence===1)return 'reviewer-1';
-  if(isV13AuthorityV1(authorityRoot)){
-    if(sequence>=2&&sequence<=4)return 'reviewer-2';
-    if(sequence>=5&&sequence<=7)return 'reviewer-3';
-  }else{
-    if(sequence>=2&&sequence<=5)return 'reviewer-2';
-    if(sequence===6)return 'reviewer-3L';
-  }
-  if(sequence>=8&&sequence<=10)return 'reviewer-4';
-  throw new Error('no agent reviewer for phase '+sequence);
+function assignmentReviewer(sequence,authorityRoot=null,root=null){
+ return boundReviewerForPhaseV1({root,authorityRoot,phase:sequence});
 }
 function isFreshBoundary(next,authorityRoot=null){
   return isV13AuthorityV1(authorityRoot)?[2,5,8].includes(next):[2,6,8].includes(next);
@@ -365,11 +356,8 @@ function revisionedArtifactPath(rel,revision){
   if(/_v[0-9]+(?=\.[^.]+$)/.test(rel))return rel.replace(/_v[0-9]+(?=\.[^.]+$)/,'_v'+revision);
   return rel.replace(/(?=\.[^.]+$)/,'_v'+revision);
 }
-function reviewerForPhase(sequence){
-  if(sequence===1)return 'reviewer-1';
-  if(sequence>=2&&sequence<=5)return 'reviewer-2';
-  if(sequence===6)return 'reviewer-3L';
-  return 'reviewer-4';
+function reviewerForPhase(sequence,root,authorityRoot){
+ return boundReviewerForPhaseV1({root,authorityRoot,phase:sequence});
 }
 function overlayReviewerOutputs(schema,fresh,saved){
   for(const [stepKey,action] of Object.entries(schema.actions??{})){
@@ -462,7 +450,7 @@ function restoreLedgerBeforeMasterPhase({root,campaignPath,authorityRoot,earlies
   const initial=(old.obligations??[]).filter(o=>Number(o?.originPhase)===0).map(o=>{
     const due=firstSeen.get(String(o.obligationId??''))??Number(o.requiredPhase);
     if(!Number.isInteger(due)||due<1||due>10)throw new Error('historical Phase-0 obligation has no valid first due phase: '+String(o.obligationId));
-    return {...structuredClone(o),requiredPhase:String(due),requiredReviewer:reviewerForPhase(due),
+    return {...structuredClone(o),requiredPhase:String(due),requiredReviewer:reviewerForPhase(due,root,authorityRoot),
       status:'OPEN',statusReason:null,closureEvidenceRefs:[],updatedAt:o.createdAt??now};
   });
   const ledger={...old,obligations:initial,
@@ -480,14 +468,14 @@ function restoreLedgerBeforeMasterPhase({root,campaignPath,authorityRoot,earlies
     const schema=loadPhaseSchema(root,authorityRoot,phase).schema;
     const canonicalRel=canonicalRelFor(campaignPath,phase);
     for(const dot of schema.bookkeepingMappings?.obligationRecordPaths??[]){
-      normalizeFormalObligationsIntoLedger({ledger,items:getByPath(canonical,dot),originPhase:phase,canonicalRel,now});
+      normalizeFormalObligationsIntoLedger({ledger,items:getByPath(canonical,dot),originPhase:phase,canonicalRel,now,root,authorityRoot});
     }
     const domain=canonical.automationInputs?.domainRegistryPath;
     if(domain){
       const registry=maybeJson(root,path.posix.join(campaignPath,domain));
       if(!registry)throw new Error('historical domain registry missing at Phase '+phase);
       normalizeFormalObligationsIntoLedger({
-        ledger,items:registry.generatedObligations??[],originPhase:phase,canonicalRel,now
+        ledger,items:registry.generatedObligations??[],originPhase:phase,canonicalRel,now,root,authorityRoot
       });
     }
     applyObligationDispositionsToLedger({ledger,canonical,sequence:phase,canonicalRel,now});
@@ -515,7 +503,7 @@ function restoreLedgerBeforeMasterPhase({root,campaignPath,authorityRoot,earlies
 }
 
 function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRoot,result,now}){
-  const segment=MASTER_REVIEW_SEGMENTS_V1.find(x=>x.segmentId===result.pending.segmentId);
+  const segment=segmentsForAuthorityV1(authorityRoot,root).find(x=>x.segmentId===result.pending.segmentId);
   if(!segment)throw new Error('master amendment refresh segment is unsupported');
   const affected=result.affectedPhases??[];
   if(!affected.length)throw new Error('master amendment refresh has no affected phases');
@@ -585,7 +573,7 @@ function applyMasterAmendmentRefresh({root,campaignPath,directoryRel,authorityRo
         phaseSequence:phase,
         phaseId:'phase-'+phase,
         phaseRevision:revision,
-        reviewer:reviewerForPhase(phase),
+        reviewer:reviewerForPhase(phase,root,authorityRoot),
         status:'ACTIVE',
         workSchemaPath:loaded.rel,
         workFormPath:formRel,
@@ -928,7 +916,7 @@ if(reviewKind==='master'){
     const unresolved=unresolvedFinalCandidateFailures({root,campaignPath,directory});
     if(unresolved.length)emit('MASTER_REVIEW_INVALID','Final audit cannot COMPLETE with unresolved material candidates. Request reviewer-directed targeted tests: '+unresolved.join('; '));
   }
-  if(pending.segmentId==='reviewer-2-phases-02-05'&&result.status==='MASTER_REVIEW_ACCEPTED'){
+  if(segmentsForAuthorityV1(masterAuthorityRoot,root).some(segment=>segment.segmentId===pending.segmentId&&segment.phases.includes(5))&&result.status==='MASTER_REVIEW_ACCEPTED'){
     const phase5=canonicalFor(root,campaignPath,5);
     // The successor prefill is deliberately metadata-only; verify the actual
     // campaign-local machine artifacts instead of trusting inherited PASS text.
@@ -977,7 +965,7 @@ if(reviewKind==='master'){
     if(plan.nextPhaseSequence===null||plan.nextPhaseSequence===undefined){
       directory.campaignStatus='COMPLETE';directory.currentAssignment=null;
     }else{
-      nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:plan.nextPhaseSequence,reviewer:assignmentReviewer(plan.nextPhaseSequence,masterAuthorityRoot),predecessorReceiptPath:pending.lastSealedReceiptPath,derivedInputPaths:plan.derivedInputPaths??[],status:'WAITING_FOR_SUCCESSOR_AGENT',prefillContext:plan.prefillContext??{}});
+      nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot:masterAuthorityRoot,sequence:plan.nextPhaseSequence,reviewer:assignmentReviewer(plan.nextPhaseSequence,masterAuthorityRoot,root),predecessorReceiptPath:pending.lastSealedReceiptPath,derivedInputPaths:plan.derivedInputPaths??[],status:'WAITING_FOR_SUCCESSOR_AGENT',prefillContext:plan.prefillContext??{}});
       directory.currentAssignment=nextAssignment;directory.campaignStatus='WAITING_FOR_SUCCESSOR_AGENT';
     }
     directory.lastSealedReceiptPath=pending.lastSealedReceiptPath;
@@ -1339,7 +1327,7 @@ if(deficiencies.length) throw new Error('controller-generated report validation 
 packet.controllerValidation={status:'PASS',validatedAt:now,deficiencies:[],controllerPassToken:'CONTROLLER_PHASE_PASS',
   ...(sequence===5?{machineExecutionGate:'PASS',machineEvidenceRefs:Object.values(phase5MachineResults??{}).map(x=>x.evidenceRef)}:{})
 };
-const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now,replacePhase:Boolean(masterAmendmentRefreshSha)});
+const controls=syncControls({root,campaignPath,schema,canonical,canonicalRel,now,authorityRoot,replacePhase:Boolean(masterAmendmentRefreshSha)});
 if(sealedRework){
   const invalid=readJson(requiredFile(root,controls.invalidRel,'evidence invalidation matrix'));
   const events=invalid.events??(invalid.events=[]);
@@ -1497,7 +1485,7 @@ if(gatedMasterReview&&masterBoundary!==null){
     rel.split('/').map(encodeURIComponent).join('/');
   const extraLines=[];
   if(activeDetectionPolicyV1(predecessor)){
-    if(['reviewer-2-phases-02-05','reviewer-2-phases-02-04'].includes(staged.segment.segmentId))
+    if(staged.segment.phases.includes(4))
       extraLines.push('As challenger, review every item in '+blob(path.posix.join(campaignPath,'work/phase-04/discovery/DISCOVERY_SUMMARY_v1.json'))+': attacker findings and contradictions, unresolved checks, not-applicable claims and coverage gaps. Amend reviewer work or order targeted tests through the existing directive; accept a gap only with a stated reason.');
     if(staged.segment.segmentId==='reviewer-4-phases-08-10')
       extraLines.push('Check the coverage label and every gap in '+blob(path.posix.join(campaignPath,'work/phase-10/COVERAGE_MATRIX_v1.json'))+' before accepting.');
@@ -1511,7 +1499,7 @@ if(sequence===10){
   directory.currentAssignment=null;directory.updatedAt=now;
 }
 else{
-  const nextReviewer=assignmentReviewer(nextSequence,authorityRoot);
+  const nextReviewer=assignmentReviewer(nextSequence,authorityRoot,root);
   const nextStatus=fresh||isFreshBoundary(nextSequence,authorityRoot)?'WAITING_FOR_SUCCESSOR_AGENT':'ACTIVE';
   nextAssignment=preparePhaseWork({root,campaignPath,authorityRoot,sequence:nextSequence,reviewer:nextReviewer,predecessorReceiptPath:sealedReceiptRel,derivedInputPaths:nextDerivedInputs,status:nextStatus,prefillContext:successorPrefillContext});
   if(sequence===3&&!masterAmendmentRefreshSha&&activeDetectionPolicyV1(predecessor)){
