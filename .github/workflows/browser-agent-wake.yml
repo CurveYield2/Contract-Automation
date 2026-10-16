@@ -6,10 +6,6 @@ on:
       wake_id:
         required: true
         type: string
-      delivery_result_sha256:
-        description: Exact controller result digest, for delivered wake acknowledgement
-        required: false
-        type: string
       campaign_id:
         required: true
         type: string
@@ -427,15 +423,14 @@ jobs:
           echo 'Reviewer wake unconfirmed after 5 minutes; browser visual send evidence is not proof of reception.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record delivered controller result only after exact first-action acknowledgement
-        if: steps.receipt.outputs.verified == 'true' && inputs.delivery_result_sha256 != ''
+        if: steps.receipt.outputs.verified == 'true'
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
-          RESULT_SHA: ${{ inputs.delivery_result_sha256 }}
           ACKED_WAKE_ID: ${{ inputs.wake_id }}
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$RESULT_SHA" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::Invalid delivery result digest"; exit 1; }
+          if [[ "$ACKED_WAKE_ID" != "$CAMPAIGN_ID-delivery-"* ]]; then exit 0; fi
           [[ "$WAKE_ACK_PATH" == campaigns/*/work/browser/WAKE_ACK_*_v1.json ]] || {
             echo "::error::Exact wake ack path required to mark delivered"; exit 1;
           }
@@ -450,17 +445,19 @@ jobs:
               import {advanceDeliveryStateV1} from "./scripts/lib/lite-controller-delivery-state-v1.mjs";
               const original=JSON.parse(fs.readFileSync("/tmp/phase-delivery-ledger.json","utf8"));
               if(original.campaignId!==process.argv[1])throw Error("wrong campaign on delivered result");
+              const entry=Object.values(original.results??{}).find(x=>x.wakeId===process.env.ACKED_WAKE_ID);
+              if(!entry)throw Error("acknowledged result missing in controller ledger");
               const updated=advanceDeliveryStateV1({
-                ledger:original,resultSha256:process.env.RESULT_SHA,wakeId:process.env.ACKED_WAKE_ID,
+                ledger:original,resultSha256:entry.resultSha256,wakeId:process.env.ACKED_WAKE_ID,
                 to:"DELIVERED",now:new Date().toISOString()
               });
               fs.writeFileSync("/tmp/phase-delivery-ledger-next.json",JSON.stringify(updated,null,2)+"\n");
             ' "$CAMPAIGN_ID"
             encoded="$(base64 -w0 /tmp/phase-delivery-ledger-next.json)"
             if gh api --method PUT "$api" -f branch="${{ inputs.gate_ref }}" \
-                -f message="audit(delivery): acknowledge $CAMPAIGN_ID $RESULT_SHA" \
+                -f message="audit(delivery): acknowledge $CAMPAIGN_ID $ACKED_WAKE_ID" \
                 -f sha="$sha" -f content="$encoded" >/dev/null; then
-              echo "Verified delivered controller result $RESULT_SHA" >> "$GITHUB_STEP_SUMMARY"
+              echo "Verified delivered controller wake $ACKED_WAKE_ID" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
           done
