@@ -1,3 +1,4 @@
+import {writeAllSyncV1} from './lib/lite-sync-stdout-v1.mjs';
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
@@ -746,7 +747,7 @@ process.stdout.write=(chunk)=>{
   const line=Buffer.isBuffer(chunk)?chunk.toString('utf8'):String(chunk);
   const result=JSON.parse(line.trim());
   const displayed=internalTransaction?result:storeControllerResultV1({root,campaignPath,response:result});
-  fs.writeSync(1,JSON.stringify(displayed)+'\n');
+  writeAllSyncV1(1,JSON.stringify(displayed)+'\n',{onRetry:()=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,5)});
   return true;
 };
 const sequence=reviewKind==='master'?null:Number(a['phase-sequence']);
