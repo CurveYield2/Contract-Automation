@@ -101,7 +101,7 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
          'Name a decisive test and exact observation that resolves correctness');
    }
    if(row?.verdict==='DEFECT'){
-     if(!hasCandidate(row,{classId:row?.classId??'OTHER'},candidateRecords(submission,row)))
+     if(!hasCandidate({...row,classId:row?.classId??'OTHER'},candidateRecords(submission,row,row)))
        err(errors,'DEFECT_WITHOUT_CANDIDATE',p+'.candidate','DEFECT requires an actionable candidate');
    }
    // A checklist cannot silently replace this specification-vs-code pass.
