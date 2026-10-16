@@ -119,3 +119,20 @@ jobs:
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         run: bash scripts/adr-audit-controller-checks-v1.sh
+
+      - name: Frozen r4 real-data Phase5 and all 78 discovery regression
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
+          (
+            cd .ac-target
+            git sparse-checkout add \
+              'campaigns/cyavKATv25b r4/receipts/PHASE_00_RECEIPT_v1.json' \
+              'campaigns/cyavKATv25b r4/work/phase-05/PHASE_05_WORK_FORM_v1.json' \
+              'campaigns/cyavKATv25b r4/work/phase-04/discovery/' \
+              'campaigns/cyavKATv25b r4/evidence/review-inventory/scope-corrected/REVIEW_INVENTORY_v1.json'
+          )
+          AC_R4_ROOT="$PWD/.ac-target" timeout -k 10s 240s node --test scripts/tests/adr-pr706-step1-r4-v1.test.mjs
