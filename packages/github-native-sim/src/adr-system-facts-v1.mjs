@@ -58,7 +58,8 @@ export function buildSystemFactsV1({inventory}) {
       ['FUNCTION','INHERITED_DEPENDENCY'].includes(c.kind)&&['public','external'].includes(c.visibility));
     for(const c of funcs) {
       const members=bySig.get(c.canonicalSignature)??[];
-      if(!members.some(x=>x.contract===q))members.push({contract:q,modifiers:uniq(c.modifiers??[]),
+      if(!members.some(x=>x.contract===q))members.push({contract:q,contextId:c.contextId,function:c.canonicalSignature,
+        sourceAnchor:c.path+':L'+c.lineStart+'-L'+c.lineEnd,modifiers:uniq(c.modifiers??[]),
         hasGuard:guardById.get(c.contextId)?.hasGuard??((c.modifiers??[]).some(x=>PRIV.test(x))||
           (c.senderCheckLines??[]).length>0)});
       bySig.set(c.canonicalSignature,members);
@@ -80,7 +81,10 @@ export function buildSystemFactsV1({inventory}) {
     if(matched.length<2)continue;
     const asymmetric=matched.some(x=>x.hasGuard!==matched[0].hasGuard||
       JSON.stringify(x.modifiers)!==JSON.stringify(matched[0].modifiers));
-    siblingGroups.push({signature,members:matched,asymmetric});
+    siblingGroups.push({signature,pattern:'same function signature in related inherited/interface contracts',
+      members:matched,asymmetric,
+      differences:asymmetric?matched.map(m=>({contract:m.contract,contextId:m.contextId,
+        guard:m.hasGuard,modifiers:m.modifiers})):[]});
   }
   sortRows(guardTable,['contract','function','contextId']);
   sortRows(siblingGroups,['signature']);

@@ -34,8 +34,11 @@ const scopeRel=path.posix.join(campaignPath,'source',identity.discovery?.project
 if(!fs.existsSync(file(scopeRel)))throw new Error('no '+AUDIT_SCOPE_FILE+' in the campaign source: '+scopeRel);
 const scope=parseAuditScope(fs.readFileSync(file(scopeRel),'utf8'));
 
+const receipt=readJson(path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'));
+const authorityRoot=authorityRootFromReceipt(receipt);
+const includeScripts=/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot);
 const before=readJson(sealed('REVIEW_INVENTORY_v1.json'));
-const inventory=applyAuditScopeToInventoryV1({inventory:before,scope,generatedAt:now});
+const inventory=applyAuditScopeToInventoryV1({inventory:before,scope,generatedAt:now,includeScripts});
 const facts={...buildSystemFactsV1({inventory}),generatedAt:now};
 const snapshotRel=sealed('DEPLOYED_STATE_SNAPSHOT_v1.json');
 const snapshot=fs.existsSync(file(snapshotRel))?readJson(snapshotRel):null;
@@ -64,8 +67,7 @@ writeJson(corrected('SCOPE_CORRECTION_v1.json'),{schemaVersion:'curveyield-revie
   supersededDiscoveryPath:fs.existsSync(file(discoveryDir))?supersededDir:null});
 
 if(fs.existsSync(file(discoveryDir)))fs.renameSync(file(discoveryDir),file(supersededDir));
-const receipt=readJson(path.posix.join(campaignPath,'receipts/PHASE_00_RECEIPT_v1.json'));
-const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot:authorityRootFromReceipt(receipt),
+const started=startDiscoveryV1({root,campaignPath,directory,authorityRoot,
   automationRoot:process.cwd(),now,auditControllerRef:args['audit-controller-ref']??'main'});
 const state=started.state.payload;
 directory.discovery={statePath:started.statePath,status:started.completeImmediately?'COMPLETE':'RUNNING',
@@ -73,7 +75,8 @@ directory.discovery={statePath:started.statePath,status:started.completeImmediat
 directory.updatedAt=now;
 writeJson(args['campaign-directory-path'],directory);
 const notice='CONTROLLER: Phase 4 discovery has been restarted on a scope-corrected plan. Only '+scope.inScopePaths.join(', ')+
-  ' is in scope (per the package '+AUDIT_SCOPE_FILE+'); vendored IPOR Fusion, forge-std and deploy scripts are no longer review units. '+
+  ' is in scope (per the package '+AUDIT_SCOPE_FILE+'); vendored IPOR Fusion and forge-std stay excluded; '+
+  (includeScripts?'first-party deployment scripts remain IN SCOPE under v13. ':'deployment scripts remain excluded under frozen v12. ')+
   'Your earlier units are superseded: stop any unit you are working on and start the units below.';
 const message=notice+'\n\n'+Buffer.from(started.wake.messageB64,'base64').toString('utf8');
 process.stdout.write(JSON.stringify({status:'RESCOPED',before:units(sealedPlan),after:units(plan),

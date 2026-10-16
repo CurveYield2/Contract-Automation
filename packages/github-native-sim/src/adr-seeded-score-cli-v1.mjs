@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {scoreSeededCampaignV1} from './adr-detection-qualification-v1.mjs';
+import {sourceBoundAutoAdjudicationsV13} from './adr-private-source-match-v1.mjs';
 
 export function scoreFilesV1({privateManifestPath,findingsPath,adjudicationsPath,partialPath=null,leakStagesPath=null}){
   if(!path.isAbsolute(privateManifestPath??''))
@@ -16,10 +17,17 @@ export function scoreFilesV1({privateManifestPath,findingsPath,adjudicationsPath
   const truth=manifest.cases;
   if(!Array.isArray(truth))throw new Error('private manifest cases must be an array');
   const findings=parse(findingsPath);
-  const adjudications=parse(adjudicationsPath);
+  const auto=adjudicationsPath==='AUTO_PRIVATE_SOURCE_MATCH';
+  const matched=auto?sourceBoundAutoAdjudicationsV13({truth,findings}):null;
+  const adjudications=auto?matched.adjudications:parse(adjudicationsPath);
   const partialCases=partialPath?parse(partialPath):[];
-  const missStageByCase=leakStagesPath?parse(leakStagesPath):{};
-  const result=scoreSeededCampaignV1({truth,findings,adjudications,partialCases,missStageByCase,
+  const missStageByCase=leakStagesPath?parse(leakStagesPath):
+    Object.fromEntries(truth.filter(x=>x.kind==='defect').map(x=>[
+      x.caseId,typeof x.leakStage==='string'&&x.leakStage.trim()?
+        x.leakStage.trim():'UNCLASSIFIED'
+    ]));
+  const result=scoreSeededCampaignV1({truth,findings:auto?matched.findings:findings,
+    adjudications,partialCases,missStageByCase,
     expectedDefects:manifest.expectedDefects??41,baselineCaught:manifest.baselineCaught??14,
     minCaught:manifest.minCaught??30});
   // No raw labels, literal truth, source paths, full findings, or manifest identity in output.
@@ -31,6 +39,7 @@ export function scoreFilesV1({privateManifestPath,findingsPath,adjudicationsPath
     bySeverity:result.bySeverity,byClassId:result.byClassId,byContract:result.byContract,
     leakStageCounts:Object.fromEntries(Object.entries(result.byLeakStage).map(([key,ids])=>[key,ids.length])),
     criticalHighMissCount:result.criticalHighMisses.length,
+    ...(auto?{sourceMatchMode:'PRIVATE_SOURCE_BOUND_AUTO',ambiguousCount:matched.ambiguous.length}:{}),
     gate:result.gate
   };
 }
@@ -38,7 +47,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===path.resolve(new URL(import.
   try{
     const [findingsPath,adjudicationsPath,partialPath,leakStagesPath]=process.argv.slice(2);
     if(!findingsPath||!adjudicationsPath)
-      throw new Error('usage: node adr-seeded-score-cli-v1.mjs FINDINGS_JSON ADJUDICATIONS_JSON [PARTIAL_JSON] [LEAK_STAGE_JSON]');
+      throw new Error('usage: node adr-seeded-score-cli-v1.mjs FINDINGS_JSON AUTO_PRIVATE_SOURCE_MATCH [PARTIAL_JSON] [LEAK_STAGE_JSON]');
     const result=scoreFilesV1({privateManifestPath:process.env.PRIVATE_SEEDED_TRUTH_FILE,
       findingsPath,adjudicationsPath,partialPath,leakStagesPath});
     process.stdout.write(JSON.stringify(result)+'\n');

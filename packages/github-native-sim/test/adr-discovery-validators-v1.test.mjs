@@ -10,7 +10,7 @@ const inventory={payload:{sourceUnits:[
  {path:'test/Mock.sol',scopeTier:'TEST_OR_MOCK',lineCount:100}
 ]}};
 const anchor='contracts/B.sol:L2-L4';
-const candidate=()=>({tempKey:'C-001',title:'Missing guard',description:'An unguarded state write is reachable.',anchors:[anchor]});
+const candidate=()=>({tempKey:'C-001',classId:'ACCESS_CONTROL',severity:'HIGH',title:'Missing guard',description:'An unguarded state write is reachable.',anchors:[anchor]});
 const flowPacket={unitId:'F-001',primaryContexts:[{contextId:'CTX-A'}],requiredClasses:{'CTX-A':['ACCESS_CONTROL']},flows:[{flowId:'FLOW-0001'}]};
 const flowSubmission=()=>({
  schemaVersion:'curveyield-flow-review-submission-v1',unitId:'F-001',
@@ -190,8 +190,9 @@ test('v13 storage initializer cannot be covered by trivialReviews',()=>{
 test('v13 requires each packet NatSpec and literal rule to be compared, and sibling asymmetry checked',()=>{
  const packet={...flowPacket,reviewPolicy:'correctness-verdict-v13',
   documentationItems:[{contextId:'CTX-A',ruleId:'NATSPEC:CTX-A',rule:'Only owner may set fee'}],
-  siblingChecks:[{pattern:'owner guard',members:[{contract:'contracts/A.sol:A',name:'setFee'},
-    {contract:'contracts/A.sol:A',name:'setLimit'}]}],
+  siblingChecks:[{signature:'setFee(uint256)',pattern:'owner guard',asymmetric:true,
+    members:[{contract:'contracts/A.sol:A',contextId:'CTX-A',function:'setFee(uint256)'},
+      {contract:'contracts/B.sol:B',contextId:'CTX-B',function:'setFee(uint256)'}]}],
   primaryContexts:[{contextId:'CTX-A',qualifiedContainer:'contracts/A.sol:A'}]};
  const sub={...flowSubmission(),rows:[{contextId:'CTX-A',verdict:'CORRECT',
   intent:'Only owner should change the fee and setter must apply declared fee limits',
@@ -204,7 +205,7 @@ test('v13 requires each packet NatSpec and literal rule to be compared, and sibl
  sub.rows[0].documentedRules=[{ruleId:'NATSPEC:CTX-A',rule:'Only owner may set fee',
    comparison:'MATCH',reason:'onlyOwner checks msg.sender'}];
  sub.rows[0].specInspection.status='MATCH';
- sub.rows[0].siblingComparisons=[{sibling:'setLimit',comparison:'Both check owner; no fee-limit asymmetry'}];
+ sub.rows[0].siblingComparisons=[{siblingContextId:'CTX-B',signature:'setFee(uint256)',comparison:'A guards owner, B lacks guard; asymmetry noted'}];
  assert.equal(flow(packet,sub).ok,true,JSON.stringify(flow(packet,sub).errors));
 });
 
@@ -224,4 +225,35 @@ test('v13 DEFECT accepts inline, row-local or linked candidate without throwing'
    const result=flow(packet,s);
    assert.equal(result.ok,true,flavor+': '+JSON.stringify(result.errors));
  }
+});
+
+test('v13 unrelated contract functions never require sibling signature comparison',()=>{
+ const packet={...flowPacket,reviewPolicy:'correctness-verdict-v13',
+  primaryContexts:[{contextId:'CTX-A',qualifiedContainer:'contracts/A.sol:A',kind:'FUNCTION'}],
+  siblingChecks:[{signature:'different()',members:[
+   {contextId:'CTX-Q',contract:'contracts/A.sol:A',function:'different()'},
+   {contextId:'CTX-R',contract:'contracts/A.sol:A',function:'different()'}]}]};
+ const result=flow(packet,{schemaVersion:'curveyield-flow-review-submission-v1',rows:[{
+   contextId:'CTX-A',verdict:'CORRECT',intent:'Only owner may change state',
+   reason:'Guard checks sender before protected state writes',anchors:[anchor],
+   specInspection:{status:'NO_DOCUMENTED_RULES',docsAndCommentsChecked:'README reviewed',
+    namedConstantsChecked:'Named constants crosschecked'},documentedRules:[]}]});
+ assert.ok(!result.errors.some(x=>x.code==='SIBLING_CHECK_REQUIRED'),JSON.stringify(result.errors));
+});
+
+test('v13 defect candidate must carry class and severity for blind qualification',()=>{
+ const packet={...flowPacket,reviewPolicy:'correctness-verdict-v13'};
+ const row={contextId:'CTX-A',verdict:'DEFECT',
+  intent:'Only privileged callers should be allowed to change fee parameters',
+  reason:'The state-changing setter has no caller check before assignment',
+  anchors:[anchor],specInspection:{status:'NO_DOCUMENTED_RULES',
+   docsAndCommentsChecked:'README and inline comments reviewed',
+   namedConstantsChecked:'Relevant constants searched'},
+  documentedRules:[],candidate:{tempKey:'C-UNTYPED',
+   title:'Missing privilege check',description:'Any caller can update fee',anchors:[anchor]}};
+ const sample={...flowSubmission(),rows:[row]};
+ has(flow(packet,sample),'V13_CANDIDATE_CLASS_REQUIRED');
+ has(flow(packet,sample),'V13_CANDIDATE_SEVERITY_REQUIRED');
+ row.candidate.classId='ACCESS_CONTROL';row.candidate.severity='HIGH';
+ assert.equal(flow(packet,sample).ok,true,JSON.stringify(flow(packet,sample).errors));
 });

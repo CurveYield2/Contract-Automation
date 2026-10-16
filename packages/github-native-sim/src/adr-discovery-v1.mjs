@@ -4,9 +4,10 @@ import {createHash} from 'node:crypto';
 import {classesForTriggersV1,loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
 import {buildCoverageMatrixV1} from './adr-coverage-matrix-v1.mjs';
 import {deriveBaselineObligationsV1} from './adr-baseline-obligations-v1.mjs';
-import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1,TRIVIAL_KINDS_V1} from './adr-discovery-validators-v1.mjs';
+import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1,TRIVIAL_KINDS_V1,isLiteralConstantV13} from './adr-discovery-validators-v1.mjs';
 import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
+import {independentSpecItemsV13} from './adr-independent-spec-v1.mjs';
 // V13 qualification status is assessed independently after real blinded audit runs.
 
 const pathJoin=(campaign,relative)=>path.posix.join(campaign,'work/phase-04/discovery',relative);
@@ -68,27 +69,36 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const contractChecks=role==='ATTACK'?[]:[...new Set(primary.map(id=>contextFor(inventory,id)?.qualifiedContainer).filter(Boolean))]
   .filter(name=>ownerUnit.get(name)===unitId).sort()
   .map(contract=>({contract,classId:'UPGRADE_INIT_STORAGE',reviewChecks:arr(upgradeClass?.reviewChecks)}));
- const trivialContextIds=role==='ATTACK'?[]:primary.filter(id=>TRIVIAL_KINDS_V1.has(contextFor(inventory,id)?.kind));
+ const verdictV13=/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot);
+ const trivialContextIds=role==='ATTACK'?[]:primary.filter(id=>verdictV13?
+   isLiteralConstantV13(contextFor(inventory,id)):TRIVIAL_KINDS_V1.has(contextFor(inventory,id)?.kind));
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
  const flows=arr(plan?.payload?.flows).filter(f=>arr(unit.flowIds).includes(f.flowId));
  const questions=arr(plan?.payload?.integrationQuestions).filter(q=>arr(unit.integrationQuestionIds).includes(q.obligationId));
- const verdictV13=/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot);
  const siblingChecks=verdictV13&&role!=='ATTACK'?arr(facts?.payload?.siblingGroups)
-  .filter(g=>arr(g.members).some(m=>primary.some(id=>contextFor(inventory,id)?.qualifiedContainer===m.contract)))
-  .map(g=>({pattern:g.pattern??'shared modifier or pattern',
-    members:arr(g.members).map(m=>({contract:m.contract,name:m.name??m.signature??m.function??''}))})):[];
- const documentationItems=verdictV13&&role!=='ATTACK'?primary.flatMap(id=>{
+  .filter(g=>arr(g.members).some(m=>primary.includes(m.contextId)))
+  .map(g=>({signature:g.signature,pattern:g.pattern??'shared modifier or pattern',
+    asymmetric:g.asymmetric,differences:g.differences??[],
+    members:arr(g.members).map(m=>({contract:m.contract,contextId:m.contextId,
+      function:m.function??g.signature,sourceAnchor:m.sourceAnchor,
+      hasGuard:m.hasGuard,modifiers:m.modifiers??[]}))})):[];
+ const independentItems=verdictV13&&role!=='ATTACK'?primary.flatMap(id=>{
   const c=contextFor(inventory,id);
-  if(!c)return [];
-  const rules=[];
-  if(typeof c.natSpec==='string'&&c.natSpec.trim())
-    rules.push({ruleId:'NATSPEC:'+id,sourceAnchor:contextAnchor(c),
-      rule:c.natSpec.slice(0,1200),type:'NATSPEC'});
-  if(typeof c.declaredValue==='string'&&c.declaredValue!=='UNINITIALIZED'&&c.declaredValue.trim())
-    rules.push({ruleId:'DECLARED_VALUE:'+id,sourceAnchor:contextAnchor(c),
-      rule:c.declaredValue.slice(0,300),type:'LITERAL_OR_INITIALIZED_STORAGE'});
-  return rules.map(x=>({contextId:id,...x}));
+  return c?[{contextId:id,...independentSpecItemsV13({root,campaignPath,context:c,
+    otherContexts:inventory.payload.contexts})}]:[];
  }):[];
+ const documentationItems=independentItems.flatMap(x=>[
+   ...(typeof contextFor(inventory,x.contextId)?.natSpec==='string'&&
+    contextFor(inventory,x.contextId).natSpec.trim()?[{
+      contextId:x.contextId,ruleId:'NATSPEC:'+x.contextId,
+      sourceAnchor:contextAnchor(contextFor(inventory,x.contextId)),
+      rule:contextFor(inventory,x.contextId).natSpec.slice(0,1200),type:'NATSPEC'}]:[]),
+   ...x.documentationItems.map(rule=>({contextId:x.contextId,...rule}))
+ ]);
+ const specContext=independentItems.map(({contextId,referenceConstants,checkedDocCount,sourceCommentsChecked,missingSource})=>({
+  contextId,referenceConstants,checkedDocCount,sourceCommentsChecked,missingSource,
+  requirement:'Code initializers and getters are observations, not independent specifications'
+ }));
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
   unitId,role,chatKey:role==='ATTACK'?(verdictV13?'reviewer-3':'reviewer-3L'):'reviewer-2',instructionsPath,
   submissionPath:submissionRel(campaignPath,unitId),boundaryRequestPath:'process/agent-upload/lite-phase-boundary/',
@@ -101,14 +111,14 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
   integrationQuestionIds:arr(unit.integrationQuestionIds),
   ...(verdictV13&&role!=='ATTACK'?{
     reviewPolicy:'correctness-verdict-v13',
-    siblingChecks,documentationItems,
+    siblingChecks,documentationItems,specContext,
     specificationReview:{sourcePaths:[...new Set(primary.map(id=>contextFor(inventory,id)?.path).filter(Boolean))],
       inspect:['NatSpec','inline comments','README and docs','named constants','paired parameters'],
       requirement:'For each documentationItems ruleId, report a MATCH/MISMATCH/UNRESOLVED comparison. Also explicitly inspect comments and README/docs from sourceRoot. If none are applicable, state NO_DOCUMENTED_RULES; the absence of entries alone is not proof.'},
     submissionGuide:[
       'V13 rows[] shape: {contextId,verdict:CORRECT|DEFECT|UNRESOLVED,intent,reason,anchors:[file.sol:Lx-Ly],specInspection:{status:MATCH|MISMATCH|UNRESOLVED|NO_DOCUMENTED_RULES,docsAndCommentsChecked,namedConstantsChecked},documentedRules:[{ruleId,rule,comparison,reason}],siblingComparisons:[{sibling,comparison}]}. Full source-backed fields are required, not guessed placeholders.',
       'CORRECT example: {contextId:CTX,verdict:CORRECT,intent:Only the owner can set cap,reason:Owner check precedes the state update,anchors:[file.sol:L20-L25],specInspection:{status:MATCH,docsAndCommentsChecked:README inspected,namedConstantsChecked:CAP inspected},documentedRules:[],siblingComparisons:[]}; use actual packet anchors and rules.',
-      'DEFECT example: same core fields plus verdict:DEFECT and candidate:{tempKey:C1,title:Uncapped update,description:Bypass of configured cap,anchors:[file.sol:L30-L35]}; also accepted: row.candidates[] or top-level candidates[] with candidateTempKey.',
+      'DEFECT example: same core fields plus verdict:DEFECT and candidate:{tempKey:C1,classId:ACCESS_CONTROL,severity:HIGH,title:Uncapped update,description:Bypass of configured cap,anchors:[file.sol:L30-L35]}; also accepted: row.candidates[] or top-level candidates[] with candidateTempKey.',
       'UNRESOLVED example: same core fields plus verdict:UNRESOLVED and decidingTest:{name:multi-actor transaction sequence,expectedObservation:the exact machine result that confirms or disproves exploitability}.',
       'Check every packet documentationItems ruleId in documentedRules, and siblingChecks for actual members; never assert NO_DOCUMENTED_RULES if packet includes documentationItems.',
       'Class checks are prompts only: no per-class response is graded. The correctness verdict cannot be inferred from checklist completion.',
@@ -212,7 +222,7 @@ export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campa
  lines.push('Units to complete now ('+ids.length+'): '+ranges.map(r=>r.fromId===r.toId?r.fromId:r.fromId+' to '+r.toId).join(', ')+'.');
  if(indexPath)lines.push('Complete assignment index: '+link(indexPath)+'. Read each page and save each unit submission without stopping or waiting for a controller message.');
  else lines.push('Discovery folder: '+link(pathJoin(campaignPath,''))+' . For each unit <id>, read <id>/ASSIGNMENT_PACKET_v1.json and write <id>/SUBMISSION_v1.json.');
- if(role!=='ATTACK')lines.push('Each packet has a submissionGuide: use trivialReviews (one per contract for constants and getters), groupChecks (functions sharing a modifier) and the listed contractChecks to avoid repeating the same check.');
+ if(role!=='ATTACK')lines.push('Each packet has a submissionGuide: use trivialReviews only for eligible literal constants, groupChecks (functions sharing a modifier) and the listed contractChecks to avoid repeating the same check.');
  lines.push(feedbackText?'Fix every unit listed in the feedback, then push ONE boundary request.':'This is your entire discovery workload for this phase. Complete every unit in one continuous pass without stopping or asking to continue, then push ONE boundary request.');
  lines.push('The controller validates every unit with a new submission in a single run and wakes you only if a unit needs rework. Do not push a request per unit.');
  lines.push('Boundary request location: process/agent-upload/lite-phase-boundary/');

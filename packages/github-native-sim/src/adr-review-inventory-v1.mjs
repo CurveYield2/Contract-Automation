@@ -325,7 +325,7 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   for(const s of sourceUnits) {
     if(s.astStatus==='AVAILABLE'||s.scopeTier!=='IN_SCOPE'&&s.astStatus!=='UNSUPPORTED_LANGUAGE')continue;
     const scriptWithoutAst=includeScripts&&s.astStatus==='MISSING'&&
-      (/(^|\/)(script|scripts|deploy|deployment|configure|config|handover)\//i.test(s.path)||s.path.endsWith('.s.sol'));
+      (/(^|\/)(script|scripts|deploy|deployment|deployments|configure|config|handover)\//i.test(s.path)||s.path.endsWith('.s.sol'));
     if(s.astStatus==='MISSING'&&s.scopeTier==='IN_SCOPE'&&!scriptWithoutAst)complete=false;
     const source=bySource.get(s.path),n=source.bytes,kind=scriptWithoutAst?'SCRIPT_FILE':'FILE_FALLBACK';
     const symbolId='SYM-'+digestCanonicalV1({path:s.path,qualifiedContainer:s.path,kind,canonicalSignature:'file()'}).slice(0,16);
@@ -349,9 +349,9 @@ export async function buildReviewInventoryV1({projectRoot,build,campaign}) {
   // Solidity compilation cannot produce an AST (JS, shell, YAML, JSON).
   // Older frozen authorities retain their historical compiled-only inventory.
   if(includeScripts){
-    const skip=new Set(['.git','node_modules','out','dist','build','artifacts','cache','.audit-hermetic-build']);
-    const textExt=/\.(?:mjs|cjs|js|ts|sh|json|ya?ml)$/i;
-    const scriptDirectory=/(^|\/)(?:script|scripts|deploy|deployment|configure|config|handover)\//i;
+    const skip=new Set(['.git','node_modules','vendor','lib','ipor-fusion','out','dist','build','artifacts','cache','.audit-hermetic-build']);
+    const textExt=/\.(?:mjs|cjs|js|ts|py|sh|json|ya?ml)$/i;
+    const scriptDirectory=/(^|\/)(?:script|scripts|deploy|deployment|deployments|configure|config|handover|internal)\//i;
     let n=0;
     async function addTextScripts(dir){
       for(const entry of await fs.readdir(dir,{withFileTypes:true})){
@@ -429,10 +429,10 @@ export async function writeReviewInventoryOutputsV1({outputDir,projectRoot,build
 // Re-applies a package's audit scope to an inventory that was built without it (campaigns whose
 // Phase 0 predates scope support). Keeps in-scope contexts, keeps dependency functions that
 // in-scope contracts inherit and expose as INHERITED_DEPENDENCY contexts, and drops the rest.
-export function applyAuditScopeToInventoryV1({inventory,scope,generatedAt}) {
+export function applyAuditScopeToInventoryV1({inventory,scope,generatedAt,includeScripts=false}) {
   if(scope?.source!==AUDIT_SCOPE_FILE)throw new Error('applyAuditScopeToInventoryV1 requires an '+AUDIT_SCOPE_FILE+' scope');
   const payload=structuredClone(inventory.payload);
-  const tierOf=(p)=>sourceTierV1(p,scope);
+  const tierOf=(p)=>sourceTierV1(p,scope,{includeScripts});
   const inScopeContainers=new Set(payload.contexts.filter(c=>tierOf(c.path)==='IN_SCOPE').map(c=>c.qualifiedContainer));
   const contexts=[];
   for(const c of payload.contexts) {
@@ -449,7 +449,7 @@ export function applyAuditScopeToInventoryV1({inventory,scope,generatedAt}) {
   payload.limitations=[{code:'SCOPE_FROM_AUDIT_SCOPE_FILE',path:AUDIT_SCOPE_FILE,
     detail:'Re-scoped after Phase 0. In scope: '+scope.inScopePaths.join(', ')+'. Every other compiled source is a dependency, reviewed only where in-scope contracts inherit it.'},
     ...(payload.limitations??[]).filter(l=>l.code!=='DEPENDENCY_TIER_BY_PATH'&&!(l.code==='INVENTORY_INCOMPLETE'&&tierOf(l.path)!=='IN_SCOPE'))];
-  payload.complete=!payload.sourceUnits.some(u=>u.scopeTier==='IN_SCOPE'&&u.astStatus==='MISSING');
+  payload.complete=!payload.sourceUnits.some(u=>u.scopeTier==='IN_SCOPE'&&u.astStatus==='MISSING'&&!(includeScripts&&payload.contexts.some(c=>c.kind==='SCRIPT_FILE'&&c.path===u.path)));
   const byKind={};for(const c of contexts)byKind[c.kind]=(byKind[c.kind]??0)+1;
   payload.counts={...(payload.counts??{}),sourceUnits:payload.sourceUnits.length,
     inScopeUnits:payload.sourceUnits.filter(u=>u.scopeTier==='IN_SCOPE').length,contexts:contexts.length,byKind};

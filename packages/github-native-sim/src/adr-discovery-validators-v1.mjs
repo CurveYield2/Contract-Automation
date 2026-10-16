@@ -9,6 +9,13 @@ const ATTACK_ROLES=new Set(['UNPRIVILEGED','UNPRIVILEGED_CALLER','OTHER_ROLE','D
 // in trivialReviews covers them. Upgrade/storage is a contract property: answered once per
 // upgradeable contract in contractChecks. groupChecks cover functions sharing a modifier.
 export const TRIVIAL_KINDS_V1=new Set(['CONSTANT','IMMUTABLE','GENERATED_GETTER']);
+export function isLiteralConstantV13(context){
+ const text=String(context?.declaredValue??'').trim();
+ return context?.kind==='CONSTANT'&&Number.isSafeInteger(context?.lineStart)&&
+   context.lineStart>=1&&Number.isSafeInteger(context.lineEnd)&&context.lineEnd>=context.lineStart&&
+   /^(?:true|false|0x[0-9a-fA-F]+|[0-9][0-9_]*(?:\s+(?:wei|gwei|ether|seconds|minutes|hours|days|weeks))?|["'][^"']{0,256}["'])$/.test(text);
+}
+
 const blank=x=>typeof x!=='string'||!x.trim();
 const emptyEvidence=x=>blank(x)||['n/a','none','safe','no issue','reviewed'].includes(x.trim().toLowerCase());
 const keys=arr=>Array.isArray(arr)?arr.map(x=>typeof x==='string'?x:x?.contextId??x?.flowId??x?.obligationId):[];
@@ -71,14 +78,15 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
  const errors=[];
  const primary=packetIds(packet,'primaryContexts').length?
    packetIds(packet,'primaryContexts'):packetIds(packet,'primaryContextIds');
- const trivial=new Set(packetIds(packet,'trivialContextIds'));
+ const trivial=new Set(packetIds(packet,'trivialContextIds').filter(id=>
+    isLiteralConstantV13(arr2(inventory?.payload?.contexts).find(c=>c.contextId===id))));
  const covered=new Set(),seen=new Set(),allCandidates=candidateRecords(submission);
  const reviews=arr2(submission?.trivialReviews);
  for(const [i,review] of reviews.entries()){
    const contexts=arr2(packet.primaryContexts).filter(x=>x.qualifiedContainer===review?.contract&&
      trivial.has(x.contextId));
    if(!contexts.length)err(errors,'TRIVIAL_CONTRACT_UNKNOWN','trivialReviews['+i+']',
-     'Only literal constants/immutables and generated getters may be reviewed as trivial');
+     'V13 trivialReviews apply only to literal CONSTANT definitions with source anchors; getters and immutables require verdict rows');
    if(blank(review?.reason??review?.evidence))err(errors,'EVIDENCE_EMPTY','trivialReviews['+i+'].reason','Explain exact literal/getter correctness');
    for(const c of contexts)covered.add(c.contextId);
  }
@@ -124,19 +132,30 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
        if(!expectedRules.has(item?.ruleId)||reviewed.has(item?.ruleId))
          err(errors,'SPEC_RULE_UNMATCHED',cp+'.ruleId','Documented rule is unknown or repeated');
        reviewed.add(item?.ruleId);
+       const expected=expectedRules.get(item?.ruleId);
        if(blank(item?.rule)||!['MATCH','MISMATCH','UNRESOLVED'].includes(item?.comparison)||
-         blank(item?.reason))err(errors,'SPEC_CHECK_INVALID',cp,'Compare exact documented value/rule with observed implementation');
+         blank(item?.reason)||item.rule!==expected?.rule)
+         err(errors,'SPEC_CHECK_INVALID',cp,
+           'Compare exact independently documented rule text; implementation values are not specifications');
      }
      for(const id of expectedRules.keys())if(!reviewed.has(id))
        err(errors,'SPEC_RULE_MISSING',p+'.documentedRules','Not compared: '+id);
    }
    const siblings=arr2(packet?.siblingChecks).filter(x=>
-     arr2(x?.members).some(m=>m.contract===arr2(packet?.primaryContexts).find(c=>c?.contextId===id)?.qualifiedContainer));
-   if(siblings.length&&(!Array.isArray(row?.siblingComparisons)||!row.siblingComparisons.length))
-     err(errors,'SIBLING_CHECK_REQUIRED',p+'.siblingComparisons',
-       'Compare sibling functions sharing guards, patterns or paired parameters');
+     arr2(x?.members).some(m=>m.contextId===id&&m.function===x.signature));
+   if(siblings.length){
+     if(!Array.isArray(row?.siblingComparisons)||!row.siblingComparisons.length)
+       err(errors,'SIBLING_CHECK_REQUIRED',p+'.siblingComparisons',
+         'Compare the exact same-signature sibling implementation');
+     else for(const group of siblings)
+       if(!row.siblingComparisons.some(entry=>entry.signature===group.signature&&
+          group.members.some(m=>m.contextId===entry.siblingContextId&&m.contextId!==id)&&
+          !blank(entry.comparison)))
+         err(errors,'SIBLING_IDENTITY_MISSING',p+'.siblingComparisons',
+           'Name exact sibling signature and distinct sibling contextId');
+   }
    if(row?.siblingComparisons!==undefined&&(!Array.isArray(row.siblingComparisons)||
-       row.siblingComparisons.some(x=>blank(x?.sibling)||blank(x?.comparison))))
+       row.siblingComparisons.some(x=>blank(x?.comparison)||!x?.siblingContextId||!x?.signature)))
      err(errors,'SIBLING_CHECK_INVALID',p+'.siblingComparisons',
        'Sibling or paired-parameter checks need explicit comparison');
    if(row?.candidate!==undefined&&obj(row.candidate))validateCandidate(row.candidate,inventory,errors,p+'.candidate');
@@ -146,6 +165,19 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
    err(errors,'MISSING_CONTEXT','rows','Primary context has no correctness verdict: '+id);
  // The legacy per-class checklist is visible in the packet only as a prompt.
  // It is never accepted as a substitute for a function correctness verdict.
+ // V13 candidates carry the two metadata fields required for independent
+ // source/class evaluation. This never changes frozen v12 validation.
+ const typed=[...arr2(submission?.candidates),...arr2(submission?.rows).flatMap(row=>[
+   ...(obj(row?.candidate)?[row.candidate]:[]),...arr2(row?.candidates)
+ ])];
+ for(const [i,c] of typed.entries()){
+   if(typeof c?.classId!=='string'||!/^[A-Z][A-Z0-9_]{2,80}$/.test(c.classId))
+     err(errors,'V13_CANDIDATE_CLASS_REQUIRED','typedCandidates['+i+'].classId',
+       'Source-grounded taxonomy class required for private seed evaluation');
+   if(!['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(c?.severity))
+     err(errors,'V13_CANDIDATE_SEVERITY_REQUIRED','typedCandidates['+i+'].severity',
+       'Severity is required for independent qualification');
+ }
  for(const [i,c] of allCandidates.entries())validateCandidate(c,inventory,errors,'candidates['+i+']');
  return finish(errors,submission);
 }
