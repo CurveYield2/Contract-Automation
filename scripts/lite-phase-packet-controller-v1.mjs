@@ -1,5 +1,5 @@
-import {writeAllSyncV1} from './lib/lite-sync-stdout-v1.mjs';
 #!/usr/bin/env node
+import {writeAllSyncV1} from './lib/lite-sync-stdout-v1.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
