@@ -71,7 +71,7 @@ test('real GitHub-installed Anvil preserves deployed code and pinned state witho
  });
  const engine=await startAnvilEngine({
   artifacts:{get(){throw Error('No deployments required in saved state fixture');}},
-  workflow:{steps:[]},chainId:1,forkUrl:null,block,
+  workflow:{steps:[]},chainId:1,forkUrl:url,block,
   evmVersion:'cancun',loadStatePath:staged.loadStatePath
  });
  try{
