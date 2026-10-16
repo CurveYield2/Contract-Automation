@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {generateV7ExecutionRequestV1} from '../../../scripts/lib/lite-phase5-request-generation-v1.mjs';
 import {validateDeepAssuranceRequestWithV26V1} from '../src/schema-v26.mjs';
 const digest='a'.repeat(64);
@@ -119,4 +122,20 @@ test('Katana Phase0 fork snapshots accept chainId 747474 but never mismatched ch
  const bad={...state,reusableForkState:{...state.reusableForkState,chainId:1}};
  const denied=generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,phase0Source:bad,target:targetK});
  assert.equal(denied.status,'REWORK_REQUIRED');
+});
+
+test('D-T1 machine generator refuses an absent/unusable harness and accepts a complete registry bundle',()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'v13-harness-registry-'));
+ try{
+  const opts={campaignId:'demo-r1',sourceSha256:digest,phase0Source:source,target:target(),automationRoot:root};
+  const missing=generateV7ExecutionRequestV1(opts);
+  assert.equal(missing.status,'REWORK_REQUIRED');
+  assert.ok(missing.missing.some(x=>x.field==='executionBlueprint.configuration.harness.bundleId'));
+  const bundleDir=path.join(root,'packages/github-native-sim/audit-harnesses/fixture-phase5');
+  fs.mkdirSync(bundleDir,{recursive:true});
+  fs.writeFileSync(path.join(bundleDir,'medusa.json'),'{}\n');
+  fs.writeFileSync(path.join(bundleDir,'foundry.toml'),'[profile.default]\n');
+  const ok=generateV7ExecutionRequestV1(opts);
+  assert.equal(ok.status,'GENERATED',JSON.stringify(ok.missing));
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
