@@ -207,3 +207,21 @@ test('v13 requires each packet NatSpec and literal rule to be compared, and sibl
  sub.rows[0].siblingComparisons=[{sibling:'setLimit',comparison:'Both check owner; no fee-limit asymmetry'}];
  assert.equal(flow(packet,sub).ok,true,JSON.stringify(flow(packet,sub).errors));
 });
+
+test('v13 DEFECT accepts inline, row-local or linked candidate without throwing',()=>{
+ const packet={...flowPacket,reviewPolicy:'correctness-verdict-v13'};
+ const row={contextId:'CTX-A',verdict:'DEFECT',
+   intent:'Unauthorized callers must not move protected funds',
+   reason:'The state change executes before the caller authorization guard',
+   anchors:[anchor],specInspection:{status:'MISMATCH',
+     docsAndCommentsChecked:'README and NatSpec reviewed',
+     namedConstantsChecked:'Relevant constants checked'},documentedRules:[]};
+ for(const flavor of ['inline','row','linked']){
+   const s={...flowSubmission(),rows:[{...row}],candidates:[]};
+   if(flavor==='inline')s.rows[0].candidate=candidate();
+   if(flavor==='row')s.rows[0].candidates=[candidate()];
+   if(flavor==='linked'){s.rows[0].candidateTempKey='C-001';s.candidates=[candidate()];}
+   const result=flow(packet,s);
+   assert.equal(result.ok,true,flavor+': '+JSON.stringify(result.errors));
+ }
+});
