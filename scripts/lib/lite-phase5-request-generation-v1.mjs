@@ -1,4 +1,6 @@
 import {createHash} from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import {V2_AUTOMATION_RELEASE,V2_RUNNER_RELEASE} from '../../packages/github-native-sim/src/schema.mjs';
 import {validateDeepAssuranceRequestWithV26V1} from '../../packages/github-native-sim/src/schema-v26.mjs';
 
@@ -15,7 +17,7 @@ const MIN_FUZZ_RUNS=100000;
 const okPath=x=>nonempty(x)&&!x.startsWith('/')&&!x.split('/').some(y=>!y||y==='.'||y==='..');
 const validType=new Set(['ANVIL_WORKFLOW','FOUNDRY_TEST','MEDUSA_PROPERTY']);
 
-export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Source,target}={}){
+export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Source,target,automationRoot}={}){
  const missing=[],key=String(target?.candidateKey??'').trim(),type=target?.reproductionType;
  const need=(field,valid,reason='required')=>{if(!valid)missing.push({field,reason});};
  need('candidateKey',nonempty(key));
@@ -52,6 +54,15 @@ export function generateV7ExecutionRequestV1({campaignId,sourceSha256,phase0Sour
     need('executionBlueprint.configuration.harness.bundleId',
       nonempty(blueprint.configuration?.harness?.bundleId),
       'require an existing audited harness bundle ID, not a placeholder');
+    if(automationRoot&&nonempty(blueprint.configuration?.harness?.bundleId)){
+      const id=blueprint.configuration.harness.bundleId;
+      const base=/^[a-z0-9][a-z0-9._-]{0,127}$/.test(id)
+        ?path.resolve(automationRoot,'packages/github-native-sim/audit-harnesses',id):null;
+      const ready=base&&fs.existsSync(base)&&fs.statSync(base).isDirectory()&&
+        ['medusa.json','foundry.toml'].every(name=>fs.existsSync(path.join(base,name)));
+      need('executionBlueprint.configuration.harness.bundleId',ready,
+        'bundle must exist in the trusted runner overlay registry with medusa.json and foundry.toml');
+    }
   }
  }
  need('phase0Source.archiveRepository',nonempty(phase0Source?.archiveRepository));
