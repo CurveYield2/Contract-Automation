@@ -240,3 +240,20 @@ test('v13 unrelated contract functions never require sibling signature compariso
     namedConstantsChecked:'Named constants crosschecked'},documentedRules:[]}]});
  assert.ok(!result.errors.some(x=>x.code==='SIBLING_CHECK_REQUIRED'),JSON.stringify(result.errors));
 });
+
+test('v13 defect candidate must carry class and severity for blind qualification',()=>{
+ const packet={...flowPacket,reviewPolicy:'correctness-verdict-v13'};
+ const row={contextId:'CTX-A',verdict:'DEFECT',
+  intent:'Only privileged callers should be allowed to change fee parameters',
+  reason:'The state-changing setter has no caller check before assignment',
+  anchors:[anchor],specInspection:{status:'NO_DOCUMENTED_RULES',
+   docsAndCommentsChecked:'README and inline comments reviewed',
+   namedConstantsChecked:'Relevant constants searched'},
+  documentedRules:[],candidate:{tempKey:'C-UNTYPED',
+   title:'Missing privilege check',description:'Any caller can update fee',anchors:[anchor]}};
+ const sample={...flowSubmission(),rows:[row]};
+ has(flow(packet,sample),'V13_CANDIDATE_CLASS_REQUIRED');
+ has(flow(packet,sample),'V13_CANDIDATE_SEVERITY_REQUIRED');
+ row.candidate.classId='ACCESS_CONTROL';row.candidate.severity='HIGH';
+ assert.equal(flow(packet,sample).ok,true,JSON.stringify(flow(packet,sample).errors));
+});
