@@ -77,14 +77,18 @@ test('private real-campaign projection uses accepted candidate evidence and inve
    qualifiedContainer:'contracts/Vault.sol:Vault'}]}};
  put(root,campaign+'/evidence/review-inventory/REVIEW_INVENTORY_v1.json',inv);
  put(root,campaign+'/work/phase-04/discovery/F-001/ACCEPTED_SUBMISSION_v1.json',{
-  rows:[{contextId:'CTX-A',candidate:{classId:'ACCESS_CONTROL',severity:'HIGH',
-   title:'Unauthorized setter',description:'Missing caller guard',
-   anchors:['contracts/Vault.sol:L12-L13']}}]});
+  candidates:[{tempKey:'LINK-2',classId:'ACCOUNTING_MATH',severity:'MEDIUM',
+    title:'Uncapped accrual',description:'Wrong basis points',anchors:['contracts/Vault.sol:L20-L23']}],
+  rows:[{contextId:'CTX-A',candidateTempKey:'LINK-2',
+   candidate:{classId:'ACCESS_CONTROL',severity:'HIGH',
+     title:'Unauthorized setter',description:'Missing caller guard',
+     anchors:['contracts/Vault.sol:L12-L13']}}]});
  const x=extractCampaignFindingsV13({controllerRoot:root,campaignPath:campaign});
- assert.equal(x.findings.length,1);
- assert.equal(x.findings[0].classId,'ACCESS_CONTROL');
- assert.deepEqual(x.findings[0].caseRefs,[]);
- assert.equal(x.findings[0].contract,'contracts/Vault.sol:Vault');
+ assert.equal(x.findings.length,2);
+ assert.ok(x.findings.some(v=>v.classId==='ACCESS_CONTROL'));
+ assert.ok(x.findings.some(v=>v.classId==='ACCOUNTING_MATH'));
+ assert.ok(x.findings.every(v=>v.caseRefs.length===0));
+ assert.ok(x.findings.every(v=>v.contract==='contracts/Vault.sol:Vault'));
 }));
 test('private answer-key leak scan finds hidden markers without returning case IDs or paths',()=>fixture(root=>{
  put(root,'reviewable/WAKE_v1.md','General assignment and source anchors only');
