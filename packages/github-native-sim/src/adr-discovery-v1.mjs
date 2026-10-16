@@ -223,7 +223,7 @@ function wakeFor({root,directory,ids,state,campaignPath,authorityRoot,auditContr
  const round=state.payload.wakeRound=(state.payload.wakeRound??0)+1;
  const attempt=Math.max(...ids.map(id=>state.payload.units[id]?.attempts??0))+1;
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
- const indexPath=/Audit_Litemode_v13(?:\\/|$)/.test(authorityRoot)
+ const indexPath=/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot)
     ?writeDiscoveryWindowIndexV1({root,campaignPath,ids,role}):null;
  const message=discoveryWindowWakeMessageV1({directory,auditControllerRef,campaignPath,ids,role,instructionsPath,attempt,feedbackText,indexPath});
  return {chatKey:state.payload.units[ids[0]].chatKey,
