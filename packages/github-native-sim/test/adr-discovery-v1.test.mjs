@@ -226,3 +226,20 @@ test('200-unit discovery window uses bounded index pages and one wake below 8 Ki
   assert.equal(count,200);
  }finally{fs.rmSync(o.root,{force:true,recursive:true});}
 });
+
+test('v12 discovery with forty-five real packet slots preserves folder wake and no v13 index',()=>{
+ const o=setup();
+ try{
+   const ids=Array.from({length:45},(_,i)=>'F-'+String(i+1).padStart(3,'0'));
+   const plan0=readJson(repoFile(o.root,campaignPath+'/evidence/review-inventory/FLOW_PLAN_v1.json'));
+   plan0.payload.reviewUnits=ids.map(unitId=>({unitId,role:'FLOW_REVIEW',clusterId:'CL-001',
+     flowIds:['FLOW-0001'],primaryContextIds:['CTX-A'],readContextIds:['CTX-A']}));
+   plan0.payload.attackUnits=[];
+   writeJson(repoFile(o.root,campaignPath+'/evidence/review-inventory/FLOW_PLAN_v1.json'),plan0);
+   const result=startDiscoveryV1(o);
+   const wake=Buffer.from(result.wakes[0].messageB64,'base64').toString('utf8');
+   assert.doesNotMatch(wake,/Complete assignment index:/);
+   assert.match(wake,/Discovery folder:/);
+   assert.equal(fs.existsSync(repoFile(o.root,campaignPath+'/work/phase-04/discovery/index/flow-review/INDEX_v1.json')),false);
+ }finally{fs.rmSync(o.root,{force:true,recursive:true});}
+});
