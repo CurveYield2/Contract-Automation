@@ -338,6 +338,8 @@ jobs:
         id: controller
         env:
           ETHEREUM_FORK_RPC_URL: ${{ secrets.RPC_ETHEREUM }}
+          RPC_KATANA: ${{ secrets.RPC_KATANA }}
+          RPC_BASE: ${{ secrets.RPC_BASE }}
         shell: bash
         run: |
           set -euo pipefail
