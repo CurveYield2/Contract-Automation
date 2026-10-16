@@ -139,3 +139,17 @@ test('D-T1 machine generator refuses an absent/unusable harness and accepts a co
   assert.equal(ok.status,'GENERATED',JSON.stringify(ok.missing));
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('r4 candidateId embedded in expected observation is bound as request metadata',()=>{
+ const design=target();
+ design.expectedMachineObservation={componentStatus:'COMPLETED',candidateId:design.candidateKey};
+ const good=generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,phase0Source:source,target:design});
+ assert.equal(good.status,'GENERATED',JSON.stringify(good.missing));
+ assert.deepEqual(good.request.configuration.v26.reproduction.expectedObservation,{componentStatus:'COMPLETED'});
+ assert.equal(good.request.configuration.v26.reproduction.candidateId,design.candidateKey);
+ const wrong=structuredClone(design);
+ wrong.expectedMachineObservation.candidateId='not-the-selected-candidate';
+ const bad=generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,phase0Source:source,target:wrong});
+ assert.equal(bad.status,'REWORK_REQUIRED');
+ assert.ok(bad.missing.some(x=>x.field==='expectedMachineObservation.candidateId'));
+});
