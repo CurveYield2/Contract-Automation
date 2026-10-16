@@ -81,6 +81,11 @@ else for(const [i,target] of designs.entries()){
     // Do not change reviewer work or its controller prefill digest in preflight.
     // The existing controller resolver owns the executionRequestRef mutation.
     generated.push({candidateKey:key,executionRequestRef:rel,shardPath});
+    const evidenceRel='work/phase-05/execution-requests/'+safe+'.design-v1.json';
+    const evidencePath=path.join(root,campaignPath,evidenceRel);
+    fs.writeFileSync(evidencePath,JSON.stringify({schemaVersion:'curveyield-phase5-machine-design-v1',
+      campaignId,sourceSha256,candidateKey:key,requestDigest:generatedRequest.request.requestDigest,
+      ...generatedRequest.designEvidence},null,2)+'\\n');
   }
   const candidateRef=(target.executionRequestRef&&!String(target.executionRequestRef).trim().startsWith('<')?target.executionRequestRef:null)||(generated.some(x=>x.candidateKey===key)?
     generated.find(x=>x.candidateKey===key).executionRequestRef:null);
@@ -94,7 +99,7 @@ else for(const [i,target] of designs.entries()){
 
 if(sharded)shardWorkFormV1({root,formRel:fullRel,phase:5,retireFull:true,force:true});
 const report={schemaVersion:'curveyield-phase5-request-preflight-v1',campaignId,sourceSha256,
-  status:failures.length?'REWORK_REQUIRED':'PREFLIGHT_PASS',runnable:ready.length>0,
+  status:failures.length?'REWORK_REQUIRED':'PREFLIGHT_PASS',runnable:failures.length===0&&ready.length>0,
   designCount:designs?.length??0,readyCount:ready.length,generated,failures,
   ...(sharded?{workShardIndexPath:indexRel}:{})};
 process.stdout.write(JSON.stringify(report)+'\n');
