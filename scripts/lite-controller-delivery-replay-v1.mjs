@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {restoreControllerResultV1} from './lib/lite-boundary-result-v1.mjs';
+import {validatePublishedDeliveryV1} from './lib/lite-controller-delivery-state-v1.mjs';
 
 export function prepareControllerDeliveryReplayV1({root,directoryRel,detailRef}={}){
  const directory=JSON.parse(fs.readFileSync(path.join(root,...directoryRel.split('/')),'utf8'));
@@ -25,6 +26,10 @@ export function prepareControllerDeliveryReplayV1({root,directoryRel,detailRef}=
      resultBytes:index.resultBytes,pageCount:index.pages.length}
  }});
  const resultSha256=index.resultSha256;
+ const authority=String(directory.currentAssignment?.workSchemaPath??directory.skillAuthority?.current?.homepagePath??'');
+ const isV13=authority.includes('Audit_Litemode_v13');
+ const delivery=validatePublishedDeliveryV1({root,campaignPath,resultSha256,now:new Date().toISOString()});
+ if(isV13&&!delivery)throw new Error('v13 published controller result has no bound delivery ledger');
  let kind=null,role=null,phaseId=null,milestoneId=null,message=null;
  if(response.status==='NEEDS_REWORK'){
    const assignment=directory.currentAssignment;
@@ -62,7 +67,7 @@ export function prepareControllerDeliveryReplayV1({root,directoryRel,detailRef}=
    message='Controller review requires action. Retrieve all exact, lossless details from '+fullRef+
      ', then resume only your current assigned work; no controller computation is needed.';
  return {schemaVersion:'curveyield-lite-delivery-replay-v1',kind,campaignId,campaignPath,
-   role,phaseId,milestoneId,wakeId:campaignId+'-delivery-replay-'+resultSha256.slice(0,20),
+   role,phaseId,milestoneId,wakeId:delivery?.wakeId??campaignId+'-delivery-replay-'+resultSha256.slice(0,20),
    messageB64:Buffer.from(message).toString('base64'),
    sourceResultSha256:resultSha256,sourceResultRef:fullRef,
    // A successful GH content fetch proves publication. Browser delivery is
