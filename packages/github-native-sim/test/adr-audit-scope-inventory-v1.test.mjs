@@ -52,7 +52,10 @@ test('v13 reviews deploy scripts unless explicitly excluded, regardless of src-o
  assert.equal(sourceTierV1('upgrade/script/deploy.s.sol',policyScope,{includeScripts:true}),'IN_SCOPE');
  assert.equal(sourceTierV1('upgrade/script/skip.s.sol',policyScope,{includeScripts:true}),'SCRIPT');
  assert.equal(sourceTierV1('upgrade/src/Vault.sol',policyScope,{includeScripts:true}),'IN_SCOPE');
- assert.equal(sourceTierV1('vendor/script/thirdparty.s.sol',policyScope,{includeScripts:true}),'IN_SCOPE');
+ assert.equal(sourceTierV1('vendor/script/thirdparty.s.sol',policyScope,{includeScripts:true}),'DEPENDENCY');
+ assert.equal(sourceTierV1('src/config/Vault.sol',null),'IN_SCOPE');
+ assert.equal(sourceTierV1('src/deploy/Vault.sol',null),'IN_SCOPE');
+ assert.equal(sourceTierV1('vendor/config/Vault.sol',null,{includeScripts:true}),'DEPENDENCY');
 });
 test('v13 adds text deploy/config scripts as residual review units while v12 does not',async()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'script-inventory-'));
