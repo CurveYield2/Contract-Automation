@@ -287,7 +287,7 @@ export function secureRestoreWorkFormV13({root,indexRel}){
  const baseText=fs.readFileSync(relfile(root,path.posix.join(workDir,working.baseFile)),'utf8');
  if(Buffer.byteLength(baseText)>MAX_SHARD||digest(baseText)!==trusted.baseSha256)
    throw new Error('v13 immutable work base changed');
- const full=JSON.parse(baseText),seenFiles=new Set(),arrays=new Map();
+ const full=JSON.parse(baseText),seenFiles=new Set(),arrays=new Map(),identities=new Map();
  const load=(desc)=>{
    if(seenFiles.has(desc.file))throw new Error('duplicate v13 shard filename: '+desc.file);
    seenFiles.add(desc.file);
@@ -321,6 +321,10 @@ export function secureRestoreWorkFormV13({root,indexRel}){
      if(entry.key!==expected||(!desc.append&&recordKey(desc.path,entry.value,pos)!==expected))
        throw new Error('v13 mandatory work record key changed: '+desc.file);
      if(positions.has(pos))throw new Error('v13 duplicate work record: '+desc.file);
+     const identity=recordKey(desc.path,entry.value,pos);
+     const knownIdentities=identities.get(id)??new Set();
+     if(knownIdentities.has(identity))throw new Error('v13 duplicate candidate or work record identity: '+desc.file);
+     knownIdentities.add(identity);identities.set(id,knownIdentities);
      positions.add(pos);cursor[field][pos]=entry.value;
    }
    arrays.set(id,positions);
