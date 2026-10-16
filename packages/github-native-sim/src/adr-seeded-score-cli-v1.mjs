@@ -21,7 +21,11 @@ export function scoreFilesV1({privateManifestPath,findingsPath,adjudicationsPath
   const matched=auto?sourceBoundAutoAdjudicationsV13({truth,findings}):null;
   const adjudications=auto?matched.adjudications:parse(adjudicationsPath);
   const partialCases=partialPath?parse(partialPath):[];
-  const missStageByCase=leakStagesPath?parse(leakStagesPath):{};
+  const missStageByCase=leakStagesPath?parse(leakStagesPath):
+    Object.fromEntries(truth.filter(x=>x.kind==='defect').map(x=>[
+      x.caseId,typeof x.leakStage==='string'&&x.leakStage.trim()?
+        x.leakStage.trim():'UNCLASSIFIED'
+    ]));
   const result=scoreSeededCampaignV1({truth,findings:auto?matched.findings:findings,
     adjudications,partialCases,missStageByCase,
     expectedDefects:manifest.expectedDefects??41,baselineCaught:manifest.baselineCaught??14,
