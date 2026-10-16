@@ -132,19 +132,30 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
        if(!expectedRules.has(item?.ruleId)||reviewed.has(item?.ruleId))
          err(errors,'SPEC_RULE_UNMATCHED',cp+'.ruleId','Documented rule is unknown or repeated');
        reviewed.add(item?.ruleId);
+       const expected=expectedRules.get(item?.ruleId);
        if(blank(item?.rule)||!['MATCH','MISMATCH','UNRESOLVED'].includes(item?.comparison)||
-         blank(item?.reason))err(errors,'SPEC_CHECK_INVALID',cp,'Compare exact documented value/rule with observed implementation');
+         blank(item?.reason)||item.rule!==expected?.rule)
+         err(errors,'SPEC_CHECK_INVALID',cp,
+           'Compare exact independently documented rule text; implementation values are not specifications');
      }
      for(const id of expectedRules.keys())if(!reviewed.has(id))
        err(errors,'SPEC_RULE_MISSING',p+'.documentedRules','Not compared: '+id);
    }
    const siblings=arr2(packet?.siblingChecks).filter(x=>
-     arr2(x?.members).some(m=>m.contract===arr2(packet?.primaryContexts).find(c=>c?.contextId===id)?.qualifiedContainer));
-   if(siblings.length&&(!Array.isArray(row?.siblingComparisons)||!row.siblingComparisons.length))
-     err(errors,'SIBLING_CHECK_REQUIRED',p+'.siblingComparisons',
-       'Compare sibling functions sharing guards, patterns or paired parameters');
+     arr2(x?.members).some(m=>m.contextId===id&&m.function===x.signature));
+   if(siblings.length){
+     if(!Array.isArray(row?.siblingComparisons)||!row.siblingComparisons.length)
+       err(errors,'SIBLING_CHECK_REQUIRED',p+'.siblingComparisons',
+         'Compare the exact same-signature sibling implementation');
+     else for(const group of siblings)
+       if(!row.siblingComparisons.some(entry=>entry.signature===group.signature&&
+          group.members.some(m=>m.contextId===entry.siblingContextId&&m.contextId!==id)&&
+          !blank(entry.comparison)))
+         err(errors,'SIBLING_IDENTITY_MISSING',p+'.siblingComparisons',
+           'Name exact sibling signature and distinct sibling contextId');
+   }
    if(row?.siblingComparisons!==undefined&&(!Array.isArray(row.siblingComparisons)||
-       row.siblingComparisons.some(x=>blank(x?.sibling)||blank(x?.comparison))))
+       row.siblingComparisons.some(x=>blank(x?.comparison)||!x?.siblingContextId||!x?.signature)))
      err(errors,'SIBLING_CHECK_INVALID',p+'.siblingComparisons',
        'Sibling or paired-parameter checks need explicit comparison');
    if(row?.candidate!==undefined&&obj(row.candidate))validateCandidate(row.candidate,inventory,errors,p+'.candidate');
