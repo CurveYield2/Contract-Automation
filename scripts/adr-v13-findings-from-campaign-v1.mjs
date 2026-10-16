@@ -33,7 +33,11 @@ export function extractCampaignFindingsV13({controllerRoot,campaignPath}={}){
   const filename=path.join(dir,entry.name,'ACCEPTED_SUBMISSION_v1.json');
   if(!fs.existsSync(filename))continue;
   const submission=JSON.parse(fs.readFileSync(filename,'utf8'));
-  for(const c of arr(submission.candidates))add(c,arr(c.contextIds),entry.name,'top');
+  for(const c of arr(submission.candidates)){
+   const linked=arr(submission.rows).filter(row=>[row.candidateTempKey,row.candidateId].some(
+     key=>key&&[c.tempKey,c.candidateId,c.id].includes(key))).map(row=>row.contextId);
+   add(c,[...new Set([...arr(c.contextIds),...linked])],entry.name,'top');
+  }
   for(const row of arr(submission.rows)){
    for(const c of arr(row.candidates))add(c,[row.contextId],entry.name,'row');
    if(row.candidate)add(row.candidate,[row.contextId],entry.name,'inline');
