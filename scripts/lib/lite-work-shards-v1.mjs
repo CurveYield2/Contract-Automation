@@ -153,6 +153,9 @@ export function shardFailureIndexV1({root,indexRel,deficiencies=[]}={}){
  if(!indexRel)return {shards:[],unmapped:deficiencies};
  const index=JSON.parse(fs.readFileSync(relfile(root,indexRel),'utf8'));
  const matches=new Map(),unmapped=[];
+ const descriptors=index.schemaVersion==='curveyield-work-shard-index-v13'
+   ?index.pages.flatMap(p=>secureReadV13(root,path.posix.join(path.posix.dirname(indexRel),p.file)).shards)
+   :index.shards;
  for(const description of deficiencies){
   const message=String(description);
   const ref=message.match(/(step-[0-9]+)\.outputs\.([A-Za-z][A-Za-z0-9_]*)\[([0-9]+)\]/);
@@ -160,7 +163,7 @@ export function shardFailureIndexV1({root,indexRel,deficiencies=[]}={}){
   const indexInArray=ref?Number(ref[3]):loose?Number(loose[1]):null;
   const step=ref?.[1]??'step-3',field=ref?.[2]??'targetDesigns';
   if(indexInArray===null){unmapped.push(message);continue;}
-  const shard=index.shards.find(s=>s.path.includes(step)&&s.path.includes(field)&&
+  const shard=descriptors.find(s=>s.path.includes(step)&&s.path.includes(field)&&
     indexInArray>=s.startIndex&&indexInArray<s.startIndex+s.recordKeys.length);
   if(!shard){unmapped.push(message);continue;}
   const rel=path.posix.join(path.posix.dirname(indexRel),shard.file);
