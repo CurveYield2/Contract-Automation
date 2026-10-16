@@ -57,7 +57,7 @@ export function restoreControllerResultV1({root,campaignPath,envelope}){
   if(bytes.length!==index.resultBytes||digest(bytes)!==index.resultSha256||
     index.resultSha256!==envelope.sha256)throw new Error('controller result digest mismatch');
   const response=JSON.parse(bytes.toString('utf8'));
-  if(response.status!==envelope.status||response.campaignId!==envelope.campaignId)
+  if(response.status!==envelope.status||(response.campaignId??null)!==(envelope.campaignId??null))
     throw new Error('controller result identity mismatch');
   return response;
 }
