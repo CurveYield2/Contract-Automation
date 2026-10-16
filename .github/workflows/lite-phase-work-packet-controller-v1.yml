@@ -509,6 +509,9 @@ jobs:
 
       - name: Record v13 per-unit Git-commit depth audit for master review
         if: steps.routing.outputs.stale != 'true' && contains(steps.controller.outputs.authority_link_root, 'Audit_Litemode_v13') && steps.controller.outputs.status == 'DISCOVERY_COMPLETE'
+        # Observation must never roll back or block an already published boundary.
+        # A missing spotcheck instead prevents later independent qualification.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
@@ -516,8 +519,9 @@ jobs:
           set -euo pipefail
           campaign="${{ steps.routing.outputs.campaign_path }}"
           cd .audit-controller
-          # The accepted submission and assignment commits must be independently
-          # visible in the repository; never infer duration from window openedAt.
+          # Resolve individual historical commits; the primary controller uses a
+          # shallow checkout. Fetch commit/tree history only, never an extra build.
+          git fetch --no-tags --deepen=800 --filter=blob:none origin "${{ steps.request.outputs.audit_controller_ref }}"
           node ../scripts/adr-v13-unit-depth-review-v1.mjs "$PWD" "$campaign"
           git config user.name 'CurveYield V13 Depth Review Controller'
           git config user.email 'v13-depth-controller@users.noreply.github.com'
