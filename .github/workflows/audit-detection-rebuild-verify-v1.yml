@@ -70,6 +70,7 @@ jobs:
             packages/github-native-sim/test/phase0-fork-state-reuse-v1.test.mjs \
             packages/github-native-sim/test/phase7-saved-state-preflight-v1.test.mjs \
             packages/github-native-sim/test/lite-work-shards-v1.test.mjs \
+            scripts/tests/lite-v13-protected-shards-v1.test.mjs \
             packages/runner/test/anvil-engine-v1.test.mjs
       - name: Isolated real Anvil saved-state roundtrip (bounded)
         shell: bash
