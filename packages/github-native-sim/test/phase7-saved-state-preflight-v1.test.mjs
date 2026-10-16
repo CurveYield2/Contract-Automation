@@ -12,7 +12,7 @@ const request=()=>({
     workflow:{steps:[{action:'snapshot',alias:'baseline',label:'saved deployment baseline'}]}}}
 });
 const savedEnv={V7_PHASE0_FORK_STATE_PATH:'/tmp/trusted-stage.json',
-  V7_PHASE0_FORK_FINAL_BLOCK:String(expectedBlock)};
+  V7_PHASE0_FORK_FINAL_BLOCK:String(expectedBlock),ETHEREUM_FORK_RPC_URL:'https://test-rpc.invalid'};
 function makeEngine({chainId='0x1',block=expectedBlock}={}){
   return {engine:'anvil',provider:{
     async send(method){
@@ -27,12 +27,12 @@ function makeEngine({chainId='0x1',block=expectedBlock}={}){
     async getCode(){return '0x6000';}
   },close:async()=>{}};
 }
-test('saved state preflight uses no remote RPC, binds pinned block and still checks impersonation',async()=>{
+test('saved state preflight layers pinned fork without claiming remote archive proof',async()=>{
  let calls=0;
  const pre=await runPhase7ForkPreflightV1({
   request:request(),environment:savedEnv,
   startEngine:async args=>{
-    calls++;assert.equal(args.forkUrl,null);
+    calls++;assert.equal(args.forkUrl,savedEnv.ETHEREUM_FORK_RPC_URL);
     assert.equal(args.loadStatePath,savedEnv.V7_PHASE0_FORK_STATE_PATH);
     return makeEngine();
   },

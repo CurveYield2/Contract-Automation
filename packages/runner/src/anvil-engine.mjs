@@ -14,7 +14,7 @@ export function selectForkEngineName(_evmVersion) {
 export function buildAnvilArgs({ chainId, forkUrl, block = 'latest', port, hardfork, loadStatePath = null }) {
   if (!Number.isSafeInteger(chainId) || chainId < 1) throw new Error('Anvil chainId must be a positive safe integer');
   if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error('Anvil port must be 1-65535');
-  if (!loadStatePath&&(typeof forkUrl !== 'string' || forkUrl.length === 0)) throw new Error('Anvil fork URL is required');
+  if (typeof forkUrl !== 'string' || forkUrl.length === 0) throw new Error('Anvil fork URL is required for all executions, including saved-state replay');
   if(loadStatePath&&(!path.isAbsolute(loadStatePath)||!loadStatePath.endsWith('.json')))throw new Error('snapshot loadStatePath must be absolute JSON');
   if (typeof hardfork !== 'string' || hardfork.length === 0) throw new Error('Anvil hardfork is required');
   const args = [
@@ -23,11 +23,11 @@ export function buildAnvilArgs({ chainId, forkUrl, block = 'latest', port, hardf
     '--chain-id', String(chainId),
     '--hardfork', hardfork
   ];
+  // Saved state contains touched accounts; untouched fork state stays on the
+  // exact pinned upstream fork. A state-only Anvil silently drops those accounts.
+  args.push('--fork-url',forkUrl);
+  if(block!=='latest')args.push('--fork-block-number',String(block));
   if(loadStatePath)args.push('--load-state',loadStatePath,'--auto-impersonate');
-  else{
-    args.push('--fork-url',forkUrl);
-    if(block!=='latest')args.push('--fork-block-number',String(block));
-  }
   args.push('--accounts', '20', '--silent');
   return args;
 }
@@ -147,7 +147,7 @@ export async function startAnvilEngine({
   let child = null;
   let provider = null;
   try {
-    if(!loadStatePath)identityProxy = await startRpcIdentityProxy({ upstreamUrl: forkUrl, chainId, fetchImpl });
+    identityProxy = await startRpcIdentityProxy({ upstreamUrl: forkUrl, chainId, fetchImpl });
     const port = await reserveLoopbackPort();
     const anvilArgs = buildAnvilArgs({
       chainId,

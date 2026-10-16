@@ -31,7 +31,7 @@ const CONFIGURATION_FIELDS = new Set([
   'deploymentGas', 'simulation', 'build', 'sbom', 'coverage', 'properties', 'harness', 'actions'
 ]);
 const PROFILE_IDS = new Set(Object.values(V7_POLICY.profiles));
-const V7_FORK_CHAINS = new Set(['ethereum', 'base']);
+const V7_FORK_CHAINS = new Set(['ethereum', 'base', 'katana']);
 const FORBIDDEN_DYNAMIC_KEYS = new Set(['command', 'shell', 'script', 'npmScript', 'rawTransaction', 'signedTransaction', 'rpc', 'rpcUrl', 'privateKey', 'privateKeys', 'mnemonic', 'seed', 'secret']);
 
 export class DeepAssuranceRequestValidationError extends Error {
@@ -199,7 +199,7 @@ function validateSimulation(simulation, { required = false } = {}) {
   object(simulation, 'configuration.simulation');
   const allowed = new Set(['chain', 'block', 'workflow']);
   for (const key of Object.keys(simulation)) if (!allowed.has(key)) fail(`configuration.simulation.${key}`, 'is not allowed');
-  if (!V7_FORK_CHAINS.has(simulation.chain)) fail('configuration.simulation.chain', 'must be ethereum or base for the V7 pinned-fork lifecycle');
+  if (!V7_FORK_CHAINS.has(simulation.chain)) fail('configuration.simulation.chain', 'must be ethereum, base or katana for the V7 pinned-fork lifecycle');
   if (!Number.isSafeInteger(simulation.block) || simulation.block < 0) fail('configuration.simulation.block', 'must be a pinned non-negative integer block number');
   try {
     validateWorkflow(simulation.workflow);

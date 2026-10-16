@@ -71,7 +71,7 @@ test('real GitHub-installed Anvil preserves deployed code and pinned state witho
  });
  const engine=await startAnvilEngine({
   artifacts:{get(){throw Error('No deployments required in saved state fixture');}},
-  workflow:{steps:[]},chainId:1,forkUrl:null,block,
+  workflow:{steps:[]},chainId:1,forkUrl:url,block,
   evmVersion:'cancun',loadStatePath:staged.loadStatePath
  });
  try{
@@ -80,4 +80,65 @@ test('real GitHub-installed Anvil preserves deployed code and pinned state witho
   assert.equal(Number(BigInt(await engine.provider.send('eth_blockNumber',[]))),block);
   assert.equal(engine.engine,'anvil');
  }finally{await engine.close();}
+});
+
+test('real forked Anvil loadState preserves untouched upstream code as well as modified local state',async t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'phase0-layered-fork-'));
+ t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const port=await reservePort(),upstream='http://127.0.0.1:'+port;
+ const binary=path.join(process.cwd(),'node_modules/@foundry-rs/anvil/bin.mjs');
+ assert.ok(fs.existsSync(binary),'CI must use pinned Anvil binary');
+ const proc=spawn(process.execPath,[binary,'--host','127.0.0.1','--port',String(port),
+  '--chain-id','1','--hardfork','cancun','--silent'],{
+  cwd:process.cwd(),env:process.env,stdio:['ignore','ignore','pipe'],detached:true
+ });
+ t.after(()=>{try{if(proc.pid)process.kill(-proc.pid,'SIGKILL');}catch{}try{proc.stderr?.destroy();}catch{}});
+ let ready=false;
+ for(let i=0;i<140;i++){
+  try{if(await rpc(upstream,'eth_chainId')==='0x1'){ready=true;break;}}catch{}
+  if(proc.exitCode!==null)break;
+  await sleep(100);
+ }
+ assert.ok(ready,'trusted upstream Anvil did not start');
+ const untouched='0x000000000000000000000000000000000000babe';
+ const modified='0x000000000000000000000000000000000000face';
+ await rpc(upstream,'anvil_setCode',[untouched,'0x6000600055']);
+ await rpc(upstream,'evm_mine');
+ const baseBlock=Number(BigInt(await rpc(upstream,'eth_blockNumber')));
+ let fork=await startAnvilEngine({
+  artifacts:{get(){throw Error('No deployment artifacts');}},
+  workflow:{steps:[]},chainId:1,forkUrl:upstream,block:baseBlock,evmVersion:'cancun'
+ });
+ const stateDir=path.join(root,'campaigns/test r1/evidence/phase0');
+ let manifest;
+ try{
+  assert.equal(await fork.provider.getCode(untouched),'0x6000600055');
+  await fork.provider.send('anvil_setCode',[modified,'0x6001600155']);
+  await fork.provider.send('evm_mine',[]);
+  const finalBlock=Number(BigInt(await fork.provider.send('eth_blockNumber',[])));
+  manifest=await capturePhase0ForkStateV1({
+   rpc:(method,params)=>fork.provider.send(method,params),outputDir:stateDir,
+   campaignId:'test-r1',sourceSha256:'f'.repeat(64),
+   chainId:1,hardfork:'cancun',finalBlock
+  });
+  assert.equal(manifest.status,'CAPTURED');
+ }finally{await fork.close();}
+ while(Number(BigInt(await rpc(upstream,'eth_blockNumber')))<manifest.finalBlock)
+   await rpc(upstream,'evm_mine');
+ const staged=await stageVerifiedPhase0ForkStateV1({
+  controllerRoot:root,manifestRef:'campaigns/test r1/evidence/phase0/PHASE0_FORK_STATE_MANIFEST_v1.json',
+  expected:{campaignId:'test-r1',sourceSha256:'f'.repeat(64),sha256:manifest.sha256,
+   hardfork:'cancun',chainId:1,finalBlock:manifest.finalBlock},workspaceRoot:path.join(root,'workspace')
+ });
+ const restored=await startAnvilEngine({
+  artifacts:{get(){throw Error('Saved replay never redeploys');}},workflow:{steps:[]},
+  chainId:1,forkUrl:upstream,block:manifest.finalBlock,evmVersion:'cancun',
+  loadStatePath:staged.loadStatePath
+ });
+ try{
+  assert.equal(await restored.provider.getCode(modified),'0x6001600155',
+   'local touched state must restore from snapshot');
+  assert.equal(await restored.provider.getCode(untouched),'0x6000600055',
+   'untouched upstream bytecode must remain available through pinned fork');
+ }finally{await restored.close();}
 });

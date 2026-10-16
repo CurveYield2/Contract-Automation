@@ -16,6 +16,7 @@ source "$ROOT/scripts/audit-source-initialization/extract-v1.sh"
 : "${AGENT_CHAT_4_URL:?AGENT_CHAT_4_URL is required}"
 : "${MASTER_CHAT_URL:?MASTER_CHAT_URL is required}"
 : "${TEST_EXECUTOR_CHAT_URL:?TEST_EXECUTOR_CHAT_URL is required}"
+: "${BACKUP_CHAT_URL:?BACKUP_CHAT_URL is required}"
 
 safe_request="$(printf '%s' "$REQUEST_ID" | tr -c 'A-Za-z0-9._-' '_')"
 report_path="process/audit-source-initialization/reports/$safe_request.json"
@@ -30,7 +31,7 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
   jq -e \
     --arg u "$SOURCE_URL" \
     --arg c1 "$AGENT_CHAT_1_URL" --arg c2 "$AGENT_CHAT_2_URL" \
-    --arg c3 "$AGENT_CHAT_3_URL" --arg c4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
+    --arg c3 "$AGENT_CHAT_3_URL" --arg c4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
     '.schemaVersion=="curveyield-audit-source-initialization-report-v1"
      and .status=="PASS"
      and .request.sourceUrl==$u
@@ -39,7 +40,8 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
      and (.request.agentChats["reviewer-3"] // .request.agentChats["reviewer-3L"])==$c3
      and .request.agentChats["reviewer-4"]==$c4
      and .request.masterChatUrl==$master
-     and .request.testExecutorChatUrl==$tester' \
+     and .request.testExecutorChatUrl==$tester
+     and .request.backupChatUrl==$backup' \
     /tmp/prior-source-init.json >/dev/null
   campaign_id="$(jq -r '.campaign.campaignId' /tmp/prior-source-init.json)"
   generation_id="$(jq -r '.campaign.campaignGenerationId' /tmp/prior-source-init.json)"
@@ -166,7 +168,7 @@ else
     --arg admission "$admission_commit" --arg blob "$source_blob" --arg tree "$tree_sha" \
     --arg init "$init_commit" --arg run "$GITHUB_RUN_ID" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
-    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg masterChat "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg masterChat "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
     '{
       schemaVersion:"curveyield-audit-source-initialization-report-v1",
       request:{
@@ -179,7 +181,8 @@ else
           "reviewer-4":$chat4
         },
         masterChatUrl:$masterChat,
-        testExecutorChatUrl:$tester
+        testExecutorChatUrl:$tester,
+        backupChatUrl:$backup
       },
       status:"PASS",
       source:{
@@ -219,7 +222,7 @@ if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
   jq \
     --arg campaignId "$campaign_id" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
-    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
     '.schemaVersion="curveyield-browser-agent-wake-registration-v1"
      | .campaignId=$campaignId
      | .agentChats={
@@ -228,8 +231,10 @@ if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
          ($thirdReviewer):$chat3,
          "reviewer-4":$chat4,
          "master-reviewer":$master,
-         "test-executor":$tester
+         "test-executor":$tester,
+          "backup":$backup
        }
+     | .backupChatUrl=$backup
      | .masterReviewer={chatUrl:$master,reasoning:"MAXIMUM",repairModel:"SOL",repairReasoning:"HIGH"}
      | .browserInteractionPolicy=(.browserInteractionPolicy // "phase1-fixed-x11-normal-chrome-no-chatgpt-page-read-v1")
      | .repair=((.repair // {}) + {enabled:true,idlePokeThreshold:(.repair.idlePokeThreshold // 3),unviewableThreshold:(.repair.unviewableThreshold // 2)})
@@ -240,7 +245,7 @@ else
   jq -n \
     --arg campaignId "$campaign_id" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
-    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" --arg backup "$BACKUP_CHAT_URL" \
     '{
       schemaVersion:"curveyield-browser-agent-wake-registration-v1",
       campaignId:$campaignId,
@@ -253,8 +258,10 @@ else
         ($thirdReviewer):$chat3,
         "reviewer-4":$chat4,
         "master-reviewer":$master,
-        "test-executor":$tester
+        "test-executor":$tester,
+          "backup":$backup
       },
+      backupChatUrl:$backup,
       masterReviewer:{chatUrl:$master,reasoning:"MAXIMUM",repairModel:"SOL",repairReasoning:"HIGH"},
       chatgptProject:{name:"",url:""},
       activeChat:{name:"",url:""},

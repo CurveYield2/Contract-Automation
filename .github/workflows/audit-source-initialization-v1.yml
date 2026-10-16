@@ -31,6 +31,10 @@ on:
         description: Dedicated ChatGPT conversation URL for the targeted-test executor
         required: true
         type: string
+      backup_chat_url:
+        description: Pre-created standby ChatGPT conversation for automatic reviewer failover
+        required: true
+        type: string
   push:
     branches: [main]
     paths:
@@ -67,6 +71,7 @@ jobs:
           DISPATCH_CHAT_4_URL: ${{ inputs.agent_chat_4_url }}
           DISPATCH_MASTER_CHAT_URL: ${{ inputs.master_chat_url }}
           DISPATCH_TEST_EXECUTOR_CHAT_URL: ${{ inputs.test_executor_chat_url }}
+          DISPATCH_BACKUP_CHAT_URL: ${{ inputs.backup_chat_url }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
@@ -80,6 +85,7 @@ jobs:
             agent_chat_4_url="$DISPATCH_CHAT_4_URL"
             master_chat_url="$DISPATCH_MASTER_CHAT_URL"
             test_executor_chat_url="$DISPATCH_TEST_EXECUTOR_CHAT_URL"
+            backup_chat_url="$DISPATCH_BACKUP_CHAT_URL"
             request_id="dispatch-$GITHUB_RUN_ID"
           else
             mapfile -t requests < <(
@@ -98,6 +104,7 @@ jobs:
             agent_chat_4_url="$(jq -r '.agent_chat_4_url // empty' "$request")"
             master_chat_url="$(jq -r '.master_chat_url // empty' "$request")"
             test_executor_chat_url="$(jq -r '.test_executor_chat_url // empty' "$request")"
+            backup_chat_url="$(jq -r '.backup_chat_url // empty' "$request")"
             request_id="push-$GITHUB_SHA"
           fi
 
@@ -131,11 +138,15 @@ jobs:
           validate_chat_url agent_chat_4_url "$agent_chat_4_url"
           validate_chat_url master_chat_url "$master_chat_url"
           validate_chat_url test_executor_chat_url "$test_executor_chat_url"
+          validate_chat_url backup_chat_url "$backup_chat_url"
           for reviewer_chat_url in "$agent_chat_1_url" "$agent_chat_2_url" "$agent_chat_3_url" "$agent_chat_4_url"; do
             [ "$master_chat_url" != "$reviewer_chat_url" ] || { echo "::error::master_chat_url must be distinct from every normal reviewer chat URL"; exit 1; }
             [ "$test_executor_chat_url" != "$reviewer_chat_url" ] || { echo "::error::test_executor_chat_url must be distinct from every normal reviewer chat URL"; exit 1; }
           done
           [ "$test_executor_chat_url" != "$master_chat_url" ] || { echo "::error::test_executor_chat_url must be distinct from master_chat_url"; exit 1; }
+          for reserved_chat in "$agent_chat_1_url" "$agent_chat_2_url" "$agent_chat_3_url" "$agent_chat_4_url" "$master_chat_url" "$test_executor_chat_url"; do
+            [ "$backup_chat_url" != "$reserved_chat" ] || { echo "::error::backup_chat_url must be a distinct unused chat"; exit 1; }
+          done
 
           {
             echo "source_url=$source_url"
@@ -145,6 +156,7 @@ jobs:
             echo "agent_chat_4_url=$agent_chat_4_url"
             echo "master_chat_url=$master_chat_url"
             echo "test_executor_chat_url=$test_executor_chat_url"
+            echo "backup_chat_url=$backup_chat_url"
             echo "request_id=$request_id"
           } >> "$GITHUB_OUTPUT"
 
@@ -168,6 +180,7 @@ jobs:
           AGENT_CHAT_4_URL: ${{ steps.request.outputs.agent_chat_4_url }}
           MASTER_CHAT_URL: ${{ steps.request.outputs.master_chat_url }}
           TEST_EXECUTOR_CHAT_URL: ${{ steps.request.outputs.test_executor_chat_url }}
+          BACKUP_CHAT_URL: ${{ steps.request.outputs.backup_chat_url }}
           REQUEST_ID: ${{ steps.request.outputs.request_id }}
         shell: bash
         run: python3 scripts/audit-command-guard-v1.py --label audit-source-initialization --wall 1080 --idle 720 --log /tmp/audit-source-initialization-guard-v1.log -- bash scripts/audit-source-initialization/run-v1.sh

@@ -120,21 +120,24 @@ async function savedPhase0StatePreflight({request,environment,startEngine,chain,
    sourceCommit:request.source.commit,chain:sim.chain,pinnedBlock:sim.block,
    nextState:'PHASE7_FORK_PREFLIGHT'});
  if(typeof stateFile!=='string'||!stateFile||!Number.isSafeInteger(expectedBlock)||
-    sim.block!==expectedBlock||sim.chain!=='ethereum'||workflowActions.status!=='PASS')
+    sim.block!==expectedBlock||!['ethereum','base','katana'].includes(sim.chain)||workflowActions.status!=='PASS')
    return fail('PHASE0_SAVED_STATE_MISMATCH',
      'Saved state must match exact pinned post-deployment block and supported chain/workflow');
+ const upstreamForkUrl=environment?.[({ethereum:'ETHEREUM_FORK_RPC_URL',base:'RPC_BASE',katana:'RPC_KATANA'})[sim.chain]];
+ if(typeof upstreamForkUrl!=='string'||!upstreamForkUrl.trim())return fail('PHASE0_SAVED_STATE_FORK_UNAVAILABLE',
+   'Saved state must be layered on an exact-chain qualified fork RPC; no upstream URL is persisted');
  const placeholderArtifacts={get(){throw new Error('Preflight never deploys an artifact');}};
  let engine;
  try{
    engine=await startEngine({artifacts:placeholderArtifacts,workflow:sim.workflow,
-     chainId:chain.chainId,forkUrl:null,loadStatePath:stateFile,
+     chainId:chain.chainId,forkUrl:upstreamForkUrl,loadStatePath:stateFile,
      block:sim.block,evmVersion:request.configuration.evmVersion});
    const liveChain=Number(BigInt(await engine.provider.send('eth_chainId',[])));
    const liveBlock=Number(BigInt(await engine.provider.send('eth_blockNumber',[])));
    const localHash=liveBlock===sim.block?(await engine.provider.getBlock(sim.block))?.hash??null:null;
    const chainIdentity={status:liveChain===chain.chainId?'PASS':'FAIL',
      expectedChainId:chain.chainId,anvilChainId:liveChain,
-     mode:'VERIFIED_PHASE0_SAVED_STATE_NO_REMOTE_ARCHIVE_ASSERTION'};
+     mode:'VERIFIED_PHASE0_SAVED_STATE_LAYERED_FORK_NO_REMOTE_ARCHIVE_ASSERTION'};
    const pinnedBlockState={status:liveBlock===sim.block&&Boolean(localHash)?'PASS':'FAIL',
      number:liveBlock,localHash,expectedBlock:sim.block};
    const codeChecks=[];
