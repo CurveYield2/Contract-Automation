@@ -56,7 +56,10 @@ jobs:
             echo "::error::Independent private manifest credential not configured"; exit 1;
           }
           [[ "$TRUTH_PATH" =~ ^[A-Za-z0-9._/-]+\.json$ && "$TRUTH_PATH" != *..* ]] || exit 1
-          [[ "$TRUTH_REF" =~ ^[A-Za-z0-9._/-]+$ && "$TRUTH_REF" != *..* ]] || exit 1
+          # A moving branch could silently replace the hidden answer key.
+          [[ "$TRUTH_REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::Private manifest must be pinned to an immutable commit"; exit 1;
+          }
           echo "::add-mask::$TRUTH_REPO"
           echo "::add-mask::$TRUTH_PATH"
           mkdir -p /tmp/v13-private
