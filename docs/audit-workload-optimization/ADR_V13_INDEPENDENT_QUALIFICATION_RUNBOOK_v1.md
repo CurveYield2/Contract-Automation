@@ -1,10 +1,12 @@
 # ADR v13 — independent detection qualification (v1)
 
-## Hard activation boundary
+## Live activation vs. independent detection qualification
 
-**V13 is NOT production-eligible until an independent seeded campaign reaches at least 30 confirmed detections out of 41 defects (baseline 14), flags ZERO known decoys, and produces ZERO Critical/High false positives on clean controls.** The test must be independently reviewed. Unit tests and synthetic 14/1/26 fixtures do **not** authorize activation.
+On October 15, 2026 the owner authorized activation of the v13 audit process so real testing could begin. **The 41-defect qualification is still NOT completed or claimed.** Activation and independently proven detection effectiveness are separate states. New v13-bound campaigns may execute the `correctness-verdict-v13` Phase-0/Phase-4 workflow before a private seeded campaign scores. The v12 authority remains frozen for previously bound campaigns.
 
-The v13 gate is `packages/github-native-sim/src/adr-v13-release-gate-v1.mjs`. The Phase-0 intelligence workflow and Phase-4 discovery controller refuse to start new v13 campaigns if the gate is absent. Earlier frozen v12 campaigns are not automatically upgraded. Existing phase boundaries/receipts do not change on failed qualification.
+**Measured qualification** still requires at least 30 confirmed detections of 41 hidden defects (baseline 14), ZERO flagged decoys and ZERO Critical/High false positives on clean controls, independently adjudicated and human-reviewed. A successful local unit fixture or an owner-approved launch is not qualification evidence.
+
+The optional, fail-closed **qualification-certificate verifier** is `packages/github-native-sim/src/adr-v13-release-gate-v1.mjs`. It checks genuine `QUALIFICATION_SCORE_v1.json` and `QUALIFICATION_PASS_v1.json` before anyone claims `QUALIFIED`; it is no longer used to block audit/benchmark execution in Phase 0 or Phase 4. **Do not fabricate these files to enable audits.**
 
 ## Private run inputs — never commit
 
@@ -100,8 +102,8 @@ node --input-type=module -e 'import {verifyV13ReleaseV1} from "./packages/github
 node --test packages/github-native-sim/test/adr-v13-release-gate-v1.test.mjs
 ```
 
-Only a genuine passing external 41-defect run may create the two release artifacts. A v13 audit must still separately pass the ordinary inventory, review, deployment, evidence, targeted-test, and final controller gates. This qualification does **not** replace them.
+Only a genuine passing external 41-defect run may create the two qualification artifacts. The owner has separately approved running v13 audits while this qualification remains pending. A v13 audit must still separately pass the ordinary inventory, review, deployment, evidence, targeted-test, and final controller gates. This qualification does **not** replace them.
 
 ## Rollback / safety
 
-If v13 underperforms, is unqualified, or emits unsupported findings, withhold both public qualification artifacts. The activation gate blocks new v13 work; the previously frozen v12 workflow continues unchanged. Never add a waiver to skip the gate, mutate sealed v12 campaign receipts, or commit the private answer key.
+If v13 underperforms, is unqualified, or emits unsupported findings, withhold both public qualification artifacts and report the result honestly. Owner-authorized v13 execution remains available for testing; previously frozen v12 campaigns continue unchanged unless explicitly rebound. Never misrepresent an unqualified run as qualified, mutate sealed v12 campaign receipts, or commit the private answer key.
