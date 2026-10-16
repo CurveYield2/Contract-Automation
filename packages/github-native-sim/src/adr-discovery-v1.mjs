@@ -68,7 +68,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const contractChecks=role==='ATTACK'?[]:[...new Set(primary.map(id=>contextFor(inventory,id)?.qualifiedContainer).filter(Boolean))]
   .filter(name=>ownerUnit.get(name)===unitId).sort()
   .map(contract=>({contract,classId:'UPGRADE_INIT_STORAGE',reviewChecks:arr(upgradeClass?.reviewChecks)}));
- const verdictV13=/Audit_Litemode_v13(?:\\/|$)/.test(authorityRoot);
+ const verdictV13=/Audit_Litemode_v13(?:\/|$)/.test(authorityRoot);
  const trivialContextIds=role==='ATTACK'?[]:primary.filter(id=>verdictV13?
    isLiteralConstantV13(contextFor(inventory,id)):TRIVIAL_KINDS_V1.has(contextFor(inventory,id)?.kind));
  const instructionsPath=path.posix.join(authorityRoot,'discovery',role==='ATTACK'?'ATTACKER_START_HERE.md':'FLOW_REVIEW_START_HERE.md');
