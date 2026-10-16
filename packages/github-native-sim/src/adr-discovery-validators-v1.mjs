@@ -9,6 +9,13 @@ const ATTACK_ROLES=new Set(['UNPRIVILEGED','UNPRIVILEGED_CALLER','OTHER_ROLE','D
 // in trivialReviews covers them. Upgrade/storage is a contract property: answered once per
 // upgradeable contract in contractChecks. groupChecks cover functions sharing a modifier.
 export const TRIVIAL_KINDS_V1=new Set(['CONSTANT','IMMUTABLE','GENERATED_GETTER']);
+export function isLiteralConstantV13(context){
+ const text=String(context?.declaredValue??'').trim();
+ return context?.kind==='CONSTANT'&&Number.isSafeInteger(context?.lineStart)&&
+   context.lineStart>=1&&Number.isSafeInteger(context.lineEnd)&&context.lineEnd>=context.lineStart&&
+   /^(?:true|false|0x[0-9a-fA-F]+|[0-9][0-9_]*(?:\s+(?:wei|gwei|ether|seconds|minutes|hours|days|weeks))?|["'][^"']{0,256}["'])$/.test(text);
+}
+
 const blank=x=>typeof x!=='string'||!x.trim();
 const emptyEvidence=x=>blank(x)||['n/a','none','safe','no issue','reviewed'].includes(x.trim().toLowerCase());
 const keys=arr=>Array.isArray(arr)?arr.map(x=>typeof x==='string'?x:x?.contextId??x?.flowId??x?.obligationId):[];
@@ -71,14 +78,15 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
  const errors=[];
  const primary=packetIds(packet,'primaryContexts').length?
    packetIds(packet,'primaryContexts'):packetIds(packet,'primaryContextIds');
- const trivial=new Set(packetIds(packet,'trivialContextIds'));
+ const trivial=new Set(packetIds(packet,'trivialContextIds').filter(id=>
+    isLiteralConstantV13(arr2(inventory?.payload?.contexts).find(c=>c.contextId===id))));
  const covered=new Set(),seen=new Set(),allCandidates=candidateRecords(submission);
  const reviews=arr2(submission?.trivialReviews);
  for(const [i,review] of reviews.entries()){
    const contexts=arr2(packet.primaryContexts).filter(x=>x.qualifiedContainer===review?.contract&&
      trivial.has(x.contextId));
    if(!contexts.length)err(errors,'TRIVIAL_CONTRACT_UNKNOWN','trivialReviews['+i+']',
-     'Only literal constants/immutables and generated getters may be reviewed as trivial');
+     'V13 trivialReviews apply only to literal CONSTANT definitions with source anchors; getters and immutables require verdict rows');
    if(blank(review?.reason??review?.evidence))err(errors,'EVIDENCE_EMPTY','trivialReviews['+i+'].reason','Explain exact literal/getter correctness');
    for(const c of contexts)covered.add(c.contextId);
  }
