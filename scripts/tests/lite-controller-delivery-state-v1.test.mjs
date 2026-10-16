@@ -25,8 +25,8 @@ const read=root=>JSON.parse(fs.readFileSync(p(root,campaign+'/'+DELIVERY_STATE_F
 const write=(root,body)=>fs.writeFileSync(p(root,campaign+'/'+DELIVERY_STATE_FILE_V1),JSON.stringify(body,null,2)+'\n');
 
 test('5MB UTF-8 child output survives partial synchronous writes and EAGAIN intact',()=>{
- const message=JSON.stringify({status:'NEEDS_REWORK',entries:Array.from({length:190000},(_,i)=>'case:'+i+'π')})+'\n';
- assert.ok(Buffer.byteLength(message)>2*1024*1024);
+ const message=JSON.stringify({status:'NEEDS_REWORK',entries:Array.from({length:520000},(_,i)=>'case:'+i+'π')})+'\n';
+ assert.ok(Buffer.byteLength(message)>5*1024*1024);
  let chunks=[],calls=0,retries=0;
  const written=writeAllSyncV1(1,message,{writer:(_fd,data,offset,len)=>{
   calls++;
