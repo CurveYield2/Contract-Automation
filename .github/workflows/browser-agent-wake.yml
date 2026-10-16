@@ -37,7 +37,7 @@ on:
         required: false
         default: reviewer
         type: choice
-        options: [reviewer, interphase_mechanical, master_reviewer, repair_child]
+        options: [reviewer, interphase_mechanical, master_reviewer, test-executor, repair_child]
       watchdog_message_b64:
         required: false
         type: string
@@ -290,7 +290,7 @@ jobs:
           echo 'WAKE_ACK_ID=' >> "$GITHUB_ENV"
           if [ "$(cat /tmp/wake-message.txt)" != 'GET BACK TO WORK' ] \
             && [ "${{ inputs.gate_mode }}" = 'LITE' ] \
-            && [[ "$WORKER_ROLE" == 'reviewer' || "$WORKER_ROLE" == 'master_reviewer' ]] \
+            && [[ "$WORKER_ROLE" == 'reviewer' || "$WORKER_ROLE" == 'master_reviewer' || "$WORKER_ROLE" == 'test-executor' ]] \
             && [ "${{ inputs.gate_repository }}" = 'CurveYield2/Audit-Controller' ]; then
             token="${AUDIT_CONTROLLER_GITHUB_TOKEN:-}"
             gate_ref="${{ inputs.gate_ref }}"
@@ -421,6 +421,48 @@ jobs:
           done
           echo "::warning::No matching reviewer check-in within 5 minutes (11 checks, 30-second interval). Delivery remains UNCONFIRMED; no duplicate wake is dispatched."
           echo 'Reviewer wake unconfirmed after 5 minutes; browser visual send evidence is not proof of reception.' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record delivered controller result only after exact first-action acknowledgement
+        if: steps.receipt.outputs.verified == 'true'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          ACKED_WAKE_ID: ${{ inputs.wake_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$ACKED_WAKE_ID" != "$CAMPAIGN_ID-delivery-"* ]]; then exit 0; fi
+          [[ "$WAKE_ACK_PATH" == campaigns/*/work/browser/WAKE_ACK_*_v1.json ]] || {
+            echo "::error::Exact wake ack path required to mark delivered"; exit 1;
+          }
+          campaign="${WAKE_ACK_PATH%/work/browser/*}"
+          api="repos/CurveYield2/Audit-Controller/contents/${campaign// /%20}/controller/delivery/DELIVERY_LEDGER_v1.json"
+          for attempt in 1 2 3; do
+            response="$(gh api "$api?ref=${{ inputs.gate_ref }}" )"
+            sha="$(printf '%s' "$response" | jq -r '.sha')"
+            printf '%s' "$response" | jq -r '.content' | base64 -d > /tmp/phase-delivery-ledger.json
+            node --input-type=module -e '
+              import fs from "node:fs";
+              import {advanceDeliveryStateV1} from "./scripts/lib/lite-controller-delivery-state-v1.mjs";
+              const original=JSON.parse(fs.readFileSync("/tmp/phase-delivery-ledger.json","utf8"));
+              if(original.campaignId!==process.argv[1])throw Error("wrong campaign on delivered result");
+              const entry=Object.values(original.results??{}).find(x=>x.wakeId===process.env.ACKED_WAKE_ID);
+              if(!entry)throw Error("acknowledged result missing in controller ledger");
+              const updated=advanceDeliveryStateV1({
+                ledger:original,resultSha256:entry.resultSha256,wakeId:process.env.ACKED_WAKE_ID,
+                to:"DELIVERED",now:new Date().toISOString()
+              });
+              fs.writeFileSync("/tmp/phase-delivery-ledger-next.json",JSON.stringify(updated,null,2)+"\n");
+            ' "$CAMPAIGN_ID"
+            encoded="$(base64 -w0 /tmp/phase-delivery-ledger-next.json)"
+            if gh api --method PUT "$api" -f branch="${{ inputs.gate_ref }}" \
+                -f message="audit(delivery): acknowledge $CAMPAIGN_ID $ACKED_WAKE_ID" \
+                -f sha="$sha" -f content="$encoded" >/dev/null; then
+              echo "Verified delivered controller wake $ACKED_WAKE_ID" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          done
+          echo "::error::Unable to persist acknowledged controller delivery" >&2
+          exit 1
 
       - name: Dispatch fresh-runner retry for retryable pre-post failure
         id: fresh-runner-retry

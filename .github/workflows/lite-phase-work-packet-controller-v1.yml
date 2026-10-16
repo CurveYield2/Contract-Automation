@@ -438,8 +438,28 @@ jobs:
             echo "discovery_wakes_b64=$(jq -r '.discoveryWakesB64 // empty' /tmp/lite-phase-packet-result.json)"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Record v13 controller delivery result and latest per-assignment identity
+        id: delivery_state
+        if: steps.routing.outputs.stale != 'true' && steps.controller.outcome == 'success' && contains(steps.controller.outputs.authority_link_root, 'Audit_Litemode_v13')
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import {publishedDeliveryStateV1} from "./scripts/lib/lite-controller-delivery-state-v1.mjs";
+            const [campaign,kind,phase,runId]=process.argv.slice(1);
+            const envelope=JSON.parse(fs.readFileSync("/tmp/lite-phase-packet-envelope.json","utf8"));
+            const record=publishedDeliveryStateV1({
+              root:".audit-controller",campaignPath:campaign,envelope,
+              reviewKind:kind,phaseSequence:phase?Number(phase):null,
+              requestId:runId,now:new Date().toISOString()
+            });
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,"wake_id="+record.wakeId+"\n");
+            fs.appendFileSync(process.env.GITHUB_OUTPUT,"result_sha256="+record.resultSha256+"\n");
+          ' "${{ steps.routing.outputs.campaign_path }}" "${{ steps.request.outputs.review_kind }}" "${{ steps.request.outputs.phase_sequence }}" "${{ github.run_id }}"
+
       - name: Publish validation response or successful phase transaction
-        if: ${{ steps.routing.outputs.stale != 'true' && steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' || steps.controller.outputs.status == 'FOLLOWUP_ADMITTED' || steps.controller.outputs.status == 'DISCOVERY_REWORK' || steps.controller.outputs.status == 'DISCOVERY_NEXT' || steps.controller.outputs.status == 'DISCOVERY_PARTIAL' || steps.controller.outputs.status == 'DISCOVERY_COMPLETE') }}
+        if: ${{ steps.routing.outputs.stale != 'true' && steps.routing.outcome == 'success' && steps.controller.outcome == 'success' && (steps.controller.outputs.status == 'PASS' || steps.controller.outputs.status == 'WAITING_FOR_MASTER_REVIEW' || steps.controller.outputs.status == 'NEEDS_REWORK' || steps.controller.outputs.status == 'MASTER_TESTS_REQUESTED' || steps.controller.outputs.status == 'FOLLOWUP_ADMITTED' || steps.controller.outputs.status == 'DISCOVERY_REWORK' || steps.controller.outputs.status == 'DISCOVERY_NEXT' || steps.controller.outputs.status == 'DISCOVERY_PARTIAL' || steps.controller.outputs.status == 'DISCOVERY_COMPLETE' || steps.controller.outputs.status == 'DISCOVERY_STALE_REQUEST' || steps.controller.outputs.status == 'MASTER_REVIEW_INVALID' || steps.controller.outputs.status == 'MASTER_REVIEW_HELD' || steps.controller.outputs.status == 'ALREADY_ACCEPTED' || steps.controller.outputs.status == 'CONTROLLER_ERROR') }}
         env:
           GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
         shell: bash
@@ -552,7 +572,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-phase-${{ steps.request.outputs.phase_sequence }}-packet-rework"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.request.outputs.phase_sequence }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="${{ steps.controller.outputs.feedback_b64 }}"             -f watchdog_enabled=true             -f worker_role=reviewer             -f gate_mode=LITE             -f gate_repository=CurveYield2/Audit-Controller             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}"             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"             -f gate_expected_phase_id="phase-${{ steps.request.outputs.phase_sequence }}"             -f gate_expected_milestone_id="PHASE_${{ steps.request.outputs.phase_sequence }}_WORK_PACKET"
+          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.delivery_state.outputs.wake_id || format('{0}-phase-{1}-packet-rework',steps.request.outputs.campaign_id,steps.request.outputs.phase_sequence) }}"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.request.outputs.phase_sequence }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="${{ steps.controller.outputs.feedback_b64 }}"             -f watchdog_enabled=true             -f worker_role=reviewer             -f gate_mode=LITE             -f gate_repository=CurveYield2/Audit-Controller             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}"             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"             -f gate_expected_phase_id="phase-${{ steps.request.outputs.phase_sequence }}"             -f gate_expected_milestone_id="PHASE_${{ steps.request.outputs.phase_sequence }}_WORK_PACKET"
 
       - name: Inform same reviewer that next phase is authorized
         if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.same == 'true' && steps.chat.outputs.chat_url != ''
@@ -566,7 +586,7 @@ jobs:
             msg="$msg Read only the work shard INDEX at $shard_index, then work through BASE_v1.json and each listed shard in order; write all shards sequentially without a controller wait, submit ONE boundary request after the final shard."
           fi
           b64="$(printf '%s' "$msg" | base64 -w0)"
-          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.request.outputs.campaign_id }}-phase-${{ steps.controller.outputs.next_phase }}-continue"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=true             -f worker_role=reviewer             -f gate_mode=LITE             -f gate_repository=CurveYield2/Audit-Controller             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}"             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"             -f gate_expected_phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f gate_expected_milestone_id="PHASE_${{ steps.controller.outputs.next_phase }}_WORK_PACKET"
+          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main             -f wake_id="${{ steps.delivery_state.outputs.wake_id || format('{0}-phase-{1}-continue',steps.request.outputs.campaign_id,steps.controller.outputs.next_phase) }}"             -f campaign_id="${{ steps.request.outputs.campaign_id }}"             -f phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f mode=resume_existing             -f chat_url="${{ steps.chat.outputs.chat_url }}"             -f wake_message_b64="$b64"             -f watchdog_enabled=true             -f worker_role=reviewer             -f gate_mode=LITE             -f gate_repository=CurveYield2/Audit-Controller             -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}"             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}"             -f gate_expected_phase_id="phase-${{ steps.controller.outputs.next_phase }}"             -f gate_expected_milestone_id="PHASE_${{ steps.controller.outputs.next_phase }}_WORK_PACKET"
 
       - name: Dispatch fresh successor after controller PASS
         if: steps.routing.outputs.effective_hold != 'true' && steps.controller.outputs.status == 'PASS' && steps.controller.outputs.fresh == 'true'
@@ -645,7 +665,7 @@ jobs:
           browser_context_b64="$(jq -cn --arg purpose "$purpose" \
             '{routineId:"",projectName:"",projectUrl:"",chatName:"master-reviewer",repair:{enabled:true,idlePokeThreshold:3,unviewableThreshold:2},messagePurpose:$purpose}' | base64 -w0)"
           timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
-            -f wake_id="${{ steps.request.outputs.campaign_id }}-${{ steps.controller.outputs.segment_id }}-master-reviewer" \
+            -f wake_id="${{ steps.delivery_state.outputs.wake_id || format('{0}-{1}-master-reviewer',steps.request.outputs.campaign_id,steps.controller.outputs.segment_id) }}" \
             -f campaign_id="${{ steps.request.outputs.campaign_id }}" \
             -f phase_id=master-review \
             -f mode=resume_existing \

@@ -20,7 +20,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: lite-phase-boundary-controller-v1
+  group: lite-controller-delivery-replay-${{ inputs.campaign_id }}
   cancel-in-progress: false
 
 jobs:
@@ -68,10 +68,44 @@ jobs:
             echo "milestone=$(jq -r '.milestoneId' /tmp/replay.json)"
             echo "role=$(jq -r '.role' /tmp/replay.json)"
             echo "wake_id=$(jq -r '.wakeId' /tmp/replay.json)"
+            echo "result_sha256=$(jq -r '.sourceResultSha256' /tmp/replay.json)"
+            echo "managed=$(jq -r '.deliveryManaged' /tmp/replay.json)"
             echo "wake_b64=$(jq -r '.messageB64' /tmp/replay.json)"
             echo "campaign_path=$campaign_path"
             echo "directory=$directory"
           } >> "$GITHUB_OUTPUT"
+      - name: Atomically claim at most one active replay for this result
+        if: steps.replay.outputs.managed == 'true'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          CLAIMED_SHA: ${{ steps.replay.outputs.result_sha256 }}
+          CLAIMED_WAKE: ${{ steps.replay.outputs.wake_id }}
+          CAMPAIGN: ${{ steps.replay.outputs.campaign_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ledger_api="repos/CurveYield2/Audit-Controller/contents/${CAMPAIGN// /%20}/controller/delivery/DELIVERY_LEDGER_v1.json"
+          response="$(gh api "$ledger_api?ref=${{ inputs.audit_controller_ref }}")"
+          sha="$(printf '%s' "$response" | jq -r '.sha')"
+          printf '%s' "$response" | jq -r '.content' | base64 -d > /tmp/replay-ledger.json
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import {advanceDeliveryStateV1} from "./scripts/lib/lite-controller-delivery-state-v1.mjs";
+            const prior=JSON.parse(fs.readFileSync("/tmp/replay-ledger.json","utf8"));
+            const next=advanceDeliveryStateV1({
+              ledger:prior,resultSha256:process.env.CLAIMED_SHA,
+              wakeId:process.env.CLAIMED_WAKE,to:"CLAIM",
+              claimId:process.env.GITHUB_RUN_ID,now:new Date().toISOString()
+            });
+            fs.writeFileSync("/tmp/replay-ledger-next.json",JSON.stringify(next,null,2)+"\n");
+          '
+          encoded="$(base64 -w0 /tmp/replay-ledger-next.json)"
+          gh api --method PUT "$ledger_api" \
+            -f branch="${{ inputs.audit_controller_ref }}" \
+            -f message="audit(delivery): claim bounded replay $CAMPAIGN $CLAIMED_SHA" \
+            -f content="$encoded" -f sha="$sha" >/dev/null
+          echo "Atomic one-time replay claim accepted" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Resolve currently authorized chat
         id: chat
         if: steps.replay.outputs.kind != 'ORCHESTRATOR'

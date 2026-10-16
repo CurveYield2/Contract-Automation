@@ -66,6 +66,7 @@ jobs:
           set -euo pipefail
           timeout -k 10s 180s node --test \
             scripts/tests/lite-controller-delivery-replay-v1.test.mjs \
+            scripts/tests/lite-controller-delivery-state-v1.test.mjs \
             packages/github-native-sim/test/lite-phase5-request-generation-v1.test.mjs \
             packages/github-native-sim/test/browser-backup-failover-v1.test.mjs \
             packages/github-native-sim/test/phase0-fork-state-reuse-v1.test.mjs \
@@ -140,3 +141,4 @@ jobs:
               'campaigns/cyavKATv25b r4/evidence/review-inventory/scope-corrected/REVIEW_INVENTORY_v1.json'
           )
           AC_R4_ROOT="$PWD/.ac-target" timeout -k 10s 240s node --test scripts/tests/adr-pr706-step1-r4-v1.test.mjs
+          AC_R4_ROOT="$PWD/.ac-target" timeout -k 10s 240s node --test scripts/tests/adr-pr706-step5-r4-v1.test.mjs

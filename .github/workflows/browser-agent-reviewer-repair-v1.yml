@@ -314,7 +314,7 @@ jobs:
             -f campaign_id="$CAMPAIGN_ID" -f phase_id="phase-$phase" \
             -f mode=resume_existing -f chat_url="$backup" \
             -f wake_message_b64="$(printf '%s' "$message" | base64 -w0)" \
-            -f watchdog_enabled=true -f worker_role="$role" -f gate_mode=LITE \
+            -f watchdog_enabled=true -f worker_role="$(if [ "$role" = master-reviewer ]; then echo master_reviewer; else echo "$role"; fi)" -f gate_mode=LITE \
             -f gate_repository="$gate_repo" -f gate_ref="$gate_ref" \
             -f gate_state_path="$gate_path" -f gate_expected_phase_id="phase-$phase" \
             -f gate_expected_milestone_id="$milestone"
