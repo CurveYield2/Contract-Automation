@@ -198,8 +198,8 @@ test('v13 discovery state routes independent attacker to reviewer-3, while v12 k
  }finally{fs.rmSync(o.root,{recursive:true,force:true});}
 });
 
-test('200-unit discovery window uses bounded index pages and one wake below 8 KiB',()=>{
- const o=setup();
+test('200-unit v13 discovery window uses bounded index pages and one wake below 8 KiB',()=>{
+ const o={...setup(),authorityRoot:'Audit Skill - Current Authority/Audit_Litemode_v13'};
  try{
   const many=structuredClone(plan);
   many.payload.reviewUnits=Array.from({length:200},(_,i)=>({
