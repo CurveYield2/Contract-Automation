@@ -165,6 +165,19 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
    err(errors,'MISSING_CONTEXT','rows','Primary context has no correctness verdict: '+id);
  // The legacy per-class checklist is visible in the packet only as a prompt.
  // It is never accepted as a substitute for a function correctness verdict.
+ // V13 candidates carry the two metadata fields required for independent
+ // source/class evaluation. This never changes frozen v12 validation.
+ const typed=[...arr2(submission?.candidates),...arr2(submission?.rows).flatMap(row=>[
+   ...(obj(row?.candidate)?[row.candidate]:[]),...arr2(row?.candidates)
+ ])];
+ for(const [i,c] of typed.entries()){
+   if(typeof c?.classId!=='string'||!/^[A-Z][A-Z0-9_]{2,80}$/.test(c.classId))
+     err(errors,'V13_CANDIDATE_CLASS_REQUIRED','typedCandidates['+i+'].classId',
+       'Source-grounded taxonomy class required for private seed evaluation');
+   if(!['CRITICAL','HIGH','MEDIUM','LOW','INFO','INFORMATIONAL'].includes(c?.severity))
+     err(errors,'V13_CANDIDATE_SEVERITY_REQUIRED','typedCandidates['+i+'].severity',
+       'Severity is required for independent qualification');
+ }
  for(const [i,c] of allCandidates.entries())validateCandidate(c,inventory,errors,'candidates['+i+']');
  return finish(errors,submission);
 }
