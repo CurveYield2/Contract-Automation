@@ -73,6 +73,12 @@ test('v13 allows append only through the controller-preauthorized append slot',(
    assert.equal(restore(s).actions['step-1'].outputs.newCandidateRecords[0].candidateKey,'NEW-1');
  }finally{fs.rmSync(s.root,{recursive:true,force:true});}
 });
+exercise('v13 rejects an appended duplicate candidate identity across indexed shards',s=>{
+ const slot=specs(s).find(x=>x.append&&x.path.at(-1)==='targetDesigns');
+ const body=read(s.root,s.workDir+'/'+slot.file);
+ body.entries.push({key:JSON.stringify(slot.path)+':APPEND-0001',value:{candidateKey:'C-00000'}});
+ write(s.root,s.workDir+'/'+slot.file,body);
+});
 exercise('v13 rejects deletion of a complete targetDesigns shard',s=>{
  const x=specs(s).find(x=>x.path.at(-1)==='targetDesigns'&&!x.append);
  fs.unlinkSync(p(s.root,s.workDir+'/'+x.file));
