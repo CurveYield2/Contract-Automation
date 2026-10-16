@@ -507,6 +507,26 @@ jobs:
             -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
             -f gate_expected_phase_id=phase-5 -f gate_expected_milestone_id=PHASE_5_WORK_PACKET
 
+      - name: Record v13 per-unit Git-commit depth audit for master review
+        if: steps.routing.outputs.stale != 'true' && contains(steps.controller.outputs.authority_link_root, 'Audit_Litemode_v13') && steps.controller.outputs.status == 'DISCOVERY_COMPLETE'
+        env:
+          GH_TOKEN: ${{ env.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          campaign="${{ steps.routing.outputs.campaign_path }}"
+          cd .audit-controller
+          # The accepted submission and assignment commits must be independently
+          # visible in the repository; never infer duration from window openedAt.
+          node ../scripts/adr-v13-unit-depth-review-v1.mjs "$PWD" "$campaign"
+          git config user.name 'CurveYield V13 Depth Review Controller'
+          git config user.email 'v13-depth-controller@users.noreply.github.com'
+          git add -- "$campaign/work/master-review/DEPTH_SPOTCHECK_RESULTS_v1.json"
+          if ! git diff --cached --quiet; then
+            git commit -m "audit(depth): bind every unit to exact per-unit Git commits"
+            git push origin "HEAD:${{ steps.request.outputs.audit_controller_ref }}"
+          fi
+
       - name: Wake discovery chat
         if: steps.routing.outputs.effective_hold != 'true' && steps.routing.outputs.stale != 'true' && steps.controller.outputs.discovery_wake_chat_key != ''
         env:
