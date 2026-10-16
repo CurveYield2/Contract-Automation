@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {classesForTriggersV1,loadTaxonomyV1} from './adr-taxonomy-v1.mjs';
 import {buildCoverageMatrixV1} from './adr-coverage-matrix-v1.mjs';
 import {deriveBaselineObligationsV1} from './adr-baseline-obligations-v1.mjs';
-import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1,TRIVIAL_KINDS_V1} from './adr-discovery-validators-v1.mjs';
+import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1,TRIVIAL_KINDS_V1,isLiteralConstantV13} from './adr-discovery-validators-v1.mjs';
 import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
 // V13 qualification status is assessed independently after real blinded audit runs.
@@ -212,7 +212,7 @@ export function discoveryWindowWakeMessageV1({directory,auditControllerRef,campa
  lines.push('Units to complete now ('+ids.length+'): '+ranges.map(r=>r.fromId===r.toId?r.fromId:r.fromId+' to '+r.toId).join(', ')+'.');
  if(indexPath)lines.push('Complete assignment index: '+link(indexPath)+'. Read each page and save each unit submission without stopping or waiting for a controller message.');
  else lines.push('Discovery folder: '+link(pathJoin(campaignPath,''))+' . For each unit <id>, read <id>/ASSIGNMENT_PACKET_v1.json and write <id>/SUBMISSION_v1.json.');
- if(role!=='ATTACK')lines.push('Each packet has a submissionGuide: use trivialReviews (one per contract for constants and getters), groupChecks (functions sharing a modifier) and the listed contractChecks to avoid repeating the same check.');
+ if(role!=='ATTACK')lines.push('Each packet has a submissionGuide: use trivialReviews only for eligible literal constants, groupChecks (functions sharing a modifier) and the listed contractChecks to avoid repeating the same check.');
  lines.push(feedbackText?'Fix every unit listed in the feedback, then push ONE boundary request.':'This is your entire discovery workload for this phase. Complete every unit in one continuous pass without stopping or asking to continue, then push ONE boundary request.');
  lines.push('The controller validates every unit with a new submission in a single run and wakes you only if a unit needs rework. Do not push a request per unit.');
  lines.push('Boundary request location: process/agent-upload/lite-phase-boundary/');
