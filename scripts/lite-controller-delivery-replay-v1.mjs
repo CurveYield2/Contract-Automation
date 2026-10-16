@@ -68,6 +68,7 @@ export function prepareControllerDeliveryReplayV1({root,directoryRel,detailRef}=
      ', then resume only your current assigned work; no controller computation is needed.';
  return {schemaVersion:'curveyield-lite-delivery-replay-v1',kind,campaignId,campaignPath,
    role,phaseId,milestoneId,wakeId:delivery?.wakeId??campaignId+'-delivery-replay-'+resultSha256.slice(0,20),
+   deliveryManaged:Boolean(delivery),
    messageB64:Buffer.from(message).toString('base64'),
    sourceResultSha256:resultSha256,sourceResultRef:fullRef,
    // A successful GH content fetch proves publication. Browser delivery is
