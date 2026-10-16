@@ -14,8 +14,10 @@ test('real frozen r4 323-design Phase5 message expands beyond 5MB and roundtrips
  const original=fs.readFileSync(file);
  const obj=JSON.parse(original.toString());
  assert.equal(obj.actions['step-3'].outputs.targetDesigns.length,323);
+ const perBlock=Buffer.byteLength(JSON.stringify(obj.actions['step-3'].outputs.targetDesigns));
+ const repeats=Math.ceil((6*1024*1024)/perBlock);
  const response=JSON.stringify({status:'NEEDS_REWORK',realCampaign:'cyavkatv25b-r4',
-  diagnostics:Array.from({length:7},()=>obj.actions['step-3'].outputs.targetDesigns)});
+  diagnostics:Array.from({length:repeats},()=>obj.actions['step-3'].outputs.targetDesigns)});
  assert.ok(Buffer.byteLength(response)>5*1024*1024);
  let segments=[],pos=0,calls=0;
  const total=writeAllSyncV1(1,response,{writer:(_fd,bytes,offset,length)=>{
@@ -25,7 +27,7 @@ test('real frozen r4 323-design Phase5 message expands beyond 5MB and roundtrips
  const joined=Buffer.concat(segments);
  assert.equal(total,joined.length);
  assert.equal(digest(joined),digest(Buffer.from(response)));
- assert.equal(JSON.parse(joined.toString()).diagnostics.length,7);
+ assert.equal(JSON.parse(joined.toString()).diagnostics.length,repeats);
  assert.equal(digest(fs.readFileSync(file)),digest(original),'no frozen r4 file changed');
  console.log('R4_REAL_5MB_STDOUT bytes='+total+' calls='+calls+' SHA256='+digest(joined));
 });
