@@ -28,7 +28,7 @@ if(fs.existsSync(path.join(root,...stateManifestRef.split('/')))){
     await verifyPhase0ForkStateV1({root:stateRoot,manifest});
     if(manifest.sourceSha256!==sourceSha256||manifest.campaignId!==campaignId)
       throw new Error('Phase-0 state does not match current campaign/source');
-    phase0Source.reusableForkState={...manifest,manifestRef};
+    phase0Source.reusableForkState={...manifest,manifestRef:stateManifestRef};
   }catch(error){phase0Source.reusableForkState={status:'INVALID',reason:String(error?.message??error)};}
 }
 
@@ -53,7 +53,7 @@ else for(const [i,target] of designs.entries()){
   const method=String(target.executionMethod??'');
   if(method==='NOT_APPLICABLE')continue;
   if(method!=='V7_REQUEST'){fail(prefix+'.executionMethod','Unsupported method');continue;}
-  if(!target.executionRequestRef){
+  if(!target.executionRequestRef||String(target.executionRequestRef).trim().startsWith('<')){
     const generatedRequest=generateV7ExecutionRequestV1({
       campaignId,sourceSha256,phase0Source,target});
     if(generatedRequest.status!=='GENERATED'){
@@ -71,7 +71,7 @@ else for(const [i,target] of designs.entries()){
     // The existing controller resolver owns the executionRequestRef mutation.
     generated.push({candidateKey:key,executionRequestRef:rel,shardPath});
   }
-  const candidateRef=target.executionRequestRef||(generated.some(x=>x.candidateKey===key)?
+  const candidateRef=(target.executionRequestRef&&!String(target.executionRequestRef).trim().startsWith('<')?target.executionRequestRef:null)||(generated.some(x=>x.candidateKey===key)?
     generated.find(x=>x.candidateKey===key).executionRequestRef:null);
   const binding=validateTargetExecutionRequestBindingV1({controllerRoot:root,campaignPath,
     target:{...target,executionRequestRef:candidateRef},expectedCampaignId:campaignId,
