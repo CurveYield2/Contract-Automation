@@ -7,6 +7,7 @@ import {deriveBaselineObligationsV1} from './adr-baseline-obligations-v1.mjs';
 import {validateFlowReviewSubmissionV1,validateAttackSubmissionV1,feedbackTextV1,parseAnchorV1,TRIVIAL_KINDS_V1,isLiteralConstantV13} from './adr-discovery-validators-v1.mjs';
 import {repoFile,readJson,writeJson} from '../../../scripts/lib/lite-phase-work-v1.mjs';
 import {reviewInventoryRelV1} from './adr-review-inventory-v1.mjs';
+import {independentSpecItemsV13} from './adr-independent-spec-v1.mjs';
 // V13 qualification status is assessed independently after real blinded audit runs.
 
 const pathJoin=(campaign,relative)=>path.posix.join(campaign,'work/phase-04/discovery',relative);
@@ -75,21 +76,29 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
  const flows=arr(plan?.payload?.flows).filter(f=>arr(unit.flowIds).includes(f.flowId));
  const questions=arr(plan?.payload?.integrationQuestions).filter(q=>arr(unit.integrationQuestionIds).includes(q.obligationId));
  const siblingChecks=verdictV13&&role!=='ATTACK'?arr(facts?.payload?.siblingGroups)
-  .filter(g=>arr(g.members).some(m=>primary.some(id=>contextFor(inventory,id)?.qualifiedContainer===m.contract)))
-  .map(g=>({pattern:g.pattern??'shared modifier or pattern',
-    members:arr(g.members).map(m=>({contract:m.contract,name:m.name??m.signature??m.function??''}))})):[];
- const documentationItems=verdictV13&&role!=='ATTACK'?primary.flatMap(id=>{
+  .filter(g=>arr(g.members).some(m=>primary.includes(m.contextId)))
+  .map(g=>({signature:g.signature,pattern:g.pattern??'shared modifier or pattern',
+    asymmetric:g.asymmetric,differences:g.differences??[],
+    members:arr(g.members).map(m=>({contract:m.contract,contextId:m.contextId,
+      function:m.function??g.signature,sourceAnchor:m.sourceAnchor,
+      hasGuard:m.hasGuard,modifiers:m.modifiers??[]}))})):[];
+ const independentItems=verdictV13&&role!=='ATTACK'?primary.flatMap(id=>{
   const c=contextFor(inventory,id);
-  if(!c)return [];
-  const rules=[];
-  if(typeof c.natSpec==='string'&&c.natSpec.trim())
-    rules.push({ruleId:'NATSPEC:'+id,sourceAnchor:contextAnchor(c),
-      rule:c.natSpec.slice(0,1200),type:'NATSPEC'});
-  if(typeof c.declaredValue==='string'&&c.declaredValue!=='UNINITIALIZED'&&c.declaredValue.trim())
-    rules.push({ruleId:'DECLARED_VALUE:'+id,sourceAnchor:contextAnchor(c),
-      rule:c.declaredValue.slice(0,300),type:'LITERAL_OR_INITIALIZED_STORAGE'});
-  return rules.map(x=>({contextId:id,...x}));
+  return c?[{contextId:id,...independentSpecItemsV13({root,campaignPath,context:c,
+    otherContexts:inventory.payload.contexts})}]:[];
  }):[];
+ const documentationItems=independentItems.flatMap(x=>[
+   ...(typeof contextFor(inventory,x.contextId)?.natSpec==='string'&&
+    contextFor(inventory,x.contextId).natSpec.trim()?[{
+      contextId:x.contextId,ruleId:'NATSPEC:'+x.contextId,
+      sourceAnchor:contextAnchor(contextFor(inventory,x.contextId)),
+      rule:contextFor(inventory,x.contextId).natSpec.slice(0,1200),type:'NATSPEC'}]:[]),
+   ...x.documentationItems.map(rule=>({contextId:x.contextId,...rule}))
+ ]);
+ const specContext=independentItems.map(({contextId,referenceConstants,checkedDocCount,sourceCommentsChecked,missingSource})=>({
+  contextId,referenceConstants,checkedDocCount,sourceCommentsChecked,missingSource,
+  requirement:'Code initializers and getters are observations, not independent specifications'
+ }));
  const packet=head(directory,now,'curveyield-discovery-assignment-packet-v1',{
   unitId,role,chatKey:role==='ATTACK'?(verdictV13?'reviewer-3':'reviewer-3L'):'reviewer-2',instructionsPath,
   submissionPath:submissionRel(campaignPath,unitId),boundaryRequestPath:'process/agent-upload/lite-phase-boundary/',
@@ -102,7 +111,7 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
   integrationQuestionIds:arr(unit.integrationQuestionIds),
   ...(verdictV13&&role!=='ATTACK'?{
     reviewPolicy:'correctness-verdict-v13',
-    siblingChecks,documentationItems,
+    siblingChecks,documentationItems,specContext,
     specificationReview:{sourcePaths:[...new Set(primary.map(id=>contextFor(inventory,id)?.path).filter(Boolean))],
       inspect:['NatSpec','inline comments','README and docs','named constants','paired parameters'],
       requirement:'For each documentationItems ruleId, report a MATCH/MISMATCH/UNRESOLVED comparison. Also explicitly inspect comments and README/docs from sourceRoot. If none are applicable, state NO_DOCUMENTED_RULES; the absence of entries alone is not proof.'},
