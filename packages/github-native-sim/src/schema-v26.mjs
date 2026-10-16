@@ -15,7 +15,7 @@ export function validateDeepAssuranceRequestWithV26V1(input){
     forkState.campaignId!==validated.campaignId||
     forkState.sourceSha256!==validated.source.archiveSha256||
     forkState.finalBlock!==validated.configuration.simulation?.block||
-    forkState.chainId!==(validated.configuration.simulation?.chain==='ethereum'?1:8453)||
+    forkState.chainId!==({ethereum:1,base:8453,katana:747474}[validated.configuration.simulation?.chain])||
     String(forkState.hardfork).toLowerCase()!==String(validated.configuration.evmVersion??'').toLowerCase()))
     throw new Error('Phase-0 fork state campaign and exact source mismatch');
 
