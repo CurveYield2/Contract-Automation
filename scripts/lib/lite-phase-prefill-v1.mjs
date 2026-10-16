@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {detectionPolicyForAuthorityV1} from '../../packages/github-native-sim/src/adr-policy-v1.mjs';
-import {boundReviewerForPhaseV1} from './lite-master-review-v1.mjs';
+import {boundReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
 
 function repoFile(root,rel){return path.join(root,...String(rel).split('/'));}
 function readJsonIf(file){try{return JSON.parse(fs.readFileSync(file,'utf8'));}catch{return null;}}
