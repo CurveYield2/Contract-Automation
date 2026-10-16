@@ -42,6 +42,13 @@ checkout_controller ".ac-target" "$target_ref"
 run_controller_checks ".ac-main"
 run_controller_checks ".ac-target"
 
+# Use the exact frozen r4 Phase-5 1.15 MB form from AC git objects;
+# the default sparse checkout intentionally excludes campaign data.
+r4_form="campaigns/cyavKATv25b r4/work/phase-05/PHASE_05_WORK_FORM_v1.json"
+mkdir -p ".ac-main/$(dirname "$r4_form")"
+git -C .ac-main show "HEAD:$r4_form" > ".ac-main/$r4_form"
+ADR_R4_CHECKOUT=.ac-main node --test scripts/tests/lite-v13-real-r4-shards-v1.test.mjs
+
 echo "Audit-Controller main failing tests:"
 cat .ac-main/failed-tests.txt
 echo "Audit-Controller target ($target_ref) failing tests:"
