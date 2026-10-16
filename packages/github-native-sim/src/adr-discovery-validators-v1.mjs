@@ -40,7 +40,7 @@ function candidateRecords(submission,row,check){
 }
 function hasCandidate(check,all){
  const pointer=check?.candidateTempKey??check?.candidateId??(typeof check?.candidate==='string'?check.candidate:null);
- return obj(check?.candidate)|| (typeof pointer==='string'&&pointer.trim()&&all.some(x=>[x?.tempKey,x?.candidateId,x?.id].includes(pointer)))||
+ return obj(check?.candidate)|| (Array.isArray(check?.candidates)&&check.candidates.some(obj))|| (typeof pointer==='string'&&pointer.trim()&&all.some(x=>[x?.tempKey,x?.candidateId,x?.id].includes(pointer)))||
    all.some(x=>x?.classId===check.classId);
 }
 function validateCandidate(c,inventory,errors,path){
@@ -139,7 +139,8 @@ function validateVerdictSubmissionV13({packet,submission,inventory}){
        row.siblingComparisons.some(x=>blank(x?.sibling)||blank(x?.comparison))))
      err(errors,'SIBLING_CHECK_INVALID',p+'.siblingComparisons',
        'Sibling or paired-parameter checks need explicit comparison');
-   for(const [j,c] of arr2(row?.candidates).entries())validateCandidate(c,inventory,errors,p+'.candidates['+j+']');
+   if(row?.candidate!==undefined&&obj(row.candidate))validateCandidate(row.candidate,inventory,errors,p+'.candidate');
+    for(const [j,c] of arr2(row?.candidates).entries())validateCandidate(c,inventory,errors,p+'.candidates['+j+']');
  }
  for(const id of primary)if(!seen.has(id)&&!covered.has(id))
    err(errors,'MISSING_CONTEXT','rows','Primary context has no correctness verdict: '+id);
