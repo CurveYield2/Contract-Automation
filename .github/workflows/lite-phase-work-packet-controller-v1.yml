@@ -314,6 +314,7 @@ jobs:
           mkdir -p "$(dirname "$report_path")"
           cp /tmp/lite-phase5-preflight.json "$report_path"
           echo "runnable=$(jq -r '.runnable' /tmp/lite-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
+          echo "generated_count=$(jq '.generated|length' /tmp/lite-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
           echo "rework=$(jq -r '.status=="REWORK_REQUIRED"' /tmp/lite-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
           jq '{status,designCount,readyCount,failureCount:(.failures|length),generatedCount:(.generated|length)}' /tmp/lite-phase5-preflight.json
 
@@ -447,6 +448,35 @@ jobs:
               timeout -k 10s 120s git pull --rebase origin "${{ steps.request.outputs.audit_controller_ref }}"
             done
           fi
+
+      - name: Delegate v13 Phase-5 generated harness requests to test executor
+        if: steps.routing.outputs.effective_hold != 'true' && steps.routing.outputs.stale != 'true' && contains(steps.controller.outputs.authority_link_root, 'Audit_Litemode_v13') && steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5' && steps.phase5_preflight.outputs.generated_count != '0' && steps.phase5_preflight.outputs.generated_count != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "${{ steps.request.outputs.campaign_id }}" | tr -c 'A-Za-z0-9._-' '_')"
+          registration="process/browser-agent-wake/registrations/$safe_campaign.json"
+          encoded="$(gh api "repos/$GITHUB_REPOSITORY/contents/$registration?ref=main" --jq '.content')"
+          printf '%s' "$encoded" | base64 -d > /tmp/phase5-test-executor-registration.json
+          chat="$(jq -r '.agentChats["test-executor"] // empty' /tmp/phase5-test-executor-registration.json)"
+          [[ "$chat" =~ ^https://chatgpt\\.com/c/[A-Za-z0-9_-]+/?$ || "$chat" =~ ^https://chatgpt\\.com/g/g-p-[A-Za-z0-9_-]+/c/[A-Za-z0-9_-]+/?$ ]] || {
+            echo "::error::V13 requires a distinct registered test-executor chat"
+            exit 1
+          }
+          refs="$(jq -r '[.generated[:12][]?.executionRequestRef] | join(", ")' /tmp/lite-phase5-preflight.json)"
+          count="$(jq '.generated|length' /tmp/lite-phase5-preflight.json)"
+          message="PHASE5_TEST_EXECUTOR_HANDOFF: v13 campaign ${{ steps.request.outputs.campaign_id }}. $count candidate-bound requests are published. Read ${{ steps.routing.outputs.campaign_path }}/controller/preflight/PHASE5_REQUEST_PREFLIGHT_v1.json and the listed request and *.design-v1.json sidecars from Audit-Controller. First request paths: $refs. You are the TEST EXECUTOR: author/verify exact runnable harnesses, preserve every required ABI method/actor/transaction sequence and oracle, never lower 100000 native fuzz budget, retain raw execution evidence. Do NOT alter reviewer shards or fabricate successful executions. Unready targets remain preflight REWORK."
+          b64="$(printf '%s' "$message" | base64 -w0)"
+          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="${{ steps.request.outputs.campaign_id }}-phase5-test-executor-${{ github.run_id }}" \
+            -f campaign_id="${{ steps.request.outputs.campaign_id }}" -f phase_id=phase-5 \
+            -f mode=resume_existing -f chat_url="$chat" -f wake_message_b64="$b64" \
+            -f watchdog_enabled=true -f worker_role=test-executor -f gate_mode=LITE \
+            -f gate_repository=CurveYield2/Audit-Controller -f gate_ref="${{ steps.request.outputs.audit_controller_ref }}" \
+            -f gate_state_path="${{ steps.routing.outputs.campaign_directory_path }}" \
+            -f gate_expected_phase_id=phase-5 -f gate_expected_milestone_id=PHASE_5_WORK_PACKET
 
       - name: Wake discovery chat
         if: steps.routing.outputs.effective_hold != 'true' && steps.routing.outputs.stale != 'true' && steps.controller.outputs.discovery_wake_chat_key != ''
