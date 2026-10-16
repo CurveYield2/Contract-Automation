@@ -269,6 +269,57 @@ jobs:
             -f gate_stop_campaign_statuses_csv=COMPLETE,STOPPED_BY_HUMAN \
             -f browser_context_b64="${{ steps.current.outputs.browser_context_b64 }}"
 
+      - name: Fail over only after a verified reviewer-repair workflow failure
+        if: ${{ failure() && inputs.repair_mode == 'auto' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_CONTROLLER_READ_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
+          AUDIT_CONTROLLER_FALLBACK_TOKEN: ${{ secrets.PREFLIGHTSIM_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          safe_campaign="$(printf '%s' "$CAMPAIGN_ID" | tr -c 'A-Za-z0-9._-' '_')"
+          api="repos/$GITHUB_REPOSITORY/contents/process/browser-agent-wake/registrations/$safe_campaign.json"
+          response="$(gh api "$api?ref=main")"
+          printf '%s' "$response" | jq -r '.content' | base64 -d > /tmp/failed-repair-registration.json
+          gate_repo="$(jq -r '.watchdog.gate.repository // "CurveYield2/Audit-Controller"' /tmp/failed-repair-registration.json)"
+          gate_ref="$(jq -r '.watchdog.gate.ref // "main"' /tmp/failed-repair-registration.json)"
+          gate_path="$(jq -r '.watchdog.gate.statePath // empty' /tmp/failed-repair-registration.json)"
+          [ "$gate_repo" = CurveYield2/Audit-Controller ] && [[ "$gate_path" == "Audit Campaign Directory/campaigns/"*.json ]] || {
+            echo "::warning::No trusted campaign directory binding for standby"
+            exit 0
+          }
+          token="${AUDIT_CONTROLLER_READ_TOKEN:-${AUDIT_CONTROLLER_FALLBACK_TOKEN:-}}"
+          [ -n "$token" ] || { echo "::warning::No available Audit-Controller read credential"; exit 0; }
+          GH_TOKEN="$token" gh api "repos/$gate_repo/contents/$gate_path?ref=$gate_ref" --jq '.content' |
+            base64 -d > /tmp/failed-repair-directory.json
+          failed="$(jq -r '.activeChat.url // empty' /tmp/failed-repair-registration.json)"
+          planned="$(node scripts/browser-backup-failover-v1.mjs /tmp/failed-repair-registration.json /tmp/failed-repair-directory.json "$failed")"
+          if [ "$(printf '%s' "$planned" | jq -r '.status')" != ELIGIBLE ]; then
+            echo "::warning::Repair failed, but no eligible one-time standby exists: $(printf '%s' "$planned" | jq -r '.reason')"
+            exit 0
+          fi
+          backup="$(printf '%s' "$planned" | jq -r '.backupChatUrl')"
+          role="$(printf '%s' "$planned" | jq -r '.role')"
+          message="$(printf '%s' "$planned" | jq -r '.message')"
+          payload="$(printf '%s' "$planned" | jq -c '.registration' | base64 -w0)"
+          sha="$(printf '%s' "$response" | jq -r '.sha')"
+          gh api --method PUT "$api" \
+            -f message="repair(watchdog): one-time standby following failed repair run $GITHUB_RUN_ID" \
+            -f content="$payload" -f sha="$sha" -f branch=main >/dev/null
+          phase="$(jq -r '.currentAssignment.phaseSequence' /tmp/failed-repair-directory.json)"
+          milestone="PHASE_${phase}_WORK_PACKET"
+          timeout -k 10s 90s gh workflow run browser-agent-wake.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f wake_id="$CAMPAIGN_ID-$milestone-verified-repair-failure-backup" \
+            -f campaign_id="$CAMPAIGN_ID" -f phase_id="phase-$phase" \
+            -f mode=resume_existing -f chat_url="$backup" \
+            -f wake_message_b64="$(printf '%s' "$message" | base64 -w0)" \
+            -f watchdog_enabled=true -f worker_role="$role" -f gate_mode=LITE \
+            -f gate_repository="$gate_repo" -f gate_ref="$gate_ref" \
+            -f gate_state_path="$gate_path" -f gate_expected_phase_id="phase-$phase" \
+            -f gate_expected_milestone_id="$milestone"
+          echo "Standby dispatched after repair workflow failed (run $GITHUB_RUN_ID)." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Summarize reviewer repair
         if: always()
         shell: bash
