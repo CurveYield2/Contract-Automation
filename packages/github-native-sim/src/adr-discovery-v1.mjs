@@ -106,7 +106,11 @@ export function buildUnitPacketV1({root,campaignPath,directory,authorityRoot,aut
       inspect:['NatSpec','inline comments','README and docs','named constants','paired parameters'],
       requirement:'For each documentationItems ruleId, report a MATCH/MISMATCH/UNRESOLVED comparison. Also explicitly inspect comments and README/docs from sourceRoot. If none are applicable, state NO_DOCUMENTED_RULES; the absence of entries alone is not proof.'},
     submissionGuide:[
-      'For EVERY primary context, give verdict CORRECT or DEFECT, intent, reason and source anchors. UNRESOLVED requires a named decisive test and an exact expected observation.',
+      'V13 rows[] shape: {contextId,verdict:CORRECT|DEFECT|UNRESOLVED,intent,reason,anchors:[file.sol:Lx-Ly],specInspection:{status:MATCH|MISMATCH|UNRESOLVED|NO_DOCUMENTED_RULES,docsAndCommentsChecked,namedConstantsChecked},documentedRules:[{ruleId,rule,comparison,reason}],siblingComparisons:[{sibling,comparison}]}. Full source-backed fields are required, not guessed placeholders.',
+      'CORRECT example: {contextId:CTX,verdict:CORRECT,intent:Only the owner can set cap,reason:Owner check precedes the state update,anchors:[file.sol:L20-L25],specInspection:{status:MATCH,docsAndCommentsChecked:README inspected,namedConstantsChecked:CAP inspected},documentedRules:[],siblingComparisons:[]}; use actual packet anchors and rules.',
+      'DEFECT example: same core fields plus verdict:DEFECT and candidate:{tempKey:C1,title:Uncapped update,description:Bypass of configured cap,anchors:[file.sol:L30-L35]}; also accepted: row.candidates[] or top-level candidates[] with candidateTempKey.',
+      'UNRESOLVED example: same core fields plus verdict:UNRESOLVED and decidingTest:{name:multi-actor transaction sequence,expectedObservation:the exact machine result that confirms or disproves exploitability}.',
+      'Check every packet documentationItems ruleId in documentedRules, and siblingChecks for actual members; never assert NO_DOCUMENTED_RULES if packet includes documentationItems.',
       'Class checks are prompts only: no per-class response is graded. The correctness verdict cannot be inferred from checklist completion.',
       'Compare implementation with NatSpec, comments, README/docs and named constants. Report every mismatch as a candidate.',
       'Compare sibling functions and paired parameters, documenting asymmetry. Storage initializers and locks never qualify for trivialReviews.',

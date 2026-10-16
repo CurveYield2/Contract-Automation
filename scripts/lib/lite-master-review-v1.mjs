@@ -4,6 +4,8 @@ import {createHash} from 'node:crypto';
 import {buildMasterDepthSpotCheckV1,validateMasterDepthSpotCheckV1} from './lite-master-depth-spotcheck-v1.mjs';
 import {readJson,writeJson,repoFile,requiredFile,loadPhaseSchema,getByPath} from './lite-phase-work-v1.mjs';
 import {validatePhaseScaffold} from './lite-phase-prefill-v1.mjs';
+import {isV13AuthorityV1,boundReviewerLineupV13,boundReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
+export {isV13AuthorityV1,boundReviewerLineupV13,boundReviewerForPhaseV1} from './lite-authority-lineup-v1.mjs';
 import {validateRecordedPhase5MachineEvidenceV1} from '../../packages/github-native-sim/src/lite-boundary-artifacts-v1.mjs';
 
 export const MASTER_REVIEW_SEGMENTS_V1=Object.freeze([
@@ -56,10 +58,11 @@ export const MASTER_REVIEW_SEGMENTS_V13=Object.freeze([
   Object.freeze({segmentId:'reviewer-4-phases-08-10',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10}),
   Object.freeze({segmentId:'reviewer-4-followup-v1',reviewerId:'reviewer-4',phases:Object.freeze([8,9,10]),boundaryPhase:10})
 ]);
-export const isV13AuthorityV1=authorityRoot=>/Audit_Litemode_v13(?:\/|$)/.test(String(authorityRoot??''));
-export const segmentsForAuthorityV1=authorityRoot=>isV13AuthorityV1(authorityRoot)?MASTER_REVIEW_SEGMENTS_V13:MASTER_REVIEW_SEGMENTS_V1;
-function segmentForBoundary(boundaryPhase,authorityRoot=null){
-  return segmentsForAuthorityV1(authorityRoot).find(x=>x.boundaryPhase===Number(boundaryPhase))??null;
+export const segmentsForAuthorityV1=(authorityRoot,root=null)=>isV13AuthorityV1(authorityRoot)
+ ?(root?boundReviewerLineupV13({root,authorityRoot}).masterSegments:MASTER_REVIEW_SEGMENTS_V13)
+ :MASTER_REVIEW_SEGMENTS_V1;
+function segmentForBoundary(boundaryPhase,authorityRoot=null,root=null){
+  return segmentsForAuthorityV1(authorityRoot,root).find(x=>x.boundaryPhase===Number(boundaryPhase))??null;
 }
 function segmentForId(segmentId){
   return [...MASTER_REVIEW_SEGMENTS_V13,...MASTER_REVIEW_SEGMENTS_V1].find(x=>x.segmentId===segmentId)??null;
@@ -179,7 +182,7 @@ function sealedOriginalSnapshotPath(campaignPath,segmentId,sealed){
 export function stageMasterReview({root,campaignPath,directory,predecessor,authorityRoot,boundaryPhase,segmentId=null,lastSealedReceiptPath,nextSequence,nextDerivedInputPaths=[],successorPrefillContext={},now}){
   const cfg=validateMasterReviewConfiguration(directory,{required:true});
   if(directory.pendingMasterReview)throw new Error('campaign already has pendingMasterReview');
-  const segment=segmentId?segmentForId(segmentId):segmentForBoundary(boundaryPhase,authorityRoot);
+  const segment=segmentId?segmentForId(segmentId):segmentForBoundary(boundaryPhase,authorityRoot,root);
   if(segment&&segment.boundaryPhase!==boundaryPhase)throw new Error('master segment boundary mismatches requested phase');
   if(!segment)throw new Error('unsupported master review boundary '+boundaryPhase);
   const reviewedArtifacts=collectSegmentArtifacts({root,campaignPath,segment,directory,expectedAuthority:predecessor.authority});

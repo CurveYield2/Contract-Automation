@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import {boundReviewerLineupV13,boundReviewerForPhaseV1} from './lib/lite-authority-lineup-v1.mjs';
+import {MASTER_REVIEW_SEGMENTS_V13} from './lib/lite-master-review-v1.mjs';
 
 function args(argv){
   const out={};
@@ -30,6 +32,26 @@ const authorityRoot=a['authority-root']?path.resolve(controllerRoot,a['authority
 need(authorityRoot.startsWith(controllerRoot+path.sep),'authority root must be within controller checkout');
 need(fs.existsSync(path.join(authorityRoot,'SKILL.md')),'authority root is not an unpacked Lite package');
 const authorityRel=path.relative(controllerRoot,authorityRoot).split(path.sep).join('/');
+
+if(authorityRel.includes('Audit_Litemode_v13')){
+ const lineup=boundReviewerLineupV13({root:controllerRoot,authorityRoot:authorityRel});
+ const expectedPhases={1:'reviewer-1',2:'reviewer-2',3:'reviewer-2',4:'reviewer-2',
+   5:'reviewer-3',6:'reviewer-3',7:'reviewer-3',8:'reviewer-4',9:'reviewer-4',10:'reviewer-4'};
+ for(const [phase,role] of Object.entries(expectedPhases))
+   need(boundReviewerForPhaseV1({root:controllerRoot,authorityRoot:authorityRel,phase:Number(phase)})===role,
+     'V13 reviewer lineup disagrees at Phase '+phase);
+ const expected=MASTER_REVIEW_SEGMENTS_V13.filter(x=>x.segmentId!=='reviewer-4-followup-v1')
+   .map(x=>({segmentId:x.segmentId,reviewerId:x.reviewerId,phases:[...x.phases],boundaryPhase:x.boundaryPhase}));
+ need(JSON.stringify(lineup.masterSegments)===JSON.stringify(expected),
+   'V13 master segments differ from CA routing');
+ const init=read(join(automationRoot,'scripts/audit-source-initialization/run-v1.sh'));
+ need(init.includes('third_reviewer_key="reviewer-3"')&&
+   init.includes('($thirdReviewer):$chat3'),
+   'V13 role must be registered as reviewer-3 by initialization');
+ need(read(join(automationRoot,'.github/workflows/browser-agent-reviewer-repair-v1.yml')).includes('reviewer-3|reviewer-3L'),
+   'V13 reviewer-3 must be supported by repair workflow');
+}
+
 
 const prefillSource=read(join(automationRoot,'scripts/lib/lite-phase-prefill-v1.mjs'));
 const packetController=read(join(automationRoot,'scripts/lite-phase-packet-controller-v1.mjs'));
@@ -116,8 +138,10 @@ for(let phase=1;phase<=10;phase++){
     1:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
     2:['REWORK_REQUIRED','ACTIVE'],
     3:['REWORK_REQUIRED','ACTIVE'],
-    4:['REWORK_REQUIRED','ACTIVE'],
-    5:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
+    4:authorityRel.includes('Audit_Litemode_v13')?
+      ['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT']:['REWORK_REQUIRED','ACTIVE'],
+    5:authorityRel.includes('Audit_Litemode_v13')?
+      ['REWORK_REQUIRED','ACTIVE']:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
     6:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
     7:['REWORK_REQUIRED','WAITING_FOR_MASTER_REVIEW','WAITING_FOR_SUCCESSOR_AGENT'],
     8:['REWORK_REQUIRED','ACTIVE'],
