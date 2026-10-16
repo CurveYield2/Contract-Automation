@@ -32,6 +32,8 @@ test('source-bound executable design yields valid typed V7 request',()=>{
  const x=generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,phase0Source:source,target:target()});
  assert.equal(x.status,'GENERATED',JSON.stringify(x.missing));
  assert.equal(x.request.configuration.v26.reproduction.candidateId,'C-005');
+ assert.deepEqual(x.designEvidence.transactionSequence,['nonowner attack','owner control']);
+ assert.match(x.designEvidence.oracle,/Nonowner call must revert/);
  assert.equal(x.request.source.archiveSha256,digest);
  assert.deepEqual(validateDeepAssuranceRequestWithV26V1(x.request),x.request);
  assert.deepEqual(generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,phase0Source:source,target:target()}).request,x.request);
@@ -79,4 +81,41 @@ test('D5 generated Anvil requests reuse only exact Phase-0 campaign snapshot and
  assert.equal(expected.status,'GENERATED',JSON.stringify(expected.missing));
  assert.equal(expected.request.configuration.v26.phase0ForkState.sha256,sha,
   'agent cannot override controller-verifiable Phase-0 state digest');
+});
+
+test('v13 fail-closed invalid placeholders and missing concrete fuzz budgets',()=>{
+ for(const [label,mutate,field] of [
+  ['oracle',t=>{t.oracle='<REQUIRED_TEST_ORACLE>';},'oracle'],
+  ['transaction',t=>{t.transactionSequence=['TODO'];},'transactionSequence'],
+  ['compilers',t=>{t.executionBlueprint.configuration.compilers[0].version='<SOLC>';},'executionBlueprint.configuration'],
+  ['missing analysis',t=>{delete t.executionBlueprint.configuration.analysis;},'executionBlueprint.configuration.analysis'],
+  ['low budget',t=>{t.executionBlueprint.configuration.analysis.nativeFuzz.fuzzRuns=1;},'executionBlueprint.configuration.analysis.nativeFuzz.fuzzRuns'],
+  ['missing harness ID',t=>{delete t.executionBlueprint.configuration.harness.bundleId;},'executionBlueprint.configuration.harness.bundleId']
+ ]){
+  const design=target();mutate(design);
+  const result=generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,phase0Source:source,target:design});
+  assert.equal(result.status,'REWORK_REQUIRED',label);
+  assert.ok(result.missing.some(e=>e.field===field),label+': '+JSON.stringify(result.missing));
+ }
+});
+test('Katana Phase0 fork snapshots accept chainId 747474 but never mismatched chain',()=>{
+ const targetK=target();
+ Object.assign(targetK,{reproductionType:'ANVIL_WORKFLOW',
+  expectedMachineObservation:{stepLabel:'owner check',stepStatus:'completed'},
+  executionBlueprint:{usePhase0ForkState:true,projectPath:'campaigns/demo r1/source',
+    configuration:{compilers:[{language:'solidity',version:'0.8.28'}],evmVersion:'cancun',timeoutMinutes:20,
+      analysis:{nativeFuzz:{enabled:true,fuzzRuns:100000}},
+      harness:{recipeId:'phase0-snapshot-targeted-v1'},
+      deploymentGas:{deployableContracts:[{sourceName:'contracts/Vault.sol',contractName:'Vault'}]},
+      simulation:{chain:'katana',block:123,workflow:{steps:[
+         {action:'snapshot',alias:'baseline',label:'owner check'}]}}}}});
+ const state={...source,reusableForkState:{status:'CAPTURED',sha256:'b'.repeat(64),
+   sourceSha256:digest,campaignId:'demo-r1',chainId:747474,finalBlock:123,hardfork:'cancun',
+   manifestRef:'campaigns/demo r1/evidence/phase0/PHASE0_FORK_STATE_MANIFEST_v1.json'}};
+ const ok=generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,phase0Source:state,target:targetK});
+ assert.equal(ok.status,'GENERATED',JSON.stringify(ok.missing));
+ assert.equal(ok.request.configuration.v26.phase0ForkState.chainId,747474);
+ const bad={...state,reusableForkState:{...state.reusableForkState,chainId:1}};
+ const denied=generateV7ExecutionRequestV1({campaignId:'demo-r1',sourceSha256:digest,phase0Source:bad,target:targetK});
+ assert.equal(denied.status,'REWORK_REQUIRED');
 });
