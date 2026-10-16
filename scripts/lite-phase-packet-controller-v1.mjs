@@ -1011,6 +1011,7 @@ const existingPacket=fs.existsSync(packetFile)?readJson(packetFile):null;
 const packet=buildControllerPacket({directory,assignment,existing:existingPacket,now});
 let deficiencies=ensurePacketShape({packet,directory,assignment});
 let form=null;
+let workShardIntegrityFailed=false;
 try{
   // Agent edits live shards; reconstruct the legacy form for existing validators.
   // Digest/key checks run before any reviewer work can reach bookkeeping.
@@ -1064,9 +1065,14 @@ try{
       deficiencies.push(...validatePhaseScaffold(sequence,form,assignment.controllerPrefillDigestSha256));
     }
   }
-}catch(e){deficiencies.push(String(e.message||e));}
+}catch(e){
+  workShardIntegrityFailed=Boolean(assignment.workShardIndexPath);
+  deficiencies.push(String(e.message||e));
+}
 
 function persistReviewerReworkShardsV1(){
+  // A failed integrity check must never re-seal a stale or corrupt agent shard.
+  if(workShardIntegrityFailed)return;
   if(!assignment.workShardIndexPath)return;
   const full=repoFile(root,assignment.workFormPath);
   if(fs.existsSync(full))
