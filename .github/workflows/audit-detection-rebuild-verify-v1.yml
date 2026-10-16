@@ -110,6 +110,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Install validator dependencies before cross-repository authority checks
+        run: timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
       - name: Select Audit-Controller credential
         env:
           AUDIT_CONTROLLER_PRIMARY_TOKEN: ${{ secrets.AUDIT_CONTROLLER_GITHUB_TOKEN }}
