@@ -85,7 +85,7 @@ else for(const [i,target] of designs.entries()){
     const evidencePath=path.join(root,campaignPath,evidenceRel);
     fs.writeFileSync(evidencePath,JSON.stringify({schemaVersion:'curveyield-phase5-machine-design-v1',
       campaignId,sourceSha256,candidateKey:key,requestDigest:generatedRequest.request.requestDigest,
-      ...generatedRequest.designEvidence},null,2)+'\\n');
+      ...generatedRequest.designEvidence},null,2)+'\n');
   }
   const candidateRef=(target.executionRequestRef&&!String(target.executionRequestRef).trim().startsWith('<')?target.executionRequestRef:null)||(generated.some(x=>x.candidateKey===key)?
     generated.find(x=>x.candidateKey===key).executionRequestRef:null);
