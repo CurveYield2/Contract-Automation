@@ -36,7 +36,7 @@ if [[ "$report_sha" =~ ^[0-9a-f]{40}$ ]]; then
      and .request.sourceUrl==$u
      and .request.agentChats["reviewer-1"]==$c1
      and .request.agentChats["reviewer-2"]==$c2
-     and .request.agentChats["reviewer-3L"]==$c3
+     and (.request.agentChats["reviewer-3"] // .request.agentChats["reviewer-3L"])==$c3
      and .request.agentChats["reviewer-4"]==$c4
      and .request.masterChatUrl==$master
      and .request.testExecutorChatUrl==$tester' \
@@ -81,6 +81,11 @@ else
   skill_blob="$(git rev-parse "HEAD:$skill_home")"
   test -n "$skill_release"
   test -n "$skill_revision"
+  third_reviewer_key="reviewer-3L"
+  if [ "$skill_release" = "Audit_Litemode_v13" ]; then
+    third_reviewer_key="reviewer-3"
+    jq -e '.reviewerLineup.schemaVersion=="curveyield-v13-reviewer-lineup-v1" and .reviewerLineup.discoveryAttacker=="reviewer-3"' "${authority_packages[0]}/MANIFEST.json" >/dev/null
+  fi
 
   success=false
   for attempt in 1 2 3 4 5; do
@@ -161,7 +166,7 @@ else
     --arg admission "$admission_commit" --arg blob "$source_blob" --arg tree "$tree_sha" \
     --arg init "$init_commit" --arg run "$GITHUB_RUN_ID" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
-    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg masterChat "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg masterChat "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
     '{
       schemaVersion:"curveyield-audit-source-initialization-report-v1",
       request:{
@@ -170,7 +175,7 @@ else
         agentChats:{
           "reviewer-1":$chat1,
           "reviewer-2":$chat2,
-          "reviewer-3L":$chat3,
+          ($thirdReviewer):$chat3,
           "reviewer-4":$chat4
         },
         masterChatUrl:$masterChat,
@@ -214,13 +219,13 @@ if [[ "$existing_registration_sha" =~ ^[0-9a-f]{40}$ ]]; then
   jq \
     --arg campaignId "$campaign_id" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
-    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
     '.schemaVersion="curveyield-browser-agent-wake-registration-v1"
      | .campaignId=$campaignId
      | .agentChats={
          "reviewer-1":$chat1,
          "reviewer-2":$chat2,
-         "reviewer-3L":$chat3,
+         ($thirdReviewer):$chat3,
          "reviewer-4":$chat4,
          "master-reviewer":$master,
          "test-executor":$tester
@@ -235,7 +240,7 @@ else
   jq -n \
     --arg campaignId "$campaign_id" \
     --arg chat1 "$AGENT_CHAT_1_URL" --arg chat2 "$AGENT_CHAT_2_URL" \
-    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
+    --arg chat3 "$AGENT_CHAT_3_URL" --arg chat4 "$AGENT_CHAT_4_URL" --arg thirdReviewer "$third_reviewer_key" --arg master "$MASTER_CHAT_URL" --arg tester "$TEST_EXECUTOR_CHAT_URL" \
     '{
       schemaVersion:"curveyield-browser-agent-wake-registration-v1",
       campaignId:$campaignId,
@@ -245,7 +250,7 @@ else
       agentChats:{
         "reviewer-1":$chat1,
         "reviewer-2":$chat2,
-        "reviewer-3L":$chat3,
+        ($thirdReviewer):$chat3,
         "reviewer-4":$chat4,
         "master-reviewer":$master,
         "test-executor":$tester
