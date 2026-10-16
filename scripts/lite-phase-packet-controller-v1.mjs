@@ -871,7 +871,7 @@ if(reviewKind==='discovery'){
     authorityRoot:authorityRootFromReceipt(sourceReceipt),automationRoot:process.cwd(),
     unitId:a['unit-id'],now,auditControllerRef:a['audit-controller-ref']??'main'});
   if(result.status==='DISCOVERY_STALE_REQUEST'){
-    process.stdout.write(JSON.stringify({authorityLinkRoot,status:result.status,campaignName:directory.campaignName})+'\n');
+    process.stdout.write(JSON.stringify({authorityLinkRoot,status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName})+'\n');
     process.exit(0);
   }
   directory.discovery.status=result.status==='DISCOVERY_COMPLETE'?'COMPLETE':'RUNNING';
@@ -888,7 +888,7 @@ if(reviewKind==='discovery'){
   }
   directory.updatedAt=now;writeJson(directoryFile,directory);
   const feedback=result.feedbackText??result.status;
-  process.stdout.write(JSON.stringify({authorityLinkRoot,status:result.status,campaignName:directory.campaignName,
+  process.stdout.write(JSON.stringify({authorityLinkRoot,status:result.status,campaignId:directory.campaignId,campaignName:directory.campaignName,
     feedbackB64:Buffer.from(feedback).toString('base64'),
     discoveryWakeChatKey:result.wake?.chatKey??'',discoveryWakeId:result.wake?.wakeId??'',
     discoveryWakePhaseId:result.wake?.phaseId??'',discoveryWakeMilestoneId:result.wake?.milestoneId??'',

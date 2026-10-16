@@ -290,6 +290,13 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install locked Node dependencies for controller validation
+        if: steps.routing.outputs.stale != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
+
       - name: Preflight Phase-5 bound execution requests without toolchain
         id: phase5_preflight
         if: steps.routing.outputs.stale != 'true' && steps.request.outputs.review_kind == 'phase' && steps.request.outputs.phase_sequence == '5'
@@ -309,13 +316,6 @@ jobs:
           echo "runnable=$(jq -r '.runnable' /tmp/lite-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
           echo "rework=$(jq -r '.status=="REWORK_REQUIRED"' /tmp/lite-phase5-preflight.json)" >> "$GITHUB_OUTPUT"
           jq '{status,designCount,readyCount,failureCount:(.failures|length),generatedCount:(.generated|length)}' /tmp/lite-phase5-preflight.json
-
-      - name: Install locked Node dependencies for controller validation
-        if: steps.routing.outputs.stale != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          timeout -k 10s 360s npm ci --force --ignore-scripts --no-audit --no-fund
 
       - name: Determine whether master amendment needs Phase-5 execution
         id: phase5_plan

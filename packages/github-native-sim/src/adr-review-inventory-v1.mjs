@@ -30,8 +30,14 @@ function walk(n,fn,parent=null) {
 // file, path conventions apply at any depth (e.g. ipor-fusion/lib/forge-std is a dependency).
 export function sourceTierV1(p,scope=null,{includeScripts=false}={}) {
   if(/(^|\/)(test|tests|mock|mocks)\//.test(p)||p.endsWith('.t.sol'))return 'TEST_OR_MOCK';
-  if(p.endsWith('.s.sol')||/(^|\/)(script|scripts|deploy|deployment|config|configure|handover)\//.test(p))
-    return includeScripts&&!sourceExplicitlyExcludedV1(p,scope)?'IN_SCOPE':'SCRIPT';
+  // Never promote vendored/dependency paths into FIRST-PARTY v13 script scope.
+  // Preserve historical v12 path rules (including ipor-fusion without scope).
+  if(includeScripts&&(/(^|\/)(vendor|lib|node_modules|ipor-fusion)\//.test(p)||p.startsWith('@')))
+    return 'DEPENDENCY';
+  const scriptPath=p.endsWith('.s.sol')||/(^|\/)(script|scripts|deploy|deployment|deployments|config|configure|handover)\//.test(p);
+  if(includeScripts&&scriptPath)return !sourceExplicitlyExcludedV1(p,scope)?'IN_SCOPE':'SCRIPT';
+  // Config/deploy Solidity sources remain normal executable code under v12.
+  if(p.endsWith('.s.sol')||/(^|\/)(script|scripts)\//.test(p))return 'SCRIPT';
   if(scope?.source===AUDIT_SCOPE_FILE)return sourceIsInScope(p,scope)?'IN_SCOPE':'DEPENDENCY';
   if(/(^|\/)(vendor|lib|node_modules)\//.test(p)||p.startsWith('@'))return 'DEPENDENCY';
   return 'IN_SCOPE';
