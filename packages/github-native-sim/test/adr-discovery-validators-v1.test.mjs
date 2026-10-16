@@ -10,7 +10,7 @@ const inventory={payload:{sourceUnits:[
  {path:'test/Mock.sol',scopeTier:'TEST_OR_MOCK',lineCount:100}
 ]}};
 const anchor='contracts/B.sol:L2-L4';
-const candidate=()=>({tempKey:'C-001',title:'Missing guard',description:'An unguarded state write is reachable.',anchors:[anchor]});
+const candidate=()=>({tempKey:'C-001',classId:'ACCESS_CONTROL',severity:'HIGH',title:'Missing guard',description:'An unguarded state write is reachable.',anchors:[anchor]});
 const flowPacket={unitId:'F-001',primaryContexts:[{contextId:'CTX-A'}],requiredClasses:{'CTX-A':['ACCESS_CONTROL']},flows:[{flowId:'FLOW-0001'}]};
 const flowSubmission=()=>({
  schemaVersion:'curveyield-flow-review-submission-v1',unitId:'F-001',
