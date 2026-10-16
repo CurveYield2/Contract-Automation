@@ -66,7 +66,7 @@ else for(const [i,target] of designs.entries()){
   if(method!=='V7_REQUEST'){fail(prefix+'.executionMethod','Unsupported method');continue;}
   if(!target.executionRequestRef||String(target.executionRequestRef).trim().startsWith('<')){
     const generatedRequest=generateV7ExecutionRequestV1({
-      campaignId,sourceSha256,phase0Source,target});
+      campaignId,sourceSha256,phase0Source,target,automationRoot:process.cwd()});
     if(generatedRequest.status!=='GENERATED'){
       for(const item of generatedRequest.missing)fail(prefix+'.'+item.field,item.reason);
       continue;
