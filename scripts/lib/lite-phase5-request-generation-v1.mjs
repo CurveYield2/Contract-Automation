@@ -3,10 +3,10 @@ import {V2_AUTOMATION_RELEASE,V2_RUNNER_RELEASE} from '../../packages/github-nat
 import {validateDeepAssuranceRequestWithV26V1} from '../../packages/github-native-sim/src/schema-v26.mjs';
 
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
-const nonempty=x=>typeof x==='string'&&x.trim()&&!/(?:<[^>]*>|\\b(?:TODO|TBD)\\b)/i.test(x);
+const nonempty=x=>typeof x==='string'&&x.trim()&&!/(?:<[^>]*>|\b(?:TODO|TBD)\b)/i.test(x);
 const complete=x=>Array.isArray(x)?x.length>0&&x.every(complete):nonempty(x);
 const noPlaceholders=x=>{
- if(typeof x==='string')return !/(?:<[^>]*>|\\b(?:TODO|TBD)\\b)/i.test(x);
+ if(typeof x==='string')return !/(?:<[^>]*>|\b(?:TODO|TBD)\b)/i.test(x);
  if(Array.isArray(x))return x.every(noPlaceholders);
  if(x&&typeof x==='object')return Object.values(x).every(noPlaceholders);
  return true;
