@@ -346,7 +346,13 @@ jobs:
           set -euo pipefail
           if { [ "${{ steps.request.outputs.review_kind }}" = phase ] && [ "${{ steps.request.outputs.phase_sequence }}" = 5 ] && [ "${{ steps.phase5_preflight.outputs.runnable }}" = true ]; } ||
              { [ "${{ steps.phase5_plan.outputs.requires_execution }}" = true ]; }; then
-            test -n "${ETHEREUM_FORK_RPC_URL:-}" || { echo "::error::RPC_ETHEREUM secret missing for Phase-5 V7 fork preflight"; exit 1; }
+            # Phase-5 accepts Ethereum, Base, and Katana. Do not require Ethereum
+            # for a Katana-only source; the downstream per-request preflight
+            # verifies exact chain identity and reports missing chain RPCs.
+            if [ -z "${ETHEREUM_FORK_RPC_URL:-}" ] && [ -z "${RPC_KATANA:-}" ] && [ -z "${RPC_BASE:-}" ]; then
+              echo "::error::No configured fork RPC for Phase-5 execution"
+              exit 1
+            fi
           fi
           args=(--controller-root .audit-controller --campaign-id "${{ steps.request.outputs.campaign_id }}" --campaign-path "${{ steps.routing.outputs.campaign_path }}" --campaign-directory-path "${{ steps.routing.outputs.campaign_directory_path }}" --review-kind "${{ steps.request.outputs.review_kind }}" --audit-controller-ref "${{ steps.request.outputs.audit_controller_ref }}")
           if [ "${{ steps.request.outputs.review_kind }}" = master-test-result ]; then
