@@ -52,6 +52,7 @@ test('D5 generated Anvil requests reuse only exact Phase-0 campaign snapshot and
  t.expectedMachineObservation={stepLabel:'pin persisted Phase 0 baseline',stepStatus:'completed'};
  t.executionBlueprint={usePhase0ForkState:true,projectPath:'campaigns/demo r1/source',
   configuration:{compilers:[{language:'solidity',version:'0.8.28'}],timeoutMinutes:20,evmVersion:'cancun',
+   analysis:{nativeFuzz:{enabled:true,fuzzRuns:100000}},
    harness:{recipeId:'phase0-snapshot-targeted-v1'},
    deploymentGas:{deployableContracts:[{sourceName:'contracts/Vault.sol',contractName:'Vault'}]},
    simulation:{chain:'ethereum',block,
