@@ -35,3 +35,18 @@ test('D4 rejects unregistered, already-owned, stale and cross-campaign backups',
  f.directory.campaignId='unrelated';
  assert.equal(planBackupChatFailoverV1({...f,failedChatUrl:failed}).status,'NOT_ELIGIBLE');
 });
+
+test('D4 standby also covers current master reviewer and targeted-test executor',()=>{
+ for(const role of ['master-reviewer','test-executor']){
+   const f=fixture();
+   f.registration.agentChats[role]=failed;
+   delete f.registration.agentChats['reviewer-3'];
+   f.registration.activeChat={name:role,url:failed};
+   f.directory.campaignStatus=role==='master-reviewer'?'WAITING_FOR_MASTER_REVIEW':'ACTIVE';
+   const x=planBackupChatFailoverV1({...f,failedChatUrl:failed,now:'2026-10-16T00:00:00Z'});
+   assert.equal(x.status,'ELIGIBLE',role+': '+x.reason);
+   assert.equal(x.registration.agentChats[role],backup);
+   assert.equal(x.registration.activeAssignment.workerRole,role);
+   assert.match(x.message,role==='test-executor'?/raw evidence/:/master review/);
+ }
+});
